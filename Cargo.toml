@@ -9,10 +9,11 @@ categories = ["cryptography"]
 
 [workspace]
 members = [
-  "prover",
-  "recursion/compiler",
-  "recursion/core",
-  "recursion/derive",
+  "crates/prover",
+  "crates/derive",
+  "crates/recursion/compiler",
+  "crates/recursion/core",
+  "crates/recursion/derive",
 ]
 resolver = "2"
 
@@ -54,9 +55,10 @@ p3-symmetric = { git = "https://github.com/Plonky3/Plonky3" }
 p3-bn254-fr = { git = "https://github.com/Plonky3/Plonky3" }
 rand = "0.8.5"
 
-zkm2-recursion-derive = { path = "recursion/derive", version = "0.0.1", default-features = false }
-zkm2-recursion-compiler = { path = "recursion/compiler", version = "0.0.1" }
-zkm2-recursion-core = { path = "recursion/core", version = "0.0.1", default-features = false }
+zkm2-recursion-derive = { path = "crates/recursion/derive", version = "0.0.1", default-features = false }
+zkm2-recursion-compiler = { path = "crates/recursion/compiler", version = "0.0.1" }
+zkm2-recursion-core = { path = "crates/recursion/core", version = "0.0.1", default-features = false }
+zkm2-derive = { path = "crates/derive", version = "0.0.1" }
 
 # misc
 hashbrown = "0.14.5"
