@@ -1,8 +1,7 @@
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField64,
-    PackedField,
+    Field, FieldAlgebra, FieldExtensionAlgebra, PackedField, PrimeField64,
 };
 
 use crate::evaluation_frame::StarkEvaluationFrame;
