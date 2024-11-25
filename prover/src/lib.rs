@@ -1,21 +1,22 @@
-//! A minimal univariate STARK framework.
+//! A STARK framework.
 
 #![no_std]
 
 extern crate alloc;
 
-mod evaluation_frame;
 mod config;
+mod evaluation_frame;
 mod folder;
+mod generation;
 mod proof;
 mod prover;
+mod stark;
+mod stark_testing;
 mod symbolic_builder;
 mod symbolic_expression;
 mod symbolic_variable;
 mod verifier;
 mod zerofier_coset;
-mod generation;
-mod stark_testing;
 
 #[cfg(debug_assertions)]
 mod check_constraints;

@@ -1,21 +1,21 @@
-use core::borrow::Borrow;
+use crate::{prove, verify, StarkConfig};
 use alloc::vec;
-use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
-use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
-use p3_keccak::Keccak256Hash;
+use core::borrow::Borrow;
 use core::marker::PhantomData;
+use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_challenger::{HashChallenger, SerializingChallenger32};
-use p3_mersenne_31::Mersenne31;
+use p3_circle::CirclePcs;
 use p3_commit::ExtensionMmcs;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::{Field, FieldAlgebra, PrimeField64};
 use p3_fri::{FriConfig, TwoAdicFriPcs};
-use p3_circle::CirclePcs;
+use p3_keccak::Keccak256Hash;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 use p3_merkle_tree::MerkleTreeMmcs;
+use p3_mersenne_31::Mersenne31;
+use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use crate::{prove, verify, StarkConfig};
 use rand::thread_rng;
 
 /// For testing the public values feature
