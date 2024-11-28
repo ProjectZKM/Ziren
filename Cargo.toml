@@ -9,7 +9,7 @@ categories = ["cryptography"]
 
 [workspace]
 members = [
-  "crates/prover",
+  "crates/stark",
   "crates/derive",
 #  "crates/recursion/compiler",
 #  "crates/recursion/core",
@@ -40,6 +40,8 @@ p3-matrix = { git = "https://github.com/Plonky3/Plonky3" }
 p3-maybe-rayon = { git = "https://github.com/Plonky3/Plonky3" }
 p3-util = { git = "https://github.com/Plonky3/Plonky3" }
 tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", default-features = false }
+tracing-forest = { version = "0.1.6", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 p3-fri = { git = "https://github.com/Plonky3/Plonky3" }
 

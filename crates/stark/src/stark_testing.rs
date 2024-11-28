@@ -18,6 +18,12 @@ use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::thread_rng;
 
+use tracing_forest::util::LevelFilter;
+use tracing_forest::ForestLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Registry};
+
 /// For testing the public values feature
 pub struct FibonacciAir {}
 
@@ -114,6 +120,16 @@ type MyConfig = StarkConfig<Pcs, Challenge, Challenger>;
 
 /// n-th Fibonacci number expected to be x
 fn test_public_value_impl(n: usize, x: u64) {
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .try_from_env()
+        .unwrap_or_default();
+
+    let _ = Registry::default()
+        .with(env_filter)
+        .with(ForestLayer::default())
+        .try_init();
+
     let byte_hash = ByteHash {};
     let field_hash = FieldHash::new(byte_hash);
     let compress = MyCompress::new(byte_hash);
