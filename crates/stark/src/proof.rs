@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use p3_commit::Pcs;
 use serde::{Deserialize, Serialize};
 

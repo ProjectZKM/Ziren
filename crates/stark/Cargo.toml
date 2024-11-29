@@ -10,7 +10,7 @@ p3-challenger = { workspace = true  }
 p3-commit = { workspace = true  }
 p3-dft = { workspace = true  }
 p3-matrix = { workspace = true  }
-p3-maybe-rayon = { workspace = true  }
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-util = { workspace = true  }
 itertools = { workspace = true }
 tracing = { workspace = true }
@@ -29,6 +29,15 @@ p3-mersenne-31 = { workspace = true  }
 p3-poseidon2 = { workspace = true  }
 p3-symmetric = { workspace = true  }
 rand = { workspace = true }
+
+zkm2-derive = { workspace = true }
+zkm2-primitives = { workspace = true }
+
+strum = "0.26.3"
+strum_macros = "0.26.4"
+hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
+arrayref = "0.3.8"
+rayon-scan = "0.1.1"
 
 [dev-dependencies]
 postcard = { version = "1.0.0", default-features = false, features = ["alloc"] }

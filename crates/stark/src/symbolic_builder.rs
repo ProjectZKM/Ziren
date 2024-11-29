@@ -1,6 +1,3 @@
-use alloc::vec;
-use alloc::vec::Vec;
-
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;

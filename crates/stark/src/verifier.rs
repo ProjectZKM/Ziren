@@ -1,5 +1,6 @@
-use alloc::vec;
-use alloc::vec::Vec;
+use std::{
+    marker::PhantomData,
+};
 
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
@@ -12,6 +13,9 @@ use tracing::instrument;
 
 use crate::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 use crate::{PcsError, Proof, StarkGenericConfig, Val, VerifierConstraintFolder};
+
+/// A verifier for a collection of air chips.
+pub struct Verifier<SC, A>(PhantomData<SC>, PhantomData<A>);
 
 #[instrument(skip_all)]
 pub fn verify<SC, A>(

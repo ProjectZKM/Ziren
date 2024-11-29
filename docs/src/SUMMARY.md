@@ -2,6 +2,7 @@
 
 - [Introducation](./introducation/introducation.md)
     - [Overview](./introducation/overview.md)
+    - [Installation](./introducation/installation.md)
     - [Benchmarks and Performance](./introducation/performance.md)
 - [MIPS VM](./mips-vm/mips-vm.md)
     - [MIPS ISA](./mips-vm/mips_isa.md)
