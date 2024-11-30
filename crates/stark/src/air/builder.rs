@@ -2,8 +2,8 @@ use std::{array, iter::once};
 
 use itertools::Itertools;
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, FilteredAirBuilder, PermutationAirBuilder};
-use p3_field::{FieldAlgebra, Field};
-use crate::{
+use p3_field::{Field, FieldAlgebra};
+use p3_uni_stark::{
     ProverConstraintFolder, StarkGenericConfig, SymbolicAirBuilder, VerifierConstraintFolder,
 };
 use serde::{Deserialize, Serialize};

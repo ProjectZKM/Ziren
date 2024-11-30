@@ -3,11 +3,21 @@ use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::Pcs;
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_maybe_rayon::prelude::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{array, cmp::Reverse, env, fmt::Debug, time::Instant};
+
+use serde::de::{self, DeserializeOwned, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::ser::{SerializeStruct, Serializer};
+use serde::{Deserialize, Serialize};
+
+use std::{
+    array,
+    cmp::Reverse,
+    env,
+    fmt::{Debug, Display},
+    time::Instant,
+};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
@@ -21,6 +31,126 @@ use crate::{
 use super::{
     Chip, Com, MachineProof, PcsProverData, StarkGenericConfig, Val, VerificationError, Verifier,
 };
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct ZKMDimensions(Dimensions);
+
+impl Display for ZKMDimensions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Serialize for ZKMDimensions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 3 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("Dimensions", 2)?;
+        state.serialize_field("width", &self.0.width)?;
+        state.serialize_field("height", &self.0.height)?;
+        state.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ZKMDimensions {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        enum Field {
+            Width,
+            Height,
+        }
+        // This part could also be generated independently by:
+        //
+        //    #[derive(Deserialize)]
+        //    #[serde(field_identifier, rename_all = "lowercase")]
+        //    enum Field { Width, Height }
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        formatter.write_str("`width` or `height`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "width" => Ok(Field::Width),
+                            "height" => Ok(Field::Height),
+                            _ => Err(de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct DimensionsVisitor;
+
+        impl<'de> Visitor<'de> for DimensionsVisitor {
+            type Value = ZKMDimensions;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct Dimensions")
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<ZKMDimensions, V::Error>
+            where
+                V: SeqAccess<'de>,
+            {
+                let width = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let height = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                Ok(ZKMDimensions(Dimensions { width, height }))
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<ZKMDimensions, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut height = None;
+                let mut width = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Width => {
+                            if width.is_some() {
+                                return Err(de::Error::duplicate_field("width"));
+                            }
+                            width = Some(map.next_value()?);
+                        }
+                        Field::Height => {
+                            if height.is_some() {
+                                return Err(de::Error::duplicate_field("height"));
+                            }
+                            height = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let width = width.ok_or_else(|| de::Error::missing_field("width"))?;
+                let height = height.ok_or_else(|| de::Error::missing_field("height"))?;
+                Ok(ZKMDimensions(Dimensions { width, height }))
+            }
+        }
+        const FIELDS: &[&str] = &["width", "height"];
+        deserializer.deserialize_struct("Dimensions", FIELDS, DimensionsVisitor)
+    }
+}
 
 /// A chip in a machine.
 pub type MachineChip<SC, A> = Chip<Val<SC>, A>;
@@ -47,7 +177,12 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         num_pv_elts: usize,
         contains_global_bus: bool,
     ) -> Self {
-        Self { config, chips, num_pv_elts, contains_global_bus }
+        Self {
+            config,
+            chips,
+            num_pv_elts,
+            contains_global_bus,
+        }
     }
 }
 
@@ -91,7 +226,7 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     /// The start pc of the program.
     pub pc_start: Val<SC>,
     /// The chip information.
-    pub chip_information: Vec<(String, Dom<SC>, Dimensions)>,
+    pub chip_information: Vec<(String, Dom<SC>, ZKMDimensions)>,
     /// The chip ordering.
     pub chip_ordering: HashMap<String, usize>,
 }
@@ -166,7 +301,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
     /// Returns the indices of the chips in the machine that are included in the given shard.
     pub fn chips_sorted_indices(&self, proof: &ShardProof<SC>) -> Vec<Option<usize>> {
-        self.chips().iter().map(|chip| proof.chip_ordering.get(&chip.name()).copied()).collect()
+        self.chips()
+            .iter()
+            .map(|chip| proof.chip_ordering.get(&chip.name()).copied())
+            .collect()
     }
 
     /// The setup preprocessing phase.
@@ -212,7 +350,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             .iter()
             .map(|(name, _, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                ((name.to_owned(), domain, trace.dimensions()), (domain, trace.to_owned()))
+                (
+                    (name.to_owned(), domain, trace.dimensions()),
+                    (domain, trace.to_owned()),
+                )
             })
             .unzip();
 
@@ -233,11 +374,17 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             .collect::<Vec<_>>();
 
         // Get the preprocessed traces
-        let traces =
-            named_preprocessed_traces.into_iter().map(|(_, _, trace)| trace).collect::<Vec<_>>();
+        let traces = named_preprocessed_traces
+            .into_iter()
+            .map(|(_, _, trace)| trace)
+            .collect::<Vec<_>>();
 
         let pc_start = program.pc_start();
 
+        let chip_information = chip_information
+            .iter()
+            .map(|(s, d, d2)| (s.clone(), *d, ZKMDimensions(*d2)))
+            .collect();
         (
             StarkProvingKey {
                 commit: commit.clone(),
@@ -247,7 +394,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 chip_ordering: chip_ordering.clone(),
                 local_only,
             },
-            StarkVerifyingKey { commit, pc_start, chip_information, chip_ordering },
+            StarkVerifyingKey {
+                commit,
+                pc_start,
+                chip_information,
+                chip_ordering,
+            },
         )
     }
 
@@ -331,8 +483,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         tracing::debug_span!("verify shard proofs").in_scope(|| {
             for (i, shard_proof) in proof.shard_proofs.iter().enumerate() {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
-                    let chips =
-                        self.shard_chips_ordered(&shard_proof.chip_ordering).collect::<Vec<_>>();
+                    let chips = self
+                        .shard_chips_ordered(&shard_proof.chip_ordering)
+                        .collect::<Vec<_>>();
                     Verifier::verify_shard(
                         &self.config,
                         vk,
@@ -399,7 +552,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             // Generate the main trace for each chip.
             let pre_traces = chips
                 .iter()
-                .map(|chip| pk.chip_ordering.get(&chip.name()).map(|index| &pk.traces[*index]))
+                .map(|chip| {
+                    pk.chip_ordering
+                        .get(&chip.name())
+                        .map(|index| &pk.traces[*index])
+                })
                 .collect::<Vec<_>>();
             let mut traces = chips
                 .par_iter()
@@ -425,11 +582,15 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                     .unzip_into_vecs(&mut permutation_traces, &mut cumulative_sums);
             });
 
-            global_cumulative_sum +=
-                cumulative_sums.iter().map(|sum| sum[0]).sum::<SC::Challenge>();
+            global_cumulative_sum += cumulative_sums
+                .iter()
+                .map(|sum| sum[0])
+                .sum::<SC::Challenge>();
 
-            let local_cumulative_sum =
-                cumulative_sums.iter().map(|sum| sum[1]).sum::<SC::Challenge>();
+            let local_cumulative_sum = cumulative_sums
+                .iter()
+                .map(|sum| sum[1])
+                .sum::<SC::Challenge>();
             if !local_cumulative_sum.is_zero() {
                 tracing::warn!("Local cumulative sum is not zero");
                 tracing::debug_span!("debug local interactions").in_scope(|| {
@@ -465,8 +626,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             if env::var("SKIP_CONSTRAINTS").is_err() {
                 tracing::info_span!("debug constraints").in_scope(|| {
                     for i in 0..chips.len() {
-                        let preprocessed_trace =
-                            pk.chip_ordering.get(&chips[i].name()).map(|index| &pk.traces[*index]);
+                        let preprocessed_trace = pk
+                            .chip_ordering
+                            .get(&chips[i].name())
+                            .map(|index| &pk.traces[*index]);
                         debug_constraints::<SC, A>(
                             chips[i],
                             preprocessed_trace,
@@ -539,7 +702,11 @@ impl<SC: StarkGenericConfig> Debug for MachineVerificationError<SC> {
                 write!(f, "Invalid global proof: {:?}", e)
             }
             MachineVerificationError::NonZeroCumulativeSum(scope, shard) => {
-                write!(f, "Non-zero cumulative sum.  Scope: {}, Shard: {}", scope, shard)
+                write!(
+                    f,
+                    "Non-zero cumulative sum.  Scope: {}, Shard: {}",
+                    scope, shard
+                )
             }
             MachineVerificationError::InvalidPublicValuesDigest => {
                 write!(f, "Invalid public values digest")

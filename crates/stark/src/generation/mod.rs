@@ -1,4 +1,3 @@
-use crate::config::StarkConfig;
 use crate::config::StarkGenericConfig;
 use p3_field::FieldExtensionAlgebra;
 use p3_field::{Field, FieldAlgebra};

@@ -1,7 +1,7 @@
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder, PairCol, VirtualPairCol};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use crate::{Entry, SymbolicExpression, SymbolicVariable};
+use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 
 use crate::{
     air::{AirInteraction, InteractionScope, MessageBuilder},
@@ -94,21 +94,29 @@ impl<F: Field> PairBuilder for InteractionBuilder<F> {
 
 impl<F: Field> MessageBuilder<AirInteraction<SymbolicExpression<F>>> for InteractionBuilder<F> {
     fn send(&mut self, message: AirInteraction<SymbolicExpression<F>>, scope: InteractionScope) {
-        let values =
-            message.values.into_iter().map(|v| symbolic_to_virtual_pair(&v)).collect::<Vec<_>>();
+        let values = message
+            .values
+            .into_iter()
+            .map(|v| symbolic_to_virtual_pair(&v))
+            .collect::<Vec<_>>();
 
         let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
 
-        self.sends.push(Interaction::new(values, multiplicity, message.kind, scope));
+        self.sends
+            .push(Interaction::new(values, multiplicity, message.kind, scope));
     }
 
     fn receive(&mut self, message: AirInteraction<SymbolicExpression<F>>, scope: InteractionScope) {
-        let values =
-            message.values.into_iter().map(|v| symbolic_to_virtual_pair(&v)).collect::<Vec<_>>();
+        let values = message
+            .values
+            .into_iter()
+            .map(|v| symbolic_to_virtual_pair(&v))
+            .collect::<Vec<_>>();
 
         let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
 
-        self.receives.push(Interaction::new(values, multiplicity, message.kind, scope));
+        self.receives
+            .push(Interaction::new(values, multiplicity, message.kind, scope));
     }
 }
 
@@ -142,7 +150,10 @@ fn eval_symbolic_to_virtual_pair<F: Field>(
                 (vec![(PairCol::Preprocessed(v.index), F::ONE)], F::ZERO)
             }
             Entry::Main { offset: 0 } => (vec![(PairCol::Main(v.index), F::ONE)], F::ZERO),
-            _ => panic!("not an affine expression in current row elements {:?}", v.entry),
+            _ => panic!(
+                "not an affine expression in current row elements {:?}",
+                v.entry
+            ),
         },
         SymbolicExpression::Add { x, y, .. } => {
             let (v_l, c_l) = eval_symbolic_to_virtual_pair(x);
@@ -191,7 +202,7 @@ mod tests {
 
     use p3_air::{Air, BaseAir};
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::Matrix;
 
     use super::*;

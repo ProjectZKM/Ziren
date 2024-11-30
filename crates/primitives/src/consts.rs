@@ -6,7 +6,10 @@ pub const WORD_SIZE: usize = 4;
 
 /// Converts a slice of words to a byte vector in little endian.
 pub fn words_to_bytes_le_vec(words: &[u32]) -> Vec<u8> {
-    words.iter().flat_map(|word| word.to_le_bytes().to_vec()).collect::<Vec<_>>()
+    words
+        .iter()
+        .flat_map(|word| word.to_le_bytes().to_vec())
+        .collect::<Vec<_>>()
 }
 
 /// Converts a slice of words to a slice of bytes in little endian.

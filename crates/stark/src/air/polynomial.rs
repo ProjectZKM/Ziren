@@ -5,7 +5,7 @@ use core::{
 use std::slice::Iter;
 
 use itertools::Itertools;
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 
 /// A polynomial represented as a vector of coefficients.
 #[derive(Debug, Clone)]

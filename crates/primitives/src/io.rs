@@ -12,7 +12,9 @@ pub struct SP1PublicValues {
 impl SP1PublicValues {
     /// Create a new `SP1PublicValues`.
     pub const fn new() -> Self {
-        Self { buffer: Buffer::new() }
+        Self {
+            buffer: Buffer::new(),
+        }
     }
 
     pub fn raw(&self) -> String {
@@ -21,7 +23,9 @@ impl SP1PublicValues {
 
     /// Create a `SP1PublicValues` from a slice of bytes.
     pub fn from(data: &[u8]) -> Self {
-        Self { buffer: Buffer::from(data) }
+        Self {
+            buffer: Buffer::from(data),
+        }
     }
 
     pub fn as_slice(&self) -> &[u8] {

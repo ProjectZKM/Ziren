@@ -2,9 +2,9 @@
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;
-use p3_baby_bear::{BabyBear, /*DiffusionMatrixBabyBear*/};
+use p3_baby_bear::{BabyBear /*DiffusionMatrixBabyBear*/};
 use p3_field::FieldAlgebra;
-use p3_poseidon2::{Poseidon2, /*Poseidon2ExternalMatrixGeneral*/};
+use p3_poseidon2::{Poseidon2 /*Poseidon2ExternalMatrixGeneral*/};
 
 pub mod consts;
 pub mod io;

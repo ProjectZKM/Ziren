@@ -5,48 +5,41 @@
 extern crate alloc;
 
 mod air;
-mod permutation;
-mod lookup;
+mod chip;
 mod config;
+mod debug;
 mod evaluation_frame;
 mod folder;
 mod generation;
+mod lookup;
+mod machine;
+mod opts;
+mod permutation;
 mod proof;
 mod prover;
+mod quotient;
+mod record;
 mod stark;
 mod stark_testing;
-mod symbolic_builder;
-mod symbolic_expression;
-mod symbolic_variable;
-mod verifier;
-mod zerofier_coset;
 mod types;
-mod chip;
-mod machine;
-mod record;
+mod verifier;
 mod word;
-mod debug;
-
-#[cfg(debug_assertions)]
-mod check_constraints;
+mod zerofier_coset;
 
 pub use air::*;
-pub use debug::*;
-pub use permutation::*;
-pub use word::*;
-pub use record::*;
 pub use chip::*;
-pub use machine::*;
-pub use lookup::*;
-pub use types::*;
-#[cfg(debug_assertions)]
-pub use check_constraints::*;
 pub use config::*;
+pub use debug::*;
 pub use folder::*;
+pub use lookup::*;
+pub use machine::*;
+pub use opts::*;
+pub use permutation::*;
 pub use proof::*;
 pub use prover::*;
-pub use symbolic_builder::*;
-pub use symbolic_expression::*;
-pub use symbolic_variable::*;
+pub use quotient::*;
+pub use record::*;
+pub use types::*;
 pub use verifier::*;
+pub use word::*;
 pub use zerofier_coset::*;

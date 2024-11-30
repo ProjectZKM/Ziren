@@ -8,7 +8,7 @@ use p3_air::{
     Air, AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PairBuilder,
     PermutationAirBuilder,
 };
-use p3_field::{FieldAlgebra, ExtensionField, Field, PrimeField32};
+use p3_field::{ExtensionField, Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
@@ -121,7 +121,10 @@ fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::th
 ///
 /// Note that this does not actually verify the proof.
 pub fn debug_cumulative_sums<F: Field, EF: ExtensionField<F>>(perms: &[RowMajorMatrix<EF>]) {
-    let sum: EF = perms.iter().map(|perm| *perm.row_slice(perm.height() - 1).last().unwrap()).sum();
+    let sum: EF = perms
+        .iter()
+        .map(|perm| *perm.row_slice(perm.height() - 1).last().unwrap())
+        .sum();
     assert_eq!(sum, EF::ZERO);
 }
 

@@ -3,7 +3,7 @@ use std::hash::Hash;
 use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::{ExtensionField, Field, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use crate::{get_max_constraint_degree, SymbolicAirBuilder};
+use p3_uni_stark::{get_max_constraint_degree, SymbolicAirBuilder};
 use p3_util::log2_ceil_usize;
 
 use crate::{
@@ -70,8 +70,14 @@ where
         air.eval(&mut builder);
         let (sends, receives) = builder.interactions();
 
-        let nb_byte_sends = sends.iter().filter(|s| s.kind == InteractionKind::Byte).count();
-        let nb_byte_receives = receives.iter().filter(|r| r.kind == InteractionKind::Byte).count();
+        let nb_byte_sends = sends
+            .iter()
+            .filter(|s| s.kind == InteractionKind::Byte)
+            .count();
+        let nb_byte_receives = receives
+            .iter()
+            .filter(|r| r.kind == InteractionKind::Byte)
+            .count();
         tracing::debug!(
             "chip {} has {} byte interactions",
             air.name(),
@@ -86,7 +92,12 @@ where
         }
         let log_quotient_degree = log2_ceil_usize(max_constraint_degree - 1);
 
-        Self { air, sends, receives, log_quotient_degree }
+        Self {
+            air,
+            sends,
+            receives,
+            log_quotient_degree,
+        }
     }
 
     /// Returns the number of interactions in the chip.
@@ -98,7 +109,10 @@ where
     /// Returns the number of sent byte lookups in the chip.
     #[inline]
     pub fn num_sent_byte_lookups(&self) -> usize {
-        self.sends.iter().filter(|i| i.kind == InteractionKind::Byte).count()
+        self.sends
+            .iter()
+            .filter(|i| i.kind == InteractionKind::Byte)
+            .count()
     }
 
     /// Returns the number of sends of the given kind.

@@ -4,11 +4,11 @@ use crate::air::SP1AirBuilder;
 use arrayref::array_ref;
 use itertools::Itertools;
 use p3_air::AirBuilder;
-use p3_field::{FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra};
 use serde::{Deserialize, Serialize};
+use std::array::IntoIter;
 use zkm2_derive::AlignedBorrow;
 use zkm2_primitives::consts::WORD_SIZE;
-use std::array::IntoIter;
 
 /// An array of four bytes to represent a 32-bit value.
 ///
@@ -31,20 +31,35 @@ impl<T> Word<T> {
 
     /// Extends a variable to a word.
     pub fn extend_var<AB: SP1AirBuilder<Var = T>>(var: T) -> Word<AB::Expr> {
-        Word([AB::Expr::ZERO + var, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
+        Word([
+            AB::Expr::ZERO + var,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+        ])
     }
 }
 
 impl<T: FieldAlgebra> Word<T> {
     /// Extends a variable to a word.
     pub fn extend_expr<AB: SP1AirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
-        Word([AB::Expr::ZERO + expr, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
+        Word([
+            AB::Expr::ZERO + expr,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+        ])
     }
 
     /// Returns a word with all zero expressions.
     #[must_use]
     pub fn zero<AB: SP1AirBuilder<Expr = T>>() -> Word<T> {
-        Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
+        Word([
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+        ])
     }
 }
 
@@ -59,7 +74,11 @@ impl<V: Copy> Word<V> {
     /// Reduces a word to a single variable.
     pub fn reduce<AB: AirBuilder<Var = V>>(&self) -> AB::Expr {
         let base = [1, 1 << 8, 1 << 16, 1 << 24].map(AB::Expr::from_canonical_u32);
-        self.0.iter().enumerate().map(|(i, x)| base[i].clone() * *x).sum()
+        self.0
+            .iter()
+            .enumerate()
+            .map(|(i, x)| base[i].clone() * *x)
+            .sum()
     }
 }
 

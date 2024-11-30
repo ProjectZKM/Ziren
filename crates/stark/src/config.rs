@@ -3,8 +3,14 @@ use core::marker::PhantomData;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field, PrimeField};
+use serde::{de::DeserializeOwned, Serialize};
 
 pub type PcsError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
+    <SC as StarkGenericConfig>::Challenge,
+    <SC as StarkGenericConfig>::Challenger,
+>>::Error;
+
+pub type OpeningError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::Error;
@@ -34,6 +40,7 @@ pub type Dom<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::Domain;
+
 pub type PcsProverData<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
@@ -42,51 +49,46 @@ pub type PcsProverData<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
 pub type PackedChallenge<SC> =
     <<SC as StarkGenericConfig>::Challenge as ExtensionField<Val<SC>>>::ExtensionPacking;
 
-pub trait StarkGenericConfig {
-    type Val: Field;
+pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwned + Clone {
+    type Val: PrimeField;
+    type Domain: PolynomialSpace<Val = Self::Val> + Sync;
+
     /// The PCS used to commit to trace polynomials.
-    type Pcs: Pcs<Self::Challenge, Self::Challenger>;
+    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain>
+        + Sync
+        + ZeroCommitment<Self>;
 
     /// The field from which most random challenges are drawn.
-    type Challenge: ExtensionField<Val<Self>>;
+    type Challenge: ExtensionField<Self::Val>;
 
     /// The challenger (Fiat-Shamir) implementation used.
     type Challenger: FieldChallenger<Val<Self>>
         + CanObserve<<Self::Pcs as Pcs<Self::Challenge, Self::Challenger>>::Commitment>
-        + CanSample<Self::Challenge>;
+        + CanSample<Self::Challenge>
+        + Serialize
+        + DeserializeOwned;
 
+    /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;
+
+    /// Initialize a new challenger.
+    fn challenger(&self) -> Self::Challenger;
 }
 
-#[derive(Debug)]
-pub struct StarkConfig<Pcs, Challenge, Challenger> {
-    pcs: Pcs,
-    _phantom: PhantomData<(Challenge, Challenger)>,
+pub trait ZeroCommitment<SC: StarkGenericConfig> {
+    fn zero_commitment(&self) -> Com<SC>;
 }
 
-impl<Pcs, Challenge, Challenger> StarkConfig<Pcs, Challenge, Challenger> {
-    pub const fn new(pcs: Pcs) -> Self {
-        Self {
-            pcs,
-            _phantom: PhantomData,
-        }
-    }
-}
+pub struct UniConfig<SC>(pub SC);
 
-impl<Pcs, Challenge, Challenger> StarkGenericConfig for StarkConfig<Pcs, Challenge, Challenger>
-where
-    Challenge: ExtensionField<<Pcs::Domain as PolynomialSpace>::Val>,
-    Pcs: p3_commit::Pcs<Challenge, Challenger>,
-    Challenger: FieldChallenger<<Pcs::Domain as PolynomialSpace>::Val>
-        + CanObserve<<Pcs as p3_commit::Pcs<Challenge, Challenger>>::Commitment>
-        + CanSample<Challenge>,
-{
-    type Pcs = Pcs;
-    type Val = <Pcs::Domain as PolynomialSpace>::Val;
-    type Challenge = Challenge;
-    type Challenger = Challenger;
+impl<SC: StarkGenericConfig> p3_uni_stark::StarkGenericConfig for UniConfig<SC> {
+    type Pcs = SC::Pcs;
+
+    type Challenge = SC::Challenge;
+
+    type Challenger = SC::Challenger;
 
     fn pcs(&self) -> &Self::Pcs {
-        &self.pcs
+        self.0.pcs()
     }
 }

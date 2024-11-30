@@ -16,8 +16,9 @@ itertools = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["std", "env-filter"] }
 tracing-forest = { workspace = true, features = ["ansi", "smallvec"] }
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde = { workspace = true }
 p3-fri = { workspace = true  }
+p3-uni-stark = { workspace = true }
 
 p3-baby-bear = { workspace = true  }
 #p3-commit = { workspace = true , features = ["test-utils"] }
@@ -38,6 +39,9 @@ strum_macros = "0.26.4"
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 arrayref = "0.3.8"
 rayon-scan = "0.1.1"
+
+num-traits = "0.2.19"
+sysinfo = "0.30.13"
 
 [dev-dependencies]
 postcard = { version = "1.0.0", default-features = false, features = ["alloc"] }

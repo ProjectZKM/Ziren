@@ -2,7 +2,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    FieldExtensionAlgebra, FieldAlgebra, Field,
+    Field, FieldAlgebra, FieldExtensionAlgebra,
 };
 use zkm2_derive::AlignedBorrow;
 
