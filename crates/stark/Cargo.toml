@@ -21,7 +21,6 @@ p3-fri = { workspace = true  }
 p3-uni-stark = { workspace = true }
 
 p3-baby-bear = { workspace = true  }
-#p3-commit = { workspace = true , features = ["test-utils"] }
 p3-circle = { workspace = true  }
 p3-keccak = { workspace = true  }
 p3-mds = { workspace = true  }

@@ -4,7 +4,9 @@
 use lazy_static::lazy_static;
 use p3_baby_bear::{BabyBear, Poseidon2ExternalLayerBabyBear, Poseidon2InternalLayerBabyBear};
 use p3_field::FieldAlgebra;
-use p3_poseidon2::{Poseidon2, ExternalLayerConstants, ExternalLayerConstructor, InternalLayerConstructor};
+use p3_poseidon2::{
+    ExternalLayerConstants, ExternalLayerConstructor, InternalLayerConstructor, Poseidon2,
+};
 //use p3_monty_31::{Poseidon2InternalLayerMonty31, Poseidon2ExternalLayerMonty31};
 
 pub mod consts;
@@ -1104,19 +1106,26 @@ lazy_static! {
     ];
 }
 
-pub fn poseidon2_init(
-) -> Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7> {
+pub fn poseidon2_init() -> Poseidon2<
+    BabyBear,
+    Poseidon2ExternalLayerBabyBear<16>,
+    Poseidon2InternalLayerBabyBear<16>,
+    16,
+    7,
+> {
     const ROUNDS_F: usize = 8;
     const ROUNDS_P: usize = 13;
     let mut round_constants = RC_16_30.to_vec();
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
-    let internal_round_constants =
-        round_constants.drain(internal_start..internal_end).map(|vec| vec[0]).collect::<Vec<_>>();
+    let internal_round_constants = round_constants
+        .drain(internal_start..internal_end)
+        .map(|vec| vec[0])
+        .collect::<Vec<_>>();
 
     let external_round_constants = ExternalLayerConstants::new(
-        round_constants[..ROUNDS_F/2].to_vec(),
-        round_constants[ROUNDS_F/2..].to_vec(),
+        round_constants[..ROUNDS_F / 2].to_vec(),
+        round_constants[ROUNDS_F / 2..].to_vec(),
     );
     Poseidon2::new(external_round_constants, internal_round_constants)
 }
@@ -1128,14 +1137,26 @@ pub fn poseidon2_hash(input: Vec<BabyBear>) -> [BabyBear; 8] {
 }
 
 pub fn poseidon2_hasher() -> PaddingFreeSponge<
-    Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7>,
+    Poseidon2<
+        BabyBear,
+        Poseidon2ExternalLayerBabyBear<16>,
+        Poseidon2InternalLayerBabyBear<16>,
+        16,
+        7,
+    >,
     16,
     8,
     8,
 > {
     let hasher = poseidon2_init();
     PaddingFreeSponge::<
-        Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7>,
+        Poseidon2<
+            BabyBear,
+            Poseidon2ExternalLayerBabyBear<16>,
+            Poseidon2InternalLayerBabyBear<16>,
+            16,
+            7,
+        >,
         16,
         8,
         8,
@@ -1144,7 +1165,13 @@ pub fn poseidon2_hasher() -> PaddingFreeSponge<
 
 lazy_static! {
     pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<
-        Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7>,
+        Poseidon2<
+            BabyBear,
+            Poseidon2ExternalLayerBabyBear<16>,
+            Poseidon2InternalLayerBabyBear<16>,
+            16,
+            7,
+        >,
         16,
         8,
         8,
@@ -1163,4 +1190,3 @@ pub fn hash_deferred_proof(
     inputs.extend_from_slice(pv_digest);
     poseidon2_hash(inputs.to_vec())
 }
-

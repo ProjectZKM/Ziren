@@ -1,5 +1,3 @@
-/*
-use crate::{UniConfig};
 use alloc::vec;
 use core::borrow::Borrow;
 use core::marker::PhantomData;
@@ -19,10 +17,7 @@ use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::thread_rng;
 
-use crate::{
-    air::InteractionScope, bb31_poseidon2::BabyBearPoseidon2, MachineProvingKey,
-    MachineVerificationError,
-};
+use crate::{air::InteractionScope, MachineProvingKey, MachineVerificationError};
 
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -152,16 +147,17 @@ fn test_public_value_impl(n: usize, x: u64) {
         fri_config,
         _phantom: PhantomData,
     };
-    let config = BabyBearPoseidon2::new();
+    let config = p3_uni_stark::StarkConfig::new(pcs);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let pis = vec![
         Mersenne31::from_canonical_u64(0),
         Mersenne31::from_canonical_u64(1),
         Mersenne31::from_canonical_u64(x),
     ];
-    let proof = p3_uni_stark::prove(&UniConfig(config.clone()), &FibonacciAir {}, &mut challenger, trace, &pis);
+    let proof = p3_uni_stark::prove(&config, &FibonacciAir {}, &mut challenger, trace, &pis);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    p3_uni_stark::verify(&UniConfig(config), &FibonacciAir {}, &mut challenger, &proof, &pis).expect("verification failed");
+    p3_uni_stark::verify(&config, &FibonacciAir {}, &mut challenger, &proof, &pis)
+        .expect("verification failed");
 }
 
 #[test]
@@ -203,6 +199,11 @@ fn test_incorrect_public_value() {
         Mersenne31::from_canonical_u64(1),
         Mersenne31::from_canonical_u64(123_123), // incorrect result
     ];
-    p3_uni_stark::prove(&UniConfig(config), &FibonacciAir {}, &mut challenger, trace, &pis);
+    p3_uni_stark::prove(
+        &UniConfig(config),
+        &FibonacciAir {},
+        &mut challenger,
+        trace,
+        &pis,
+    );
 }
-*/
