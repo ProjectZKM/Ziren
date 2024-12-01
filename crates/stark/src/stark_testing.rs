@@ -1,5 +1,5 @@
 /*
-use crate::{prove, verify};
+use crate::{UniConfig};
 use alloc::vec;
 use core::borrow::Borrow;
 use core::marker::PhantomData;
@@ -18,6 +18,11 @@ use p3_mersenne_31::Mersenne31;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use rand::thread_rng;
+
+use crate::{
+    air::InteractionScope, bb31_poseidon2::BabyBearPoseidon2, MachineProvingKey,
+    MachineVerificationError,
+};
 
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -117,7 +122,6 @@ type Challenger = SerializingChallenger32<Val, HashChallenger<u8, ByteHash, 32>>
 type MyCompress = CompressionFunctionFromHasher<ByteHash, 2, 32>;
 type ValMmcs = MerkleTreeMmcs<Val, u8, FieldHash, MyCompress, 32>;
 type Pcs = CirclePcs<Val, ValMmcs, ChallengeMmcs>;
-//type MyConfig = UniConfig<Pcs, Challenge, Challenger>;
 
 /// n-th Fibonacci number expected to be x
 fn test_public_value_impl(n: usize, x: u64) {
@@ -148,16 +152,16 @@ fn test_public_value_impl(n: usize, x: u64) {
         fri_config,
         _phantom: PhantomData,
     };
-    let config = MyConfig::new(pcs);
+    let config = BabyBearPoseidon2::new();
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let pis = vec![
         Mersenne31::from_canonical_u64(0),
         Mersenne31::from_canonical_u64(1),
         Mersenne31::from_canonical_u64(x),
     ];
-    let proof = prove(&config, &FibonacciAir {}, &mut challenger, trace, &pis);
+    let proof = p3_uni_stark::prove(&UniConfig(config.clone()), &FibonacciAir {}, &mut challenger, trace, &pis);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
-    verify(&config, &FibonacciAir {}, &mut challenger, &proof, &pis).expect("verification failed");
+    p3_uni_stark::verify(&UniConfig(config), &FibonacciAir {}, &mut challenger, &proof, &pis).expect("verification failed");
 }
 
 #[test]
@@ -192,13 +196,13 @@ fn test_incorrect_public_value() {
         fri_config,
         _phantom: PhantomData,
     };
-    let config = MyConfig::new(pcs);
+    let config = Val::new();
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let pis = vec![
         Mersenne31::from_canonical_u64(0),
         Mersenne31::from_canonical_u64(1),
         Mersenne31::from_canonical_u64(123_123), // incorrect result
     ];
-    prove(&config, &FibonacciAir {}, &mut challenger, trace, &pis);
+    p3_uni_stark::prove(&UniConfig(config), &FibonacciAir {}, &mut challenger, trace, &pis);
 }
 */

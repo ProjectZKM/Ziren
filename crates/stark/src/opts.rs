@@ -13,27 +13,27 @@ const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 18;
 
-/// Options to configure the SP1 prover for core and recursive proofs.
+/// Options to configure the ZKM prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SP1ProverOpts {
+pub struct ZKMProverOpts {
     /// Options for the core prover.
-    pub core_opts: SP1CoreOpts,
+    pub core_opts: ZKMCoreOpts,
     /// Options for the recursion prover.
-    pub recursion_opts: SP1CoreOpts,
+    pub recursion_opts: ZKMCoreOpts,
 }
 
-impl Default for SP1ProverOpts {
+impl Default for ZKMProverOpts {
     fn default() -> Self {
         Self {
-            core_opts: SP1CoreOpts::default(),
-            recursion_opts: SP1CoreOpts::recursion(),
+            core_opts: ZKMCoreOpts::default(),
+            recursion_opts: ZKMCoreOpts::recursion(),
         }
     }
 }
 
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SP1CoreOpts {
+pub struct ZKMCoreOpts {
     /// The size of a shard in terms of cycles.
     pub shard_size: usize,
     /// The size of a batch of shards in terms of cycles.
@@ -81,7 +81,7 @@ fn shard_batch_size(total_available_mem: u64) -> usize {
     }
 }
 
-impl Default for SP1CoreOpts {
+impl Default for ZKMCoreOpts {
     fn default() -> Self {
         let split_threshold = env::var("SPLIT_THRESHOLD")
             .map(|s| s.parse::<usize>().unwrap_or(MAX_DEFERRED_SPLIT_THRESHOLD))
@@ -127,7 +127,7 @@ impl Default for SP1CoreOpts {
     }
 }
 
-impl SP1CoreOpts {
+impl ZKMCoreOpts {
     /// Get the default options for the recursion prover.
     #[must_use]
     pub fn recursion() -> Self {

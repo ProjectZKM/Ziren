@@ -18,7 +18,7 @@ use super::{
     VerifierConstraintFolder,
 };
 use crate::{
-    air::MachineAir, config::ZeroCommitment, lookup::InteractionBuilder, opts::SP1CoreOpts,
+    air::MachineAir, config::ZeroCommitment, lookup::InteractionBuilder, opts::ZKMCoreOpts,
     record::MachineRecord, Challenger, DebugConstraintBuilder, MachineChip, MachineProof,
     PackedChallenge, PcsProverData, ProverConstraintFolder, ShardCommitment, ShardMainData,
     ShardProof, StarkVerifyingKey,
@@ -302,7 +302,7 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + Air<InteractionBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
-    A::Record: MachineRecord<Config = SP1CoreOpts>,
+    A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC::Val: PrimeField32,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,

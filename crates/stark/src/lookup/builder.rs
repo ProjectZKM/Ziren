@@ -206,7 +206,7 @@ mod tests {
     use p3_matrix::Matrix;
 
     use super::*;
-    use crate::{air::SP1AirBuilder, lookup::InteractionKind};
+    use crate::{air::ZKMAirBuilder, lookup::InteractionKind};
 
     #[test]
     fn test_symbolic_to_virtual_pair_col() {
@@ -241,7 +241,7 @@ mod tests {
         }
     }
 
-    impl<AB: SP1AirBuilder> Air<AB> for LookupTestAir {
+    impl<AB: ZKMAirBuilder> Air<AB> for LookupTestAir {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
             let local = main.row_slice(0);

@@ -7,7 +7,7 @@ use p3_uni_stark::{get_max_constraint_degree, SymbolicAirBuilder};
 use p3_util::log2_ceil_usize;
 
 use crate::{
-    air::{MachineAir, MultiTableAirBuilder, SP1AirBuilder},
+    air::{MachineAir, MultiTableAirBuilder, ZKMAirBuilder},
     lookup::{Interaction, InteractionBuilder, InteractionKind},
 };
 
@@ -238,7 +238,7 @@ impl<'a, F, A, AB> Air<AB> for Chip<F, A>
 where
     F: Field,
     A: Air<AB>,
-    AB: SP1AirBuilder<F = F> + MultiTableAirBuilder<'a> + PairBuilder + 'a,
+    AB: ZKMAirBuilder<F = F> + MultiTableAirBuilder<'a> + PairBuilder + 'a,
 {
     fn eval(&self, builder: &mut AB) {
         // Evaluate the execution trace constraints.

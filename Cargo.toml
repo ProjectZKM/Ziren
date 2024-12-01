@@ -54,6 +54,7 @@ p3-keccak = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-mds = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-merkle-tree = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-mersenne-31 = { git = "https://github.com/zkMIPS/Plonky3" }
+p3-monty-31 = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-poseidon2 = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-symmetric = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-bn254-fr = { git = "https://github.com/zkMIPS/Plonky3" }

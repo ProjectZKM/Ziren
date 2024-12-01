@@ -337,15 +337,15 @@ pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
     fn cumulative_sums(&self) -> &'a [Self::Sum];
 }
 
-/// A trait that contains the common helper methods for building `SP1 recursion` and SP1 machine
+/// A trait that contains the common helper methods for building `ZKM recursion` and ZKM machine
 /// AIRs.
 pub trait MachineAirBuilder:
     BaseAirBuilder + ExtensionAirBuilder + AirBuilderWithPublicValues
 {
 }
 
-/// A trait which contains all helper methods for building SP1 machine AIRs.
-pub trait SP1AirBuilder: MachineAirBuilder + ByteAirBuilder + AluAirBuilder {}
+/// A trait which contains all helper methods for building ZKM machine AIRs.
+pub trait ZKMAirBuilder: MachineAirBuilder + ByteAirBuilder + AluAirBuilder {}
 
 impl<'a, AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBuilder<'a, AB> {
     fn send(&mut self, message: M, scope: InteractionScope) {
@@ -363,7 +363,7 @@ impl<AB: BaseAirBuilder> AluAirBuilder for AB {}
 
 impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> MachineAirBuilder for AB {}
-impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> SP1AirBuilder for AB {}
+impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> ZKMAirBuilder for AB {}
 
 impl<'a, SC: StarkGenericConfig> EmptyMessageBuilder for ProverConstraintFolder<'a, SC> {}
 impl<'a, SC: StarkGenericConfig> EmptyMessageBuilder for VerifierConstraintFolder<'a, SC> {}

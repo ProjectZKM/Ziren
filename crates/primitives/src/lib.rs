@@ -2,9 +2,10 @@
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;
-use p3_baby_bear::{BabyBear /*DiffusionMatrixBabyBear*/};
+use p3_baby_bear::{BabyBear, Poseidon2ExternalLayerBabyBear, Poseidon2InternalLayerBabyBear};
 use p3_field::FieldAlgebra;
-use p3_poseidon2::{Poseidon2 /*Poseidon2ExternalMatrixGeneral*/};
+use p3_poseidon2::{Poseidon2, ExternalLayerConstants, ExternalLayerConstructor, InternalLayerConstructor};
+//use p3_monty_31::{Poseidon2InternalLayerMonty31, Poseidon2ExternalLayerMonty31};
 
 pub mod consts;
 pub mod io;
@@ -1103,9 +1104,8 @@ lazy_static! {
     ];
 }
 
-/*
 pub fn poseidon2_init(
-) -> Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7> {
+) -> Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7> {
     const ROUNDS_F: usize = 8;
     const ROUNDS_P: usize = 13;
     let mut round_constants = RC_16_30.to_vec();
@@ -1113,35 +1113,29 @@ pub fn poseidon2_init(
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
     let internal_round_constants =
         round_constants.drain(internal_start..internal_end).map(|vec| vec[0]).collect::<Vec<_>>();
-    let external_round_constants = round_constants;
-    Poseidon2::new(
-        ROUNDS_F,
-        external_round_constants,
-        Poseidon2ExternalMatrixGeneral,
-        ROUNDS_P,
-        internal_round_constants,
-        DiffusionMatrixBabyBear,
-    )
+
+    let external_round_constants = ExternalLayerConstants::new(
+        round_constants[..ROUNDS_F/2].to_vec(),
+        round_constants[ROUNDS_F/2..].to_vec(),
+    );
+    Poseidon2::new(external_round_constants, internal_round_constants)
 }
-*/
 
 use p3_symmetric::{CryptographicHasher, PaddingFreeSponge};
 
 pub fn poseidon2_hash(input: Vec<BabyBear>) -> [BabyBear; 8] {
-    //POSEIDON2_HASHER.hash_iter(input)
-    panic!("Unimplemented function")
+    POSEIDON2_HASHER.hash_iter(input)
 }
 
-/*
 pub fn poseidon2_hasher() -> PaddingFreeSponge<
-    Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>,
+    Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7>,
     16,
     8,
     8,
 > {
     let hasher = poseidon2_init();
     PaddingFreeSponge::<
-        Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>,
+        Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7>,
         16,
         8,
         8,
@@ -1150,13 +1144,12 @@ pub fn poseidon2_hasher() -> PaddingFreeSponge<
 
 lazy_static! {
     pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<
-        Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>,
+        Poseidon2<BabyBear, Poseidon2ExternalLayerBabyBear<16>, Poseidon2InternalLayerBabyBear<16>, 16, 7>,
         16,
         8,
         8,
     > = poseidon2_hasher();
 }
-*/
 
 /// Append a single deferred proof to a hash chain of deferred proofs.
 pub fn hash_deferred_proof(
@@ -1170,3 +1163,4 @@ pub fn hash_deferred_proof(
     inputs.extend_from_slice(pv_digest);
     poseidon2_hash(inputs.to_vec())
 }
+

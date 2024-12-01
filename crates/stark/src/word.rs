@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::air::SP1AirBuilder;
+use crate::air::ZKMAirBuilder;
 use arrayref::array_ref;
 use itertools::Itertools;
 use p3_air::AirBuilder;
@@ -30,7 +30,7 @@ impl<T> Word<T> {
     }
 
     /// Extends a variable to a word.
-    pub fn extend_var<AB: SP1AirBuilder<Var = T>>(var: T) -> Word<AB::Expr> {
+    pub fn extend_var<AB: ZKMAirBuilder<Var = T>>(var: T) -> Word<AB::Expr> {
         Word([
             AB::Expr::ZERO + var,
             AB::Expr::ZERO,
@@ -42,7 +42,7 @@ impl<T> Word<T> {
 
 impl<T: FieldAlgebra> Word<T> {
     /// Extends a variable to a word.
-    pub fn extend_expr<AB: SP1AirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
+    pub fn extend_expr<AB: ZKMAirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
         Word([
             AB::Expr::ZERO + expr,
             AB::Expr::ZERO,
@@ -53,7 +53,7 @@ impl<T: FieldAlgebra> Word<T> {
 
     /// Returns a word with all zero expressions.
     #[must_use]
-    pub fn zero<AB: SP1AirBuilder<Expr = T>>() -> Word<T> {
+    pub fn zero<AB: ZKMAirBuilder<Expr = T>>() -> Word<T> {
         Word([
             AB::Expr::ZERO,
             AB::Expr::ZERO,

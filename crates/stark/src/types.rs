@@ -77,7 +77,7 @@ pub struct ShardOpenedValues<T> {
     pub chips: Vec<ChipOpenedValues<T>>,
 }
 
-/// The maximum number of elements that can be stored in the public values vec.  Both SP1 and
+/// The maximum number of elements that can be stored in the public values vec.  Both ZKM and
 /// recursive proofs need to pad their public values vec to this length.  This is required since the
 /// recursion verification program expects the public values vec to be fixed length.
 pub const PROOF_MAX_NUM_PVS: usize = 371;

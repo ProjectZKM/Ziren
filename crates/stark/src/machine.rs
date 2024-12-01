@@ -32,126 +32,6 @@ use super::{
     Chip, Com, MachineProof, PcsProverData, StarkGenericConfig, Val, VerificationError, Verifier,
 };
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub struct ZKMDimensions(Dimensions);
-
-impl Display for ZKMDimensions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Serialize for ZKMDimensions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // 3 is the number of fields in the struct.
-        let mut state = serializer.serialize_struct("Dimensions", 2)?;
-        state.serialize_field("width", &self.0.width)?;
-        state.serialize_field("height", &self.0.height)?;
-        state.end()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for ZKMDimensions {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        enum Field {
-            Width,
-            Height,
-        }
-        // This part could also be generated independently by:
-        //
-        //    #[derive(Deserialize)]
-        //    #[serde(field_identifier, rename_all = "lowercase")]
-        //    enum Field { Width, Height }
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                struct FieldVisitor;
-
-                impl<'de> Visitor<'de> for FieldVisitor {
-                    type Value = Field;
-
-                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                        formatter.write_str("`width` or `height`")
-                    }
-
-                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
-                    where
-                        E: de::Error,
-                    {
-                        match value {
-                            "width" => Ok(Field::Width),
-                            "height" => Ok(Field::Height),
-                            _ => Err(de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-
-                deserializer.deserialize_identifier(FieldVisitor)
-            }
-        }
-
-        struct DimensionsVisitor;
-
-        impl<'de> Visitor<'de> for DimensionsVisitor {
-            type Value = ZKMDimensions;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("struct Dimensions")
-            }
-
-            fn visit_seq<V>(self, mut seq: V) -> Result<ZKMDimensions, V::Error>
-            where
-                V: SeqAccess<'de>,
-            {
-                let width = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let height = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
-                Ok(ZKMDimensions(Dimensions { width, height }))
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<ZKMDimensions, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut height = None;
-                let mut width = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Width => {
-                            if width.is_some() {
-                                return Err(de::Error::duplicate_field("width"));
-                            }
-                            width = Some(map.next_value()?);
-                        }
-                        Field::Height => {
-                            if height.is_some() {
-                                return Err(de::Error::duplicate_field("height"));
-                            }
-                            height = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let width = width.ok_or_else(|| de::Error::missing_field("width"))?;
-                let height = height.ok_or_else(|| de::Error::missing_field("height"))?;
-                Ok(ZKMDimensions(Dimensions { width, height }))
-            }
-        }
-        const FIELDS: &[&str] = &["width", "height"];
-        deserializer.deserialize_struct("Dimensions", FIELDS, DimensionsVisitor)
-    }
-}
-
 /// A chip in a machine.
 pub type MachineChip<SC, A> = Chip<Val<SC>, A>;
 
@@ -226,7 +106,7 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     /// The start pc of the program.
     pub pc_start: Val<SC>,
     /// The chip information.
-    pub chip_information: Vec<(String, Dom<SC>, ZKMDimensions)>,
+    pub chip_information: Vec<(String, Dom<SC>, Dimensions)>,
     /// The chip ordering.
     pub chip_ordering: HashMap<String, usize>,
 }
@@ -381,10 +261,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
         let pc_start = program.pc_start();
 
-        let chip_information = chip_information
-            .iter()
-            .map(|(s, d, d2)| (s.clone(), *d, ZKMDimensions(*d2)))
-            .collect();
         (
             StarkProvingKey {
                 commit: commit.clone(),

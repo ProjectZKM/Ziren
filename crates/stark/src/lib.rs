@@ -25,7 +25,9 @@ mod types;
 mod verifier;
 mod word;
 mod zerofier_coset;
+//mod bb31_poseidon2;
 
+//pub use bb31_poseidon2::*;
 pub use air::*;
 pub use chip::*;
 pub use config::*;
