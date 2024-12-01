@@ -6,7 +6,7 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use sp1_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
-use sp1_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, SP1AirBuilder};
+use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, SP1AirBuilder};
 use std::borrow::BorrowMut;
 use tracing::instrument;
 
@@ -300,7 +300,7 @@ mod tests {
     use p3_util::reverse_bits_len;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use sp1_core_machine::utils::setup_logger;
-    use sp1_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm2_stark::{air::MachineAir, StarkGenericConfig};
     use std::iter::once;
 
     use p3_baby_bear::BabyBear;

@@ -7,7 +7,7 @@ use p3_symmetric::CryptographicPermutation;
 use serde::{Deserialize, Serialize};
 use sp1_core_machine::utils::indices_arr;
 use zkm2_derive::AlignedBorrow;
-use sp1_stark::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
+use zkm2_stark::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
 use static_assertions::const_assert_eq;
 use std::{
     borrow::BorrowMut,

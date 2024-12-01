@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use serde::{Deserialize, Serialize};
-use sp1_stark::{air::MachineAir, ProofShape};
+use zkm2_stark::{air::MachineAir, ProofShape};
 
 use crate::{
     chips::{

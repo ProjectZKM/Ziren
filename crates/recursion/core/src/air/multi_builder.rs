@@ -2,7 +2,7 @@ use p3_air::{
     AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, FilteredAirBuilder,
     PermutationAirBuilder,
 };
-use sp1_stark::air::{InteractionScope, MessageBuilder};
+use zkm2_stark::air::{InteractionScope, MessageBuilder};
 
 /// The MultiBuilder is used for the multi table.  It is used to create a virtual builder for one of
 /// the sub tables in the multi table.

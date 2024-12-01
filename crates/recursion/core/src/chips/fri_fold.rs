@@ -3,14 +3,14 @@
 use core::borrow::Borrow;
 use itertools::Itertools;
 use sp1_core_machine::utils::pad_rows_fixed;
-use sp1_stark::air::{BinomialExtension, MachineAir};
+use zkm2_stark::air::{BinomialExtension, MachineAir};
 use std::borrow::BorrowMut;
 use tracing::instrument;
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use sp1_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
+use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
 
 use zkm2_derive::AlignedBorrow;
 
@@ -355,7 +355,7 @@ mod tests {
     use p3_field::AbstractExtensionField;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use sp1_core_machine::utils::setup_logger;
-    use sp1_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm2_stark::{air::MachineAir, StarkGenericConfig};
     use std::mem::size_of;
 
     use p3_baby_bear::BabyBear;

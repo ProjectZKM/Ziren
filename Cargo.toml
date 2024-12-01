@@ -13,7 +13,7 @@ members = [
   "crates/derive",
   "crates/primitives",
 #  "crates/recursion/compiler",
-#  "crates/recursion/core",
+  "crates/recursion/core",
   "crates/recursion/derive",
 ]
 resolver = "2"
@@ -63,9 +63,10 @@ rand = "0.8.5"
 
 zkm2-recursion-derive = { path = "crates/recursion/derive", version = "0.0.1", default-features = false }
 #zkm2-recursion-compiler = { path = "crates/recursion/compiler", version = "0.0.1" }
-#zkm2-recursion-core = { path = "crates/recursion/core", version = "0.0.1", default-features = false }
+zkm2-recursion-core = { path = "crates/recursion/core", version = "0.0.1", default-features = false }
 zkm2-derive = { path = "crates/derive", version = "0.0.1" }
 zkm2-primitives = { path = "crates/primitives", version = "0.0.1" }
+zkm2-stark = { path = "crates/stark", version = "0.0.1" }
 
 # misc
 hashbrown = "0.14.5"

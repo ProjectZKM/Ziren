@@ -3,14 +3,14 @@
 use core::borrow::Borrow;
 use itertools::Itertools;
 use sp1_core_machine::utils::pad_rows_fixed;
-use sp1_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
+use zkm2_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 use std::borrow::BorrowMut;
 use tracing::instrument;
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use sp1_stark::air::ExtensionAirBuilder;
+use zkm2_stark::air::ExtensionAirBuilder;
 
 use zkm2_derive::AlignedBorrow;
 

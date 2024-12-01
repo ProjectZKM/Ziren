@@ -2,7 +2,7 @@ use backtrace::Backtrace;
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use shape::RecursionShape;
-use sp1_stark::air::{MachineAir, MachineProgram};
+use zkm2_stark::air::{MachineAir, MachineProgram};
 
 use crate::*;
 
