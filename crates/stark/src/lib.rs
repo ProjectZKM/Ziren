@@ -5,6 +5,7 @@
 extern crate alloc;
 
 mod air;
+mod bb31_poseidon2;
 mod chip;
 mod config;
 mod debug;
@@ -25,10 +26,9 @@ mod types;
 mod verifier;
 mod word;
 mod zerofier_coset;
-//mod bb31_poseidon2;
 
-//pub use bb31_poseidon2::*;
 pub use air::*;
+pub use bb31_poseidon2::*;
 pub use chip::*;
 pub use config::*;
 pub use debug::*;
