@@ -2,7 +2,7 @@
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;
-use p3_baby_bear::{BabyBear, Poseidon2ExternalLayerBabyBear, Poseidon2InternalLayerBabyBear};
+use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
 use p3_field::FieldAlgebra;
 use p3_poseidon2::{
     ExternalLayerConstants, ExternalLayerConstructor, InternalLayerConstructor, Poseidon2,
@@ -1106,13 +1106,7 @@ lazy_static! {
     ];
 }
 
-pub fn poseidon2_init() -> Poseidon2<
-    BabyBear,
-    Poseidon2ExternalLayerBabyBear<16>,
-    Poseidon2InternalLayerBabyBear<16>,
-    16,
-    7,
-> {
+pub fn poseidon2_init() -> Poseidon2BabyBear<16> {
     const ROUNDS_F: usize = 8;
     const ROUNDS_P: usize = 13;
     let mut round_constants = RC_16_30.to_vec();
@@ -1137,26 +1131,14 @@ pub fn poseidon2_hash(input: Vec<BabyBear>) -> [BabyBear; 8] {
 }
 
 pub fn poseidon2_hasher() -> PaddingFreeSponge<
-    Poseidon2<
-        BabyBear,
-        Poseidon2ExternalLayerBabyBear<16>,
-        Poseidon2InternalLayerBabyBear<16>,
-        16,
-        7,
-    >,
+    Poseidon2BabyBear<16>,
     16,
     8,
     8,
 > {
     let hasher = poseidon2_init();
     PaddingFreeSponge::<
-        Poseidon2<
-            BabyBear,
-            Poseidon2ExternalLayerBabyBear<16>,
-            Poseidon2InternalLayerBabyBear<16>,
-            16,
-            7,
-        >,
+        Poseidon2BabyBear<16>,
         16,
         8,
         8,
@@ -1165,13 +1147,7 @@ pub fn poseidon2_hasher() -> PaddingFreeSponge<
 
 lazy_static! {
     pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<
-        Poseidon2<
-            BabyBear,
-            Poseidon2ExternalLayerBabyBear<16>,
-            Poseidon2InternalLayerBabyBear<16>,
-            16,
-            7,
-        >,
+        Poseidon2BabyBear<16>,
         16,
         8,
         8,
