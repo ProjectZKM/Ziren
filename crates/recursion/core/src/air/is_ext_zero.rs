@@ -11,7 +11,7 @@ use p3_field::{
     FieldAlgebra, Field,
 };
 use zkm2_derive::AlignedBorrow;
-use sp1_stark::air::{BinomialExtension, SP1AirBuilder};
+use zkm2_stark::air::{BinomialExtension, SP1AirBuilder};
 
 use crate::air::extension::BinomialExtensionUtils;
 

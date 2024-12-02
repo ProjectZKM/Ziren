@@ -2,7 +2,7 @@ use p3_air::AirBuilder;
 use p3_field::{FieldAlgebra, ExtensionField, Field};
 use serde::{Deserialize, Serialize};
 use zkm2_derive::AlignedBorrow;
-use sp1_stark::air::{BinomialExtension, ExtensionAirBuilder, SP1AirBuilder};
+use zkm2_stark::air::{BinomialExtension, ExtensionAirBuilder, SP1AirBuilder};
 
 use std::ops::{Index, IndexMut};
 

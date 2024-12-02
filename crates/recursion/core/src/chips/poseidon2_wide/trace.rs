@@ -6,7 +6,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use sp1_core_machine::utils::next_power_of_two;
 use sp1_primitives::RC_16_30_U32;
-use sp1_stark::air::MachineAir;
+use zkm2_stark::air::MachineAir;
 use tracing::instrument;
 
 use crate::{
@@ -283,7 +283,7 @@ mod tests {
     use p3_field::AbstractField;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
-    use sp1_stark::{air::MachineAir, inner_perm};
+    use zkm2_stark::{air::MachineAir, inner_perm};
     use zkhash::ark_ff::UniformRand;
 
     use crate::{

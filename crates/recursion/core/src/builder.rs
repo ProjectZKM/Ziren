@@ -2,7 +2,7 @@ use std::iter::once;
 
 use p3_air::AirBuilderWithPublicValues;
 use p3_field::FieldAlgebra;
-use sp1_stark::{
+use zkm2_stark::{
     air::{AirInteraction, BaseAirBuilder, InteractionScope, MachineAirBuilder},
     InteractionKind,
 };

@@ -12,7 +12,7 @@ use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use sp1_stark::{Com, StarkGenericConfig, ZeroCommitment};
+use zkm2_stark::{Com, StarkGenericConfig, ZeroCommitment};
 
 use super::{poseidon2::bn254_poseidon2_rc3, sp1_dev_mode};
 

@@ -5,7 +5,7 @@ use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use sp1_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
-use sp1_stark::air::MachineAir;
+use zkm2_stark::air::MachineAir;
 
 use crate::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
@@ -181,7 +181,7 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use sp1_core_machine::utils::setup_logger;
 
-    use sp1_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm2_stark::{air::MachineAir, StarkGenericConfig};
     use std::{array, borrow::Borrow};
 
     use p3_baby_bear::BabyBear;

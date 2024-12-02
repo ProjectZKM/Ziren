@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign};
 
 use hashbrown::HashMap;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
-use sp1_stark::{
+use zkm2_stark::{
     air::{InteractionScope, MachineAir},
     Chip, ProofShape, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
 };
@@ -266,7 +266,7 @@ pub mod tests {
     };
     use rand::prelude::*;
     use sp1_core_machine::utils::run_test_machine;
-    use sp1_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
 
     // TODO expand glob import
     use crate::{runtime::instruction as instr, *};
