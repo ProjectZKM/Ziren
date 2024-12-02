@@ -52,7 +52,13 @@ pub trait BaseAir<F>: Sync {
 
 * Matrix: A matrix that each cell is variable.
 
+#### Template Builders
+
+* AirBuilderWithPublicValues: a builder who defines the public inputs
+* PairBuilder: a builder who defines the pre-defined state variables
+* PermutationAirBuilder: a builder whose constraints are enfoced by a permutation check.
+
 ### Sub Builder
 
 * FilteredAirBuilder: a sub builder whose constraints are enforced by a condition.
-* PermutationAirBuilder: a sub builder whose constraints are enfoced by a permutation check.
+* SubBuilder
