@@ -78,12 +78,12 @@ pub trait RecursionMemoryAirBuilder: RecursionInteractionAirBuilder {
         let prev_values = once(prev_timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.prev_value().clone().into()))
-            .chain(repeat(Self::Expr::zero()).take(3))
+            .chain(repeat(Self::Expr::ZERO).take(3))
             .collect();
         let current_values = once(timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.value().clone().into()))
-            .chain(repeat(Self::Expr::zero()).take(3))
+            .chain(repeat(Self::Expr::ZERO).take(3))
             .collect();
 
         self.receive(
@@ -105,7 +105,7 @@ pub trait RecursionMemoryAirBuilder: RecursionInteractionAirBuilder {
     ) {
         // We subtract one since a diff of zero is not valid.
         let diff_minus_one: Self::Expr =
-            timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::one();
+            timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::ONE;
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_12bit_limb * 2^16.

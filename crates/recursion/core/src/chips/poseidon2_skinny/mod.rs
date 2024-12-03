@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use p3_baby_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
+//use p3_baby_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
 use p3_field::{FieldAlgebra, PrimeField32};
 
 pub mod air;
@@ -57,6 +57,7 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
 }
 
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
+    /*
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
         POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
             .iter()
@@ -67,6 +68,8 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     matmul_internal(state, matmul_constants);
     let monty_inverse = F::from_wrapped_u32(MONTY_INVERSE.as_canonical_u32());
     state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
+    */
+    panic!("Unimplement internal_linear_layer")
 }
 
 #[cfg(test)]
@@ -78,12 +81,12 @@ pub(crate) mod tests {
         machine::RecursionAir, runtime::instruction as instr, MemAccessKind, RecursionProgram,
         Runtime,
     };
-    use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
+    use p3_baby_bear::{BabyBear, Poseidon2InternalLayerBabyBear};
     use p3_field::{FieldAlgebra, PrimeField32};
     use p3_symmetric::Permutation;
 
     use crate::stark::BabyBearPoseidon2Outer;
-    use sp1_core_machine::utils::{run_test_machine, setup_logger};
+    use zkm2_core_machine::utils::{run_test_machine, setup_logger};
     use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, inner_perm, StarkGenericConfig};
     use zkhash::ark_ff::UniformRand;
 
@@ -133,7 +136,7 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
 
         let program = Arc::new(RecursionProgram { instructions, ..Default::default() });
-        let mut runtime = Runtime::<F, EF, DiffusionMatrixBabyBear>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
             program.clone(),
             BabyBearPoseidon2::new().perm,
         );

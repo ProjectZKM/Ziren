@@ -33,17 +33,17 @@ pub struct MemoryInitCols<T> {
 impl<T: PrimeField32> MemoryInitCols<T> {
     pub fn new() -> Self {
         Self {
-            addr: T::zero(),
-            timestamp: T::zero(),
-            value: Block::from([T::zero(); 4]),
-            is_initialize: T::zero(),
-            is_finalize: T::zero(),
-            diff_16bit_limb: T::zero(),
-            diff_12bit_limb: T::zero(),
-            addr_16bit_limb: T::zero(),
-            addr_12bit_limb: T::zero(),
-            is_real: T::zero(),
-            is_range_check: T::zero(),
+            addr: T::ZERO,
+            timestamp: T::ZERO,
+            value: Block::from([T::ZERO; 4]),
+            is_initialize: T::ZERO,
+            is_finalize: T::ZERO,
+            diff_16bit_limb: T::ZERO,
+            diff_12bit_limb: T::ZERO,
+            addr_16bit_limb: T::ZERO,
+            addr_12bit_limb: T::ZERO,
+            is_real: T::ZERO,
+            is_range_check: T::ZERO,
         }
     }
 }

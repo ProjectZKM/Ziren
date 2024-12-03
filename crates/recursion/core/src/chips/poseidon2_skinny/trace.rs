@@ -7,8 +7,8 @@ use std::{
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use sp1_core_machine::utils::pad_rows_fixed;
-use sp1_primitives::RC_16_30_U32;
+use zkm2_core_machine::utils::pad_rows_fixed;
+use zkm2_primitives::RC_16_30_U32;
 use zkm2_stark::air::MachineAir;
 use tracing::instrument;
 
@@ -56,7 +56,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         for event in &input.poseidon2_events {
             // We have one row for input, one row for output, NUM_EXTERNAL_ROUNDS rows for the
             // external rounds, and one row for all internal rounds.
-            let mut row_add = [[F::zero(); NUM_POSEIDON2_COLS]; NUM_EXTERNAL_ROUNDS + 3];
+            let mut row_add = [[F::ZERO; NUM_POSEIDON2_COLS]; NUM_EXTERNAL_ROUNDS + 3];
 
             // The first row should have event.input and [event.input[0].clone();
             // NUM_INTERNAL_ROUNDS-1] in its state columns. The sbox_state will be
@@ -102,7 +102,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
         // Pad the trace to a power of two.
         // This will need to be adjusted when the AIR constraints are implemented.
-        pad_rows_fixed(&mut rows, || [F::zero(); NUM_POSEIDON2_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_POSEIDON2_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_POSEIDON2_COLS)
@@ -126,7 +126,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         let num_instructions = instructions.clone().count();
 
         let mut rows = vec![
-            [F::zero(); PREPROCESSED_POSEIDON2_WIDTH];
+            [F::ZERO; PREPROCESSED_POSEIDON2_WIDTH];
             num_instructions * (NUM_EXTERNAL_ROUNDS + 3)
         ];
 
@@ -162,7 +162,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
                         } else if i == INTERNAL_ROUND_IDX {
                             F::from_wrapped_u32(RC_16_30_U32[NUM_EXTERNAL_ROUNDS / 2 + j][0])
                         } else {
-                            F::zero()
+                            F::ZERO
                         };
                     });
 
@@ -172,7 +172,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
                         cols.memory_preprocessed = instruction
                             .addrs
                             .input
-                            .map(|addr| MemoryAccessCols { addr, mult: F::neg_one() });
+                            .map(|addr| MemoryAccessCols { addr, mult: F::NEG_ONE });
                     } else if i == OUTPUT_ROUND_IDX {
                         cols.memory_preprocessed = array::from_fn(|i| MemoryAccessCols {
                             addr: instruction.addrs.output[i],
@@ -187,7 +187,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         // This may need to be adjusted when the AIR constraints are implemented.
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); PREPROCESSED_POSEIDON2_WIDTH],
+            || [F::ZERO; PREPROCESSED_POSEIDON2_WIDTH],
             program.fixed_log2_rows(self),
         );
         let trace_rows = rows.into_iter().flatten().collect::<Vec<_>>();
@@ -215,7 +215,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
             // avoid adding columns for the result of the sbox, and instead include the x^3 -> x^7
             // part of the sbox in the constraint for the linear layer
-            let mut sbox_deg_7: [F; 16] = [F::zero(); WIDTH];
+            let mut sbox_deg_7: [F; 16] = [F::ZERO; WIDTH];
             for i in 0..WIDTH {
                 let sbox_deg_3 = add_rc[i] * add_rc[i] * add_rc[i];
                 sbox_deg_7[i] = sbox_deg_3 * sbox_deg_3 * add_rc[i];
@@ -268,7 +268,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
 #[cfg(test)]
 mod tests {
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
     use zkm2_stark::{air::MachineAir, inner_perm};
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         type F = BabyBear;
-        let input_0 = [F::one(); WIDTH];
+        let input_0 = [F::ONE; WIDTH];
         let permuter = inner_perm();
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();

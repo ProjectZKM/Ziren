@@ -1,12 +1,12 @@
-//! The air module contains the AIR constraints for the poseidon2 chip.  
+//! The air module contains the AIR constraints for the poseidon2 chip.
 //! At the moment, we're only including memory constraints to test the new memory argument.
 
 use std::{array, borrow::Borrow};
 
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use sp1_primitives::RC_16_30_U32;
+use zkm2_primitives::RC_16_30_U32;
 
 use crate::builder::SP1RecursionAirBuilder;
 
@@ -105,8 +105,8 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
-        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
-        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
+        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
+        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         for i in 0..WIDTH {
             let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 

@@ -3,7 +3,7 @@ use std::borrow::{Borrow, BorrowMut};
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use sp1_core_machine::utils::pad_rows_fixed;
+use zkm2_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
 
@@ -87,10 +87,10 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         // values hash.
         for instr in commit_pv_hash_instrs.iter().take(1) {
             for (i, addr) in instr.pv_addrs.digest.iter().enumerate() {
-                let mut row = [F::zero(); NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
+                let mut row = [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
                 let cols: &mut PublicValuesPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
-                cols.pv_idx[i] = F::one();
-                cols.pv_mem = MemoryAccessCols { addr: *addr, mult: F::neg_one() };
+                cols.pv_idx[i] = F::ONE;
+                cols.pv_mem = MemoryAccessCols { addr: *addr, mult: F::NEG_ONE };
                 rows.push(row);
             }
         }
@@ -99,7 +99,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         // gpu code breaks for small traces
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
+            || [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
             Some(PUB_VALUES_LOG_HEIGHT),
         );
 
@@ -125,7 +125,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         // values hash.
         for event in input.commit_pv_hash_events.iter().take(1) {
             for element in event.public_values.digest.iter() {
-                let mut row = [F::zero(); NUM_PUBLIC_VALUES_COLS];
+                let mut row = [F::ZERO; NUM_PUBLIC_VALUES_COLS];
                 let cols: &mut PublicValuesCols<F> = row.as_mut_slice().borrow_mut();
 
                 cols.pv_element = *element;
@@ -136,7 +136,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         // Pad the trace to 8 rows.
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); NUM_PUBLIC_VALUES_COLS],
+            || [F::ZERO; NUM_PUBLIC_VALUES_COLS],
             Some(PUB_VALUES_LOG_HEIGHT),
         );
 
@@ -179,13 +179,13 @@ where
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use sp1_core_machine::utils::setup_logger;
+    use zkm2_core_machine::utils::setup_logger;
 
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
     use std::{array, borrow::Borrow};
 
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::{

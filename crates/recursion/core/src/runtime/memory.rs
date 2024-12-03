@@ -43,7 +43,7 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
     }
 
     fn mr(&mut self, addr: Address<F>) -> &mut MemoryEntry<F> {
-        self.mr_mult(addr, F::one())
+        self.mr_mult(addr, F::ONE)
     }
 
     fn mr_mult(&mut self, addr: Address<F>, mult: F) -> &mut MemoryEntry<F> {
@@ -77,7 +77,7 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
     }
 
     fn mr(&mut self, addr: Address<F>) -> &mut MemoryEntry<F> {
-        self.mr_mult(addr, F::one())
+        self.mr_mult(addr, F::ONE)
     }
 
     fn mr_mult(&mut self, addr: Address<F>, mult: F) -> &mut MemoryEntry<F> {

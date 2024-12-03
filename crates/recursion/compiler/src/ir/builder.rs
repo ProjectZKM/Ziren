@@ -2,8 +2,8 @@ use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
 use p3_field::AbstractField;
-use sp1_core_machine::utils::sp1_debug_mode;
-use sp1_primitives::types::RecursionProgramType;
+use zkm2_core_machine::utils::sp1_debug_mode;
+use zkm2_primitives::types::RecursionProgramType;
 
 use super::{
     Array, Config, DslIr, Ext, ExtHandle, ExtOperations, Felt, FeltHandle, FeltOperations,

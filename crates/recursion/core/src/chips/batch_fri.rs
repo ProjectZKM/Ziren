@@ -2,7 +2,7 @@
 
 use core::borrow::Borrow;
 use itertools::Itertools;
-use sp1_core_machine::utils::pad_rows_fixed;
+use zkm2_core_machine::utils::pad_rows_fixed;
 use zkm2_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 use std::borrow::BorrowMut;
 use tracing::instrument;
@@ -88,12 +88,12 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
                 let BatchFRIInstr { base_vec_addrs, ext_single_addrs, ext_vec_addrs, acc_mult } =
                     instruction.as_ref();
                 let len = ext_vec_addrs.p_at_z.len();
-                let mut row_add = vec![[F::zero(); NUM_BATCH_FRI_PREPROCESSED_COLS]; len];
-                debug_assert_eq!(*acc_mult, F::one());
+                let mut row_add = vec![[F::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS]; len];
+                debug_assert_eq!(*acc_mult, F::ONE);
 
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut BatchFRIPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
-                    row.is_real = F::one();
+                    row.is_real = F::ONE;
                     row.is_end = F::from_bool(i == len - 1);
                     row.acc_addr = ext_single_addrs.acc;
                     row.alpha_pow_addr = ext_vec_addrs.alpha_pow[i];
@@ -106,7 +106,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         // Pad the trace to a power of two.
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); NUM_BATCH_FRI_PREPROCESSED_COLS],
+            || [F::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
         );
 
@@ -127,7 +127,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             .batch_fri_events
             .iter()
             .map(|event| {
-                let mut row = [F::zero(); NUM_BATCH_FRI_COLS];
+                let mut row = [F::ZERO; NUM_BATCH_FRI_COLS];
                 let cols: &mut BatchFRICols<F> = row.as_mut_slice().borrow_mut();
                 cols.acc = event.ext_single.acc;
                 cols.alpha_pow = event.ext_vec.alpha_pow;
@@ -138,7 +138,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             .collect_vec();
 
         // Pad the trace to a power of two.
-        pad_rows_fixed(&mut rows, || [F::zero(); NUM_BATCH_FRI_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_BATCH_FRI_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
         let trace = RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_BATCH_FRI_COLS);

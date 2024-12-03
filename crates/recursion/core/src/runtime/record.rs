@@ -2,7 +2,7 @@ use std::{array, sync::Arc};
 
 use hashbrown::HashMap;
 use p3_field::{FieldAlgebra, Field, PrimeField32};
-use zkm2_stark::{air::MachineAir, MachineRecord, SP1CoreOpts, PROOF_MAX_NUM_PVS};
+use zkm2_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
@@ -31,7 +31,7 @@ pub struct ExecutionRecord<F> {
 }
 
 impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
-    type Config = SP1CoreOpts;
+    type Config = ZKMCoreOpts;
 
     fn stats(&self) -> hashbrown::HashMap<String, usize> {
         let mut stats = HashMap::new();
@@ -82,7 +82,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             if i < pv_elms.len() {
                 T::from_canonical_u32(pv_elms[i].as_canonical_u32())
             } else {
-                T::zero()
+                T::ZERO
             }
         });
 

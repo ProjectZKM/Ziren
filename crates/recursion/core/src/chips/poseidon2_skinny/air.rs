@@ -105,7 +105,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
-        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
+        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         for i in 0..WIDTH {
             let sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
             sbox_deg_7[i] = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc[i].clone();

@@ -13,7 +13,8 @@ members = [
   "crates/derive",
   "crates/primitives",
 #  "crates/recursion/compiler",
-#  "crates/recursion/core",
+  "crates/recursion/core",
+  "crates/core/machine",
   "crates/recursion/derive",
 ]
 resolver = "2"
@@ -51,6 +52,7 @@ p3-baby-bear = { git = "https://github.com/zkMIPS/Plonky3" }
 #p3-commit = { git = "https://github.com/zkMIPS/Plonky3", features = ["test-utils"] }
 p3-circle = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-keccak = { git = "https://github.com/zkMIPS/Plonky3" }
+p3-keccak-air = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-mds = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-merkle-tree = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-mersenne-31 = { git = "https://github.com/zkMIPS/Plonky3" }
@@ -63,7 +65,8 @@ rand = "0.8.5"
 
 zkm2-recursion-derive = { path = "crates/recursion/derive", version = "0.0.1", default-features = false }
 #zkm2-recursion-compiler = { path = "crates/recursion/compiler", version = "0.0.1" }
-#zkm2-recursion-core = { path = "crates/recursion/core", version = "0.0.1", default-features = false }
+zkm2-recursion-core = { path = "crates/recursion/core", version = "0.0.1", default-features = false }
+zkm2-core-machine = { path = "crates/core/machine", version = "0.0.1", default-features = false }
 zkm2-derive = { path = "crates/derive", version = "0.0.1" }
 zkm2-primitives = { path = "crates/primitives", version = "0.0.1" }
 zkm2-stark = { path = "crates/stark", version = "0.0.1" }

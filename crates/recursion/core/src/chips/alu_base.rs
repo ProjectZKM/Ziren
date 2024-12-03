@@ -3,7 +3,7 @@ use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use sp1_core_machine::utils::next_power_of_two;
+use zkm2_core_machine::utils::next_power_of_two;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
 use std::{borrow::BorrowMut, iter::zip};
@@ -89,7 +89,7 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_BASE_ALU_PREPROCESSED_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * NUM_BASE_ALU_ACCESS_COLS;
@@ -131,7 +131,7 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_BASE_ALU_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_BASE_ALU_VALUE_COLS;
@@ -194,7 +194,7 @@ where
 mod tests {
     use machine::tests::run_recursion_test_machines;
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -209,7 +209,7 @@ mod tests {
         type F = BabyBear;
 
         let shard = ExecutionRecord {
-            base_alu_events: vec![BaseAluIo { out: F::one(), in1: F::one(), in2: F::one() }],
+            base_alu_events: vec![BaseAluIo { out: F::ONE, in1: F::ONE, in2: F::ONE }],
             ..Default::default()
         };
         let chip = BaseAluChip;

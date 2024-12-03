@@ -27,6 +27,7 @@
     - [Proof Recursion](./design/proof-recursion.md)
         - [Stark-to-Snark](./design/stark-to-snark.md)
     - [Continuation](./design/continuation.md)
+    - [Prover Architecture](./design/prover-architecture.md)
     - [Proof Composition](./design/proof-composition.md)
 - [Background Material](./background.md)
 - [Chapter template](./chapter_template.md)

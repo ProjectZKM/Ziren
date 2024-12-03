@@ -29,7 +29,7 @@ use crate::{
 };
 
 #[derive(zkm2_derive::MachineAir)]
-#[sp1_core_path = "sp1_core_machine"]
+#[zkm2_core_path = "zkm2_core_machine"]
 #[execution_record_path = "crate::ExecutionRecord<F>"]
 #[program_path = "crate::RecursionProgram<F>"]
 #[builder_path = "crate::builder::SP1RecursionAirBuilder<F = F>"]
@@ -259,13 +259,13 @@ pub mod tests {
     use std::{iter::once, sync::Arc};
 
     use machine::RecursionAir;
-    use p3_baby_bear::DiffusionMatrixBabyBear;
+    use p3_baby_bear::Poseidon2InternalLayerBabyBear;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
-        AbstractExtensionField, AbstractField, Field,
+        FieldExtensionAlgebra, FieldAlgebra, Field,
     };
     use rand::prelude::*;
-    use sp1_core_machine::utils::run_test_machine;
+    use zkm2_core_machine::utils::run_test_machine;
     use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
 
     // TODO expand glob import
@@ -281,7 +281,7 @@ pub mod tests {
     pub fn run_recursion_test_machines(program: RecursionProgram<F>) {
         let program = Arc::new(program);
         let mut runtime =
-            Runtime::<F, EF, DiffusionMatrixBabyBear>::new(program.clone(), SC::new().perm);
+            Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(program.clone(), SC::new().perm);
         runtime.run().unwrap();
 
         // Run with the poseidon2 wide chip.
@@ -361,7 +361,7 @@ pub mod tests {
             let x = BinomialExtensionField::<F, D>::from_base_slice(&inner);
             let gal = x.galois_group();
 
-            let mut acc = BinomialExtensionField::one();
+            let mut acc = BinomialExtensionField::ONE;
 
             instructions.push(instr::mem_ext(MemAccessKind::Write, 1, addr, acc));
             for conj in gal {

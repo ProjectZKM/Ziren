@@ -5,7 +5,7 @@ use itertools::Itertools;
 use p3_field::{
     FieldAlgebra, FieldExtensionAlgebra, Field, PrimeField, PrimeField64, TwoAdicField,
 };
-use sp1_core_machine::utils::{sp1_debug_mode, SpanBuilder};
+use zkm2_core_machine::utils::{sp1_debug_mode, SpanBuilder};
 use zkm2_recursion_core::{
     air::{Block, RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     BaseAluInstr, BaseAluOpcode,
@@ -844,9 +844,9 @@ mod tests {
     use p3_symmetric::{CryptographicHasher, Permutation};
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
-    use sp1_core_machine::utils::{run_test_machine, setup_logger};
+    use zkm2_core_machine::utils::{run_test_machine, setup_logger};
     use zkm2_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
-    use sp1_stark::{
+    use zkm2_stark::{
         baby_bear_poseidon2::BabyBearPoseidon2, inner_perm, BabyBearPoseidon2Inner, InnerHash,
         StarkGenericConfig,
     };

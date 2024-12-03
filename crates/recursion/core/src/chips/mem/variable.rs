@@ -4,7 +4,7 @@ use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use sp1_core_machine::utils::{next_power_of_two, pad_rows_fixed};
+use zkm2_core_machine::utils::{next_power_of_two, pad_rows_fixed};
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
@@ -79,7 +79,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = accesses.len() * NUM_MEM_ACCESS_COLS;
@@ -101,7 +101,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .mem_var_events
             .chunks(NUM_VAR_MEM_ENTRIES_PER_ROW)
             .map(|row_events| {
-                let mut row = [F::zero(); NUM_MEM_INIT_COLS];
+                let mut row = [F::ZERO; NUM_MEM_INIT_COLS];
                 let cols: &mut MemoryCols<_> = row.as_mut_slice().borrow_mut();
                 for (cell, vals) in zip(&mut cols.values, row_events) {
                     *cell = vals.inner;
@@ -111,7 +111,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(&mut rows, || [F::zero(); NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS)
@@ -148,7 +148,7 @@ where
 mod tests {
     use machine::tests::run_recursion_test_machines;
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
@@ -159,8 +159,8 @@ mod tests {
     pub fn generate_trace() {
         let shard = ExecutionRecord::<BabyBear> {
             mem_var_events: vec![
-                MemEvent { inner: BabyBear::one().into() },
-                MemEvent { inner: BabyBear::one().into() },
+                MemEvent { inner: BabyBear::ONE.into() },
+                MemEvent { inner: BabyBear::ONE.into() },
             ],
             ..Default::default()
         };

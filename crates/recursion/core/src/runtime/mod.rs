@@ -28,7 +28,8 @@ use std::{
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{FieldAlgebra, ExtensionField, PrimeField32};
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
+use p3_poseidon2::{Poseidon2};
+use p3_baby_bear::{Poseidon2ExternalLayerBabyBear};
 use p3_symmetric::{CryptographicPermutation, Permutation};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
@@ -123,7 +124,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     perm: Option<
         Poseidon2<
             F,
-            Poseidon2ExternalMatrixGeneral,
+            Poseidon2ExternalLayerBabyBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
             POSEIDON2_SBOX_DEGREE,
@@ -169,7 +170,7 @@ impl<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'a, F, EF, D
 where
     Poseidon2<
         F,
-        Poseidon2ExternalMatrixGeneral,
+        Poseidon2ExternalLayerBabyBear<16>,
         Diffusion,
         PERMUTATION_WIDTH,
         POSEIDON2_SBOX_DEGREE,
@@ -179,7 +180,7 @@ where
         program: Arc<RecursionProgram<F>>,
         perm: Poseidon2<
             F,
-            Poseidon2ExternalMatrixGeneral,
+            Poseidon2ExternalLayerBabyBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
             POSEIDON2_SBOX_DEGREE,
@@ -202,9 +203,9 @@ where
             nb_batch_fri: 0,
             nb_print_f: 0,
             nb_print_e: 0,
-            clk: F::zero(),
+            clk: F::ZERO,
             program,
-            pc: F::zero(),
+            pc: F::ZERO,
             memory,
             record,
             witness_stream: VecDeque::new(),
@@ -261,7 +262,7 @@ where
             let instruction = self.program.instructions[idx].clone();
 
             let next_clk = self.clk + F::from_canonical_u32(4);
-            let next_pc = self.pc + F::one();
+            let next_pc = self.pc + F::ONE;
             match instruction {
                 Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
                     self.nb_base_ops += 1;
@@ -272,13 +273,13 @@ where
                         BaseAluOpcode::AddF => in1 + in2,
                         BaseAluOpcode::SubF => in1 - in2,
                         BaseAluOpcode::MulF => in1 * in2,
-                        BaseAluOpcode::DivF => match in1.try_div(in2) {
+                        BaseAluOpcode::DivF => match in2.try_inverse().map(|x| x * in1) {
                             Some(x) => x,
                             None => {
                                 // Check for division exceptions and error. Note that 0/0 is defined
                                 // to be 1.
                                 if in1.is_zero() {
-                                    FieldAlgebra::one()
+                                    FieldAlgebra::ONE
                                 } else {
                                     return Err(RuntimeError::DivFOutOfDomain {
                                         in1,
@@ -305,13 +306,13 @@ where
                         ExtAluOpcode::AddE => in1_ef + in2_ef,
                         ExtAluOpcode::SubE => in1_ef - in2_ef,
                         ExtAluOpcode::MulE => in1_ef * in2_ef,
-                        ExtAluOpcode::DivE => match in1_ef.try_div(in2_ef) {
+                        ExtAluOpcode::DivE => match in2_ef.try_inverse().map(|x| x * in1_ef) {
                             Some(x) => x,
                             None => {
                                 // Check for division exceptions and error. Note that 0/0 is defined
                                 // to be 1.
                                 if in1_ef.is_zero() {
-                                    FieldAlgebra::one()
+                                    FieldAlgebra::ONE
                                 } else {
                                     return Err(RuntimeError::DivEOutOfDomain {
                                         in1: in1_ef,
@@ -369,8 +370,8 @@ where
                     let bit = self.memory.mr(bit).val[0];
                     let in1 = self.memory.mr(in1).val[0];
                     let in2 = self.memory.mr(in2).val[0];
-                    let out1_val = bit * in2 + (F::one() - bit) * in1;
-                    let out2_val = bit * in1 + (F::one() - bit) * in2;
+                    let out1_val = bit * in2 + (F::ONE - bit) * in1;
+                    let out2_val = bit * in1 + (F::ONE - bit) * in2;
                     self.memory.mw(out1, Block::from(out1_val), mult1);
                     self.memory.mw(out2, Block::from(out2_val), mult2);
                     self.record.select_events.push(SelectEvent {
@@ -404,7 +405,7 @@ where
                 }
                 Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
                     self.nb_bit_decompositions += 1;
-                    let num = self.memory.mr_mult(input_addr, F::zero()).val[0].as_canonical_u32();
+                    let num = self.memory.mr_mult(input_addr, F::ZERO).val[0].as_canonical_u32();
                     // Decompose the num into LE bits.
                     let bits = (0..output_addrs_mults.len())
                         .map(|i| Block::from(F::from_canonical_u32((num >> i) & 1)))
@@ -494,7 +495,7 @@ where
                     let BatchFRIInstr { base_vec_addrs, ext_single_addrs, ext_vec_addrs, acc_mult } =
                         *instr;
 
-                    let mut acc = EF::zero();
+                    let mut acc = EF::ZERO;
                     let p_at_xs = base_vec_addrs
                         .p_at_x
                         .iter()
@@ -545,12 +546,12 @@ where
                 Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
                     FieldEltType::Base => {
                         self.nb_print_f += 1;
-                        let f = self.memory.mr_mult(addr, F::zero()).val[0];
+                        let f = self.memory.mr_mult(addr, F::ZERO).val[0];
                         writeln!(self.debug_stdout, "PRINTF={f}")
                     }
                     FieldEltType::Extension => {
                         self.nb_print_e += 1;
-                        let ef = self.memory.mr_mult(addr, F::zero()).val;
+                        let ef = self.memory.mr_mult(addr, F::ZERO).val;
                         writeln!(self.debug_stdout, "PRINTEF={ef:?}")
                     }
                 }
@@ -560,7 +561,7 @@ where
                     input_addr,
                 }) => {
                     self.nb_bit_decompositions += 1;
-                    let fs = self.memory.mr_mult(input_addr, F::zero()).val;
+                    let fs = self.memory.mr_mult(input_addr, F::ZERO).val;
                     // Write the bits to the array at dst.
                     for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults) {
                         let felt = Block::from(f);

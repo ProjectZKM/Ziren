@@ -1,10 +1,10 @@
 use core::borrow::Borrow;
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use sp1_core_machine::utils::next_power_of_two;
+use zkm2_core_machine::utils::next_power_of_two;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
 use std::borrow::BorrowMut;
@@ -68,7 +68,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * SELECT_PREPROCESSED_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
@@ -77,7 +77,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
                 let SelectInstr { addrs, mult1, mult2 } = instr;
                 let access: &mut SelectPreprocessedCols<_> = row.borrow_mut();
                 *access = SelectPreprocessedCols {
-                    is_real: F::one(),
+                    is_real: F::ONE,
                     addrs: addrs.to_owned(),
                     mult1: mult1.to_owned(),
                     mult2: mult2.to_owned(),
@@ -101,7 +101,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * SELECT_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * SELECT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * SELECT_COLS;
@@ -144,11 +144,11 @@ where
         builder.send_single(prep_local.addrs.out2, local.vals.out2, prep_local.mult2);
         builder.assert_eq(
             local.vals.out1,
-            local.vals.bit * local.vals.in2 + (AB::Expr::one() - local.vals.bit) * local.vals.in1,
+            local.vals.bit * local.vals.in2 + (AB::Expr::ONE - local.vals.bit) * local.vals.in1,
         );
         builder.assert_eq(
             local.vals.out2,
-            local.vals.bit * local.vals.in1 + (AB::Expr::one() - local.vals.bit) * local.vals.in2,
+            local.vals.bit * local.vals.in1 + (AB::Expr::ONE - local.vals.bit) * local.vals.in2,
         );
     }
 }
@@ -157,7 +157,7 @@ where
 mod tests {
     use machine::tests::run_recursion_test_machines;
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -174,14 +174,14 @@ mod tests {
         let shard = ExecutionRecord {
             select_events: vec![
                 SelectIo {
-                    bit: F::one(),
+                    bit: F::ONE,
                     out1: F::from_canonical_u32(5),
                     out2: F::from_canonical_u32(3),
                     in1: F::from_canonical_u32(3),
                     in2: F::from_canonical_u32(5),
                 },
                 SelectIo {
-                    bit: F::zero(),
+                    bit: F::ZERO,
                     out1: F::from_canonical_u32(5),
                     out2: F::from_canonical_u32(3),
                     in1: F::from_canonical_u32(5),
@@ -208,9 +208,9 @@ mod tests {
                 let in1: F = rng.sample(rand::distributions::Standard);
                 let in2: F = rng.sample(rand::distributions::Standard);
                 let bit = F::from_bool(rng.gen_bool(0.5));
-                assert_eq!(bit * (bit - F::one()), F::zero());
+                assert_eq!(bit * (bit - F::ONE), F::ZERO);
 
-                let (out1, out2) = if bit == F::one() { (in2, in1) } else { (in1, in2) };
+                let (out1, out2) = if bit == F::ONE { (in2, in1) } else { (in1, in2) };
                 let alloc_size = 5;
                 let a = (0..alloc_size).map(|x| x + addr).collect::<Vec<_>>();
                 addr += alloc_size;

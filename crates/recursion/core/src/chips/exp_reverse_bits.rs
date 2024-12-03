@@ -4,9 +4,9 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use sp1_core_machine::utils::pad_rows_fixed;
+use zkm2_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, SP1AirBuilder};
+use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
 use std::borrow::BorrowMut;
 use tracing::instrument;
 
@@ -100,16 +100,16 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             .for_each(|instruction| {
                 let ExpReverseBitsInstr { addrs, mult } = instruction;
                 let mut row_add =
-                    vec![[F::zero(); NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]; addrs.exp.len()];
+                    vec![[F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]; addrs.exp.len()];
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExpReverseBitsLenPreprocessedCols<F> =
                         row.as_mut_slice().borrow_mut();
                     row.iteration_num = F::from_canonical_u32(i as u32);
                     row.is_first = F::from_bool(i == 0);
                     row.is_last = F::from_bool(i == addrs.exp.len() - 1);
-                    row.is_real = F::one();
+                    row.is_real = F::ONE;
                     row.x_mem = MemoryAccessCols { addr: addrs.base, mult: -F::from_bool(i == 0) };
-                    row.exponent_mem = MemoryAccessCols { addr: addrs.exp[i], mult: F::neg_one() };
+                    row.exponent_mem = MemoryAccessCols { addr: addrs.exp[i], mult: F::NEG_ONE };
                     row.result_mem = MemoryAccessCols {
                         addr: addrs.result,
                         mult: *mult * F::from_bool(i == addrs.exp.len() - 1),
@@ -121,7 +121,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         // Pad the trace to a power of two.
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
+            || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
         );
 
@@ -140,9 +140,9 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
     ) -> RowMajorMatrix<F> {
         let mut overall_rows = Vec::new();
         input.exp_reverse_bits_len_events.iter().for_each(|event| {
-            let mut rows = vec![vec![F::zero(); NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
+            let mut rows = vec![vec![F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
 
-            let mut accum = F::one();
+            let mut accum = F::ONE;
 
             rows.iter_mut().enumerate().for_each(|(i, row)| {
                 let cols: &mut ExpReverseBitsLenCols<F> = row.as_mut_slice().borrow_mut();
@@ -150,14 +150,14 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                 let prev_accum = accum;
                 accum = prev_accum
                     * prev_accum
-                    * if event.exp[i] == F::one() { event.base } else { F::one() };
+                    * if event.exp[i] == F::ONE { event.base } else { F::ONE };
 
                 cols.x = event.base;
                 cols.current_bit = event.exp[i];
                 cols.accum = accum;
                 cols.accum_squared = accum * accum;
                 cols.prev_accum_squared = prev_accum * prev_accum;
-                cols.multiplier = if event.exp[i] == F::one() { event.base } else { F::one() };
+                cols.multiplier = if event.exp[i] == F::ONE { event.base } else { F::ONE };
                 cols.prev_accum_squared_times_multiplier =
                     cols.prev_accum_squared * cols.multiplier;
                 if i == event.exp.len() {
@@ -171,7 +171,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         // Pad the trace to a power of two.
         pad_rows_fixed(
             &mut overall_rows,
-            || [F::zero(); NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
+            || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
             input.fixed_log2_rows(self),
         );
 
@@ -198,7 +198,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
 
 impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
     pub fn eval_exp_reverse_bits_len<
-        AB: BaseAirBuilder + ExtensionAirBuilder + SP1RecursionAirBuilder + SP1AirBuilder,
+        AB: BaseAirBuilder + ExtensionAirBuilder + SP1RecursionAirBuilder + ZKMAirBuilder,
     >(
         &self,
         builder: &mut AB,
@@ -243,7 +243,7 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
         builder
             .when(local_prepr.is_real)
             .when_not(local.current_bit)
-            .assert_eq(local.multiplier, AB::Expr::one());
+            .assert_eq(local.multiplier, AB::Expr::ONE);
 
         // To get `next.accum`, we multiply `local.prev_accum_squared` by `local.multiplier` when
         // not `is_last`.
@@ -299,7 +299,7 @@ mod tests {
     use itertools::Itertools;
     use p3_util::reverse_bits_len;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use sp1_core_machine::utils::setup_logger;
+    use zkm2_core_machine::utils::setup_logger;
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
     use std::iter::once;
 
@@ -377,9 +377,9 @@ mod tests {
 
         let shard = ExecutionRecord {
             exp_reverse_bits_len_events: vec![ExpReverseBitsEvent {
-                base: F::two(),
-                exp: vec![F::zero(), F::one(), F::one()],
-                result: F::two().exp_u64(0b110),
+                base: F::TWO,
+                exp: vec![F::ZERO, F::ONE, F::ONE],
+                result: F::TWO.exp_u64(0b110),
             }],
             ..Default::default()
         };
