@@ -25,7 +25,7 @@
     - [Lookup and Permutation Argument](./design/lookup-and-permutation.md)
     - [Stark](./design/stark.md)
     - [Proof Recursion](./design/proof-recursion.md)
-    - [Stark-to-Snark](./design/stark-to-snark.md)
+        - [Stark-to-Snark](./design/stark-to-snark.md)
     - [Continuation](./design/continuation.md)
     - [Proof Composition](./design/proof-composition.md)
 - [Background Material](./background.md)
