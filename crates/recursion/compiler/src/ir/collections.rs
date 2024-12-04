@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 
 use super::{Builder, Config, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
 
@@ -75,12 +75,12 @@ impl<C: Config, V: MemVariable<C>> Array<C, V> {
                     let start_v = start.materialize(builder);
                     let end_v = end.materialize(builder);
                     let valid = builder.lt(start_v, end_v);
-                    builder.assert_var_eq(valid, C::N::one());
+                    builder.assert_var_eq(valid, C::N::ONE);
 
                     let len_v = len.materialize(builder);
-                    let len_plus_1_v = builder.eval(len_v + C::N::one());
+                    let len_plus_1_v = builder.eval(len_v + C::N::ONE);
                     let valid = builder.lt(end_v, len_plus_1_v);
-                    builder.assert_var_eq(valid, C::N::one());
+                    builder.assert_var_eq(valid, C::N::ONE);
                 }
 
                 let slice_len: Usize<_> = builder.eval(end - start);
@@ -139,7 +139,7 @@ impl<C: Config> Builder<C> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, C::N::one());
+                    self.assert_var_eq(valid, C::N::ONE);
                 }
                 let index = MemIndex { index, offset: 0, size: V::size_of() };
                 let var: V = self.uninit();
@@ -165,7 +165,7 @@ impl<C: Config> Builder<C> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, C::N::one());
+                    self.assert_var_eq(valid, C::N::ONE);
                 }
                 let index = MemIndex { index, offset: 0, size: V::size_of() };
                 let var: Ptr<C::N> = self.uninit();
@@ -192,7 +192,7 @@ impl<C: Config> Builder<C> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, C::N::one());
+                    self.assert_var_eq(valid, C::N::ONE);
                 }
                 let index = MemIndex { index, offset: 0, size: V::size_of() };
                 let value: V = self.eval(value);

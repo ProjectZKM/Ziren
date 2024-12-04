@@ -27,9 +27,9 @@ use std::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{FieldAlgebra, ExtensionField, PrimeField32};
+use p3_field::{Field, FieldAlgebra, ExtensionField, PrimeField32};
 use p3_poseidon2::{Poseidon2};
-use p3_baby_bear::{Poseidon2ExternalLayerBabyBear};
+use p3_baby_bear::{Poseidon2ExternalLayerBabyBear, Poseidon2BabyBear};
 use p3_symmetric::{CryptographicPermutation, Permutation};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
@@ -123,7 +123,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// Entries for dealing with the Poseidon2 hash state.
     perm: Option<
         Poseidon2<
-            F,
+            <F as Field>::Packing,
             Poseidon2ExternalLayerBabyBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
@@ -169,7 +169,7 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
 impl<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'a, F, EF, Diffusion>
 where
     Poseidon2<
-        F,
+        <F as Field>::Packing,
         Poseidon2ExternalLayerBabyBear<16>,
         Diffusion,
         PERMUTATION_WIDTH,
@@ -179,7 +179,7 @@ where
     pub fn new(
         program: Arc<RecursionProgram<F>>,
         perm: Poseidon2<
-            F,
+            <F as Field>::Packing,
             Poseidon2ExternalLayerBabyBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,

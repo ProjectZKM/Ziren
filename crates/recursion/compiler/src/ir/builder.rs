@@ -1,7 +1,7 @@
 use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use zkm2_core_machine::utils::sp1_debug_mode;
 use zkm2_primitives::types::RecursionProgramType;
 
@@ -463,12 +463,12 @@ impl<C: Config> Builder<C> {
     pub fn commit_public_value(&mut self, val: Felt<C::F>) {
         assert!(!self.is_sub_builder, "Cannot commit to a public value with a sub builder");
         if self.nb_public_values.is_none() {
-            self.nb_public_values = Some(self.eval(C::N::zero()));
+            self.nb_public_values = Some(self.eval(C::N::ZERO));
         }
         let nb_public_values = *self.nb_public_values.as_ref().unwrap();
 
         self.push_op(DslIr::Commit(val, nb_public_values));
-        self.assign(nb_public_values, nb_public_values + C::N::one());
+        self.assign(nb_public_values, nb_public_values + C::N::ONE);
     }
 
     /// Commits an array of felts in public values.

@@ -39,7 +39,7 @@ where
     /// Allocate a fresh address. Checks that the address space is not full.
     pub fn alloc(next_addr: &mut C::F) -> Address<C::F> {
         let id = Address(*next_addr);
-        *next_addr += C::F::one();
+        *next_addr += C::F::ONE;
         if next_addr.is_zero() {
             panic!("out of address space");
         }
@@ -68,7 +68,7 @@ where
                 if increment_mult {
                     // This is a read, so we increment the mult.
                     match self.addr_to_mult.get_mut(entry.get().as_usize()) {
-                        Some(mult) => *mult += C::F::one(),
+                        Some(mult) => *mult += C::F::ONE,
                         None => panic!("expected entry: virtual_physical[{:?}]", vaddr),
                     }
                 }
@@ -86,7 +86,7 @@ where
             Entry::Vacant(entry) => {
                 let addr = Self::alloc(&mut self.next_addr);
                 // This is a write, so we set the mult to zero.
-                if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::zero()) {
+                if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::ZERO) {
                     panic!("unexpected entry in addr_to_mult: {x:?}");
                 }
                 *entry.insert(addr)
@@ -119,7 +119,7 @@ where
                 // This is a read, so we increment the mult.
                 let mult = entry.into_mut();
                 if increment_mult {
-                    *mult += C::F::one();
+                    *mult += C::F::ONE;
                 }
                 mult
             }
@@ -132,7 +132,7 @@ where
     pub fn write_addr(&mut self, addr: Address<C::F>) -> &mut C::F {
         use vec_map::Entry;
         match self.addr_to_mult.entry(addr.as_usize()) {
-            Entry::Vacant(entry) => entry.insert(C::F::zero()),
+            Entry::Vacant(entry) => entry.insert(C::F::ZERO),
             Entry::Occupied(entry) => {
                 panic!("unexpected entry: addr_to_mult[{:?}] = {:?}", addr.as_usize(), entry.get())
             }
@@ -145,8 +145,8 @@ where
     pub fn read_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
         self.consts
             .entry(imm)
-            .and_modify(|(_, x)| *x += C::F::one())
-            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::one()))
+            .and_modify(|(_, x)| *x += C::F::ONE)
+            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ONE))
             .0
     }
 
@@ -154,14 +154,14 @@ where
     ///
     /// Does not increment the mult. Creates an entry if it does not yet exist.
     pub fn read_ghost_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
-        self.consts.entry(imm).or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::zero())).0
+        self.consts.entry(imm).or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ZERO)).0
     }
 
     fn mem_write_const(&mut self, dst: impl Reg<C>, src: Imm<C::F, C::EF>) -> Instruction<C::F> {
         Instruction::Mem(MemInstr {
             addrs: MemIo { inner: dst.write(self) },
             vals: MemIo { inner: src.as_block() },
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
             kind: MemAccessKind::Write,
         })
     }
@@ -175,7 +175,7 @@ where
     ) -> Instruction<C::F> {
         Instruction::BaseAlu(BaseAluInstr {
             opcode,
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
             addrs: BaseAluIo { out: dst.write(self), in1: lhs.read(self), in2: rhs.read(self) },
         })
     }
@@ -189,7 +189,7 @@ where
     ) -> Instruction<C::F> {
         Instruction::ExtAlu(ExtAluInstr {
             opcode,
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
             addrs: ExtAluIo { out: dst.write(self), in1: lhs.read(self), in2: rhs.read(self) },
         })
     }
@@ -203,7 +203,7 @@ where
         use BaseAluOpcode::*;
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivF, out, diff, Imm::F(C::F::zero())));
+        f(self.base_alu(DivF, out, diff, Imm::F(C::F::ZERO)));
     }
 
     fn base_assert_ne(
@@ -216,7 +216,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivF, out, Imm::F(C::F::one()), diff));
+        f(self.base_alu(DivF, out, Imm::F(C::F::ONE), diff));
     }
 
     fn ext_assert_eq(
@@ -229,7 +229,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivE, out, diff, Imm::EF(C::EF::zero())));
+        f(self.ext_alu(DivE, out, diff, Imm::EF(C::EF::ZERO)));
     }
 
     fn ext_assert_ne(
@@ -242,7 +242,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivE, out, Imm::EF(C::EF::one()), diff));
+        f(self.ext_alu(DivE, out, Imm::EF(C::EF::ONE), diff));
     }
 
     fn poseidon2_permute(
@@ -255,7 +255,7 @@ where
                 input: src.map(|r| r.read(self)),
                 output: dst.map(|r| r.write(self)),
             },
-            mults: [C::F::zero(); WIDTH],
+            mults: [C::F::ZERO; WIDTH],
         }))
     }
 
@@ -275,8 +275,8 @@ where
                 in1: lhs.read(self),
                 in2: rhs.read(self),
             },
-            mult1: C::F::zero(),
-            mult2: C::F::zero(),
+            mult1: C::F::ZERO,
+            mult2: C::F::ZERO,
         })
     }
 
@@ -292,7 +292,7 @@ where
                 base: base.read(self),
                 exp: exp.into_iter().map(|r| r.read(self)).collect(),
             },
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
         })
     }
 
@@ -302,7 +302,7 @@ where
         output: impl IntoIterator<Item = impl Reg<C>>,
     ) -> Instruction<C::F> {
         Instruction::HintBits(HintBitsInstr {
-            output_addrs_mults: output.into_iter().map(|r| (r.write(self), C::F::zero())).collect(),
+            output_addrs_mults: output.into_iter().map(|r| (r.write(self), C::F::ZERO)).collect(),
             input_addr: value.read_ghost(self),
         })
     }
@@ -322,8 +322,8 @@ where
     ) -> Instruction<C::F> {
         Instruction::FriFold(Box::new(FriFoldInstr {
             // Calculate before moving the vecs.
-            alpha_pow_mults: vec![C::F::zero(); alpha_pow_output.len()],
-            ro_mults: vec![C::F::zero(); ro_output.len()],
+            alpha_pow_mults: vec![C::F::ZERO; alpha_pow_output.len()],
+            ro_mults: vec![C::F::ZERO; ro_output.len()],
 
             base_single_addrs: FriFoldBaseIo { x: x.read(self) },
             ext_single_addrs: FriFoldExtSingleIo { z: z.read(self), alpha: alpha.read(self) },
@@ -354,7 +354,7 @@ where
                 p_at_z: p_at_zs.into_iter().map(|e| e.read(self)).collect(),
                 alpha_pow: alpha_pows.into_iter().map(|e| e.read(self)).collect(),
             },
-            acc_mult: C::F::zero(),
+            acc_mult: C::F::ZERO,
         }))
     }
 
@@ -396,14 +396,14 @@ where
 
     fn ext2felts(&mut self, felts: [impl Reg<C>; D], ext: impl Reg<C>) -> Instruction<C::F> {
         Instruction::HintExt2Felts(HintExt2FeltsInstr {
-            output_addrs_mults: felts.map(|r| (r.write(self), C::F::zero())),
+            output_addrs_mults: felts.map(|r| (r.write(self), C::F::ZERO)),
             input_addr: ext.read_ghost(self),
         })
     }
 
     fn hint(&mut self, output: &[impl Reg<C>]) -> Instruction<C::F> {
         Instruction::Hint(HintInstr {
-            output_addrs_mults: output.iter().map(|r| (r.write(self), C::F::zero())).collect(),
+            output_addrs_mults: output.iter().map(|r| (r.write(self), C::F::ZERO)).collect(),
         })
     }
 
@@ -470,12 +470,12 @@ where
             DslIr::DivEFIN(dst, lhs, rhs) => f(self.ext_alu(DivE, dst, Imm::F(lhs), rhs)),
             DslIr::DivEF(dst, lhs, rhs) => f(self.ext_alu(DivE, dst, lhs, rhs)),
 
-            DslIr::NegV(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::zero()), src)),
-            DslIr::NegF(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::zero()), src)),
-            DslIr::NegE(dst, src) => f(self.ext_alu(SubE, dst, Imm::EF(C::EF::zero()), src)),
-            DslIr::InvV(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::one()), src)),
-            DslIr::InvF(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::one()), src)),
-            DslIr::InvE(dst, src) => f(self.ext_alu(DivE, dst, Imm::F(C::F::one()), src)),
+            DslIr::NegV(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::ZERO), src)),
+            DslIr::NegF(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::ZERO), src)),
+            DslIr::NegE(dst, src) => f(self.ext_alu(SubE, dst, Imm::EF(C::EF::ZERO), src)),
+            DslIr::InvV(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::ONE), src)),
+            DslIr::InvF(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::ONE), src)),
+            DslIr::InvE(dst, src) => f(self.ext_alu(DivE, dst, Imm::F(C::F::ONE), src)),
 
             DslIr::Select(bit, dst1, dst2, lhs, rhs) => f(self.select(bit, dst1, dst2, lhs, rhs)),
 
@@ -839,7 +839,7 @@ impl<C: Config<F: PrimeField64>> Reg<C> for Address<C::F> {
 mod tests {
     use std::{collections::VecDeque, io::BufRead, iter::zip, sync::Arc};
 
-    use p3_baby_bear::DiffusionMatrixBabyBear;
+    use p3_baby_bear::Poseidon2InternalLayerBabyBear;
     use p3_field::{Field, PrimeField32};
     use p3_symmetric::{CryptographicHasher, Permutation};
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -860,7 +860,7 @@ mod tests {
     type EF = <SC as StarkGenericConfig>::Challenge;
     fn test_operations(operations: TracedVec<DslIr<AsmConfig<F, EF>>>) {
         test_operations_with_runner(operations, |program| {
-            let mut runtime = Runtime::<F, EF, DiffusionMatrixBabyBear>::new(
+            let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
                 program,
                 BabyBearPoseidon2Inner::new().perm,
             );
@@ -988,7 +988,7 @@ mod tests {
                 .rev()
                 .zip(std::iter::successors(Some(base), |x| Some(x.square())))
                 .map(|(bit, base_pow)| match bit {
-                    0 => F::one(),
+                    0 => F::ONE,
                     1 => base_pow,
                     _ => panic!("not a bit: {bit}"),
                 })
@@ -1116,7 +1116,7 @@ mod tests {
         builder.cycle_tracker_v2_exit();
 
         test_operations_with_runner(builder.into_operations(), |program| {
-            let mut runtime = Runtime::<F, EF, DiffusionMatrixBabyBear>::new(
+            let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
                 program,
                 BabyBearPoseidon2Inner::new().perm,
             );

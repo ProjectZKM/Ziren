@@ -11,7 +11,7 @@ fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254Fr {
 
     let mut res = <FFBn254Fr as ff::PrimeField>::Repr::default();
 
-    for (i, digit) in res.0.as_mut().iter_mut().enumerate() {
+    for (i, digit) in res.as_mut().iter_mut().enumerate() {
         *digit = bytes[i];
     }
 

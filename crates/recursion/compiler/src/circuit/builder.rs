@@ -2,6 +2,7 @@
 
 use std::iter::repeat;
 
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_baby_bear::BabyBear;
 use zkm2_recursion_core::air::RecursionPublicValues;
 
@@ -44,7 +45,7 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
         &mut self,
         bits: impl IntoIterator<Item = Felt<<C as Config>::F>>,
     ) -> Felt<<C as Config>::F> {
-        let mut num: Felt<_> = self.eval(C::F::zero());
+        let mut num: Felt<_> = self.eval(C::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
             // Add `bit * 2^i` to the sum.
             num = self.eval(num + bit * C::F::from_wrapped_u32(1 << i));
@@ -61,7 +62,7 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
             .iter()
             .enumerate()
             .map(|(i, &bit)| {
-                self.assert_felt_eq(bit * (bit - C::F::one()), C::F::zero());
+                self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
                 bit * C::F::from_wrapped_u32(1 << i)
             })
             .sum();
@@ -90,7 +91,7 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
 
             // Assert that if all the top `4` bits are one, then all the bottom `27` bits are zero.
             for bit in output.iter().take(27).copied() {
-                self.assert_felt_eq(bit * are_all_top_bits_one, C::F::zero());
+                self.assert_felt_eq(bit * are_all_top_bits_one, C::F::ZERO);
             }
         }
 
@@ -135,7 +136,7 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     fn poseidon2_hash_v2(&mut self, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
         // static_assert(RATE < WIDTH)
-        let mut state = core::array::from_fn(|_| self.eval(C::F::zero()));
+        let mut state = core::array::from_fn(|_| self.eval(C::F::ZERO));
         for input_chunk in input.chunks(HASH_RATE) {
             state[..input_chunk.len()].copy_from_slice(input_chunk);
             state = self.poseidon2_permute_v2(state);
@@ -175,7 +176,7 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
         let felts = core::array::from_fn(|_| self.uninit());
         self.push_op(DslIr::CircuitExt2Felt(felts, ext));
         // Verify that the decomposed extension element is correct.
-        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::zero());
+        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
         for i in 0..4 {
             let felt = felts[i];
             let monomial: Ext<C::F, C::EF> = self.constant(C::EF::monomial(i));

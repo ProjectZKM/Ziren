@@ -634,7 +634,7 @@ impl<C: Config> ExtOperations<C::F, C::EF> for UnsafeCell<InnerBuilder<C>> {
         handle: *mut ExtHandle<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         // TODO: optimize to one opcode.
-        let lhs = Self::add_felt_const_ext(ptr, lhs, C::EF::zero(), handle);
+        let lhs = Self::add_felt_const_ext(ptr, lhs, C::EF::ZERO, handle);
         Self::mul_const_ext(ptr, lhs, rhs)
     }
 
@@ -668,7 +668,7 @@ impl<C: Config> ExtOperations<C::F, C::EF> for UnsafeCell<InnerBuilder<C>> {
 
     fn div_base_ext(ptr: *mut (), lhs: Felt<C::F>, rhs: Ext<C::F, C::EF>) -> Ext<C::F, C::EF> {
         // TODO: optimize to one opcode.
-        let lhs = Self::add_felt_const_ext(ptr, lhs, C::EF::zero(), rhs.handle);
+        let lhs = Self::add_felt_const_ext(ptr, lhs, C::EF::ZERO, rhs.handle);
         Self::div_ext(ptr, lhs, rhs)
     }
 
@@ -877,7 +877,7 @@ impl<F: Field, EF: FieldExtensionAlgebra<F>> ExtHandle<F, EF> {
         handle: *mut ExtHandle<F, EF>,
     ) -> Ext<F, EF> {
         // TODO: optimize to one opcode.
-        let rhs = self.add_f_const_e(rhs, EF::zero(), handle);
+        let rhs = self.add_f_const_e(rhs, EF::ZERO, handle);
         self.sub_e_const(lhs, rhs)
     }
 

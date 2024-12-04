@@ -1,6 +1,6 @@
 use alloc::format;
 
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
+use p3_field::{FieldExtensionAlgebra, FieldAlgebra, ExtensionField, Field};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -134,7 +134,7 @@ impl<F> Felt<F> {
     where
         F: Field,
     {
-        SymbolicFelt::<F>::one() / *self
+        SymbolicFelt::<F>::ONE / *self
     }
 }
 
@@ -156,7 +156,7 @@ impl<F, EF> Ext<F, EF> {
         F: Field,
         EF: ExtensionField<F>,
     {
-        SymbolicExt::<F, EF>::one() / *self
+        SymbolicExt::<F, EF>::ONE / *self
     }
 }
 
@@ -246,7 +246,7 @@ impl<C: Config> Variable<C> for Var<C::N> {
                 builder.push_op(DslIr::ImmV(*self, src));
             }
             SymbolicVar::Val(src) => {
-                builder.push_op(DslIr::AddVI(*self, src, C::N::zero()));
+                builder.push_op(DslIr::AddVI(*self, src, C::N::ZERO));
             }
         }
     }
@@ -330,7 +330,7 @@ impl<C: Config> Variable<C> for Felt<C::F> {
                 builder.push_op(DslIr::ImmF(*self, src));
             }
             SymbolicFelt::Val(src) => {
-                builder.push_op(DslIr::AddFI(*self, src, C::F::zero()));
+                builder.push_op(DslIr::AddFI(*self, src, C::F::ZERO));
             }
         }
     }
@@ -418,11 +418,11 @@ impl<C: Config> Variable<C> for Ext<C::F, C::EF> {
                     builder.push_op(DslIr::ImmE(*self, C::EF::from_base(src)));
                 }
                 SymbolicFelt::Val(src) => {
-                    builder.push_op(DslIr::AddEFFI(*self, src, C::EF::zero()));
+                    builder.push_op(DslIr::AddEFFI(*self, src, C::EF::ZERO));
                 }
             },
             SymbolicExt::Val(src) => {
-                builder.push_op(DslIr::AddEI(*self, src, C::EF::zero()));
+                builder.push_op(DslIr::AddEI(*self, src, C::EF::ZERO));
             }
         }
     }

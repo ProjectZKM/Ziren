@@ -1,14 +1,14 @@
 pub mod concurrency;
 mod logger;
 mod prove;
-//mod span;
+mod span;
 mod tracer;
 
 pub use logger::*;
 use p3_field::Field;
 pub use prove::*;
 //use sp1_curves::params::Limbs;
-//pub use span::*;
+pub use span::*;
 pub use tracer::*;
 
 //use crate::memory::MemoryCols;
