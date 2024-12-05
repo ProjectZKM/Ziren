@@ -1110,6 +1110,7 @@ pub fn poseidon2_init() -> Poseidon2BabyBear<16> {
     const ROUNDS_F: usize = 8;
     const ROUNDS_P: usize = 13;
     let mut round_constants = RC_16_30.to_vec();
+    println!("1111111111 init {}", round_constants.len());
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
     let internal_round_constants = round_constants
@@ -1117,9 +1118,10 @@ pub fn poseidon2_init() -> Poseidon2BabyBear<16> {
         .map(|vec| vec[0])
         .collect::<Vec<_>>();
 
+    println!("1111111111 {} {}", round_constants.len(), ROUNDS_F);
     let external_round_constants = ExternalLayerConstants::new(
         round_constants[..ROUNDS_F / 2].to_vec(),
-        round_constants[ROUNDS_F / 2..].to_vec(),
+        round_constants[(round_constants.len() - ROUNDS_F / 2)..].to_vec(),
     );
     Poseidon2::new(external_round_constants, internal_round_constants)
 }

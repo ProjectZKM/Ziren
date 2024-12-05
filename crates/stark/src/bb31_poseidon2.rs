@@ -199,7 +199,7 @@ pub mod baby_bear_poseidon2 {
             .collect::<Vec<_>>();
         let external_round_constants = ExternalLayerConstants::new(
             round_constants[..ROUNDS_F / 2].to_vec(),
-            round_constants[ROUNDS_F / 2..].to_vec(),
+            round_constants[(round_constants.len() - ROUNDS_F / 2)..].to_vec(),
         );
         Perm::new(external_round_constants, internal_round_constants)
     }

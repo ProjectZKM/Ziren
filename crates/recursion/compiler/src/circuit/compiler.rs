@@ -860,10 +860,12 @@ mod tests {
     type EF = <SC as StarkGenericConfig>::Challenge;
     fn test_operations(operations: TracedVec<DslIr<AsmConfig<F, EF>>>) {
         test_operations_with_runner(operations, |program| {
+            println!("1111");
             let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
                 program,
                 BabyBearPoseidon2Inner::new().perm,
             );
+            println!("1111 2222");
             runtime.run().unwrap();
             runtime.record
         });

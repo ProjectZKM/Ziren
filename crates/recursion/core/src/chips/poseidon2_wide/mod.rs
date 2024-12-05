@@ -92,7 +92,7 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     let monty_inverse = F::from_wrapped_u32(MONTY_INVERSE.as_canonical_u32());
     state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
     */
-    panic!("Umplemented internal_linear_layer")
+    panic!("111111")
 }
 
 #[cfg(test)]
