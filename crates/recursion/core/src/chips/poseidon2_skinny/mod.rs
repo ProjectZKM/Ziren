@@ -56,8 +56,40 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     }
 }
 
+pub const fn to_babybear_array<const N: usize>(input: [u32; N]) -> [BabyBear; N] {
+    let mut output = [BabyBear::ZERO; N];
+    let mut i = 0;
+    loop {
+        if i == N {
+            break;
+        }
+        output[i] = BabyBear::new(input[i]);
+        i += 1;
+    }
+    output
+}
+
+use p3_baby_bear::BabyBear;
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    /*
+    let POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = to_babybear_array([
+        BabyBear::ORDER_U32 - 2,
+        1,
+        1 << 1,
+        1 << 2,
+        1 << 3,
+        1 << 4,
+        1 << 5,
+        1 << 6,
+        1 << 7,
+        1 << 8,
+        1 << 9,
+        1 << 10,
+        1 << 11,
+        1 << 12,
+        1 << 13,
+        1 << 15,
+    ]);
+
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
         POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
             .iter()
@@ -66,10 +98,8 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
             .try_into()
             .unwrap();
     matmul_internal(state, matmul_constants);
-    let monty_inverse = F::from_wrapped_u32(MONTY_INVERSE.as_canonical_u32());
+    let monty_inverse = F::from_wrapped_u32(1);
     state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
-    */
-    panic!("Unimplement internal_linear_layer")
 }
 
 #[cfg(test)]

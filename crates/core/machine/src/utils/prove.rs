@@ -789,6 +789,7 @@ pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
 
     Ok(proof)
 }
+*/
 
 #[allow(unused_variables)]
 pub fn run_test_machine_with_prover<SC, A, P: MachineProver<SC, A>>(
@@ -830,7 +831,6 @@ where
     Ok(proof)
 }
 
-*/
 #[allow(unused_variables)]
 pub fn run_test_machine<SC, A>(
     records: Vec<A::Record>,
@@ -852,9 +852,8 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
 {
-    panic!("Unimplemented")
-    //let prover = CpuProver::new(machine);
-    //run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
+    let prover = CpuProver::new(machine);
+    run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
 }
 
     /*
