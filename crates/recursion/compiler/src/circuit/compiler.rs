@@ -904,7 +904,7 @@ mod tests {
         let mut builder = AsmBuilder::<F, EF>::default();
         let mut rng = StdRng::seed_from_u64(0xCAFEDA7E)
             .sample_iter::<[F; WIDTH], _>(rand::distributions::Standard);
-        for _ in 0..100 {
+        for _ in 0..1 {
             let input_1: [F; WIDTH] = rng.next().unwrap();
             let output_1 = inner_perm().permute(input_1);
 

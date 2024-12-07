@@ -186,7 +186,6 @@ where
             POSEIDON2_SBOX_DEGREE,
         >,
     ) -> Self {
-        println!("222");
         let record = ExecutionRecord::<F> { program: program.clone(), ..Default::default() };
         let memory = Memory::with_capacity(program.total_memory);
         Self {
