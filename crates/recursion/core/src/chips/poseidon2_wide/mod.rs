@@ -60,6 +60,7 @@ where
     x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
 }
 
+// eq mds_light_permutation
 pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     for j in (0..WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
@@ -94,6 +95,7 @@ pub const fn to_babybear_array<const N: usize>(input: [u32; N]) -> [BabyBear; N]
 }
 
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
+    /*
     let POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = to_babybear_array([
         BabyBear::ORDER_U32 - 2,
         1,
@@ -123,6 +125,9 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     matmul_internal(state, matmul_constants);
     let monty_inverse = F::from_wrapped_u32(1);
     state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
+    */
+
+    let part_su
 }
 
 #[cfg(test)]

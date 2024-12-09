@@ -1118,8 +1118,8 @@ pub fn poseidon2_init() -> Poseidon2BabyBear<16> {
         .collect::<Vec<_>>();
 
     let external_round_constants = ExternalLayerConstants::new(
-        round_constants[..ROUNDS_F].to_vec(),
-        round_constants[..ROUNDS_F].to_vec(),
+        round_constants[..ROUNDS_F/2].to_vec(),
+        round_constants[..ROUNDS_F/2].to_vec(),
     );
     Poseidon2::new(external_round_constants, internal_round_constants)
 }

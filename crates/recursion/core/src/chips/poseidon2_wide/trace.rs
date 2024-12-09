@@ -57,22 +57,22 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
         let populate_len = events.len() * num_columns;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
-        join(
-            || {
+        //join(
+        //    || {
                 values_pop.par_chunks_mut(num_columns).zip_eq(&input.poseidon2_events).for_each(
                     |(row, &event)| {
                         self.populate_perm(event.input, Some(event.output), row);
                     },
-                )
-            },
-            || {
+                );
+         //   },
+         //   || {
                 let mut dummy_row = vec![F::ZERO; num_columns];
                 self.populate_perm([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
-                    .for_each(|row| row.copy_from_slice(&dummy_row))
-            },
-        );
+                    .for_each(|row| row.copy_from_slice(&dummy_row));
+         //   },
+        //);
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, num_columns)
@@ -135,6 +135,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         input_row: &mut [F],
     ) {
         {
+            println!("air inputs: {:?}", input);
             let permutation = permutation_mut::<F, DEGREE>(input_row);
 
             let (
@@ -154,17 +155,17 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
                     self.populate_external_round(external_rounds_state, &mut external_sbox, r);
                 if r == NUM_EXTERNAL_ROUNDS / 2 - 1 {
                     *internal_rounds_state = next_state;
-                } else {
-                    external_rounds_state[r + 1] = next_state;
                 }
+                external_rounds_state[r + 1] = next_state;
             }
 
             // Apply the internal rounds.
-            external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] = self.populate_internal_rounds(
+            external_rounds_state[NUM_EXTERNAL_ROUNDS / 2 + 1] = self.populate_internal_rounds(
                 internal_rounds_state,
                 internal_rounds_s0,
                 &mut internal_sbox,
             );
+            //panic!("after external_rounds_state: {:?}", external_rounds_state);
 
             // Apply the second half of external rounds.
             for r in NUM_EXTERNAL_ROUNDS / 2..NUM_EXTERNAL_ROUNDS {
@@ -227,8 +228,10 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             sbox_deg_7
         };
 
+        //panic!("_+____ {:?}", state);
         // Apply the linear layer.
         external_linear_layer(&mut state);
+        //panic!("_+____ {:?}", state);
         state
     }
 
@@ -255,7 +258,15 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
             // Apply the linear layer.
             state[0] = sbox_deg_7;
+
+
+            //let part_sum: F = state[1..].iter().cloned().sum();
+            //let full_sum = part_sum + state[0];
+            //state[0] = part_sum - state[0];
+
             internal_linear_layer(&mut state);
+
+
 
             // Optimization: since we're only applying the sbox to the 0th state element, we only
             // need to have columns for the 0th state element at every step. This is because the
