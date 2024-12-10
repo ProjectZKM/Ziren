@@ -28,13 +28,19 @@ impl<T> Default for TracedVec<T> {
 impl<T> From<Vec<T>> for TracedVec<T> {
     fn from(vec: Vec<T>) -> Self {
         let len = vec.len();
-        Self { vec, traces: vec![None; len] }
+        Self {
+            vec,
+            traces: vec![None; len],
+        }
     }
 }
 
 impl<T> TracedVec<T> {
     pub const fn new() -> Self {
-        Self { vec: Vec::new(), traces: Vec::new() }
+        Self {
+            vec: Vec::new(),
+            traces: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, value: T) {
@@ -316,7 +322,12 @@ impl<C: Config> Builder<C> {
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) -> IfBuilder<C> {
-        IfBuilder { lhs: lhs.into(), rhs: rhs.into(), is_eq: true, builder: self }
+        IfBuilder {
+            lhs: lhs.into(),
+            rhs: rhs.into(),
+            is_eq: true,
+            builder: self,
+        }
     }
 
     /// Evaluate a block of operations if two expressions are not equal.
@@ -325,7 +336,12 @@ impl<C: Config> Builder<C> {
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) -> IfBuilder<C> {
-        IfBuilder { lhs: lhs.into(), rhs: rhs.into(), is_eq: false, builder: self }
+        IfBuilder {
+            lhs: lhs.into(),
+            rhs: rhs.into(),
+            is_eq: false,
+            builder: self,
+        }
     }
 
     /// Evaluate a block of operations over a range from start to end.
@@ -334,7 +350,12 @@ impl<C: Config> Builder<C> {
         start: impl Into<Usize<C::N>>,
         end: impl Into<Usize<C::N>>,
     ) -> RangeBuilder<C> {
-        RangeBuilder { start: start.into(), end: end.into(), builder: self, step_size: 1 }
+        RangeBuilder {
+            start: start.into(),
+            end: end.into(),
+            builder: self,
+            step_size: 1,
+        }
     }
 
     /// Break out of a loop.
@@ -418,7 +439,10 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn witness_var(&mut self) -> Var<C::N> {
-        assert!(!self.is_sub_builder, "Cannot create a witness var with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot create a witness var with a sub builder"
+        );
         let witness = self.uninit();
         self.push_op(DslIr::WitnessVar(witness, self.witness_var_count));
         self.witness_var_count += 1;
@@ -426,7 +450,10 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn witness_felt(&mut self) -> Felt<C::F> {
-        assert!(!self.is_sub_builder, "Cannot create a witness felt with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot create a witness felt with a sub builder"
+        );
         let witness = self.uninit();
         self.push_op(DslIr::WitnessFelt(witness, self.witness_felt_count));
         self.witness_felt_count += 1;
@@ -434,7 +461,10 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn witness_ext(&mut self) -> Ext<C::F, C::EF> {
-        assert!(!self.is_sub_builder, "Cannot create a witness ext with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot create a witness ext with a sub builder"
+        );
         let witness = self.uninit();
         self.push_op(DslIr::WitnessExt(witness, self.witness_ext_count));
         self.witness_ext_count += 1;
@@ -461,7 +491,10 @@ impl<C: Config> Builder<C> {
 
     /// Register and commits a felt as public value.  This value will be constrained when verified.
     pub fn commit_public_value(&mut self, val: Felt<C::F>) {
-        assert!(!self.is_sub_builder, "Cannot commit to a public value with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot commit to a public value with a sub builder"
+        );
         if self.nb_public_values.is_none() {
             self.nb_public_values = Some(self.eval(C::N::ZERO));
         }
@@ -473,7 +506,10 @@ impl<C: Config> Builder<C> {
 
     /// Commits an array of felts in public values.
     pub fn commit_public_values(&mut self, vals: &Array<C, Felt<C::F>>) {
-        assert!(!self.is_sub_builder, "Cannot commit to public values with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot commit to public values with a sub builder"
+        );
         let len = vals.len();
         self.range(0, len).for_each(|i, builder| {
             let val = builder.get(vals, i);

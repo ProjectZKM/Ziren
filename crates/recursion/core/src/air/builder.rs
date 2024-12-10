@@ -200,7 +200,11 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.send(
-            AirInteraction::new(program_interaction_vals, is_real.into(), InteractionKind::Program),
+            AirInteraction::new(
+                program_interaction_vals,
+                is_real.into(),
+                InteractionKind::Program,
+            ),
             InteractionScope::Global,
         );
     }
@@ -217,7 +221,11 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.receive(
-            AirInteraction::new(program_interaction_vals, is_real.into(), InteractionKind::Program),
+            AirInteraction::new(
+                program_interaction_vals,
+                is_real.into(),
+                InteractionKind::Program,
+            ),
             InteractionScope::Global,
         );
     }

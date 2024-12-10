@@ -3,12 +3,12 @@
 use std::{borrow::Borrow, ops::Deref};
 
 //use p3_baby_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_baby_bear::{BabyBear};
-use p3_monty_31::InternalLayerBaseParameters;
+use p3_baby_bear::BabyBear;
 use p3_baby_bear::BabyBearParameters;
-use p3_monty_31::MontyField31;
 use p3_field::Field;
+use p3_field::{FieldAlgebra, PrimeField32};
+use p3_monty_31::InternalLayerBaseParameters;
+use p3_monty_31::MontyField31;
 
 pub mod air;
 pub mod columns;
@@ -69,8 +69,12 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     for j in (0..WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
     }
-    let sums: [AF; 4] =
-        core::array::from_fn(|k| (0..WIDTH).step_by(4).map(|j| state[j + k].clone()).sum::<AF>());
+    let sums: [AF; 4] = core::array::from_fn(|k| {
+        (0..WIDTH)
+            .step_by(4)
+            .map(|j| state[j + k].clone())
+            .sum::<AF>()
+    });
 
     for j in 0..WIDTH {
         state[j] = state[j].clone() + sums[j % 4].clone();
@@ -85,38 +89,24 @@ pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
     state
 }
 
-pub const fn to_babybear_array<const N: usize>(input: [u32; N]) -> [BabyBear; N] {
-    let mut output = [BabyBear::ZERO; N];
-    let mut i = 0;
-    loop {
-        if i == N {
-            break;
-        }
-        output[i] = BabyBear::new(input[i]);
-        i += 1;
-    }
-    output
-}
-
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    /*
-    let POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = to_babybear_array([
+    let POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
         BabyBear::ORDER_U32 - 2,
         1,
-        1 << 1,
-        1 << 2,
-        1 << 3,
-        1 << 4,
-        1 << 5,
-        1 << 6,
-        1 << 7,
-        1 << 8,
-        1 << 9,
-        1 << 10,
-        1 << 11,
-        1 << 12,
-        1 << 13,
-        1 << 15,
+        2,
+        (BabyBear::ORDER_U32 + 1) >> 1,
+        3,
+        4,
+        (BabyBear::ORDER_U32 - 1) >> 1,
+        BabyBear::ORDER_U32 - 3,
+        BabyBear::ORDER_U32 - 4,
+        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
+        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
+        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
+        BabyBear::ORDER_U32 - 15,
+        (BabyBear::ORDER_U32 - 1) >> 8,
+        (BabyBear::ORDER_U32 - 1) >> 4,
+        15,
     ]);
     //let MONTY_INVERSE: BabyBear = BabyBear { value: 1 };
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
@@ -127,59 +117,7 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
             .try_into()
             .unwrap();
     matmul_internal(state, matmul_constants);
-    let monty_inverse = F::from_wrapped_u32(1);
-    state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
-    */
-
-    let part_sum: F = state[1..].iter().cloned().sum();
-    let full_sum = part_sum + state[0];
-    state[0] = part_sum - state[0];
-    internal_layer_mat_mul(state, full_sum);
 }
-
-fn halve<F: FieldAlgebra>(value: &F) -> F {
-    let inv = F::TWO.try_inverse().unwrap();
-    inv * value
-}
-
-const fn mul_2exp_neg_n<F: FieldAlgebra>(value: &F, n: u32) -> Self {
-    assert!(n < 33);
-    let value_mul_2exp_neg_n = (value as u64) << (32 - n);
-    MontyField31::new_monty(monty_reduce::<MP>(value_mul_2exp_neg_n))
-}
-
-fn internal_layer_mat_mul<F: FieldAlgebra>(
-    //state: &mut [MontyField31<BabyBearParameters>; 16],
-    state: &mut [F; 16],
-    //sum: MontyField31<BabyBearParameters>,
-    sum: F,
-) {
-    // The diagonal matrix is defined by the vector:
-    // V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/4, 1/8, 1/2^27, -1/2^8, -1/16, -1/2^27]
-    state[1] += sum;
-    state[2] = state[2].double() + sum;
-    state[3] = state[3].halve() + sum;
-    state[4] = sum + state[4].double() + state[4];
-    state[5] = sum + state[5].double().double();
-    state[6] = sum - state[6].halve();
-    state[7] = sum - (state[7].double() + state[7]);
-    state[8] = sum - state[8].double().double();
-    state[9] = state[9].mul_2exp_neg_n(8);
-    state[9] += sum;
-    state[10] = state[10].mul_2exp_neg_n(2);
-    state[10] += sum;
-    state[11] = state[11].mul_2exp_neg_n(3);
-    state[11] += sum;
-    state[12] = state[12].mul_2exp_neg_n(27);
-    state[12] += sum;
-    state[13] = state[13].mul_2exp_neg_n(8);
-    state[13] = sum - state[13];
-    state[14] = state[14].mul_2exp_neg_n(4);
-    state[14] = sum - state[14];
-    state[15] = state[15].mul_2exp_neg_n(27);
-    state[15] = sum - state[15];
-}
-
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -194,9 +132,9 @@ pub(crate) mod tests {
     use p3_field::{FieldAlgebra, PrimeField32};
     use p3_symmetric::Permutation;
 
+    use zkhash::ark_ff::UniformRand;
     use zkm2_core_machine::utils::{run_test_machine, setup_logger};
     use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, inner_perm, StarkGenericConfig};
-    use zkhash::ark_ff::UniformRand;
 
     use super::WIDTH;
 
@@ -216,7 +154,9 @@ pub(crate) mod tests {
 
         let rng = &mut rand::thread_rng();
         let input_1: [BabyBear; WIDTH] = std::array::from_fn(|_| BabyBear::rand(rng));
-        let output_1 = inner_perm().permute(input_1).map(|x| BabyBear::as_canonical_u32(&x));
+        let output_1 = inner_perm()
+            .permute(input_1)
+            .map(|x| BabyBear::as_canonical_u32(&x));
         let input_1 = input_1.map(|x| BabyBear::as_canonical_u32(&x));
 
         let instructions =
@@ -244,7 +184,10 @@ pub(crate) mod tests {
                 }))
                 .collect::<Vec<_>>();
 
-        let program = Arc::new(RecursionProgram { instructions, ..Default::default() });
+        let program = Arc::new(RecursionProgram {
+            instructions,
+            ..Default::default()
+        });
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
             program.clone(),
             BabyBearPoseidon2::new().perm,

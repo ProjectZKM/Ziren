@@ -26,7 +26,12 @@ impl<'a, AB: AirBuilder> MultiBuilder<'a, AB> {
         next_condition: AB::Expr,
     ) -> Self {
         let inner = builder.when(local_condition.clone());
-        Self { inner, is_first_row, is_last_row, next_condition }
+        Self {
+            inner,
+            is_first_row,
+            is_last_row,
+            next_condition,
+        }
     }
 }
 

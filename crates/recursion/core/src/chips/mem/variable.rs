@@ -4,10 +4,10 @@ use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
+use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 use zkm2_core_machine::utils::{next_power_of_two, pad_rows_fixed};
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
-use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 
 use crate::{builder::SP1RecursionAirBuilder, *};
 
@@ -111,10 +111,17 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_MEM_INIT_COLS],
+            input.fixed_log2_rows(self),
+        );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS)
+        RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_MEM_INIT_COLS,
+        )
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -159,8 +166,12 @@ mod tests {
     pub fn generate_trace() {
         let shard = ExecutionRecord::<BabyBear> {
             mem_var_events: vec![
-                MemEvent { inner: BabyBear::ONE.into() },
-                MemEvent { inner: BabyBear::ONE.into() },
+                MemEvent {
+                    inner: BabyBear::ONE.into(),
+                },
+                MemEvent {
+                    inner: BabyBear::ONE.into(),
+                },
             ],
             ..Default::default()
         };

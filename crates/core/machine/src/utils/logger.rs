@@ -27,7 +27,10 @@ pub fn setup_logger() {
         let logger_type = std::env::var("RUST_LOGGER").unwrap_or_else(|_| "flat".to_string());
         match logger_type.as_str() {
             "forest" => {
-                Registry::default().with(env_filter).with(ForestLayer::default()).init();
+                Registry::default()
+                    .with(env_filter)
+                    .with(ForestLayer::default())
+                    .init();
             }
             "flat" => {
                 tracing_subscriber::fmt::Subscriber::builder()

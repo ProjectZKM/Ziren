@@ -37,7 +37,9 @@ impl<C: Config> Variable<C> for Ptr<C::N> {
     type Expression = SymbolicPtr<C::N>;
 
     fn uninit(builder: &mut Builder<C>) -> Self {
-        Ptr { address: Var::uninit(builder) }
+        Ptr {
+            address: Var::uninit(builder),
+        }
     }
 
     fn assign(&self, src: Self::Expression, builder: &mut Builder<C>) {
@@ -77,7 +79,9 @@ impl<C: Config> MemVariable<C> for Ptr<C::N> {
 
 impl<N: Field> From<Ptr<N>> for SymbolicPtr<N> {
     fn from(ptr: Ptr<N>) -> Self {
-        SymbolicPtr { address: SymbolicVar::from(ptr.address) }
+        SymbolicPtr {
+            address: SymbolicVar::from(ptr.address),
+        }
     }
 }
 
@@ -85,7 +89,9 @@ impl<N: Field> Add for Ptr<N> {
     type Output = SymbolicPtr<N>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        SymbolicPtr { address: self.address + rhs.address }
+        SymbolicPtr {
+            address: self.address + rhs.address,
+        }
     }
 }
 
@@ -93,7 +99,9 @@ impl<N: Field> Sub for Ptr<N> {
     type Output = SymbolicPtr<N>;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        SymbolicPtr { address: self.address - rhs.address }
+        SymbolicPtr {
+            address: self.address - rhs.address,
+        }
     }
 }
 
@@ -101,7 +109,9 @@ impl<N: Field> Add for SymbolicPtr<N> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
-        Self { address: self.address + rhs.address }
+        Self {
+            address: self.address + rhs.address,
+        }
     }
 }
 
@@ -109,7 +119,9 @@ impl<N: Field> Sub for SymbolicPtr<N> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self {
-        Self { address: self.address - rhs.address }
+        Self {
+            address: self.address - rhs.address,
+        }
     }
 }
 
@@ -117,7 +129,9 @@ impl<N: Field> Add<Ptr<N>> for SymbolicPtr<N> {
     type Output = Self;
 
     fn add(self, rhs: Ptr<N>) -> Self {
-        Self { address: self.address + rhs.address }
+        Self {
+            address: self.address + rhs.address,
+        }
     }
 }
 
@@ -125,7 +139,9 @@ impl<N: Field> Sub<Ptr<N>> for SymbolicPtr<N> {
     type Output = Self;
 
     fn sub(self, rhs: Ptr<N>) -> Self {
-        Self { address: self.address - rhs.address }
+        Self {
+            address: self.address - rhs.address,
+        }
     }
 }
 
@@ -133,7 +149,9 @@ impl<N: Field> Add<SymbolicPtr<N>> for Ptr<N> {
     type Output = SymbolicPtr<N>;
 
     fn add(self, rhs: SymbolicPtr<N>) -> SymbolicPtr<N> {
-        SymbolicPtr { address: self.address + rhs.address }
+        SymbolicPtr {
+            address: self.address + rhs.address,
+        }
     }
 }
 
@@ -141,7 +159,9 @@ impl<N: Field> Add<SymbolicVar<N>> for Ptr<N> {
     type Output = SymbolicPtr<N>;
 
     fn add(self, rhs: SymbolicVar<N>) -> SymbolicPtr<N> {
-        SymbolicPtr { address: self.address + rhs }
+        SymbolicPtr {
+            address: self.address + rhs,
+        }
     }
 }
 
@@ -149,7 +169,9 @@ impl<N: Field> Sub<SymbolicVar<N>> for Ptr<N> {
     type Output = SymbolicPtr<N>;
 
     fn sub(self, rhs: SymbolicVar<N>) -> SymbolicPtr<N> {
-        SymbolicPtr { address: self.address - rhs }
+        SymbolicPtr {
+            address: self.address - rhs,
+        }
     }
 }
 
@@ -157,7 +179,9 @@ impl<N: Field> Sub<SymbolicPtr<N>> for Ptr<N> {
     type Output = SymbolicPtr<N>;
 
     fn sub(self, rhs: SymbolicPtr<N>) -> SymbolicPtr<N> {
-        SymbolicPtr { address: self.address - rhs.address }
+        SymbolicPtr {
+            address: self.address - rhs.address,
+        }
     }
 }
 
@@ -166,10 +190,12 @@ impl<N: Field> Add<Usize<N>> for Ptr<N> {
 
     fn add(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address + N::from_canonical_usize(rhs) }
-            }
-            Usize::Var(rhs) => SymbolicPtr { address: self.address + rhs },
+            Usize::Const(rhs) => SymbolicPtr {
+                address: self.address + N::from_canonical_usize(rhs),
+            },
+            Usize::Var(rhs) => SymbolicPtr {
+                address: self.address + rhs,
+            },
         }
     }
 }
@@ -179,10 +205,12 @@ impl<N: Field> Add<Usize<N>> for SymbolicPtr<N> {
 
     fn add(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address + N::from_canonical_usize(rhs) }
-            }
-            Usize::Var(rhs) => SymbolicPtr { address: self.address + rhs },
+            Usize::Const(rhs) => SymbolicPtr {
+                address: self.address + N::from_canonical_usize(rhs),
+            },
+            Usize::Var(rhs) => SymbolicPtr {
+                address: self.address + rhs,
+            },
         }
     }
 }
@@ -192,10 +220,12 @@ impl<N: Field> Sub<Usize<N>> for Ptr<N> {
 
     fn sub(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address - N::from_canonical_usize(rhs) }
-            }
-            Usize::Var(rhs) => SymbolicPtr { address: self.address - rhs },
+            Usize::Const(rhs) => SymbolicPtr {
+                address: self.address - N::from_canonical_usize(rhs),
+            },
+            Usize::Var(rhs) => SymbolicPtr {
+                address: self.address - rhs,
+            },
         }
     }
 }
@@ -205,10 +235,12 @@ impl<N: Field> Sub<Usize<N>> for SymbolicPtr<N> {
 
     fn sub(self, rhs: Usize<N>) -> SymbolicPtr<N> {
         match rhs {
-            Usize::Const(rhs) => {
-                SymbolicPtr { address: self.address - N::from_canonical_usize(rhs) }
-            }
-            Usize::Var(rhs) => SymbolicPtr { address: self.address - rhs },
+            Usize::Const(rhs) => SymbolicPtr {
+                address: self.address - N::from_canonical_usize(rhs),
+            },
+            Usize::Var(rhs) => SymbolicPtr {
+                address: self.address - rhs,
+            },
         }
     }
 }

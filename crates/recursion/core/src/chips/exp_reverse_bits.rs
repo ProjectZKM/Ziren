@@ -4,11 +4,11 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use std::borrow::BorrowMut;
+use tracing::instrument;
 use zkm2_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
-use std::borrow::BorrowMut;
-use tracing::instrument;
 
 use crate::{
     builder::SP1RecursionAirBuilder,
@@ -108,8 +108,14 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                     row.is_first = F::from_bool(i == 0);
                     row.is_last = F::from_bool(i == addrs.exp.len() - 1);
                     row.is_real = F::ONE;
-                    row.x_mem = MemoryAccessCols { addr: addrs.base, mult: -F::from_bool(i == 0) };
-                    row.exponent_mem = MemoryAccessCols { addr: addrs.exp[i], mult: F::NEG_ONE };
+                    row.x_mem = MemoryAccessCols {
+                        addr: addrs.base,
+                        mult: -F::from_bool(i == 0),
+                    };
+                    row.exponent_mem = MemoryAccessCols {
+                        addr: addrs.exp[i],
+                        mult: F::NEG_ONE,
+                    };
                     row.result_mem = MemoryAccessCols {
                         addr: addrs.result,
                         mult: *mult * F::from_bool(i == addrs.exp.len() - 1),
@@ -150,14 +156,22 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                 let prev_accum = accum;
                 accum = prev_accum
                     * prev_accum
-                    * if event.exp[i] == F::ONE { event.base } else { F::ONE };
+                    * if event.exp[i] == F::ONE {
+                        event.base
+                    } else {
+                        F::ONE
+                    };
 
                 cols.x = event.base;
                 cols.current_bit = event.exp[i];
                 cols.accum = accum;
                 cols.accum_squared = accum * accum;
                 cols.prev_accum_squared = prev_accum * prev_accum;
-                cols.multiplier = if event.exp[i] == F::ONE { event.base } else { F::ONE };
+                cols.multiplier = if event.exp[i] == F::ONE {
+                    event.base
+                } else {
+                    F::ONE
+                };
                 cols.prev_accum_squared_times_multiplier =
                     cols.prev_accum_squared * cols.multiplier;
                 if i == event.exp.len() {
@@ -209,8 +223,12 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
     ) {
         // Dummy constraints to normalize to DEGREE when DEGREE > 3.
         if DEGREE > 3 {
-            let lhs = (0..DEGREE).map(|_| local_prepr.is_real.into()).product::<AB::Expr>();
-            let rhs = (0..DEGREE).map(|_| local_prepr.is_real.into()).product::<AB::Expr>();
+            let lhs = (0..DEGREE)
+                .map(|_| local_prepr.is_real.into())
+                .product::<AB::Expr>();
+            let rhs = (0..DEGREE)
+                .map(|_| local_prepr.is_real.into())
+                .product::<AB::Expr>();
             builder.assert_eq(lhs, rhs);
         }
 
@@ -233,7 +251,9 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
         );
 
         // The accumulator needs to start with the multiplier for every `is_first` row.
-        builder.when(local_prepr.is_first).assert_eq(local.accum, local.multiplier);
+        builder
+            .when(local_prepr.is_first)
+            .assert_eq(local.accum, local.multiplier);
 
         // `multiplier` is x if the current bit is 1, and 1 if the current bit is 0.
         builder
@@ -258,7 +278,9 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
             .assert_eq(local.accum, local.prev_accum_squared_times_multiplier);
 
         // Constrain the accum_squared column.
-        builder.when(local_prepr.is_real).assert_eq(local.accum_squared, local.accum * local.accum);
+        builder
+            .when(local_prepr.is_real)
+            .assert_eq(local.accum_squared, local.accum * local.accum);
 
         builder
             .when_transition()
@@ -267,7 +289,11 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
             .assert_eq(next.prev_accum_squared, local.accum_squared);
 
         // Constrain mem write for the result.
-        builder.send_single(local_prepr.result_mem.addr, local.accum, local_prepr.result_mem.mult);
+        builder.send_single(
+            local_prepr.result_mem.addr,
+            local.accum,
+            local_prepr.result_mem.mult,
+        );
     }
 
     pub const fn do_exp_bit_memory_access<T: Copy>(
@@ -299,9 +325,9 @@ mod tests {
     use itertools::Itertools;
     use p3_util::reverse_bits_len;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::iter::once;
     use zkm2_core_machine::utils::setup_logger;
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
-    use std::iter::once;
 
     use p3_baby_bear::BabyBear;
     use p3_field::{FieldAlgebra, PrimeField32};
@@ -332,7 +358,10 @@ mod tests {
                 let base = random_felt();
                 let exponent_bits = vec![random_bit(); i];
                 let exponent = F::from_canonical_u32(
-                    exponent_bits.iter().enumerate().fold(0, |acc, (i, x)| acc + x * (1 << i)),
+                    exponent_bits
+                        .iter()
+                        .enumerate()
+                        .fold(0, |acc, (i, x)| acc + x * (1 << i)),
                 );
                 let result =
                     base.exp_u64(reverse_bits_len(exponent.as_canonical_u32() as usize, i) as u64);
@@ -362,11 +391,19 @@ mod tests {
                             .collect_vec(),
                         F::from_canonical_u32(result_a as u32),
                     )))
-                    .chain(once(instr::mem_single(MemAccessKind::Read, 1, result_a as u32, result)))
+                    .chain(once(instr::mem_single(
+                        MemAccessKind::Read,
+                        1,
+                        result_a as u32,
+                        result,
+                    )))
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            instructions,
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }

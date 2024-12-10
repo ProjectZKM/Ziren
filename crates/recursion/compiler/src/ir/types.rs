@@ -1,6 +1,6 @@
 use alloc::format;
 
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, ExtensionField, Field};
+use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};
 
 use super::{

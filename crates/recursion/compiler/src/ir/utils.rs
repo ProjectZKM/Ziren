@@ -1,4 +1,4 @@
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use std::ops::{Add, Mul, MulAssign};
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};
@@ -157,7 +157,11 @@ impl<C: Config> Builder<C> {
 
         // Call the DslIR instruction ExpReverseBitsLen, which modifies the memory pointed to by
         // `x_copy_arr_ptr`.
-        self.push_op(DslIr::ExpReverseBitsLen(x_copy_arr_ptr, ptr.address, bit_len_var));
+        self.push_op(DslIr::ExpReverseBitsLen(
+            x_copy_arr_ptr,
+            ptr.address,
+            bit_len_var,
+        ));
 
         // Return the value stored at the address pointed to by `x_copy_arr_ptr`.
         self.get(&x_copy_arr, 0)
@@ -210,7 +214,8 @@ impl<C: Config> Builder<C> {
         V: Variable<C> + Copy + Add<Output = V::Expression>,
     {
         let result: V = self.eval(base);
-        self.range(0, shift).for_each(|_, builder| builder.assign(result, result + result));
+        self.range(0, shift)
+            .for_each(|_, builder| builder.assign(result, result + result));
         result
     }
 

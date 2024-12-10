@@ -13,12 +13,12 @@ use p3_challenger::FieldChallenger;
 use p3_maybe_rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
+use std::thread::ScopedJoinHandle;
+use thiserror::Error;
 use zkm2_stark::{
     air::InteractionScope, baby_bear_poseidon2::BabyBearPoseidon2, MachineProvingKey,
     MachineVerificationError,
 };
-use std::thread::ScopedJoinHandle;
-use thiserror::Error;
 
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
@@ -42,9 +42,9 @@ use zkm2_primitives::io::SP1PublicValues;
 use zkm2_stark::{
     air::{MachineAir, PublicValues},
     Com, CpuProver, DebugConstraintBuilder, InteractionBuilder, MachineProof, MachineProver,
-    MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, ZKMCoreOpts,
-    StarkGenericConfig, StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val,
-    VerifierConstraintFolder,
+    MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,
+    StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val, VerifierConstraintFolder,
+    ZKMCoreOpts,
 };
 
 #[derive(Error, Debug)]
@@ -821,7 +821,9 @@ where
         &mut challenger.clone(),
     );
 
-    let proof = prover.prove(&pk, records, &mut challenger, ZKMCoreOpts::default()).unwrap();
+    let proof = prover
+        .prove(&pk, records, &mut challenger, ZKMCoreOpts::default())
+        .unwrap();
     prove_span.exit();
     let nb_bytes = bincode::serialize(&proof).unwrap().len();
 
@@ -856,7 +858,7 @@ where
     run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
 }
 
-    /*
+/*
 fn trace_checkpoint<SC: StarkGenericConfig>(
     program: Program,
     file: &File,
@@ -885,7 +887,8 @@ where
         */
 
 fn reset_seek(file: &mut File) {
-    file.seek(std::io::SeekFrom::Start(0)).expect("failed to seek to start of tempfile");
+    file.seek(std::io::SeekFrom::Start(0))
+        .expect("failed to seek to start of tempfile");
 }
 
 #[cfg(debug_assertions)]

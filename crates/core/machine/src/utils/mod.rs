@@ -82,7 +82,10 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>) -> usize {
                 );
             }
             if n > padded_nb_rows {
-                panic!("fixed log2 rows is too small: got {}, expected {}", n, padded_nb_rows);
+                panic!(
+                    "fixed log2 rows is too small: got {}, expected {}",
+                    n, padded_nb_rows
+                );
             }
             padded_nb_rows
         }
@@ -109,7 +112,10 @@ pub fn words_to_bytes_le<const B: usize>(words: &[u32]) -> [u8; B] {
 
 /// Converts a slice of words to a byte vector in little endian.
 pub fn words_to_bytes_le_vec(words: &[u32]) -> Vec<u8> {
-    words.iter().flat_map(|word| word.to_le_bytes().to_vec()).collect::<Vec<_>>()
+    words
+        .iter()
+        .flat_map(|word| word.to_le_bytes().to_vec())
+        .collect::<Vec<_>>()
 }
 
 /// Converts a byte array in little endian to a slice of words.
@@ -176,14 +182,18 @@ where
     let ceil_div = (len + cpus - 1) / cpus;
     let chunk_size = std::cmp::max(ceil_div, cpus);
 
-    vec.chunks_mut(chunk_size * num_elements_per_event).enumerate().par_bridge().for_each(
-        |(i, chunk)| {
-            chunk.chunks_mut(num_elements_per_event).enumerate().for_each(|(j, row)| {
-                assert!(row.len() == num_elements_per_event);
-                processor(i * chunk_size + j, row);
-            });
-        },
-    );
+    vec.chunks_mut(chunk_size * num_elements_per_event)
+        .enumerate()
+        .par_bridge()
+        .for_each(|(i, chunk)| {
+            chunk
+                .chunks_mut(num_elements_per_event)
+                .enumerate()
+                .for_each(|(j, row)| {
+                    assert!(row.len() == num_elements_per_event);
+                    processor(i * chunk_size + j, row);
+                });
+        });
 }
 
 /// Returns whether the `SP1_DEBUG` environment variable is enabled or disabled.
