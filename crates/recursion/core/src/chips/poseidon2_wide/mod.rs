@@ -5,6 +5,10 @@ use std::{borrow::Borrow, ops::Deref};
 //use p3_baby_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_baby_bear::{BabyBear};
+use p3_monty_31::InternalLayerBaseParameters;
+use p3_baby_bear::BabyBearParameters;
+use p3_monty_31::MontyField31;
+use p3_field::Field;
 
 pub mod air;
 pub mod columns;
@@ -127,8 +131,55 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
     */
 
-    let part_su
+    let part_sum: F = state[1..].iter().cloned().sum();
+    let full_sum = part_sum + state[0];
+    state[0] = part_sum - state[0];
+    internal_layer_mat_mul(state, full_sum);
 }
+
+fn halve<F: FieldAlgebra>(value: &F) -> F {
+    let inv = F::TWO.try_inverse().unwrap();
+    inv * value
+}
+
+const fn mul_2exp_neg_n<F: FieldAlgebra>(value: &F, n: u32) -> Self {
+    assert!(n < 33);
+    let value_mul_2exp_neg_n = (value as u64) << (32 - n);
+    MontyField31::new_monty(monty_reduce::<MP>(value_mul_2exp_neg_n))
+}
+
+fn internal_layer_mat_mul<F: FieldAlgebra>(
+    //state: &mut [MontyField31<BabyBearParameters>; 16],
+    state: &mut [F; 16],
+    //sum: MontyField31<BabyBearParameters>,
+    sum: F,
+) {
+    // The diagonal matrix is defined by the vector:
+    // V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/4, 1/8, 1/2^27, -1/2^8, -1/16, -1/2^27]
+    state[1] += sum;
+    state[2] = state[2].double() + sum;
+    state[3] = state[3].halve() + sum;
+    state[4] = sum + state[4].double() + state[4];
+    state[5] = sum + state[5].double().double();
+    state[6] = sum - state[6].halve();
+    state[7] = sum - (state[7].double() + state[7]);
+    state[8] = sum - state[8].double().double();
+    state[9] = state[9].mul_2exp_neg_n(8);
+    state[9] += sum;
+    state[10] = state[10].mul_2exp_neg_n(2);
+    state[10] += sum;
+    state[11] = state[11].mul_2exp_neg_n(3);
+    state[11] += sum;
+    state[12] = state[12].mul_2exp_neg_n(27);
+    state[12] += sum;
+    state[13] = state[13].mul_2exp_neg_n(8);
+    state[13] = sum - state[13];
+    state[14] = state[14].mul_2exp_neg_n(4);
+    state[14] = sum - state[14];
+    state[15] = state[15].mul_2exp_neg_n(27);
+    state[15] = sum - state[15];
+}
+
 
 #[cfg(test)]
 pub(crate) mod tests {

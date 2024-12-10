@@ -2673,6 +2673,7 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
+ "p3-monty-31",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-util",

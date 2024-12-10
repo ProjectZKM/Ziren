@@ -155,12 +155,13 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
                     self.populate_external_round(external_rounds_state, &mut external_sbox, r);
                 if r == NUM_EXTERNAL_ROUNDS / 2 - 1 {
                     *internal_rounds_state = next_state;
+                } else {
+                    external_rounds_state[r + 1] = next_state;
                 }
-                external_rounds_state[r + 1] = next_state;
             }
 
             // Apply the internal rounds.
-            external_rounds_state[NUM_EXTERNAL_ROUNDS / 2 + 1] = self.populate_internal_rounds(
+            external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] = self.populate_internal_rounds(
                 internal_rounds_state,
                 internal_rounds_s0,
                 &mut internal_sbox,
