@@ -8,7 +8,7 @@ use zkm2_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
 
-use crate::{builder::SP1RecursionAirBuilder, *};
+use crate::{builder::ZKMRecursionAirBuilder, *};
 
 use super::MemoryAccessCols;
 
@@ -149,7 +149,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
 impl<AB> Air<AB> for MemoryChip<AB::F>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let prep = builder.preprocessed();

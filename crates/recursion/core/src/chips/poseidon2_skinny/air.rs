@@ -7,7 +7,7 @@ use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 
-use crate::{builder::SP1RecursionAirBuilder, chips::poseidon2_skinny::columns::Poseidon2};
+use crate::{builder::ZKMRecursionAirBuilder, chips::poseidon2_skinny::columns::Poseidon2};
 
 use super::{
     columns::{preprocessed::Poseidon2PreprocessedCols, NUM_POSEIDON2_COLS},
@@ -24,7 +24,7 @@ impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2SkinnyChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for Poseidon2SkinnyChip<DEGREE>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
     AB::Var: 'static,
 {
     fn eval(&self, builder: &mut AB) {
@@ -72,7 +72,7 @@ where
 }
 
 impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
-    fn eval_input_round<AB: SP1RecursionAirBuilder>(
+    fn eval_input_round<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local_row: &Poseidon2<AB::Var>,
@@ -93,7 +93,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
         }
     }
 
-    fn eval_external_round<AB: SP1RecursionAirBuilder>(
+    fn eval_external_round<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local_row: &Poseidon2<AB::Var>,
@@ -128,7 +128,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
         }
     }
 
-    fn eval_internal_rounds<AB: SP1RecursionAirBuilder>(
+    fn eval_internal_rounds<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local_row: &Poseidon2<AB::Var>,

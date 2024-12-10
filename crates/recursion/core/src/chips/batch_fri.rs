@@ -16,7 +16,7 @@ use zkm2_derive::AlignedBorrow;
 
 use crate::{
     air::Block,
-    builder::SP1RecursionAirBuilder,
+    builder::ZKMRecursionAirBuilder,
     runtime::{Instruction, RecursionProgram},
     Address, BatchFRIInstr, ExecutionRecord,
 };
@@ -167,7 +167,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
 }
 
 impl<const DEGREE: usize> BatchFRIChip<DEGREE> {
-    pub fn eval_batch_fri<AB: SP1RecursionAirBuilder>(
+    pub fn eval_batch_fri<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local: &BatchFRICols<AB::Var>,
@@ -227,7 +227,7 @@ impl<const DEGREE: usize> BatchFRIChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for BatchFRIChip<DEGREE>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();

@@ -9,7 +9,7 @@ use zkm2_stark::air::MachineAir;
 
 use crate::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
-    builder::SP1RecursionAirBuilder,
+    builder::ZKMRecursionAirBuilder,
     runtime::{Instruction, RecursionProgram},
     ExecutionRecord,
 };
@@ -154,7 +154,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
 impl<AB> Air<AB> for PublicValuesChip
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();

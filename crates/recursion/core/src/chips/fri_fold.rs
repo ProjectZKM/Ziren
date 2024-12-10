@@ -16,7 +16,7 @@ use zkm2_derive::AlignedBorrow;
 
 use crate::{
     air::Block,
-    builder::SP1RecursionAirBuilder,
+    builder::ZKMRecursionAirBuilder,
     runtime::{Instruction, RecursionProgram},
     ExecutionRecord, FriFoldInstr,
 };
@@ -252,7 +252,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
 }
 
 impl<const DEGREE: usize> FriFoldChip<DEGREE> {
-    pub fn eval_fri_fold<AB: SP1RecursionAirBuilder>(
+    pub fn eval_fri_fold<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local: &FriFoldCols<AB::Var>,
@@ -367,7 +367,7 @@ impl<const DEGREE: usize> FriFoldChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for FriFoldChip<DEGREE>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();

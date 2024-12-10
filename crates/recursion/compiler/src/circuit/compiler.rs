@@ -7,7 +7,7 @@ use p3_field::{
 };
 use std::{borrow::Borrow, collections::HashMap, iter::repeat, mem::transmute};
 use vec_map::VecMap;
-use zkm2_core_machine::utils::{sp1_debug_mode, SpanBuilder};
+use zkm2_core_machine::utils::{zkm2_debug_mode, SpanBuilder};
 use zkm2_recursion_core::{
     air::{Block, RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     BaseAluInstr, BaseAluOpcode,
@@ -568,7 +568,7 @@ where
     {
         // In debug mode, we perform cycle tracking and keep track of backtraces.
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
-        let debug_mode = sp1_debug_mode();
+        let debug_mode = zkm2_debug_mode();
         // Compile each IR instruction into a list of ASM instructions, then combine them.
         // This step also counts the number of times each address is read from.
         let (mut instrs, traces) = tracing::debug_span!("compile_one loop").in_scope(|| {

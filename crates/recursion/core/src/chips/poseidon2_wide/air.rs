@@ -8,7 +8,7 @@ use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 use zkm2_primitives::RC_16_30_U32;
 
-use crate::builder::SP1RecursionAirBuilder;
+use crate::builder::ZKMRecursionAirBuilder;
 
 use super::{
     columns::{
@@ -33,7 +33,7 @@ impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2WideChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for Poseidon2WideChip<DEGREE>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
     AB::Var: 'static,
 {
     fn eval(&self, builder: &mut AB) {
@@ -87,7 +87,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         local_row: &dyn Poseidon2<AB::Var>,
         r: usize,
     ) where
-        AB: SP1RecursionAirBuilder + PairBuilder,
+        AB: ZKMRecursionAirBuilder + PairBuilder,
     {
         let mut local_state: [AB::Expr; WIDTH] =
             array::from_fn(|i| local_row.external_rounds_state()[r][i].into());
@@ -144,7 +144,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     /// Eval the constraints for the internal rounds.
     fn eval_internal_rounds<AB>(&self, builder: &mut AB, local_row: &dyn Poseidon2<AB::Var>)
     where
-        AB: SP1RecursionAirBuilder + PairBuilder,
+        AB: ZKMRecursionAirBuilder + PairBuilder,
     {
         let state = &local_row.internal_rounds_state();
         let s0 = local_row.internal_rounds_s0();

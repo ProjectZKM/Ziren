@@ -19,7 +19,7 @@ use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
 use zkm2_stark::{Com, StarkGenericConfig, ZeroCommitment};
 
-use super::{poseidon2::bn254_poseidon2_rc3, sp1_dev_mode};
+use super::{poseidon2::bn254_poseidon2_rc3, zkm2_dev_mode};
 
 pub const DIGEST_SIZE: usize = 1;
 
@@ -80,7 +80,7 @@ pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress));
-    let num_queries = if sp1_dev_mode() {
+    let num_queries = if zkm2_dev_mode() {
         1
     } else {
         match std::env::var("FRI_QUERIES") {
@@ -102,7 +102,7 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress));
-    let num_queries = if sp1_dev_mode() {
+    let num_queries = if zkm2_dev_mode() {
         1
     } else {
         match std::env::var("FRI_QUERIES") {

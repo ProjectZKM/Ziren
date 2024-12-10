@@ -8,7 +8,7 @@ use zkm2_core_machine::utils::next_power_of_two;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
 
-use crate::{builder::SP1RecursionAirBuilder, *};
+use crate::{builder::ZKMRecursionAirBuilder, *};
 
 pub const NUM_BASE_ALU_ENTRIES_PER_ROW: usize = 4;
 
@@ -163,7 +163,7 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
 
 impl<AB> Air<AB> for BaseAluChip
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();

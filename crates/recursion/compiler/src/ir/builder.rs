@@ -2,7 +2,7 @@ use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
 use p3_field::FieldAlgebra;
-use zkm2_core_machine::utils::sp1_debug_mode;
+use zkm2_core_machine::utils::zkm2_debug_mode;
 use zkm2_primitives::types::RecursionProgramType;
 
 use super::{
@@ -48,10 +48,10 @@ impl<T> TracedVec<T> {
         self.traces.push(None);
     }
 
-    /// Pushes a value to the vector and records a backtrace if SP1_DEBUG is enabled
+    /// Pushes a value to the vector and records a backtrace if ZKM_DEBUG is enabled
     pub fn trace_push(&mut self, value: T) {
         self.vec.push(value);
-        if sp1_debug_mode() {
+        if zkm2_debug_mode() {
             self.traces.push(Some(Backtrace::new_unresolved()));
         } else {
             self.traces.push(None);
@@ -176,7 +176,7 @@ impl<C: Config> Builder<C> {
         self.inner.get_mut().operations.extend(ops);
     }
 
-    /// Pushes an operation to the builder and records a trace if SP1_DEBUG.
+    /// Pushes an operation to the builder and records a trace if ZKM_DEBUG.
     pub fn trace_push(&mut self, op: DslIr<C>) {
         self.inner.get_mut().operations.trace_push(op);
     }

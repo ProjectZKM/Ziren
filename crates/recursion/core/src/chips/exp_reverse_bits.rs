@@ -11,7 +11,7 @@ use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
 
 use crate::{
-    builder::SP1RecursionAirBuilder,
+    builder::ZKMRecursionAirBuilder,
     runtime::{ExecutionRecord, RecursionProgram},
     ExpReverseBitsInstr, Instruction,
 };
@@ -212,7 +212,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
 
 impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
     pub fn eval_exp_reverse_bits_len<
-        AB: BaseAirBuilder + ExtensionAirBuilder + SP1RecursionAirBuilder + ZKMAirBuilder,
+        AB: BaseAirBuilder + ExtensionAirBuilder + ZKMRecursionAirBuilder + ZKMAirBuilder,
     >(
         &self,
         builder: &mut AB,
@@ -305,7 +305,7 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for ExpReverseBitsLenChip<DEGREE>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();

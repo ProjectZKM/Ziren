@@ -196,14 +196,14 @@ where
         });
 }
 
-/// Returns whether the `SP1_DEBUG` environment variable is enabled or disabled.
+/// Returns whether the `ZKM_DEBUG` environment variable is enabled or disabled.
 ///
 /// This variable controls whether backtraces are attached to compiled circuit programs, as well
 /// as whether cycle tracking is performed for circuit programs.
 ///
 /// By default, the variable is disabled.
-pub fn sp1_debug_mode() -> bool {
-    let value = std::env::var("SP1_DEBUG").unwrap_or_else(|_| "false".to_string());
+pub fn zkm2_debug_mode() -> bool {
+    let value = std::env::var("ZKM_DEBUG").unwrap_or_else(|_| "false".to_string());
     value == "1" || value.to_lowercase() == "true"
 }
 
