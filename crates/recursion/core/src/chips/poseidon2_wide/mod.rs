@@ -89,26 +89,26 @@ pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
     state
 }
 
+const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
+    BabyBear::ORDER_U32 - 2,
+    1,
+    2,
+    (BabyBear::ORDER_U32 + 1) >> 1,
+    3,
+    4,
+    (BabyBear::ORDER_U32 - 1) >> 1,
+    BabyBear::ORDER_U32 - 3,
+    BabyBear::ORDER_U32 - 4,
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
+    BabyBear::ORDER_U32 - 15,
+    (BabyBear::ORDER_U32 - 1) >> 8,
+    (BabyBear::ORDER_U32 - 1) >> 4,
+    15,
+]);
+
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    let POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
-        BabyBear::ORDER_U32 - 2,
-        1,
-        2,
-        (BabyBear::ORDER_U32 + 1) >> 1,
-        3,
-        4,
-        (BabyBear::ORDER_U32 - 1) >> 1,
-        BabyBear::ORDER_U32 - 3,
-        BabyBear::ORDER_U32 - 4,
-        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
-        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
-        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
-        BabyBear::ORDER_U32 - 15,
-        (BabyBear::ORDER_U32 - 1) >> 8,
-        (BabyBear::ORDER_U32 - 1) >> 4,
-        15,
-    ]);
-    //let MONTY_INVERSE: BabyBear = BabyBear { value: 1 };
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
         POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
             .iter()

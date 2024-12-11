@@ -57,23 +57,23 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
         let populate_len = events.len() * num_columns;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
-        //join(
-        //    || {
-        values_pop
-            .par_chunks_mut(num_columns)
-            .zip_eq(&input.poseidon2_events)
-            .for_each(|(row, &event)| {
-                self.populate_perm(event.input, Some(event.output), row);
-            });
-        //   },
-        //   || {
-        let mut dummy_row = vec![F::ZERO; num_columns];
-        self.populate_perm([F::ZERO; WIDTH], None, &mut dummy_row);
-        values_dummy
-            .par_chunks_mut(num_columns)
-            .for_each(|row| row.copy_from_slice(&dummy_row));
-        //   },
-        //);
+        join(
+            || {
+                values_pop
+                    .par_chunks_mut(num_columns)
+                    .zip_eq(&input.poseidon2_events)
+                    .for_each(|(row, &event)| {
+                        self.populate_perm(event.input, Some(event.output), row);
+                    });
+            },
+            || {
+                let mut dummy_row = vec![F::ZERO; num_columns];
+                self.populate_perm([F::ZERO; WIDTH], None, &mut dummy_row);
+                values_dummy
+                    .par_chunks_mut(num_columns)
+                    .for_each(|row| row.copy_from_slice(&dummy_row));
+            },
+        );
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, num_columns)
@@ -260,10 +260,6 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
             // Apply the linear layer.
             state[0] = sbox_deg_7;
-
-            //let part_sum: F = state[1..].iter().cloned().sum();
-            //let full_sum = part_sum + state[0];
-            //state[0] = part_sum - state[0];
 
             internal_linear_layer(&mut state);
 

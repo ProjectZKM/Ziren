@@ -1,12 +1,11 @@
 use std::marker::PhantomData;
 
-//use p3_baby_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
 use p3_field::{FieldAlgebra, PrimeField32};
 
 pub mod air;
 pub mod columns;
 pub mod trace;
-
+use p3_baby_bear::BabyBear;
 use p3_poseidon2::matmul_internal;
 
 /// The width of the permutation.
@@ -60,27 +59,26 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     }
 }
 
-use p3_baby_bear::BabyBear;
-pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    let POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
-        BabyBear::ORDER_U32 - 2,
-        1,
-        2,
-        (BabyBear::ORDER_U32 + 1) >> 1,
-        3,
-        4,
-        (BabyBear::ORDER_U32 - 1) >> 1,
-        BabyBear::ORDER_U32 - 3,
-        BabyBear::ORDER_U32 - 4,
-        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
-        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
-        BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
-        BabyBear::ORDER_U32 - 15,
-        (BabyBear::ORDER_U32 - 1) >> 8,
-        (BabyBear::ORDER_U32 - 1) >> 4,
-        15,
-    ]);
+const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
+    BabyBear::ORDER_U32 - 2,
+    1,
+    2,
+    (BabyBear::ORDER_U32 + 1) >> 1,
+    3,
+    4,
+    (BabyBear::ORDER_U32 - 1) >> 1,
+    BabyBear::ORDER_U32 - 3,
+    BabyBear::ORDER_U32 - 4,
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
+    BabyBear::ORDER_U32 - 15,
+    (BabyBear::ORDER_U32 - 1) >> 8,
+    (BabyBear::ORDER_U32 - 1) >> 4,
+    15,
+]);
 
+pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
         POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
             .iter()
