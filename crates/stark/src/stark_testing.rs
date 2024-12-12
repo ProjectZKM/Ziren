@@ -199,11 +199,5 @@ fn test_incorrect_public_value() {
         Mersenne31::from_canonical_u64(1),
         Mersenne31::from_canonical_u64(123_123), // incorrect result
     ];
-    p3_uni_stark::prove(
-        &config,
-        &FibonacciAir {},
-        &mut challenger,
-        trace,
-        &pis,
-    );
+    p3_uni_stark::prove(&config, &FibonacciAir {}, &mut challenger, trace, &pis);
 }

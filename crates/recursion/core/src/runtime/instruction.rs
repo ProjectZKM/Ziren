@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};
 
 use crate::*;
@@ -92,12 +92,7 @@ pub fn ext_alu<F: FieldAlgebra>(
     })
 }
 
-pub fn mem<F: FieldAlgebra>(
-    kind: MemAccessKind,
-    mult: u32,
-    addr: u32,
-    val: u32,
-) -> Instruction<F> {
+pub fn mem<F: FieldAlgebra>(kind: MemAccessKind, mult: u32, addr: u32, val: u32) -> Instruction<F> {
     mem_single(kind, mult, addr, F::from_canonical_u32(val))
 }
 
@@ -126,7 +121,9 @@ pub fn mem_block<F: FieldAlgebra>(
     val: Block<F>,
 ) -> Instruction<F> {
     Instruction::Mem(MemInstr {
-        addrs: MemIo { inner: Address(F::from_canonical_u32(addr)) },
+        addrs: MemIo {
+            inner: Address(F::from_canonical_u32(addr)),
+        },
         vals: MemIo { inner: val },
         mult: F::from_canonical_u32(mult),
         kind,
@@ -201,7 +198,9 @@ pub fn fri_fold<F: FieldAlgebra>(
     ro_mults: Vec<u32>,
 ) -> Instruction<F> {
     Instruction::FriFold(Box::new(FriFoldInstr {
-        base_single_addrs: FriFoldBaseIo { x: Address(F::from_canonical_u32(x)) },
+        base_single_addrs: FriFoldBaseIo {
+            x: Address(F::from_canonical_u32(x)),
+        },
         ext_single_addrs: FriFoldExtSingleIo {
             z: Address(F::from_canonical_u32(z)),
             alpha: Address(F::from_canonical_u32(alpha)),
@@ -211,20 +210,35 @@ pub fn fri_fold<F: FieldAlgebra>(
                 .iter()
                 .map(|elm| Address(F::from_canonical_u32(*elm)))
                 .collect(),
-            ps_at_z: ps_at_z.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            ps_at_z: ps_at_z
+                .iter()
+                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .collect(),
             alpha_pow_input: alpha_pow_input
                 .iter()
                 .map(|elm| Address(F::from_canonical_u32(*elm)))
                 .collect(),
-            ro_input: ro_input.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            ro_input: ro_input
+                .iter()
+                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .collect(),
             alpha_pow_output: alpha_pow_output
                 .iter()
                 .map(|elm| Address(F::from_canonical_u32(*elm)))
                 .collect(),
-            ro_output: ro_output.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            ro_output: ro_output
+                .iter()
+                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .collect(),
         },
-        alpha_pow_mults: alpha_mults.iter().map(|mult| F::from_canonical_u32(*mult)).collect(),
-        ro_mults: ro_mults.iter().map(|mult| F::from_canonical_u32(*mult)).collect(),
+        alpha_pow_mults: alpha_mults
+            .iter()
+            .map(|mult| F::from_canonical_u32(*mult))
+            .collect(),
+        ro_mults: ro_mults
+            .iter()
+            .map(|mult| F::from_canonical_u32(*mult))
+            .collect(),
     }))
 }
 
@@ -238,12 +252,23 @@ pub fn batch_fri<F: FieldAlgebra>(
 ) -> Instruction<F> {
     Instruction::BatchFRI(Box::new(BatchFRIInstr {
         base_vec_addrs: BatchFRIBaseVecIo {
-            p_at_x: p_at_xs.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            p_at_x: p_at_xs
+                .iter()
+                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .collect(),
         },
-        ext_single_addrs: BatchFRIExtSingleIo { acc: Address(F::from_canonical_u32(acc)) },
+        ext_single_addrs: BatchFRIExtSingleIo {
+            acc: Address(F::from_canonical_u32(acc)),
+        },
         ext_vec_addrs: BatchFRIExtVecIo {
-            p_at_z: p_at_zs.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
-            alpha_pow: alpha_pows.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            p_at_z: p_at_zs
+                .iter()
+                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .collect(),
+            alpha_pow: alpha_pows
+                .iter()
+                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .collect(),
         },
         acc_mult: F::from_canonical_u32(acc_mult),
     }))
@@ -252,7 +277,9 @@ pub fn batch_fri<F: FieldAlgebra>(
 pub fn commit_public_values<F: FieldAlgebra>(
     public_values_a: &RecursionPublicValues<u32>,
 ) -> Instruction<F> {
-    let pv_a = public_values_a.as_array().map(|pv| Address(F::from_canonical_u32(pv)));
+    let pv_a = public_values_a
+        .as_array()
+        .map(|pv| Address(F::from_canonical_u32(pv)));
     let pv_address: &RecursionPublicValues<Address<F>> = pv_a.as_slice().borrow();
 
     Instruction::CommitPublicValues(Box::new(CommitPublicValuesInstr {

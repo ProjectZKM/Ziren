@@ -61,7 +61,11 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
         let index = addr.as_usize();
         match self.0.entry(index) {
             Entry::Occupied(entry) => {
-                panic!("tried to write to assigned address {}: {:?}", index, entry.get())
+                panic!(
+                    "tried to write to assigned address {}: {:?}",
+                    index,
+                    entry.get()
+                )
             }
             Entry::Vacant(entry) => entry.insert(MemoryEntry { val, mult }),
         }
@@ -95,7 +99,8 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
 
     fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) -> &mut MemoryEntry<F> {
         let addr_usize = addr.as_usize();
-        self.0.extend(repeat(None).take((addr_usize + 1).saturating_sub(self.0.len())));
+        self.0
+            .extend(repeat(None).take((addr_usize + 1).saturating_sub(self.0.len())));
         match &mut self.0[addr_usize] {
             Some(entry) => panic!(
                 "tried to write to assigned address: {entry:?}\nbacktrace: {:?}",

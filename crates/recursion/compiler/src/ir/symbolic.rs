@@ -9,7 +9,7 @@ use std::{
     ops::{AddAssign, DivAssign, MulAssign, SubAssign},
 };
 
-use p3_field::{FieldAlgebra, ExtensionField, Field};
+use p3_field::{ExtensionField, Field, FieldAlgebra};
 
 use crate::ir::ExtHandle;
 

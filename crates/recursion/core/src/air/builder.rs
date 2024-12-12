@@ -11,13 +11,13 @@ use super::{
     RangeCheckOpcode,
 };
 
-/// A trait which contains all helper methods for building SP1 recursion machine AIRs.
-pub trait SP1RecursionAirBuilder:
+/// A trait which contains all helper methods for building ZKM recursion machine AIRs.
+pub trait ZKMRecursionAirBuilder:
     MachineAirBuilder + RecursionMemoryAirBuilder + RecursionInteractionAirBuilder
 {
 }
 
-impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder> SP1RecursionAirBuilder for AB {}
+impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionMemoryAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionInteractionAirBuilder for AB {}
 
@@ -200,7 +200,11 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.send(
-            AirInteraction::new(program_interaction_vals, is_real.into(), InteractionKind::Program),
+            AirInteraction::new(
+                program_interaction_vals,
+                is_real.into(),
+                InteractionKind::Program,
+            ),
             InteractionScope::Global,
         );
     }
@@ -217,7 +221,11 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.receive(
-            AirInteraction::new(program_interaction_vals, is_real.into(), InteractionKind::Program),
+            AirInteraction::new(
+                program_interaction_vals,
+                is_real.into(),
+                InteractionKind::Program,
+            ),
             InteractionScope::Global,
         );
     }

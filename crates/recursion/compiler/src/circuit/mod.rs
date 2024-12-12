@@ -10,7 +10,7 @@ pub use config::*;
 mod tests {
     use std::sync::Arc;
 
-    use p3_baby_bear::{Poseidon2InternalLayerBabyBear};
+    use p3_baby_bear::Poseidon2InternalLayerBabyBear;
     use p3_field::FieldAlgebra;
 
     use zkm2_core_machine::utils::run_test_machine;
@@ -53,8 +53,10 @@ mod tests {
         let operations = builder.into_operations();
         let mut compiler = AsmCompiler::default();
         let program = Arc::new(compiler.compile(operations));
-        let mut runtime =
-            Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(program.clone(), SC::new().perm);
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+            program.clone(),
+            SC::new().perm,
+        );
         runtime.witness_stream = [
             vec![F::ONE.into(), F::ONE.into(), F::TWO.into()],
             vec![F::ZERO.into(), F::ONE.into(), F::TWO.into()],
@@ -91,10 +93,13 @@ mod tests {
         let operations = builder.into_operations();
         let mut compiler = AsmCompiler::default();
         let program = Arc::new(compiler.compile(operations));
-        let mut runtime =
-            Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(program.clone(), SC::new().perm);
-        runtime.witness_stream =
-            [vec![F::ONE.into(), F::ONE.into(), F::TWO.into()]].concat().into();
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+            program.clone(),
+            SC::new().perm,
+        );
+        runtime.witness_stream = [vec![F::ONE.into(), F::ONE.into(), F::TWO.into()]]
+            .concat()
+            .into();
 
         match runtime.run() {
             Err(RuntimeError::EmptyWitnessStream) => (),

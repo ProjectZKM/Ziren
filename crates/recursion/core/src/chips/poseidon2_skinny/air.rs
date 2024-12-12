@@ -7,7 +7,7 @@ use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 
-use crate::{builder::SP1RecursionAirBuilder, chips::poseidon2_skinny::columns::Poseidon2};
+use crate::{builder::ZKMRecursionAirBuilder, chips::poseidon2_skinny::columns::Poseidon2};
 
 use super::{
     columns::{preprocessed::Poseidon2PreprocessedCols, NUM_POSEIDON2_COLS},
@@ -24,7 +24,7 @@ impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2SkinnyChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for Poseidon2SkinnyChip<DEGREE>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
     AB::Var: 'static,
 {
     fn eval(&self, builder: &mut AB) {
@@ -40,8 +40,12 @@ where
         let prep_local: &Poseidon2PreprocessedCols<_> = (*prep_local).borrow();
 
         // Dummy constraints to normalize to DEGREE.
-        let lhs = (0..DEGREE).map(|_| local_row.state_var[0].into()).product::<AB::Expr>();
-        let rhs = (0..DEGREE).map(|_| local_row.state_var[0].into()).product::<AB::Expr>();
+        let lhs = (0..DEGREE)
+            .map(|_| local_row.state_var[0].into())
+            .product::<AB::Expr>();
+        let rhs = (0..DEGREE)
+            .map(|_| local_row.state_var[0].into())
+            .product::<AB::Expr>();
         builder.assert_eq(lhs, rhs);
 
         // For now, include only memory constraints.
@@ -68,7 +72,7 @@ where
 }
 
 impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
-    fn eval_input_round<AB: SP1RecursionAirBuilder>(
+    fn eval_input_round<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local_row: &Poseidon2<AB::Var>,
@@ -89,7 +93,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
         }
     }
 
-    fn eval_external_round<AB: SP1RecursionAirBuilder>(
+    fn eval_external_round<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local_row: &Poseidon2<AB::Var>,
@@ -124,7 +128,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
         }
     }
 
-    fn eval_internal_rounds<AB: SP1RecursionAirBuilder>(
+    fn eval_internal_rounds<AB: ZKMRecursionAirBuilder>(
         &self,
         builder: &mut AB,
         local_row: &Poseidon2<AB::Var>,
@@ -138,8 +142,11 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
         let mut state: [AB::Expr; WIDTH] = core::array::from_fn(|i| local_state[i].into());
         for r in 0..NUM_INTERNAL_ROUNDS {
             // Add the round constant.
-            let add_rc =
-                if r == 0 { state[0].clone() } else { s0[r - 1].into() } + round_constants[r];
+            let add_rc = if r == 0 {
+                state[0].clone()
+            } else {
+                s0[r - 1].into()
+            } + round_constants[r];
 
             let sbox_deg_3 = add_rc.clone() * add_rc.clone() * add_rc.clone();
             // See `populate_internal_rounds` for why we don't have columns for the sbox output
@@ -152,13 +159,17 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             internal_linear_layer(&mut state);
 
             if r < NUM_INTERNAL_ROUNDS - 1 {
-                builder.when(is_internal_row).assert_eq(s0[r], state[0].clone());
+                builder
+                    .when(is_internal_row)
+                    .assert_eq(s0[r], state[0].clone());
             }
         }
 
         let next_state = next_row.state_var;
         for i in 0..WIDTH {
-            builder.when(is_internal_row).assert_eq(next_state[i], state[i].clone())
+            builder
+                .when(is_internal_row)
+                .assert_eq(next_state[i], state[i].clone())
         }
     }
 }

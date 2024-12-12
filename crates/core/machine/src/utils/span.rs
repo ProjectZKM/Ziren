@@ -18,7 +18,10 @@ where
 {
     /// Create an empty builder with the given name for the root span.
     pub fn new(name: S) -> Self {
-        Self { parents: Default::default(), current_span: Span::new(name) }
+        Self {
+            parents: Default::default(),
+            current_span: Span::new(name),
+        }
     }
 
     /// Add an item to this span.
@@ -26,14 +29,19 @@ where
     where
         T: Hash + Eq,
     {
-        self.current_span.cts.entry(item_name.into()).and_modify(|x| *x += 1).or_insert(1);
+        self.current_span
+            .cts
+            .entry(item_name.into())
+            .and_modify(|x| *x += 1)
+            .or_insert(1);
         self
     }
 
     /// Enter a new child span with the given name.
     pub fn enter(&mut self, span_name: S) -> &mut Self {
         let span = Span::new(span_name);
-        self.parents.push(core::mem::replace(&mut self.current_span, span));
+        self.parents
+            .push(core::mem::replace(&mut self.current_span, span));
         self
     }
 
@@ -44,11 +52,18 @@ where
     where
         T: Clone + Hash + Eq,
     {
-        let mut parent_span = self.parents.pop().ok_or(SpanBuilderExitError::RootSpanExit)?;
+        let mut parent_span = self
+            .parents
+            .pop()
+            .ok_or(SpanBuilderExitError::RootSpanExit)?;
         // Add spanned instructions to parent.
         for (instr_name, &ct) in self.current_span.cts.iter() {
             // Always clones. Could be avoided with `raw_entry`, but it's not a big deal.
-            parent_span.cts.entry(instr_name.clone()).and_modify(|x| *x += ct).or_insert(ct);
+            parent_span
+                .cts
+                .entry(instr_name.clone())
+                .and_modify(|x| *x += ct)
+                .or_insert(ct);
         }
         // Move to the parent span.
         let child_span = core::mem::replace(&mut self.current_span, parent_span);
@@ -63,7 +78,9 @@ where
         if self.parents.is_empty() {
             Ok(self.current_span)
         } else {
-            Err(SpanBuilderFinishError::OpenSpan(self.current_span.name.to_string()))
+            Err(SpanBuilderFinishError::OpenSpan(
+                self.current_span.name.to_string(),
+            ))
         }
     }
 }
@@ -104,7 +121,11 @@ where
 {
     /// Create a new span with the given name.
     pub fn new(name: S) -> Self {
-        Self { name, cts: Default::default(), children: Default::default() }
+        Self {
+            name,
+            cts: Default::default(),
+            children: Default::default(),
+        }
     }
 
     /// Calculate the total number of items counted by this span and its children.

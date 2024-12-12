@@ -9,10 +9,10 @@ use zkm2_stark::{
 
 use crate::{air::Block, Address};
 
-/// A trait which contains all helper methods for building SP1 recursion machine AIRs.
-pub trait SP1RecursionAirBuilder: MachineAirBuilder + RecursionAirBuilder {}
+/// A trait which contains all helper methods for building ZKM recursion machine AIRs.
+pub trait ZKMRecursionAirBuilder: MachineAirBuilder + RecursionAirBuilder {}
 
-impl<AB: AirBuilderWithPublicValues + RecursionAirBuilder> SP1RecursionAirBuilder for AB {}
+impl<AB: AirBuilderWithPublicValues + RecursionAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionAirBuilder for AB {}
 
 pub trait RecursionAirBuilder: BaseAirBuilder {
