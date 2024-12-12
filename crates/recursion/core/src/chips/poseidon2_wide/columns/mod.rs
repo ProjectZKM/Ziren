@@ -1,7 +1,7 @@
 use std::mem::{size_of, transmute};
 
 use permutation::{PermutationNoSbox, PermutationSBox};
-use sp1_core_machine::utils::indices_arr;
+use zkm2_core_machine::utils::indices_arr;
 
 pub mod permutation;
 pub mod preprocessed;

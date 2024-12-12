@@ -192,18 +192,12 @@ fn test_incorrect_public_value() {
         fri_config,
         _phantom: PhantomData,
     };
-    let config = Val::new();
+    let config = p3_uni_stark::StarkConfig::new(pcs);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let pis = vec![
         Mersenne31::from_canonical_u64(0),
         Mersenne31::from_canonical_u64(1),
         Mersenne31::from_canonical_u64(123_123), // incorrect result
     ];
-    p3_uni_stark::prove(
-        &UniConfig(config),
-        &FibonacciAir {},
-        &mut challenger,
-        trace,
-        &pis,
-    );
+    p3_uni_stark::prove(&config, &FibonacciAir {}, &mut challenger, trace, &pis);
 }

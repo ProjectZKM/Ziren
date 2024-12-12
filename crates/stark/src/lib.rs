@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-mod air;
+pub mod air;
 mod bb31_poseidon2;
 mod chip;
 mod config;

@@ -1,8 +1,8 @@
 use std::{array, sync::Arc};
 
 use hashbrown::HashMap;
-use p3_field::{FieldAlgebra, Field, PrimeField32};
-use zkm2_stark::{air::MachineAir, MachineRecord, SP1CoreOpts, PROOF_MAX_NUM_PVS};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
+use zkm2_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
@@ -31,7 +31,7 @@ pub struct ExecutionRecord<F> {
 }
 
 impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
-    type Config = SP1CoreOpts;
+    type Config = ZKMCoreOpts;
 
     fn stats(&self) -> hashbrown::HashMap<String, usize> {
         let mut stats = HashMap::new();
@@ -40,7 +40,10 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         stats.insert("mem_var_events".to_string(), self.mem_var_events.len());
 
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
-        stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());
+        stats.insert(
+            "exp_reverse_bits_events".to_string(),
+            self.exp_reverse_bits_len_events.len(),
+        );
         stats.insert("fri_fold_events".to_string(), self.fri_fold_events.len());
 
         stats
@@ -82,7 +85,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             if i < pv_elms.len() {
                 T::from_canonical_u32(pv_elms[i].as_canonical_u32())
             } else {
-                T::zero()
+                T::ZERO
             }
         });
 

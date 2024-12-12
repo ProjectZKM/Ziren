@@ -9,10 +9,10 @@ use zkm2_stark::{
 
 use crate::{air::Block, Address};
 
-/// A trait which contains all helper methods for building SP1 recursion machine AIRs.
-pub trait SP1RecursionAirBuilder: MachineAirBuilder + RecursionAirBuilder {}
+/// A trait which contains all helper methods for building ZKM recursion machine AIRs.
+pub trait ZKMRecursionAirBuilder: MachineAirBuilder + RecursionAirBuilder {}
 
-impl<AB: AirBuilderWithPublicValues + RecursionAirBuilder> SP1RecursionAirBuilder for AB {}
+impl<AB: AirBuilderWithPublicValues + RecursionAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionAirBuilder for AB {}
 
 pub trait RecursionAirBuilder: BaseAirBuilder {
@@ -22,7 +22,7 @@ pub trait RecursionAirBuilder: BaseAirBuilder {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
         padded_value[0] = val.into();
         self.send_block(Address(addr.0.into()), Block(padded_value), mult)
     }
@@ -49,7 +49,7 @@ pub trait RecursionAirBuilder: BaseAirBuilder {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
         padded_value[0] = val.into();
         self.receive_block(Address(addr.0.into()), Block(padded_value), mult)
     }

@@ -24,6 +24,10 @@ backtrace = "0.3.71"
 tracing = { workspace = true }
 vec_map = "0.8.2"
 
+zkm2-stark = { workspace = true }
+zkm2-core-machine = { workspace = true }
+zkm2-primitives = { workspace = true }
+
 [dev-dependencies]
 p3-challenger = { workspace = true }
 p3-dft = { workspace = true }

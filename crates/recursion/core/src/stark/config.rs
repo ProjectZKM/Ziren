@@ -1,20 +1,25 @@
-use p3_baby_bear::BabyBear;
-use p3_bn254_fr::{Bn254Fr, DiffusionMatrixBN254};
+use p3_baby_bear::{BabyBear, Poseidon2ExternalLayerBabyBear};
+use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, AbstractField};
+use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use p3_fri::{
-    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs,
-    TwoAdicFriPcsProof,
+    BatchOpening,
+    CommitPhaseProofStep,
+    FriConfig,
+    FriProof,
+    QueryProof,
+    TwoAdicFriPcs,
+    //TwoAdicFriPcsProof,
 };
-use p3_merkle_tree::FieldMerkleTreeMmcs;
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
+use p3_merkle_tree::MerkleTreeMmcs;
+use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
 use zkm2_stark::{Com, StarkGenericConfig, ZeroCommitment};
 
-use super::{poseidon2::bn254_poseidon2_rc3, sp1_dev_mode};
+use super::{poseidon2::bn254_poseidon2_rc3, zkm2_dev_mode};
 
 pub const DIGEST_SIZE: usize = 1;
 
@@ -25,15 +30,15 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 /// A configuration for outer recursion.
 pub type OuterVal = BabyBear;
 pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
-pub type OuterPerm = Poseidon2<Bn254Fr, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBN254, 3, 5>;
+pub type OuterPerm = Poseidon2Bn254<3>;
 pub type OuterHash =
     MultiField32PaddingFreeSponge<OuterVal, Bn254Fr, OuterPerm, 3, 16, DIGEST_SIZE>;
 pub type OuterDigestHash = Hash<OuterVal, Bn254Fr, DIGEST_SIZE>;
 pub type OuterDigest = [Bn254Fr; DIGEST_SIZE];
 pub type OuterCompress = TruncatedPermutation<OuterPerm, 2, 1, 3>;
-pub type OuterValMmcs = FieldMerkleTreeMmcs<BabyBear, Bn254Fr, OuterHash, OuterCompress, 1>;
+pub type OuterValMmcs = MerkleTreeMmcs<BabyBear, Bn254Fr, OuterHash, OuterCompress, 1>;
 pub type OuterChallengeMmcs = ExtensionMmcs<OuterVal, OuterChallenge, OuterValMmcs>;
-pub type OuterDft = Radix2DitParallel;
+pub type OuterDft = Radix2DitParallel<OuterVal>;
 pub type OuterChallenger = MultiField32Challenger<
     OuterVal,
     Bn254Fr,
@@ -43,12 +48,12 @@ pub type OuterChallenger = MultiField32Challenger<
 >;
 pub type OuterPcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, OuterChallengeMmcs>;
 
-pub type OuterQueryProof = QueryProof<OuterChallenge, OuterChallengeMmcs>;
+pub type OuterQueryProof = QueryProof<OuterVal, OuterChallenge, OuterChallengeMmcs>;
 pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs>;
-pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal>;
+pub type OuterFriProof = FriProof<OuterVal, OuterChallenge, OuterChallengeMmcs, OuterVal>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
-pub type OuterPcsProof =
-    TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs>;
+//pub type OuterPcsProof =
+//    TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs>;
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {
@@ -57,17 +62,16 @@ pub fn outer_perm() -> OuterPerm {
     let mut round_constants = bn254_poseidon2_rc3();
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
-    let internal_round_constants =
-        round_constants.drain(internal_start..internal_end).map(|vec| vec[0]).collect::<Vec<_>>();
-    let external_round_constants = round_constants;
-    OuterPerm::new(
-        ROUNDS_F,
-        external_round_constants,
-        Poseidon2ExternalMatrixGeneral,
-        ROUNDS_P,
-        internal_round_constants,
-        DiffusionMatrixBN254,
-    )
+    let internal_round_constants = round_constants
+        .drain(internal_start..internal_end)
+        .map(|vec| vec[0])
+        .collect::<Vec<_>>();
+    let external_round_constants = ExternalLayerConstants::new(
+        round_constants[..(ROUNDS_F / 2)].to_vec(),
+        round_constants[(ROUNDS_F / 2)..].to_vec(),
+    );
+
+    OuterPerm::new(external_round_constants, internal_round_constants)
 }
 
 /// The FRI config for outer recursion.
@@ -76,7 +80,7 @@ pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress));
-    let num_queries = if sp1_dev_mode() {
+    let num_queries = if zkm2_dev_mode() {
         1
     } else {
         match std::env::var("FRI_QUERIES") {
@@ -84,7 +88,12 @@ pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
             Err(_) => 25,
         }
     };
-    FriConfig { log_blowup: 4, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriConfig {
+        log_blowup: 4,
+        num_queries,
+        proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    }
 }
 
 /// The FRI config for outer recursion.
@@ -93,7 +102,7 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress));
-    let num_queries = if sp1_dev_mode() {
+    let num_queries = if zkm2_dev_mode() {
         1
     } else {
         match std::env::var("FRI_QUERIES") {
@@ -101,7 +110,12 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
             Err(_) => 100 / log_blowup,
         }
     };
-    FriConfig { log_blowup, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriConfig {
+        log_blowup,
+        num_queries,
+        proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    }
 }
 
 #[derive(Deserialize)]
@@ -138,9 +152,9 @@ impl BabyBearPoseidon2Outer {
         let hash = OuterHash::new(perm.clone()).unwrap();
         let compress = OuterCompress::new(perm.clone());
         let val_mmcs = OuterValMmcs::new(hash, compress);
-        let dft = OuterDft {};
+        let dft = OuterDft::default();
         let fri_config = outer_fri_config();
-        let pcs = OuterPcs::new(27, dft, val_mmcs, fri_config);
+        let pcs = OuterPcs::new(dft, val_mmcs, fri_config);
         Self { pcs, perm }
     }
     pub fn new_with_log_blowup(log_blowup: usize) -> Self {
@@ -148,9 +162,9 @@ impl BabyBearPoseidon2Outer {
         let hash = OuterHash::new(perm.clone()).unwrap();
         let compress = OuterCompress::new(perm.clone());
         let val_mmcs = OuterValMmcs::new(hash, compress);
-        let dft = OuterDft {};
+        let dft = OuterDft::default();
         let fri_config = outer_fri_config_with_blowup(log_blowup);
-        let pcs = OuterPcs::new(27, dft, val_mmcs, fri_config);
+        let pcs = OuterPcs::new(dft, val_mmcs, fri_config);
         Self { pcs, perm }
     }
 }
@@ -179,7 +193,7 @@ impl StarkGenericConfig for BabyBearPoseidon2Outer {
 
 impl ZeroCommitment<BabyBearPoseidon2Outer> for OuterPcs {
     fn zero_commitment(&self) -> Com<BabyBearPoseidon2Outer> {
-        OuterDigestHash::from([Bn254Fr::zero(); DIGEST_SIZE])
+        OuterDigestHash::from([Bn254Fr::ZERO; DIGEST_SIZE])
     }
 }
 
@@ -189,5 +203,10 @@ pub fn test_fri_config() -> FriConfig<OuterChallengeMmcs> {
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress));
-    FriConfig { log_blowup: 1, num_queries: 1, proof_of_work_bits: 1, mmcs: challenge_mmcs }
+    FriConfig {
+        log_blowup: 1,
+        num_queries: 1,
+        proof_of_work_bits: 1,
+        mmcs: challenge_mmcs,
+    }
 }

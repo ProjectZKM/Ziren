@@ -1,6 +1,6 @@
 use crate::air::Block;
-use zkm2_derive::AlignedBorrow;
 use std::{iter::once, vec::IntoIter};
+use zkm2_derive::AlignedBorrow;
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]

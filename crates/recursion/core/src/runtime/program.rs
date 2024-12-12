@@ -17,7 +17,7 @@ pub struct RecursionProgram<F> {
 
 impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
     fn pc_start(&self) -> F {
-        F::zero()
+        F::ZERO
     }
 }
 
