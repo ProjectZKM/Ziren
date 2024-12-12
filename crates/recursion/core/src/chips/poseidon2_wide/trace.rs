@@ -4,10 +4,10 @@ use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
+use tracing::instrument;
 use zkm2_core_machine::utils::next_power_of_two;
 use zkm2_primitives::RC_16_30_U32;
 use zkm2_stark::air::MachineAir;
-use tracing::instrument;
 
 use crate::{
     chips::{
@@ -59,18 +59,19 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
         join(
             || {
-                values_pop.par_chunks_mut(num_columns).zip_eq(&input.poseidon2_events).for_each(
-                    |(row, &event)| {
+                values_pop
+                    .par_chunks_mut(num_columns)
+                    .zip_eq(&input.poseidon2_events)
+                    .for_each(|(row, &event)| {
                         self.populate_perm(event.input, Some(event.output), row);
-                    },
-                )
+                    });
             },
             || {
                 let mut dummy_row = vec![F::ZERO; num_columns];
                 self.populate_perm([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
-                    .for_each(|row| row.copy_from_slice(&dummy_row))
+                    .for_each(|row| row.copy_from_slice(&dummy_row));
             },
         );
 
@@ -203,7 +204,11 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
             // columns for it, and instead include it in the constraint for the x^3 part of the
             // sbox.
-            let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
+            let round = if r < NUM_EXTERNAL_ROUNDS / 2 {
+                r
+            } else {
+                r + NUM_INTERNAL_ROUNDS
+            };
             let mut add_rc = *round_state;
             for i in 0..WIDTH {
                 add_rc[i] += F::from_wrapped_u32(RC_16_30_U32[round][i]);
@@ -255,6 +260,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
             // Apply the linear layer.
             state[0] = sbox_deg_7;
+
             internal_linear_layer(&mut state);
 
             // Optimization: since we're only applying the sbox to the 0th state element, we only
@@ -283,8 +289,8 @@ mod tests {
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
-    use zkm2_stark::{air::MachineAir, inner_perm};
     use zkhash::ark_ff::UniformRand;
+    use zkm2_stark::{air::MachineAir, inner_perm};
 
     use crate::{
         chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},
@@ -304,8 +310,14 @@ mod tests {
 
         let shard = ExecutionRecord {
             poseidon2_events: vec![
-                Poseidon2Event { input: input_0, output: output_0 },
-                Poseidon2Event { input: input_1, output: output_1 },
+                Poseidon2Event {
+                    input: input_0,
+                    output: output_0,
+                },
+                Poseidon2Event {
+                    input: input_1,
+                    output: output_1,
+                },
             ],
             ..Default::default()
         };
@@ -326,8 +338,14 @@ mod tests {
 
         let shard = ExecutionRecord {
             poseidon2_events: vec![
-                Poseidon2Event { input: input_0, output: output_0 },
-                Poseidon2Event { input: input_1, output: output_1 },
+                Poseidon2Event {
+                    input: input_0,
+                    output: output_0,
+                },
+                Poseidon2Event {
+                    input: input_1,
+                    output: output_1,
+                },
             ],
             ..Default::default()
         };

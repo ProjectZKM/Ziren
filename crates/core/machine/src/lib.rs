@@ -14,11 +14,15 @@
 )]
 #![warn(unused_extern_crates)]
 
+pub mod air;
+mod alu;
+mod operations;
 pub mod utils;
 
-/// The global version for all components of SP1.
+/// The global version for all components of ZKM.
+
 ///
-/// This string should be updated whenever any step in verifying an SP1 proof changes, including
-/// core, recursion, and plonk-bn254. This string is used to download SP1 artifacts and the gnark
+/// This string should be updated whenever any step in verifying an ZKM proof changes, including
+/// core, recursion, and plonk-bn254. This string is used to download ZKM artifacts and the gnark
 /// docker image.
-pub const SP1_CIRCUIT_VERSION: &str = "v3.0.0";
+pub const ZKM_CIRCUIT_VERSION: &str = "v0.0.1";

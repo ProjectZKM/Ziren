@@ -13,19 +13,19 @@ use p3_challenger::FieldChallenger;
 use p3_maybe_rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
+use std::thread::ScopedJoinHandle;
+use thiserror::Error;
 use zkm2_stark::{
     air::InteractionScope, baby_bear_poseidon2::BabyBearPoseidon2, MachineProvingKey,
     MachineVerificationError,
 };
-use std::thread::ScopedJoinHandle;
-use thiserror::Error;
 
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_matrix::Matrix;
 
 use crate::{
-    //io::SP1Stdin,
+    //io::ZKMStdin,
     //riscv::cost::CostEstimator,
     utils::{chunk_vec, concurrency::TurnBasedSync},
 };
@@ -33,22 +33,22 @@ use crate::{
 //    events::{format_table_line, sorted_table_lines},
 //    ExecutionState,
 //};
-use zkm2_primitives::io::SP1PublicValues;
+use zkm2_primitives::io::ZKMPublicValues;
 
 //use sp1_core_executor::{
 //    subproof::NoOpSubproofVerifier, ExecutionError, ExecutionRecord, ExecutionReport, Executor,
-//    Program, SP1Context,
+//    Program, ZKMContext,
 //};
 use zkm2_stark::{
     air::{MachineAir, PublicValues},
     Com, CpuProver, DebugConstraintBuilder, InteractionBuilder, MachineProof, MachineProver,
-    MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, ZKMCoreOpts,
-    StarkGenericConfig, StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val,
-    VerifierConstraintFolder,
+    MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,
+    StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val, VerifierConstraintFolder,
+    ZKMCoreOpts,
 };
 
 #[derive(Error, Debug)]
-pub enum SP1CoreProverError {
+pub enum ZKMCoreProverError {
     //#[error("failed to execute program: {0}")]
     //ExecutionError(ExecutionError),
     #[error("io error: {0}")]
@@ -61,7 +61,7 @@ pub enum SP1CoreProverError {
 pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, RiscvAir<SC::Val>>>(
     config: SC,
     mut runtime: Executor,
-) -> Result<(MachineProof<SC>, u64), SP1CoreProverError>
+) -> Result<(MachineProof<SC>, u64), ZKMCoreProverError>
 where
     SC::Challenger: Clone,
     OpeningProof<SC>: Send + Sync,
@@ -102,11 +102,11 @@ where
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, RiscvAir<SC::Val>>>(
     program: Program,
-    stdin: &SP1Stdin,
+    stdin: &ZKMStdin,
     config: SC,
     opts: ZKMCoreOpts,
     shape_config: Option<&CoreShapeConfig<SC::Val>>,
-) -> Result<(MachineProof<SC>, Vec<u8>, u64), SP1CoreProverError>
+) -> Result<(MachineProof<SC>, Vec<u8>, u64), ZKMCoreProverError>
 where
     SC::Challenger: 'static + Clone + Send,
     <SC as StarkGenericConfig>::Val: PrimeField32,
@@ -132,11 +132,11 @@ pub fn prove_with_context<SC: StarkGenericConfig, P: MachineProver<SC, RiscvAir<
     prover: &P,
     pk: &P::DeviceProvingKey,
     program: Program,
-    stdin: &SP1Stdin,
+    stdin: &ZKMStdin,
     opts: ZKMCoreOpts,
-    context: SP1Context,
+    context: ZKMContext,
     shape_config: Option<&CoreShapeConfig<SC::Val>>,
-) -> Result<(MachineProof<SC>, Vec<u8>, u64), SP1CoreProverError>
+) -> Result<(MachineProof<SC>, Vec<u8>, u64), ZKMCoreProverError>
 where
     SC::Val: PrimeField32,
     SC::Challenger: 'static + Clone + Send,
@@ -167,7 +167,7 @@ where
         let checkpoint_generator_span = tracing::Span::current().clone();
         let (checkpoints_tx, checkpoints_rx) =
             sync_channel::<(usize, File, bool)>(opts.checkpoints_channel_capacity);
-        let checkpoint_generator_handle: ScopedJoinHandle<Result<_, SP1CoreProverError>> =
+        let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
@@ -180,14 +180,14 @@ where
                         // Execute the runtime until we reach a checkpoint.
                         let (checkpoint, done) = runtime
                             .execute_state(false)
-                            .map_err(SP1CoreProverError::ExecutionError)?;
+                            .map_err(ZKMCoreProverError::ExecutionError)?;
 
                         // Save the checkpoint to a temp file.
                         let mut checkpoint_file =
-                            tempfile::tempfile().map_err(SP1CoreProverError::IoError)?;
+                            tempfile::tempfile().map_err(ZKMCoreProverError::IoError)?;
                         checkpoint
                             .save(&mut checkpoint_file)
-                            .map_err(SP1CoreProverError::IoError)?;
+                            .map_err(ZKMCoreProverError::IoError)?;
 
                         // Send the checkpoint.
                         checkpoints_tx.send((index, checkpoint_file, done)).unwrap();
@@ -726,8 +726,8 @@ where
 /// Runs a program and returns the public values stream.
 pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
     mut program: Program,
-    inputs: SP1Stdin,
-) -> Result<SP1PublicValues, MachineVerificationError<BabyBearPoseidon2>> {
+    inputs: ZKMStdin,
+) -> Result<ZKMPublicValues, MachineVerificationError<BabyBearPoseidon2>> {
     let shape_config = CoreShapeConfig::<BabyBear>::default();
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
@@ -738,7 +738,7 @@ pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
         runtime.run().unwrap();
         runtime
     });
-    let public_values = SP1PublicValues::from(&runtime.state.public_values_stream);
+    let public_values = ZKMPublicValues::from(&runtime.state.public_values_stream);
 
     let _ = run_test_core::<P>(runtime, inputs, Some(&shape_config))?;
     Ok(public_values)
@@ -756,13 +756,13 @@ pub fn run_test<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
         runtime.run().unwrap();
         runtime
     });
-    run_test_core::<P>(runtime, SP1Stdin::new(), Some(&shape_config))
+    run_test_core::<P>(runtime, ZKMStdin::new(), Some(&shape_config))
 }
 
 #[allow(unused_variables)]
 pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
     runtime: Executor,
-    inputs: SP1Stdin,
+    inputs: ZKMStdin,
     shape_config: Option<&CoreShapeConfig<BabyBear>>,
 ) -> Result<MachineProof<BabyBearPoseidon2>, MachineVerificationError<BabyBearPoseidon2>> {
     let config = BabyBearPoseidon2::new();
@@ -776,7 +776,7 @@ pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
         Program::clone(&runtime.program),
         &inputs,
         ZKMCoreOpts::default(),
-        SP1Context::default(),
+        ZKMContext::default(),
         shape_config,
     )
     .unwrap();
@@ -789,6 +789,7 @@ pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
 
     Ok(proof)
 }
+*/
 
 #[allow(unused_variables)]
 pub fn run_test_machine_with_prover<SC, A, P: MachineProver<SC, A>>(
@@ -820,7 +821,9 @@ where
         &mut challenger.clone(),
     );
 
-    let proof = prover.prove(&pk, records, &mut challenger, ZKMCoreOpts::default()).unwrap();
+    let proof = prover
+        .prove(&pk, records, &mut challenger, ZKMCoreOpts::default())
+        .unwrap();
     prove_span.exit();
     let nb_bytes = bincode::serialize(&proof).unwrap().len();
 
@@ -830,7 +833,6 @@ where
     Ok(proof)
 }
 
-*/
 #[allow(unused_variables)]
 pub fn run_test_machine<SC, A>(
     records: Vec<A::Record>,
@@ -852,12 +854,11 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
 {
-    panic!("Unimplemented")
-    //let prover = CpuProver::new(machine);
-    //run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
+    let prover = CpuProver::new(machine);
+    run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
 }
 
-    /*
+/*
 fn trace_checkpoint<SC: StarkGenericConfig>(
     program: Program,
     file: &File,
@@ -886,7 +887,8 @@ where
         */
 
 fn reset_seek(file: &mut File) {
-    file.seek(std::io::SeekFrom::Start(0)).expect("failed to seek to start of tempfile");
+    file.seek(std::io::SeekFrom::Start(0))
+        .expect("failed to seek to start of tempfile");
 }
 
 #[cfg(debug_assertions)]

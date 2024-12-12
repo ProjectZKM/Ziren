@@ -126,13 +126,35 @@ pub enum DslIr<C: Config> {
     // Control flow.
     /// Executes a for loop with the parameters (start step value, end step value, step size, step
     /// variable, body).
-    For(Box<(Usize<C::N>, Usize<C::N>, C::N, Var<C::N>, TracedVec<DslIr<C>>)>),
+    For(
+        Box<(
+            Usize<C::N>,
+            Usize<C::N>,
+            C::N,
+            Var<C::N>,
+            TracedVec<DslIr<C>>,
+        )>,
+    ),
     /// Executes an equal conditional branch with the parameters (lhs var, rhs var, then body, else
     /// body).
-    IfEq(Box<(Var<C::N>, Var<C::N>, TracedVec<DslIr<C>>, TracedVec<DslIr<C>>)>),
+    IfEq(
+        Box<(
+            Var<C::N>,
+            Var<C::N>,
+            TracedVec<DslIr<C>>,
+            TracedVec<DslIr<C>>,
+        )>,
+    ),
     /// Executes a not equal conditional branch with the parameters (lhs var, rhs var, then body,
     /// else body).
-    IfNe(Box<(Var<C::N>, Var<C::N>, TracedVec<DslIr<C>>, TracedVec<DslIr<C>>)>),
+    IfNe(
+        Box<(
+            Var<C::N>,
+            Var<C::N>,
+            TracedVec<DslIr<C>>,
+            TracedVec<DslIr<C>>,
+        )>,
+    ),
     /// Executes an equal conditional branch with the parameters (lhs var, rhs imm, then body, else
     /// body).
     IfEqI(Box<(Var<C::N>, C::N, TracedVec<DslIr<C>>, TracedVec<DslIr<C>>)>),
@@ -205,7 +227,11 @@ pub enum DslIr<C: Config> {
     /// Compresses two baby bear element arrays using Poseidon2 (output = p2_compress(array1,
     /// array2)).
     Poseidon2CompressBabyBear(
-        Box<(Array<C, Felt<C::F>>, Array<C, Felt<C::F>>, Array<C, Felt<C::F>>)>,
+        Box<(
+            Array<C, Felt<C::F>>,
+            Array<C, Felt<C::F>>,
+            Array<C, Felt<C::F>>,
+        )>,
     ),
     /// Absorb an array of baby bear elements for a specified hash instance.
     Poseidon2AbsorbBabyBear(Var<C::N>, Array<C, Felt<C::F>>),
@@ -285,7 +311,12 @@ pub enum DslIr<C: Config> {
     // FRI specific instructions.
     /// Executes a Batch FRI loop. Input is the power of alphas, evaluations at z, and evaluations at x.
     CircuitV2BatchFRI(
-        Box<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>, Vec<Ext<C::F, C::EF>>, Vec<Felt<C::F>>)>,
+        Box<(
+            Ext<C::F, C::EF>,
+            Vec<Ext<C::F, C::EF>>,
+            Vec<Ext<C::F, C::EF>>,
+            Vec<Felt<C::F>>,
+        )>,
     ),
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).
     /// Should only be used when target is a gnark circuit.
@@ -295,7 +326,12 @@ pub enum DslIr<C: Config> {
     CircuitSelectF(Var<C::N>, Felt<C::F>, Felt<C::F>, Felt<C::F>),
     /// Select's an extension field element based on a condition. (select(cond, true_val,
     /// false_val) => output). Should only be used when target is a gnark circuit.
-    CircuitSelectE(Var<C::N>, Ext<C::F, C::EF>, Ext<C::F, C::EF>, Ext<C::F, C::EF>),
+    CircuitSelectE(
+        Var<C::N>,
+        Ext<C::F, C::EF>,
+        Ext<C::F, C::EF>,
+        Ext<C::F, C::EF>,
+    ),
     /// Converts an ext to a slice of felts. Should only be used when target is a gnark circuit.
     CircuitExt2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
     /// Converts a slice of felts to an ext. Should only be used when target is a gnark circuit.

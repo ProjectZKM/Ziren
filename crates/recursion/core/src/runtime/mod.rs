@@ -27,9 +27,9 @@ use std::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{FieldAlgebra, ExtensionField, PrimeField32};
-use p3_poseidon2::{Poseidon2};
-use p3_baby_bear::{Poseidon2ExternalLayerBabyBear};
+use p3_baby_bear::{Poseidon2BabyBear, Poseidon2ExternalLayerBabyBear};
+use p3_field::{ExtensionField, Field, FieldAlgebra, PrimeField32};
+use p3_poseidon2::Poseidon2;
 use p3_symmetric::{CryptographicPermutation, Permutation};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
@@ -123,7 +123,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// Entries for dealing with the Poseidon2 hash state.
     perm: Option<
         Poseidon2<
-            F,
+            <F as Field>::Packing,
             Poseidon2ExternalLayerBabyBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
@@ -169,7 +169,7 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
 impl<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'a, F, EF, Diffusion>
 where
     Poseidon2<
-        F,
+        <F as Field>::Packing,
         Poseidon2ExternalLayerBabyBear<16>,
         Diffusion,
         PERMUTATION_WIDTH,
@@ -179,14 +179,17 @@ where
     pub fn new(
         program: Arc<RecursionProgram<F>>,
         perm: Poseidon2<
-            F,
+            <F as Field>::Packing,
             Poseidon2ExternalLayerBabyBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
             POSEIDON2_SBOX_DEGREE,
         >,
     ) -> Self {
-        let record = ExecutionRecord::<F> { program: program.clone(), ..Default::default() };
+        let record = ExecutionRecord::<F> {
+            program: program.clone(),
+            ..Default::default()
+        };
         let memory = Memory::with_capacity(program.total_memory);
         Self {
             timestamp: 0,
@@ -264,7 +267,13 @@ where
             let next_clk = self.clk + F::from_canonical_u32(4);
             let next_pc = self.pc + F::ONE;
             match instruction {
-                Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
+                Instruction::BaseAlu(
+                    instr @ BaseAluInstr {
+                        opcode,
+                        mult,
+                        addrs,
+                    },
+                ) => {
                     self.nb_base_ops += 1;
                     let in1 = self.memory.mr(addrs.in1).val[0];
                     let in2 = self.memory.mr(addrs.in2).val[0];
@@ -293,9 +302,17 @@ where
                         },
                     };
                     self.memory.mw(addrs.out, Block::from(out), mult);
-                    self.record.base_alu_events.push(BaseAluEvent { out, in1, in2 });
+                    self.record
+                        .base_alu_events
+                        .push(BaseAluEvent { out, in1, in2 });
                 }
-                Instruction::ExtAlu(instr @ ExtAluInstr { opcode, mult, addrs }) => {
+                Instruction::ExtAlu(
+                    instr @ ExtAluInstr {
+                        opcode,
+                        mult,
+                        addrs,
+                    },
+                ) => {
                     self.nb_ext_ops += 1;
                     let in1 = self.memory.mr(addrs.in1).val;
                     let in2 = self.memory.mr(addrs.in2).val;
@@ -327,7 +344,9 @@ where
                     };
                     let out = Block::from(out_ef.as_base_slice());
                     self.memory.mw(addrs.out, out, mult);
-                    self.record.ext_alu_events.push(ExtAluEvent { out, in1, in2 });
+                    self.record
+                        .ext_alu_events
+                        .push(ExtAluEvent { out, in1, in2 });
                 }
                 Instruction::Mem(MemInstr {
                     addrs: MemIo { inner: addr },
@@ -349,20 +368,35 @@ where
                     self.record.mem_const_count += 1;
                 }
                 Instruction::Poseidon2(instr) => {
-                    let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
+                    let Poseidon2Instr {
+                        addrs: Poseidon2Io { input, output },
+                        mults,
+                    } = *instr;
                     self.nb_poseidons += 1;
                     let in_vals = std::array::from_fn(|i| self.memory.mr(input[i]).val[0]);
                     let perm_output = self.perm.as_ref().unwrap().permute(in_vals);
 
-                    perm_output.iter().zip(output).zip(mults).for_each(|((&val, addr), mult)| {
-                        self.memory.mw(addr, Block::from(val), mult);
+                    perm_output
+                        .iter()
+                        .zip(output)
+                        .zip(mults)
+                        .for_each(|((&val, addr), mult)| {
+                            self.memory.mw(addr, Block::from(val), mult);
+                        });
+                    self.record.poseidon2_events.push(Poseidon2Event {
+                        input: in_vals,
+                        output: perm_output,
                     });
-                    self.record
-                        .poseidon2_events
-                        .push(Poseidon2Event { input: in_vals, output: perm_output });
                 }
                 Instruction::Select(SelectInstr {
-                    addrs: SelectIo { bit, out1, out2, in1, in2 },
+                    addrs:
+                        SelectIo {
+                            bit,
+                            out1,
+                            out2,
+                            in1,
+                            in2,
+                        },
                     mult1,
                     mult2,
                 }) => {
@@ -397,13 +431,18 @@ where
                     let out =
                         base_val.exp_u64(reverse_bits_len(exp_val as usize, exp_bits.len()) as u64);
                     self.memory.mw(result, Block::from(out), mult);
-                    self.record.exp_reverse_bits_len_events.push(ExpReverseBitsEvent {
-                        result: out,
-                        base: base_val,
-                        exp: exp_bits,
-                    });
+                    self.record
+                        .exp_reverse_bits_len_events
+                        .push(ExpReverseBitsEvent {
+                            result: out,
+                            base: base_val,
+                            exp: exp_bits,
+                        });
                 }
-                Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
+                Instruction::HintBits(HintBitsInstr {
+                    output_addrs_mults,
+                    input_addr,
+                }) => {
                     self.nb_bit_decompositions += 1;
                     let num = self.memory.mr_mult(input_addr, F::ZERO).val[0].as_canonical_u32();
                     // Decompose the num into LE bits.
@@ -492,8 +531,12 @@ where
                     }
                 }
                 Instruction::BatchFRI(instr) => {
-                    let BatchFRIInstr { base_vec_addrs, ext_single_addrs, ext_vec_addrs, acc_mult } =
-                        *instr;
+                    let BatchFRIInstr {
+                        base_vec_addrs,
+                        ext_single_addrs,
+                        ext_vec_addrs,
+                        acc_mult,
+                    } = *instr;
 
                     let mut acc = EF::ZERO;
                     let p_at_xs = base_vec_addrs
@@ -540,10 +583,15 @@ where
                     self.record.public_values = *pv_values.as_slice().borrow();
                     self.record
                         .commit_pv_hash_events
-                        .push(CommitPublicValuesEvent { public_values: self.record.public_values });
+                        .push(CommitPublicValuesEvent {
+                            public_values: self.record.public_values,
+                        });
                 }
 
-                Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
+                Instruction::Print(PrintInstr {
+                    field_elt_type,
+                    addr,
+                }) => match field_elt_type {
                     FieldEltType::Base => {
                         self.nb_print_f += 1;
                         let f = self.memory.mr_mult(addr, F::ZERO).val[0];
@@ -599,12 +647,26 @@ where
             .program
             .instructions
             .iter()
-            .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
-        self.record.poseidon2_events.reserve(event_counts.poseidon2_wide_events);
-        self.record.mem_var_events.reserve(event_counts.mem_var_events);
-        self.record.base_alu_events.reserve(event_counts.base_alu_events);
-        self.record.ext_alu_events.reserve(event_counts.ext_alu_events);
-        self.record.exp_reverse_bits_len_events.reserve(event_counts.exp_reverse_bits_len_events);
-        self.record.select_events.reserve(event_counts.select_events);
+            .fold(RecursionAirEventCount::default(), |heights, instruction| {
+                heights + instruction
+            });
+        self.record
+            .poseidon2_events
+            .reserve(event_counts.poseidon2_wide_events);
+        self.record
+            .mem_var_events
+            .reserve(event_counts.mem_var_events);
+        self.record
+            .base_alu_events
+            .reserve(event_counts.base_alu_events);
+        self.record
+            .ext_alu_events
+            .reserve(event_counts.ext_alu_events);
+        self.record
+            .exp_reverse_bits_len_events
+            .reserve(event_counts.exp_reverse_bits_len_events);
+        self.record
+            .select_events
+            .reserve(event_counts.select_events);
     }
 }

@@ -1,8 +1,8 @@
 use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
-use p3_field::AbstractField;
-use zkm2_core_machine::utils::sp1_debug_mode;
+use p3_field::FieldAlgebra;
+use zkm2_core_machine::utils::zkm2_debug_mode;
 use zkm2_primitives::types::RecursionProgramType;
 
 use super::{
@@ -28,13 +28,19 @@ impl<T> Default for TracedVec<T> {
 impl<T> From<Vec<T>> for TracedVec<T> {
     fn from(vec: Vec<T>) -> Self {
         let len = vec.len();
-        Self { vec, traces: vec![None; len] }
+        Self {
+            vec,
+            traces: vec![None; len],
+        }
     }
 }
 
 impl<T> TracedVec<T> {
     pub const fn new() -> Self {
-        Self { vec: Vec::new(), traces: Vec::new() }
+        Self {
+            vec: Vec::new(),
+            traces: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, value: T) {
@@ -42,10 +48,10 @@ impl<T> TracedVec<T> {
         self.traces.push(None);
     }
 
-    /// Pushes a value to the vector and records a backtrace if SP1_DEBUG is enabled
+    /// Pushes a value to the vector and records a backtrace if ZKM_DEBUG is enabled
     pub fn trace_push(&mut self, value: T) {
         self.vec.push(value);
-        if sp1_debug_mode() {
+        if zkm2_debug_mode() {
             self.traces.push(Some(Backtrace::new_unresolved()));
         } else {
             self.traces.push(None);
@@ -170,7 +176,7 @@ impl<C: Config> Builder<C> {
         self.inner.get_mut().operations.extend(ops);
     }
 
-    /// Pushes an operation to the builder and records a trace if SP1_DEBUG.
+    /// Pushes an operation to the builder and records a trace if ZKM_DEBUG.
     pub fn trace_push(&mut self, op: DslIr<C>) {
         self.inner.get_mut().operations.trace_push(op);
     }
@@ -316,7 +322,12 @@ impl<C: Config> Builder<C> {
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) -> IfBuilder<C> {
-        IfBuilder { lhs: lhs.into(), rhs: rhs.into(), is_eq: true, builder: self }
+        IfBuilder {
+            lhs: lhs.into(),
+            rhs: rhs.into(),
+            is_eq: true,
+            builder: self,
+        }
     }
 
     /// Evaluate a block of operations if two expressions are not equal.
@@ -325,7 +336,12 @@ impl<C: Config> Builder<C> {
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) -> IfBuilder<C> {
-        IfBuilder { lhs: lhs.into(), rhs: rhs.into(), is_eq: false, builder: self }
+        IfBuilder {
+            lhs: lhs.into(),
+            rhs: rhs.into(),
+            is_eq: false,
+            builder: self,
+        }
     }
 
     /// Evaluate a block of operations over a range from start to end.
@@ -334,7 +350,12 @@ impl<C: Config> Builder<C> {
         start: impl Into<Usize<C::N>>,
         end: impl Into<Usize<C::N>>,
     ) -> RangeBuilder<C> {
-        RangeBuilder { start: start.into(), end: end.into(), builder: self, step_size: 1 }
+        RangeBuilder {
+            start: start.into(),
+            end: end.into(),
+            builder: self,
+            step_size: 1,
+        }
     }
 
     /// Break out of a loop.
@@ -418,7 +439,10 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn witness_var(&mut self) -> Var<C::N> {
-        assert!(!self.is_sub_builder, "Cannot create a witness var with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot create a witness var with a sub builder"
+        );
         let witness = self.uninit();
         self.push_op(DslIr::WitnessVar(witness, self.witness_var_count));
         self.witness_var_count += 1;
@@ -426,7 +450,10 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn witness_felt(&mut self) -> Felt<C::F> {
-        assert!(!self.is_sub_builder, "Cannot create a witness felt with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot create a witness felt with a sub builder"
+        );
         let witness = self.uninit();
         self.push_op(DslIr::WitnessFelt(witness, self.witness_felt_count));
         self.witness_felt_count += 1;
@@ -434,7 +461,10 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn witness_ext(&mut self) -> Ext<C::F, C::EF> {
-        assert!(!self.is_sub_builder, "Cannot create a witness ext with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot create a witness ext with a sub builder"
+        );
         let witness = self.uninit();
         self.push_op(DslIr::WitnessExt(witness, self.witness_ext_count));
         self.witness_ext_count += 1;
@@ -461,19 +491,25 @@ impl<C: Config> Builder<C> {
 
     /// Register and commits a felt as public value.  This value will be constrained when verified.
     pub fn commit_public_value(&mut self, val: Felt<C::F>) {
-        assert!(!self.is_sub_builder, "Cannot commit to a public value with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot commit to a public value with a sub builder"
+        );
         if self.nb_public_values.is_none() {
-            self.nb_public_values = Some(self.eval(C::N::zero()));
+            self.nb_public_values = Some(self.eval(C::N::ZERO));
         }
         let nb_public_values = *self.nb_public_values.as_ref().unwrap();
 
         self.push_op(DslIr::Commit(val, nb_public_values));
-        self.assign(nb_public_values, nb_public_values + C::N::one());
+        self.assign(nb_public_values, nb_public_values + C::N::ONE);
     }
 
     /// Commits an array of felts in public values.
     pub fn commit_public_values(&mut self, vals: &Array<C, Felt<C::F>>) {
-        assert!(!self.is_sub_builder, "Cannot commit to public values with a sub builder");
+        assert!(
+            !self.is_sub_builder,
+            "Cannot commit to public values with a sub builder"
+        );
         let len = vals.len();
         self.range(0, len).for_each(|i, builder| {
             let val = builder.get(vals, i);

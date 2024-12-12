@@ -278,7 +278,7 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            // Attach an extra generic AB : crate::air::SP1AirBuilder to the generics of the enum
+            // Attach an extra generic AB : crate::air::ZKMAirBuilder to the generics of the enum
             let generics = &ast.generics;
             let mut new_generics = generics.clone();
             new_generics
@@ -382,7 +382,7 @@ fn find_builder_path(attrs: &[syn::Attribute]) -> syn::Path {
             }
         }
     }
-    parse_quote!(crate::air::SP1CoreAirBuilder<F = F>)
+    parse_quote!(crate::air::ZKMCoreAirBuilder<F = F>)
 }
 
 fn find_eval_trait_bound(attrs: &[syn::Attribute]) -> Option<String> {

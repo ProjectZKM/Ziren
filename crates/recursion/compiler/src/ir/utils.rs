@@ -1,4 +1,4 @@
-use p3_field::{AbstractExtensionField, AbstractField};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use std::ops::{Add, Mul, MulAssign};
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};
@@ -56,15 +56,15 @@ impl<C: Config> Builder<C> {
     /// Exponentializes a variable to an array of bits in little endian.
     pub fn exp_bits<V>(&mut self, x: V, power_bits: &Array<C, Var<C::N>>) -> V
     where
-        V::Expression: AbstractField,
+        V::Expression: FieldAlgebra,
         V: Copy + Mul<Output = V::Expression> + Variable<C>,
     {
-        let result = self.eval(V::Expression::one());
+        let result = self.eval(V::Expression::ONE);
         let power_f: V = self.eval(x);
         self.range(0, power_bits.len()).for_each(|i, builder| {
             let bit = builder.get(power_bits, i);
             builder
-                .if_eq(bit, C::N::one())
+                .if_eq(bit, C::N::ONE)
                 .then(|builder| builder.assign(result, result * power_f));
             builder.assign(power_f, power_f * power_f);
         });
@@ -73,7 +73,7 @@ impl<C: Config> Builder<C> {
 
     /// Exponentiates a felt to a list of bits in little endian.
     pub fn exp_f_bits(&mut self, x: Felt<C::F>, power_bits: Vec<Var<C::N>>) -> Felt<C::F> {
-        let mut result = self.eval(C::F::one());
+        let mut result = self.eval(C::F::ONE);
         let mut power_f: Felt<_> = self.eval(x);
         for i in 0..power_bits.len() {
             let bit = power_bits[i];
@@ -90,7 +90,7 @@ impl<C: Config> Builder<C> {
         x: Ext<C::F, C::EF>,
         power_bits: Vec<Var<C::N>>,
     ) -> Ext<C::F, C::EF> {
-        let mut result = self.eval(SymbolicExt::from_f(C::EF::one()));
+        let mut result = self.eval(SymbolicExt::from_f(C::EF::ONE));
         let mut power_f: Ext<_, _> = self.eval(x);
         for i in 0..power_bits.len() {
             let bit = power_bits[i];
@@ -111,19 +111,19 @@ impl<C: Config> Builder<C> {
         bit_len: impl Into<Usize<C::N>>,
     ) -> V
     where
-        V::Expression: AbstractField,
+        V::Expression: FieldAlgebra,
         V: Copy + Mul<Output = V::Expression> + Variable<C>,
     {
-        let result = self.eval(V::Expression::one());
+        let result = self.eval(V::Expression::ONE);
         let power_f: V = self.eval(x);
         let bit_len = bit_len.into().materialize(self);
-        let bit_len_plus_one: Var<_> = self.eval(bit_len + C::N::one());
+        let bit_len_plus_one: Var<_> = self.eval(bit_len + C::N::ONE);
 
         self.range(1, bit_len_plus_one).for_each(|i, builder| {
             let index: Var<C::N> = builder.eval(bit_len - i);
             let bit = builder.get(power_bits, index);
             builder
-                .if_eq(bit, C::N::one())
+                .if_eq(bit, C::N::ONE)
                 .then(|builder| builder.assign(result, result * power_f));
             builder.assign(power_f, power_f * power_f);
         });
@@ -157,7 +157,11 @@ impl<C: Config> Builder<C> {
 
         // Call the DslIR instruction ExpReverseBitsLen, which modifies the memory pointed to by
         // `x_copy_arr_ptr`.
-        self.push_op(DslIr::ExpReverseBitsLen(x_copy_arr_ptr, ptr.address, bit_len_var));
+        self.push_op(DslIr::ExpReverseBitsLen(
+            x_copy_arr_ptr,
+            ptr.address,
+            bit_len_var,
+        ));
 
         // Return the value stored at the address pointed to by `x_copy_arr_ptr`.
         self.get(&x_copy_arr, 0)
@@ -210,14 +214,15 @@ impl<C: Config> Builder<C> {
         V: Variable<C> + Copy + Add<Output = V::Expression>,
     {
         let result: V = self.eval(base);
-        self.range(0, shift).for_each(|_, builder| builder.assign(result, result + result));
+        self.range(0, shift)
+            .for_each(|_, builder| builder.assign(result, result + result));
         result
     }
 
     /// Creates an ext from a slice of felts.
     pub fn ext_from_base_slice(&mut self, arr: &[Felt<C::F>]) -> Ext<C::F, C::EF> {
-        assert!(arr.len() <= <C::EF as AbstractExtensionField::<C::F>>::D);
-        let mut res = SymbolicExt::from_f(C::EF::zero());
+        assert!(arr.len() <= <C::EF as FieldExtensionAlgebra::<C::F>>::D);
+        let mut res = SymbolicExt::from_f(C::EF::ZERO);
         for i in 0..arr.len() {
             res += arr[i] * SymbolicExt::from_f(C::EF::monomial(i));
         }
@@ -237,7 +242,7 @@ impl<C: Config> Builder<C> {
         self.push_op(DslIr::HintExt2Felt(result.clone(), value));
 
         // Verify that the decomposed extension element is correct.
-        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::zero());
+        let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
         for i in 0..4 {
             let felt = self.get(&result, i);
             let monomial: Ext<C::F, C::EF> = self.constant(C::EF::monomial(i));
