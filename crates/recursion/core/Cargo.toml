@@ -34,9 +34,12 @@ backtrace = { version = "0.3.71", features = ["serde"] }
 static_assertions = "1.1.0"
 thiserror = "1.0.60"
 vec_map = "0.8.2"
+p3-monty-31 = { workspace = true }
 
 zkm2-derive = { workspace = true }
 zkm2-stark = { workspace = true }
+zkm2-core-machine = { workspace = true }
+zkm2-primitives = { workspace = true }
 
 [dev-dependencies]
 rand = "0.8.5"

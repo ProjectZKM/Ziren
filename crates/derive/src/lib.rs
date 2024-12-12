@@ -93,7 +93,7 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(
     MachineAir,
     attributes(
-        sp1_core_path,
+        zkm2_core_path,
         execution_record_path,
         program_path,
         builder_path,
@@ -151,61 +151,61 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
             let name_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::name(x)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::name(x)
                 }
             });
 
             let preprocessed_width_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::preprocessed_width(x)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::preprocessed_width(x)
                 }
             });
 
             let generate_preprocessed_trace_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::generate_preprocessed_trace(x, program)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::generate_preprocessed_trace(x, program)
                 }
             });
 
             let generate_trace_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::generate_trace(x, input, output)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::generate_trace(x, input, output)
                 }
             });
 
             let generate_dependencies_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::generate_dependencies(x, input, output)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::generate_dependencies(x, input, output)
                 }
             });
 
             let included_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::included(x, shard)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::included(x, shard)
                 }
             });
 
             let commit_scope_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::commit_scope(x)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::commit_scope(x)
                 }
             });
 
             let local_only_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as sp1_stark::air::MachineAir<F>>::local_only(x)
+                    #name::#variant_name(x) => <#field_ty as zkm2_stark::air::MachineAir<F>>::local_only(x)
                 }
             });
 
             let machine_air = quote! {
-                impl #impl_generics sp1_stark::air::MachineAir<F> for #name #ty_generics #where_clause {
+                impl #impl_generics zkm2_stark::air::MachineAir<F> for #name #ty_generics #where_clause {
                     type Record = #execution_record_path;
 
                     type Program = #program_path;
@@ -278,7 +278,7 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            // Attach an extra generic AB : crate::air::SP1AirBuilder to the generics of the enum
+            // Attach an extra generic AB : crate::air::ZKMAirBuilder to the generics of the enum
             let generics = &ast.generics;
             let mut new_generics = generics.clone();
             new_generics
@@ -352,7 +352,7 @@ fn find_execution_record_path(attrs: &[syn::Attribute]) -> syn::Path {
             }
         }
     }
-    parse_quote!(sp1_core_executor::ExecutionRecord)
+    parse_quote!(zkm2_core_executor::ExecutionRecord)
 }
 
 fn find_program_path(attrs: &[syn::Attribute]) -> syn::Path {
@@ -367,7 +367,7 @@ fn find_program_path(attrs: &[syn::Attribute]) -> syn::Path {
             }
         }
     }
-    parse_quote!(sp1_core_executor::Program)
+    parse_quote!(zkm2_core_executor::Program)
 }
 
 fn find_builder_path(attrs: &[syn::Attribute]) -> syn::Path {
@@ -382,7 +382,7 @@ fn find_builder_path(attrs: &[syn::Attribute]) -> syn::Path {
             }
         }
     }
-    parse_quote!(crate::air::SP1CoreAirBuilder<F = F>)
+    parse_quote!(crate::air::ZKMCoreAirBuilder<F = F>)
 }
 
 fn find_eval_trait_bound(attrs: &[syn::Attribute]) -> Option<String> {

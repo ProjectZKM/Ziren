@@ -3,12 +3,12 @@ use itertools::Itertools;
 use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use sp1_core_machine::utils::pad_rows_fixed;
+use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
+use zkm2_core_machine::utils::pad_rows_fixed;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::MachineAir;
-use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 
-use crate::{builder::SP1RecursionAirBuilder, *};
+use crate::{builder::ZKMRecursionAirBuilder, *};
 
 use super::MemoryAccessCols;
 
@@ -59,21 +59,32 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .instructions
             .iter()
             .filter_map(|instruction| match instruction {
-                Instruction::Mem(MemInstr { addrs, vals, mult, kind }) => {
+                Instruction::Mem(MemInstr {
+                    addrs,
+                    vals,
+                    mult,
+                    kind,
+                }) => {
                     let mult = mult.to_owned();
                     let mult = match kind {
                         MemAccessKind::Read => -mult,
                         MemAccessKind::Write => mult,
                     };
 
-                    Some((vals.inner, MemoryAccessCols { addr: addrs.inner, mult }))
+                    Some((
+                        vals.inner,
+                        MemoryAccessCols {
+                            addr: addrs.inner,
+                            mult,
+                        },
+                    ))
                 }
                 _ => None,
             })
             .chunks(NUM_CONST_MEM_ENTRIES_PER_ROW)
             .into_iter()
             .map(|row_vs_as| {
-                let mut row = [F::zero(); NUM_MEM_PREPROCESSED_INIT_COLS];
+                let mut row = [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS];
                 let cols: &mut MemoryPreprocessedCols<_> = row.as_mut_slice().borrow_mut();
                 for (cell, access) in zip(&mut cols.values_and_accesses, row_vs_as) {
                     *cell = access;
@@ -85,7 +96,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         // Pad the rows to the next power of two.
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); NUM_MEM_PREPROCESSED_INIT_COLS],
+            || [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS],
             program.fixed_log2_rows(self),
         );
 
@@ -109,14 +120,22 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .checked_sub(1)
             .map(|x| x / NUM_CONST_MEM_ENTRIES_PER_ROW + 1)
             .unwrap_or_default();
-        let mut rows =
-            std::iter::repeat([F::zero(); NUM_MEM_INIT_COLS]).take(num_rows).collect::<Vec<_>>();
+        let mut rows = std::iter::repeat([F::ZERO; NUM_MEM_INIT_COLS])
+            .take(num_rows)
+            .collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(&mut rows, || [F::zero(); NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_MEM_INIT_COLS],
+            input.fixed_log2_rows(self),
+        );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS)
+        RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_MEM_INIT_COLS,
+        )
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -130,7 +149,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
 impl<AB> Air<AB> for MemoryChip<AB::F>
 where
-    AB: SP1RecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let prep = builder.preprocessed();
@@ -148,12 +167,12 @@ mod tests {
     use std::sync::Arc;
 
     use machine::{tests::run_recursion_test_machines, RecursionAir};
-    use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
-    use p3_field::AbstractField;
+    use p3_baby_bear::{BabyBear, Poseidon2InternalLayerBabyBear};
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::stark::BabyBearPoseidon2Outer;
-    use sp1_core_machine::utils::run_test_machine;
+    use zkm2_core_machine::utils::run_test_machine;
     use zkm2_stark::{BabyBearPoseidon2Inner, StarkGenericConfig};
 
     use super::*;
@@ -167,7 +186,7 @@ mod tests {
 
     pub fn prove_program(program: RecursionProgram<F>) {
         let program = Arc::new(program);
-        let mut runtime = Runtime::<F, EF, DiffusionMatrixBabyBear>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
             program.clone(),
             BabyBearPoseidon2Inner::new().perm,
         );
@@ -186,8 +205,12 @@ mod tests {
     pub fn generate_trace() {
         let shard = ExecutionRecord::<BabyBear> {
             mem_var_events: vec![
-                MemEvent { inner: BabyBear::one().into() },
-                MemEvent { inner: BabyBear::one().into() },
+                MemEvent {
+                    inner: BabyBear::ONE.into(),
+                },
+                MemEvent {
+                    inner: BabyBear::ONE.into(),
+                },
             ],
             ..Default::default()
         };

@@ -5,12 +5,12 @@ use sha2::{Digest, Sha256};
 
 /// Public values for the prover.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SP1PublicValues {
+pub struct ZKMPublicValues {
     buffer: Buffer,
 }
 
-impl SP1PublicValues {
-    /// Create a new `SP1PublicValues`.
+impl ZKMPublicValues {
+    /// Create a new `ZKMPublicValues`.
     pub const fn new() -> Self {
         Self {
             buffer: Buffer::new(),
@@ -21,7 +21,7 @@ impl SP1PublicValues {
         format!("0x{}", hex::encode(self.buffer.data.clone()))
     }
 
-    /// Create a `SP1PublicValues` from a slice of bytes.
+    /// Create a `ZKMPublicValues` from a slice of bytes.
     pub fn from(data: &[u8]) -> Self {
         Self {
             buffer: Buffer::from(data),
@@ -36,7 +36,7 @@ impl SP1PublicValues {
         self.buffer.data.clone()
     }
 
-    /// Read a value from the buffer.    
+    /// Read a value from the buffer.
     pub fn read<T: Serialize + DeserializeOwned>(&mut self) -> T {
         self.buffer.read()
     }
@@ -84,7 +84,7 @@ impl SP1PublicValues {
     }
 }
 
-impl AsRef<[u8]> for SP1PublicValues {
+impl AsRef<[u8]> for ZKMPublicValues {
     fn as_ref(&self) -> &[u8] {
         &self.buffer.data
     }
@@ -99,7 +99,7 @@ mod tests {
         let test_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let test_bytes = hex::decode(test_hex).unwrap();
 
-        let mut public_values = SP1PublicValues::new();
+        let mut public_values = ZKMPublicValues::new();
         public_values.write_slice(&test_bytes);
         let hash = public_values.hash_bn254();
 

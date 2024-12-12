@@ -11,13 +11,13 @@ use super::{
     RangeCheckOpcode,
 };
 
-/// A trait which contains all helper methods for building SP1 recursion machine AIRs.
-pub trait SP1RecursionAirBuilder:
+/// A trait which contains all helper methods for building ZKM recursion machine AIRs.
+pub trait ZKMRecursionAirBuilder:
     MachineAirBuilder + RecursionMemoryAirBuilder + RecursionInteractionAirBuilder
 {
 }
 
-impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder> SP1RecursionAirBuilder for AB {}
+impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionMemoryAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionInteractionAirBuilder for AB {}
 
@@ -78,12 +78,12 @@ pub trait RecursionMemoryAirBuilder: RecursionInteractionAirBuilder {
         let prev_values = once(prev_timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.prev_value().clone().into()))
-            .chain(repeat(Self::Expr::zero()).take(3))
+            .chain(repeat(Self::Expr::ZERO).take(3))
             .collect();
         let current_values = once(timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.value().clone().into()))
-            .chain(repeat(Self::Expr::zero()).take(3))
+            .chain(repeat(Self::Expr::ZERO).take(3))
             .collect();
 
         self.receive(
@@ -105,7 +105,7 @@ pub trait RecursionMemoryAirBuilder: RecursionInteractionAirBuilder {
     ) {
         // We subtract one since a diff of zero is not valid.
         let diff_minus_one: Self::Expr =
-            timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::one();
+            timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::ONE;
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_12bit_limb * 2^16.
@@ -200,7 +200,11 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.send(
-            AirInteraction::new(program_interaction_vals, is_real.into(), InteractionKind::Program),
+            AirInteraction::new(
+                program_interaction_vals,
+                is_real.into(),
+                InteractionKind::Program,
+            ),
             InteractionScope::Global,
         );
     }
@@ -217,7 +221,11 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.receive(
-            AirInteraction::new(program_interaction_vals, is_real.into(), InteractionKind::Program),
+            AirInteraction::new(
+                program_interaction_vals,
+                is_real.into(),
+                InteractionKind::Program,
+            ),
             InteractionScope::Global,
         );
     }

@@ -46,9 +46,9 @@ pub fn inner_perm() -> InnerPerm {
     poseidon2_init()
 }
 
-/// The FRI config for sp1 proofs.
+/// The FRI config for zkm2 proofs.
 #[must_use]
-pub fn sp1_fri_config() -> FriConfig<InnerChallengeMmcs> {
+pub fn zkm2_fri_config() -> FriConfig<InnerChallengeMmcs> {
     let perm = inner_perm();
     let hash = InnerHash::new(perm.clone());
     let compress = InnerCompress::new(perm.clone());
@@ -199,7 +199,7 @@ pub mod baby_bear_poseidon2 {
             .collect::<Vec<_>>();
         let external_round_constants = ExternalLayerConstants::new(
             round_constants[..ROUNDS_F / 2].to_vec(),
-            round_constants[ROUNDS_F / 2..].to_vec(),
+            round_constants[ROUNDS_F / 2..ROUNDS_F].to_vec(),
         );
         Perm::new(external_round_constants, internal_round_constants)
     }

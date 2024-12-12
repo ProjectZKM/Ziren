@@ -5,14 +5,14 @@ use p3_challenger::DuplexChallenger;
 use p3_field::PrimeField32;
 use p3_symmetric::CryptographicPermutation;
 use serde::{Deserialize, Serialize};
-use sp1_core_machine::utils::indices_arr;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
 use static_assertions::const_assert_eq;
 use std::{
     borrow::BorrowMut,
     mem::{size_of, transmute, MaybeUninit},
 };
+use zkm2_core_machine::utils::indices_arr;
+use zkm2_derive::AlignedBorrow;
+use zkm2_stark::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
@@ -33,7 +33,7 @@ pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_c
 pub const NUM_PV_ELMS_TO_HASH: usize = RECURSION_PUBLIC_VALUES_COL_MAP.digest[0];
 
 // Recursive proof has more public values than core proof, so the max number constant defined in
-// sp1_core should be set to `RECURSIVE_PROOF_NUM_PV_ELTS`.
+// zkm2_core should be set to `RECURSIVE_PROOF_NUM_PV_ELTS`.
 const_assert_eq!(RECURSIVE_PROOF_NUM_PV_ELTS, PROOF_MAX_NUM_PVS);
 
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
@@ -125,8 +125,8 @@ pub struct RecursionPublicValues<T> {
     /// End state of reconstruct_deferred_digest.
     pub end_reconstruct_deferred_digest: [T; POSEIDON_NUM_WORDS],
 
-    /// The commitment to the sp1 program being proven.
-    pub sp1_vk_digest: [T; DIGEST_SIZE],
+    /// The commitment to the zkm2 program being proven.
+    pub zkm2_vk_digest: [T; DIGEST_SIZE],
 
     /// The root of the vk merkle tree.
     pub vk_root: [T; DIGEST_SIZE],
