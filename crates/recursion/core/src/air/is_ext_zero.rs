@@ -8,7 +8,7 @@ use crate::air::Block;
 use p3_air::AirBuilder;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    FieldAlgebra, Field,
+    Field, FieldAlgebra,
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{BinomialExtension, ZKMAirBuilder};
@@ -85,7 +85,10 @@ impl<F: Field> IsExtZeroOperation<F> {
 
         // If the result is 1, then the input is 0.
         for x in a {
-            builder.when(is_real.clone()).when(cols.result).assert_zero(x.clone());
+            builder
+                .when(is_real.clone())
+                .when(cols.result)
+                .assert_zero(x.clone());
         }
     }
 }

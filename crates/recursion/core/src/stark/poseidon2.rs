@@ -18,7 +18,9 @@ fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254Fr {
     let value = FFBn254Fr::from_repr(res);
 
     if value.is_some().into() {
-        Bn254Fr { value: value.unwrap() }
+        Bn254Fr {
+            value: value.unwrap(),
+        }
     } else {
         panic!("Invalid field element")
     }
@@ -27,7 +29,12 @@ fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254Fr {
 pub fn bn254_poseidon2_rc3() -> Vec<[Bn254Fr; 3]> {
     RC3.iter()
         .map(|vec| {
-            vec.iter().cloned().map(bn254_from_ark_ff).collect::<Vec<_>>().try_into().unwrap()
+            vec.iter()
+                .cloned()
+                .map(bn254_from_ark_ff)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap()
         })
         .collect()
 }
@@ -35,8 +42,13 @@ pub fn bn254_poseidon2_rc3() -> Vec<[Bn254Fr; 3]> {
 pub fn bn254_poseidon2_rc4() -> Vec<[Bn254Fr; 4]> {
     RC3.iter()
         .map(|vec| {
-            let result: [Bn254Fr; 3] =
-                vec.iter().cloned().map(bn254_from_ark_ff).collect::<Vec<_>>().try_into().unwrap();
+            let result: [Bn254Fr; 3] = vec
+                .iter()
+                .cloned()
+                .map(bn254_from_ark_ff)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
             [result[0], result[1], result[2], result[2]]
         })
         .collect()

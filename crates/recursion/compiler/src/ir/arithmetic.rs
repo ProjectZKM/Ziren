@@ -1,6 +1,6 @@
 use std::{cell::UnsafeCell, mem::ManuallyDrop};
 
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 
 use crate::ir::DslIr;
 

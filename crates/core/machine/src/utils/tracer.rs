@@ -19,5 +19,8 @@ pub fn setup_tracer() {
     } else if tracer_config == "debug" {
         env_filter = env_filter.add_directive("zkm2_core=debug".parse().unwrap());
     }
-    Registry::default().with(env_filter).with(ForestLayer::default()).init();
+    Registry::default()
+        .with(env_filter)
+        .with(ForestLayer::default())
+        .init();
 }

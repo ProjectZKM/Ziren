@@ -1,4 +1,4 @@
-//! sp1-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
+//! zkm2-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;
@@ -1118,8 +1118,8 @@ pub fn poseidon2_init() -> Poseidon2BabyBear<16> {
         .collect::<Vec<_>>();
 
     let external_round_constants = ExternalLayerConstants::new(
-        round_constants[..ROUNDS_F/2].to_vec(),
-        round_constants[..ROUNDS_F/2].to_vec(),
+        round_constants[..ROUNDS_F / 2].to_vec(),
+        round_constants[ROUNDS_F / 2..ROUNDS_F].to_vec(),
     );
     Poseidon2::new(external_round_constants, internal_round_constants)
 }
@@ -1130,28 +1130,14 @@ pub fn poseidon2_hash(input: Vec<BabyBear>) -> [BabyBear; 8] {
     POSEIDON2_HASHER.hash_iter(input)
 }
 
-pub fn poseidon2_hasher() -> PaddingFreeSponge<
-    Poseidon2BabyBear<16>,
-    16,
-    8,
-    8,
-> {
+pub fn poseidon2_hasher() -> PaddingFreeSponge<Poseidon2BabyBear<16>, 16, 8, 8> {
     let hasher = poseidon2_init();
-    PaddingFreeSponge::<
-        Poseidon2BabyBear<16>,
-        16,
-        8,
-        8,
-    >::new(hasher)
+    PaddingFreeSponge::<Poseidon2BabyBear<16>, 16, 8, 8>::new(hasher)
 }
 
 lazy_static! {
-    pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<
-        Poseidon2BabyBear<16>,
-        16,
-        8,
-        8,
-    > = poseidon2_hasher();
+    pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<Poseidon2BabyBear<16>, 16, 8, 8> =
+        poseidon2_hasher();
 }
 
 /// Append a single deferred proof to a hash chain of deferred proofs.
