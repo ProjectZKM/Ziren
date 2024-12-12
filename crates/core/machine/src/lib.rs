@@ -14,7 +14,11 @@
 )]
 #![warn(unused_extern_crates)]
 
+pub mod air;
+mod alu;
+mod operations;
 pub mod utils;
+
 
 /// The global version for all components of SP1.
 ///
