@@ -268,6 +268,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3ac9f8b63eca6fd385229b3675f6cc0dc5c8a5c8a54a59d4f52ffd670d87b0c"
 
 [[package]]
+name = "bytemuck"
+version = "1.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b37c88a63ffd85d15b406896cc343916d7cf57838a847b3a6f2ca5d39a5695a"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -514,6 +520,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "downcast-rs"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -532,6 +544,12 @@ name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
+
+[[package]]
+name = "elf"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
 
 [[package]]
 name = "elliptic-curve"
@@ -566,6 +584,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
+name = "enum-map"
+version = "2.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
+dependencies = [
+ "enum-map-derive",
+ "serde",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.90",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -579,6 +618,16 @@ checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "eyre"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cd915d99f24784cdc19fd37ef22b97e3ff0ae756c7e492e9fbfe897d61e2aec"
+dependencies = [
+ "indenter",
+ "once_cell",
 ]
 
 [[package]]
@@ -842,6 +891,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indenter"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce23b50ad8242c51a442f3ff322d56b02f08852c77e4c0b4d3fd684abc89c683"
+
+[[package]]
 name = "indexmap"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -991,6 +1046,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nohash-hasher"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
+
+[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1106,6 +1167,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_enum"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f646caf906c20226733ed5b1374287eb97e3c2a5c227ce668c1f2ce20ae57c9"
+dependencies = [
+ "num_enum_derive",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcbff9bc912032c62bf65ef1d5aea88983b420f4f839db1e9b0c281a25c9c799"
+dependencies = [
+ "proc-macro-crate 1.3.1",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "nums"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1159,7 +1241,7 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1168,7 +1250,7 @@ dependencies = [
 [[package]]
 name = "p3-baby-bear"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -1182,7 +1264,7 @@ dependencies = [
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "ff 0.13.0",
  "halo2curves",
@@ -1197,7 +1279,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -1210,7 +1292,7 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1228,7 +1310,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1242,7 +1324,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1255,7 +1337,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1272,7 +1354,7 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1291,7 +1373,7 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1302,7 +1384,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1314,7 +1396,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1327,7 +1409,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1342,7 +1424,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "rayon",
 ]
@@ -1350,7 +1432,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-dft",
@@ -1364,7 +1446,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
@@ -1381,7 +1463,7 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1400,7 +1482,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1421,7 +1503,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "gcd",
  "p3-field",
@@ -1434,7 +1516,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1444,7 +1526,7 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
@@ -1462,7 +1544,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/Plonky3#347db6949036f45d2f7320cddfa007bf5a6bc064"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "serde",
 ]
@@ -1503,7 +1585,7 @@ version = "3.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d830939c76d294956402033aee57a6da7b438f2294eb94864c37b0569053a42c"
 dependencies = [
- "proc-macro-crate",
+ "proc-macro-crate 3.2.0",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -1632,11 +1714,21 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
+dependencies = [
+ "once_cell",
+ "toml_edit 0.19.15",
+]
+
+[[package]]
+name = "proc-macro-crate"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecf48c7ca261d60b74ab1a7b20da18bede46776b2e55535cb958eb595c5fa7b"
 dependencies = [
- "toml_edit",
+ "toml_edit 0.22.22",
 ]
 
 [[package]]
@@ -1777,6 +1869,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rrs-succinct"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3372685893a9f67d18e98e792d690017287fd17379a83d798d958e517d380fa9"
+dependencies = [
+ "downcast-rs",
+ "num_enum",
+ "paste",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1843,7 +1946,7 @@ version = "2.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6630024bf739e2179b91fb424b28898baf819414262c5d376677dbff1fe7ebf"
 dependencies = [
- "proc-macro-crate",
+ "proc-macro-crate 3.2.0",
  "proc-macro2",
  "quote",
  "syn 2.0.90",
@@ -2005,6 +2108,9 @@ name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+dependencies = [
+ "strum_macros",
+]
 
 [[package]]
 name = "strum_macros"
@@ -2138,13 +2244,24 @@ checksum = "0dd7358ecb8fc2f8d014bf86f6f638ce72ba252a2c3a2572f2a795f1d23efb41"
 
 [[package]]
 name = "toml_edit"
+version = "0.19.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
+dependencies = [
+ "indexmap",
+ "toml_datetime",
+ "winnow 0.5.40",
+]
+
+[[package]]
+name = "toml_edit"
 version = "0.22.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ae48d6208a266e853d946088ed816055e556cc6028c5e8e2b84d9fa5dd7c7f5"
 dependencies = [
  "indexmap",
  "toml_datetime",
- "winnow",
+ "winnow 0.6.20",
 ]
 
 [[package]]
@@ -2264,6 +2381,9 @@ name = "vec_map"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "version_check"
@@ -2495,6 +2615,15 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
+version = "0.5.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "winnow"
 version = "0.6.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
@@ -2580,6 +2709,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm2-core-executor"
+version = "0.0.1"
+dependencies = [
+ "bincode",
+ "bytemuck",
+ "elf",
+ "enum-map",
+ "eyre",
+ "hashbrown 0.14.5",
+ "hex",
+ "itertools 0.13.0",
+ "log",
+ "nohash-hasher",
+ "num",
+ "p3-field",
+ "p3-maybe-rayon",
+ "rand",
+ "rrs-succinct",
+ "serde",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "tiny-keccak",
+ "tracing",
+ "typenum",
+ "vec_map",
+ "zkm2-primitives",
+ "zkm2-stark",
+]
+
+[[package]]
 name = "zkm2-core-machine"
 version = "0.0.1"
 dependencies = [
@@ -2620,6 +2780,7 @@ dependencies = [
  "tracing-subscriber",
  "typenum",
  "web-time",
+ "zkm2-core-executor",
  "zkm2-derive",
  "zkm2-primitives",
  "zkm2-stark",

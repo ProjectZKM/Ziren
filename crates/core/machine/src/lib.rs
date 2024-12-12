@@ -14,9 +14,13 @@
 )]
 #![warn(unused_extern_crates)]
 
+pub mod air;
+mod alu;
+mod operations;
 pub mod utils;
 
 /// The global version for all components of ZKM.
+
 ///
 /// This string should be updated whenever any step in verifying an ZKM proof changes, including
 /// core, recursion, and plonk-bn254. This string is used to download ZKM artifacts and the gnark
