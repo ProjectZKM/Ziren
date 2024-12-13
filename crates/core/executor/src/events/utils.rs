@@ -12,7 +12,6 @@ pub(crate) fn create_random_lookup_ids() -> [LookupId; 6] {
     std::array::from_fn(|_| LookupId(rand::random()))
 }
 
-/*
 /// Returns a tuple containing everything needed to to correctly display a table of counts
 /// (e.g. `opcode_counts`):
 ///
@@ -32,10 +31,15 @@ where
     // Sort table by count (descending), then the name order (ascending).
     entries.sort_unstable_by(|a, b| a.1.cmp(b.1).reverse().then_with(|| a.0.cmp(&b.0)));
     // Convert counts to `String`s to prepare them for printing and to measure their width.
-    let mut entries =
-        entries.into_iter().map(|(label, ct)| (label.to_string().to_lowercase(), ct)).peekable();
+    let mut entries = entries
+        .into_iter()
+        .map(|(label, ct)| (label.to_string().to_lowercase(), ct))
+        .peekable();
     // Calculate width for padding the counts.
-    let width = entries.peek().map(|(_, b)| b.to_string().len()).unwrap_or_default();
+    let width = entries
+        .peek()
+        .map(|(_, b)| b.to_string().len())
+        .unwrap_or_default();
 
     (width, entries)
 }
@@ -74,4 +78,3 @@ where
         .filter(move |(_, count)| **count != 0)
         .map(move |(label, count)| format!("  {}", format_table_line(&width, &label, count)))
 }
-*/

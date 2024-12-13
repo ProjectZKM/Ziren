@@ -29,16 +29,12 @@ use crate::{
     //riscv::cost::CostEstimator,
     utils::{chunk_vec, concurrency::TurnBasedSync},
 };
-//use sp1_core_executor::{
-//    events::{format_table_line, sorted_table_lines},
-//    ExecutionState,
-//};
+use zkm2_core_executor::{
+    events::{format_table_line, sorted_table_lines},
+    ExecutionState,
+};
 use zkm2_primitives::io::ZKMPublicValues;
 
-//use sp1_core_executor::{
-//    subproof::NoOpSubproofVerifier, ExecutionError, ExecutionRecord, ExecutionReport, Executor,
-//    Program, ZKMContext,
-//};
 use zkm2_stark::{
     air::{MachineAir, PublicValues},
     Com, CpuProver, DebugConstraintBuilder, InteractionBuilder, MachineProof, MachineProver,
@@ -923,7 +919,6 @@ where
     p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
 }
 
-/*
 #[cfg(debug_assertions)]
 #[cfg(not(doctest))]
 pub fn uni_stark_verify<SC, A>(
@@ -931,14 +926,15 @@ pub fn uni_stark_verify<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<SC as p3_uni_stark::StarkGenericConfig>>>
+) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
 where
     SC: StarkGenericConfig,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
         + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![]).unwrap();
+    Ok(())
 }
 
 #[cfg(not(debug_assertions))]
@@ -947,15 +943,15 @@ pub fn uni_stark_verify<SC, A>(
     air: &A,
     challenger: &mut SC::Challenger,
     proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<SC>>>
+) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
 where
     SC: StarkGenericConfig,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![]).unwrap();
+    Ok(())
 }
-*/
 
 use p3_air::Air;
 use p3_matrix::dense::RowMajorMatrix;

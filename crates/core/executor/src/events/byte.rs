@@ -94,7 +94,10 @@ pub trait ByteRecord {
     fn add_u8_range_checks_field<F: PrimeField32>(&mut self, shard: u32, field_values: &[F]) {
         self.add_u8_range_checks(
             shard,
-            &field_values.iter().map(|x| x.as_canonical_u32() as u8).collect::<Vec<_>>(),
+            &field_values
+                .iter()
+                .map(|x| x.as_canonical_u32() as u8)
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -120,7 +123,14 @@ impl ByteLookupEvent {
     /// Creates a new `ByteLookupEvent`.
     #[must_use]
     pub fn new(shard: u32, opcode: ByteOpcode, a1: u16, a2: u8, b: u8, c: u8) -> Self {
-        Self { shard, opcode, a1, a2, b, c }
+        Self {
+            shard,
+            opcode,
+            a1,
+            a2,
+            b,
+            c,
+        }
     }
 }
 
@@ -166,7 +176,10 @@ pub(crate) fn add_sharded_byte_lookup_events(
         HashMap::new();
     for new_sharded_blu_events in new_events {
         for (shard, new_blu_map) in new_sharded_blu_events {
-            new_sharded_blu_map.entry(*shard).or_insert(Vec::new()).push(new_blu_map);
+            new_sharded_blu_map
+                .entry(*shard)
+                .or_insert(Vec::new())
+                .push(new_blu_map);
         }
     }
 
@@ -190,14 +203,17 @@ pub(crate) fn add_sharded_byte_lookup_events(
     }
 
     // Increment self's byte lookup events multiplicity.
-    shards.par_iter().zip_eq(self_blu_maps.par_iter_mut()).for_each(|(shard, self_blu_map)| {
-        let blu_map_vec = new_sharded_blu_map.get(shard).unwrap();
-        for blu_map in blu_map_vec.iter() {
-            for (blu_event, count) in blu_map.iter() {
-                *self_blu_map.entry(*blu_event).or_insert(0) += count;
+    shards
+        .par_iter()
+        .zip_eq(self_blu_maps.par_iter_mut())
+        .for_each(|(shard, self_blu_map)| {
+            let blu_map_vec = new_sharded_blu_map.get(shard).unwrap();
+            for blu_map in blu_map_vec.iter() {
+                for (blu_event, count) in blu_map.iter() {
+                    *self_blu_map.entry(*blu_event).or_insert(0) += count;
+                }
             }
-        }
-    });
+        });
 
     // Move ownership of the blu maps back to self.
     for (shard, blu) in shards.into_iter().zip(self_blu_maps.into_iter()) {

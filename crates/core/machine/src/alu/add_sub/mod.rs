@@ -78,41 +78,54 @@ impl<F: PrimeField> MachineAir<F> for AddSubChip {
         _: &mut ExecutionRecord,
     ) -> RowMajorMatrix<F> {
         // Generate the rows for the trace.
-        let chunk_size =
-            std::cmp::max((input.add_events.len() + input.sub_events.len()) / num_cpus::get(), 1);
-        let merged_events =
-            input.add_events.iter().chain(input.sub_events.iter()).collect::<Vec<_>>();
+        let chunk_size = std::cmp::max(
+            (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
+            1,
+        );
+        let merged_events = input
+            .add_events
+            .iter()
+            .chain(input.sub_events.iter())
+            .collect::<Vec<_>>();
         let nb_rows = merged_events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
         let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_COLS);
 
-        values.chunks_mut(chunk_size * NUM_ADD_SUB_COLS).enumerate().par_bridge().for_each(
-            |(i, rows)| {
-                rows.chunks_mut(NUM_ADD_SUB_COLS).enumerate().for_each(|(j, row)| {
-                    let idx = i * chunk_size + j;
-                    let cols: &mut AddSubCols<F> = row.borrow_mut();
+        values
+            .chunks_mut(chunk_size * NUM_ADD_SUB_COLS)
+            .enumerate()
+            .par_bridge()
+            .for_each(|(i, rows)| {
+                rows.chunks_mut(NUM_ADD_SUB_COLS)
+                    .enumerate()
+                    .for_each(|(j, row)| {
+                        let idx = i * chunk_size + j;
+                        let cols: &mut AddSubCols<F> = row.borrow_mut();
 
-                    if idx < merged_events.len() {
-                        let mut byte_lookup_events = Vec::new();
-                        let event = &merged_events[idx];
-                        self.event_to_row(event, cols, &mut byte_lookup_events);
-                    }
-                    cols.nonce = F::from_canonical_usize(idx);
-                });
-            },
-        );
+                        if idx < merged_events.len() {
+                            let mut byte_lookup_events = Vec::new();
+                            let event = &merged_events[idx];
+                            self.event_to_row(event, cols, &mut byte_lookup_events);
+                        }
+                        cols.nonce = F::from_canonical_usize(idx);
+                    });
+            });
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_ADD_SUB_COLS)
     }
 
     fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
-        let chunk_size =
-            std::cmp::max((input.add_events.len() + input.sub_events.len()) / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(
+            (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
+            1,
+        );
 
-        let event_iter =
-            input.add_events.chunks(chunk_size).chain(input.sub_events.chunks(chunk_size));
+        let event_iter = input
+            .add_events
+            .chunks(chunk_size)
+            .chain(input.sub_events.chunks(chunk_size));
 
         let blu_batches = event_iter
             .par_bridge()
@@ -155,7 +168,8 @@ impl AddSubChip {
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation.populate(blu, event.shard, operand_1, operand_2);
+        cols.add_operation
+            .populate(blu, event.shard, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
     }
@@ -180,7 +194,9 @@ where
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
+        builder
+            .when_transition()
+            .assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // Evaluate the addition operation.
         AddOperation::<AB::F>::eval(
@@ -223,13 +239,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use rand::thread_rng;
+    use rand::Rng;
+
     use p3_baby_bear::BabyBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+
     use zkm2_stark::air::MachineAir;
+    use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
+    use zkm2_stark::StarkGenericConfig;
 
     use super::AddSubChip;
-    // use crate::utils::uni_stark_verify as verify;
+    use crate::utils::uni_stark_prove as prove;
+    use crate::utils::uni_stark_verify as verify;
 
     #[test]
     fn generate_trace() {
@@ -240,47 +263,45 @@ mod tests {
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }
-    /*
-        #[test]
-        fn prove_babybear() {
-            let config = BabyBearPoseidon2::new();
-            let mut challenger = config.challenger();
+    #[test]
+    fn prove_babybear() {
+        let config = BabyBearPoseidon2::new();
+        let mut challenger = config.challenger();
 
-            let mut shard = ExecutionRecord::default();
-            for i in 0..255 {
-                let operand_1 = thread_rng().gen_range(0..u32::MAX);
-                let operand_2 = thread_rng().gen_range(0..u32::MAX);
-                let result = operand_1.wrapping_add(operand_2);
-                shard.add_events.push(AluEvent::new(
-                    i % 2,
-                    0,
-                    Opcode::ADD,
-                    result,
-                    operand_1,
-                    operand_2,
-                ));
-            }
-            for i in 0..255 {
-                let operand_1 = thread_rng().gen_range(0..u32::MAX);
-                let operand_2 = thread_rng().gen_range(0..u32::MAX);
-                let result = operand_1.wrapping_sub(operand_2);
-                shard.add_events.push(AluEvent::new(
-                    i % 2,
-                    0,
-                    Opcode::SUB,
-                    result,
-                    operand_1,
-                    operand_2,
-                ));
-            }
-
-            let chip = AddSubChip::default();
-            let trace: RowMajorMatrix<BabyBear> =
-                chip.generate_trace(&shard, &mut ExecutionRecord::default());
-            let proof = prove::<BabyBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
-
-            let mut challenger = config.challenger();
-            verify(&config, &chip, &mut challenger, &proof).unwrap();
+        let mut shard = ExecutionRecord::default();
+        for i in 0..255 {
+            let operand_1 = thread_rng().gen_range(0..u32::MAX);
+            let operand_2 = thread_rng().gen_range(0..u32::MAX);
+            let result = operand_1.wrapping_add(operand_2);
+            shard.add_events.push(AluEvent::new(
+                i % 2,
+                0,
+                Opcode::ADD,
+                result,
+                operand_1,
+                operand_2,
+            ));
         }
-     */
+        for i in 0..255 {
+            let operand_1 = thread_rng().gen_range(0..u32::MAX);
+            let operand_2 = thread_rng().gen_range(0..u32::MAX);
+            let result = operand_1.wrapping_sub(operand_2);
+            shard.add_events.push(AluEvent::new(
+                i % 2,
+                0,
+                Opcode::SUB,
+                result,
+                operand_1,
+                operand_2,
+            ));
+        }
+
+        let chip = AddSubChip::default();
+        let trace: RowMajorMatrix<BabyBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let proof = prove::<BabyBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+
+        let mut challenger = config.challenger();
+        verify(&config, &chip, &mut challenger, &proof).unwrap();
+    }
 }

@@ -109,8 +109,11 @@ impl Debug for Instruction {
         } else {
             format!("%x{}", self.op_b)
         };
-        let op_c_formatted =
-            if self.imm_c { format!("{}", self.op_c as i32) } else { format!("%x{}", self.op_c) };
+        let op_c_formatted = if self.imm_c {
+            format!("{}", self.op_c as i32)
+        } else {
+            format!("%x{}", self.op_c)
+        };
 
         let width = 10;
         write!(

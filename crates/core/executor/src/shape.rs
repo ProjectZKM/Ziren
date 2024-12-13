@@ -16,7 +16,6 @@ pub struct CoreShape {
     pub inner: HashMap<String, usize>,
 }
 
-
 impl CoreShape {
     /// Create a dummy program with this shape.
     ///
@@ -46,7 +45,7 @@ impl CoreShape {
 }
 
 impl Extend<CoreShape> for CoreShape {
-    fn extend<T: IntoIterator<Item=CoreShape>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = CoreShape>>(&mut self, iter: T) {
         for shape in iter {
             self.inner.extend(shape.inner);
         }
@@ -54,7 +53,7 @@ impl Extend<CoreShape> for CoreShape {
 }
 
 impl Extend<(String, usize)> for CoreShape {
-    fn extend<T: IntoIterator<Item=(String, usize)>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = (String, usize)>>(&mut self, iter: T) {
         self.inner.extend(iter);
     }
 }
@@ -70,14 +69,18 @@ impl IntoIterator for CoreShape {
 }
 
 impl FromIterator<(String, usize)> for CoreShape {
-    fn from_iter<T: IntoIterator<Item=(String, usize)>>(iter: T) -> Self {
-        Self { inner: iter.into_iter().collect() }
+    fn from_iter<T: IntoIterator<Item = (String, usize)>>(iter: T) -> Self {
+        Self {
+            inner: iter.into_iter().collect(),
+        }
     }
 }
 
 impl From<ProofShape> for CoreShape {
     fn from(value: ProofShape) -> Self {
-        Self { inner: value.into_iter().collect() }
+        Self {
+            inner: value.into_iter().collect(),
+        }
     }
 }
 
@@ -136,4 +139,3 @@ impl PartialOrd for CoreShape {
         None
     }
 }
-

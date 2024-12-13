@@ -92,7 +92,6 @@ pub enum Opcode {
      */
 }
 
-
 /// Byte Opcode.
 ///
 /// This represents a basic operation that can be performed on a byte. Usually, these operations

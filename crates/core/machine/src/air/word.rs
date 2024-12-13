@@ -34,7 +34,11 @@ pub trait WordAirBuilder: ByteAirBuilder {
         let mut result = Word::default();
         for i in 0..WORD_SIZE {
             result[i] = self.index_array(
-                array.iter().map(|word| word[i].clone()).collect_vec().as_slice(),
+                array
+                    .iter()
+                    .map(|word| word[i].clone())
+                    .collect_vec()
+                    .as_slice(),
                 index_bitmap,
             );
         }
@@ -48,7 +52,9 @@ pub trait WordAirBuilder: ByteAirBuilder {
         a: Word<impl Into<Self::Expr> + Clone>,
         b: Word<impl Into<Self::Expr> + Clone>,
     ) -> Word<Self::Expr> {
-        Word(array::from_fn(|i| self.if_else(condition.clone(), a[i].clone(), b[i].clone())))
+        Word(array::from_fn(|i| {
+            self.if_else(condition.clone(), a[i].clone(), b[i].clone())
+        }))
     }
 
     /// Check that each limb of the given slice is a u8.

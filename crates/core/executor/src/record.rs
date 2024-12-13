@@ -2,15 +2,16 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{FieldAlgebra, PrimeField};
 use std::sync::Arc;
-use zkm2_stark::{air::{MachineAir, PublicValues}, MachineRecord, ZKMCoreOpts};
+use zkm2_stark::{
+    air::{MachineAir, PublicValues},
+    MachineRecord, ZKMCoreOpts,
+};
 
 use serde::{Deserialize, Serialize};
 
 use super::{program::Program, Opcode};
 use crate::{
-    events::{
-        add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, LookupId,
-    },
+    events::{add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, LookupId},
     CoreShape,
 };
 
@@ -94,7 +95,10 @@ impl ExecutionRecord {
     /// Create a new [`ExecutionRecord`].
     #[must_use]
     pub fn new(program: Arc<Program>) -> Self {
-        let mut res = Self { program, ..Default::default() };
+        let mut res = Self {
+            program,
+            ..Default::default()
+        };
         res.nonce_lookup.insert(0, 0);
         res
     }
@@ -316,7 +320,6 @@ pub struct MemoryAccessRecord {
 impl MachineRecord for ExecutionRecord {
     type Config = ZKMCoreOpts;
 
-
     fn stats(&self) -> HashMap<String, usize> {
         let mut stats = HashMap::new();
         // stats.insert("cpu_events".to_string(), self.cpu_events.len());
@@ -413,17 +416,20 @@ impl MachineRecord for ExecutionRecord {
         // });
     }
 
-
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
     fn public_values<F: FieldAlgebra>(&self) -> Vec<F> {
         self.public_values.to_vec()
     }
 }
 
-
 impl ByteRecord for ExecutionRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
-        *self.byte_lookups.entry(blu_event.shard).or_default().entry(blu_event).or_insert(0) += 1;
+        *self
+            .byte_lookups
+            .entry(blu_event.shard)
+            .or_default()
+            .entry(blu_event)
+            .or_insert(0) += 1;
     }
 
     #[inline]
