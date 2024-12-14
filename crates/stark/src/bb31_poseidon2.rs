@@ -6,7 +6,7 @@ use p3_challenger::DuplexChallenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs, TwoAdicFriPcsProof};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
@@ -37,8 +37,8 @@ pub type InnerQueryProof = QueryProof<InnerVal, InnerChallenge, InnerChallengeMm
 pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>;
 pub type InnerFriProof = FriProof<InnerVal, InnerChallenge, InnerChallengeMmcs, InnerVal>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
-//pub type InnerPcsProof =
-//    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
+pub type InnerPcsProof =
+    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
 
 /// The permutation for inner recursion.
 #[must_use]

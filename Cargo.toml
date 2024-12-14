@@ -17,6 +17,8 @@ members = [
     "crates/core/machine",
     "crates/core/executor",
     "crates/recursion/derive",
+    "crates/recursion/circuit",
+    "crates/recursion/gnark-ffi",
 ]
 resolver = "2"
 
@@ -88,6 +90,8 @@ serde_json = "1.0.132"
 rand = "0.8.5"
 
 zkm2-recursion-derive = { path = "crates/recursion/derive", version = "0.0.1", default-features = false }
+zkm2-recursion-circuit = { path = "crates/recursion/circuit", version = "0.0.1", default-features = false }
+zkm2-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", version = "0.0.1", default-features = false }
 zkm2-recursion-compiler = { path = "crates/recursion/compiler", version = "0.0.1" }
 zkm2-recursion-core = { path = "crates/recursion/core", version = "0.0.1", default-features = false }
 zkm2-core-executor = { path = "crates/core/executor", version = "0.0.1", default-features = false }
