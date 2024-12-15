@@ -11,7 +11,7 @@ use p3_air::Air;
 use p3_baby_bear::BabyBear;
 
 use p3_commit::Mmcs;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -36,7 +36,7 @@ use crate::{
         assert_complete, assert_recursion_public_values_valid, recursion_public_values_digest,
         root_public_values_digest,
     },
-    stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
+    stark::{ShardProofVariable, StarkVerifier},
     utils::uninit_challenger_pv,
     BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
 };
@@ -142,7 +142,7 @@ where
         let mut reconstruct_deferred_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
             core::array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
         let mut global_cumulative_sum: [Felt<_>; D] =
-            core::array::from_fn(|_| builder.eval(C::F::zero()));
+            core::array::from_fn(|_| builder.eval(C::F::ZERO));
         let mut init_addr_bits: [Felt<_>; 32] =
             core::array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
         let mut finalize_addr_bits: [Felt<_>; 32] =
@@ -150,7 +150,7 @@ where
 
         // Initialize a flag to denote if the any of the recursive proofs represents a shard range
         // where at least once of the shards is an execution shard (i.e. contains cpu).
-        let mut contains_execution_shard: Felt<_> = builder.eval(C::F::zero());
+        let mut contains_execution_shard: Felt<_> = builder.eval(C::F::ZERO);
 
         // Verify proofs, check consistency, and aggregate public values.
         for (i, (vk, shard_proof)) in vks_and_proofs.into_iter().enumerate() {
@@ -162,7 +162,7 @@ where
             // Observe the vk and start pc.
             challenger.observe(builder, vk.commitment);
             challenger.observe(builder, vk.pc_start);
-            let zero: Felt<_> = builder.eval(C::F::zero());
+            let zero: Felt<_> = builder.eval(C::F::ZERO);
             for _ in 0..7 {
                 challenger.observe(builder, zero);
             }
@@ -173,7 +173,7 @@ where
                 shard_proof.public_values[0..machine.num_pv_elts()].iter().copied(),
             );
 
-            let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::zero());
+            let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
             StarkVerifier::verify_shard(
                 builder,
                 &vk,
@@ -305,8 +305,8 @@ where
                 // Assert that `contains_execution_shard` is boolean.
                 builder.assert_felt_eq(
                     current_public_values.contains_execution_shard
-                        * (SymbolicFelt::one() - current_public_values.contains_execution_shard),
-                    C::F::zero(),
+                        * (SymbolicFelt::ONE - current_public_values.contains_execution_shard),
+                    C::F::ZERO,
                 );
                 // A flag to indicate whether the first execution shard has been seen. We have:
                 // - `is_first_execution_shard_seen`  = current_contains_execution_shard &&
@@ -316,7 +316,7 @@ where
                 // shard before.
                 let is_first_execution_shard_seen: Felt<_> = builder.eval(
                     current_public_values.contains_execution_shard
-                        * (SymbolicFelt::one() - contains_execution_shard),
+                        * (SymbolicFelt::ONE - contains_execution_shard),
                 );
 
                 // If this is the first execution shard, then we update the start execution shard
@@ -324,18 +324,18 @@ where
                 compress_public_values.start_execution_shard = builder.eval(
                     current_public_values.start_execution_shard * is_first_execution_shard_seen
                         + compress_public_values.start_execution_shard
-                            * (SymbolicFelt::one() - is_first_execution_shard_seen),
+                            * (SymbolicFelt::ONE - is_first_execution_shard_seen),
                 );
                 execution_shard = builder.eval(
                     current_public_values.start_execution_shard * is_first_execution_shard_seen
-                        + execution_shard * (SymbolicFelt::one() - is_first_execution_shard_seen),
+                        + execution_shard * (SymbolicFelt::ONE - is_first_execution_shard_seen),
                 );
 
                 // If this is an execution shard, make the assertion that the value is consistent.
                 builder.assert_felt_eq(
                     current_public_values.contains_execution_shard
                         * (execution_shard - current_public_values.start_execution_shard),
-                    C::F::zero(),
+                    C::F::ZERO,
                 );
             }
 
@@ -394,7 +394,7 @@ where
                         {
                             builder.assert_felt_eq(
                                 is_non_zero * (byte_current - byte_public),
-                                C::F::zero(),
+                                C::F::ZERO,
                             );
                         }
                     }
@@ -424,7 +424,7 @@ where
                     {
                         builder.assert_felt_eq(
                             is_non_zero * (digest_current - digest_public),
-                            C::F::zero(),
+                            C::F::ZERO,
                         );
                     }
                 }
@@ -449,7 +449,7 @@ where
             contains_execution_shard = builder.eval(
                 contains_execution_shard
                     + current_public_values.contains_execution_shard
-                        * (SymbolicFelt::one() - contains_execution_shard),
+                        * (SymbolicFelt::ONE - contains_execution_shard),
             );
 
             // If this proof contains an execution shard, we update the execution shard value.
@@ -457,7 +457,7 @@ where
                 current_public_values.next_execution_shard
                     * current_public_values.contains_execution_shard
                     + execution_shard
-                        * (SymbolicFelt::one() - current_public_values.contains_execution_shard),
+                        * (SymbolicFelt::ONE - current_public_values.contains_execution_shard),
             );
 
             // Update the reconstruct deferred proof digest.
@@ -564,6 +564,7 @@ impl SP1CompressWitnessValues<BabyBearPoseidon2> {
         machine: &StarkMachine<BabyBearPoseidon2, A>,
         shape: &SP1CompressShape,
     ) -> Self {
+        /*
         let vks_and_proofs = shape
             .proof_shapes
             .iter()
@@ -574,6 +575,8 @@ impl SP1CompressWitnessValues<BabyBearPoseidon2> {
             .collect();
 
         Self { vks_and_proofs, is_complete: false }
+        */
+        panic!("Unimpl")
     }
 }
 

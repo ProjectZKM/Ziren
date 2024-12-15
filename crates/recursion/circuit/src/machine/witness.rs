@@ -4,7 +4,7 @@ use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_symmetric::Hash;
 
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use zkm2_recursion_compiler::ir::Builder;
 use zkm2_stark::{
     baby_bear_poseidon2::BabyBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal, OpeningProof,
@@ -107,6 +107,7 @@ where
     type WitnessVariable = SP1RecursionWitnessVariable<C, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        /*
         let vk = self.vk.read(builder);
         let shard_proofs = self.shard_proofs.read(builder);
         let leaf_challenger = self.leaf_challenger.read(builder);
@@ -123,9 +124,12 @@ where
             is_first_shard,
             vk_root,
         }
+        */
+        panic!("Umiple")
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        /*
         self.vk.write(witness);
         self.shard_proofs.write(witness);
         self.leaf_challenger.write(witness);
@@ -133,6 +137,8 @@ where
         self.is_complete.write(witness);
         self.is_first_shard.write(witness);
         self.vk_root.write(witness);
+        */
+        panic!("Unimpl")
     }
 }
 
@@ -164,6 +170,7 @@ where
     type WitnessVariable = SP1DeferredWitnessVariable<C, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        /*
         let vks_and_proofs = self.vks_and_proofs.read(builder);
         let vk_merkle_data = self.vk_merkle_data.read(builder);
         let start_reconstruct_deferred_digest =
@@ -194,22 +201,25 @@ where
             finalize_addr_bits,
             is_complete,
         }
+        */
+        panic!("impl")
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
-        self.vk_merkle_data.write(witness);
-        self.start_reconstruct_deferred_digest.write(witness);
-        self.zkm2_vk_digest.write(witness);
-        self.leaf_challenger.write(witness);
-        self.committed_value_digest.write(witness);
-        self.deferred_proofs_digest.write(witness);
-        self.end_pc.write(witness);
-        self.end_shard.write(witness);
-        self.end_execution_shard.write(witness);
-        self.init_addr_bits.write(witness);
-        self.finalize_addr_bits.write(witness);
-        self.is_complete.write(witness);
+        panic!("impl")
+        //self.vks_and_proofs.write(witness);
+        //self.vk_merkle_data.write(witness);
+        //self.start_reconstruct_deferred_digest.write(witness);
+        //self.zkm2_vk_digest.write(witness);
+        //self.leaf_challenger.write(witness);
+        //self.committed_value_digest.write(witness);
+        //self.deferred_proofs_digest.write(witness);
+        //self.end_pc.write(witness);
+        //self.end_shard.write(witness);
+        //self.end_execution_shard.write(witness);
+        //self.init_addr_bits.write(witness);
+        //self.finalize_addr_bits.write(witness);
+        //self.is_complete.write(witness);
     }
 }
 

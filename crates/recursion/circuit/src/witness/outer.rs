@@ -11,7 +11,7 @@ use zkm2_recursion_compiler::{
 };
 use zkm2_recursion_core::stark::{
     BabyBearPoseidon2Outer, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs, OuterDigest,
-    OuterFriProof, OuterPcsProof, OuterVal,
+    OuterFriProof, OuterVal,
 };
 
 use crate::{
@@ -70,6 +70,7 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
     }
 }
 
+/*
 impl Witnessable<OuterConfig> for OuterPcsProof {
     type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
@@ -104,13 +105,14 @@ impl Witnessable<OuterConfig> for OuterFriProof {
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        self.commit_phase_commits.iter().for_each(|commit| {
-            let commit = Borrow::<OuterDigest>::borrow(commit);
-            commit.write(witness);
-        });
-        self.query_proofs.write(witness);
+        //self.commit_phase_commits.iter().for_each(|commit| {
+        //    let commit = Borrow::<OuterDigest>::borrow(commit);
+        //    commit.write(witness);
+        //});
+        //self.query_proofs.write(witness);
         self.final_poly.write(witness);
-        self.pow_witness.write(witness);
+        //self.pow_witness.write(witness);
+        panic!("Incomplete impl")
     }
 }
 
@@ -129,7 +131,7 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     }
 }
 
-impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs> {
+impl Witnessable<OuterConfig> for QueryProof<OuterVal, OuterChallenge, OuterChallengeMmcs> {
     type WitnessVariable = FriQueryProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
@@ -141,3 +143,4 @@ impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs>
         self.commit_phase_openings.write(witness);
     }
 }
+*/

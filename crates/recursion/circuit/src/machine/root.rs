@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::Mmcs;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
@@ -50,7 +50,7 @@ where
         vk_root: [Felt<C::F>; DIGEST_SIZE],
     ) {
         // Assert that the program is complete.
-        builder.assert_felt_eq(input.is_complete, C::F::one());
+        builder.assert_felt_eq(input.is_complete, C::F::ONE);
         // Verify the proof, as a compress proof.
         SP1CompressVerifier::verify(
             builder,
@@ -81,7 +81,7 @@ where
         kind: PublicValuesOutputDigest,
     ) {
         // Assert that the program is complete.
-        builder.assert_felt_eq(input.compress_var.is_complete, C::F::one());
+        builder.assert_felt_eq(input.compress_var.is_complete, C::F::ONE);
         // Verify the proof, as a compress proof.
         SP1CompressWithVKeyVerifier::verify(builder, machine, input, value_assertions, kind);
     }

@@ -75,7 +75,7 @@ where
         public_values: &[Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
         let mut unflatten = |v: &[Ext<C::F, C::EF>]| {
-            v.chunks_exact(<SC::Challenge as AbstractExtensionField<C::F>>::D)
+            v.chunks_exact(<SC::Challenge as FieldExtensionAlgebra<C::F>>::D)
                 .map(|chunk| {
                     builder.eval(
                         chunk

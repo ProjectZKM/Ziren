@@ -1,5 +1,5 @@
 use p3_commit::{LagrangeSelectors, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{AbstractExtensionField, AbstractField, Field, TwoAdicField};
+use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field, TwoAdicField};
 use zkm2_recursion_compiler::prelude::*;
 
 /// Reference: [p3_commit::PolynomialSpace]
@@ -51,12 +51,12 @@ where
         let unshifted_point: Ext<_, _> = builder.eval(point * self.shift.inverse());
         let z_h_expr = builder
             .exp_power_of_2_v::<Ext<_, _>>(unshifted_point, Usize::Const(self.log_n))
-            - C::EF::one();
+            - C::EF::ONE;
         let z_h: Ext<_, _> = builder.eval(z_h_expr);
         let g = C::F::two_adic_generator(self.log_n);
         let ginv = g.inverse();
         LagrangeSelectors {
-            is_first_row: builder.eval(z_h / (unshifted_point - C::EF::one())),
+            is_first_row: builder.eval(z_h / (unshifted_point - C::EF::ONE)),
             is_last_row: builder.eval(z_h / (unshifted_point - ginv)),
             is_transition: builder.eval(unshifted_point - ginv),
             inv_zeroifier: builder.eval(z_h.inverse()),
@@ -70,12 +70,12 @@ where
     ) -> Ext<<C as Config>::F, <C as Config>::EF> {
         let unshifted_power = builder.exp_power_of_2_v::<Ext<_, _>>(
             point
-                * C::EF::from_base_slice(&[self.shift, C::F::zero(), C::F::zero(), C::F::zero()])
+                * C::EF::from_base_slice(&[self.shift, C::F::ZERO, C::F::ZERO, C::F::ZERO])
                     .inverse()
                     .cons(),
             Usize::Const(self.log_n),
         );
-        builder.eval(unshifted_power - C::EF::one())
+        builder.eval(unshifted_power - C::EF::ONE)
     }
     fn zp_at_point_f(
         &self,
@@ -84,6 +84,6 @@ where
     ) -> Felt<<C as Config>::F> {
         let unshifted_power = builder
             .exp_power_of_2_v::<Felt<_>>(point * self.shift.inverse(), Usize::Const(self.log_n));
-        builder.eval(unshifted_power - C::F::one())
+        builder.eval(unshifted_power - C::F::ONE)
     }
 }

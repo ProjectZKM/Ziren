@@ -157,7 +157,7 @@ where
             // Observe the vk and start pc.
             challenger.observe(builder, vk.commitment);
             challenger.observe(builder, vk.pc_start);
-            let zero: Felt<_> = builder.eval(C::F::zero());
+            let zero: Felt<_> = builder.eval(C::F::ZERO);
             for _ in 0..7 {
                 challenger.observe(builder, zero);
             }
@@ -168,7 +168,7 @@ where
                 shard_proof.public_values[0..machine.num_pv_elts()].iter().copied(),
             );
 
-            let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::zero());
+            let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
             StarkVerifier::verify_shard(
                 builder,
                 &vk,
@@ -189,7 +189,7 @@ where
             assert_recursion_public_values_valid::<C, SC>(builder, current_public_values);
 
             // Assert that the proof is complete.
-            builder.assert_felt_eq(current_public_values.is_complete, C::F::one());
+            builder.assert_felt_eq(current_public_values.is_complete, C::F::ONE);
 
             // Update deferred proof digest
             // poseidon2( current_digest[..8] || pv.zkm2_vk_digest[..8] ||
@@ -238,15 +238,15 @@ where
         deferred_public_values.start_reconstruct_challenger = values;
         deferred_public_values.end_reconstruct_challenger = values;
         // Set the exit code to be zero for now.
-        deferred_public_values.exit_code = builder.eval(C::F::zero());
+        deferred_public_values.exit_code = builder.eval(C::F::ZERO);
         // Assign the deferred proof digests.
         deferred_public_values.end_reconstruct_deferred_digest = reconstruct_deferred_digest;
         // Set the is_complete flag.
         deferred_public_values.is_complete = is_complete;
         // Set the `contains_execution_shard` flag.
-        deferred_public_values.contains_execution_shard = builder.eval(C::F::zero());
+        deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
         // Set the cumulative sum to zero.
-        deferred_public_values.cumulative_sum = array::from_fn(|_| builder.eval(C::F::zero()));
+        deferred_public_values.cumulative_sum = array::from_fn(|_| builder.eval(C::F::ZERO));
         // Set the vk root from the witness.
         deferred_public_values.vk_root = vk_root;
         // Set the digest according to the previous values.
@@ -273,15 +273,15 @@ impl SP1DeferredWitnessValues<BabyBearPoseidon2> {
             vk_merkle_data,
             leaf_challenger: dummy_challenger(machine.config()),
             is_complete: true,
-            zkm2_vk_digest: [BabyBear::zero(); DIGEST_SIZE],
-            start_reconstruct_deferred_digest: [BabyBear::zero(); POSEIDON_NUM_WORDS],
+            zkm2_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
+            start_reconstruct_deferred_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
             committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
-            deferred_proofs_digest: [BabyBear::zero(); POSEIDON_NUM_WORDS],
-            end_pc: BabyBear::zero(),
-            end_shard: BabyBear::zero(),
-            end_execution_shard: BabyBear::zero(),
-            init_addr_bits: [BabyBear::zero(); 32],
-            finalize_addr_bits: [BabyBear::zero(); 32],
+            deferred_proofs_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
+            end_pc: BabyBear::ZERO,
+            end_shard: BabyBear::ZERO,
+            end_execution_shard: BabyBear::ZERO,
+            init_addr_bits: [BabyBear::ZERO; 32],
+            finalize_addr_bits: [BabyBear::ZERO; 32],
         }
     }
 }

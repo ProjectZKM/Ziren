@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{AbstractField, TwoAdicField};
+use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_matrix::Dimensions;
 
 use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
@@ -84,7 +84,7 @@ impl<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>> VerifyingK
         // Observe the pc_start.
         challenger.observe(builder, self.pc_start);
         // Observe the padding.
-        let zero: Felt<_> = builder.eval(C::F::zero());
+        let zero: Felt<_> = builder.eval(C::F::ZERO);
         for _ in 0..7 {
             challenger.observe(builder, zero);
         }

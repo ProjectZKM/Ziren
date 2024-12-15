@@ -235,23 +235,23 @@ impl From<Opcode> for ByteOpcode {
 }
 
 impl ByteOpcode {
-    // /// Get all the byte opcodes.
-    // #[must_use]
-    // pub fn all() -> Vec<Self> {
-    //     let opcodes = vec![
-    //         ByteOpcode::AND,
-    //         ByteOpcode::OR,
-    //         ByteOpcode::XOR,
-    //         ByteOpcode::SLL,
-    //         ByteOpcode::U8Range,
-    //         ByteOpcode::ShrCarry,
-    //         ByteOpcode::LTU,
-    //         ByteOpcode::MSB,
-    //         ByteOpcode::U16Range,
-    //     ];
-    //     debug_assert_eq!(opcodes.len(), NUM_BYTE_OPS);
-    //     opcodes
-    // }
+    /// Get all the byte opcodes.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        let opcodes = vec![
+            ByteOpcode::AND,
+            ByteOpcode::OR,
+            ByteOpcode::XOR,
+            ByteOpcode::SLL,
+            ByteOpcode::U8Range,
+            ByteOpcode::ShrCarry,
+            ByteOpcode::LTU,
+            ByteOpcode::MSB,
+            ByteOpcode::U16Range,
+        ];
+        debug_assert_eq!(opcodes.len(), NUM_BYTE_OPS);
+        opcodes
+    }
 
     /// Convert the opcode to a field element.
     #[must_use]

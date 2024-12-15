@@ -206,6 +206,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     type WitnessVariable = ChipOpenedValues<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        /*
         let preprocessed = self.preprocessed.read(builder);
         let main = self.main.read(builder);
         let permutation = self.permutation.read(builder);
@@ -222,14 +223,19 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
             local_cumulative_sum,
             log_degree,
         }
+        */
+        panic!("Unimpl")
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        panic!("Unimpl")
+        /*
         self.preprocessed.write(witness);
         self.main.write(witness);
         self.permutation.write(witness);
         self.quotient.write(witness);
         self.global_cumulative_sum.write(witness);
         self.local_cumulative_sum.write(witness);
+        */
     }
 }

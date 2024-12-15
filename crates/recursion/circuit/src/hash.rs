@@ -39,7 +39,7 @@ pub trait Posedion2BabyBearHasherVariable<C: CircuitConfig> {
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     fn poseidon2_hash(builder: &mut Builder<C>, input: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE] {
         // static_assert(RATE < WIDTH)
-        let mut state = core::array::from_fn(|_| builder.eval(C::F::zero()));
+        let mut state = core::array::from_fn(|_| builder.eval(C::F::ZERO));
         for input_chunk in input.chunks(HASH_RATE) {
             state[..input_chunk.len()].copy_from_slice(input_chunk);
             state = Self::poseidon2_permute(builder, state);
@@ -73,7 +73,7 @@ impl FieldHasher<BabyBear> for BabyBearPoseidon2 {
     type Digest = [BabyBear; DIGEST_SIZE];
 
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
-        let mut pre_iter = input.into_iter().flatten().chain(repeat(BabyBear::zero()));
+        let mut pre_iter = input.into_iter().flatten().chain(repeat(BabyBear::ZERO));
         let mut pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
         (inner_perm()).permute_mut(&mut pre);
         pre[..DIGEST_SIZE].try_into().unwrap()
@@ -158,7 +158,7 @@ impl FieldHasher<BabyBear> for BabyBearPoseidon2Outer {
     type Digest = [Bn254Fr; BN254_DIGEST_SIZE];
 
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
-        let mut state = [input[0][0], input[1][0], Bn254Fr::zero()];
+        let mut state = [input[0][0], input[1][0], Bn254Fr::ZERO];
         outer_perm().permute_mut(&mut state);
         [state[0]; BN254_DIGEST_SIZE]
     }
@@ -174,7 +174,7 @@ impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHashe
         assert!(C::F::bits() == p3_baby_bear::BabyBear::bits());
         let num_f_elms = C::N::bits() / C::F::bits();
         let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
-            [builder.eval(C::N::zero()), builder.eval(C::N::zero()), builder.eval(C::N::zero())];
+            [builder.eval(C::N::ZERO), builder.eval(C::N::ZERO), builder.eval(C::N::ZERO)];
         for block_chunk in &input.iter().chunks(POSEIDON_2_BB_RATE) {
             for (chunk_id, chunk) in (&block_chunk.chunks(num_f_elms)).into_iter().enumerate() {
                 let chunk = chunk.copied().collect::<Vec<_>>();
@@ -191,7 +191,7 @@ impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHashe
         input: [Self::DigestVariable; 2],
     ) -> Self::DigestVariable {
         let state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
-            [builder.eval(input[0][0]), builder.eval(input[1][0]), builder.eval(C::N::zero())];
+            [builder.eval(input[0][0]), builder.eval(input[1][0]), builder.eval(C::N::ZERO)];
         builder.push_op(DslIr::CircuitPoseidon2Permute(state));
         [state[0]; BN254_DIGEST_SIZE]
     }

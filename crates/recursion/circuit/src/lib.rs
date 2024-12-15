@@ -41,7 +41,7 @@ use p3_dft::Radix2DitParallel;
 use p3_fri::{FriConfig, TwoAdicFriPcs};
 use zkm2_recursion_core::{
     air::RecursionPublicValues,
-    stark::{BabyBearPoseidon2Outer, OuterValMmcs},
+    stark::{BabyBearPoseidon2Outer, OuterValMmcs, outer_fri_config},
     D,
 };
 
@@ -69,7 +69,7 @@ pub trait BabyBearFriConfig:
     Challenger = Self::FriChallenger,
     Pcs = TwoAdicFriPcs<
         BabyBear,
-        Radix2DitParallel,
+        Radix2DitParallel<BabyBear>,
         Self::ValMmcs,
         ExtensionMmcs<BabyBear, EF, Self::ValMmcs>,
     >,
@@ -563,7 +563,8 @@ impl BabyBearFriConfig for BabyBearPoseidon2 {
     type RowMajorProverData = <ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>;
 
     fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        self.pcs().fri_config()
+        //self.pcs().fri_config()
+        panic!("fri config BabyBearPoseidon2")
     }
 
     fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape {
@@ -582,7 +583,8 @@ impl BabyBearFriConfig for BabyBearPoseidon2Outer {
         <OuterValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>;
 
     fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        self.pcs().fri_config()
+        //self.pcs().fri_config()
+        panic!("fri config BabyBearPoseidon2Outer")
     }
 
     fn challenger_shape(_challenger: &Self::FriChallenger) -> SpongeChallengerShape {

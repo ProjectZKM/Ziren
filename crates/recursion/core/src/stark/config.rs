@@ -11,7 +11,6 @@ use p3_fri::{
     FriProof,
     QueryProof,
     TwoAdicFriPcs,
-    //TwoAdicFriPcsProof,
 };
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
@@ -52,8 +51,6 @@ pub type OuterQueryProof = QueryProof<OuterVal, OuterChallenge, OuterChallengeMm
 pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs>;
 pub type OuterFriProof = FriProof<OuterVal, OuterChallenge, OuterChallengeMmcs, OuterVal>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
-//pub type OuterPcsProof =
-//    TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs>;
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {

@@ -23,7 +23,7 @@ use zkm2_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyi
 
 use crate::{
     challenger::CanObserveVariable,
-    fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+//    fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
     BabyBearFriConfig, CircuitConfig, TwoAdicPcsMatsVariable, TwoAdicPcsProofVariable,
 };
@@ -52,6 +52,7 @@ pub fn dummy_challenger(config: &BabyBearPoseidon2) -> Challenger<BabyBearPoseid
     challenger
 }
 
+/*
 /// Make a dummy shard proof for a given proof shape.
 pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
     machine: &StarkMachine<BabyBearPoseidon2, A>,
@@ -148,7 +149,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
 
     let fri_queries = machine.config().fri_config().num_queries;
     let log_blowup = machine.config().fri_config().log_blowup;
-    let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
+    let (opening_proof, _)= dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
 
     let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| BabyBear::ZERO).collect::<Vec<_>>();
 
@@ -184,6 +185,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
 
     (vk, shard_proof)
 }
+*/
 
 fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
     chip: &Chip<F, A>,
@@ -555,9 +557,10 @@ pub mod tests {
 
     use zkm2_core_executor::Program;
     use zkm2_core_machine::{
-        io::SP1Stdin,
-        riscv::RiscvAir,
-        utils::{prove, setup_logger},
+    //    io::SP1Stdin,
+          mips::MipsAir,
+    //    utils::{prove, setup_logger},
+          utils::{setup_logger},
     };
     use zkm2_recursion_compiler::{
         config::{InnerConfig, OuterConfig},
@@ -566,16 +569,16 @@ pub mod tests {
 
     use zkm2_recursion_core::{air::Block, machine::RecursionAir, stark::BabyBearPoseidon2Outer};
     use zkm2_stark::{
-        baby_bear_poseidon2::BabyBearPoseidon2, CpuProver, InnerVal, MachineProver, SP1CoreOpts,
+        baby_bear_poseidon2::BabyBearPoseidon2, CpuProver, InnerVal, MachineProver, ZKMCoreOpts,
         ShardProof,
     };
-    use test_artifacts::FIBONACCI_ELF;
+    //use test_artifacts::FIBONACCI_ELF;
 
     use super::*;
     use crate::witness::*;
 
     type F = InnerVal;
-    type A = RiscvAir<F>;
+    type A = MipsAir<F>;
     type SC = BabyBearPoseidon2;
 
     pub fn build_verify_shard_with_provers<
@@ -585,10 +588,13 @@ pub mod tests {
     >(
         config: SC,
         elf: &[u8],
-        opts: SP1CoreOpts,
+        opts: ZKMCoreOpts,
         num_shards_in_batch: Option<usize>,
     ) -> (TracedVec<DslIr<C>>, Vec<Block<BabyBear>>) {
         setup_logger();
+        panic!("build_verify_shard_with_provers")
+
+        /*
 
         let machine = RiscvAir::<C::F>::machine(SC::default());
         let (_, vk) = machine.setup(&Program::from(elf).unwrap());
@@ -650,8 +656,10 @@ pub mod tests {
             );
         }
         (builder.into_operations(), witness_stream)
+        */
     }
 
+    /*
     #[test]
     fn test_verify_shard_inner() {
         let (operations, stream) =
@@ -663,4 +671,5 @@ pub mod tests {
             );
         run_test_recursion_with_prover::<CpuProver<_, _>>(operations, stream);
     }
+    */
 }

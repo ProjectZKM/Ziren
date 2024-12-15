@@ -8,14 +8,14 @@ use std::{
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
 use p3_commit::Mmcs;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm2_core_machine::{
-    cpu::MAX_CPU_LOG_DEGREE,
-    riscv::{RiscvAir, MAX_LOG_NUMBER_OF_SHARDS},
-};
+//use zkm2_core_machine::{
+//    cpu::MAX_CPU_LOG_DEGREE,
+//    riscv::{RiscvAir, MAX_LOG_NUMBER_OF_SHARDS},
+//};
 
 use zkm2_recursion_core::air::PV_DIGEST_NUM_WORDS;
 use zkm2_stark::{
@@ -39,7 +39,7 @@ use zkm2_recursion_core::{
 use crate::{
     challenger::{CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable},
     machine::recursion_public_values_digest,
-    stark::{dummy_challenger, dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
+    stark::{dummy_challenger, ShardProofVariable, StarkVerifier},
     BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
 };
 
@@ -81,6 +81,7 @@ pub struct SP1RecursiveVerifier<C: Config, SC: BabyBearFriConfig> {
     _phantom: PhantomData<(C, SC)>,
 }
 
+/*
 impl<C, SC> SP1RecursiveVerifier<C, SC>
 where
     SC: BabyBearFriConfigVariable<
@@ -172,7 +173,7 @@ where
             initial_reconstruct_challenger.copy(builder);
 
         // Initialize the cumulative sum.
-        let mut global_cumulative_sum: Ext<_, _> = builder.eval(C::EF::zero().cons());
+        let mut global_cumulative_sum: Ext<_, _> = builder.eval(C::EF::ZERO.cons());
 
         // Assert that the number of proofs is not zero.
         assert!(!shard_proofs.is_empty());
@@ -249,14 +250,14 @@ where
 
                 // Assert that the shard is boolean.
                 builder
-                    .assert_felt_eq(is_first_shard * (is_first_shard - C::F::one()), C::F::zero());
+                    .assert_felt_eq(is_first_shard * (is_first_shard - C::F::ONE), C::F::ZERO);
                 // Assert that if the flag is set to `1`, then the shard idex is `1`.
                 builder
-                    .assert_felt_eq(is_first_shard * (initial_shard - C::F::one()), C::F::zero());
+                    .assert_felt_eq(is_first_shard * (initial_shard - C::F::ONE), C::F::ZERO);
                 // Assert that if the flag is set to `0`, then the shard index is not `1`.
                 builder.assert_felt_ne(
-                    (SymbolicFelt::one() - is_first_shard) * initial_shard,
-                    C::F::one(),
+                    (SymbolicFelt::ONE - is_first_shard) * initial_shard,
+                    C::F::ONE,
                 );
 
                 // If the initial shard is the first shard, we assert that the initial challenger
@@ -269,19 +270,19 @@ where
                 for (first, initial) in
                     first_challenger_public_values.into_iter().zip(initial_challenger_public_values)
                 {
-                    builder.assert_felt_eq(is_first_shard * (first - initial), C::F::zero());
+                    builder.assert_felt_eq(is_first_shard * (first - initial), C::F::ZERO);
                 }
 
                 // If it's the first shard (which is the first execution shard), then the `start_pc`
                 // should be vk.pc_start.
-                builder.assert_felt_eq(is_first_shard * (start_pc - vk.pc_start), C::F::zero());
+                builder.assert_felt_eq(is_first_shard * (start_pc - vk.pc_start), C::F::ZERO);
 
                 // Assert that `init_addr_bits` and `finalize_addr_bits` are zero for the first
                 for bit in current_init_addr_bits.iter() {
-                    builder.assert_felt_eq(is_first_shard * *bit, C::F::zero());
+                    builder.assert_felt_eq(is_first_shard * *bit, C::F::ZERO);
                 }
                 for bit in current_finalize_addr_bits.iter() {
-                    builder.assert_felt_eq(is_first_shard * *bit, C::F::zero());
+                    builder.assert_felt_eq(is_first_shard * *bit, C::F::ZERO);
                 }
             }
 
@@ -306,13 +307,13 @@ where
             // Assert that first shard has a "CPU". Equivalently, assert that if the shard does
             // not have a "CPU", then the current shard is not 1.
             if !contains_cpu {
-                builder.assert_felt_ne(current_shard, C::F::one());
+                builder.assert_felt_ne(current_shard, C::F::ONE);
             }
 
             // CPU log degree bound check constraints (this assertion is made in compile time).
             if shard_proof.contains_cpu() {
                 let log_degree_cpu = shard_proof.log_degree_cpu();
-                assert!(log_degree_cpu <= MAX_CPU_LOG_DEGREE);
+                //assert!(log_degree_cpu <= MAX_CPU_LOG_DEGREE);
             }
 
             // Shard constraints.
@@ -321,7 +322,7 @@ where
                 builder.assert_felt_eq(current_shard, public_values.shard);
 
                 // Increment the current shard by one.
-                current_shard = builder.eval(current_shard + C::F::one());
+                current_shard = builder.eval(current_shard + C::F::ONE);
             }
 
             // Execution shard constraints.
@@ -339,7 +340,7 @@ where
 
                     builder.assert_felt_eq(current_execution_shard, public_values.execution_shard);
 
-                    current_execution_shard = builder.eval(current_execution_shard + C::F::one());
+                    current_execution_shard = builder.eval(current_execution_shard + C::F::ONE);
                 }
             }
 
@@ -354,7 +355,7 @@ where
                     builder.assert_felt_eq(public_values.start_pc, public_values.next_pc);
                 } else {
                     // If it's a shard with "CPU", then assert that the start_pc is not zero.
-                    builder.assert_felt_ne(public_values.start_pc, C::F::zero());
+                    builder.assert_felt_ne(public_values.start_pc, C::F::ZERO);
                 }
 
                 // Update current_pc to be the end_pc of the current proof.
@@ -364,7 +365,7 @@ where
             // Exit code constraints.
             {
                 // Assert that the exit code is zero (success) for all proofs.
-                builder.assert_felt_eq(exit_code, C::F::zero());
+                builder.assert_felt_eq(exit_code, C::F::ZERO);
             }
 
             // Memory initialization & finalization constraints.
@@ -448,7 +449,7 @@ where
                         {
                             builder.assert_felt_eq(
                                 is_non_zero * (byte_current - byte_public),
-                                C::F::zero(),
+                                C::F::ZERO,
                             );
                         }
                     }
@@ -498,7 +499,7 @@ where
                     {
                         builder.assert_felt_eq(
                             is_non_zero * (*deferred_current - *deferred_public),
-                            C::F::zero(),
+                            C::F::ZERO,
                         );
                     }
                 }
@@ -536,7 +537,7 @@ where
         }
 
         // Assert that the last exit code is zero.
-        builder.assert_felt_eq(exit_code, C::F::zero());
+        builder.assert_felt_eq(exit_code, C::F::ZERO);
 
         // Write all values to the public values struct and commit to them.
         {
@@ -552,7 +553,7 @@ where
             let global_cumulative_sum_array = builder.ext2felt_v2(global_cumulative_sum);
 
             // Collect the deferred proof digests.
-            let zero: Felt<_> = builder.eval(C::F::zero());
+            let zero: Felt<_> = builder.eval(C::F::ZERO);
             let start_deferred_digest = [zero; POSEIDON_NUM_WORDS];
             let end_deferred_digest = [zero; POSEIDON_NUM_WORDS];
 
@@ -595,6 +596,7 @@ where
         }
     }
 }
+*/
 
 impl<SC: BabyBearFriConfig> SP1RecursionWitnessValues<SC> {
     pub fn shape(&self) -> SP1RecursionShape {
@@ -604,6 +606,7 @@ impl<SC: BabyBearFriConfig> SP1RecursionWitnessValues<SC> {
     }
 }
 
+/*
 impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
     pub fn dummy(
         machine: &StarkMachine<BabyBearPoseidon2, RiscvAir<BabyBear>>,
@@ -619,10 +622,11 @@ impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
             initial_reconstruct_challenger: dummy_challenger(machine.config()),
             is_complete: shape.is_complete,
             is_first_shard: false,
-            vk_root: [BabyBear::zero(); DIGEST_SIZE],
+            vk_root: [BabyBear::ZERO; DIGEST_SIZE],
         }
     }
 }
+*/
 
 impl From<ProofShape> for SP1RecursionShape {
     fn from(proof_shape: ProofShape) -> Self {
