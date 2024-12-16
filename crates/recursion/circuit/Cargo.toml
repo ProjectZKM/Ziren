@@ -54,6 +54,7 @@ rand = "0.8.5"
 #test-artifacts = { workspace = true }
 
 [features]
+default = ["native-gnark"]
 native-gnark = ["zkm2-recursion-gnark-ffi/native"]
 #export-tests = ["dep:test-artifacts"]
 debug = ["zkm2-core-machine/debug"]
