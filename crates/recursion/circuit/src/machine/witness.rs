@@ -50,7 +50,11 @@ where
         let sponge_state = self.sponge_state.read(builder);
         let input_buffer = self.input_buffer.read(builder);
         let output_buffer = self.output_buffer.read(builder);
-        DuplexChallengerVariable { sponge_state, input_buffer, output_buffer }
+        DuplexChallengerVariable {
+            sponge_state,
+            input_buffer,
+            output_buffer,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -91,7 +95,12 @@ where
         let pc_start = self.pc_start.read(builder);
         let chip_information = self.chip_information.clone();
         let chip_ordering = self.chip_ordering.clone();
-        VerifyingKeyVariable { commitment, pc_start, chip_information, chip_ordering }
+        VerifyingKeyVariable {
+            commitment,
+            pc_start,
+            chip_information,
+            chip_ordering,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -154,7 +163,10 @@ where
         let vks_and_proofs = self.vks_and_proofs.read(builder);
         let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
 
-        SP1CompressWitnessVariable { vks_and_proofs, is_complete }
+        SP1CompressWitnessVariable {
+            vks_and_proofs,
+            is_complete,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -239,7 +251,10 @@ where
         let index_bits = bits.read(builder);
         let path = self.path.read(builder);
 
-        MerkleProofVariable { index: index_bits, path }
+        MerkleProofVariable {
+            index: index_bits,
+            path,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

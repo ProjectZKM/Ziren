@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use p3_baby_bear::BabyBear;
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
 
 use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
@@ -88,7 +88,10 @@ where
             .map(|a| a.into_iter().map(|b| vec![b]).collect())
             .collect();
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { opened_values, opening_proof }
+        Self::WitnessVariable {
+            opened_values,
+            opening_proof,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -153,7 +156,10 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { sibling_value, opening_proof }
+        Self::WitnessVariable {
+            sibling_value,
+            opening_proof,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

@@ -9,12 +9,12 @@ use itertools::izip;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
+use std::iter::{repeat, zip};
 use zkm2_recursion_compiler::{
     circuit::CircuitV2Builder,
     config::{InnerConfig, OuterConfig},
     ir::{Builder, Config, DslIr, Ext, Felt, SymbolicFelt, Var, Variable},
 };
-use std::iter::{repeat, zip};
 
 mod types;
 
@@ -29,11 +29,11 @@ pub mod stark;
 pub(crate) mod utils;
 pub mod witness;
 
+pub use types::*;
 use zkm2_stark::{
     baby_bear_poseidon2::{BabyBearPoseidon2, ValMmcs},
     StarkGenericConfig,
 };
-pub use types::*;
 
 use p3_challenger::{CanObserve, CanSample, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -41,7 +41,7 @@ use p3_dft::Radix2DitParallel;
 use p3_fri::{FriConfig, TwoAdicFriPcs};
 use zkm2_recursion_core::{
     air::RecursionPublicValues,
-    stark::{BabyBearPoseidon2Outer, OuterValMmcs, outer_fri_config},
+    stark::{outer_fri_config, BabyBearPoseidon2Outer, OuterValMmcs},
     D,
 };
 
@@ -252,9 +252,12 @@ impl CircuitConfig for InnerConfig {
 
         let id_branch = first.clone().into_iter().chain(second.clone());
         let swap_branch = second.into_iter().chain(first);
-        zip(zip(id_branch, swap_branch), zip(repeat(shouldnt_swap), repeat(should_swap)))
-            .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
-            .collect()
+        zip(
+            zip(id_branch, swap_branch),
+            zip(repeat(shouldnt_swap), repeat(should_swap)),
+        )
+        .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
+        .collect()
     }
 
     fn select_chain_ef(
@@ -268,9 +271,12 @@ impl CircuitConfig for InnerConfig {
 
         let id_branch = first.clone().into_iter().chain(second.clone());
         let swap_branch = second.into_iter().chain(first);
-        zip(zip(id_branch, swap_branch), zip(repeat(shouldnt_swap), repeat(should_swap)))
-            .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
-            .collect()
+        zip(
+            zip(id_branch, swap_branch),
+            zip(repeat(shouldnt_swap), repeat(should_swap)),
+        )
+        .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
+        .collect()
     }
 
     fn exp_f_bits_precomputed(
@@ -380,9 +386,12 @@ impl CircuitConfig for WrapConfig {
 
         let id_branch = first.clone().into_iter().chain(second.clone());
         let swap_branch = second.into_iter().chain(first);
-        zip(zip(id_branch, swap_branch), zip(repeat(shouldnt_swap), repeat(should_swap)))
-            .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
-            .collect()
+        zip(
+            zip(id_branch, swap_branch),
+            zip(repeat(shouldnt_swap), repeat(should_swap)),
+        )
+        .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
+        .collect()
     }
 
     fn select_chain_ef(
@@ -396,9 +405,12 @@ impl CircuitConfig for WrapConfig {
 
         let id_branch = first.clone().into_iter().chain(second.clone());
         let swap_branch = second.into_iter().chain(first);
-        zip(zip(id_branch, swap_branch), zip(repeat(shouldnt_swap), repeat(should_swap)))
-            .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
-            .collect()
+        zip(
+            zip(id_branch, swap_branch),
+            zip(repeat(shouldnt_swap), repeat(should_swap)),
+        )
+        .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
+        .collect()
     }
 
     fn exp_f_bits_precomputed(
@@ -623,7 +635,9 @@ impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> BabyBearFr
         public_values: RecursionPublicValues<Felt<<C>::F>>,
     ) {
         let committed_values_digest_bytes_felts: [Felt<_>; 32] =
-            words_to_bytes(&public_values.committed_value_digest).try_into().unwrap();
+            words_to_bytes(&public_values.committed_value_digest)
+                .try_into()
+                .unwrap();
         let committed_values_digest_bytes: Var<_> =
             felt_bytes_to_bn254_var(builder, &committed_values_digest_bytes_felts);
         builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);

@@ -1,5 +1,5 @@
 use p3_commit::{LagrangeSelectors, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field, TwoAdicField};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use zkm2_recursion_compiler::prelude::*;
 
 /// Reference: [p3_commit::PolynomialSpace]

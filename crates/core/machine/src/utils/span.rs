@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, hash::Hash, iter::once};
 
-//use zkm2_core_executor::events::{format_table_line, sorted_table_lines};
+use zkm2_core_executor::events::{format_table_line, sorted_table_lines};
 use thiserror::Error;
 
 /// A builder to create a [`Span`].
@@ -136,8 +136,6 @@ where
 
     /// Format and yield lines describing this span. Appropriate for logging.
     pub fn lines(&self) -> Vec<String> {
-        panic!("Umimplemment lines")
-        /*
         let Self { name, cts: instr_cts, children } = self;
         let (width, lines) = sorted_table_lines(instr_cts);
         let lines = lines.map(|(label, count)| format_table_line(&width, &label, count));
@@ -152,6 +150,5 @@ where
             )
             .chain(once(format!("└╴ {} total", self.total())))
             .collect()
-        */
     }
 }

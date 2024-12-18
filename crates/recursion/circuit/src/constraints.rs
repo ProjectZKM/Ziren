@@ -1,7 +1,7 @@
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
 use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field, TwoAdicField};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 
 use zkm2_recursion_compiler::ir::{
@@ -142,8 +142,10 @@ where
                     .filter(|(j, _)| *j != i)
                     .map(|(_, other_domain)| {
                         // `shift_power` is used in the computation of
-                        let shift_power =
-                            other_domain.shift.exp_power_of_2(other_domain.log_n).inverse();
+                        let shift_power = other_domain
+                            .shift
+                            .exp_power_of_2(other_domain.log_n)
+                            .inverse();
                         // This is `other_domain.zp_at_point_f(builder, domain.first_point())`.
                         // We compute it as a constant here.
                         let z_f = domain.first_point().exp_power_of_2(other_domain.log_n)
@@ -163,8 +165,10 @@ where
                         )
                     })
                     .unzip::<_, _, Vec<SymbolicExt<C::F, C::EF>>, Vec<Felt<_>>>();
-                let symbolic_prod: SymbolicFelt<_> =
-                    zinvs.into_iter().map(|x| x.into()).product::<SymbolicFelt<_>>();
+                let symbolic_prod: SymbolicFelt<_> = zinvs
+                    .into_iter()
+                    .map(|x| x.into())
+                    .product::<SymbolicFelt<_>>();
                 (zs.into_iter().product::<SymbolicExt<_, _>>(), symbolic_prod)
             })
             .collect::<Vec<(SymbolicExt<_, _>, SymbolicFelt<_>)>>()

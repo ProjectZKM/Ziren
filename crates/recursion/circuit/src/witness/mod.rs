@@ -4,11 +4,11 @@ mod stark;
 use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
 
 pub use outer::*;
+pub use stark::*;
 use zkm2_stark::{
     ChipOpenedValues, Com, InnerChallenge, InnerVal, OpeningProof, ShardCommitment,
     ShardOpenedValues, ShardProof,
 };
-pub use stark::*;
 
 use crate::{
     hash::FieldHasherVariable, stark::ShardProofVariable, BabyBearFriConfigVariable, CircuitConfig,
@@ -100,12 +100,17 @@ impl<C: CircuitConfig, T: Witnessable<C>, const N: usize> Witnessable<C> for [T;
     type WitnessVariable = [T::WitnessVariable; N];
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        self.iter().map(|x| x.read(builder)).collect::<Vec<_>>().try_into().unwrap_or_else(
-            |x: Vec<_>| {
+        self.iter()
+            .map(|x| x.read(builder))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or_else(|x: Vec<_>| {
                 // Cannot just `.unwrap()` without requiring Debug bounds.
-                panic!("could not coerce vec of len {} into array of len {N}", x.len())
-            },
-        )
+                panic!(
+                    "could not coerce vec of len {} into array of len {N}",
+                    x.len()
+                )
+            })
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

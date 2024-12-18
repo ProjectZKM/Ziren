@@ -1,5 +1,5 @@
 use p3_baby_bear::BabyBear;
-use p3_field::{FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra};
 use zkm2_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{DslIr, Var},
@@ -77,7 +77,11 @@ impl<C: Config<F = BabyBear>> DuplexChallengerVariable<C> {
 
     /// Creates a new challenger with the same state as an existing challenger.
     pub fn copy(&self, builder: &mut Builder<C>) -> Self {
-        let DuplexChallengerVariable { sponge_state, input_buffer, output_buffer } = self;
+        let DuplexChallengerVariable {
+            sponge_state,
+            input_buffer,
+            output_buffer,
+        } = self;
         let sponge_state = sponge_state.map(|x| builder.eval(x));
         let mut copy_vec = |v: &Vec<Felt<C::F>>| v.iter().map(|x| builder.eval(*x)).collect();
         DuplexChallengerVariable::<C> {
@@ -102,7 +106,9 @@ impl<C: Config<F = BabyBear>> DuplexChallengerVariable<C> {
             self.duplexing(builder);
         }
 
-        self.output_buffer.pop().expect("output buffer should be non-empty")
+        self.output_buffer
+            .pop()
+            .expect("output buffer should be non-empty")
     }
 
     fn sample_bits(&mut self, builder: &mut Builder<C>, nb_bits: usize) -> Vec<Felt<C::F>> {
@@ -134,9 +140,7 @@ impl<C: Config<F = BabyBear>> DuplexChallengerVariable<C> {
             .output_buffer
             .iter()
             .copied()
-            .chain(
-                (self.output_buffer.len()..PERMUTATION_WIDTH).map(|_| builder.eval(C::F::ZERO)),
-            )
+            .chain((self.output_buffer.len()..PERMUTATION_WIDTH).map(|_| builder.eval(C::F::ZERO)))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
@@ -301,7 +305,9 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
             self.duplexing(builder);
         }
 
-        self.output_buffer.pop().expect("output buffer should be non-empty")
+        self.output_buffer
+            .pop()
+            .expect("output buffer should be non-empty")
     }
 
     pub fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
@@ -443,7 +449,9 @@ pub(crate) mod tests {
         constraints::ConstraintCompiler,
         ir::{Builder, Config, Ext, ExtConst, Felt, Var},
     };
-    use zkm2_recursion_core::stark::{outer_perm, BabyBearPoseidon2Outer, OuterCompress, OuterHash};
+    use zkm2_recursion_core::stark::{
+        outer_perm, BabyBearPoseidon2Outer, OuterCompress, OuterHash,
+    };
     use zkm2_recursion_gnark_ffi::PlonkBn254Prover;
     use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
 

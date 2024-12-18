@@ -77,7 +77,11 @@ where
         input: SP1MerkleProofWitnessVariable<C, SC>,
         value_assertions: bool,
     ) {
-        let SP1MerkleProofWitnessVariable { vk_merkle_proofs, values, root } = input;
+        let SP1MerkleProofWitnessVariable {
+            vk_merkle_proofs,
+            values,
+            root,
+        } = input;
         for ((proof, value), expected_value) in
             vk_merkle_proofs.into_iter().zip(values).zip(digests)
         {
@@ -145,18 +149,30 @@ where
 impl<SC: BabyBearFriConfig + FieldHasher<BabyBear>> SP1CompressWithVKeyWitnessValues<SC> {
     pub fn shape(&self) -> SP1CompressWithVkeyShape {
         let merkle_tree_height = self.merkle_val.vk_merkle_proofs.first().unwrap().path.len();
-        SP1CompressWithVkeyShape { compress_shape: self.compress_val.shape(), merkle_tree_height }
+        SP1CompressWithVkeyShape {
+            compress_shape: self.compress_val.shape(),
+            merkle_tree_height,
+        }
     }
 }
 
 impl SP1MerkleProofWitnessValues<BabyBearPoseidon2> {
     pub fn dummy(num_proofs: usize, height: usize) -> Self {
         let dummy_digest = [BabyBear::ZERO; DIGEST_SIZE];
-        let vk_merkle_proofs =
-            vec![MerkleProof { index: 0, path: vec![dummy_digest; height] }; num_proofs];
+        let vk_merkle_proofs = vec![
+            MerkleProof {
+                index: 0,
+                path: vec![dummy_digest; height]
+            };
+            num_proofs
+        ];
         let values = vec![dummy_digest; num_proofs];
 
-        Self { vk_merkle_proofs, values, root: dummy_digest }
+        Self {
+            vk_merkle_proofs,
+            values,
+            root: dummy_digest,
+        }
     }
 }
 
@@ -172,7 +188,10 @@ impl SP1CompressWithVKeyWitnessValues<BabyBearPoseidon2> {
             num_proofs,
             shape.merkle_tree_height,
         );
-        Self { compress_val, merkle_val }
+        Self {
+            compress_val,
+            merkle_val,
+        }
     }
 }
 

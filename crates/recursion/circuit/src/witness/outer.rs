@@ -61,7 +61,10 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
             .map(|a| a.into_iter().map(|b| vec![b]).collect())
             .collect();
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { opened_values, opening_proof }
+        Self::WitnessVariable {
+            opened_values,
+            opening_proof,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {

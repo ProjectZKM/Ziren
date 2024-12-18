@@ -44,15 +44,24 @@ pub(crate) fn assert_complete<C: Config>(
     builder.assert_felt_ne(is_complete * *next_shard, C::F::ONE);
 
     // Assert that that an execution shard is present.
-    builder.assert_felt_eq(is_complete * (*contains_execution_shard - C::F::ONE), C::F::ZERO);
+    builder.assert_felt_eq(
+        is_complete * (*contains_execution_shard - C::F::ONE),
+        C::F::ZERO,
+    );
     // Assert that the start execution shard is equal to 1.
-    builder.assert_felt_eq(is_complete * (*start_execution_shard - C::F::ONE), C::F::ZERO);
+    builder.assert_felt_eq(
+        is_complete * (*start_execution_shard - C::F::ONE),
+        C::F::ZERO,
+    );
 
     // Assert that the end reconstruct challenger is equal to the leaf challenger.
     for (end_challenger_d, leaf_challenger_d) in
         end_reconstruct_challenger.into_iter().zip(*leaf_challenger)
     {
-        builder.assert_felt_eq(is_complete * (end_challenger_d - leaf_challenger_d), C::F::ZERO);
+        builder.assert_felt_eq(
+            is_complete * (end_challenger_d - leaf_challenger_d),
+            C::F::ZERO,
+        );
     }
 
     // The start reconstruct deferred digest should be zero.
@@ -61,11 +70,14 @@ pub(crate) fn assert_complete<C: Config>(
     }
 
     // The end reconstruct deferred digest should be equal to the deferred proofs digest.
-    for (end_digest_word, deferred_digest_word) in
-        end_reconstruct_deferred_digest.iter().zip_eq(deferred_proofs_digest.iter())
+    for (end_digest_word, deferred_digest_word) in end_reconstruct_deferred_digest
+        .iter()
+        .zip_eq(deferred_proofs_digest.iter())
     {
-        builder
-            .assert_felt_eq(is_complete * (*end_digest_word - *deferred_digest_word), C::F::ZERO);
+        builder.assert_felt_eq(
+            is_complete * (*end_digest_word - *deferred_digest_word),
+            C::F::ZERO,
+        );
     }
 
     // Assert that the cumulative sum is zero.

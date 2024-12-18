@@ -3,7 +3,7 @@ use std::iter::{repeat, zip};
 
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
-use p3_field::{FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra};
 
 use p3_bn254_fr::Bn254Fr;
 use p3_symmetric::Permutation;
@@ -173,8 +173,11 @@ impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHashe
         assert!(C::N::bits() == p3_bn254_fr::Bn254Fr::bits());
         assert!(C::F::bits() == p3_baby_bear::BabyBear::bits());
         let num_f_elms = C::N::bits() / C::F::bits();
-        let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
-            [builder.eval(C::N::ZERO), builder.eval(C::N::ZERO), builder.eval(C::N::ZERO)];
+        let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] = [
+            builder.eval(C::N::ZERO),
+            builder.eval(C::N::ZERO),
+            builder.eval(C::N::ZERO),
+        ];
         for block_chunk in &input.iter().chunks(POSEIDON_2_BB_RATE) {
             for (chunk_id, chunk) in (&block_chunk.chunks(num_f_elms)).into_iter().enumerate() {
                 let chunk = chunk.copied().collect::<Vec<_>>();
@@ -190,8 +193,11 @@ impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHashe
         builder: &mut Builder<C>,
         input: [Self::DigestVariable; 2],
     ) -> Self::DigestVariable {
-        let state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
-            [builder.eval(input[0][0]), builder.eval(input[1][0]), builder.eval(C::N::ZERO)];
+        let state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] = [
+            builder.eval(input[0][0]),
+            builder.eval(input[1][0]),
+            builder.eval(C::N::ZERO),
+        ];
         builder.push_op(DslIr::CircuitPoseidon2Permute(state));
         [state[0]; BN254_DIGEST_SIZE]
     }
@@ -211,12 +217,22 @@ impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHashe
     ) -> [Self::DigestVariable; 2] {
         let result0: [Var<_>; BN254_DIGEST_SIZE] = core::array::from_fn(|j| {
             let result = builder.uninit();
-            builder.push_op(DslIr::CircuitSelectV(should_swap, input[1][j], input[0][j], result));
+            builder.push_op(DslIr::CircuitSelectV(
+                should_swap,
+                input[1][j],
+                input[0][j],
+                result,
+            ));
             result
         });
         let result1: [Var<_>; BN254_DIGEST_SIZE] = core::array::from_fn(|j| {
             let result = builder.uninit();
-            builder.push_op(DslIr::CircuitSelectV(should_swap, input[0][j], input[1][j], result));
+            builder.push_op(DslIr::CircuitSelectV(
+                should_swap,
+                input[0][j],
+                input[1][j],
+                result,
+            ));
             result
         });
 

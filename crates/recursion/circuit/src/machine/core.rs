@@ -600,9 +600,16 @@ where
 
 impl<SC: BabyBearFriConfig> SP1RecursionWitnessValues<SC> {
     pub fn shape(&self) -> SP1RecursionShape {
-        let proof_shapes = self.shard_proofs.iter().map(|proof| proof.shape()).collect();
+        let proof_shapes = self
+            .shard_proofs
+            .iter()
+            .map(|proof| proof.shape())
+            .collect();
 
-        SP1RecursionShape { proof_shapes, is_complete: self.is_complete }
+        SP1RecursionShape {
+            proof_shapes,
+            is_complete: self.is_complete,
+        }
     }
 }
 
@@ -630,6 +637,9 @@ impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
 
 impl From<ProofShape> for SP1RecursionShape {
     fn from(proof_shape: ProofShape) -> Self {
-        Self { proof_shapes: vec![proof_shape], is_complete: false }
+        Self {
+            proof_shapes: vec![proof_shape],
+            is_complete: false,
+        }
     }
 }

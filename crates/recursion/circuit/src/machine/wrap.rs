@@ -68,8 +68,12 @@ where
         }
 
         // Observe the main commitment and public values.
-        challenger
-            .observe_slice(builder, proof.public_values[0..machine.num_pv_elts()].iter().copied());
+        challenger.observe_slice(
+            builder,
+            proof.public_values[0..machine.num_pv_elts()]
+                .iter()
+                .copied(),
+        );
 
         let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
         StarkVerifier::verify_shard(

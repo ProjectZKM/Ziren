@@ -135,11 +135,15 @@ where
 
         // First, verify the merkle tree proofs.
         let vk_root = vk_merkle_data.root;
-        let values = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect::<Vec<_>>();
+        let values = vks_and_proofs
+            .iter()
+            .map(|(vk, _)| vk.hash(builder))
+            .collect::<Vec<_>>();
         SP1MerkleProofVerifier::verify(builder, values, vk_merkle_data, value_assertions);
 
-        let mut deferred_public_values_stream: Vec<Felt<C::F>> =
-            (0..RECURSIVE_PROOF_NUM_PV_ELTS).map(|_| builder.uninit()).collect();
+        let mut deferred_public_values_stream: Vec<Felt<C::F>> = (0..RECURSIVE_PROOF_NUM_PV_ELTS)
+            .map(|_| builder.uninit())
+            .collect();
         let deferred_public_values: &mut RecursionPublicValues<_> =
             deferred_public_values_stream.as_mut_slice().borrow_mut();
 
@@ -165,7 +169,9 @@ where
             // Observe the and public values.
             challenger.observe_slice(
                 builder,
-                shard_proof.public_values[0..machine.num_pv_elts()].iter().copied(),
+                shard_proof.public_values[0..machine.num_pv_elts()]
+                    .iter()
+                    .copied(),
             );
 
             let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);

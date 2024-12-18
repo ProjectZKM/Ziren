@@ -2,18 +2,16 @@ use itertools::{izip, Itertools};
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
 use p3_field::{FieldAlgebra, TwoAdicField};
-use p3_fri::{
-    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof,
-};
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof};
 use p3_symmetric::Hash;
 use p3_util::log2_strict_usize;
-use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
-use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::{InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerBatchOpening, InnerVal};
 use std::{
     cmp::Reverse,
     iter::{once, repeat_with, zip},
 };
+use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
+use zkm2_recursion_core::DIGEST_SIZE;
+use zkm2_stark::{InnerBatchOpening, InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal};
 
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
@@ -66,7 +64,10 @@ pub fn verify_shape_and_sample_challenges<
             .take(config.num_queries)
             .collect();
 
-    FriChallenges { query_indices, betas }
+    FriChallenges {
+        query_indices,
+        betas,
+    }
 }
 
 pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>>(
@@ -92,8 +93,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
     }
 
     // The powers of alpha, where the ith element is alpha^i.
-    let mut alpha_pows: Vec<Ext<C::F, C::EF>> =
-        vec![builder.eval(SymbolicExt::from_f(C::EF::ONE))];
+    let mut alpha_pows: Vec<Ext<C::F, C::EF>> = vec![builder.eval(SymbolicExt::from_f(C::EF::ONE))];
 
     let reduced_openings = proof
         .query_openings
@@ -108,8 +108,10 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
             for (batch_opening, round) in zip(query_opening, rounds.iter().cloned()) {
                 let batch_commit = round.batch_commit;
                 let mats = round.domains_points_and_opens;
-                let batch_heights =
-                    mats.iter().map(|mat| mat.domain.size() << config.log_blowup).collect_vec();
+                let batch_heights = mats
+                    .iter()
+                    .map(|mat| mat.domain.size() << config.log_blowup)
+                    .collect_vec();
 
                 let batch_max_height = batch_heights.iter().max().expect("Empty batch?");
                 let log_batch_max_height = log2_strict_usize(*batch_max_height);
@@ -223,8 +225,11 @@ pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVar
     reduced_openings: Vec<[Ext<C::F, C::EF>; 32]>,
 ) {
     let log_max_height = proof.commit_phase_commits.len() + config.log_blowup;
-    for ((index_bits, query_proof), ro) in
-        challenges.query_indices.iter().zip(proof.query_proofs).zip(reduced_openings)
+    for ((index_bits, query_proof), ro) in challenges
+        .query_indices
+        .iter()
+        .zip(proof.query_proofs)
+        .zip(reduced_openings)
     {
         let folded_eval = verify_query::<C, SC>(
             builder,
@@ -253,8 +258,11 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     let two_adic_generator: Felt<_> = builder.constant(C::F::two_adic_generator(log_max_height));
 
     // TODO: fix expreversebits address bug to avoid needing to allocate a new variable.
-    let mut x =
-        C::exp_reverse_bits(builder, two_adic_generator, index_bits[..log_max_height].to_vec());
+    let mut x = C::exp_reverse_bits(
+        builder,
+        two_adic_generator,
+        index_bits[..log_max_height].to_vec(),
+    );
     // let mut x = builder.uninit();
     // builder.push(DslIr::AddFI(x, x_f, C::F::ZERO));
 
@@ -348,8 +356,11 @@ pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     opened_values: Vec<Vec<Vec<Felt<C::F>>>>,
     proof: Vec<SC::DigestVariable>,
 ) {
-    let mut heights_tallest_first =
-        heights.iter().enumerate().sorted_by_key(|(_, height)| Reverse(*height)).peekable();
+    let mut heights_tallest_first = heights
+        .iter()
+        .enumerate()
+        .sorted_by_key(|(_, height)| Reverse(*height))
+        .peekable();
 
     let mut curr_height_padded = heights_tallest_first.peek().unwrap().1.next_power_of_two();
 
@@ -386,7 +397,7 @@ pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     SC::assert_digest_eq(builder, root, commit);
 }
 
-    /*
+/*
 pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
     [BabyBear::ZERO; DIGEST_SIZE].into()
 }
