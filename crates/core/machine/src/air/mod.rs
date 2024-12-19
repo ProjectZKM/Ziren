@@ -14,5 +14,3 @@ pub trait ZKMCoreAirBuilder:
 
 impl<AB: BaseAirBuilder> WordAirBuilder for AB {}
 impl<AB: BaseAirBuilder + ZKMAirBuilder> ZKMCoreAirBuilder for AB {}
-
-
