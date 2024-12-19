@@ -8,7 +8,7 @@ use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm2_recursion_core::air::Block;
 use zkm2_stark::{
     baby_bear_poseidon2::BabyBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
-    InnerChallengeMmcs, InnerDigest, InnerVal,
+    InnerChallengeMmcs, InnerDigest, InnerVal, InnerPcsProof,
 };
 
 use crate::{
@@ -57,22 +57,22 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     }
 }
 
-//impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
-//    for InnerPcsProof
-//{
-//    type WitnessVariable = TwoAdicPcsProofVariable<C, BabyBearPoseidon2>;
-//
-//    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-//        let fri_proof = self.fri_proof.read(builder);
-//        let query_openings = self.query_openings.read(builder);
-//        Self::WitnessVariable { fri_proof, query_openings }
-//    }
-//
-//    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-//        self.fri_proof.write(witness);
-//        self.query_openings.write(witness);
-//    }
-//}
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+    for InnerPcsProof
+{
+    type WitnessVariable = TwoAdicPcsProofVariable<C, BabyBearPoseidon2>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let fri_proof = self.fri_proof.read(builder);
+        let query_openings = self.query_openings.read(builder);
+        Self::WitnessVariable { fri_proof, query_openings }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.fri_proof.write(witness);
+        self.query_openings.write(witness);
+    }
+}
 
 impl<C> Witnessable<C> for InnerBatchOpening
 where
@@ -100,7 +100,6 @@ where
     }
 }
 
-/*
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
     for InnerFriProof
 {
@@ -146,7 +145,6 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
         self.commit_phase_openings.write(witness);
     }
 }
-*/
 
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
     for CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>

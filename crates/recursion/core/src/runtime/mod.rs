@@ -263,6 +263,7 @@ where
         while self.pc < F::from_canonical_u32(self.program.instructions.len() as u32) {
             let idx = self.pc.as_canonical_u32() as usize;
             let instruction = self.program.instructions[idx].clone();
+            println!("instruct : {:?}", instruction);
 
             let next_clk = self.clk + F::from_canonical_u32(4);
             let next_pc = self.pc + F::ONE;

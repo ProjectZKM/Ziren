@@ -73,7 +73,6 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
     }
 }
 
-/*
 impl Witnessable<OuterConfig> for OuterPcsProof {
     type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
@@ -108,14 +107,13 @@ impl Witnessable<OuterConfig> for OuterFriProof {
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        //self.commit_phase_commits.iter().for_each(|commit| {
-        //    let commit = Borrow::<OuterDigest>::borrow(commit);
-        //    commit.write(witness);
-        //});
-        //self.query_proofs.write(witness);
+        self.commit_phase_commits.iter().for_each(|commit| {
+            let commit = Borrow::<OuterDigest>::borrow(commit);
+            commit.write(witness);
+        });
+        self.query_proofs.write(witness);
         self.final_poly.write(witness);
-        //self.pow_witness.write(witness);
-        panic!("Incomplete impl")
+        self.pow_witness.write(witness);
     }
 }
 
@@ -146,4 +144,3 @@ impl Witnessable<OuterConfig> for QueryProof<OuterVal, OuterChallenge, OuterChal
         self.commit_phase_openings.write(witness);
     }
 }
-*/

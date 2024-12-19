@@ -2,16 +2,17 @@ use itertools::{izip, Itertools};
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
 use p3_field::{FieldAlgebra, TwoAdicField};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof};
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig};
 use p3_symmetric::Hash;
 use p3_util::log2_strict_usize;
 use std::{
     cmp::Reverse,
     iter::{once, repeat_with, zip},
 };
+use std::marker::PhantomData;
 use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
 use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::{InnerBatchOpening, InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal};
+use zkm2_stark::{InnerBatchOpening, InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal, InputProof, InnerValMmcs, InnerPcsProof};
 
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
@@ -397,7 +398,6 @@ pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     SC::assert_digest_eq(builder, root, commit);
 }
 
-/*
 pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
     [BabyBear::ZERO; DIGEST_SIZE].into()
 }
@@ -405,8 +405,9 @@ pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
 pub fn dummy_query_proof(
     height: usize,
     log_blowup: usize,
-) -> QueryProof<InnerVal, InnerChallenge, InnerChallengeMmcs> {
+) -> QueryProof<InnerChallenge, InnerChallengeMmcs, InputProof> {
     QueryProof {
+        input_proof: TwoAdicFriGenericConfig::<Vec<(usize, InnerChallenge)>, ()>(PhantomData),
         commit_phase_openings: (0..height)
             .map(|i| CommitPhaseProofStep {
                 sibling_value: InnerChallenge::ZERO,
@@ -424,7 +425,7 @@ pub fn dummy_pcs_proof(
     fri_queries: usize,
     batch_shapes: &[PolynomialBatchShape],
     log_blowup: usize,
-) -> (InnerFriProof, InnerBatchOpening) {
+) -> InnerPcsProof {
     let max_height = batch_shapes
         .iter()
         .map(|shape| shape.shapes.iter().map(|shape| shape.log_degree).max().unwrap())
@@ -458,7 +459,7 @@ pub fn dummy_pcs_proof(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    (fri_proof, query_openings)
+    InnerPcsProof{ fri_proof, query_openings }
 }
 
 #[cfg(test)]
@@ -591,6 +592,7 @@ mod tests {
         );
     }
 
+    /*
     #[test]
     fn test_fri_verify_shape_and_sample_challenges() {
         let mut rng = &mut OsRng;
@@ -602,7 +604,7 @@ mod tests {
         let val_mmcs = InnerValMmcs::new(hash, compress);
         let dft = InnerDft::default();
         let pcs: InnerPcs =
-            InnerPcs::new(log_degrees.iter().copied().max().unwrap(), dft, val_mmcs, fri_config);
+            InnerPcs::new(dft, val_mmcs, fri_config);
 
         // Generate proof.
         let domains_and_polys = log_degrees
@@ -685,7 +687,7 @@ mod tests {
         let val_mmcs = InnerValMmcs::new(hash, compress);
         let dft = InnerDft::default();
         let pcs: InnerPcs =
-            InnerPcs::new(log_degrees.iter().copied().max().unwrap(), dft, val_mmcs, fri_config);
+            InnerPcs::new(dft, val_mmcs, fri_config);
 
         // Generate proof.
         let domains_and_polys = log_degrees
@@ -794,9 +796,8 @@ mod tests {
         );
 
         let mut witness_stream = Vec::<WitnessBlock<C>>::new();
-        // FIXME stephen
-        //Witnessable::<C>::write(&proof, &mut witness_stream);
-        //Witnessable::<C>::write(&commit, &mut witness_stream);
+        Witnessable::<C>::write(&proof, &mut witness_stream);
+        Witnessable::<C>::write(&commit, &mut witness_stream);
         for opening in os {
             let (_, points_and_opens) = opening;
             for (point, opening_for_point) in points_and_opens {
@@ -807,5 +808,5 @@ mod tests {
 
         run_test_recursion(builder.into_operations(), witness_stream);
     }
+    */
 }
-*/
