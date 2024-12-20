@@ -10,7 +10,7 @@ use zkm2_recursion_compiler::{
     ir::{Builder, Var},
 };
 use zkm2_recursion_core::stark::{
-    BabyBearPoseidon2Outer, InputProof, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs,
+    BabyBearPoseidon2Outer, OuterInputProof, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs,
     OuterDigest, OuterFriProof, OuterPcsProof, OuterVal,
 };
 
@@ -143,7 +143,7 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     }
 }
 
-impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, InputProof> {
+impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof> {
     type WitnessVariable = FriQueryProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {

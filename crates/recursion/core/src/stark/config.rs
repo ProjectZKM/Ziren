@@ -5,14 +5,14 @@ use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use p3_fri::{
-    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig,
-    TwoAdicFriPcs,
+    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof,
+    TwoAdicFriPcs, TwoAdicFriGenericConfigForMmcs
 };
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use zkm2_stark::{Com, StarkGenericConfig, TwoAdicFriPcsProof, ZeroCommitment};
+use zkm2_stark::{Com, StarkGenericConfig, ZeroCommitment, TwoAdicFriPcsProof};
 
 use super::{poseidon2::bn254_poseidon2_rc3, zkm2_dev_mode};
 
@@ -43,10 +43,10 @@ pub type OuterChallenger = MultiField32Challenger<
 >;
 pub type OuterPcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, OuterChallengeMmcs>;
 
-pub type InputProof = TwoAdicFriGenericConfig<Vec<(usize, OuterChallenge)>, ()>;
-pub type OuterQueryProof = QueryProof<OuterChallenge, OuterChallengeMmcs, InputProof>;
+pub type OuterInputProof = TwoAdicFriGenericConfigForMmcs<OuterVal, OuterValMmcs>;
+pub type OuterQueryProof = QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof>;
 pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs>;
-pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, InputProof>;
+pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, OuterInputProof>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
 pub type OuterPcsProof =
     TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs>;

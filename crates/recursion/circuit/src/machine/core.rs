@@ -12,10 +12,11 @@ use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-//use zkm2_core_machine::{
+use zkm2_core_machine::{
 //    cpu::MAX_CPU_LOG_DEGREE,
-//    riscv::{RiscvAir, MAX_LOG_NUMBER_OF_SHARDS},
-//};
+    mips::{MipsAir, MAX_LOG_NUMBER_OF_SHARDS},
+};
+use crate::stark::dummy_vk_and_shard_proof;
 
 use zkm2_recursion_core::air::PV_DIGEST_NUM_WORDS;
 use zkm2_stark::{
@@ -81,7 +82,6 @@ pub struct SP1RecursiveVerifier<C: Config, SC: BabyBearFriConfig> {
     _phantom: PhantomData<(C, SC)>,
 }
 
-/*
 impl<C, SC> SP1RecursiveVerifier<C, SC>
 where
     SC: BabyBearFriConfigVariable<
@@ -120,7 +120,7 @@ where
     /// as the one witnessed here.
     pub fn verify(
         builder: &mut Builder<C>,
-        machine: &StarkMachine<SC, RiscvAir<SC::Val>>,
+        machine: &StarkMachine<SC, MipsAir<SC::Val>>,
         input: SP1RecursionWitnessVariable<C, SC>,
     ) {
         // Read input.
@@ -596,7 +596,6 @@ where
         }
     }
 }
-*/
 
 impl<SC: BabyBearFriConfig> SP1RecursionWitnessValues<SC> {
     pub fn shape(&self) -> SP1RecursionShape {
@@ -613,10 +612,9 @@ impl<SC: BabyBearFriConfig> SP1RecursionWitnessValues<SC> {
     }
 }
 
-/*
 impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
     pub fn dummy(
-        machine: &StarkMachine<BabyBearPoseidon2, RiscvAir<BabyBear>>,
+        machine: &StarkMachine<BabyBearPoseidon2, MipsAir<BabyBear>>,
         shape: &SP1RecursionShape,
     ) -> Self {
         let (mut vks, shard_proofs): (Vec<_>, Vec<_>) =
@@ -633,7 +631,6 @@ impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
         }
     }
 }
-*/
 
 impl From<ProofShape> for SP1RecursionShape {
     fn from(proof_shape: ProofShape) -> Self {

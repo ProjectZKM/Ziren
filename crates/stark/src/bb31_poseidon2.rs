@@ -8,7 +8,7 @@ use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::{
     BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig,
-    TwoAdicFriPcs,
+    TwoAdicFriPcs, TwoAdicFriGenericConfigForMmcs,
 };
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
@@ -37,10 +37,11 @@ pub type InnerChallenger = DuplexChallenger<InnerVal, InnerPerm, 16, 8>;
 pub type InnerDft = Radix2DitParallel<InnerVal>;
 pub type InnerPcs = TwoAdicFriPcs<InnerVal, InnerDft, InnerValMmcs, InnerChallengeMmcs>;
 
-pub type InputProof = TwoAdicFriGenericConfig<Vec<(usize, InnerChallenge)>, ()>;
-pub type InnerQueryProof = QueryProof<InnerChallenge, InnerChallengeMmcs, InputProof>;
+pub type InnerInputProof = TwoAdicFriGenericConfigForMmcs<InnerVal, InnerValMmcs>;
+
+pub type InnerQueryProof = QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>;
 pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>;
-pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InputProof>;
+pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -52,7 +53,7 @@ pub struct TwoAdicFriPcsProof<
     FriMmcs: Mmcs<Challenge>,
 > {
     pub fri_proof:
-        FriProof<Challenge, FriMmcs, Val, TwoAdicFriGenericConfig<Vec<(usize, Challenge)>, ()>>,
+        FriProof<Challenge, FriMmcs, Val, TwoAdicFriGenericConfigForMmcs<Val, InputMmcs>>,
     /// For each query, for each committed batch, query openings for that batch
     pub query_openings: Vec<Vec<BatchOpening<Val, InputMmcs>>>,
 }

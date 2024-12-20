@@ -15,8 +15,8 @@ use std::{
 use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
 use zkm2_recursion_core::DIGEST_SIZE;
 use zkm2_stark::{
-    InnerBatchOpening, InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerPcsProof, InnerVal,
-    InnerValMmcs, InputProof, TwoAdicFriPcsProof,
+    InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal,
+    InnerValMmcs, InnerInputProof, OpeningProof, baby_bear_poseidon2::BabyBearPoseidon2, TwoAdicFriPcsProof, InnerPcsProof,
 };
 
 use crate::{
@@ -410,9 +410,9 @@ pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
 pub fn dummy_query_proof(
     height: usize,
     log_blowup: usize,
-) -> QueryProof<InnerChallenge, InnerChallengeMmcs, InputProof> {
+) -> QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof> {
     QueryProof {
-        input_proof: TwoAdicFriGenericConfig::<Vec<(usize, InnerChallenge)>, ()>(PhantomData),
+        input_proof: TwoAdicFriGenericConfig(PhantomData),
         commit_phase_openings: (0..height)
             .map(|i| CommitPhaseProofStep {
                 sibling_value: InnerChallenge::ZERO,

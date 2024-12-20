@@ -25,10 +25,10 @@ use zkm2_stark::{
     air::{InteractionScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
     Chip, InteractionKind, StarkGenericConfig, StarkMachine,
 };
-//
-//pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
-//pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
-//
+
+pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
+pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
+
 ///// A module for importing all the different RISC-V chips.
 pub(crate) mod mips_chips {
     pub use crate::{

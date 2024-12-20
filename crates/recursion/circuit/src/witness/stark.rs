@@ -6,9 +6,10 @@ use p3_fri::{CommitPhaseProofStep, QueryProof};
 
 use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm2_recursion_core::air::Block;
+use zkm2_recursion_core::stark::OuterInputProof;
 use zkm2_stark::{
     baby_bear_poseidon2::BabyBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
-    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerPcsProof, InnerVal, InputProof,
+    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerPcsProof, InnerVal, InnerInputProof,
 };
 
 use crate::{
@@ -140,7 +141,24 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
 }
 
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
-    for QueryProof<InnerChallenge, InnerChallengeMmcs, InputProof>
+    for QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>
+{
+    type WitnessVariable = FriQueryProofVariable<C, BabyBearPoseidon2>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let commit_phase_openings = self.commit_phase_openings.read(builder);
+        Self::WitnessVariable {
+            commit_phase_openings,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.commit_phase_openings.write(witness);
+    }
+}
+
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+    for QueryProof<InnerChallenge, InnerChallengeMmcs, OuterInputProof>
 {
     type WitnessVariable = FriQueryProofVariable<C, BabyBearPoseidon2>;
 
