@@ -1,6 +1,6 @@
 use p3_baby_bear::BabyBear;
 use p3_field::{
-    extension::BinomialExtensionField, FieldExtensionAlgebra, FieldAlgebra, Field, PrimeField32,
+    extension::BinomialExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32,
 };
 
 #[no_mangle]

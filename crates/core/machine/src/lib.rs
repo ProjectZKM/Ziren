@@ -17,9 +17,9 @@
 pub mod air;
 mod alu;
 pub mod bytes;
+pub mod mips;
 mod operations;
 pub mod utils;
-pub mod mips;
 pub use mips::*;
 
 /// The global version for all components of ZKM.

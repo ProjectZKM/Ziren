@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display, hash::Hash, iter::once};
 
-use zkm2_core_executor::events::{format_table_line, sorted_table_lines};
 use thiserror::Error;
+use zkm2_core_executor::events::{format_table_line, sorted_table_lines};
 
 /// A builder to create a [`Span`].
 /// `S` is the type of span names and `T` is the type of item names.
@@ -136,7 +136,11 @@ where
 
     /// Format and yield lines describing this span. Appropriate for logging.
     pub fn lines(&self) -> Vec<String> {
-        let Self { name, cts: instr_cts, children } = self;
+        let Self {
+            name,
+            cts: instr_cts,
+            children,
+        } = self;
         let (width, lines) = sorted_table_lines(instr_cts);
         let lines = lines.map(|(label, count)| format_table_line(&width, &label, count));
 

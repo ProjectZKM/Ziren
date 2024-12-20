@@ -77,10 +77,15 @@ impl PlonkBn254Prover {
         let vkey_hash = Self::get_vkey_hash(&build_dir);
         let sp1_verifier_str = include_str!("../assets/SP1VerifierPlonk.txt")
             .replace("{SP1_CIRCUIT_VERSION}", ZKM_CIRCUIT_VERSION)
-            .replace("{VERIFIER_HASH}", format!("0x{}", hex::encode(vkey_hash)).as_str())
+            .replace(
+                "{VERIFIER_HASH}",
+                format!("0x{}", hex::encode(vkey_hash)).as_str(),
+            )
             .replace("{PROOF_SYSTEM}", "Plonk");
         let mut sp1_verifier_file = File::create(sp1_verifier_path).unwrap();
-        sp1_verifier_file.write_all(sp1_verifier_str.as_bytes()).unwrap();
+        sp1_verifier_file
+            .write_all(sp1_verifier_str.as_bytes())
+            .unwrap();
 
         let plonk_verifier_path = build_dir.join("PlonkVerifier.sol");
         Self::modify_plonk_verifier(&plonk_verifier_path);
@@ -94,8 +99,10 @@ impl PlonkBn254Prover {
         let serialized = serde_json::to_string(&gnark_witness).unwrap();
         witness_file.write_all(serialized.as_bytes()).unwrap();
 
-        let mut proof =
-            prove_plonk_bn254(build_dir.to_str().unwrap(), witness_file.path().to_str().unwrap());
+        let mut proof = prove_plonk_bn254(
+            build_dir.to_str().unwrap(),
+            witness_file.path().to_str().unwrap(),
+        );
         proof.plonk_vkey_hash = Self::get_vkey_hash(&build_dir);
         proof
     }
@@ -126,7 +133,10 @@ impl PlonkBn254Prover {
     /// Modify the PlonkVerifier so that it works with the SP1Verifier.
     fn modify_plonk_verifier(file_path: &Path) {
         let mut content = String::new();
-        File::open(file_path).unwrap().read_to_string(&mut content).unwrap();
+        File::open(file_path)
+            .unwrap()
+            .read_to_string(&mut content)
+            .unwrap();
 
         content = content.replace("pragma solidity ^0.8.19;", "pragma solidity ^0.8.20;");
 

@@ -2,17 +2,22 @@ use itertools::{izip, Itertools};
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
 use p3_field::{FieldAlgebra, TwoAdicField};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig};
+use p3_fri::{
+    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig,
+};
 use p3_symmetric::Hash;
 use p3_util::log2_strict_usize;
+use std::marker::PhantomData;
 use std::{
     cmp::Reverse,
     iter::{once, repeat_with, zip},
 };
-use std::marker::PhantomData;
 use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
 use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::{InnerBatchOpening, InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal, InputProof, InnerValMmcs, InnerPcsProof};
+use zkm2_stark::{
+    InnerBatchOpening, InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerPcsProof, InnerVal,
+    InnerValMmcs, InputProof, TwoAdicFriPcsProof,
+};
 
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
@@ -428,7 +433,14 @@ pub fn dummy_pcs_proof(
 ) -> InnerPcsProof {
     let max_height = batch_shapes
         .iter()
-        .map(|shape| shape.shapes.iter().map(|shape| shape.log_degree).max().unwrap())
+        .map(|shape| {
+            shape
+                .shapes
+                .iter()
+                .map(|shape| shape.log_degree)
+                .max()
+                .unwrap()
+        })
         .max()
         .unwrap();
     let fri_proof = FriProof {
@@ -445,8 +457,12 @@ pub fn dummy_pcs_proof(
             batch_shapes
                 .iter()
                 .map(|shapes| {
-                    let batch_max_height =
-                        shapes.shapes.iter().map(|shape| shape.log_degree).max().unwrap();
+                    let batch_max_height = shapes
+                        .shapes
+                        .iter()
+                        .map(|shape| shape.log_degree)
+                        .max()
+                        .unwrap();
                     BatchOpening {
                         opened_values: shapes
                             .shapes
@@ -459,7 +475,10 @@ pub fn dummy_pcs_proof(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    InnerPcsProof{ fri_proof, query_openings }
+    TwoAdicFriPcsProof {
+        fri_proof,
+        query_openings,
+    }
 }
 
 #[cfg(test)]
@@ -529,10 +548,15 @@ mod tests {
                             .iter()
                             .map(|sibling| sibling.map(|x| builder.eval(x)))
                             .collect::<Vec<_>>();
-                        FriCommitPhaseProofStepVariable { sibling_value, opening_proof }
+                        FriCommitPhaseProofStepVariable {
+                            sibling_value,
+                            opening_proof,
+                        }
                     })
                     .collect::<Vec<_>>();
-                FriQueryProofVariable { commit_phase_openings }
+                FriQueryProofVariable {
+                    commit_phase_openings,
+                }
             })
             .collect::<Vec<_>>();
 
@@ -568,8 +592,12 @@ mod tests {
         let small_mats = (0..6).map(|_| RowMajorMatrix::<F>::rand(&mut OsRng, 8, 8));
         let small_mat_heights = (0..6).map(|_| 8);
 
-        let (commit, prover_data) =
-            mmcs.commit(large_mats.chain(medium_mats).chain(small_mats).collect_vec());
+        let (commit, prover_data) = mmcs.commit(
+            large_mats
+                .chain(medium_mats)
+                .chain(small_mats)
+                .collect_vec(),
+        );
 
         let commit: [_; DIGEST_SIZE] = commit.into();
         let commit = commit.map(|x| builder.eval(x));
@@ -577,15 +605,25 @@ mod tests {
         let (opened_values, proof) = mmcs.open_batch(6, &prover_data);
         let opened_values = opened_values
             .into_iter()
-            .map(|x| x.into_iter().map(|y| vec![builder.eval::<Felt<_>, _>(y)]).collect())
+            .map(|x| {
+                x.into_iter()
+                    .map(|y| vec![builder.eval::<Felt<_>, _>(y)])
+                    .collect()
+            })
             .collect();
         let index = builder.eval(F::from_canonical_u32(6));
         let index_bits = C::num2bits(&mut builder, index, 31);
-        let proof = proof.into_iter().map(|p| p.map(|x| builder.eval(x))).collect();
+        let proof = proof
+            .into_iter()
+            .map(|p| p.map(|x| builder.eval(x)))
+            .collect();
         verify_batch::<_, SC>(
             &mut builder,
             commit,
-            &large_mat_heights.chain(medium_mat_heights).chain(small_mat_heights).collect_vec(),
+            &large_mat_heights
+                .chain(medium_mat_heights)
+                .chain(small_mat_heights)
+                .collect_vec(),
             &index_bits,
             opened_values,
             proof,

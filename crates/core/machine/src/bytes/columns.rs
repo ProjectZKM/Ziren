@@ -1,5 +1,5 @@
-use zkm2_derive::AlignedBorrow;
 use std::mem::size_of;
+use zkm2_derive::AlignedBorrow;
 
 use super::NUM_BYTE_OPS;
 

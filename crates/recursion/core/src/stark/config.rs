@@ -5,18 +5,14 @@ use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use p3_fri::{
-    BatchOpening,
-    CommitPhaseProofStep,
-    FriConfig,
-    FriProof,
-    QueryProof,
+    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig,
     TwoAdicFriPcs,
 };
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use zkm2_stark::{Com, StarkGenericConfig, ZeroCommitment};
+use zkm2_stark::{Com, StarkGenericConfig, TwoAdicFriPcsProof, ZeroCommitment};
 
 use super::{poseidon2::bn254_poseidon2_rc3, zkm2_dev_mode};
 
@@ -47,10 +43,13 @@ pub type OuterChallenger = MultiField32Challenger<
 >;
 pub type OuterPcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, OuterChallengeMmcs>;
 
-pub type OuterQueryProof = QueryProof<OuterVal, OuterChallenge, OuterChallengeMmcs>;
+pub type InputProof = TwoAdicFriGenericConfig<Vec<(usize, OuterChallenge)>, ()>;
+pub type OuterQueryProof = QueryProof<OuterChallenge, OuterChallengeMmcs, InputProof>;
 pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs>;
-pub type OuterFriProof = FriProof<OuterVal, OuterChallenge, OuterChallengeMmcs, OuterVal>;
+pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, InputProof>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
+pub type OuterPcsProof =
+    TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs>;
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {

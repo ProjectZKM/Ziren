@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::{FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use zkm2_core_executor::ByteOpcode;
 use zkm2_stark::air::ZKMAirBuilder;
@@ -59,13 +59,9 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                 ByteOpcode::MSB => {
                     builder.receive_byte(field_op, local.msb, local.b, AB::F::ZERO, mult)
                 }
-                ByteOpcode::U16Range => builder.receive_byte(
-                    field_op,
-                    local.value_u16,
-                    AB::F::ZERO,
-                    AB::F::ZERO,
-                    mult,
-                ),
+                ByteOpcode::U16Range => {
+                    builder.receive_byte(field_op, local.value_u16, AB::F::ZERO, AB::F::ZERO, mult)
+                }
             }
         }
     }
