@@ -232,7 +232,8 @@ impl<C: Config<F = BabyBear>> FieldChallengerVariable<C, Felt<C::F>>
         self.sponge_state = builder.poseidon2_permute_v2(self.sponge_state);
 
         self.output_buffer.clear();
-        self.output_buffer.extend_from_slice(&self.sponge_state[..HASH_RATE]);
+        self.output_buffer
+            .extend_from_slice(&self.sponge_state[..HASH_RATE]);
     }
 }
 

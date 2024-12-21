@@ -36,7 +36,7 @@ use crate::{
         assert_complete, assert_recursion_public_values_valid, recursion_public_values_digest,
         root_public_values_digest,
     },
-    stark::{ShardProofVariable, StarkVerifier},
+    stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
     utils::uninit_challenger_pv,
     BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
 };
@@ -588,7 +588,6 @@ impl SP1CompressWitnessValues<BabyBearPoseidon2> {
         machine: &StarkMachine<BabyBearPoseidon2, A>,
         shape: &SP1CompressShape,
     ) -> Self {
-        /*
         let vks_and_proofs = shape
             .proof_shapes
             .iter()
@@ -598,9 +597,10 @@ impl SP1CompressWitnessValues<BabyBearPoseidon2> {
             })
             .collect();
 
-        Self { vks_and_proofs, is_complete: false }
-        */
-        panic!("Unimpl")
+        Self {
+            vks_and_proofs,
+            is_complete: false,
+        }
     }
 }
 

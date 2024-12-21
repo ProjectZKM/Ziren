@@ -23,12 +23,9 @@ use zkm2_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyi
 
 use crate::{
     challenger::CanObserveVariable,
-    //    fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+    fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
-    BabyBearFriConfig,
-    CircuitConfig,
-    TwoAdicPcsMatsVariable,
-    TwoAdicPcsProofVariable,
+    BabyBearFriConfig, CircuitConfig, TwoAdicPcsMatsVariable, TwoAdicPcsProofVariable,
 };
 
 use crate::{
@@ -55,12 +52,14 @@ pub fn dummy_challenger(config: &BabyBearPoseidon2) -> Challenger<BabyBearPoseid
     challenger
 }
 
-/*
 /// Make a dummy shard proof for a given proof shape.
 pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
     machine: &StarkMachine<BabyBearPoseidon2, A>,
     shape: &ProofShape,
-) -> (StarkVerifyingKey<BabyBearPoseidon2>, ShardProof<BabyBearPoseidon2>) {
+) -> (
+    StarkVerifyingKey<BabyBearPoseidon2>,
+    ShardProof<BabyBearPoseidon2>,
+) {
     // Make a dummy commitment.
     let commitment = ShardCommitment {
         global_main_commit: dummy_hash(),
@@ -76,8 +75,13 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
         .enumerate()
         .map(|(i, (name, _))| (name.clone(), i))
         .collect::<HashMap<_, _>>();
-    let shard_chips = machine.shard_chips_ordered(&chip_ordering).collect::<Vec<_>>();
-    let chip_scopes = shard_chips.iter().map(|chip| chip.commit_scope()).collect::<Vec<_>>();
+    let shard_chips = machine
+        .shard_chips_ordered(&chip_ordering)
+        .collect::<Vec<_>>();
+    let chip_scopes = shard_chips
+        .iter()
+        .map(|chip| chip.commit_scope())
+        .collect::<Vec<_>>();
     let has_global_main_commit = chip_scopes.contains(&InteractionScope::Global);
     let opened_values = ShardOpenedValues {
         chips: shard_chips
@@ -96,8 +100,10 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
     let mut permutation_batch_shape = vec![];
     let mut quotient_batch_shape = vec![];
 
-    for ((chip, chip_opening), scope) in
-        shard_chips.iter().zip_eq(opened_values.chips.iter()).zip_eq(chip_scopes.iter())
+    for ((chip, chip_opening), scope) in shard_chips
+        .iter()
+        .zip_eq(opened_values.chips.iter())
+        .zip_eq(chip_scopes.iter())
     {
         if !chip_opening.preprocessed.local.is_empty() {
             let prep_shape = PolynomialShape {
@@ -135,26 +141,46 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
 
     let batch_shapes = if has_global_main_commit {
         vec![
-            PolynomialBatchShape { shapes: preprocessed_batch_shape },
-            PolynomialBatchShape { shapes: global_main_batch_shape },
-            PolynomialBatchShape { shapes: local_main_batch_shape },
-            PolynomialBatchShape { shapes: permutation_batch_shape },
-            PolynomialBatchShape { shapes: quotient_batch_shape },
+            PolynomialBatchShape {
+                shapes: preprocessed_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: global_main_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: local_main_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: permutation_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: quotient_batch_shape,
+            },
         ]
     } else {
         vec![
-            PolynomialBatchShape { shapes: preprocessed_batch_shape },
-            PolynomialBatchShape { shapes: local_main_batch_shape },
-            PolynomialBatchShape { shapes: permutation_batch_shape },
-            PolynomialBatchShape { shapes: quotient_batch_shape },
+            PolynomialBatchShape {
+                shapes: preprocessed_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: local_main_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: permutation_batch_shape,
+            },
+            PolynomialBatchShape {
+                shapes: quotient_batch_shape,
+            },
         ]
     };
 
     let fri_queries = machine.config().fri_config().num_queries;
     let log_blowup = machine.config().fri_config().log_blowup;
-    let (opening_proof, _)= dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
+    let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
 
-    let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| BabyBear::ZERO).collect::<Vec<_>>();
+    let public_values = (0..PROOF_MAX_NUM_PVS)
+        .map(|_| BabyBear::ZERO)
+        .collect::<Vec<_>>();
 
     // Get the preprocessed chip information.
     let pcs = machine.config().pcs();
@@ -165,7 +191,14 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
                 <BabyBearPoseidon2 as StarkGenericConfig>::Challenge,
                 <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
             >>::natural_domain_for_degree(pcs, 1 << log_height);
-            (name.to_owned(), domain, Dimensions { width: *width, height: 1 << log_height })
+            (
+                name.to_owned(),
+                domain,
+                Dimensions {
+                    width: *width,
+                    height: 1 << log_height,
+                },
+            )
         })
         .collect();
 
@@ -183,12 +216,16 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<BabyBear>>(
         chip_ordering: preprocessed_chip_ordering,
     };
 
-    let shard_proof =
-        ShardProof { commitment, opened_values, opening_proof, chip_ordering, public_values };
+    let shard_proof = ShardProof {
+        commitment,
+        opened_values,
+        opening_proof,
+        chip_ordering,
+        public_values,
+    };
 
     (vk, shard_proof)
 }
-*/
 
 fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
     chip: &Chip<F, A>,

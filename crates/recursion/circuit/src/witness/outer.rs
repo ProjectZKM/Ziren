@@ -10,8 +10,8 @@ use zkm2_recursion_compiler::{
     ir::{Builder, Var},
 };
 use zkm2_recursion_core::stark::{
-    BabyBearPoseidon2Outer, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs, OuterDigest,
-    OuterFriProof, OuterVal,
+    BabyBearPoseidon2Outer, OuterInputProof, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs,
+    OuterDigest, OuterFriProof, OuterVal,
 };
 
 use crate::{
@@ -80,7 +80,10 @@ impl Witnessable<OuterConfig> for OuterPcsProof {
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let fri_proof = self.fri_proof.read(builder);
         let query_openings = self.query_openings.read(builder);
-        Self::WitnessVariable { fri_proof, query_openings }
+        Self::WitnessVariable {
+            fri_proof,
+            query_openings,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
@@ -88,6 +91,7 @@ impl Witnessable<OuterConfig> for OuterPcsProof {
         self.query_openings.write(witness);
     }
 }
+*/
 
 impl Witnessable<OuterConfig> for OuterFriProof {
     type WitnessVariable = FriProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
@@ -104,18 +108,22 @@ impl Witnessable<OuterConfig> for OuterFriProof {
         let query_proofs = self.query_proofs.read(builder);
         let final_poly = self.final_poly.read(builder);
         let pow_witness = self.pow_witness.read(builder);
-        Self::WitnessVariable { commit_phase_commits, query_proofs, final_poly, pow_witness }
+        Self::WitnessVariable {
+            commit_phase_commits,
+            query_proofs,
+            final_poly,
+            pow_witness,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        //self.commit_phase_commits.iter().for_each(|commit| {
-        //    let commit = Borrow::<OuterDigest>::borrow(commit);
-        //    commit.write(witness);
-        //});
-        //self.query_proofs.write(witness);
+        self.commit_phase_commits.iter().for_each(|commit| {
+            let commit = Borrow::<OuterDigest>::borrow(commit);
+            commit.write(witness);
+        });
+        self.query_proofs.write(witness);
         self.final_poly.write(witness);
-        //self.pow_witness.write(witness);
-        panic!("Incomplete impl")
+        self.pow_witness.write(witness);
     }
 }
 
@@ -125,7 +133,10 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { sibling_value, opening_proof }
+        Self::WitnessVariable {
+            sibling_value,
+            opening_proof,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
@@ -134,16 +145,17 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     }
 }
 
-impl Witnessable<OuterConfig> for QueryProof<OuterVal, OuterChallenge, OuterChallengeMmcs> {
+impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof> {
     type WitnessVariable = FriQueryProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let commit_phase_openings = self.commit_phase_openings.read(builder);
-        Self::WitnessVariable { commit_phase_openings }
+        Self::WitnessVariable {
+            commit_phase_openings,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
         self.commit_phase_openings.write(witness);
     }
 }
-*/

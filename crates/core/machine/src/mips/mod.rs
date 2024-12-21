@@ -16,50 +16,50 @@ use itertools::Itertools;
 //    syscall::precompiles::fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
 //};
 use hashbrown::{HashMap, HashSet};
-use p3_field::PrimeField32;
 pub use mips_chips::*;
+use p3_field::PrimeField32;
 ////use sp1_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
+use strum_macros::{EnumDiscriminants, EnumIter};
+use tracing::instrument;
 use zkm2_stark::{
     air::{InteractionScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
     Chip, InteractionKind, StarkGenericConfig, StarkMachine,
 };
-use strum_macros::{EnumDiscriminants, EnumIter};
-use tracing::instrument;
-//
-//pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
-//pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
-//
+
+pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
+pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
+
 ///// A module for importing all the different RISC-V chips.
 pub(crate) mod mips_chips {
     pub use crate::{
-          alu::AddSubChip,
-//        alu::{AddSubChip, BitwiseChip, DivRemChip, LtChip, MulChip, ShiftLeft, ShiftRightChip},
-          bytes::ByteChip,
-//        cpu::CpuChip,
-//        memory::MemoryGlobalChip,
-//        program::ProgramChip,
-//        syscall::{
-//            chip::SyscallChip,
-//            precompiles::{
-//                edwards::{EdAddAssignChip, EdDecompressChip},
-//                keccak256::KeccakPermuteChip,
-//                sha256::{ShaCompressChip, ShaExtendChip},
-//                u256x2048_mul::U256x2048MulChip,
-//                uint256::Uint256MulChip,
-//                weierstrass::{
-//                    WeierstrassAddAssignChip, WeierstrassDecompressChip,
-//                    WeierstrassDoubleAssignChip,
-//                },
-//            },
-//        },
+        alu::AddSubChip,
+        //        alu::{AddSubChip, BitwiseChip, DivRemChip, LtChip, MulChip, ShiftLeft, ShiftRightChip},
+        bytes::ByteChip,
+        //        cpu::CpuChip,
+        //        memory::MemoryGlobalChip,
+        //        program::ProgramChip,
+        //        syscall::{
+        //            chip::SyscallChip,
+        //            precompiles::{
+        //                edwards::{EdAddAssignChip, EdDecompressChip},
+        //                keccak256::KeccakPermuteChip,
+        //                sha256::{ShaCompressChip, ShaExtendChip},
+        //                u256x2048_mul::U256x2048MulChip,
+        //                uint256::Uint256MulChip,
+        //                weierstrass::{
+        //                    WeierstrassAddAssignChip, WeierstrassDecompressChip,
+        //                    WeierstrassDoubleAssignChip,
+        //                },
+        //            },
+        //        },
     };
-//    pub use sp1_curves::{
-//        edwards::{ed25519::Ed25519Parameters, EdwardsCurve},
-//        weierstrass::{
-//            bls12_381::Bls12381Parameters, bn254::Bn254Parameters, secp256k1::Secp256k1Parameters,
-//            secp256r1::Secp256r1Parameters, SwCurve,
-//        },
-//    };
+    //    pub use sp1_curves::{
+    //        edwards::{ed25519::Ed25519Parameters, EdwardsCurve},
+    //        weierstrass::{
+    //            bls12_381::Bls12381Parameters, bn254::Bn254Parameters, secp256k1::Secp256k1Parameters,
+    //            secp256r1::Secp256r1Parameters, SwCurve,
+    //        },
+    //    };
 }
 
 /// An AIR for encoding MIPS execution.
@@ -173,7 +173,10 @@ impl<F: PrimeField32> MipsAir<F> {
 
     pub fn get_airs_and_costs() -> (Vec<Self>, HashMap<MipsAirDiscriminants, u64>) {
         let (chips, costs) = Self::get_chips_and_costs();
-        (chips.into_iter().map(|chip| chip.into_inner()).collect(), costs)
+        (
+            chips.into_iter().map(|chip| chip.into_inner()).collect(),
+            costs,
+        )
     }
 
     /// Get all the different RISC-V AIRs.

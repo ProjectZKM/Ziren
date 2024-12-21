@@ -8,7 +8,7 @@ use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm2_recursion_core::air::Block;
 use zkm2_stark::{
     baby_bear_poseidon2::BabyBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
-    InnerChallengeMmcs, InnerDigest, InnerVal,
+    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerVal, InnerInputProof,
 };
 
 use crate::{
@@ -57,22 +57,27 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     }
 }
 
-//impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
-//    for InnerPcsProof
-//{
-//    type WitnessVariable = TwoAdicPcsProofVariable<C, BabyBearPoseidon2>;
-//
-//    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-//        let fri_proof = self.fri_proof.read(builder);
-//        let query_openings = self.query_openings.read(builder);
-//        Self::WitnessVariable { fri_proof, query_openings }
-//    }
-//
-//    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-//        self.fri_proof.write(witness);
-//        self.query_openings.write(witness);
-//    }
-//}
+/*
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+    for InnerPcsProof
+{
+    type WitnessVariable = TwoAdicPcsProofVariable<C, BabyBearPoseidon2>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let fri_proof = self.fri_proof.read(builder);
+        let query_openings = self.query_openings.read(builder);
+        Self::WitnessVariable {
+            fri_proof,
+            query_openings,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.fri_proof.write(witness);
+        self.query_openings.write(witness);
+    }
+}
+*/
 
 impl<C> Witnessable<C> for InnerBatchOpening
 where
@@ -100,7 +105,6 @@ where
     }
 }
 
-/*
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
     for InnerFriProof
 {
@@ -118,7 +122,12 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
         let query_proofs = self.query_proofs.read(builder);
         let final_poly = self.final_poly.read(builder);
         let pow_witness = self.pow_witness.read(builder);
-        Self::WitnessVariable { commit_phase_commits, query_proofs, final_poly, pow_witness }
+        Self::WitnessVariable {
+            commit_phase_commits,
+            query_proofs,
+            final_poly,
+            pow_witness,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -133,20 +142,23 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
 }
 
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
-    for QueryProof<InnerVal, InnerChallenge, InnerChallengeMmcs>
+    for QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>
 {
     type WitnessVariable = FriQueryProofVariable<C, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let commit_phase_openings = self.commit_phase_openings.read(builder);
-        Self::WitnessVariable { commit_phase_openings }
+  //      let input_proof = self.input_proof.read(builder);
+        Self::WitnessVariable {
+ //           input_proof,
+            commit_phase_openings,
+        }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.commit_phase_openings.write(witness);
     }
 }
-*/
 
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
     for CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>

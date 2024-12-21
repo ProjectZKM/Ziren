@@ -580,6 +580,7 @@ where
                 for (ir_instr, trace) in operations {
                     self.compile_one(ir_instr, &mut |item| match item {
                         Ok(instr) => {
+                            println!("instr: {:?}", instr);
                             span_builder.item(instr_name(&instr));
                             instrs.push(instr);
                             traces.push(trace.clone());
