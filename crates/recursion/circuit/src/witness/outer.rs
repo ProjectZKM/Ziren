@@ -10,8 +10,8 @@ use zkm2_recursion_compiler::{
     ir::{Builder, Var},
 };
 use zkm2_recursion_core::stark::{
-    BabyBearPoseidon2Outer, InputProof, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs,
-    OuterDigest, OuterFriProof, OuterPcsProof, OuterVal,
+    BabyBearPoseidon2Outer, OuterInputProof, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs,
+    OuterDigest, OuterFriProof, OuterVal,
 };
 
 use crate::{
@@ -73,6 +73,7 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
     }
 }
 
+/*
 impl Witnessable<OuterConfig> for OuterPcsProof {
     type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
@@ -90,6 +91,7 @@ impl Witnessable<OuterConfig> for OuterPcsProof {
         self.query_openings.write(witness);
     }
 }
+*/
 
 impl Witnessable<OuterConfig> for OuterFriProof {
     type WitnessVariable = FriProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
@@ -143,7 +145,7 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     }
 }
 
-impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, InputProof> {
+impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof> {
     type WitnessVariable = FriQueryProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {

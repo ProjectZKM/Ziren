@@ -9,6 +9,7 @@ use std::{
 use web_time::Instant;
 
 //use crate::riscv::{CoreShapeConfig, RiscvAir};
+use crate::mips::{MipsAir};
 use p3_challenger::FieldChallenger;
 use p3_maybe_rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
@@ -54,7 +55,7 @@ pub enum ZKMCoreProverError {
 }
 
 /*
-pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, RiscvAir<SC::Val>>>(
+pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     config: SC,
     mut runtime: Executor,
 ) -> Result<(MachineProof<SC>, u64), ZKMCoreProverError>
@@ -67,7 +68,7 @@ where
     <SC as StarkGenericConfig>::Val: PrimeField32,
 {
     // Setup the machine.
-    let machine = RiscvAir::machine(config);
+    let machine = MipsAir::machine(config);
     let prover = P::new(machine);
     let (pk, _) = prover.setup(runtime.program.as_ref());
 
@@ -96,7 +97,7 @@ where
     Ok((proof, runtime.state.global_clk))
 }
 
-pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, RiscvAir<SC::Val>>>(
+pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     program: Program,
     stdin: &ZKMStdin,
     config: SC,
@@ -110,7 +111,7 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
-    let machine = RiscvAir::machine(config);
+    let machine = MipsAir::machine(config);
     let prover = P::new(machine);
     let (pk, _) = prover.setup(&program);
     prove_with_context::<SC, _>(
@@ -124,7 +125,7 @@ where
     )
 }
 
-pub fn prove_with_context<SC: StarkGenericConfig, P: MachineProver<SC, RiscvAir<SC::Val>>>(
+pub fn prove_with_context<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     prover: &P,
     pk: &P::DeviceProvingKey,
     program: Program,
@@ -720,7 +721,7 @@ where
 }
 
 /// Runs a program and returns the public values stream.
-pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
+pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
     mut program: Program,
     inputs: ZKMStdin,
 ) -> Result<ZKMPublicValues, MachineVerificationError<BabyBearPoseidon2>> {
@@ -740,7 +741,7 @@ pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
     Ok(public_values)
 }
 
-pub fn run_test<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
+pub fn run_test<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
     mut program: Program,
 ) -> Result<MachineProof<BabyBearPoseidon2>, MachineVerificationError<BabyBearPoseidon2>> {
     let shape_config = CoreShapeConfig::default();
@@ -756,13 +757,13 @@ pub fn run_test<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
 }
 
 #[allow(unused_variables)]
-pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
+pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
     runtime: Executor,
     inputs: ZKMStdin,
     shape_config: Option<&CoreShapeConfig<BabyBear>>,
 ) -> Result<MachineProof<BabyBearPoseidon2>, MachineVerificationError<BabyBearPoseidon2>> {
     let config = BabyBearPoseidon2::new();
-    let machine = RiscvAir::machine(config);
+    let machine = MipsAir::machine(config);
     let prover = P::new(machine);
 
     let (pk, _) = prover.setup(runtime.program.as_ref());
@@ -778,7 +779,7 @@ pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, RiscvAir<BabyBear>>>(
     .unwrap();
 
     let config = BabyBearPoseidon2::new();
-    let machine = RiscvAir::machine(config);
+    let machine = MipsAir::machine(config);
     let (pk, vk) = machine.setup(runtime.program.as_ref());
     let mut challenger = machine.config().challenger();
     machine.verify(&vk, &proof, &mut challenger).unwrap();

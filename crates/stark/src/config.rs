@@ -10,11 +10,6 @@ pub type PcsError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenger,
 >>::Error;
 
-pub type OpeningError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Error;
-
 pub type Domain<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
@@ -24,16 +19,20 @@ pub type Val<SC> = <Domain<SC> as PolynomialSpace>::Val;
 
 pub type PackedVal<SC> = <Val<SC> as Field>::Packing;
 
-pub type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
-pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
 pub type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::Commitment;
+
 pub type OpeningProof<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::Proof;
+
+pub type OpeningError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
+    <SC as StarkGenericConfig>::Challenge,
+    <SC as StarkGenericConfig>::Challenger,
+>>::Error;
 
 // FIXME: dumplicated with Domain
 pub type Dom<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
@@ -45,6 +44,9 @@ pub type PcsProverData<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
 >>::ProverData;
+
+pub type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
+pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
 
 pub type PackedChallenge<SC> =
     <<SC as StarkGenericConfig>::Challenge as ExtensionField<Val<SC>>>::ExtensionPacking;

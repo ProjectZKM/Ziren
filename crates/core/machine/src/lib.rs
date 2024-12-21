@@ -19,6 +19,7 @@ mod alu;
 pub mod bytes;
 pub mod mips;
 mod operations;
+//pub mod memory;
 pub mod utils;
 pub use mips::*;
 
