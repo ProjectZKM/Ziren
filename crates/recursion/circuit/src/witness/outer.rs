@@ -11,7 +11,7 @@ use zkm2_recursion_compiler::{
 };
 use zkm2_recursion_core::stark::{
     BabyBearPoseidon2Outer, OuterInputProof, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs,
-    OuterDigest, OuterFriProof, OuterPcsProof, OuterVal,
+    OuterDigest, OuterFriProof, OuterVal,
 };
 
 use crate::{
@@ -73,6 +73,7 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
     }
 }
 
+/*
 impl Witnessable<OuterConfig> for OuterPcsProof {
     type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
@@ -90,6 +91,7 @@ impl Witnessable<OuterConfig> for OuterPcsProof {
         self.query_openings.write(witness);
     }
 }
+*/
 
 impl Witnessable<OuterConfig> for OuterFriProof {
     type WitnessVariable = FriProofVariable<OuterConfig, BabyBearPoseidon2Outer>;

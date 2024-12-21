@@ -116,6 +116,8 @@ where
     type WitnessVariable = SP1RecursionWitnessVariable<C, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        panic!("1111111")
+            /*
         let vk = self.vk.read(builder);
         let shard_proofs = self.shard_proofs.read(builder);
         let leaf_challenger = self.leaf_challenger.read(builder);
@@ -132,11 +134,12 @@ where
             is_first_shard,
             vk_root,
         }
+        */
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vk.write(witness);
-        self.shard_proofs.write(witness);
+        //self.vk.write(witness);
+        //self.shard_proofs.write(witness);
         self.leaf_challenger.write(witness);
         self.initial_reconstruct_challenger.write(witness);
         self.is_complete.write(witness);
@@ -176,6 +179,8 @@ where
     type WitnessVariable = SP1DeferredWitnessVariable<C, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        panic!("1111")
+        /*
         let vks_and_proofs = self.vks_and_proofs.read(builder);
         let vk_merkle_data = self.vk_merkle_data.read(builder);
         let start_reconstruct_deferred_digest =
@@ -206,10 +211,11 @@ where
             finalize_addr_bits,
             is_complete,
         }
+        */
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
+        //self.vks_and_proofs.write(witness);
         self.vk_merkle_data.write(witness);
         self.start_reconstruct_deferred_digest.write(witness);
         self.zkm2_vk_digest.write(witness);

@@ -7,8 +7,8 @@ use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::{
-    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig,
-    TwoAdicFriPcs, TwoAdicFriGenericConfigForMmcs,
+    BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof,
+    TwoAdicFriPcs, TwoAdicFriGenericConfigForMmcs, FriGenericConfig, TwoAdicFriGenericConfig,
 };
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
@@ -37,28 +37,12 @@ pub type InnerChallenger = DuplexChallenger<InnerVal, InnerPerm, 16, 8>;
 pub type InnerDft = Radix2DitParallel<InnerVal>;
 pub type InnerPcs = TwoAdicFriPcs<InnerVal, InnerDft, InnerValMmcs, InnerChallengeMmcs>;
 
-pub type InnerInputProof = TwoAdicFriGenericConfigForMmcs<InnerVal, InnerValMmcs>;
+pub type InnerInputProof = <TwoAdicFriGenericConfig<Vec<BatchOpening<InnerVal, InnerValMmcs>>, <InnerValMmcs as Mmcs<InnerVal>>::Error> as FriGenericConfig<InnerVal>>::InputProof;
 
 pub type InnerQueryProof = QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>;
 pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>;
 pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(bound = "")]
-pub struct TwoAdicFriPcsProof<
-    Val: Field,
-    Challenge: Field,
-    InputMmcs: Mmcs<Val>,
-    FriMmcs: Mmcs<Challenge>,
-> {
-    pub fri_proof:
-        FriProof<Challenge, FriMmcs, Val, TwoAdicFriGenericConfigForMmcs<Val, InputMmcs>>,
-    /// For each query, for each committed batch, query openings for that batch
-    pub query_openings: Vec<Vec<BatchOpening<Val, InputMmcs>>>,
-}
-pub type InnerPcsProof =
-    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
 
 /// The permutation for inner recursion.
 #[must_use]

@@ -40,6 +40,7 @@ pub struct FriCommitPhaseProofStepVariable<C: CircuitConfig, H: FieldHasherVaria
 #[derive(Clone)]
 pub struct FriQueryProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     // FIXME add input proof, stephen
+    //pub input_proof: FriProofVariable<C, H>,
     pub commit_phase_openings: Vec<FriCommitPhaseProofStepVariable<C, H>>,
 }
 
