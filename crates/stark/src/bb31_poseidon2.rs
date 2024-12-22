@@ -44,6 +44,26 @@ pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChalle
 pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(bound(
+    serialize = "InputProof: Serialize",
+    deserialize = "InputProof: Deserialize<'de>"
+))]
+pub struct TwoAdicFriPcsProof<
+    Val: Field,
+    Challenge: Field,
+    InputMmcs: Mmcs<Val>,
+    FriMmcs: Mmcs<Challenge>,
+    InputProof,
+> {
+    pub fri_proof:
+        FriProof<Challenge, FriMmcs, Val, InputProof>,
+    /// For each query, for each committed batch, query openings for that batch
+    pub query_openings: Vec<Vec<BatchOpening<Val, InputMmcs>>>,
+}
+pub type InnerPcsProof =
+    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs, InnerInputProof>;
+
 /// The permutation for inner recursion.
 #[must_use]
 pub fn inner_perm() -> InnerPerm {

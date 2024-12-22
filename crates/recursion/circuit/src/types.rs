@@ -29,14 +29,14 @@ pub struct FriProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub pow_witness: Felt<C::F>,
 }
 
-/// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/proof.rs#L32
+/// Reference: https://github.com/zkMIPS/Plonky3/blob/main/fri/src/proof.rs#L35
 #[derive(Clone)]
 pub struct FriCommitPhaseProofStepVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub sibling_value: Ext<C::F, C::EF>,
     pub opening_proof: Vec<H::DigestVariable>,
 }
 
-/// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/proof.rs#L23
+/// Reference: https://github.com/Plonky3/Plonky3/blob/main/fri/src/proof.rs#L26
 #[derive(Clone)]
 pub struct FriQueryProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     // FIXME add input proof, stephen

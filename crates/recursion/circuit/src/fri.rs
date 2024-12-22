@@ -17,13 +17,13 @@ use std::{
 use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
 use zkm2_recursion_core::DIGEST_SIZE;
 use zkm2_stark::{
-    InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal,
+    InnerChallenge, InnerChallengeMmcs, InnerFriProof, InnerVal, InnerPcsProof, TwoAdicFriPcsProof,
     InnerValMmcs, InnerInputProof, OpeningProof, baby_bear_poseidon2::BabyBearPoseidon2,
 };
 
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
-    BabyBearFriConfigVariable, CanObserveVariable, CircuitConfig, Ext, FriChallenges, FriMmcs,
+    BabyBearFriConfigVariable, CanObserveVariable, CircuitConfig, Ext, FriMmcs, FriChallenges,
     FriProofVariable, FriQueryProofVariable, TwoAdicPcsProofVariable, TwoAdicPcsRoundVariable,
 };
 
@@ -434,7 +434,7 @@ pub fn dummy_pcs_proof(
     fri_queries: usize,
     batch_shapes: &[PolynomialBatchShape],
     log_blowup: usize,
-) -> InnerFriProof {
+) -> InnerPcsProof {
     let max_height = batch_shapes
         .iter()
         .map(|shape| {
@@ -454,9 +454,6 @@ pub fn dummy_pcs_proof(
         pow_witness: InnerVal::ZERO,
     };
 
-    fri_proof
-
-    /*
     // For each query, create a dummy batch opening for each matrix in the batch. `batch_shapes`
     // determines the sizes of each dummy batch opening.
     let query_openings = (0..fri_queries)
@@ -486,7 +483,6 @@ pub fn dummy_pcs_proof(
         fri_proof,
         query_openings,
     }
-    */
 }
 
 #[cfg(test)]
@@ -776,22 +772,22 @@ mod tests {
         )
         .unwrap();
 
-        //// Define circuit.
-        //let mut builder = Builder::<InnerConfig>::default();
-        //let config = inner_fri_config();
-        //let fri_proof = const_fri_proof(&mut builder, proof);
+        // Define circuit.
+        let mut builder = Builder::<InnerConfig>::default();
+        let config = inner_fri_config();
+        let fri_proof = const_fri_proof(&mut builder, proof);
 
-        //let mut challenger = DuplexChallengerVariable::new(&mut builder);
-        //let commit: [_; DIGEST_SIZE] = commit.into();
-        //let commit: [Felt<InnerVal>; DIGEST_SIZE] = commit.map(|x| builder.eval(x));
-        //challenger.observe_slice(&mut builder, commit);
-        //let _ = challenger.sample_ext(&mut builder);
-        //let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, BabyBearPoseidon2>(
-        //    &mut builder,
-        //    &config,
-        //    &fri_proof,
-        //    &mut challenger,
-        //);
+        let mut challenger = DuplexChallengerVariable::new(&mut builder);
+        let commit: [_; DIGEST_SIZE] = commit.into();
+        let commit: [Felt<InnerVal>; DIGEST_SIZE] = commit.map(|x| builder.eval(x));
+        challenger.observe_slice(&mut builder, commit);
+        let _ = challenger.sample_ext(&mut builder);
+        let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, BabyBearPoseidon2>(
+            &mut builder,
+            &config,
+            &fri_proof,
+            &mut challenger,
+        );
 
         //for i in 0..fri_challenges_gt.betas.len() {
         //    builder.assert_ext_eq(
@@ -809,10 +805,9 @@ mod tests {
         //    );
         //}
 
-        //run_test_recursion(builder.into_operations(), None);
+        run_test_recursion(builder.into_operations(), None);
     }
 
-    /*
     #[test]
     fn test_verify_two_adic_pcs_inner() {
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
@@ -945,5 +940,4 @@ mod tests {
 
         run_test_recursion(builder.into_operations(), witness_stream);
     }
-*/
 }

@@ -16,7 +16,6 @@ use zkm2_core_machine::{
 //    cpu::MAX_CPU_LOG_DEGREE,
     mips::{MipsAir, MAX_LOG_NUMBER_OF_SHARDS},
 };
-use crate::stark::dummy_vk_and_shard_proof;
 
 use zkm2_recursion_core::air::PV_DIGEST_NUM_WORDS;
 use zkm2_stark::{
@@ -40,7 +39,7 @@ use zkm2_recursion_core::{
 use crate::{
     challenger::{CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable},
     machine::recursion_public_values_digest,
-    stark::{dummy_challenger, ShardProofVariable, StarkVerifier},
+    stark::{dummy_challenger, dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
     BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
 };
 

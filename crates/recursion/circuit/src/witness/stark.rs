@@ -8,7 +8,7 @@ use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm2_recursion_core::air::Block;
 use zkm2_stark::{
     baby_bear_poseidon2::BabyBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
-    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerVal, InnerInputProof,
+    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerVal, InnerInputProof, InnerPcsProof,
 };
 
 use crate::{
@@ -57,7 +57,6 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     }
 }
 
-/*
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
     for InnerPcsProof
 {
@@ -77,7 +76,6 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
         self.query_openings.write(witness);
     }
 }
-*/
 
 impl<C> Witnessable<C> for InnerBatchOpening
 where
