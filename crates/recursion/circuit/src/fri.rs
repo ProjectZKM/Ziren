@@ -1,13 +1,14 @@
 use itertools::{izip, Itertools};
+use std::collections::BTreeMap;
 use p3_baby_bear::BabyBear;
 use p3_commit::{PolynomialSpace, Mmcs};
-use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_field::{FieldAlgebra, TwoAdicField, Field};
 use p3_fri::{
     BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriGenericConfig,
-    FriGenericConfig,
+    FriGenericConfig, TwoAdicFriGenericConfigForMmcs,
 };
 use p3_symmetric::Hash;
-use p3_util::log2_strict_usize;
+use p3_util::{log2_strict_usize, reverse_bits_len};
 use std::marker::PhantomData;
 use std::{
     cmp::Reverse,
@@ -25,6 +26,8 @@ use crate::{
     BabyBearFriConfigVariable, CanObserveVariable, CircuitConfig, Ext, FriChallenges, FriMmcs,
     FriProofVariable, FriQueryProofVariable, TwoAdicPcsProofVariable, TwoAdicPcsRoundVariable,
 };
+
+use p3_matrix::Dimensions;
 
 #[derive(Debug, Clone, Copy)]
 pub struct PolynomialShape {
@@ -635,92 +638,179 @@ mod tests {
         );
     }
 
-    //#[test]
-    //fn test_fri_verify_shape_and_sample_challenges() {
-    //    let mut rng = &mut OsRng;
-    //    let log_degrees = &[16, 9, 7, 4, 2];
-    //    let perm = inner_perm();
-    //    let fri_config = inner_fri_config();
-    //    let hash = InnerHash::new(perm.clone());
-    //    let compress = InnerCompress::new(perm.clone());
-    //    let val_mmcs = InnerValMmcs::new(hash, compress);
-    //    let dft = InnerDft::default();
-    //    let pcs: InnerPcs =
-    //        InnerPcs::new(dft, val_mmcs, fri_config);
+    #[test]
+    fn test_fri_verify_shape_and_sample_challenges() {
+        let mut rng = &mut OsRng;
+        let log_degrees = &[16, 9, 7, 4, 2];
+        let perm = inner_perm();
+        let fri_config = inner_fri_config();
+        let hash = InnerHash::new(perm.clone());
+        let compress = InnerCompress::new(perm.clone());
+        let val_mmcs = InnerValMmcs::new(hash, compress);
+        let dft = InnerDft::default();
 
-    //    // Generate proof.
-    //    let domains_and_polys = log_degrees
-    //        .iter()
-    //        .map(|&d| {
-    //            (
-    //                <InnerPcs as Pcs<InnerChallenge, InnerChallenger>>::natural_domain_for_degree(
-    //                    &pcs,
-    //                    1 << d,
-    //                ),
-    //                RowMajorMatrix::<InnerVal>::rand(&mut rng, 1 << d, 10),
-    //            )
-    //        })
-    //        .collect::<Vec<_>>();
-    //    let (commit, data) = <InnerPcs as Pcs<InnerChallenge, InnerChallenger>>::commit(
-    //        &pcs,
-    //        domains_and_polys.clone(),
-    //    );
-    //    let mut challenger = InnerChallenger::new(perm.clone());
-    //    challenger.observe(commit);
-    //    let zeta = challenger.sample_ext_element::<InnerChallenge>();
-    //    let points = repeat_with(|| vec![zeta]).take(domains_and_polys.len()).collect::<Vec<_>>();
-    //    let (_, proof) = pcs.open(vec![(&data, points)], &mut challenger);
+        let log_blowup = fri_config.log_blowup;
+        let pcs: InnerPcs =
+            InnerPcs::new(dft, val_mmcs.clone(), fri_config);
 
-    //    // Verify proof.
-    //    let mut challenger = InnerChallenger::new(perm.clone());
-    //    challenger.observe(commit);
-    //    let _: InnerChallenge = challenger.sample();
-    //    let fri_challenges_gt = verifier::verify(
-    //        &TwoAdicFriGenericConfig::<Vec<(usize, InnerChallenge)>, ()>(PhantomData),
-    //        &inner_fri_config(),
-    //        &proof,
-    //        &mut challenger,
-    //        |_index, proof| Ok(proof.clone()),
-    //    )
-    //    .unwrap();
+        // Generate proof.
+        let domains_and_polys = log_degrees
+            .iter()
+            .map(|&d| {
+                (
+                    <InnerPcs as Pcs<InnerChallenge, InnerChallenger>>::natural_domain_for_degree(
+                        &pcs,
+                        1 << d,
+                    ),
+                    RowMajorMatrix::<InnerVal>::rand(&mut rng, 1 << d, 10),
+                )
+            })
+            .collect::<Vec<_>>();
+        let (commit, data) = <InnerPcs as Pcs<InnerChallenge, InnerChallenger>>::commit(
+            &pcs,
+            domains_and_polys.clone(),
+        );
+        let mut challenger = InnerChallenger::new(perm.clone());
+        challenger.observe(commit);
+        let zeta = challenger.sample_ext_element::<InnerChallenge>();
+        let points = repeat_with(|| vec![zeta]).take(domains_and_polys.len()).collect::<Vec<_>>();
+        let (opening_by_round, proof) = pcs.open(vec![(&data, points)], &mut challenger);
 
-    //    // Define circuit.
-    //    let mut builder = Builder::<InnerConfig>::default();
-    //    let config = inner_fri_config();
-    //    let fri_proof = const_fri_proof(&mut builder, proof);
+        // Verify proof.
+        let mut challenger = InnerChallenger::new(perm.clone());
+        challenger.observe(commit);
+        let _: InnerChallenge = challenger.sample();
 
-    //    let mut challenger = DuplexChallengerVariable::new(&mut builder);
-    //    let commit: [_; DIGEST_SIZE] = commit.into();
-    //    let commit: [Felt<InnerVal>; DIGEST_SIZE] = commit.map(|x| builder.eval(x));
-    //    challenger.observe_slice(&mut builder, commit);
-    //    let _ = challenger.sample_ext(&mut builder);
-    //    let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, BabyBearPoseidon2>(
-    //        &mut builder,
-    //        &config,
-    //        &fri_proof,
-    //        &mut challenger,
-    //    );
 
-    //    /*
-    //    for i in 0..fri_challenges_gt.betas.len() {
-    //        builder.assert_ext_eq(
-    //            SymbolicExt::from_f(fri_challenges_gt.betas[i]),
-    //            fri_challenges.betas[i],
-    //        );
-    //    }
+        let alpha: InnerChallenge = challenger.sample_ext_element();
+        let g: TwoAdicFriGenericConfigForMmcs<InnerVal, InnerValMmcs> =
+            TwoAdicFriGenericConfig(PhantomData);
 
-    //    for i in 0..fri_challenges_gt.query_indices.len() {
-    //        let query_indices =
-    //            C::bits2num(&mut builder, fri_challenges.query_indices[i].iter().cloned());
-    //        builder.assert_felt_eq(
-    //            F::from_canonical_usize(fri_challenges_gt.query_indices[i]),
-    //            query_indices,
-    //        );
-    //    }
-    //    */
+        let log_global_max_height = proof.commit_phase_commits.len() + log_blowup;
 
-    //    run_test_recursion(builder.into_operations(), None);
-    //}
+        let rounds = izip!(
+            vec![commit],
+            vec![domains_and_polys],
+            opening_by_round,
+        ).map(|(commit, domains_and_polys, openings)| {
+                let claims = domains_and_polys
+                    .iter()
+                    .zip(openings)
+                    .map(|((domain, _), mat_openings)| (*domain, vec![(zeta, mat_openings[0].clone())]))
+                    .collect_vec();
+                (commit, claims)
+            })
+        .collect_vec();
+
+
+        let _ = verifier::verify(
+            &g,
+            &inner_fri_config(),
+            &proof,
+            &mut challenger,
+            |index, input_proof| {
+                // TODO: separate this out into functions
+
+                // log_height -> (alpha_pow, reduced_opening)
+                let mut reduced_openings = BTreeMap::<usize, (InnerChallenge, InnerChallenge)>::new();
+
+                for (batch_opening, (batch_commit, mats)) in izip!(input_proof, &rounds) {
+                    let batch_heights = mats
+                        .iter()
+                        .map(|(domain, _)| domain.size() << log_blowup)
+                        .collect_vec();
+                    let batch_dims = batch_heights
+                        .iter()
+                        // TODO: MMCS doesn't really need width; we put 0 for now.
+                        .map(|&height| Dimensions { width: 0, height })
+                        .collect_vec();
+
+                    let batch_max_height = batch_heights.iter().max().expect("Empty batch?");
+                    let log_batch_max_height = log2_strict_usize(*batch_max_height);
+                    let bits_reduced = log_global_max_height - log_batch_max_height;
+                    let reduced_index = index >> bits_reduced;
+
+                    val_mmcs.verify_batch(
+                        batch_commit,
+                        &batch_dims,
+                        reduced_index,
+                        &batch_opening.opened_values,
+                        &batch_opening.opening_proof,
+                    ).unwrap();
+                    for (mat_opening, (mat_domain, mat_points_and_values)) in
+                        izip!(&batch_opening.opened_values, mats)
+                    {
+                        let log_height = log2_strict_usize(mat_domain.size()) + log_blowup;
+
+                        let bits_reduced = log_global_max_height - log_height;
+                        let rev_reduced_index = reverse_bits_len(index >> bits_reduced, log_height);
+
+                        // todo: this can be nicer with domain methods?
+
+                        let x = InnerVal::GENERATOR
+                            * InnerVal::two_adic_generator(log_height).exp_u64(rev_reduced_index as u64);
+
+                        let (alpha_pow, ro) = reduced_openings
+                            .entry(log_height)
+                            .or_insert((InnerChallenge::ONE, InnerChallenge::ZERO));
+
+                        for (z, ps_at_z) in mat_points_and_values {
+                            for (&p_at_x, &p_at_z) in izip!(mat_opening, ps_at_z) {
+                                let quotient = (-p_at_z + p_at_x) / (-*z + x);
+                                *ro += *alpha_pow * quotient;
+                                *alpha_pow *= alpha;
+                            }
+                        }
+                    }
+                }
+                if let Some((_alpha_pow, ro)) = reduced_openings.remove(&log_blowup) {
+                    debug_assert!(ro.is_zero());
+                }
+
+                Ok(reduced_openings
+                    .into_iter()
+                    .rev()
+                    .map(|(log_height, (_alpha_pow, ro))| (log_height, ro))
+                    .collect())
+            }
+        )
+        .unwrap();
+
+        //// Define circuit.
+        //let mut builder = Builder::<InnerConfig>::default();
+        //let config = inner_fri_config();
+        //let fri_proof = const_fri_proof(&mut builder, proof);
+
+        //let mut challenger = DuplexChallengerVariable::new(&mut builder);
+        //let commit: [_; DIGEST_SIZE] = commit.into();
+        //let commit: [Felt<InnerVal>; DIGEST_SIZE] = commit.map(|x| builder.eval(x));
+        //challenger.observe_slice(&mut builder, commit);
+        //let _ = challenger.sample_ext(&mut builder);
+        //let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, BabyBearPoseidon2>(
+        //    &mut builder,
+        //    &config,
+        //    &fri_proof,
+        //    &mut challenger,
+        //);
+
+        //for i in 0..fri_challenges_gt.betas.len() {
+        //    builder.assert_ext_eq(
+        //        SymbolicExt::from_f(fri_challenges_gt.betas[i]),
+        //        fri_challenges.betas[i],
+        //    );
+        //}
+
+        //for i in 0..fri_challenges_gt.query_indices.len() {
+        //    let query_indices =
+        //        C::bits2num(&mut builder, fri_challenges.query_indices[i].iter().cloned());
+        //    builder.assert_felt_eq(
+        //        F::from_canonical_usize(fri_challenges_gt.query_indices[i]),
+        //        query_indices,
+        //    );
+        //}
+
+        //run_test_recursion(builder.into_operations(), None);
+    }
 
     /*
     #[test]
