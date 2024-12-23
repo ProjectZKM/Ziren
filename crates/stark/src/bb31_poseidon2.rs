@@ -37,32 +37,28 @@ pub type InnerChallenger = DuplexChallenger<InnerVal, InnerPerm, 16, 8>;
 pub type InnerDft = Radix2DitParallel<InnerVal>;
 pub type InnerPcs = TwoAdicFriPcs<InnerVal, InnerDft, InnerValMmcs, InnerChallengeMmcs>;
 
-pub type InnerInputProof = <TwoAdicFriGenericConfig<Vec<BatchOpening<InnerVal, InnerValMmcs>>, <InnerValMmcs as Mmcs<InnerVal>>::Error> as FriGenericConfig<InnerVal>>::InputProof;
+pub type InnerInputProof = Vec<BatchOpening<InnerVal, InnerValMmcs>>;
 
 pub type InnerQueryProof = QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>;
 pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>;
 pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(bound(
-    serialize = "InputProof: Serialize",
-    deserialize = "InputProof: Deserialize<'de>"
-))]
-pub struct TwoAdicFriPcsProof<
-    Val: Field,
-    Challenge: Field,
-    InputMmcs: Mmcs<Val>,
-    FriMmcs: Mmcs<Challenge>,
-    InputProof,
-> {
-    pub fri_proof:
-        FriProof<Challenge, FriMmcs, Val, InputProof>,
-    /// For each query, for each committed batch, query openings for that batch
-    pub query_openings: Vec<Vec<BatchOpening<Val, InputMmcs>>>,
-}
-pub type InnerPcsProof =
-    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs, InnerInputProof>;
+//#[derive(Clone)]
+//pub struct TwoAdicFriPcsProof<
+//    Val: Field,
+//    Challenge: Field,
+//    InputMmcs: Mmcs<Val>,
+//    FriMmcs: Mmcs<Challenge>,
+//> {
+//    pub fri_proof:
+//        FriProof<Challenge, FriMmcs, Val, Vec<BatchOpening<Val, InputMmcs>>>,
+//    /// For each query, for each committed batch, query openings for that batch
+//    pub query_openings: Vec<Vec<BatchOpening<Val, InputMmcs>>>,
+//}
+//pub type InnerPcsProof =
+//    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
+pub type InnerPcsProof = <InnerPcs as p3_commit::Pcs<InnerChallenge, InnerChallenger>>::Proof;
 
 /// The permutation for inner recursion.
 #[must_use]

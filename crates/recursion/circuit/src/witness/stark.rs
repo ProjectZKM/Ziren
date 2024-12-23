@@ -57,6 +57,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     }
 }
 
+/*
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
     for InnerPcsProof
 {
@@ -76,6 +77,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
         self.query_openings.write(witness);
     }
 }
+*/
 
 impl<C> Witnessable<C> for InnerBatchOpening
 where
