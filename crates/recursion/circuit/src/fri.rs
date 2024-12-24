@@ -94,6 +94,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
 
     let log_global_max_height = fri_proof.commit_phase_commits.len() + config.log_blowup;
 
+    // input_proof handler: https://github.com/zkMIPS/Plonky3/blob/main/fri/src/two_adic_pcs.rs#L375
     // Precompute the two-adic powers of the two-adic generator. They can be loaded in as constants.
     // The ith element has order 2^(log_global_max_height - i).
     let mut precomputed_generator_powers: Vec<Felt<_>> = vec![];
@@ -105,9 +106,9 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
     // The powers of alpha, where the ith element is alpha^i.
     let mut alpha_pows: Vec<Ext<C::F, C::EF>> = vec![builder.eval(SymbolicExt::from_f(C::EF::ONE))];
 
-    let query_openings: Vec<_> = fri_proof.query_proofs.iter().map(|x| x.input_proof.clone()).collect();
+    let qp: Vec<_> = fri_proof.query_proofs.iter().map(|x| x.input_proof.clone()).collect();
 
-    let reduced_openings = query_openings
+    let reduced_openings = qp
         .iter()
         .zip(&fri_challenges.query_indices)
         .map(|(query_opening, index_bits)| {
@@ -119,12 +120,12 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
             for (batch_opening, round) in zip(query_opening, rounds.iter().cloned()) {
                 let batch_commit = round.batch_commit;
                 let mats = round.domains_points_and_opens;
-                let batch_heights = mats
+                let batch_dims = mats
                     .iter()
                     .map(|mat| mat.domain.size() << config.log_blowup)
                     .collect_vec();
 
-                let batch_max_height = batch_heights.iter().max().expect("Empty batch?");
+                let batch_max_height = batch_dims.iter().max().expect("Empty batch?");
                 let log_batch_max_height = log2_strict_usize(*batch_max_height);
                 let bits_reduced = log_global_max_height - log_batch_max_height;
 
@@ -133,7 +134,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
                 verify_batch::<C, SC>(
                     builder,
                     batch_commit,
-                    &batch_heights,
+                    &batch_dims,
                     reduced_index_bits,
                     batch_opening.opened_values.clone(),
                     batch_opening.opening_proof.clone(),
@@ -725,12 +726,25 @@ mod tests {
         .collect_vec();
 
 
+        let mut dummy_challenger = challenger.clone();
+        let betas_gt: Vec<InnerChallenge> = proof
+            .commit_phase_commits
+            .iter()
+            .map(|comm| {
+                dummy_challenger.observe(comm.clone());
+                dummy_challenger.sample_ext_element()
+            })
+            .collect();
+        drop(dummy_challenger);
+        let mut query_indices_gt: Vec<usize> = vec![];
+
         let _ = verifier::verify(
             &g,
             &inner_fri_config(),
             &proof,
             &mut challenger,
             |index, input_proof| {
+                // TODO read the query index into query_indices_gt
                 // TODO: separate this out into functions
 
                 // log_height -> (alpha_pow, reduced_opening)
@@ -815,21 +829,22 @@ mod tests {
             &mut challenger,
         );
 
-        //for i in 0..fri_challenges_gt.betas.len() {
-        //    builder.assert_ext_eq(
-        //        SymbolicExt::from_f(fri_challenges_gt.betas[i]),
-        //        fri_challenges.betas[i],
-        //    );
-        //}
+        // Comment out because we can not get the betas
+        for i in 0..betas_gt.len() {
+            builder.assert_ext_eq(
+                SymbolicExt::from_f(betas_gt[i]),
+                fri_challenges.betas[i],
+            );
+        }
 
-        //for i in 0..fri_challenges_gt.query_indices.len() {
-        //    let query_indices =
-        //        C::bits2num(&mut builder, fri_challenges.query_indices[i].iter().cloned());
-        //    builder.assert_felt_eq(
-        //        F::from_canonical_usize(fri_challenges_gt.query_indices[i]),
-        //        query_indices,
-        //    );
-        //}
+        for i in 0..query_indices_gt.len() {
+            let query_indices =
+                C::bits2num(&mut builder, fri_challenges.query_indices[i].iter().cloned());
+            builder.assert_felt_eq(
+                F::from_canonical_usize(query_indices_gt[i]),
+                query_indices,
+            );
+        }
 
         run_test_recursion(builder.into_operations(), None);
     }
