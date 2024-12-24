@@ -147,15 +147,16 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
     type WitnessVariable = FriQueryProofVariable<C, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let input_proof = self.input_proof.read(builder);
         let commit_phase_openings = self.commit_phase_openings.read(builder);
-  //      let input_proof = self.input_proof.read(builder);
         Self::WitnessVariable {
- //           input_proof,
+            input_proof,
             commit_phase_openings,
         }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.input_proof.write(witness);
         self.commit_phase_openings.write(witness);
     }
 }

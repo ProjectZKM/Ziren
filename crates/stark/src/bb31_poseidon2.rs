@@ -44,20 +44,6 @@ pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChalle
 pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 
-//#[derive(Clone)]
-//pub struct TwoAdicFriPcsProof<
-//    Val: Field,
-//    Challenge: Field,
-//    InputMmcs: Mmcs<Val>,
-//    FriMmcs: Mmcs<Challenge>,
-//> {
-//    pub fri_proof:
-//        FriProof<Challenge, FriMmcs, Val, Vec<BatchOpening<Val, InputMmcs>>>,
-//    /// For each query, for each committed batch, query openings for that batch
-//    pub query_openings: Vec<Vec<BatchOpening<Val, InputMmcs>>>,
-//}
-//pub type InnerPcsProof =
-//    TwoAdicFriPcsProof<InnerVal, InnerChallenge, InnerValMmcs, InnerChallengeMmcs>;
 pub type InnerPcsProof = <InnerPcs as p3_commit::Pcs<InnerChallenge, InnerChallenger>>::Proof;
 
 /// The permutation for inner recursion.

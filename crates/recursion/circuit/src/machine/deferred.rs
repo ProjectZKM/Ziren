@@ -263,34 +263,34 @@ where
     }
 }
 
-impl SP1DeferredWitnessValues<BabyBearPoseidon2> {
-    pub fn dummy<A: MachineAir<BabyBear>>(
-        machine: &StarkMachine<BabyBearPoseidon2, A>,
-        shape: &SP1DeferredShape,
-    ) -> Self {
-        let inner_witness =
-            SP1CompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.inner);
-        let vks_and_proofs = inner_witness.vks_and_proofs;
-
-        let vk_merkle_data = SP1MerkleProofWitnessValues::dummy(vks_and_proofs.len(), shape.height);
-
-        Self {
-            vks_and_proofs,
-            vk_merkle_data,
-            leaf_challenger: dummy_challenger(machine.config()),
-            is_complete: true,
-            zkm2_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
-            start_reconstruct_deferred_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
-            committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
-            deferred_proofs_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
-            end_pc: BabyBear::ZERO,
-            end_shard: BabyBear::ZERO,
-            end_execution_shard: BabyBear::ZERO,
-            init_addr_bits: [BabyBear::ZERO; 32],
-            finalize_addr_bits: [BabyBear::ZERO; 32],
-        }
-    }
-}
+//impl SP1DeferredWitnessValues<BabyBearPoseidon2> {
+//    pub fn dummy<A: MachineAir<BabyBear>>(
+//        machine: &StarkMachine<BabyBearPoseidon2, A>,
+//        shape: &SP1DeferredShape,
+//    ) -> Self {
+//        let inner_witness =
+//            SP1CompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.inner);
+//        let vks_and_proofs = inner_witness.vks_and_proofs;
+//
+//        let vk_merkle_data = SP1MerkleProofWitnessValues::dummy(vks_and_proofs.len(), shape.height);
+//
+//        Self {
+//            vks_and_proofs,
+//            vk_merkle_data,
+//            leaf_challenger: dummy_challenger(machine.config()),
+//            is_complete: true,
+//            zkm2_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
+//            start_reconstruct_deferred_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
+//            committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
+//            deferred_proofs_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
+//            end_pc: BabyBear::ZERO,
+//            end_shard: BabyBear::ZERO,
+//            end_execution_shard: BabyBear::ZERO,
+//            init_addr_bits: [BabyBear::ZERO; 32],
+//            finalize_addr_bits: [BabyBear::ZERO; 32],
+//        }
+//    }
+//}
 
 impl SP1DeferredShape {
     pub const fn new(inner: SP1CompressShape, height: usize) -> Self {

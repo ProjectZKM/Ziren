@@ -39,8 +39,7 @@ pub struct FriCommitPhaseProofStepVariable<C: CircuitConfig, H: FieldHasherVaria
 /// Reference: https://github.com/Plonky3/Plonky3/blob/main/fri/src/proof.rs#L26
 #[derive(Clone)]
 pub struct FriQueryProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
-    // FIXME add input proof, stephen
-    //pub input_proof: FriProofVariable<C, H>,
+    pub input_proof: Vec<BatchOpeningVariable<C, H>>,
     pub commit_phase_openings: Vec<FriCommitPhaseProofStepVariable<C, H>>,
 }
 
@@ -54,7 +53,7 @@ pub struct FriChallenges<C: CircuitConfig> {
 #[derive(Clone)]
 pub struct TwoAdicPcsProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub fri_proof: FriProofVariable<C, H>,
-    pub query_openings: Vec<Vec<BatchOpeningVariable<C, H>>>,
+    //pub query_openings: Vec<Vec<BatchOpeningVariable<C, H>>>,
 }
 
 #[derive(Clone)]

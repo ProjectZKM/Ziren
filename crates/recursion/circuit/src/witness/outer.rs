@@ -149,13 +149,16 @@ impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs,
     type WitnessVariable = FriQueryProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
+        let input_proof = self.input_proof.read(builder);
         let commit_phase_openings = self.commit_phase_openings.read(builder);
         Self::WitnessVariable {
+            input_proof,
             commit_phase_openings,
         }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
+        self.input_proof.write(witness);
         self.commit_phase_openings.write(witness);
     }
 }
