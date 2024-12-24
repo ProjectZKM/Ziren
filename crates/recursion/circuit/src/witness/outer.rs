@@ -16,7 +16,7 @@ use zkm2_recursion_core::stark::{
 
 use crate::{
     BatchOpeningVariable, CircuitConfig, FriCommitPhaseProofStepVariable, FriProofVariable,
-    FriQueryProofVariable, TwoAdicPcsProofVariable,
+    FriQueryProofVariable,
 };
 
 use super::{WitnessWriter, Witnessable};
@@ -58,7 +58,7 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
             .opened_values
             .read(builder)
             .into_iter()
-            .map(|a| a.into_iter().map(|b| vec![b]).collect())
+            .map(|a| a.into_iter().map(|b| b).collect())
             .collect();
         let opening_proof = self.opening_proof.read(builder);
         Self::WitnessVariable {

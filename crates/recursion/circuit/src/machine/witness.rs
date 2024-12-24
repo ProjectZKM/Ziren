@@ -19,7 +19,7 @@ use crate::{
     merkle_tree::MerkleProof,
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    BabyBearFriConfigVariable, CircuitConfig, TwoAdicPcsProofVariable, VerifyingKeyVariable,
+    BabyBearFriConfigVariable, CircuitConfig, FriProofVariable, VerifyingKeyVariable,
 };
 
 use super::{
@@ -86,7 +86,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: BabyBearFriConfigV
     Witnessable<C> for StarkVerifyingKey<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = TwoAdicPcsProofVariable<C, SC>>,
+    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
     type WitnessVariable = VerifyingKeyVariable<C, SC>;
 
@@ -149,7 +149,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: BabyBearFriConfigV
     Witnessable<C> for SP1CompressWitnessValues<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = TwoAdicPcsProofVariable<C, SC>>,
+    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
     type WitnessVariable = SP1CompressWitnessVariable<C, SC>;
 

@@ -50,15 +50,15 @@ pub struct FriChallenges<C: CircuitConfig> {
     pub betas: Vec<Ext<C::F, C::EF>>,
 }
 
-#[derive(Clone)]
-pub struct TwoAdicPcsProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
-    pub fri_proof: FriProofVariable<C, H>,
-    //pub query_openings: Vec<Vec<BatchOpeningVariable<C, H>>>,
-}
+//#[derive(Clone)]
+//pub struct TwoAdicPcsProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
+//    pub fri_proof: FriProofVariable<C, H>,
+//    //pub query_openings: Vec<Vec<BatchOpeningVariable<C, H>>>,
+//}
 
 #[derive(Clone)]
 pub struct BatchOpeningVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
-    pub opened_values: Vec<Vec<Vec<Felt<C::F>>>>,
+    pub opened_values: Vec<Vec<Felt<C::F>>>,
     pub opening_proof: Vec<H::DigestVariable>,
 }
 
