@@ -490,10 +490,10 @@ mod tests {
         FriCommitPhaseProofStepVariable, FriProofVariable, FriQueryProofVariable,
         TwoAdicPcsMatsVariable, BatchOpeningVariable
     };
-    use p3_challenger::{CanObserve, CanSample, FieldChallenger};
+    use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger};
     use p3_commit::Pcs;
     use p3_field::FieldAlgebra;
-    use p3_fri::verifier;
+    use p3_fri::{verifier, FriGenericConfig};
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{
         rngs::{OsRng, StdRng},
@@ -727,16 +727,34 @@ mod tests {
                 dummy_challenger.sample_ext_element()
             })
             .collect();
-        drop(dummy_challenger);
         let mut query_indices_gt: Vec<usize> = vec![];
+        dummy_challenger.observe_ext_element(proof.final_poly);
+
+        let config = inner_fri_config();
+        if proof.query_proofs.len() != config.num_queries {
+            panic!("Invalid query proofs");
+        }
+
+        // Check PoW.
+        if !dummy_challenger.check_witness(config.proof_of_work_bits, proof.pow_witness) {
+            panic!("Invalid witness");
+        }
+
+        let log_max_height = proof.commit_phase_commits.len() + config.log_blowup;
+
+        for qp in &proof.query_proofs {
+            let index = dummy_challenger.sample_bits(log_max_height + <TwoAdicFriGenericConfigForMmcs<InnerVal, InnerValMmcs> as FriGenericConfig<InnerVal>>::extra_query_index_bits(&g));
+            query_indices_gt.push(index);
+        }
+        drop(dummy_challenger);
+
 
         let _ = verifier::verify(
             &g,
-            &inner_fri_config(),
+            &config,
             &proof,
             &mut challenger,
             |index, input_proof| {
-                // TODO read the query index into query_indices_gt
                 // TODO: separate this out into functions
 
                 // log_height -> (alpha_pow, reduced_opening)
