@@ -24,7 +24,7 @@ use zkm2_stark::{
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
     BabyBearFriConfigVariable, CanObserveVariable, CircuitConfig, Ext, FriMmcs, FriChallenges,
-    FriProofVariable, FriQueryProofVariable, TwoAdicPcsRoundVariable,
+    FriProofVariable, FriQueryProofVariable, TwoAdicPcsRoundVariable, FriCommitPhaseProofStepVariable,
 };
 
 use p3_matrix::Dimensions;
@@ -94,7 +94,6 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
 
     let log_global_max_height = fri_proof.commit_phase_commits.len() + config.log_blowup;
 
-    // input_proof handler: https://github.com/zkMIPS/Plonky3/blob/main/fri/src/two_adic_pcs.rs#L375
     // Precompute the two-adic powers of the two-adic generator. They can be loaded in as constants.
     // The ith element has order 2^(log_global_max_height - i).
     let mut precomputed_generator_powers: Vec<Felt<_>> = vec![];
@@ -106,18 +105,17 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
     // The powers of alpha, where the ith element is alpha^i.
     let mut alpha_pows: Vec<Ext<C::F, C::EF>> = vec![builder.eval(SymbolicExt::from_f(C::EF::ONE))];
 
-    let qp: Vec<_> = fri_proof.query_proofs.iter().map(|x| x.input_proof.clone()).collect();
-
-    let reduced_openings = qp
+    // input_proof handler: https://github.com/zkMIPS/Plonky3/blob/main/fri/src/two_adic_pcs.rs#L375
+    let reduced_openings = fri_proof.query_proofs
         .iter()
         .zip(&fri_challenges.query_indices)
-        .map(|(query_opening, index_bits)| {
+        .map(|(query_proof, index_bits)| {
             // The powers of alpha, where the ith element is alpha^i.
             let mut log_height_pow = [0usize; 32];
             let mut ro: [Ext<C::F, C::EF>; 32] =
                 [builder.eval(SymbolicExt::from_f(C::EF::ZERO)); 32];
 
-            for (batch_opening, round) in zip(query_opening, rounds.iter().cloned()) {
+            for (batch_opening, round) in zip(&query_proof.input_proof, rounds.iter().cloned()) {
                 let batch_commit = round.batch_commit;
                 let mats = round.domains_points_and_opens;
                 let batch_dims = mats
@@ -130,6 +128,8 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
                 let bits_reduced = log_global_max_height - log_batch_max_height;
 
                 let reduced_index_bits = &index_bits[bits_reduced..];
+                // let index_pair_i = C::bits2num(builder, reduced_index_bits);
+                // builder.print_f(index_pair_i);
 
                 verify_batch::<C, SC>(
                     builder,
@@ -185,7 +185,6 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
                                 builder.reduce_e(new_alpha);
                                 alpha_pows.push(new_alpha);
                             }
-
                             alphas.push(alpha_pows[pow]);
                             p_at_zs.push(p_at_z);
                             p_at_xs.push(p_at_x);
@@ -193,7 +192,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
                             log_height_pow[log_height] += 1;
                         }
 
-                        // acc = sum(alpha_pows[pow] * (p_at_z - p_at_x[0]));
+                        // acc = sum(alpha_pows[pow] * (p_at_z - p_at_x));
                         let acc = C::batch_fri(builder, alphas, p_at_zs, p_at_xs);
 
                         // Unroll this calculation to avoid symbolic expression overhead
@@ -207,7 +206,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
                         let temp_2: Ext<_, _> = builder.uninit();
                         builder.push_op(DslIr::DivE(temp_2, acc, temp_1));
 
-                        // let temp_3 = rp[log_height] + temp_2;
+                        // let temp_3 = ro[log_height] + temp_2;
                         let temp_3: Ext<_, _> = builder.uninit();
                         builder.push_op(DslIr::AddE(temp_3, ro[log_height], temp_2));
 
@@ -247,7 +246,7 @@ pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVar
             builder,
             &proof.commit_phase_commits,
             index_bits,
-            query_proof,
+            &query_proof.commit_phase_openings,
             &challenges.betas,
             ro,
             log_max_height,
@@ -261,13 +260,14 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     builder: &mut Builder<C>,
     commit_phase_commits: &[SC::DigestVariable],
     index_bits: &[C::Bit],
-    proof: FriQueryProofVariable<C, SC>,
+    commit_phase_openings: &Vec<FriCommitPhaseProofStepVariable<C, SC>>,
     betas: &[Ext<C::F, C::EF>],
     reduced_openings: [Ext<C::F, C::EF>; 32],
     log_max_height: usize,
 ) -> Ext<C::F, C::EF> {
     let mut folded_eval: Ext<_, _> = builder.constant(C::EF::ZERO);
     let two_adic_generator: Felt<_> = builder.constant(C::F::two_adic_generator(log_max_height));
+
 
     // TODO: fix expreversebits address bug to avoid needing to allocate a new variable.
     let mut x = C::exp_reverse_bits(
@@ -285,7 +285,7 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
         0..,
         (0..log_max_height).rev(),
         commit_phase_commits,
-        &proof.commit_phase_openings,
+        commit_phase_openings,
         betas,
     ) {
         folded_eval = builder.eval(folded_eval + reduced_openings[log_folded_height + 1]);
@@ -304,7 +304,7 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
         let evals_felt = vec![
             C::ext2felt(builder, evals_ext[0]).to_vec(),
             C::ext2felt(builder, evals_ext[1]).to_vec(),
-        ];
+        ].into_iter().flatten().collect();
 
         let heights = &[1 << log_folded_height];
         verify_batch::<C, SC>(
@@ -312,7 +312,7 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
             *commit,
             heights,
             index_pair,
-            evals_felt,
+            [evals_felt].to_vec(),
             step.opening_proof.clone(),
         );
 
@@ -381,7 +381,6 @@ pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
         .flat_map(|(i, _)| opened_values[i].as_slice())
         .cloned()
         .collect::<Vec<_>>();
-    //let felt_slice: Vec<Felt<C::F>> = ext_slice.into_iter().flatten().collect::<Vec<_>>();
     let mut root: SC::DigestVariable = SC::hash(builder, &ext_slice[..]);
 
     zip(index_bits.iter(), proof).for_each(|(&bit, sibling): (&C::Bit, SC::DigestVariable)| {
@@ -400,7 +399,6 @@ pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
                 .peeking_take_while(|(_, height)| *height == next_height)
                 .flat_map(|(i, _)| opened_values[i].clone())
                 .collect::<Vec<_>>();
-            //let felt_slice: Vec<Felt<C::F>> = ext_slice.into_iter().flatten().collect::<Vec<_>>();
             let next_height_openings_digest = SC::hash(builder, &ext_slice);
             root = SC::compress(builder, [root, next_height_openings_digest]);
         }
@@ -555,13 +553,11 @@ mod tests {
                     .collect::<Vec<_>>();
                 let input_proof: Vec<_> = query_proof.input_proof.iter().map(|input_proof| {
                     // input_proof: Vec<BatchOpening<InnerVal, InnerValMmcs>>;
-                    //let opened_values =
-                    //    builder.eval(SymbolicExt::from_f(input_proof.opened_values));
                     let opened_values: Vec<_> = input_proof
                         .opened_values.iter()
-                        .map(|values| {
-                            values.iter().map(|value| {
-                                builder.eval(value.clone())
+                        .map(|open_value| {
+                            open_value.iter().map(|value| {
+                                builder.eval::<Felt<_>, _>(*value)
                             }).collect::<Vec<_>>()
                         }).collect();
 
@@ -839,7 +835,6 @@ mod tests {
             &mut challenger,
         );
 
-        // Comment out because we can not get the betas
         for i in 0..betas_gt.len() {
             builder.assert_ext_eq(
                 SymbolicExt::from_f(betas_gt[i]),
@@ -861,7 +856,7 @@ mod tests {
 
     #[test]
     fn test_verify_two_adic_pcs_inner() {
-        let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
+        //let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let log_degrees = &[19, 19];
         let perm = inner_perm();
         let fri_config = inner_fri_config();
@@ -872,6 +867,16 @@ mod tests {
         let pcs: InnerPcs =
             InnerPcs::new(dft, val_mmcs, fri_config);
 
+        let gen_mat = |d: usize| -> RowMajorMatrix<InnerVal> {
+            let mut mat_vec: Vec<_> = vec![];
+
+            for i in 0.. (1 << d) * 100 {
+                mat_vec.push(InnerVal::from_canonical_u32(i));
+            }
+            RowMajorMatrix::<InnerVal>::new(mat_vec, 100)
+        };
+
+
         // Generate proof.
         let domains_and_polys = log_degrees
             .iter()
@@ -881,7 +886,8 @@ mod tests {
                         &pcs,
                         1 << d,
                     ),
-                    RowMajorMatrix::<InnerVal>::rand(&mut rng, 1 << d, 100),
+                    gen_mat(d),
+                    //RowMajorMatrix::<InnerVal>::rand(&mut rng, 1 << d, 100),
                 )
             })
             .collect::<Vec<_>>();
