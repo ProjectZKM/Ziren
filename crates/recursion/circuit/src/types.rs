@@ -53,7 +53,7 @@ pub struct FriChallenges<C: CircuitConfig> {
 //#[derive(Clone)]
 //pub struct TwoAdicPcsProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
 //    pub fri_proof: FriProofVariable<C, H>,
-//    //pub query_openings: Vec<Vec<BatchOpeningVariable<C, H>>>,
+//    pub query_openings: Vec<Vec<BatchOpeningVariable<C, H>>>,
 //}
 
 #[derive(Clone)]

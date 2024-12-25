@@ -416,9 +416,32 @@ pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
 pub fn dummy_query_proof(
     height: usize,
     log_blowup: usize,
+    batch_shapes: &[PolynomialBatchShape],
 ) -> QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof> {
+    // For each query, create a dummy batch opening for each matrix in the batch. `batch_shapes`
+    // determines the sizes of each dummy batch opening.
+    let query_openings = batch_shapes
+        .iter()
+        .map(|shapes| {
+            let batch_max_height = shapes
+                .shapes
+                .iter()
+                .map(|shape| shape.log_degree)
+                .max()
+                .unwrap();
+            BatchOpening {
+                opened_values: shapes
+                    .shapes
+                    .iter()
+                    .map(|shape| vec![BabyBear::ZERO; shape.width])
+                    .collect(),
+                    opening_proof: vec![dummy_hash().into(); batch_max_height + log_blowup],
+            }
+        })
+    .collect::<Vec<_>>();
+
     QueryProof {
-        input_proof: vec![],
+        input_proof: query_openings,
         commit_phase_openings: (0..height)
             .map(|i| CommitPhaseProofStep {
                 sibling_value: InnerChallenge::ZERO,
@@ -449,43 +472,12 @@ pub fn dummy_pcs_proof(
         })
         .max()
         .unwrap();
-    let fri_proof = FriProof {
+    FriProof {
         commit_phase_commits: vec![dummy_hash(); max_height],
-        query_proofs: vec![dummy_query_proof(max_height, log_blowup); fri_queries],
+        query_proofs: vec![dummy_query_proof(max_height, log_blowup, batch_shapes); fri_queries],
         final_poly: InnerChallenge::ZERO,
         pow_witness: InnerVal::ZERO,
-    };
-    fri_proof
-
-    //// For each query, create a dummy batch opening for each matrix in the batch. `batch_shapes`
-    //// determines the sizes of each dummy batch opening.
-    //let query_openings = (0..fri_queries)
-    //    .map(|_| {
-    //        batch_shapes
-    //            .iter()
-    //            .map(|shapes| {
-    //                let batch_max_height = shapes
-    //                    .shapes
-    //                    .iter()
-    //                    .map(|shape| shape.log_degree)
-    //                    .max()
-    //                    .unwrap();
-    //                BatchOpening {
-    //                    opened_values: shapes
-    //                        .shapes
-    //                        .iter()
-    //                        .map(|shape| vec![BabyBear::ZERO; shape.width])
-    //                        .collect(),
-    //                    opening_proof: vec![dummy_hash().into(); batch_max_height + log_blowup],
-    //                }
-    //            })
-    //            .collect::<Vec<_>>()
-    //    })
-    //    .collect::<Vec<_>>();
-    //TwoAdicFriPcsProof {
-    //    fri_proof,
-    //    query_openings,
-    //}
+    }
 }
 
 #[cfg(test)]
@@ -569,7 +561,7 @@ mod tests {
                         .opened_values.iter()
                         .map(|values| {
                             values.iter().map(|value| {
-                                builder.eval(*value)
+                                builder.eval(value.clone())
                             }).collect::<Vec<_>>()
                         }).collect();
 
