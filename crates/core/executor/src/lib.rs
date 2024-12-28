@@ -7,14 +7,13 @@ mod opcode;
 mod operation;
 mod program;
 mod record;
-mod reduce;
 mod register;
-mod report;
 mod shape;
 mod state;
-pub mod subproof;
 mod syscalls;
 mod utils;
+pub mod reduce;
+pub mod report;
 
 pub use context::*;
 pub use executor::*;

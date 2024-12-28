@@ -84,7 +84,6 @@ impl Display for ExecutionReport {
         for line in generate_execution_report(self.syscall_counts.as_ref()) {
             writeln!(f, "  {line}")?;
         }
-
         Ok(())
     }
 }

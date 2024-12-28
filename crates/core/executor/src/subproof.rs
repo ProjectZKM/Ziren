@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use zkm2_stark::{
     baby_bear_poseidon2::BabyBearPoseidon2, MachineVerificationError, StarkVerifyingKey,
 };
+use std::sync::atomic::AtomicBool;
 
 use crate::ZKMReduceProof;
 
@@ -50,8 +51,7 @@ impl SubproofVerifier for DefaultSubproofVerifier {
     ) -> Result<(), MachineVerificationError<BabyBearPoseidon2>> {
         if !self.printed.load(std::sync::atomic::Ordering::SeqCst) {
             tracing::info!("Not verifying sub proof during runtime");
-            self.printed
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.printed.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(())
     }

@@ -1,9 +1,9 @@
 //pub mod cost;
 //
-//mod shape;
+mod shape;
 //
 use itertools::Itertools;
-//pub use shape::*;
+pub use shape::*;
 //use zkm2_core_executor::{
 //    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, Program,
 //};

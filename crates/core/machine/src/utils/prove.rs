@@ -8,8 +8,7 @@ use std::{
 };
 use web_time::Instant;
 
-//use crate::riscv::{CoreShapeConfig, RiscvAir};
-use crate::mips::{MipsAir};
+use crate::mips::{MipsAir, CoreShapeConfig};
 use p3_challenger::FieldChallenger;
 use p3_maybe_rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
@@ -32,7 +31,8 @@ use crate::{
 };
 use zkm2_core_executor::{
     events::{format_table_line, sorted_table_lines},
-    ExecutionState,
+    ExecutionState, Program, ExecutionRecord, ExecutionReport,
+    subproof::NoOpSubproofVerifier,
 };
 use zkm2_primitives::io::ZKMPublicValues;
 
@@ -54,7 +54,6 @@ pub enum ZKMCoreProverError {
     SerializationError(bincode::Error),
 }
 
-/*
 pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     config: SC,
     mut runtime: Executor,
@@ -786,7 +785,6 @@ pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
 
     Ok(proof)
 }
-*/
 
 #[allow(unused_variables)]
 pub fn run_test_machine_with_prover<SC, A, P: MachineProver<SC, A>>(
@@ -855,7 +853,6 @@ where
     run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
 }
 
-/*
 fn trace_checkpoint<SC: StarkGenericConfig>(
     program: Program,
     file: &File,
@@ -881,7 +878,6 @@ where
 
     (records, runtime.report)
 }
-        */
 
 fn reset_seek(file: &mut File) {
     file.seek(std::io::SeekFrom::Start(0))
