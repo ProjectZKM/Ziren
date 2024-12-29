@@ -20,7 +20,8 @@ use crate::{
     merkle_tree::{verify, MerkleProof},
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, TwoAdicPcsProofVariable,
+    BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig,
+    FriProofVariable,
 };
 
 use super::{
@@ -202,7 +203,7 @@ where
     // This trait bound is redundant, but Rust-Analyzer is not able to infer it.
     SC: FieldHasher<BabyBear>,
     <SC as FieldHasher<BabyBear>>::Digest: Witnessable<C, WitnessVariable = SC::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = TwoAdicPcsProofVariable<C, SC>>,
+    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
     type WitnessVariable = SP1CompressWithVKeyWitnessVariable<C, SC>;
 

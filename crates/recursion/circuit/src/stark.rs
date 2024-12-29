@@ -25,7 +25,8 @@ use crate::{
     challenger::CanObserveVariable,
     fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
-    BabyBearFriConfig, CircuitConfig, TwoAdicPcsMatsVariable, TwoAdicPcsProofVariable,
+    BabyBearFriConfig, CircuitConfig, TwoAdicPcsMatsVariable,
+    FriProofVariable,
 };
 
 use crate::{
@@ -39,7 +40,7 @@ use crate::{
 pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>> {
     pub commitment: ShardCommitment<SC::DigestVariable>,
     pub opened_values: ShardOpenedValues<Ext<C::F, C::EF>>,
-    pub opening_proof: TwoAdicPcsProofVariable<C, SC>,
+    pub opening_proof: FriProofVariable<C, SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Felt<C::F>>,
 }

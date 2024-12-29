@@ -43,14 +43,13 @@ pub type OuterChallenger = MultiField32Challenger<
 >;
 pub type OuterPcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, OuterChallengeMmcs>;
 
-pub type OuterInputProof = <TwoAdicFriGenericConfig<Vec<BatchOpening<OuterVal, OuterValMmcs>>, <OuterValMmcs as Mmcs<OuterVal>>::Error> as FriGenericConfig<OuterVal>>::InputProof;
+pub type OuterInputProof = Vec<BatchOpening<OuterVal, OuterValMmcs>>;
 
 pub type OuterQueryProof = QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof>;
 pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs>;
 pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, OuterInputProof>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
-//pub type OuterPcsProof =
-//    TwoAdicFriPcsProof<OuterVal, OuterChallenge, OuterValMmcs, OuterChallengeMmcs, OuterInputProof>;
+pub type OuterPcsProof = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Proof;
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {

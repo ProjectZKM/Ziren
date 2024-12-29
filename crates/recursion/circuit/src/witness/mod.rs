@@ -12,7 +12,7 @@ use zkm2_stark::{
 
 use crate::{
     hash::FieldHasherVariable, stark::ShardProofVariable, BabyBearFriConfigVariable, CircuitConfig,
-    TwoAdicPcsProofVariable,
+    FriProofVariable,
 };
 
 pub trait WitnessWriter<C: CircuitConfig>: Sized {
@@ -138,7 +138,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: BabyBearFriConfigV
     Witnessable<C> for ShardProof<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = TwoAdicPcsProofVariable<C, SC>>,
+    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
     type WitnessVariable = ShardProofVariable<C, SC>;
 
