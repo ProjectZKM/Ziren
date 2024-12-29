@@ -2796,9 +2796,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm2-core-emulator"
+version = "0.0.1"
+dependencies = [
+ "bincode",
+ "byteorder",
+ "elf",
+ "hex",
+ "itertools 0.13.0",
+ "lazy_static",
+ "log",
+ "serde",
+ "serde_json",
+ "sha3",
+]
+
+[[package]]
 name = "zkm2-core-executor"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "bincode",
  "bytemuck",
  "elf",
@@ -2815,6 +2832,8 @@ dependencies = [
  "rand",
  "rrs-succinct",
  "serde",
+ "serde_json",
+ "sha2",
  "strum",
  "strum_macros",
  "thiserror",
@@ -2822,6 +2841,7 @@ dependencies = [
  "tracing",
  "typenum",
  "vec_map",
+ "zkm2-core-emulator",
  "zkm2-primitives",
  "zkm2-stark",
 ]

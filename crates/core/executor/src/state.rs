@@ -8,11 +8,10 @@ use serde::{Deserialize, Serialize};
 use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkVerifyingKey};
 
 use crate::{
-    //events::MemoryRecord,
-    //memory::PagedMemory,
-    record::{ExecutionRecord /*MemoryAccessRecord*/},
-    //syscalls::SyscallCode,
-    //ExecutorMode, ZKMReduceProof,
+    events::MemoryRecord,
+    memory::PagedMemory,
+    record::{ExecutionRecord, MemoryAccessRecord},
+    ExecutorMode, ZKMReduceProof,
 };
 
 /// Holds data describing the current state of a program's execution.
@@ -27,7 +26,7 @@ pub struct ExecutionState {
 
     /// The memory which instructions operate over. Values contain the memory value and last shard
     /// + timestamp that each memory address was accessed.
-    //   pub memory: PagedMemory<MemoryRecord>,
+    pub memory: PagedMemory<MemoryRecord>,
 
     /// The global clock keeps track of how many instructions have been executed through all shards.
     pub global_clk: u64,
@@ -38,7 +37,7 @@ pub struct ExecutionState {
 
     /// Uninitialized memory addresses that have a specific value they should be initialized with.
     /// `SyscallHintRead` uses this to write hint data into uninitialized memory.
-    // pub uninitialized_memory: PagedMemory<u32>,
+    pub uninitialized_memory: PagedMemory<u32>,
 
     /// A stream of input values (global to the entire program).
     pub input_stream: Vec<Vec<u8>>,
@@ -47,8 +46,10 @@ pub struct ExecutionState {
     pub input_stream_ptr: usize,
 
     /// A stream of proofs (reduce vk, proof, verifying key) inputted to the program.
-    //pub proof_stream:
-    //    Vec<(ZKMReduceProof<BabyBearPoseidon2>, StarkVerifyingKey<BabyBearPoseidon2>)>,
+    pub proof_stream: Vec<(
+        ZKMReduceProof<BabyBearPoseidon2>,
+        StarkVerifyingKey<BabyBearPoseidon2>,
+    )>,
 
     /// A ptr to the current position in the proof stream, incremented after verifying a proof.
     pub proof_stream_ptr: usize,
@@ -73,13 +74,13 @@ impl ExecutionState {
             current_shard: 1,
             clk: 0,
             pc: pc_start,
-            //memory: PagedMemory::new_preallocated(),
-            //uninitialized_memory: PagedMemory::default(),
+            memory: PagedMemory::new_preallocated(),
+            uninitialized_memory: PagedMemory::default(),
             input_stream: Vec::new(),
             input_stream_ptr: 0,
             public_values_stream: Vec::new(),
             public_values_stream_ptr: 0,
-            //proof_stream: Vec::new(),
+            proof_stream: Vec::new(),
             proof_stream_ptr: 0,
             //syscall_counts: HashMap::new(),
         }
@@ -97,13 +98,13 @@ pub struct ForkState {
     /// The original `pc` value at the fork point.
     pub pc: u32,
     /// All memory changes since the fork point.
-    // pub memory_diff: HashMap<u32, Option<MemoryRecord>>,
+    pub memory_diff: HashMap<u32, Option<MemoryRecord>>,
     /// The original memory access record at the fork point.
-    // pub op_record: MemoryAccessRecord,
+    pub op_record: MemoryAccessRecord,
     /// The original execution record at the fork point.
     pub record: ExecutionRecord,
     // /// Whether `emit_events` was enabled at the fork point.
-    //pub executor_mode: ExecutorMode,
+    pub executor_mode: ExecutorMode,
 }
 
 impl ExecutionState {

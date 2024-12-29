@@ -11,7 +11,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm2_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
-    ExecutionRecord, Opcode, Program,
+    BinaryOperator, EnumAsField, ExecutionRecord, Program,
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::{
@@ -160,7 +160,7 @@ impl AddSubChip {
         cols: &mut AddSubCols<F>,
         blu: &mut impl ByteRecord,
     ) {
-        let is_add = event.opcode == Opcode::ADD;
+        let is_add = event.opcode == BinaryOperator::ADD;
         cols.shard = F::from_canonical_u32(event.shard);
         cols.is_add = F::from_bool(is_add);
         cols.is_sub = F::from_bool(!is_add);
@@ -210,7 +210,7 @@ where
         // Receive the arguments.  There are separate receives for ADD and SUB.
         // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            Opcode::ADD.as_field::<AB::F>(),
+            BinaryOperator::ADD.as_field::<AB::F>(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
@@ -221,7 +221,7 @@ where
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            Opcode::SUB.as_field::<AB::F>(),
+            BinaryOperator::SUB.as_field::<AB::F>(),
             local.operand_1,
             local.add_operation.value,
             local.operand_2,
@@ -244,7 +244,7 @@ mod tests {
 
     use p3_baby_bear::BabyBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm2_core_executor::{events::AluEvent, BinaryOperator, ExecutionRecord};
 
     use zkm2_stark::air::MachineAir;
     use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.add_events = vec![AluEvent::new(0, 0, Opcode::ADD, 14, 8, 6)];
+        shard.add_events = vec![AluEvent::new(0, 0, BinaryOperator::ADD, 14, 8, 6)];
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<BabyBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -276,7 +276,7 @@ mod tests {
             shard.add_events.push(AluEvent::new(
                 i % 2,
                 0,
-                Opcode::ADD,
+                BinaryOperator::ADD,
                 result,
                 operand_1,
                 operand_2,
@@ -289,7 +289,7 @@ mod tests {
             shard.add_events.push(AluEvent::new(
                 i % 2,
                 0,
-                Opcode::SUB,
+                BinaryOperator::SUB,
                 result,
                 operand_1,
                 operand_2,

@@ -8,7 +8,7 @@ use zkm2_stark::{air::MachineAir, ProofShape};
 use crate::{ExecutionRecord, Program};
 
 /// The shape of a core proof.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Eq, Serialize, Deserialize, PartialEq)]
 pub struct CoreShape {
     /// The shape of the proof.
     ///
