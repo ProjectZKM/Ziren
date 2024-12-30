@@ -7,8 +7,8 @@ use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
-    PublicValuesOutputDigest, SP1CompressVerifier, SP1CompressWithVKeyVerifier,
-    SP1CompressWithVKeyWitnessVariable, SP1CompressWitnessVariable,
+    PublicValuesOutputDigest, ZKMCompressVerifier, ZKMCompressWithVKeyVerifier,
+    ZKMCompressWithVKeyWitnessVariable, ZKMCompressWitnessVariable,
 };
 use crate::{
     challenger::DuplexChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
@@ -20,23 +20,23 @@ use zkm2_stark::{air::MachineAir, StarkMachine};
 
 /// A program to verify a single recursive proof representing a complete proof of program execution.
 ///
-/// The root verifier is simply a `SP1CompressVerifier` with an assertion that the `is_complete`
+/// The root verifier is simply a `ZKMCompressVerifier` with an assertion that the `is_complete`
 /// flag is set to true.
 #[derive(Debug, Clone, Copy)]
-pub struct SP1CompressRootVerifier<C, SC, A> {
+pub struct ZKMCompressRootVerifier<C, SC, A> {
     _phantom: PhantomData<(C, SC, A)>,
 }
 
 /// A program to verify a single recursive proof representing a complete proof of program execution.
 ///
-/// The root verifier is simply a `SP1CompressVerifier` with an assertion that the `is_complete`
+/// The root verifier is simply a `ZKMCompressVerifier` with an assertion that the `is_complete`
 /// flag is set to true.
 #[derive(Debug, Clone, Copy)]
-pub struct SP1CompressRootVerifierWithVKey<C, SC, A> {
+pub struct ZKMCompressRootVerifierWithVKey<C, SC, A> {
     _phantom: PhantomData<(C, SC, A)>,
 }
 
-impl<C, SC, A> SP1CompressRootVerifier<C, SC, A>
+impl<C, SC, A> ZKMCompressRootVerifier<C, SC, A>
 where
     SC: BabyBearFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
@@ -46,13 +46,13 @@ where
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
-        input: SP1CompressWitnessVariable<C, SC>,
+        input: ZKMCompressWitnessVariable<C, SC>,
         vk_root: [Felt<C::F>; DIGEST_SIZE],
     ) {
         // Assert that the program is complete.
         builder.assert_felt_eq(input.is_complete, C::F::ONE);
         // Verify the proof, as a compress proof.
-        SP1CompressVerifier::verify(
+        ZKMCompressVerifier::verify(
             builder,
             machine,
             input,
@@ -62,7 +62,7 @@ where
     }
 }
 
-impl<C, SC, A> SP1CompressRootVerifierWithVKey<C, SC, A>
+impl<C, SC, A> ZKMCompressRootVerifierWithVKey<C, SC, A>
 where
     SC: BabyBearFriConfigVariable<
         C,
@@ -76,13 +76,13 @@ where
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
-        input: SP1CompressWithVKeyWitnessVariable<C, SC>,
+        input: ZKMCompressWithVKeyWitnessVariable<C, SC>,
         value_assertions: bool,
         kind: PublicValuesOutputDigest,
     ) {
         // Assert that the program is complete.
         builder.assert_felt_eq(input.compress_var.is_complete, C::F::ONE);
         // Verify the proof, as a compress proof.
-        SP1CompressWithVKeyVerifier::verify(builder, machine, input, value_assertions, kind);
+        ZKMCompressWithVKeyVerifier::verify(builder, machine, input, value_assertions, kind);
     }
 }

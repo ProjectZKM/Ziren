@@ -43,7 +43,7 @@ use crate::{
 
 /// A program to verify a batch of recursive proofs and aggregate their public values.
 #[derive(Debug, Clone, Copy)]
-pub struct SP1CompressVerifier<C, SC, A> {
+pub struct ZKMCompressVerifier<C, SC, A> {
     _phantom: PhantomData<(C, SC, A)>,
 }
 
@@ -53,7 +53,7 @@ pub enum PublicValuesOutputDigest {
 }
 
 /// Witness layout for the compress stage verifier.
-pub struct SP1CompressWitnessVariable<
+pub struct ZKMCompressWitnessVariable<
     C: CircuitConfig<F = BabyBear>,
     SC: BabyBearFriConfigVariable<C>,
 > {
@@ -66,17 +66,17 @@ pub struct SP1CompressWitnessVariable<
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "ShardProof<SC>: Serialize, Dom<SC>: Serialize"))]
 #[serde(bound(deserialize = "ShardProof<SC>: Deserialize<'de>, Dom<SC>: DeserializeOwned"))]
-pub struct SP1CompressWitnessValues<SC: StarkGenericConfig> {
+pub struct ZKMCompressWitnessValues<SC: StarkGenericConfig> {
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, ShardProof<SC>)>,
     pub is_complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SP1CompressShape {
+pub struct ZKMCompressShape {
     proof_shapes: Vec<ProofShape>,
 }
 
-impl<C, SC, A> SP1CompressVerifier<C, SC, A>
+impl<C, SC, A> ZKMCompressVerifier<C, SC, A>
 where
     SC: BabyBearFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
@@ -86,7 +86,7 @@ where
     /// Verify a batch of recursive proofs and aggregate their public values.
     ///
     /// The compression verifier can aggregate proofs of different kinds:
-    /// - Core proofs: proofs which are recursive proof of a batch of SP1 shard proofs. The
+    /// - Core proofs: proofs which are recursive proof of a batch of ZKM shard proofs. The
     ///   implementation in this function assumes a fixed recursive verifier specified by
     ///   `recursive_vk`.
     /// - Deferred proofs: proofs which are recursive proof of a batch of deferred proofs. The
@@ -94,16 +94,16 @@ where
     ///   `deferred_vk`.
     /// - Compress proofs: these are proofs which refer to a prove of this program. The key for it
     ///   is part of public values will be propagated across all levels of recursion and will be
-    ///   checked against itself as in [zkm2_prover::Prover] or as in [super::SP1RootVerifier].
+    ///   checked against itself as in [zkm2_prover::Prover] or as in [super::ZKMRootVerifier].
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
-        input: SP1CompressWitnessVariable<C, SC>,
+        input: ZKMCompressWitnessVariable<C, SC>,
         vk_root: [Felt<C::F>; DIGEST_SIZE],
         kind: PublicValuesOutputDigest,
     ) {
         // Read input.
-        let SP1CompressWitnessVariable {
+        let ZKMCompressWitnessVariable {
             vks_and_proofs,
             is_complete,
         } = input;
@@ -572,21 +572,21 @@ where
     }
 }
 
-impl<SC: BabyBearFriConfig> SP1CompressWitnessValues<SC> {
-    pub fn shape(&self) -> SP1CompressShape {
+impl<SC: BabyBearFriConfig> ZKMCompressWitnessValues<SC> {
+    pub fn shape(&self) -> ZKMCompressShape {
         let proof_shapes = self
             .vks_and_proofs
             .iter()
             .map(|(_, proof)| proof.shape())
             .collect();
-        SP1CompressShape { proof_shapes }
+        ZKMCompressShape { proof_shapes }
     }
 }
 
-impl SP1CompressWitnessValues<BabyBearPoseidon2> {
+impl ZKMCompressWitnessValues<BabyBearPoseidon2> {
     pub fn dummy<A: MachineAir<BabyBear>>(
         machine: &StarkMachine<BabyBearPoseidon2, A>,
-        shape: &SP1CompressShape,
+        shape: &ZKMCompressShape,
     ) -> Self {
         let vks_and_proofs = shape
             .proof_shapes
@@ -604,7 +604,7 @@ impl SP1CompressWitnessValues<BabyBearPoseidon2> {
     }
 }
 
-impl From<Vec<ProofShape>> for SP1CompressShape {
+impl From<Vec<ProofShape>> for ZKMCompressShape {
     fn from(proof_shapes: Vec<ProofShape>) -> Self {
         Self { proof_shapes }
     }

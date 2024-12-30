@@ -276,12 +276,13 @@ impl Program {
         // }
     }
 
-    // /// Disassemble a RV32IM ELF to a program that be executed by the VM.
-    // ///
-    // /// # Errors
-    // ///
-    // /// This function may return an error if the ELF is not valid.
+    /// Disassemble a RV32IM ELF to a program that be executed by the VM.
+    ///
+    /// # Errors
+    ///
+    /// This function may return an error if the ELF is not valid.
     // pub fn from(input: &[u8]) -> eyre::Result<Self> {
+    //     panic!("Unimp")
     //     // Decode the bytes as an ELF.
     //     let elf = Elf::decode(input)?;
     //
@@ -296,18 +297,19 @@ impl Program {
     //         memory_image: elf.memory_image,
     //         preprocessed_shape: None,
     //     })
-    // }
+    //}
 
-    // /// Disassemble a RV32IM ELF to a program that be executed by the VM from a file path.
-    // ///
-    // /// # Errors
-    // ///
-    // /// This function will return an error if the file cannot be opened or read.
-    // pub fn from_elf(path: &str) -> eyre::Result<Self> {
-    //     let mut elf_code = Vec::new();
-    //     File::open(path)?.read_to_end(&mut elf_code)?;
-    //     Program::from(&elf_code)
-    // }
+    /// Disassemble a RV32IM ELF to a program that be executed by the VM from a file path.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the file cannot be opened or read.
+    pub fn from_elf(path: &str) -> eyre::Result<Self> {
+        let mut elf_code = Vec::new();
+        std::fs::File::open(path)?.read_to_end(&mut elf_code)?;
+        let max_mem = 0x80000000;
+        Ok(Program::from(&elf_code, max_mem).unwrap())
+    }
 
     /// Custom logic for padding the trace to a power of two according to the proof shape.
     pub fn fixed_log2_rows<F: Field, A: MachineAir<F>>(&self, air: &A) -> Option<usize> {

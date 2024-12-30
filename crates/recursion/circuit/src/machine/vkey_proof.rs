@@ -25,25 +25,25 @@ use crate::{
 };
 
 use super::{
-    PublicValuesOutputDigest, SP1CompressShape, SP1CompressVerifier, SP1CompressWitnessValues,
-    SP1CompressWitnessVariable,
+    PublicValuesOutputDigest, ZKMCompressShape, ZKMCompressVerifier, ZKMCompressWitnessValues,
+    ZKMCompressWitnessVariable,
 };
 
 /// A program to verify a batch of recursive proofs and aggregate their public values.
 #[derive(Debug, Clone, Copy)]
-pub struct SP1MerkleProofVerifier<C, SC> {
+pub struct ZKMMerkleProofVerifier<C, SC> {
     _phantom: PhantomData<(C, SC)>,
 }
 
 /// The shape of the compress proof with vk validation proofs.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SP1CompressWithVkeyShape {
-    pub compress_shape: SP1CompressShape,
+pub struct ZKMCompressWithVkeyShape {
+    pub compress_shape: ZKMCompressShape,
     pub merkle_tree_height: usize,
 }
 
 /// Witness layout for the compress stage verifier.
-pub struct SP1MerkleProofWitnessVariable<
+pub struct ZKMMerkleProofWitnessVariable<
     C: CircuitConfig<F = BabyBear>,
     SC: FieldHasherVariable<C> + BabyBearFriConfigVariable<C>,
 > {
@@ -59,13 +59,13 @@ pub struct SP1MerkleProofWitnessVariable<
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "SC::Digest: Serialize"))]
 #[serde(bound(deserialize = "SC::Digest: Deserialize<'de>"))]
-pub struct SP1MerkleProofWitnessValues<SC: FieldHasher<BabyBear>> {
+pub struct ZKMMerkleProofWitnessValues<SC: FieldHasher<BabyBear>> {
     pub vk_merkle_proofs: Vec<MerkleProof<BabyBear, SC>>,
     pub values: Vec<SC::Digest>,
     pub root: SC::Digest,
 }
 
-impl<C, SC> SP1MerkleProofVerifier<C, SC>
+impl<C, SC> ZKMMerkleProofVerifier<C, SC>
 where
     SC: BabyBearFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
@@ -75,10 +75,10 @@ where
     pub fn verify(
         builder: &mut Builder<C>,
         digests: Vec<SC::DigestVariable>,
-        input: SP1MerkleProofWitnessVariable<C, SC>,
+        input: ZKMMerkleProofWitnessVariable<C, SC>,
         value_assertions: bool,
     ) {
-        let SP1MerkleProofWitnessVariable {
+        let ZKMMerkleProofWitnessVariable {
             vk_merkle_proofs,
             values,
             root,
@@ -97,26 +97,26 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SP1CompressWithVKeyVerifier<C, SC, A> {
+pub struct ZKMCompressWithVKeyVerifier<C, SC, A> {
     _phantom: PhantomData<(C, SC, A)>,
 }
 
 /// Witness layout for the verifier of the proof shape phase of the compress stage.
-pub struct SP1CompressWithVKeyWitnessVariable<
+pub struct ZKMCompressWithVKeyWitnessVariable<
     C: CircuitConfig<F = BabyBear>,
     SC: BabyBearFriConfigVariable<C>,
 > {
-    pub compress_var: SP1CompressWitnessVariable<C, SC>,
-    pub merkle_var: SP1MerkleProofWitnessVariable<C, SC>,
+    pub compress_var: ZKMCompressWitnessVariable<C, SC>,
+    pub merkle_var: ZKMMerkleProofWitnessVariable<C, SC>,
 }
 
 /// An input layout for the verifier of the proof shape phase of the compress stage.
-pub struct SP1CompressWithVKeyWitnessValues<SC: StarkGenericConfig + FieldHasher<BabyBear>> {
-    pub compress_val: SP1CompressWitnessValues<SC>,
-    pub merkle_val: SP1MerkleProofWitnessValues<SC>,
+pub struct ZKMCompressWithVKeyWitnessValues<SC: StarkGenericConfig + FieldHasher<BabyBear>> {
+    pub compress_val: ZKMCompressWitnessValues<SC>,
+    pub merkle_val: ZKMMerkleProofWitnessValues<SC>,
 }
 
-impl<C, SC, A> SP1CompressWithVKeyVerifier<C, SC, A>
+impl<C, SC, A> ZKMCompressWithVKeyVerifier<C, SC, A>
 where
     SC: BabyBearFriConfigVariable<
         C,
@@ -131,7 +131,7 @@ where
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
-        input: SP1CompressWithVKeyWitnessVariable<C, SC>,
+        input: ZKMCompressWithVKeyWitnessVariable<C, SC>,
         value_assertions: bool,
         kind: PublicValuesOutputDigest,
     ) {
@@ -142,22 +142,22 @@ where
             .map(|(vk, _)| vk.hash(builder))
             .collect::<Vec<_>>();
         let vk_root = input.merkle_var.root.map(|x| builder.eval(x));
-        SP1MerkleProofVerifier::verify(builder, values, input.merkle_var, value_assertions);
-        SP1CompressVerifier::verify(builder, machine, input.compress_var, vk_root, kind);
+        ZKMMerkleProofVerifier::verify(builder, values, input.merkle_var, value_assertions);
+        ZKMCompressVerifier::verify(builder, machine, input.compress_var, vk_root, kind);
     }
 }
 
-impl<SC: BabyBearFriConfig + FieldHasher<BabyBear>> SP1CompressWithVKeyWitnessValues<SC> {
-    pub fn shape(&self) -> SP1CompressWithVkeyShape {
+impl<SC: BabyBearFriConfig + FieldHasher<BabyBear>> ZKMCompressWithVKeyWitnessValues<SC> {
+    pub fn shape(&self) -> ZKMCompressWithVkeyShape {
         let merkle_tree_height = self.merkle_val.vk_merkle_proofs.first().unwrap().path.len();
-        SP1CompressWithVkeyShape {
+        ZKMCompressWithVkeyShape {
             compress_shape: self.compress_val.shape(),
             merkle_tree_height,
         }
     }
 }
 
-impl SP1MerkleProofWitnessValues<BabyBearPoseidon2> {
+impl ZKMMerkleProofWitnessValues<BabyBearPoseidon2> {
     pub fn dummy(num_proofs: usize, height: usize) -> Self {
         let dummy_digest = [BabyBear::ZERO; DIGEST_SIZE];
         let vk_merkle_proofs = vec![
@@ -177,15 +177,15 @@ impl SP1MerkleProofWitnessValues<BabyBearPoseidon2> {
     }
 }
 
-impl SP1CompressWithVKeyWitnessValues<BabyBearPoseidon2> {
+impl ZKMCompressWithVKeyWitnessValues<BabyBearPoseidon2> {
     pub fn dummy<A: MachineAir<BabyBear>>(
         machine: &StarkMachine<BabyBearPoseidon2, A>,
-        shape: &SP1CompressWithVkeyShape,
+        shape: &ZKMCompressWithVkeyShape,
     ) -> Self {
         let compress_val =
-            SP1CompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.compress_shape);
+            ZKMCompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.compress_shape);
         let num_proofs = compress_val.vks_and_proofs.len();
-        let merkle_val = SP1MerkleProofWitnessValues::<BabyBearPoseidon2>::dummy(
+        let merkle_val = ZKMMerkleProofWitnessValues::<BabyBearPoseidon2>::dummy(
             num_proofs,
             shape.merkle_tree_height,
         );
@@ -197,7 +197,7 @@ impl SP1CompressWithVKeyWitnessValues<BabyBearPoseidon2> {
 }
 
 impl<C: CircuitConfig<F = BabyBear, EF = InnerChallenge>, SC: BabyBearFriConfigVariable<C>>
-    Witnessable<C> for SP1CompressWithVKeyWitnessValues<SC>
+    Witnessable<C> for ZKMCompressWithVKeyWitnessValues<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
     // This trait bound is redundant, but Rust-Analyzer is not able to infer it.
@@ -205,10 +205,10 @@ where
     <SC as FieldHasher<BabyBear>>::Digest: Witnessable<C, WitnessVariable = SC::DigestVariable>,
     OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
-    type WitnessVariable = SP1CompressWithVKeyWitnessVariable<C, SC>;
+    type WitnessVariable = ZKMCompressWithVKeyWitnessVariable<C, SC>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        SP1CompressWithVKeyWitnessVariable {
+        ZKMCompressWithVKeyWitnessVariable {
             compress_var: self.compress_val.read(builder),
             merkle_var: self.merkle_val.read(builder),
         }

@@ -2,10 +2,10 @@ use std::{borrow::Borrow, path::PathBuf};
 
 use p3_baby_bear::BabyBear;
 use zkm2_core_executor::ZKMContext;
-use zkm2_core_machine::io::SP1Stdin;
+use zkm2_core_machine::io::ZKMStdin;
 use zkm2_recursion_circuit::{
     hash::FieldHasherVariable,
-    machine::{ZKMCompressWitnessValues, SP1WrapVerifier},
+    machine::{ZKMCompressWitnessValues, ZKMWrapVerifier},
 };
 use zkm2_recursion_compiler::{
     config::OuterConfig,
@@ -19,11 +19,11 @@ pub use zkm2_recursion_core::stark::zkm2_dev_mode;
 pub use zkm2_recursion_circuit::witness::{OuterWitness, Witnessable};
 
 use zkm2_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
-use zkm2_stark::{SP1ProverOpts, ShardProof, StarkVerifyingKey};
+use zkm2_stark::{ZKMProverOpts, ShardProof, StarkVerifyingKey};
 
 use crate::{
     utils::{babybear_bytes_to_bn254, babybears_to_bn254, words_to_bytes},
-    OuterSC, SP1Prover, WrapAir,
+    OuterSC, ZKMProver, WrapAir,
 };
 
 /// Tries to build the PLONK artifacts inside the development directory.
@@ -152,15 +152,15 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     let elf = include_bytes!("../elf/riscv32im-succinct-zkvm-elf");
 
     tracing::info!("initializing prover");
-    let prover: SP1Prover = SP1Prover::new();
-    let opts = SP1ProverOpts::default();
+    let prover: ZKMProver = ZKMProver::new();
+    let opts = ZKMProverOpts::default();
     let context = ZKMContext::default();
 
     tracing::info!("setup elf");
     let (pk, vk) = prover.setup(elf);
 
     tracing::info!("prove core");
-    let mut stdin = SP1Stdin::new();
+    let mut stdin = ZKMStdin::new();
     stdin.write(&500u32);
     let core_proof = prover.prove_core(&pk, &stdin, opts, context).unwrap();
 
@@ -200,7 +200,7 @@ fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Ve
     builder.assert_felt_eq(vk.pc_start, template_vk.pc_start);
 
     // Verify the proof.
-    SP1WrapVerifier::verify(&mut builder, &wrap_machine, input);
+    ZKMWrapVerifier::verify(&mut builder, &wrap_machine, input);
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     let operations = backend.emit(builder.into_operations());

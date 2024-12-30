@@ -1,15 +1,15 @@
-use sp1_core_machine::riscv::RiscvAir;
-use sp1_stark::{CpuProver, MachineProver, StarkGenericConfig};
+use zkm2_core_machine::mips::MipsAir;
+use zkm2_stark::{CpuProver, MachineProver, StarkGenericConfig};
 
 use crate::{CompressAir, CoreSC, InnerSC, OuterSC, ShrinkAir, WrapAir};
 
-pub trait SP1ProverComponents: Send + Sync {
-    /// The prover for making SP1 core proofs.
-    type CoreProver: MachineProver<CoreSC, RiscvAir<<CoreSC as StarkGenericConfig>::Val>>
+pub trait ZKMProverComponents: Send + Sync {
+    /// The prover for making ZKM core proofs.
+    type CoreProver: MachineProver<CoreSC, MipsAir<<CoreSC as StarkGenericConfig>::Val>>
         + Send
         + Sync;
 
-    /// The prover for making SP1 recursive proofs.
+    /// The prover for making ZKM recursive proofs.
     type CompressProver: MachineProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>
         + Send
         + Sync;
@@ -27,8 +27,8 @@ pub trait SP1ProverComponents: Send + Sync {
 
 pub struct DefaultProverComponents;
 
-impl SP1ProverComponents for DefaultProverComponents {
-    type CoreProver = CpuProver<CoreSC, RiscvAir<<CoreSC as StarkGenericConfig>::Val>>;
+impl ZKMProverComponents for DefaultProverComponents {
+    type CoreProver = CpuProver<CoreSC, MipsAir<<CoreSC as StarkGenericConfig>::Val>>;
     type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
     type ShrinkProver = CpuProver<InnerSC, ShrinkAir<<InnerSC as StarkGenericConfig>::Val>>;
     type WrapProver = CpuProver<OuterSC, WrapAir<<OuterSC as StarkGenericConfig>::Val>>;

@@ -35,17 +35,17 @@ use crate::{
 };
 
 use super::{
-    recursion_public_values_digest, SP1CompressShape, SP1CompressWitnessValues,
-    SP1MerkleProofVerifier, SP1MerkleProofWitnessValues, SP1MerkleProofWitnessVariable,
+    recursion_public_values_digest, ZKMCompressShape, ZKMCompressWitnessValues,
+    ZKMMerkleProofVerifier, ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
 };
 
-pub struct SP1DeferredVerifier<C, SC, A> {
+pub struct ZKMDeferredVerifier<C, SC, A> {
     _phantom: std::marker::PhantomData<(C, SC, A)>,
 }
 
 #[derive(Debug, Clone, Hash)]
-pub struct SP1DeferredShape {
-    inner: SP1CompressShape,
+pub struct ZKMDeferredShape {
+    inner: ZKMCompressShape,
     height: usize,
 }
 
@@ -56,9 +56,9 @@ pub struct SP1DeferredShape {
 #[serde(bound(
     deserialize = "SC::Challenger: Deserialize<'de>, ShardProof<SC>: Deserialize<'de>, Dom<SC>: DeserializeOwned, [SC::Val; DIGEST_SIZE]: Deserialize<'de>, SC::Digest: Deserialize<'de>"
 ))]
-pub struct SP1DeferredWitnessValues<SC: BabyBearFriConfig + FieldHasher<BabyBear>> {
+pub struct ZKMDeferredWitnessValues<SC: BabyBearFriConfig + FieldHasher<BabyBear>> {
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, ShardProof<SC>)>,
-    pub vk_merkle_data: SP1MerkleProofWitnessValues<SC>,
+    pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; POSEIDON_NUM_WORDS],
     pub zkm2_vk_digest: [SC::Val; DIGEST_SIZE],
     pub leaf_challenger: SC::Challenger,
@@ -72,12 +72,12 @@ pub struct SP1DeferredWitnessValues<SC: BabyBearFriConfig + FieldHasher<BabyBear
     pub is_complete: bool,
 }
 
-pub struct SP1DeferredWitnessVariable<
+pub struct ZKMDeferredWitnessVariable<
     C: CircuitConfig<F = BabyBear>,
     SC: FieldHasherVariable<C> + BabyBearFriConfigVariable<C>,
 > {
     pub vks_and_proofs: Vec<(VerifyingKeyVariable<C, SC>, ShardProofVariable<C, SC>)>,
-    pub vk_merkle_data: SP1MerkleProofWitnessVariable<C, SC>,
+    pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm2_vk_digest: [Felt<C::F>; DIGEST_SIZE],
     pub leaf_challenger: SC::FriChallengerVariable,
@@ -91,7 +91,7 @@ pub struct SP1DeferredWitnessVariable<
     pub is_complete: Felt<C::F>,
 }
 
-impl<C, SC, A> SP1DeferredVerifier<C, SC, A>
+impl<C, SC, A> ZKMDeferredVerifier<C, SC, A>
 where
     SC: BabyBearFriConfigVariable<
         C,
@@ -114,10 +114,10 @@ where
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
-        input: SP1DeferredWitnessVariable<C, SC>,
+        input: ZKMDeferredWitnessVariable<C, SC>,
         value_assertions: bool,
     ) {
-        let SP1DeferredWitnessVariable {
+        let ZKMDeferredWitnessVariable {
             vks_and_proofs,
             vk_merkle_data,
             start_reconstruct_deferred_digest,
@@ -139,7 +139,7 @@ where
             .iter()
             .map(|(vk, _)| vk.hash(builder))
             .collect::<Vec<_>>();
-        SP1MerkleProofVerifier::verify(builder, values, vk_merkle_data, value_assertions);
+        ZKMMerkleProofVerifier::verify(builder, values, vk_merkle_data, value_assertions);
 
         let mut deferred_public_values_stream: Vec<Felt<C::F>> = (0..RECURSIVE_PROOF_NUM_PV_ELTS)
             .map(|_| builder.uninit())
@@ -263,37 +263,37 @@ where
     }
 }
 
-//impl SP1DeferredWitnessValues<BabyBearPoseidon2> {
-//    pub fn dummy<A: MachineAir<BabyBear>>(
-//        machine: &StarkMachine<BabyBearPoseidon2, A>,
-//        shape: &SP1DeferredShape,
-//    ) -> Self {
-//        let inner_witness =
-//            SP1CompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.inner);
-//        let vks_and_proofs = inner_witness.vks_and_proofs;
-//
-//        let vk_merkle_data = SP1MerkleProofWitnessValues::dummy(vks_and_proofs.len(), shape.height);
-//
-//        Self {
-//            vks_and_proofs,
-//            vk_merkle_data,
-//            leaf_challenger: dummy_challenger(machine.config()),
-//            is_complete: true,
-//            zkm2_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
-//            start_reconstruct_deferred_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
-//            committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
-//            deferred_proofs_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
-//            end_pc: BabyBear::ZERO,
-//            end_shard: BabyBear::ZERO,
-//            end_execution_shard: BabyBear::ZERO,
-//            init_addr_bits: [BabyBear::ZERO; 32],
-//            finalize_addr_bits: [BabyBear::ZERO; 32],
-//        }
-//    }
-//}
+impl ZKMDeferredWitnessValues<BabyBearPoseidon2> {
+    pub fn dummy<A: MachineAir<BabyBear>>(
+        machine: &StarkMachine<BabyBearPoseidon2, A>,
+        shape: &ZKMDeferredShape,
+    ) -> Self {
+        let inner_witness =
+            ZKMCompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.inner);
+        let vks_and_proofs = inner_witness.vks_and_proofs;
 
-impl SP1DeferredShape {
-    pub const fn new(inner: SP1CompressShape, height: usize) -> Self {
+        let vk_merkle_data = ZKMMerkleProofWitnessValues::dummy(vks_and_proofs.len(), shape.height);
+
+        Self {
+            vks_and_proofs,
+            vk_merkle_data,
+            leaf_challenger: dummy_challenger(machine.config()),
+            is_complete: true,
+            zkm2_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
+            start_reconstruct_deferred_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
+            committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
+            deferred_proofs_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
+            end_pc: BabyBear::ZERO,
+            end_shard: BabyBear::ZERO,
+            end_execution_shard: BabyBear::ZERO,
+            init_addr_bits: [BabyBear::ZERO; 32],
+            finalize_addr_bits: [BabyBear::ZERO; 32],
+        }
+    }
+}
+
+impl ZKMDeferredShape {
+    pub const fn new(inner: ZKMCompressShape, height: usize) -> Self {
         Self { inner, height }
     }
 }

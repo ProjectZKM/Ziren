@@ -238,74 +238,74 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         panic!("Um")
     }
 
-//    fn generate_all_shapes_from_allowed_log_heights(
-//        allowed_log_heights: impl IntoIterator<Item = (String, Vec<Option<usize>>)>,
-//    ) -> impl Iterator<Item = ProofShape> {
-//        // for chip in allowed_heights.
-//        allowed_log_heights
-//            .into_iter()
-//            .map(|(name, heights)| heights.into_iter().map(move |height| (name.clone(), height)))
-//            .multi_cartesian_product()
-//            .map(|iter| {
-//                iter.into_iter()
-//                    .filter_map(|(name, maybe_height)| {
-//                        maybe_height.map(|log_height| (name, log_height))
-//                    })
-//                    .collect::<ProofShape>()
-//            })
-//    }
-//
-//    pub fn generate_all_allowed_shapes(&self) -> impl Iterator<Item = ProofShape> + '_ {
-//        let preprocessed_heights = self
-//            .allowed_preprocessed_log_heights
-//            .iter()
-//            .map(|(air, heights)| (air.name(), heights.clone()));
-//
-//        let mut memory_heights = self
-//            .memory_allowed_log_heights
-//            .iter()
-//            .map(|(air, heights)| (air.name(), heights.clone()))
-//            .collect::<HashMap<_, _>>();
-//        memory_heights.extend(preprocessed_heights.clone());
-//
-//        let included_shapes =
-//            self.included_shapes.iter().cloned().map(|map| map.into_iter().collect::<ProofShape>());
-//
-//        let precompile_only_shapes = self.precompile_allowed_log_heights.iter().flat_map(
-//            move |(air, (mem_events_per_row, allowed_log_heights))| {
-//                allowed_log_heights.iter().flat_map(move |allowed_log_height| {
-//                    self.get_precompile_shapes(air, *mem_events_per_row, *allowed_log_height)
-//                })
-//            },
-//        );
-//
-//        let precompile_shapes =
-//            Self::generate_all_shapes_from_allowed_log_heights(preprocessed_heights.clone())
-//                .flat_map(move |preprocessed_shape| {
-//                    precompile_only_shapes.clone().map(move |precompile_shape| {
-//                        preprocessed_shape
-//                            .clone()
-//                            .into_iter()
-//                            .chain(precompile_shape)
-//                            .collect::<ProofShape>()
-//                    })
-//                });
-//
-//        included_shapes
-//            .chain(self.allowed_core_log_heights.iter().flat_map(move |allowed_log_heights| {
-//                Self::generate_all_shapes_from_allowed_log_heights({
-//                    let mut log_heights = allowed_log_heights
-//                        .iter()
-//                        .map(|(air, heights)| (air.name(), heights.clone()))
-//                        .collect::<HashMap<_, _>>();
-//                    log_heights.extend(preprocessed_heights.clone());
-//                    log_heights
-//                })
-//            }))
-//            .chain(Self::generate_all_shapes_from_allowed_log_heights(memory_heights))
-//            .chain(precompile_shapes)
-//    }
-//
+    fn generate_all_shapes_from_allowed_log_heights(
+        allowed_log_heights: impl IntoIterator<Item = (String, Vec<Option<usize>>)>,
+    ) -> impl Iterator<Item = ProofShape> {
+        // for chip in allowed_heights.
+        allowed_log_heights
+            .into_iter()
+            .map(|(name, heights)| heights.into_iter().map(move |height| (name.clone(), height)))
+            .multi_cartesian_product()
+            .map(|iter| {
+                iter.into_iter()
+                    .filter_map(|(name, maybe_height)| {
+                        maybe_height.map(|log_height| (name, log_height))
+                    })
+                    .collect::<ProofShape>()
+            })
+    }
+
+    pub fn generate_all_allowed_shapes(&self) -> impl Iterator<Item = ProofShape> + '_ {
+        let preprocessed_heights = self
+            .allowed_preprocessed_log_heights
+            .iter()
+            .map(|(air, heights)| (air.name(), heights.clone()));
+
+        let mut memory_heights = self
+            .memory_allowed_log_heights
+            .iter()
+            .map(|(air, heights)| (air.name(), heights.clone()))
+            .collect::<HashMap<_, _>>();
+        memory_heights.extend(preprocessed_heights.clone());
+
+        let included_shapes =
+            self.included_shapes.iter().cloned().map(|map| map.into_iter().collect::<ProofShape>());
+
+        let precompile_only_shapes = self.precompile_allowed_log_heights.iter().flat_map(
+            move |(air, (mem_events_per_row, allowed_log_heights))| {
+                allowed_log_heights.iter().flat_map(move |allowed_log_height| {
+                    self.get_precompile_shapes(air, *mem_events_per_row, *allowed_log_height)
+                })
+            },
+        );
+
+        let precompile_shapes =
+            Self::generate_all_shapes_from_allowed_log_heights(preprocessed_heights.clone())
+                .flat_map(move |preprocessed_shape| {
+                    precompile_only_shapes.clone().map(move |precompile_shape| {
+                        preprocessed_shape
+                            .clone()
+                            .into_iter()
+                            .chain(precompile_shape)
+                            .collect::<ProofShape>()
+                    })
+                });
+
+        included_shapes
+            .chain(self.allowed_core_log_heights.iter().flat_map(move |allowed_log_heights| {
+                Self::generate_all_shapes_from_allowed_log_heights({
+                    let mut log_heights = allowed_log_heights
+                        .iter()
+                        .map(|(air, heights)| (air.name(), heights.clone()))
+                        .collect::<HashMap<_, _>>();
+                    log_heights.extend(preprocessed_heights.clone());
+                    log_heights
+                })
+            }))
+            .chain(Self::generate_all_shapes_from_allowed_log_heights(memory_heights))
+            .chain(precompile_shapes)
+    }
+
     pub fn maximal_core_shapes(&self) -> Vec<CoreShape> {
         let max_preprocessed = self
             .allowed_preprocessed_log_heights

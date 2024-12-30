@@ -8,29 +8,29 @@ use std::{
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
-use p3_field::{AbstractField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_symmetric::CryptographicHasher;
-use sp1_core_executor::{Executor, Program};
-use sp1_core_machine::{io::SP1Stdin, reduce::SP1ReduceProof};
-use sp1_recursion_circuit::machine::RootPublicValues;
-use sp1_recursion_core::{
+use zkm2_core_executor::{Executor, Program};
+use zkm2_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
+use zkm2_recursion_circuit::machine::RootPublicValues;
+use zkm2_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     stark::BabyBearPoseidon2Outer,
 };
-use sp1_stark::{baby_bear_poseidon2::MyHash as InnerHash, SP1CoreOpts, Word};
+use zkm2_stark::{baby_bear_poseidon2::MyHash as InnerHash, ZKMCoreOpts, Word};
 
-use crate::{InnerSC, SP1CoreProofData};
+use crate::{InnerSC, ZKMCoreProofData};
 
-/// Get the SP1 vkey BabyBear Poseidon2 digest this reduce proof is representing.
-pub fn sp1_vkey_digest_babybear(proof: &SP1ReduceProof<BabyBearPoseidon2Outer>) -> [BabyBear; 8] {
+/// Get the ZKM vkey BabyBear Poseidon2 digest this reduce proof is representing.
+pub fn zkm2_vkey_digest_babybear(proof: &ZKMReduceProof<BabyBearPoseidon2Outer>) -> [BabyBear; 8] {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<BabyBear> = proof.public_values.as_slice().borrow();
-    pv.sp1_vk_digest
+    pv.zkm2_vk_digest
 }
 
-/// Get the SP1 vkey Bn Poseidon2 digest this reduce proof is representing.
-pub fn sp1_vkey_digest_bn254(proof: &SP1ReduceProof<BabyBearPoseidon2Outer>) -> Bn254Fr {
-    babybears_to_bn254(&sp1_vkey_digest_babybear(proof))
+/// Get the ZKM vkey Bn Poseidon2 digest this reduce proof is representing.
+pub fn zkm2_vkey_digest_bn254(proof: &ZKMReduceProof<BabyBearPoseidon2Outer>) -> Bn254Fr {
+    babybears_to_bn254(&zkm2_vkey_digest_babybear(proof))
 }
 
 /// Compute the digest of the public values.
@@ -48,7 +48,7 @@ pub fn root_public_values_digest(
     public_values: &RootPublicValues<BabyBear>,
 ) -> [BabyBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
-    let input = (*public_values.sp1_vk_digest())
+    let input = (*public_values.zkm2_vk_digest())
         .into_iter()
         .chain(
             (*public_values.committed_value_digest())
@@ -81,8 +81,8 @@ pub fn assert_recursion_public_values_valid(
 }
 
 /// Get the committed values Bn Poseidon2 digest this reduce proof is representing.
-pub fn sp1_committed_values_digest_bn254(
-    proof: &SP1ReduceProof<BabyBearPoseidon2Outer>,
+pub fn zkm2_committed_values_digest_bn254(
+    proof: &ZKMReduceProof<BabyBearPoseidon2Outer>,
 ) -> Bn254Fr {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<BabyBear> = proof.public_values.as_slice().borrow();
@@ -91,7 +91,7 @@ pub fn sp1_committed_values_digest_bn254(
     babybear_bytes_to_bn254(&committed_values_digest_bytes)
 }
 
-impl SP1CoreProofData {
+impl ZKMCoreProofData {
     pub fn save(&self, path: &str) -> Result<(), std::io::Error> {
         let data = serde_json::to_string(self).unwrap();
         fs::write(path, data).unwrap();
@@ -100,9 +100,10 @@ impl SP1CoreProofData {
 }
 
 /// Get the number of cycles for a given program.
-pub fn get_cycles(elf: &[u8], stdin: &SP1Stdin) -> u64 {
-    let program = Program::from(elf).unwrap();
-    let mut runtime = Executor::new(program, SP1CoreOpts::default());
+pub fn get_cycles(elf: &[u8], stdin: &ZKMStdin) -> u64 {
+    let max_mem = 0x80000000;
+    let program = Program::from(elf, max_mem).unwrap();
+    let mut runtime = Executor::new(program, ZKMCoreOpts::default());
     runtime.write_vecs(&stdin.buffer);
     runtime.run_fast().unwrap();
     runtime.state.global_clk
@@ -122,7 +123,7 @@ pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
 /// Convert 8 BabyBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
 /// word becomes the least significant bits.
 pub fn babybears_to_bn254(digest: &[BabyBear; 8]) -> Bn254Fr {
-    let mut result = Bn254Fr::zero();
+    let mut result = Bn254Fr::ZERO;
     for word in digest.iter() {
         // Since BabyBear prime is less than 2^31, we can shift by 31 bits each time and still be
         // within the Bn254Fr field, so we don't have to truncate the top 3 bits.
@@ -135,7 +136,7 @@ pub fn babybears_to_bn254(digest: &[BabyBear; 8]) -> Bn254Fr {
 /// Convert 32 BabyBear bytes into a Bn254Fr field element. The first byte's most significant 3 bits
 /// (which would become the 3 most significant bits) are truncated.
 pub fn babybear_bytes_to_bn254(bytes: &[BabyBear; 32]) -> Bn254Fr {
-    let mut result = Bn254Fr::zero();
+    let mut result = Bn254Fr::ZERO;
     for (i, byte) in bytes.iter().enumerate() {
         debug_assert!(byte < &BabyBear::from_canonical_u32(256));
         if i == 0 {

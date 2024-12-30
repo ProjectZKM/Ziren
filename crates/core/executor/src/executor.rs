@@ -1833,7 +1833,7 @@ fn log2_ceil_usize(n: usize) -> usize {
 #[cfg(test)]
 mod tests {
 
-    use sp1_stark::SP1CoreOpts;
+    use sp1_stark::ZKMCoreOpts;
 
     use crate::programs::tests::{
         fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program,
@@ -1854,7 +1854,7 @@ mod tests {
     #[test]
     fn test_simple_program_run() {
         let program = simple_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 42);
     }
@@ -1862,35 +1862,35 @@ mod tests {
     #[test]
     fn test_fibonacci_program_run() {
         let program = fibonacci_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
 
     #[test]
     fn test_secp256r1_add_program_run() {
         let program = secp256r1_add_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
 
     #[test]
     fn test_secp256r1_double_program_run() {
         let program = secp256r1_double_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
 
     #[test]
     fn test_u256xu2048_mul() {
         let program = u256xu2048_mul_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
 
     #[test]
     fn test_ssz_withdrawals_program_run() {
         let program = ssz_withdrawals_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
 
@@ -1898,7 +1898,7 @@ mod tests {
     #[should_panic]
     fn test_panic() {
         let program = panic_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
 
@@ -1914,7 +1914,7 @@ mod tests {
             Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 42);
     }
@@ -1931,7 +1931,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 32);
     }
@@ -1948,7 +1948,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 32);
     }
@@ -1965,7 +1965,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
 
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 37);
@@ -1983,7 +1983,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 5);
     }
@@ -2000,7 +2000,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 1184);
     }
@@ -2017,7 +2017,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 1);
     }
@@ -2034,7 +2034,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 1);
     }
@@ -2051,7 +2051,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 0);
     }
@@ -2068,7 +2068,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 0);
     }
@@ -2085,7 +2085,7 @@ mod tests {
         ];
         let program = Program::new(instructions, 0, 0);
 
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 84);
     }
@@ -2101,7 +2101,7 @@ mod tests {
             Instruction::new(Opcode::ADD, 31, 30, 4, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 5 - 1 + 4);
     }
@@ -2117,7 +2117,7 @@ mod tests {
             Instruction::new(Opcode::XOR, 31, 30, 42, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 10);
     }
@@ -2133,7 +2133,7 @@ mod tests {
             Instruction::new(Opcode::OR, 31, 30, 42, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 47);
     }
@@ -2149,7 +2149,7 @@ mod tests {
             Instruction::new(Opcode::AND, 31, 30, 42, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 0);
     }
@@ -2163,7 +2163,7 @@ mod tests {
             Instruction::new(Opcode::SLL, 31, 29, 4, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 80);
     }
@@ -2177,7 +2177,7 @@ mod tests {
             Instruction::new(Opcode::SRL, 31, 29, 4, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 2);
     }
@@ -2191,7 +2191,7 @@ mod tests {
             Instruction::new(Opcode::SRA, 31, 29, 4, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 2);
     }
@@ -2205,7 +2205,7 @@ mod tests {
             Instruction::new(Opcode::SLT, 31, 29, 37, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 0);
     }
@@ -2219,7 +2219,7 @@ mod tests {
             Instruction::new(Opcode::SLTU, 31, 29, 37, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.register(Register::X31), 0);
     }
@@ -2238,7 +2238,7 @@ mod tests {
             Instruction::new(Opcode::JALR, 5, 11, 8, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.registers()[Register::X5 as usize], 8);
         assert_eq!(runtime.registers()[Register::X11 as usize], 100);
@@ -2252,7 +2252,7 @@ mod tests {
             Instruction::new(opcode, 12, 10, 11, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         assert_eq!(runtime.registers()[Register::X12 as usize], expected);
     }
@@ -2430,7 +2430,7 @@ mod tests {
     #[allow(clippy::unreadable_literal)]
     fn test_simple_memory_program_run() {
         let program = simple_memory_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
 
         // Assert SW & LW case

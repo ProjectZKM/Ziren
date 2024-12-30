@@ -43,7 +43,7 @@ use crate::{
     BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
 };
 
-pub struct SP1RecursionWitnessVariable<
+pub struct ZKMRecursionWitnessVariable<
     C: CircuitConfig<F = BabyBear>,
     SC: BabyBearFriConfigVariable<C>,
 > {
@@ -59,7 +59,7 @@ pub struct SP1RecursionWitnessVariable<
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "ShardProof<SC>: Serialize, Dom<SC>: Serialize"))]
 #[serde(bound(deserialize = "ShardProof<SC>: Deserialize<'de>, Dom<SC>: DeserializeOwned"))]
-pub struct SP1RecursionWitnessValues<SC: StarkGenericConfig> {
+pub struct ZKMRecursionWitnessValues<SC: StarkGenericConfig> {
     pub vk: StarkVerifyingKey<SC>,
     pub shard_proofs: Vec<ShardProof<SC>>,
     pub leaf_challenger: SC::Challenger,
@@ -70,18 +70,18 @@ pub struct SP1RecursionWitnessValues<SC: StarkGenericConfig> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SP1RecursionShape {
+pub struct ZKMRecursionShape {
     pub proof_shapes: Vec<ProofShape>,
     pub is_complete: bool,
 }
 
-/// A program for recursively verifying a batch of SP1 proofs.
+/// A program for recursively verifying a batch of ZKM proofs.
 #[derive(Debug, Clone, Copy)]
-pub struct SP1RecursiveVerifier<C: Config, SC: BabyBearFriConfig> {
+pub struct ZKMRecursiveVerifier<C: Config, SC: BabyBearFriConfig> {
     _phantom: PhantomData<(C, SC)>,
 }
 
-impl<C, SC> SP1RecursiveVerifier<C, SC>
+impl<C, SC> ZKMRecursiveVerifier<C, SC>
 where
     SC: BabyBearFriConfigVariable<
         C,
@@ -91,9 +91,9 @@ where
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<BabyBear>>,
     <SC::ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>: Clone,
 {
-    /// Verify a batch of SP1 shard proofs and aggregate their public values.
+    /// Verify a batch of ZKM shard proofs and aggregate their public values.
     ///
-    /// This program represents a first recursive step in the verification of an SP1 proof
+    /// This program represents a first recursive step in the verification of an ZKM proof
     /// consisting of one or more shards. Each shard proof is verified and its public values are
     /// aggregated into a single set representing the start and end state of the program execution
     /// across all shards.
@@ -105,13 +105,13 @@ where
     /// of verifying the FRI proof for openings and verifying the constraints.
     ///
     /// ## Aggregating the shard public values.
-    /// See [SP1Prover::verify] for the verification algorithm of a complete SP1 proof. In this
+    /// See [ZKMProver::verify] for the verification algorithm of a complete ZKM proof. In this
     /// function, we are aggregating several shard proofs and attesting to an aggregated state which
     /// represents all the shards.
     ///
     /// ## The leaf challenger.
     /// A key difference between the recursive tree verification and the complete one in
-    /// [SP1Prover::verify] is that the recursive verifier has no way of reconstructing the
+    /// [ZKMProver::verify] is that the recursive verifier has no way of reconstructing the
     /// chanllenger only from a part of the shard proof. Therefore, the value of the leaf challenger
     /// is witnessed in the program and the verifier asserts correctness given this challenger.
     /// In the course of the recursive verification, the challenger is reconstructed by observing
@@ -120,10 +120,10 @@ where
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, MipsAir<SC::Val>>,
-        input: SP1RecursionWitnessVariable<C, SC>,
+        input: ZKMRecursionWitnessVariable<C, SC>,
     ) {
         // Read input.
-        let SP1RecursionWitnessVariable {
+        let ZKMRecursionWitnessVariable {
             vk,
             shard_proofs,
             leaf_challenger,
@@ -596,25 +596,25 @@ where
     }
 }
 
-impl<SC: BabyBearFriConfig> SP1RecursionWitnessValues<SC> {
-    pub fn shape(&self) -> SP1RecursionShape {
+impl<SC: BabyBearFriConfig> ZKMRecursionWitnessValues<SC> {
+    pub fn shape(&self) -> ZKMRecursionShape {
         let proof_shapes = self
             .shard_proofs
             .iter()
             .map(|proof| proof.shape())
             .collect();
 
-        SP1RecursionShape {
+        ZKMRecursionShape {
             proof_shapes,
             is_complete: self.is_complete,
         }
     }
 }
 
-impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
+impl ZKMRecursionWitnessValues<BabyBearPoseidon2> {
     pub fn dummy(
         machine: &StarkMachine<BabyBearPoseidon2, MipsAir<BabyBear>>,
-        shape: &SP1RecursionShape,
+        shape: &ZKMRecursionShape,
     ) -> Self {
         let (mut vks, shard_proofs): (Vec<_>, Vec<_>) =
             shape.proof_shapes.iter().map(|shape| dummy_vk_and_shard_proof(machine, shape)).unzip();
@@ -631,7 +631,7 @@ impl SP1RecursionWitnessValues<BabyBearPoseidon2> {
     }
 }
 
-impl From<ProofShape> for SP1RecursionShape {
+impl From<ProofShape> for ZKMRecursionShape {
     fn from(proof_shape: ProofShape) -> Self {
         Self {
             proof_shapes: vec![proof_shape],

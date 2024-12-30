@@ -3,7 +3,7 @@ use std::{borrow::Borrow, path::Path, str::FromStr};
 use anyhow::Result;
 use num_bigint::BigUint;
 use p3_baby_bear::BabyBear;
-use p3_field::{AbstractField, PrimeField};
+use p3_field::{FieldAlgebra, PrimeField};
 use zkm2_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm2_core_machine::cpu::MAX_CPU_LOG_DEGREE;
 use zkm2_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
@@ -21,9 +21,9 @@ use zkm2_stark::{
 use thiserror::Error;
 
 use crate::{
-    components::SP1ProverComponents,
+    components::ZKMProverComponents,
     utils::{assert_recursion_public_values_valid, assert_root_public_values_valid},
-    CoreSC, HashableKey, OuterSC, SP1CoreProofData, SP1Prover, SP1VerifyingKey,
+    CoreSC, HashableKey, OuterSC, ZKMCoreProofData, ZKMProver, ZKMVerifyingKey,
 };
 
 #[derive(Error, Debug)]
@@ -50,13 +50,13 @@ pub enum Groth16VerificationError {
     InvalidPublicValues,
 }
 
-impl<C: SP1ProverComponents> SP1Prover<C> {
+impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a core proof by verifying the shards, verifying lookup bus, verifying that the
     /// shards are contiguous and complete.
     pub fn verify(
         &self,
-        proof: &SP1CoreProofData,
-        vk: &SP1VerifyingKey,
+        proof: &ZKMCoreProofData,
+        vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         // First shard has a "CPU" constraint.
         //
@@ -86,11 +86,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         //
         // Transition:
         // - Shard should increment by one for each shard.
-        let mut current_shard = BabyBear::zero();
+        let mut current_shard = BabyBear::ZERO;
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
-            current_shard += BabyBear::one();
+            current_shard += BabyBear::ONE;
             if public_values.shard != current_shard {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "shard index should be the previous shard index + 1 and start at 1",
@@ -107,12 +107,12 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         // - Execution shard should increment by one for each shard with "CPU".
         // - Execution shard should stay the same for non-CPU shards.
         // - For the other shards, execution shard does not matter.
-        let mut current_execution_shard = BabyBear::zero();
+        let mut current_execution_shard = BabyBear::ZERO;
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
             if shard_proof.contains_cpu() {
-                current_execution_shard += BabyBear::one();
+                current_execution_shard += BabyBear::ONE;
                 if public_values.execution_shard != current_execution_shard {
                     return Err(MachineVerificationError::InvalidPublicValues(
                         "execution shard index should be the previous execution shard index + 1 if cpu exists and start at 1",
@@ -133,7 +133,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         //
         // Finalization:
         // - `next_pc` should equal zero.
-        let mut prev_next_pc = BabyBear::zero();
+        let mut prev_next_pc = BabyBear::ZERO;
         for (i, shard_proof) in proof.0.iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
@@ -150,11 +150,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc: start_pc should equal next_pc for non-cpu shards",
                 ));
-            } else if shard_proof.contains_cpu() && public_values.start_pc == BabyBear::zero() {
+            } else if shard_proof.contains_cpu() && public_values.start_pc == BabyBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc == 0: execution should never start at halted state",
                 ));
-            } else if i == proof.0.len() - 1 && public_values.next_pc != BabyBear::zero() {
+            } else if i == proof.0.len() - 1 && public_values.next_pc != BabyBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "next_pc != 0: execution should have halted",
                 ));
@@ -168,7 +168,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
-            if public_values.exit_code != BabyBear::zero() {
+            if public_values.exit_code != BabyBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "exit_code != 0: exit code should be zero for all shards",
                 ));
@@ -190,8 +190,8 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         //   `last_init_addr_bits`.
         // - For shards without "MemoryFinalize", `previous_finalize_addr_bits` should equal
         //   `last_finalize_addr_bits`.
-        let mut last_init_addr_bits_prev = [BabyBear::zero(); 32];
-        let mut last_finalize_addr_bits_prev = [BabyBear::zero(); 32];
+        let mut last_init_addr_bits_prev = [BabyBear::ZERO; 32];
+        let mut last_finalize_addr_bits_prev = [BabyBear::ZERO; 32];
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
@@ -239,8 +239,8 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         //   the
         //  previous shard.
         let zero_committed_value_digest =
-            [Word([BabyBear::zero(); WORD_SIZE]); PV_DIGEST_NUM_WORDS];
-        let zero_deferred_proofs_digest = [BabyBear::zero(); POSEIDON_NUM_WORDS];
+            [Word([BabyBear::ZERO; WORD_SIZE]); PV_DIGEST_NUM_WORDS];
+        let zero_deferred_proofs_digest = [BabyBear::ZERO; POSEIDON_NUM_WORDS];
         let mut committed_value_digest_prev = zero_committed_value_digest;
         let mut deferred_proofs_digest_prev = zero_deferred_proofs_digest;
         for shard_proof in proof.0.iter() {
@@ -292,7 +292,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn verify_compressed(
         &self,
         proof: &ZKMReduceProof<BabyBearPoseidon2>,
-        vk: &SP1VerifyingKey,
+        vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         let ZKMReduceProof { vk: compress_vk, proof } = proof;
         let mut challenger = self.compress_prover.config().challenger();
@@ -312,7 +312,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
         // `is_complete` should be 1. In the reduce program, this ensures that the proof is fully
         // reduced.
-        if public_values.is_complete != BabyBear::one() {
+        if public_values.is_complete != BabyBear::ONE {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
@@ -329,7 +329,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn verify_shrink(
         &self,
         proof: &ZKMReduceProof<BabyBearPoseidon2>,
-        vk: &SP1VerifyingKey,
+        vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         let mut challenger = self.shrink_prover.config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
@@ -360,7 +360,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn verify_wrap_bn254(
         &self,
         proof: &ZKMReduceProof<BabyBearPoseidon2Outer>,
-        vk: &SP1VerifyingKey,
+        vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<OuterSC>> {
         let mut challenger = self.wrap_prover.config().challenger();
         let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
@@ -385,7 +385,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn verify_plonk_bn254(
         &self,
         proof: &PlonkBn254Proof,
-        vk: &SP1VerifyingKey,
+        vk: &ZKMVerifyingKey,
         public_values: &ZKMPublicValues,
         build_dir: &Path,
     ) -> Result<()> {
@@ -406,7 +406,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn verify_groth16_bn254(
         &self,
         proof: &Groth16Bn254Proof,
-        vk: &SP1VerifyingKey,
+        vk: &ZKMVerifyingKey,
         public_values: &ZKMPublicValues,
         build_dir: &Path,
     ) -> Result<()> {
@@ -427,7 +427,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 /// Verify the vk_hash and public_values_hash in the public inputs of the PlonkBn254Proof match the
 /// expected values.
 pub fn verify_plonk_bn254_public_inputs(
-    vk: &SP1VerifyingKey,
+    vk: &ZKMVerifyingKey,
     public_values: &ZKMPublicValues,
     plonk_bn254_public_inputs: &[String],
 ) -> Result<()> {
@@ -450,7 +450,7 @@ pub fn verify_plonk_bn254_public_inputs(
 /// Verify the vk_hash and public_values_hash in the public inputs of the Groth16Bn254Proof match
 /// the expected values.
 pub fn verify_groth16_bn254_public_inputs(
-    vk: &SP1VerifyingKey,
+    vk: &ZKMVerifyingKey,
     public_values: &ZKMPublicValues,
     groth16_bn254_public_inputs: &[String],
 ) -> Result<()> {
@@ -470,7 +470,7 @@ pub fn verify_groth16_bn254_public_inputs(
     Ok(())
 }
 
-impl<C: SP1ProverComponents> SubproofVerifier for &SP1Prover<C> {
+impl<C: ZKMProverComponents> SubproofVerifier for &ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
         proof: &zkm2_core_machine::reduce::ZKMReduceProof<BabyBearPoseidon2>,
@@ -487,7 +487,7 @@ impl<C: SP1ProverComponents> SubproofVerifier for &SP1Prover<C> {
         // Check that proof is valid.
         self.verify_compressed(
             &ZKMReduceProof { vk: proof.vk.clone(), proof: proof.proof.clone() },
-            &SP1VerifyingKey { vk: vk.clone() },
+            &ZKMVerifyingKey { vk: vk.clone() },
         )?;
         // Check that the committed value digest matches the one from syscall
         let public_values: &RecursionPublicValues<_> =

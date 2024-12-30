@@ -13,18 +13,18 @@ use thiserror::Error;
 use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use sp1_core_machine::riscv::CoreShapeConfig;
-use sp1_recursion_circuit::machine::{
-    SP1CompressWithVKeyWitnessValues, SP1CompressWithVkeyShape, SP1DeferredShape,
-    SP1DeferredWitnessValues, SP1RecursionShape, SP1RecursionWitnessValues,
+use zkm2_core_machine::mips::CoreShapeConfig;
+use zkm2_recursion_circuit::machine::{
+    ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape, ZKMDeferredShape,
+    ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
 };
-use sp1_recursion_core::{shape::RecursionShapeConfig, RecursionProgram};
-use sp1_stark::{MachineProver, ProofShape, DIGEST_SIZE};
+use zkm2_recursion_core::{shape::RecursionShapeConfig, RecursionProgram};
+use zkm2_stark::{MachineProver, ProofShape, DIGEST_SIZE};
 
-use crate::{components::SP1ProverComponents, CompressAir, HashableKey, SP1Prover};
+use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum SP1ProofShape {
+pub enum ZKMProofShape {
     Recursion(ProofShape),
     Compress(Vec<ProofShape>),
     Deferred(ProofShape),
@@ -32,14 +32,14 @@ pub enum SP1ProofShape {
 }
 
 #[derive(Debug, Clone, Hash)]
-pub enum SP1CompressProgramShape {
-    Recursion(SP1RecursionShape),
-    Compress(SP1CompressWithVkeyShape),
-    Deferred(SP1DeferredShape),
-    Shrink(SP1CompressWithVkeyShape),
+pub enum ZKMCompressProgramShape {
+    Recursion(ZKMRecursionShape),
+    Compress(ZKMCompressWithVkeyShape),
+    Deferred(ZKMDeferredShape),
+    Shrink(ZKMCompressWithVkeyShape),
 }
 
-impl SP1CompressProgramShape {
+impl ZKMCompressProgramShape {
     pub fn hash_u64(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         Hash::hash(&self, &mut hasher);
@@ -55,14 +55,14 @@ pub enum VkBuildError {
     Bincode(#[from] bincode::Error),
 }
 
-pub fn build_vk_map<C: SP1ProverComponents>(
+pub fn build_vk_map<C: ZKMProverComponents>(
     reduce_batch_size: usize,
     dummy: bool,
     num_compiler_workers: usize,
     num_setup_workers: usize,
     indices: Option<Vec<usize>>,
 ) -> (BTreeSet<[BabyBear; DIGEST_SIZE]>, Vec<usize>, usize) {
-    let mut prover = SP1Prover::<C>::new();
+    let mut prover = ZKMProver::<C>::new();
     prover.vk_verification = !dummy;
     let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
     let recursion_shape_config =
@@ -71,7 +71,7 @@ pub fn build_vk_map<C: SP1ProverComponents>(
     tracing::info!("building compress vk map");
     let (vk_set, panic_indices, height) = if dummy {
         tracing::warn!("Making a dummy vk map");
-        let dummy_set = SP1ProofShape::dummy_vk_map(
+        let dummy_set = ZKMProofShape::dummy_vk_map(
             core_shape_config,
             recursion_shape_config,
             reduce_batch_size,
@@ -83,7 +83,7 @@ pub fn build_vk_map<C: SP1ProverComponents>(
     } else {
         let (vk_tx, vk_rx) = std::sync::mpsc::channel();
         let (shape_tx, shape_rx) =
-            std::sync::mpsc::sync_channel::<(usize, SP1CompressProgramShape)>(num_compiler_workers);
+            std::sync::mpsc::sync_channel::<(usize, ZKMCompressProgramShape)>(num_compiler_workers);
         let (program_tx, program_rx) = std::sync::mpsc::sync_channel(num_setup_workers);
         let (panic_tx, panic_rx) = std::sync::mpsc::channel();
 
@@ -92,7 +92,7 @@ pub fn build_vk_map<C: SP1ProverComponents>(
 
         let indices_set = indices.map(|indices| indices.into_iter().collect::<HashSet<_>>());
         let all_shapes =
-            SP1ProofShape::generate(core_shape_config, recursion_shape_config, reduce_batch_size)
+            ZKMProofShape::generate(core_shape_config, recursion_shape_config, reduce_batch_size)
                 .collect::<BTreeSet<_>>();
         let num_shapes = all_shapes.len();
         tracing::info!("number of shapes: {}", num_shapes);
@@ -113,7 +113,7 @@ pub fn build_vk_map<C: SP1ProverComponents>(
                         let program = catch_unwind(AssertUnwindSafe(|| {
                             prover.program_from_shape(shape.clone())
                         }));
-                        let is_shrink = matches!(shape, SP1CompressProgramShape::Shrink(_));
+                        let is_shrink = matches!(shape, ZKMCompressProgramShape::Shrink(_));
                         match program {
                             Ok(program) => program_tx.send((i, program, is_shrink)).unwrap(),
                             Err(e) => {
@@ -164,7 +164,7 @@ pub fn build_vk_map<C: SP1ProverComponents>(
                 .into_iter()
                 .enumerate()
                 .filter(|(i, _)| indices_set.as_ref().map(|set| set.contains(i)).unwrap_or(true))
-                .map(|(i, shape)| (i, SP1CompressProgramShape::from_proof_shape(shape, height)))
+                .map(|(i, shape)| (i, ZKMCompressProgramShape::from_proof_shape(shape, height)))
                 .for_each(|(i, program_shape)| {
                     shape_tx.send((i, program_shape)).unwrap();
                 });
@@ -185,7 +185,7 @@ pub fn build_vk_map<C: SP1ProverComponents>(
     (vk_set, panic_indices, height)
 }
 
-pub fn build_vk_map_to_file<C: SP1ProverComponents>(
+pub fn build_vk_map_to_file<C: ZKMProverComponents>(
     build_dir: PathBuf,
     reduce_batch_size: usize,
     dummy: bool,
@@ -217,7 +217,7 @@ pub fn build_vk_map_to_file<C: SP1ProverComponents>(
     Ok(bincode::serialize_into(&mut file, &vk_map)?)
 }
 
-impl SP1ProofShape {
+impl ZKMProofShape {
     pub fn generate<'a>(
         core_shape_config: &'a CoreShapeConfig<BabyBear>,
         recursion_shape_config: &'a RecursionShapeConfig<BabyBear, CompressAir<BabyBear>>,
@@ -262,18 +262,18 @@ impl SP1ProofShape {
     }
 }
 
-impl SP1CompressProgramShape {
-    pub fn from_proof_shape(shape: SP1ProofShape, height: usize) -> Self {
+impl ZKMCompressProgramShape {
+    pub fn from_proof_shape(shape: ZKMProofShape, height: usize) -> Self {
         match shape {
-            SP1ProofShape::Recursion(proof_shape) => Self::Recursion(proof_shape.into()),
-            SP1ProofShape::Deferred(proof_shape) => {
-                Self::Deferred(SP1DeferredShape::new(vec![proof_shape].into(), height))
+            ZKMProofShape::Recursion(proof_shape) => Self::Recursion(proof_shape.into()),
+            ZKMProofShape::Deferred(proof_shape) => {
+                Self::Deferred(ZKMDeferredShape::new(vec![proof_shape].into(), height))
             }
-            SP1ProofShape::Compress(proof_shapes) => Self::Compress(SP1CompressWithVkeyShape {
+            ZKMProofShape::Compress(proof_shapes) => Self::Compress(ZKMCompressWithVkeyShape {
                 compress_shape: proof_shapes.into(),
                 merkle_tree_height: height,
             }),
-            SP1ProofShape::Shrink(proof_shape) => Self::Shrink(SP1CompressWithVkeyShape {
+            ZKMProofShape::Shrink(proof_shape) => Self::Shrink(ZKMCompressWithVkeyShape {
                 compress_shape: vec![proof_shape].into(),
                 merkle_tree_height: height,
             }),
@@ -281,28 +281,28 @@ impl SP1CompressProgramShape {
     }
 }
 
-impl<C: SP1ProverComponents> SP1Prover<C> {
+impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn program_from_shape(
         &self,
-        shape: SP1CompressProgramShape,
+        shape: ZKMCompressProgramShape,
     ) -> Arc<RecursionProgram<BabyBear>> {
         match shape {
-            SP1CompressProgramShape::Recursion(shape) => {
-                let input = SP1RecursionWitnessValues::dummy(self.core_prover.machine(), &shape);
+            ZKMCompressProgramShape::Recursion(shape) => {
+                let input = ZKMRecursionWitnessValues::dummy(self.core_prover.machine(), &shape);
                 self.recursion_program(&input)
             }
-            SP1CompressProgramShape::Deferred(shape) => {
-                let input = SP1DeferredWitnessValues::dummy(self.compress_prover.machine(), &shape);
+            ZKMCompressProgramShape::Deferred(shape) => {
+                let input = ZKMDeferredWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.deferred_program(&input)
             }
-            SP1CompressProgramShape::Compress(shape) => {
+            ZKMCompressProgramShape::Compress(shape) => {
                 let input =
-                    SP1CompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                    ZKMCompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.compress_program(&input)
             }
-            SP1CompressProgramShape::Shrink(shape) => {
+            ZKMCompressProgramShape::Shrink(shape) => {
                 let input =
-                    SP1CompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
+                    ZKMCompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
                 self.shrink_program(&input)
             }
         }
@@ -320,7 +320,7 @@ mod tests {
         let recursion_shape_config = RecursionShapeConfig::default();
         let reduce_batch_size = 2;
         let all_shapes =
-            SP1ProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
+            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
                 .collect::<BTreeSet<_>>();
 
         println!("Number of compress shapes: {}", all_shapes.len());

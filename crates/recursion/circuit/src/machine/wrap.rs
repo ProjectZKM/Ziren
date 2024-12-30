@@ -16,15 +16,15 @@ use crate::{
     BabyBearFriConfigVariable, CircuitConfig,
 };
 
-use super::SP1CompressWitnessVariable;
+use super::ZKMCompressWitnessVariable;
 
-/// A program that recursively verifies a proof made by [super::SP1RootVerifier].
+/// A program that recursively verifies a proof made by [super::ZKMRootVerifier].
 #[derive(Debug, Clone, Copy)]
-pub struct SP1WrapVerifier<C, SC, A> {
+pub struct ZKMWrapVerifier<C, SC, A> {
     _phantom: PhantomData<(C, SC, A)>,
 }
 
-impl<C, SC, A> SP1WrapVerifier<C, SC, A>
+impl<C, SC, A> ZKMWrapVerifier<C, SC, A>
 where
     SC: BabyBearFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
@@ -34,7 +34,7 @@ where
     /// Verify a batch of recursive proofs and aggregate their public values.
     ///
     /// The compression verifier can aggregate proofs of different kinds:
-    /// - Core proofs: proofs which are recursive proof of a batch of SP1 shard proofs. The
+    /// - Core proofs: proofs which are recursive proof of a batch of ZKM shard proofs. The
     ///   implementation in this function assumes a fixed recursive verifier specified by
     ///   `recursive_vk`.
     /// - Deferred proofs: proofs which are recursive proof of a batch of deferred proofs. The
@@ -42,14 +42,14 @@ where
     ///   `deferred_vk`.
     /// - Compress proofs: these are proofs which refer to a prove of this program. The key for it
     ///   is part of public values will be propagated across all levels of recursion and will be
-    ///   checked against itself as in [sp1_prover::Prover] or as in [super::SP1RootVerifier].
+    ///   checked against itself as in [sp1_prover::Prover] or as in [super::ZKMRootVerifier].
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
-        input: SP1CompressWitnessVariable<C, SC>,
+        input: ZKMCompressWitnessVariable<C, SC>,
     ) {
         // Read input.
-        let SP1CompressWitnessVariable { vks_and_proofs, .. } = input;
+        let ZKMCompressWitnessVariable { vks_and_proofs, .. } = input;
 
         // Assert that there is only one proof, and get the verification key and proof.
         let [(vk, proof)] = vks_and_proofs.try_into().ok().unwrap();

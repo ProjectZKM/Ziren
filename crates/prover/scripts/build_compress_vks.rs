@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use sp1_core_machine::utils::setup_logger;
-use sp1_prover::{
+use zkm2_core_machine::utils::setup_logger;
+use zkm2_prover::{
     components::DefaultProverComponents, shapes::build_vk_map_to_file, REDUCE_BATCH_SIZE,
 };
 

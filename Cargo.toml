@@ -20,7 +20,7 @@ members = [
     "crates/recursion/derive",
     "crates/recursion/circuit",
     "crates/recursion/gnark-ffi",
-#    "crates/prover",
+    "crates/prover",
 ]
 resolver = "2"
 
@@ -104,7 +104,7 @@ zkm2-core-machine = { path = "crates/core/machine", version = "0.0.1", default-f
 zkm2-derive = { path = "crates/derive", version = "0.0.1" }
 zkm2-primitives = { path = "crates/primitives", version = "0.0.1" }
 zkm2-stark = { path = "crates/stark", version = "0.0.1" }
-#zkm2-prover = { path = "crates/prover", version = "0.0.1" }
+zkm2-prover = { path = "crates/prover", version = "0.0.1" }
 
 
 # misc

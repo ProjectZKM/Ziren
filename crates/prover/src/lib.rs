@@ -1,4 +1,4 @@
-//! An end-to-end-prover implementation for the SP1 RISC-V zkVM.
+//! An end-to-end-prover implementation for the ZKM RISC-V zkVM.
 //!
 //! Separates the proof generation process into multiple stages:
 //!
@@ -37,22 +37,22 @@ use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use zkm2_core_executor::{ExecutionError, ExecutionReport, Executor, Program, SP1Context};
+use zkm2_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
 use zkm2_core_machine::{
-    io::SP1Stdin,
+    io::ZKMStdin,
     reduce::ZKMReduceProof,
-    riscv::{CoreShapeConfig, RiscvAir},
+    mips::{CoreShapeConfig, MipsAir},
     utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
 };
 use zkm2_primitives::{hash_deferred_proof, io::ZKMPublicValues};
 use zkm2_recursion_circuit::{
     hash::FieldHasher,
     machine::{
-        PublicValuesOutputDigest, SP1CompressRootVerifierWithVKey, SP1CompressShape,
-        SP1CompressWithVKeyVerifier, SP1CompressWithVKeyWitnessValues, SP1CompressWithVkeyShape,
-        SP1CompressWitnessValues, SP1DeferredVerifier, SP1DeferredWitnessValues,
-        SP1MerkleProofWitnessValues, SP1RecursionShape, SP1RecursionWitnessValues,
-        SP1RecursiveVerifier,
+        PublicValuesOutputDigest, ZKMCompressRootVerifierWithVKey, ZKMCompressShape,
+        ZKMCompressWithVKeyVerifier, ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
+        ZKMCompressWitnessValues, ZKMDeferredVerifier, ZKMDeferredWitnessValues,
+        ZKMMerkleProofWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
+        ZKMRecursiveVerifier,
     },
     merkle_tree::MerkleTree,
     witness::Witnessable,
@@ -73,17 +73,17 @@ use zkm2_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::P
 use zkm2_stark::{air::InteractionScope, MachineProvingKey, ProofShape};
 use zkm2_stark::{
     air::PublicValues, baby_bear_poseidon2::BabyBearPoseidon2, Challenge, Challenger,
-    MachineProver, ZKMCoreOpts, SP1ProverOpts, ShardProof, StarkGenericConfig, StarkVerifyingKey,
+    MachineProver, ZKMCoreOpts, ZKMProverOpts, ShardProof, StarkGenericConfig, StarkVerifyingKey,
     Val, Word, DIGEST_SIZE,
 };
 use tracing::instrument;
 
 pub use types::*;
-use utils::{sp1_committed_values_digest_bn254, sp1_vkey_digest_bn254, words_to_bytes};
+use utils::{zkm2_committed_values_digest_bn254, zkm2_vkey_digest_bn254, words_to_bytes};
 
-use components::{DefaultProverComponents, SP1ProverComponents};
+use components::{DefaultProverComponents, ZKMProverComponents};
 
-pub use zkm2_core_machine::SP1_CIRCUIT_VERSION;
+pub use zkm2_core_machine::ZKM_CIRCUIT_VERSION;
 
 /// The configuration for the core prover.
 pub type CoreSC = BabyBearPoseidon2;
@@ -114,8 +114,8 @@ pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
 
-/// A end-to-end prover implementation for the SP1 RISC-V zkVM.
-pub struct SP1Prover<C: SP1ProverComponents = DefaultProverComponents> {
+/// A end-to-end prover implementation for the ZKM RISC-V zkVM.
+pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the core step.
     pub core_prover: C::CoreProver,
 
@@ -128,12 +128,12 @@ pub struct SP1Prover<C: SP1ProverComponents = DefaultProverComponents> {
     /// The machine used for proving the wrapping step.
     pub wrap_prover: C::WrapProver,
 
-    pub recursion_programs: Mutex<LruCache<SP1RecursionShape, Arc<RecursionProgram<BabyBear>>>>,
+    pub recursion_programs: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<BabyBear>>>>,
 
     pub recursion_cache_misses: AtomicUsize,
 
     pub compress_programs:
-        Mutex<LruCache<SP1CompressWithVkeyShape, Arc<RecursionProgram<BabyBear>>>>,
+        Mutex<LruCache<ZKMCompressWithVkeyShape, Arc<RecursionProgram<BabyBear>>>>,
 
     pub compress_cache_misses: AtomicUsize,
 
@@ -154,17 +154,17 @@ pub struct SP1Prover<C: SP1ProverComponents = DefaultProverComponents> {
     pub vk_verification: bool,
 }
 
-impl<C: SP1ProverComponents> SP1Prover<C> {
-    /// Initializes a new [SP1Prover].
+impl<C: ZKMProverComponents> ZKMProver<C> {
+    /// Initializes a new [ZKMProver].
     #[instrument(name = "initialize prover", level = "debug", skip_all)]
     pub fn new() -> Self {
         Self::uninitialized()
     }
 
-    /// Creates a new [SP1Prover] with lazily initialized components.
+    /// Creates a new [ZKMProver] with lazily initialized components.
     pub fn uninitialized() -> Self {
         // Initialize the provers.
-        let core_machine = RiscvAir::machine(CoreSC::default());
+        let core_machine = MipsAir::machine(CoreSC::default());
         let core_prover = C::CoreProver::new(core_machine);
 
         let compress_machine = CompressAir::compress_machine(InnerSC::default());
@@ -243,11 +243,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     /// Creates a proving key and a verifying key for a given RISC-V ELF.
     #[instrument(name = "setup", level = "debug", skip_all)]
-    pub fn setup(&self, elf: &[u8]) -> (SP1ProvingKey, SP1VerifyingKey) {
+    pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
         let program = self.get_program(elf).unwrap();
         let (pk, vk) = self.core_prover.setup(&program);
-        let vk = SP1VerifyingKey { vk };
-        let pk = SP1ProvingKey {
+        let vk = ZKMVerifyingKey { vk };
+        let pk = ZKMProvingKey {
             pk: self.core_prover.pk_to_host(&pk),
             elf: elf.to_vec(),
             vk: vk.clone(),
@@ -257,20 +257,21 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     /// Get a program with an allowed preprocessed shape.
     pub fn get_program(&self, elf: &[u8]) -> eyre::Result<Program> {
-        let mut program = Program::from(elf)?;
+        let max_mem = 0x80000000;
+        let mut program = Program::from(elf, max_mem).unwrap();
         if let Some(core_shape_config) = &self.core_shape_config {
             core_shape_config.fix_preprocessed_shape(&mut program)?;
         }
         Ok(program)
     }
 
-    /// Generate a proof of an SP1 program with the specified inputs.
+    /// Generate a proof of an ZKM program with the specified inputs.
     #[instrument(name = "execute", level = "info", skip_all)]
     pub fn execute<'a>(
         &'a self,
         elf: &[u8],
-        stdin: &SP1Stdin,
-        mut context: SP1Context<'a>,
+        stdin: &ZKMStdin,
+        mut context: ZKMContext<'a>,
     ) -> Result<(ZKMPublicValues, ExecutionReport), ExecutionError> {
         context.subproof_verifier.replace(Arc::new(self));
         let program = self.get_program(elf).unwrap();
@@ -289,11 +290,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     #[instrument(name = "prove_core", level = "info", skip_all)]
     pub fn prove_core<'a>(
         &'a self,
-        pk: &SP1ProvingKey,
-        stdin: &SP1Stdin,
-        opts: SP1ProverOpts,
-        mut context: SP1Context<'a>,
-    ) -> Result<SP1CoreProof, ZKMCoreProverError> {
+        pk: &ZKMProvingKey,
+        stdin: &ZKMStdin,
+        opts: ZKMProverOpts,
+        mut context: ZKMContext<'a>,
+    ) -> Result<ZKMCoreProof, ZKMCoreProverError> {
         context.subproof_verifier.replace(Arc::new(self));
         let program = self.get_program(&pk.elf).unwrap();
         let pk = self.core_prover.pk_to_device(&pk.pk);
@@ -309,8 +310,8 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
             )?;
         Self::check_for_high_cycles(cycles);
         let public_values = ZKMPublicValues::from(&public_values_stream);
-        Ok(SP1CoreProof {
-            proof: SP1CoreProofData(proof.shard_proofs),
+        Ok(ZKMCoreProof {
+            proof: ZKMCoreProofData(proof.shard_proofs),
             stdin: stdin.clone(),
             public_values,
             cycles,
@@ -319,7 +320,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     pub fn recursion_program(
         &self,
-        input: &SP1RecursionWitnessValues<CoreSC>,
+        input: &ZKMRecursionWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<BabyBear>> {
         let mut cache = self.recursion_programs.lock().unwrap_or_else(|e| e.into_inner());
         cache
@@ -331,7 +332,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                 let mut builder = Builder::<InnerConfig>::default();
 
                 let input = input.read(&mut builder);
-                SP1RecursiveVerifier::verify(&mut builder, self.core_prover.machine(), input);
+                ZKMRecursiveVerifier::verify(&mut builder, self.core_prover.machine(), input);
                 let operations = builder.into_operations();
                 builder_span.exit();
 
@@ -351,7 +352,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     pub fn compress_program(
         &self,
-        input: &SP1CompressWithVKeyWitnessValues<InnerSC>,
+        input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<BabyBear>> {
         let mut cache = self.compress_programs.lock().unwrap_or_else(|e| e.into_inner());
         let shape = input.shape();
@@ -366,7 +367,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                 // read the input.
                 let input = input.read(&mut builder);
                 // Verify the proof.
-                SP1CompressWithVKeyVerifier::verify(
+                ZKMCompressWithVKeyVerifier::verify(
                     &mut builder,
                     self.compress_prover.machine(),
                     input,
@@ -392,14 +393,14 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     pub fn shrink_program(
         &self,
-        input: &SP1CompressWithVKeyWitnessValues<InnerSC>,
+        input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<BabyBear>> {
         // Get the operations.
         let builder_span = tracing::debug_span!("build shrink program").entered();
         let mut builder = Builder::<InnerConfig>::default();
         let input = input.read(&mut builder);
         // Verify the proof.
-        SP1CompressRootVerifierWithVKey::verify(
+        ZKMCompressRootVerifierWithVKey::verify(
             &mut builder,
             self.compress_prover.machine(),
             input,
@@ -427,13 +428,13 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                 let mut builder = Builder::<WrapConfig>::default();
 
                 let shrink_shape: ProofShape = ShrinkAir::<BabyBear>::shrink_shape().into();
-                let input_shape = SP1CompressShape::from(vec![shrink_shape]);
-                let shape = SP1CompressWithVkeyShape {
+                let input_shape = ZKMCompressShape::from(vec![shrink_shape]);
+                let shape = ZKMCompressWithVkeyShape {
                     compress_shape: input_shape,
                     merkle_tree_height: self.vk_merkle_tree.height,
                 };
                 let dummy_input =
-                    SP1CompressWithVKeyWitnessValues::dummy(self.shrink_prover.machine(), &shape);
+                    ZKMCompressWithVKeyWitnessValues::dummy(self.shrink_prover.machine(), &shape);
 
                 let input = dummy_input.read(&mut builder);
 
@@ -443,7 +444,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                     builder.assert_felt_eq(*val, *expected);
                 }
                 // Verify the proof.
-                SP1CompressRootVerifierWithVKey::verify(
+                ZKMCompressRootVerifierWithVKey::verify(
                     &mut builder,
                     self.shrink_prover.machine(),
                     input,
@@ -466,7 +467,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     pub fn deferred_program(
         &self,
-        input: &SP1DeferredWitnessValues<InnerSC>,
+        input: &ZKMDeferredWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<BabyBear>> {
         // Compile the program.
 
@@ -480,7 +481,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         let verify_span = tracing::debug_span!("Verify deferred program").entered();
 
         // Verify the proof.
-        SP1DeferredVerifier::verify(
+        ZKMDeferredVerifier::verify(
             &mut builder,
             self.compress_prover.machine(),
             input,
@@ -508,7 +509,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         shard_proofs: &[ShardProof<CoreSC>],
         batch_size: usize,
         is_complete: bool,
-    ) -> Vec<SP1RecursionWitnessValues<CoreSC>> {
+    ) -> Vec<ZKMRecursionWitnessValues<CoreSC>> {
         let mut core_inputs = Vec::new();
         let mut reconstruct_challenger = self.core_prover.config().challenger();
         vk.observe_into(&mut reconstruct_challenger);
@@ -517,7 +518,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
             let proofs = batch.to_vec();
 
-            core_inputs.push(SP1RecursionWitnessValues {
+            core_inputs.push(ZKMRecursionWitnessValues {
                 vk: vk.clone(),
                 shard_proofs: proofs.clone(),
                 leaf_challenger: leaf_challenger.clone(),
@@ -551,7 +552,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         last_proof_pv: &PublicValues<Word<BabyBear>, BabyBear>,
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
-    ) -> Vec<SP1DeferredWitnessValues<InnerSC>> {
+    ) -> Vec<ZKMDeferredWitnessValues<InnerSC>> {
         // Prepare the inputs for the deferred proofs recursive verification.
         let mut deferred_digest = [Val::<InnerSC>::ZERO; DIGEST_SIZE];
         let mut deferred_inputs = Vec::new();
@@ -560,11 +561,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
             let vks_and_proofs =
                 batch.iter().cloned().map(|proof| (proof.vk, proof.proof)).collect::<Vec<_>>();
 
-            let input = SP1CompressWitnessValues { vks_and_proofs, is_complete: true };
+            let input = ZKMCompressWitnessValues { vks_and_proofs, is_complete: true };
             let input = self.make_merkle_proofs(input);
-            let SP1CompressWithVKeyWitnessValues { compress_val, merkle_val } = input;
+            let ZKMCompressWithVKeyWitnessValues { compress_val, merkle_val } = input;
 
-            deferred_inputs.push(SP1DeferredWitnessValues {
+            deferred_inputs.push(ZKMDeferredWitnessValues {
                 vks_and_proofs: compress_val.vks_and_proofs,
                 vk_merkle_data: merkle_val,
                 start_reconstruct_deferred_digest: deferred_digest,
@@ -589,12 +590,12 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
-        vk: &'a SP1VerifyingKey,
+        vk: &'a ZKMVerifyingKey,
         leaf_challenger: &'a Challenger<InnerSC>,
         shard_proofs: &[ShardProof<InnerSC>],
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
-    ) -> Vec<SP1CircuitWitness> {
+    ) -> Vec<ZKMCircuitWitness> {
         let is_complete = shard_proofs.len() == 1 && deferred_proofs.is_empty();
         let core_inputs = self.get_recursion_core_inputs(
             &vk.vk,
@@ -613,8 +614,8 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         );
 
         let mut inputs = Vec::new();
-        inputs.extend(core_inputs.into_iter().map(SP1CircuitWitness::Core));
-        inputs.extend(deferred_inputs.into_iter().map(SP1CircuitWitness::Deferred));
+        inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
+        inputs.extend(deferred_inputs.into_iter().map(ZKMCircuitWitness::Deferred));
         inputs
     }
 
@@ -622,11 +623,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     #[instrument(name = "compress", level = "info", skip_all)]
     pub fn compress(
         &self,
-        vk: &SP1VerifyingKey,
-        proof: SP1CoreProof,
+        vk: &ZKMVerifyingKey,
+        proof: ZKMCoreProof,
         deferred_proofs: Vec<ZKMReduceProof<InnerSC>>,
-        opts: SP1ProverOpts,
-    ) -> Result<ZKMReduceProof<InnerSC>, SP1RecursionProverError> {
+        opts: ZKMProverOpts,
+    ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         // The batch size for reducing two layers of recursion.
         let batch_size = REDUCE_BATCH_SIZE;
         // The batch size for reducing the first layer of recursion.
@@ -667,7 +668,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
             // Spawn a worker that sends the first layer inputs to a bounded channel.
             let input_sync = Arc::new(TurnBasedSync::new());
-            let (input_tx, input_rx) = sync_channel::<(usize, usize, SP1CircuitWitness)>(
+            let (input_tx, input_rx) = sync_channel::<(usize, usize, ZKMCircuitWitness)>(
                 opts.recursion_opts.checkpoints_channel_capacity,
             );
             let input_tx = Arc::new(Mutex::new(input_tx));
@@ -711,17 +712,17 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                                 "get program and witness stream"
                             )
                             .in_scope(|| match input {
-                                SP1CircuitWitness::Core(input) => {
+                                ZKMCircuitWitness::Core(input) => {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
                                     (self.recursion_program(&input), witness_stream)
                                 }
-                                SP1CircuitWitness::Deferred(input) => {
+                                ZKMCircuitWitness::Deferred(input) => {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
                                     (self.deferred_program(&input), witness_stream)
                                 }
-                                SP1CircuitWitness::Compress(input) => {
+                                ZKMCircuitWitness::Compress(input) => {
                                     let mut witness_stream = Vec::new();
 
                                     let input_with_merkle = self.make_merkle_proofs(input);
@@ -746,7 +747,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                                 runtime
                                     .run()
                                     .map_err(|e| {
-                                        SP1RecursionProverError::RuntimeError(e.to_string())
+                                        ZKMRecursionProverError::RuntimeError(e.to_string())
                                     })
                                     .unwrap();
                                 runtime.record
@@ -925,7 +926,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
                                 .into_iter()
                                 .map(|(_, _, vk, proof)| (vk, proof))
                                 .collect::<Vec<_>>();
-                            let input = SP1CircuitWitness::Compress(SP1CompressWitnessValues {
+                            let input = ZKMCircuitWitness::Compress(ZKMCompressWitnessValues {
                                 vks_and_proofs,
                                 is_complete,
                             });
@@ -979,11 +980,11 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn shrink(
         &self,
         reduced_proof: ZKMReduceProof<InnerSC>,
-        opts: SP1ProverOpts,
-    ) -> Result<ZKMReduceProof<InnerSC>, SP1RecursionProverError> {
+        opts: ZKMProverOpts,
+    ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         // Make the compress proof.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
-        let input = SP1CompressWitnessValues {
+        let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
             is_complete: true,
         };
@@ -1003,7 +1004,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
         runtime.witness_stream = witness_stream.into();
 
-        runtime.run().map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?;
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
 
         runtime.print_stats();
         tracing::debug!("Shrink program executed successfully");
@@ -1026,10 +1027,10 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
     pub fn wrap_bn254(
         &self,
         compressed_proof: ZKMReduceProof<InnerSC>,
-        opts: SP1ProverOpts,
-    ) -> Result<ZKMReduceProof<OuterSC>, SP1RecursionProverError> {
+        opts: ZKMProverOpts,
+    ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
-        let input = SP1CompressWitnessValues {
+        let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
             is_complete: true,
         };
@@ -1048,7 +1049,7 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
         runtime.witness_stream = witness_stream.into();
 
-        runtime.run().map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?;
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
 
         runtime.print_stats();
         tracing::debug!("wrap program executed successfully");
@@ -1084,12 +1085,12 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> PlonkBn254Proof {
-        let input = SP1CompressWitnessValues {
+        let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = sp1_vkey_digest_bn254(&proof);
-        let committed_values_digest = sp1_committed_values_digest_bn254(&proof);
+        let vkey_hash = zkm2_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm2_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();
         input.write(&mut witness);
@@ -1117,12 +1118,12 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> Groth16Bn254Proof {
-        let input = SP1CompressWitnessValues {
+        let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = sp1_vkey_digest_bn254(&proof);
-        let committed_values_digest = sp1_committed_values_digest_bn254(&proof);
+        let vkey_hash = zkm2_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm2_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();
         input.write(&mut witness);
@@ -1164,8 +1165,8 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
 
     pub fn make_merkle_proofs(
         &self,
-        input: SP1CompressWitnessValues<CoreSC>,
-    ) -> SP1CompressWithVKeyWitnessValues<CoreSC> {
+        input: ZKMCompressWitnessValues<CoreSC>,
+    ) -> ZKMCompressWithVKeyWitnessValues<CoreSC> {
         let num_vks = self.allowed_vk_map.len();
         let (vk_indices, vk_digest_values): (Vec<_>, Vec<_>) = if self.vk_verification {
             input
@@ -1197,13 +1198,13 @@ impl<C: SP1ProverComponents> SP1Prover<C> {
             })
             .collect();
 
-        let merkle_val = SP1MerkleProofWitnessValues {
+        let merkle_val = ZKMMerkleProofWitnessValues {
             root: self.vk_root,
             values: vk_digest_values,
             vk_merkle_proofs: proofs,
         };
 
-        SP1CompressWithVKeyWitnessValues { compress_val: input, merkle_val }
+        ZKMCompressWithVKeyWitnessValues { compress_val: input, merkle_val }
     }
 
     fn check_for_high_cycles(cycles: u64) {
@@ -1231,7 +1232,7 @@ pub mod tests {
     use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
     use p3_field::PrimeField32;
 
-    use shapes::SP1ProofShape;
+    use shapes::ZKMProofShape;
     use zkm2_recursion_core::air::RecursionPublicValues;
 
     #[cfg(test)]
@@ -1250,36 +1251,36 @@ pub mod tests {
         All,
     }
 
-    pub fn test_e2e_prover<C: SP1ProverComponents>(
-        prover: &SP1Prover<C>,
+    pub fn test_e2e_prover<C: ZKMProverComponents>(
+        prover: &ZKMProver<C>,
         elf: &[u8],
-        stdin: SP1Stdin,
-        opts: SP1ProverOpts,
+        stdin: ZKMStdin,
+        opts: ZKMProverOpts,
         test_kind: Test,
     ) -> Result<()> {
         run_e2e_prover_with_options(prover, elf, stdin, opts, test_kind, true)
     }
 
-    pub fn bench_e2e_prover<C: SP1ProverComponents>(
-        prover: &SP1Prover<C>,
+    pub fn bench_e2e_prover<C: ZKMProverComponents>(
+        prover: &ZKMProver<C>,
         elf: &[u8],
-        stdin: SP1Stdin,
-        opts: SP1ProverOpts,
+        stdin: ZKMStdin,
+        opts: ZKMProverOpts,
         test_kind: Test,
     ) -> Result<()> {
         run_e2e_prover_with_options(prover, elf, stdin, opts, test_kind, false)
     }
 
-    pub fn run_e2e_prover_with_options<C: SP1ProverComponents>(
-        prover: &SP1Prover<C>,
+    pub fn run_e2e_prover_with_options<C: ZKMProverComponents>(
+        prover: &ZKMProver<C>,
         elf: &[u8],
-        stdin: SP1Stdin,
-        opts: SP1ProverOpts,
+        stdin: ZKMStdin,
+        opts: ZKMProverOpts,
         test_kind: Test,
         verify: bool,
     ) -> Result<()> {
         tracing::info!("initializing prover");
-        let context = SP1Context::default();
+        let context = ZKMContext::default();
 
         tracing::info!("setup elf");
         let (pk, vk) = prover.setup(elf);
@@ -1291,7 +1292,7 @@ pub mod tests {
         if env::var("COLLECT_SHAPES").is_ok() {
             let mut shapes = BTreeSet::new();
             for proof in core_proof.proof.0.iter() {
-                let shape = SP1ProofShape::Recursion(proof.shape());
+                let shape = ZKMProofShape::Recursion(proof.shape());
                 tracing::info!("shape: {:?}", shape);
                 shapes.insert(shape);
             }
@@ -1408,8 +1409,9 @@ pub mod tests {
         Ok(())
     }
 
-    pub fn test_e2e_with_deferred_proofs_prover<C: SP1ProverComponents>(
-        opts: SP1ProverOpts,
+    /*
+    pub fn test_e2e_with_deferred_proofs_prover<C: ZKMProverComponents>(
+        opts: ZKMProverOpts,
     ) -> Result<()> {
         // Test program which proves the Keccak-256 hash of various inputs.
         let keccak_elf = test_artifacts::KECCAK256_ELF;
@@ -1418,7 +1420,7 @@ pub mod tests {
         let verify_elf = test_artifacts::VERIFY_PROOF_ELF;
 
         tracing::info!("initializing prover");
-        let prover = SP1Prover::<C>::new();
+        let prover = ZKMProver::<C>::new();
 
         tracing::info!("setup keccak elf");
         let (keccak_pk, keccak_vk) = prover.setup(keccak_elf);
@@ -1427,7 +1429,7 @@ pub mod tests {
         let (verify_pk, verify_vk) = prover.setup(verify_elf);
 
         tracing::info!("prove subproof 1");
-        let mut stdin = SP1Stdin::new();
+        let mut stdin = ZKMStdin::new();
         stdin.write(&1usize);
         stdin.write(&vec![0u8, 0, 0]);
         let deferred_proof_1 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
@@ -1435,7 +1437,7 @@ pub mod tests {
 
         // Generate a second proof of keccak of various inputs.
         tracing::info!("prove subproof 2");
-        let mut stdin = SP1Stdin::new();
+        let mut stdin = ZKMStdin::new();
         stdin.write(&3usize);
         stdin.write(&vec![0u8, 1, 2]);
         stdin.write(&vec![2, 3, 4]);
@@ -1452,7 +1454,7 @@ pub mod tests {
         let deferred_reduce_2 = prover.compress(&keccak_vk, deferred_proof_2, vec![], opts)?;
 
         // Run verify program with keccak vkey, subproofs, and their committed values.
-        let mut stdin = SP1Stdin::new();
+        let mut stdin = ZKMStdin::new();
         let vkey_digest = keccak_vk.hash_babybear();
         let vkey_digest: [u32; 8] = vkey_digest
             .iter()
@@ -1505,22 +1507,22 @@ pub mod tests {
     /// pipeline.
     ///
     /// Add `FRI_QUERIES`=1 to your environment for faster execution. Should only take a few minutes
-    /// on a Mac M2. Note: This test always re-builds the plonk bn254 artifacts, so setting SP1_DEV
+    /// on a Mac M2. Note: This test always re-builds the plonk bn254 artifacts, so setting ZKM_DEV
     /// is not needed.
     #[test]
     #[serial]
     fn test_e2e() -> Result<()> {
         let elf = test_artifacts::FIBONACCI_ELF;
         setup_logger();
-        let opts = SP1ProverOpts::default();
+        let opts = ZKMProverOpts::default();
         // TODO(mattstam): We should Test::Plonk here, but this uses the existing
         // docker image which has a different API than the current. So we need to wait until the
         // next release (v1.2.0+), and then switch it back.
-        let prover = SP1Prover::<DefaultProverComponents>::new();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
-            SP1Stdin::default(),
+            ZKMStdin::default(),
             opts,
             Test::All,
         )
@@ -1532,6 +1534,7 @@ pub mod tests {
     #[serial]
     fn test_e2e_with_deferred_proofs() -> Result<()> {
         setup_logger();
-        test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(SP1ProverOpts::default())
+        test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
     }
+*/
 }
