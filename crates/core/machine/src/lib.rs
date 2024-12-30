@@ -18,6 +18,7 @@ pub mod air;
 mod alu;
 pub mod bytes;
 pub mod mips;
+pub mod io;
 mod operations;
 //pub mod memory;
 pub mod utils;

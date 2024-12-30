@@ -18,23 +18,26 @@ use super::{
 //    ProgramChip, ShiftLeft, ShiftRightChip, SyscallChip,
     MipsAir,
 };
-//
-//#[derive(Debug, Error)]
-//pub enum CoreShapeError {
-//    #[error("no preprocessed shape found")]
-//    PreprocessedShapeError,
-//    #[error("Preprocessed shape already fixed")]
-//    PreprocessedShapeAlreadyFixed,
-//    #[error("no shape found {0:?}")]
-//    ShapeError(HashMap<String, usize>),
-//    #[error("Preprocessed shape missing")]
-//    PrepcocessedShapeMissing,
-//    #[error("Shape already fixed")]
-//    ShapeAlreadyFixed,
-//    #[error("Precompile not included in allowed shapes {0:?}")]
-//    PrecompileNotIncluded(HashMap<String, usize>),
-//}
-//
+
+// FIXME: don't place it here
+pub const NUM_LOCAL_MEMORY_ENTRIES_PER_ROW: usize = 4;
+
+#[derive(Debug, Error)]
+pub enum CoreShapeError {
+    #[error("no preprocessed shape found")]
+    PreprocessedShapeError,
+    #[error("Preprocessed shape already fixed")]
+    PreprocessedShapeAlreadyFixed,
+    #[error("no shape found {0:?}")]
+    ShapeError(HashMap<String, usize>),
+    #[error("Preprocessed shape missing")]
+    PrepcocessedShapeMissing,
+    #[error("Shape already fixed")]
+    ShapeAlreadyFixed,
+    #[error("Precompile not included in allowed shapes {0:?}")]
+    PrecompileNotIncluded(HashMap<String, usize>),
+}
+
 /// A structure that enables fixing the shape of an executionrecord.
 pub struct CoreShapeConfig<F: PrimeField32> {
     included_shapes: Vec<HashMap<String, usize>>,
@@ -60,177 +63,181 @@ struct CoreShapeSpec {
 }
 
 impl<F: PrimeField32> CoreShapeConfig<F> {
-//    /// Fix the preprocessed shape of the proof.
-//    pub fn fix_preprocessed_shape(&self, program: &mut Program) -> Result<(), CoreShapeError> {
-//        if program.preprocessed_shape.is_some() {
-//            return Err(CoreShapeError::PreprocessedShapeAlreadyFixed);
-//        }
-//
-//        let heights = RiscvAir::<F>::preprocessed_heights(program);
-//        let prep_shape =
-//            Self::find_shape_from_allowed_heights(&heights, &self.allowed_preprocessed_log_heights)
-//                .ok_or(CoreShapeError::PreprocessedShapeError)?;
-//
-//        program.preprocessed_shape = Some(prep_shape);
-//        Ok(())
-//    }
-//
-//    #[inline]
-//    fn find_shape_from_allowed_heights(
-//        heights: &[(RiscvAir<F>, usize)],
-//        allowed_log_heights: &HashMap<RiscvAir<F>, Vec<Option<usize>>>,
-//    ) -> Option<CoreShape> {
-//        let shape: Option<HashMap<String, usize>> = heights
-//            .iter()
-//            .map(|(air, height)| {
-//                for maybe_allowed_log_height in allowed_log_heights.get(air).into_iter().flatten() {
-//                    let allowed_log_height = maybe_allowed_log_height.unwrap_or_default();
-//                    let allowed_height =
-//                        if allowed_log_height != 0 { 1 << allowed_log_height } else { 0 };
-//                    if *height <= allowed_height {
-//                        return Some((air.name(), allowed_log_height));
-//                    }
-//                }
-//                None
-//            })
-//            .collect();
-//
-//        let mut inner = shape?;
-//        inner.retain(|_, &mut value| value != 0);
-//
-//        let shape = CoreShape { inner };
-//        Some(shape)
-//    }
-//
-//    /// Fix the shape of the proof.
-//    pub fn fix_shape(&self, record: &mut ExecutionRecord) -> Result<(), CoreShapeError> {
-//        if record.program.preprocessed_shape.is_none() {
-//            return Err(CoreShapeError::PrepcocessedShapeMissing);
-//        }
-//        if record.shape.is_some() {
-//            return Err(CoreShapeError::ShapeAlreadyFixed);
-//        }
-//
-//        // Set the shape of the chips with prepcoded shapes to match the preprocessed shape from the
-//        // program.
-//        record.shape.clone_from(&record.program.preprocessed_shape);
-//
-//        // If cpu is included, try to fix the shape as a core.
-//        if record.contains_cpu() {
-//            // If cpu is included, try to fix the shape as a core.
-//
-//            // Get the heights of the core airs in the record.
-//            let heights = RiscvAir::<F>::core_heights(record);
-//
-//            // Try to find a shape within the included shapes.
-//            for (i, allowed_log_heights) in self.allowed_core_log_heights.iter().enumerate() {
-//                if let Some(shape) =
-//                    Self::find_shape_from_allowed_heights(&heights, allowed_log_heights)
-//                {
-//                    tracing::debug!(
-//                        "Shard Lifted: Index={}, Cluster={}",
-//                        record.public_values.shard,
-//                        i
-//                    );
-//                    for (air, height) in heights.iter() {
-//                        if shape.inner.contains_key(&air.name()) {
-//                            tracing::debug!(
-//                                "Chip {:<20}: {:<3} -> {:<3}",
-//                                air.name(),
-//                                log2_ceil_usize(*height),
-//                                shape.inner[&air.name()],
-//                            );
-//                        }
-//                    }
-//
-//                    record.shape.as_mut().unwrap().extend(shape);
-//                    return Ok(());
-//                }
-//            }
-//
-//            // No shape found, so return an error.
-//            return Err(CoreShapeError::ShapeError(record.stats()));
-//        }
-//
-//        // If the record is a global memory init/finalize record, try to fix the shape as such.
-//        if !record.global_memory_initialize_events.is_empty()
-//            || !record.global_memory_finalize_events.is_empty()
-//        {
-//            let heights = RiscvAir::<F>::get_memory_init_final_heights(record);
-//            let shape =
-//                Self::find_shape_from_allowed_heights(&heights, &self.memory_allowed_log_heights)
-//                    .ok_or(CoreShapeError::ShapeError(record.stats()))?;
-//            record.shape.as_mut().unwrap().extend(shape);
-//            return Ok(());
-//        }
-//
-//        // Try to fix the shape as a precompile record.
-//        for (air, (mem_events_per_row, allowed_log_heights)) in
-//            self.precompile_allowed_log_heights.iter()
-//        {
-//            if let Some((height, mem_events)) = air.get_precompile_heights(record) {
-//                for allowed_log_height in allowed_log_heights {
-//                    if height <= (1 << allowed_log_height) {
-//                        for shape in self.get_precompile_shapes(
-//                            air,
-//                            *mem_events_per_row,
-//                            *allowed_log_height,
-//                        ) {
-//                            let mem_events_height = shape[2].1;
-//                            if mem_events
-//                                <= (1 << mem_events_height) * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW
-//                            {
-//                                record.shape.as_mut().unwrap().extend(shape);
-//                                return Ok(());
-//                            }
-//                        }
-//                        return Ok(());
-//                    }
-//                }
-//                tracing::warn!(
-//                    "Cannot find shape for precompile {:?}, height {:?}, and mem events {:?}",
-//                    air.name(),
-//                    height,
-//                    mem_events
-//                );
-//                return Err(CoreShapeError::ShapeError(record.stats()));
-//            }
-//        }
-//        Err(CoreShapeError::PrecompileNotIncluded(record.stats()))
-//    }
-//
-//    fn get_precompile_shapes(
-//        &self,
-//        air: &RiscvAir<F>,
-//        mem_events_per_row: usize,
-//        allowed_log_height: usize,
-//    ) -> Vec<[(String, usize); 3]> {
-//        (1..=air.rows_per_event())
-//            .rev()
-//            .map(|rows_per_event| {
-//                [
-//                    (air.name(), allowed_log_height),
-//                    (
-//                        RiscvAir::<F>::SyscallPrecompile(SyscallChip::precompile()).name(),
-//                        ((1 << allowed_log_height)
-//                            .div_ceil(&air.rows_per_event())
-//                            .next_power_of_two()
-//                            .ilog2() as usize)
-//                            .max(4),
-//                    ),
-//                    (
-//                        RiscvAir::<F>::MemoryLocal(MemoryLocalChip::new()).name(),
-//                        (((1 << allowed_log_height) * mem_events_per_row)
-//                            .div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW * rows_per_event)
-//                            .next_power_of_two()
-//                            .ilog2() as usize)
-//                            .max(4),
-//                    ),
-//                ]
-//            })
-//            .collect()
-//    }
-//
+    /// Fix the preprocessed shape of the proof.
+    pub fn fix_preprocessed_shape(&self, program: &mut Program) -> Result<(), CoreShapeError> {
+        if program.preprocessed_shape.is_some() {
+            return Err(CoreShapeError::PreprocessedShapeAlreadyFixed);
+        }
+
+        let heights = MipsAir::<F>::preprocessed_heights(program);
+        let prep_shape =
+            Self::find_shape_from_allowed_heights(&heights, &self.allowed_preprocessed_log_heights)
+                .ok_or(CoreShapeError::PreprocessedShapeError)?;
+
+        program.preprocessed_shape = Some(prep_shape);
+        Ok(())
+    }
+
+    #[inline]
+    fn find_shape_from_allowed_heights(
+        heights: &[(MipsAir<F>, usize)],
+        allowed_log_heights: &HashMap<MipsAir<F>, Vec<Option<usize>>>,
+    ) -> Option<CoreShape> {
+        let shape: Option<HashMap<String, usize>> = heights
+            .iter()
+            .map(|(air, height)| {
+                for maybe_allowed_log_height in allowed_log_heights.get(air).into_iter().flatten() {
+                    let allowed_log_height = maybe_allowed_log_height.unwrap_or_default();
+                    let allowed_height =
+                        if allowed_log_height != 0 { 1 << allowed_log_height } else { 0 };
+                    if *height <= allowed_height {
+                        return Some((air.name(), allowed_log_height));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        let mut inner = shape?;
+        inner.retain(|_, &mut value| value != 0);
+
+        let shape = CoreShape { inner };
+        Some(shape)
+    }
+
+    /// Fix the shape of the proof.
+    pub fn fix_shape(&self, record: &mut ExecutionRecord) -> Result<(), CoreShapeError> {
+        if record.program.preprocessed_shape.is_none() {
+            return Err(CoreShapeError::PrepcocessedShapeMissing);
+        }
+        if record.shape.is_some() {
+            return Err(CoreShapeError::ShapeAlreadyFixed);
+        }
+
+        // Set the shape of the chips with prepcoded shapes to match the preprocessed shape from the
+        // program.
+        record.shape.clone_from(&record.program.preprocessed_shape);
+
+        // If cpu is included, try to fix the shape as a core.
+        if record.contains_cpu() {
+            // If cpu is included, try to fix the shape as a core.
+
+            // Get the heights of the core airs in the record.
+            let heights = MipsAir::<F>::core_heights(record);
+
+            // Try to find a shape within the included shapes.
+            for (i, allowed_log_heights) in self.allowed_core_log_heights.iter().enumerate() {
+                if let Some(shape) =
+                    Self::find_shape_from_allowed_heights(&heights, allowed_log_heights)
+                {
+                    tracing::debug!(
+                        "Shard Lifted: Index={}, Cluster={}",
+                        record.public_values.shard,
+                        i
+                    );
+                    for (air, height) in heights.iter() {
+                        if shape.inner.contains_key(&air.name()) {
+                            tracing::debug!(
+                                "Chip {:<20}: {:<3} -> {:<3}",
+                                air.name(),
+                                log2_ceil_usize(*height),
+                                shape.inner[&air.name()],
+                            );
+                        }
+                    }
+
+                    record.shape.as_mut().unwrap().extend(shape);
+                    return Ok(());
+                }
+            }
+
+            // No shape found, so return an error.
+            return Err(CoreShapeError::ShapeError(record.stats()));
+        }
+
+        // If the record is a global memory init/finalize record, try to fix the shape as such.
+        if !record.global_memory_initialize_events.is_empty()
+            || !record.global_memory_finalize_events.is_empty()
+        {
+            let heights = MipsAir::<F>::get_memory_init_final_heights(record);
+            let shape =
+                Self::find_shape_from_allowed_heights(&heights, &self.memory_allowed_log_heights)
+                    .ok_or(CoreShapeError::ShapeError(record.stats()))?;
+            record.shape.as_mut().unwrap().extend(shape);
+            return Ok(());
+        }
+
+        // Try to fix the shape as a precompile record.
+        for (air, (mem_events_per_row, allowed_log_heights)) in
+            self.precompile_allowed_log_heights.iter()
+        {
+            if let Some((height, mem_events)) = air.get_precompile_heights(record) {
+                for allowed_log_height in allowed_log_heights {
+                    if height <= (1 << allowed_log_height) {
+                        for shape in self.get_precompile_shapes(
+                            air,
+                            *mem_events_per_row,
+                            *allowed_log_height,
+                        ) {
+                            let mem_events_height = shape[2].1;
+                            if mem_events
+                                <= (1 << mem_events_height) * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW
+                            {
+                                record.shape.as_mut().unwrap().extend(shape);
+                                return Ok(());
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+                tracing::warn!(
+                    "Cannot find shape for precompile {:?}, height {:?}, and mem events {:?}",
+                    air.name(),
+                    height,
+                    mem_events
+                );
+                return Err(CoreShapeError::ShapeError(record.stats()));
+            }
+        }
+        Err(CoreShapeError::PrecompileNotIncluded(record.stats()))
+    }
+
+    fn get_precompile_shapes(
+        &self,
+        air: &MipsAir<F>,
+        mem_events_per_row: usize,
+        allowed_log_height: usize,
+    ) -> Vec<[(String, usize); 3]> {
+        /*
+        (1..=air.rows_per_event())
+            .rev()
+            .map(|rows_per_event| {
+                [
+                    (air.name(), allowed_log_height),
+                    (
+                        MipsAir::<F>::SyscallPrecompile(SyscallChip::precompile()).name(),
+                        ((1 << allowed_log_height)
+                            .div_ceil(&air.rows_per_event())
+                            .next_power_of_two()
+                            .ilog2() as usize)
+                            .max(4),
+                    ),
+                    (
+                        MipsAir::<F>::MemoryLocal(MemoryLocalChip::new()).name(),
+                        (((1 << allowed_log_height) * mem_events_per_row)
+                            .div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW * rows_per_event)
+                            .next_power_of_two()
+                            .ilog2() as usize)
+                            .max(4),
+                    ),
+                ]
+            })
+            .collect()
+            ()
+        */
+        panic!("Um")
+    }
+
 //    fn generate_all_shapes_from_allowed_log_heights(
 //        allowed_log_heights: impl IntoIterator<Item = (String, Vec<Option<usize>>)>,
 //    ) -> impl Iterator<Item = ProofShape> {
@@ -331,9 +338,9 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 //        let program_memory_heights = vec![Some(19), Some(20), Some(21), Some(22)];
 //
 //        let allowed_preprocessed_log_heights = HashMap::from([
-//            (RiscvAir::Program(ProgramChip::default()), program_heights),
-//            (RiscvAir::ProgramMemory(MemoryProgramChip::default()), program_memory_heights),
-//            (RiscvAir::ByteLookup(ByteChip::default()), vec![Some(16)]),
+//            (MipsAir::Program(ProgramChip::default()), program_heights),
+//            (MipsAir::ProgramMemory(MemoryProgramChip::default()), program_memory_heights),
+//            (MipsAir::ByteLookup(ByteChip::default()), vec![Some(16)]),
 //        ]);
 //
 //        let core_shapes = [
@@ -662,16 +669,16 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 //        let mut maximal_core_log_heights_mask = vec![];
 //        for spec in core_shapes {
 //            let short_allowed_log_heights = HashMap::from([
-//                (RiscvAir::Cpu(CpuChip::default()), spec.cpu_height),
-//                (RiscvAir::Add(AddSubChip::default()), spec.add_sub_height),
-//                (RiscvAir::Bitwise(BitwiseChip::default()), spec.bitwise_height),
-//                (RiscvAir::DivRem(DivRemChip::default()), spec.divrem_height),
-//                (RiscvAir::Mul(MulChip::default()), spec.mul_height),
-//                (RiscvAir::ShiftRight(ShiftRightChip::default()), spec.shift_right_height),
-//                (RiscvAir::ShiftLeft(ShiftLeft::default()), spec.shift_left_height),
-//                (RiscvAir::Lt(LtChip::default()), spec.lt_height),
-//                (RiscvAir::MemoryLocal(MemoryLocalChip::new()), spec.memory_local_height),
-//                (RiscvAir::SyscallCore(SyscallChip::core()), spec.syscall_core_height),
+//                (MipsAir::Cpu(CpuChip::default()), spec.cpu_height),
+//                (MipsAir::Add(AddSubChip::default()), spec.add_sub_height),
+//                (MipsAir::Bitwise(BitwiseChip::default()), spec.bitwise_height),
+//                (MipsAir::DivRem(DivRemChip::default()), spec.divrem_height),
+//                (MipsAir::Mul(MulChip::default()), spec.mul_height),
+//                (MipsAir::ShiftRight(ShiftRightChip::default()), spec.shift_right_height),
+//                (MipsAir::ShiftLeft(ShiftLeft::default()), spec.shift_left_height),
+//                (MipsAir::Lt(LtChip::default()), spec.lt_height),
+//                (MipsAir::MemoryLocal(MemoryLocalChip::new()), spec.memory_local_height),
+//                (MipsAir::SyscallCore(SyscallChip::core()), spec.syscall_core_height),
 //            ]);
 //            allowed_core_log_heights.push(short_allowed_log_heights);
 //            maximal_core_log_heights_mask.push(spec.is_potentially_maximal);
@@ -683,13 +690,13 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 //        let memory_finalize_heights =
 //            vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)];
 //        let memory_allowed_log_heights = HashMap::from([
-//            (RiscvAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)), memory_init_heights),
-//            (RiscvAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)), memory_finalize_heights),
+//            (MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)), memory_init_heights),
+//            (MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)), memory_finalize_heights),
 //        ]);
 //
 //        let mut precompile_allowed_log_heights = HashMap::new();
 //        let precompile_heights = (3..19).collect::<Vec<_>>();
-//        for (air, mem_events_per_row) in RiscvAir::<F>::get_all_precompile_airs() {
+//        for (air, mem_events_per_row) in MipsAir::<F>::get_all_precompile_airs() {
 //            precompile_allowed_log_heights
 //                .insert(air, (mem_events_per_row, precompile_heights.clone()));
 //        }
@@ -716,7 +723,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 //
 //    pub fn try_generate_dummy_proof<
 //        SC: StarkGenericConfig,
-//        P: MachineProver<SC, RiscvAir<SC::Val>>,
+//        P: MachineProver<SC, MipsAir<SC::Val>>,
 //    >(
 //        prover: &P,
 //        shape: &CoreShape,
@@ -775,27 +782,27 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 //        use zkm2_stark::CpuProver;
 //
 //        type SC = BabyBearPoseidon2;
-//        type A = RiscvAir<BabyBear>;
+//        type A = MipsAir<BabyBear>;
 //
 //        setup_logger();
 //
 //        let preprocessed_log_heights = [
-//            (RiscvAir::<BabyBear>::Program(ProgramChip::default()), 10),
-//            (RiscvAir::<BabyBear>::ProgramMemory(MemoryProgramChip::default()), 10),
-//            (RiscvAir::<BabyBear>::ByteLookup(ByteChip::default()), 16),
+//            (MipsAir::<BabyBear>::Program(ProgramChip::default()), 10),
+//            (MipsAir::<BabyBear>::ProgramMemory(MemoryProgramChip::default()), 10),
+//            (MipsAir::<BabyBear>::ByteLookup(ByteChip::default()), 16),
 //        ];
 //
 //        let core_log_heights = [
-//            (RiscvAir::<BabyBear>::Cpu(CpuChip::default()), 11),
-//            (RiscvAir::<BabyBear>::DivRem(DivRemChip::default()), 11),
-//            (RiscvAir::<BabyBear>::Add(AddSubChip::default()), 10),
-//            (RiscvAir::<BabyBear>::Bitwise(BitwiseChip::default()), 10),
-//            (RiscvAir::<BabyBear>::Mul(MulChip::default()), 10),
-//            (RiscvAir::<BabyBear>::ShiftRight(ShiftRightChip::default()), 10),
-//            (RiscvAir::<BabyBear>::ShiftLeft(ShiftLeft::default()), 10),
-//            (RiscvAir::<BabyBear>::Lt(LtChip::default()), 10),
-//            (RiscvAir::<BabyBear>::MemoryLocal(MemoryLocalChip::new()), 10),
-//            (RiscvAir::<BabyBear>::SyscallCore(SyscallChip::core()), 10),
+//            (MipsAir::<BabyBear>::Cpu(CpuChip::default()), 11),
+//            (MipsAir::<BabyBear>::DivRem(DivRemChip::default()), 11),
+//            (MipsAir::<BabyBear>::Add(AddSubChip::default()), 10),
+//            (MipsAir::<BabyBear>::Bitwise(BitwiseChip::default()), 10),
+//            (MipsAir::<BabyBear>::Mul(MulChip::default()), 10),
+//            (MipsAir::<BabyBear>::ShiftRight(ShiftRightChip::default()), 10),
+//            (MipsAir::<BabyBear>::ShiftLeft(ShiftLeft::default()), 10),
+//            (MipsAir::<BabyBear>::Lt(LtChip::default()), 10),
+//            (MipsAir::<BabyBear>::MemoryLocal(MemoryLocalChip::new()), 10),
+//            (MipsAir::<BabyBear>::SyscallCore(SyscallChip::core()), 10),
 //        ];
 //
 //        let height_map = preprocessed_log_heights

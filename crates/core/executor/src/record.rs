@@ -4,7 +4,7 @@ use p3_field::{FieldAlgebra, PrimeField};
 use std::sync::Arc;
 use zkm2_stark::{
     air::{MachineAir, PublicValues},
-    MachineRecord, ZKMCoreOpts,
+    MachineRecord, ZKMCoreOpts, SplitOpts,
 };
 
 use serde::{Deserialize, Serialize};
@@ -174,24 +174,27 @@ impl ExecutionRecord {
         }
     }
 
-    // /// Take out events from the [`ExecutionRecord`] that should be deferred to a separate shard.
-    // ///
-    // /// Note: we usually defer events that would increase the recursion cost significantly if
-    // /// included in every shard.
-    // #[must_use]
-    // pub fn defer(&mut self) -> ExecutionRecord {
-    //     let mut execution_record = ExecutionRecord::new(self.program.clone());
-    //     execution_record.precompile_events = std::mem::take(&mut self.precompile_events);
-    //     execution_record.global_memory_initialize_events =
-    //         std::mem::take(&mut self.global_memory_initialize_events);
-    //     execution_record.global_memory_finalize_events =
-    //         std::mem::take(&mut self.global_memory_finalize_events);
-    //     execution_record
-    // }
+    /// Take out events from the [`ExecutionRecord`] that should be deferred to a separate shard.
+    ///
+    /// Note: we usually defer events that would increase the recursion cost significantly if
+    /// included in every shard.
+    #[must_use]
+    pub fn defer(&mut self) -> ExecutionRecord {
+        panic!("Umple")
+            /*
+        let mut execution_record = ExecutionRecord::new(self.program.clone());
+        execution_record.precompile_events = std::mem::take(&mut self.precompile_events);
+        execution_record.global_memory_initialize_events =
+            std::mem::take(&mut self.global_memory_initialize_events);
+        execution_record.global_memory_finalize_events =
+            std::mem::take(&mut self.global_memory_finalize_events);
+        execution_record
+            */
+    }
 
-    // /// Splits the deferred [`ExecutionRecord`] into multiple [`ExecutionRecord`]s, each which
-    // /// contain a "reasonable" number of deferred events.
-    // pub fn split(&mut self, last: bool, opts: SplitOpts) -> Vec<ExecutionRecord> {
+    /// Splits the deferred [`ExecutionRecord`] into multiple [`ExecutionRecord`]s, each which
+    /// contain a "reasonable" number of deferred events.
+    pub fn split(&mut self, last: bool, opts: SplitOpts) -> Vec<ExecutionRecord> {
     //     let mut shards = Vec::new();
     //
     //     let precompile_events = take(&mut self.precompile_events);
@@ -266,7 +269,8 @@ impl ExecutionRecord {
     //     }
     //
     //     shards
-    // }
+        panic!("Umpl")
+    }
 
     /// Return the number of rows needed for a chip, according to the proof shape specified in the
     /// struct.

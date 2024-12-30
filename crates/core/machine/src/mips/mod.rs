@@ -1,12 +1,15 @@
 //pub mod cost;
 //
 mod shape;
+pub mod cost;
 //
 use itertools::Itertools;
 pub use shape::*;
-//use zkm2_core_executor::{
-//    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, Program,
-//};
+pub use cost::*;
+use zkm2_core_executor::{
+    //events::PrecompileLocalMemory,
+    syscalls::SyscallCode, ExecutionRecord, Program,
+};
 //
 //use crate::{
 //    memory::{
@@ -383,40 +386,46 @@ impl<F: PrimeField32> MipsAir<F> {
         (chips, costs)
     }
 
-    // /// Get the heights of the preprocessed chips for a given program.
-    // pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(Self, usize)> {
-    //     vec![
-    //         (MipsAir::Program(ProgramChip::default()), program.instructions.len()),
-    //         (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.memory_image.len()),
-    //         (MipsAir::ByteLookup(ByteChip::default()), 1 << 16),
-    //     ]
-    // }
+    /// Get the heights of the preprocessed chips for a given program.
+    pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(Self, usize)> {
+        /*
+        vec![
+            (MipsAir::Program(ProgramChip::default()), program.instructions.len()),
+            (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.memory_image.len()),
+            (MipsAir::ByteLookup(ByteChip::default()), 1 << 16),
+        ]
+        */
+        panic!("Umpl")
+    }
 
-    // /// Get the heights of the chips for a given execution record.
-    // pub(crate) fn core_heights(record: &ExecutionRecord) -> Vec<(Self, usize)> {
-    //     vec![
-    //         (MipsAir::Cpu(CpuChip::default()), record.cpu_events.len()),
-    //         (MipsAir::DivRem(DivRemChip::default()), record.divrem_events.len()),
-    //         (
-    //             MipsAir::Add(AddSubChip::default()),
-    //             record.add_events.len() + record.sub_events.len(),
-    //         ),
-    //         (MipsAir::Bitwise(BitwiseChip::default()), record.bitwise_events.len()),
-    //         (MipsAir::Mul(MulChip::default()), record.mul_events.len()),
-    //         (MipsAir::ShiftRight(ShiftRightChip::default()), record.shift_right_events.len()),
-    //         (MipsAir::ShiftLeft(ShiftLeft::default()), record.shift_left_events.len()),
-    //         (MipsAir::Lt(LtChip::default()), record.lt_events.len()),
-    //         (
-    //             MipsAir::MemoryLocal(MemoryLocalChip::new()),
-    //             record
-    //                 .get_local_mem_events()
-    //                 .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
-    //                 .into_iter()
-    //                 .count(),
-    //         ),
-    //         (MipsAir::SyscallCore(SyscallChip::core()), record.syscall_events.len()),
-    //     ]
-    // }
+    /// Get the heights of the chips for a given execution record.
+    pub(crate) fn core_heights(record: &ExecutionRecord) -> Vec<(Self, usize)> {
+        /*
+        vec![
+            (MipsAir::Cpu(CpuChip::default()), record.cpu_events.len()),
+            (MipsAir::DivRem(DivRemChip::default()), record.divrem_events.len()),
+            (
+                MipsAir::Add(AddSubChip::default()),
+                record.add_events.len() + record.sub_events.len(),
+            ),
+            (MipsAir::Bitwise(BitwiseChip::default()), record.bitwise_events.len()),
+            (MipsAir::Mul(MulChip::default()), record.mul_events.len()),
+            (MipsAir::ShiftRight(ShiftRightChip::default()), record.shift_right_events.len()),
+            (MipsAir::ShiftLeft(ShiftLeft::default()), record.shift_left_events.len()),
+            (MipsAir::Lt(LtChip::default()), record.lt_events.len()),
+            (
+                MipsAir::MemoryLocal(MemoryLocalChip::new()),
+                record
+                    .get_local_mem_events()
+                    .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
+                    .into_iter()
+                    .count(),
+            ),
+            (MipsAir::SyscallCore(SyscallChip::core()), record.syscall_events.len()),
+        ]
+        */
+        panic!("core height")
+    }
 
     // pub(crate) fn get_all_core_airs() -> Vec<Self> {
     //     vec![
@@ -440,18 +449,21 @@ impl<F: PrimeField32> MipsAir<F> {
     //     ]
     // }
 
-    // pub(crate) fn get_memory_init_final_heights(record: &ExecutionRecord) -> Vec<(Self, usize)> {
-    //     vec![
-    //         (
-    //             MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)),
-    //             record.global_memory_initialize_events.len(),
-    //         ),
-    //         (
-    //             MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)),
-    //             record.global_memory_finalize_events.len(),
-    //         ),
-    //     ]
-    // }
+    pub(crate) fn get_memory_init_final_heights(record: &ExecutionRecord) -> Vec<(Self, usize)> {
+        /*
+        vec![
+            (
+                MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)),
+                record.global_memory_initialize_events.len(),
+            ),
+            (
+                MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)),
+                record.global_memory_finalize_events.len(),
+            ),
+        ]
+        */
+        panic!("Unimpl")
+    }
 
     // pub(crate) fn get_all_precompile_airs() -> Vec<(Self, usize)> {
     //     let mut airs: HashSet<_> = Self::get_airs_and_costs().0.into_iter().collect();
@@ -540,26 +552,29 @@ impl<F: PrimeField32> MipsAir<F> {
     //     }
     //}
 
-    // /// Get the height of the corresponding precompile chip.
-    // ///
-    // /// If the precompile is not included in the record, returns `None`. Otherwise, returns
-    // /// `Some(num_rows, num_local_mem_events)`, where `num_rows` is the number of rows of the
-    // /// corresponding chip and `num_local_mem_events` is the number of local memory events.
-    // pub(crate) fn get_precompile_heights(
-    //     &self,
-    //     record: &ExecutionRecord,
-    // ) -> Option<(usize, usize)> {
-    //     record
-    //         .precompile_events
-    //         .get_events(self.syscall_code())
-    //         .filter(|events| !events.is_empty())
-    //         .map(|events| {
-    //             (
-    //                 events.len() * self.rows_per_event(),
-    //                 events.get_local_mem_events().into_iter().count(),
-    //             )
-    //         })
-    // }
+    /// Get the height of the corresponding precompile chip.
+    ///
+    /// If the precompile is not included in the record, returns `None`. Otherwise, returns
+    /// `Some(num_rows, num_local_mem_events)`, where `num_rows` is the number of rows of the
+    /// corresponding chip and `num_local_mem_events` is the number of local memory events.
+    pub(crate) fn get_precompile_heights(
+        &self,
+        record: &ExecutionRecord,
+    ) -> Option<(usize, usize)> {
+        panic!("Unimpl")
+            /*
+        record
+            .precompile_events
+            .get_events(self.syscall_code())
+            .filter(|events| !events.is_empty())
+            .map(|events| {
+                (
+                    events.len() * self.rows_per_event(),
+                    events.get_local_mem_events().into_iter().count(),
+                )
+            })
+        */
+    }
 }
 
 impl<F: PrimeField32> PartialEq for MipsAir<F> {

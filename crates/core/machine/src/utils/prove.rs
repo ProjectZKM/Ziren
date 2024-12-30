@@ -25,14 +25,14 @@ use p3_field::PrimeField32;
 use p3_matrix::Matrix;
 
 use crate::{
-    //io::ZKMStdin,
-    //riscv::cost::CostEstimator,
+    io::ZKMStdin,
+    mips::cost::CostEstimator,
     utils::{chunk_vec, concurrency::TurnBasedSync},
 };
 use zkm2_core_executor::{
-    events::{format_table_line, sorted_table_lines},
+    events::{format_table_line, sorted_table_lines}, Executor,
     ExecutionState, Program, ExecutionRecord, ExecutionReport,
-    subproof::NoOpSubproofVerifier,
+    subproof::NoOpSubproofVerifier, ZKMContext, ExecutionError,
 };
 use zkm2_primitives::io::ZKMPublicValues;
 
@@ -46,8 +46,8 @@ use zkm2_stark::{
 
 #[derive(Error, Debug)]
 pub enum ZKMCoreProverError {
-    //#[error("failed to execute program: {0}")]
-    //ExecutionError(ExecutionError),
+    #[error("failed to execute program: {0}")]
+    ExecutionError(ExecutionError),
     #[error("io error: {0}")]
     IoError(io::Error),
     #[error("serialization error: {0}")]
