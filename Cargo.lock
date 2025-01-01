@@ -56,6 +56,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "android-tzdata"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e999941b234f3131b00bc13c22d06e8c5ff726d1b6318ac7eb276997bbb4fef0"
+
+[[package]]
+name = "android_system_properties"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -349,6 +364,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "camino"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo-platform"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -377,6 +424,18 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "chrono"
+version = "0.4.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
+dependencies = [
+ "android-tzdata",
+ "iana-time-zone",
+ "num-traits",
+ "windows-targets 0.52.6",
+]
 
 [[package]]
 name = "ciborium"
@@ -1132,6 +1191,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "iana-time-zone"
+version = "0.1.61"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "235e081f3925a06703c2d0117ea8b91f042756fd6e7a6e5d901e8ca1a996b220"
+dependencies = [
+ "android_system_properties",
+ "core-foundation-sys",
+ "iana-time-zone-haiku",
+ "js-sys",
+ "wasm-bindgen",
+ "windows-core",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "impl-trait-for-tuples"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,6 +1352,12 @@ dependencies = [
  "cfg-if",
  "windows-targets 0.52.6",
 ]
+
+[[package]]
+name = "libm"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 
 [[package]]
 name = "libredox"
@@ -1566,6 +1654,7 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1574,6 +1663,7 @@ dependencies = [
 [[package]]
 name = "p3-baby-bear"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -1587,6 +1677,7 @@ dependencies = [
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "ff 0.13.0",
  "halo2curves",
@@ -1601,6 +1692,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -1613,6 +1705,7 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1630,6 +1723,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1643,6 +1737,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1655,6 +1750,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1671,6 +1767,7 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1689,6 +1786,7 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1699,6 +1797,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1710,6 +1809,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1722,6 +1822,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1736,6 +1837,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "rayon",
 ]
@@ -1743,6 +1845,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-dft",
@@ -1756,6 +1859,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
@@ -1772,6 +1876,7 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1790,6 +1895,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1810,6 +1916,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "gcd",
  "p3-field",
@@ -1822,6 +1929,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1831,6 +1939,7 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
@@ -1848,6 +1957,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
+source = "git+https://github.com/zkMIPS/Plonky3#46507a3e260c3a9148901a66c275a22865198adf"
 dependencies = [
  "serde",
 ]
@@ -2366,6 +2476,9 @@ name = "semver"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "serde"
@@ -2626,6 +2739,13 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "test-artifacts"
+version = "0.0.1"
+dependencies = [
+ "zkm2-build",
 ]
 
 [[package]]
@@ -3265,6 +3385,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm2-build"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "cargo_metadata",
+ "chrono",
+ "clap",
+ "dirs",
+]
+
+[[package]]
 name = "zkm2-core-emulator"
 version = "0.0.1"
 dependencies = [
@@ -3368,6 +3499,16 @@ version = "0.0.1"
 dependencies = [
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "zkm2-lib"
+version = "0.0.1"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "serde",
+ "sha2",
 ]
 
 [[package]]
@@ -3590,4 +3731,19 @@ dependencies = [
  "tracing-subscriber",
  "zkm2-derive",
  "zkm2-primitives",
+]
+
+[[package]]
+name = "zkm2-zkvm"
+version = "0.0.1"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "getrandom",
+ "lazy_static",
+ "libm",
+ "rand",
+ "serde",
+ "sha2",
+ "zkm2-lib",
 ]
