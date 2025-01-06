@@ -338,44 +338,44 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(MipsAirDiscriminants::Add, add_sub.cost());
         chips.push(add_sub);
 
-        // let bitwise = Chip::new(MipsAir::Bitwise(BitwiseChip::default()));
-        // costs.insert(MipsAirDiscriminants::Bitwise, bitwise.cost());
-        // chips.push(bitwise);
+        let bitwise = Chip::new(MipsAir::Bitwise(BitwiseChip::default()));
+        costs.insert(MipsAirDiscriminants::Bitwise, bitwise.cost());
+        chips.push(bitwise);
 
-        // let mul = Chip::new(MipsAir::Mul(MulChip::default()));
-        // costs.insert(MipsAirDiscriminants::Mul, mul.cost());
-        // chips.push(mul);
+        let mul = Chip::new(MipsAir::Mul(MulChip::default()));
+        costs.insert(MipsAirDiscriminants::Mul, mul.cost());
+        chips.push(mul);
 
-        // let shift_right = Chip::new(MipsAir::ShiftRight(ShiftRightChip::default()));
-        // costs.insert(MipsAirDiscriminants::ShiftRight, shift_right.cost());
-        // chips.push(shift_right);
+        let shift_right = Chip::new(MipsAir::ShiftRight(ShiftRightChip::default()));
+        costs.insert(MipsAirDiscriminants::ShiftRight, shift_right.cost());
+        chips.push(shift_right);
 
-        // let shift_left = Chip::new(MipsAir::ShiftLeft(ShiftLeft::default()));
-        // costs.insert(MipsAirDiscriminants::ShiftLeft, shift_left.cost());
-        // chips.push(shift_left);
+        let shift_left = Chip::new(MipsAir::ShiftLeft(ShiftLeft::default()));
+        costs.insert(MipsAirDiscriminants::ShiftLeft, shift_left.cost());
+        chips.push(shift_left);
 
-        // let lt = Chip::new(MipsAir::Lt(LtChip::default()));
-        // costs.insert(MipsAirDiscriminants::Lt, lt.cost());
-        // chips.push(lt);
+        let lt = Chip::new(MipsAir::Lt(LtChip::default()));
+        costs.insert(MipsAirDiscriminants::Lt, lt.cost());
+        chips.push(lt);
 
-        // let memory_global_init = Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(
-        //     MemoryChipType::Initialize,
-        // )));
-        // costs.insert(MipsAirDiscriminants::MemoryGlobalInit, memory_global_init.cost());
-        // chips.push(memory_global_init);
+        let memory_global_init = Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(
+            MemoryChipType::Initialize,
+        )));
+        costs.insert(MipsAirDiscriminants::MemoryGlobalInit, memory_global_init.cost());
+        chips.push(memory_global_init);
 
-        // let memory_global_finalize =
-        //     Chip::new(MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(MemoryChipType::Finalize)));
-        // costs.insert(MipsAirDiscriminants::MemoryGlobalFinal, memory_global_finalize.cost());
-        // chips.push(memory_global_finalize);
+        let memory_global_finalize =
+            Chip::new(MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(MemoryChipType::Finalize)));
+        costs.insert(MipsAirDiscriminants::MemoryGlobalFinal, memory_global_finalize.cost());
+        chips.push(memory_global_finalize);
 
-        // let memory_local = Chip::new(MipsAir::MemoryLocal(MemoryLocalChip::new()));
-        // costs.insert(MipsAirDiscriminants::MemoryLocal, memory_local.cost());
-        // chips.push(memory_local);
+        let memory_local = Chip::new(MipsAir::MemoryLocal(MemoryLocalChip::new()));
+        costs.insert(MipsAirDiscriminants::MemoryLocal, memory_local.cost());
+        chips.push(memory_local);
 
-        // let memory_program = Chip::new(MipsAir::ProgramMemory(MemoryProgramChip::default()));
-        // costs.insert(MipsAirDiscriminants::ProgramMemory, memory_program.cost());
-        // chips.push(memory_program);
+        let memory_program = Chip::new(MipsAir::ProgramMemory(MemoryProgramChip::default()));
+        costs.insert(MipsAirDiscriminants::ProgramMemory, memory_program.cost());
+        chips.push(memory_program);
 
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(MipsAirDiscriminants::ByteLookup, byte.cost());

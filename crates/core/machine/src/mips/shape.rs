@@ -16,7 +16,7 @@ use crate::{
 use super::{
     AddSubChip, BitwiseChip, ByteChip, CpuChip, DivRemChip, LtChip, MemoryGlobalChip, MulChip,
     ProgramChip, ShiftLeft, ShiftRightChip,
-    // SyscallChip,
+    SyscallChip,
     MipsAir,
 };
 
@@ -209,7 +209,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         mem_events_per_row: usize,
         allowed_log_height: usize,
     ) -> Vec<[(String, usize); 3]> {
-        /*
         (1..=air.rows_per_event())
             .rev()
             .map(|rows_per_event| {
@@ -234,9 +233,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 ]
             })
             .collect()
-            ()
-        */
-        panic!("Um")
     }
 
     fn generate_all_shapes_from_allowed_log_heights(
@@ -693,7 +689,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                         (MipsAir::ShiftLeft(ShiftLeft::default()), spec.shift_left_height),
                         (MipsAir::Lt(LtChip::default()), spec.lt_height),
                         (MipsAir::MemoryLocal(MemoryLocalChip::new()), spec.memory_local_height),
-                        //(MipsAir::SyscallCore(SyscallChip::core()), spec.syscall_core_height),
+                        (MipsAir::SyscallCore(SyscallChip::core()), spec.syscall_core_height),
                     ]);
                     allowed_core_log_heights.push(short_allowed_log_heights);
                     maximal_core_log_heights_mask.push(spec.is_potentially_maximal);
@@ -726,113 +722,113 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 }
     }
 }
-//
-//#[cfg(test)]
-//pub mod tests {
-//    use std::fmt::Debug;
-//
-//    use p3_challenger::{CanObserve, FieldChallenger};
-//    use zkm2_stark::{air::InteractionScope, Dom, MachineProver, StarkGenericConfig};
-//
-//    use super::*;
-//
-//    pub fn try_generate_dummy_proof<
-//        SC: StarkGenericConfig,
-//        P: MachineProver<SC, MipsAir<SC::Val>>,
-//    >(
-//        prover: &P,
-//        shape: &CoreShape,
-//    ) where
-//        SC::Val: PrimeField32,
-//        Dom<SC>: Debug,
-//    {
-//        let program = shape.dummy_program();
-//        let record = shape.dummy_record();
-//
-//        // Try doing setup.
-//        let (pk, _) = prover.setup(&program);
-//
-//        // Try to generate traces.
-//        let global_traces = prover.generate_traces(&record, InteractionScope::Global);
-//        let local_traces = prover.generate_traces(&record, InteractionScope::Local);
-//
-//        // Try to commit the traces.
-//        let global_data = prover.commit(&record, global_traces);
-//        let local_data = prover.commit(&record, local_traces);
-//
-//        let mut challenger = prover.machine().config().challenger();
-//        challenger.observe(global_data.main_commit.clone());
-//        challenger.observe(local_data.main_commit.clone());
-//
-//        let global_permutation_challenges: [<SC as StarkGenericConfig>::Challenge; 2] =
-//            [challenger.sample_ext_element(), challenger.sample_ext_element()];
-//
-//        // Try to "open".
-//        prover
-//            .open(
-//                &pk,
-//                Some(global_data),
-//                local_data,
-//                &mut challenger,
-//                &global_permutation_challenges,
-//            )
-//            .unwrap();
-//    }
-//
-//    #[test]
-//    #[ignore]
-//    fn test_making_shapes() {
-//        use p3_baby_bear::BabyBear;
-//        let shape_config = CoreShapeConfig::<BabyBear>::default();
-//        let num_shapes = shape_config.generate_all_allowed_shapes().count();
-//        println!("There are {} core shapes", num_shapes);
-//        assert!(num_shapes < 1 << 24);
-//    }
-//
-//    #[test]
-//    fn test_dummy_record() {
-//        use crate::utils::setup_logger;
-//        use p3_baby_bear::BabyBear;
-//        use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
-//        use zkm2_stark::CpuProver;
-//
-//        type SC = BabyBearPoseidon2;
-//        type A = MipsAir<BabyBear>;
-//
-//        setup_logger();
-//
-//        let preprocessed_log_heights = [
-//            (MipsAir::<BabyBear>::Program(ProgramChip::default()), 10),
-//            (MipsAir::<BabyBear>::ProgramMemory(MemoryProgramChip::default()), 10),
-//            (MipsAir::<BabyBear>::ByteLookup(ByteChip::default()), 16),
-//        ];
-//
-//        let core_log_heights = [
-//            (MipsAir::<BabyBear>::Cpu(CpuChip::default()), 11),
-//            (MipsAir::<BabyBear>::DivRem(DivRemChip::default()), 11),
-//            (MipsAir::<BabyBear>::Add(AddSubChip::default()), 10),
-//            (MipsAir::<BabyBear>::Bitwise(BitwiseChip::default()), 10),
-//            (MipsAir::<BabyBear>::Mul(MulChip::default()), 10),
-//            (MipsAir::<BabyBear>::ShiftRight(ShiftRightChip::default()), 10),
-//            (MipsAir::<BabyBear>::ShiftLeft(ShiftLeft::default()), 10),
-//            (MipsAir::<BabyBear>::Lt(LtChip::default()), 10),
-//            (MipsAir::<BabyBear>::MemoryLocal(MemoryLocalChip::new()), 10),
-//            (MipsAir::<BabyBear>::SyscallCore(SyscallChip::core()), 10),
-//        ];
-//
-//        let height_map = preprocessed_log_heights
-//            .into_iter()
-//            .chain(core_log_heights)
-//            .map(|(air, log_height)| (air.name(), log_height))
-//            .collect::<HashMap<_, _>>();
-//
-//        let shape = CoreShape { inner: height_map };
-//
-//        // Try generating preprocessed traces.
-//        let config = SC::default();
-//        let machine = A::machine(config);
-//        let prover = CpuProver::new(machine);
-//
-//        try_generate_dummy_proof(&prover, &shape);
-//    }
-//}
+
+#[cfg(test)]
+pub mod tests {
+    use std::fmt::Debug;
+
+    use p3_challenger::{CanObserve, FieldChallenger};
+    use zkm2_stark::{air::InteractionScope, Dom, MachineProver, StarkGenericConfig};
+
+    use super::*;
+
+    pub fn try_generate_dummy_proof<
+        SC: StarkGenericConfig,
+        P: MachineProver<SC, MipsAir<SC::Val>>,
+    >(
+        prover: &P,
+        shape: &CoreShape,
+    ) where
+        SC::Val: PrimeField32,
+        Dom<SC>: Debug,
+    {
+        let program = shape.dummy_program();
+        let record = shape.dummy_record();
+
+        // Try doing setup.
+        let (pk, _) = prover.setup(&program);
+
+        // Try to generate traces.
+        let global_traces = prover.generate_traces(&record, InteractionScope::Global);
+        let local_traces = prover.generate_traces(&record, InteractionScope::Local);
+
+        // Try to commit the traces.
+        let global_data = prover.commit(&record, global_traces);
+        let local_data = prover.commit(&record, local_traces);
+
+        let mut challenger = prover.machine().config().challenger();
+        challenger.observe(global_data.main_commit.clone());
+        challenger.observe(local_data.main_commit.clone());
+
+        let global_permutation_challenges: [<SC as StarkGenericConfig>::Challenge; 2] =
+            [challenger.sample_ext_element(), challenger.sample_ext_element()];
+
+        // Try to "open".
+        prover
+            .open(
+                &pk,
+                Some(global_data),
+                local_data,
+                &mut challenger,
+                &global_permutation_challenges,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn test_making_shapes() {
+        use p3_baby_bear::BabyBear;
+        let shape_config = CoreShapeConfig::<BabyBear>::default();
+        let num_shapes = shape_config.generate_all_allowed_shapes().count();
+        println!("There are {} core shapes", num_shapes);
+        assert!(num_shapes < 1 << 24);
+    }
+
+    #[test]
+    fn test_dummy_record() {
+        use crate::utils::setup_logger;
+        use p3_baby_bear::BabyBear;
+        use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
+        use zkm2_stark::CpuProver;
+
+        type SC = BabyBearPoseidon2;
+        type A = MipsAir<BabyBear>;
+
+        setup_logger();
+
+        let preprocessed_log_heights = [
+            (MipsAir::<BabyBear>::Program(ProgramChip::default()), 10),
+            (MipsAir::<BabyBear>::ProgramMemory(MemoryProgramChip::default()), 10),
+            (MipsAir::<BabyBear>::ByteLookup(ByteChip::default()), 16),
+        ];
+
+        let core_log_heights = [
+            (MipsAir::<BabyBear>::Cpu(CpuChip::default()), 11),
+            (MipsAir::<BabyBear>::DivRem(DivRemChip::default()), 11),
+            (MipsAir::<BabyBear>::Add(AddSubChip::default()), 10),
+            (MipsAir::<BabyBear>::Bitwise(BitwiseChip::default()), 10),
+            (MipsAir::<BabyBear>::Mul(MulChip::default()), 10),
+            (MipsAir::<BabyBear>::ShiftRight(ShiftRightChip::default()), 10),
+            (MipsAir::<BabyBear>::ShiftLeft(ShiftLeft::default()), 10),
+            (MipsAir::<BabyBear>::Lt(LtChip::default()), 10),
+            (MipsAir::<BabyBear>::MemoryLocal(MemoryLocalChip::new()), 10),
+            (MipsAir::<BabyBear>::SyscallCore(SyscallChip::core()), 10),
+        ];
+
+        let height_map = preprocessed_log_heights
+            .into_iter()
+            .chain(core_log_heights)
+            .map(|(air, log_height)| (air.name(), log_height))
+            .collect::<HashMap<_, _>>();
+
+        let shape = CoreShape { inner: height_map };
+
+        // Try generating preprocessed traces.
+        let config = SC::default();
+        let machine = A::machine(config);
+        let prover = CpuProver::new(machine);
+
+        try_generate_dummy_proof(&prover, &shape);
+    }
+}

@@ -1,6 +1,6 @@
 use p3_air::AirBuilder;
 use p3_field::FieldAlgebra;
-//use zkm2_core_executor::syscalls::SyscallCode;
+use zkm2_core_executor::syscalls::SyscallCode;
 use zkm2_stark::{
     air::{
         BaseAirBuilder, InteractionScope, PublicValues, ZKMAirBuilder, POSEIDON_NUM_WORDS,
@@ -34,84 +34,83 @@ impl CpuChip {
     /// 1. Send the syscall to the precompile table, if needed.
     /// 2. Check for valid op_a values.
     pub(crate) fn eval_ecall<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
-        panic!("Umimpl")
-        //let ecall_cols = local.opcode_specific_columns.ecall();
-        //let is_ecall_instruction = self.is_ecall_instruction::<AB>(&local.selectors);
+        let ecall_cols = local.opcode_specific_columns.ecall();
+        let is_ecall_instruction = self.is_ecall_instruction::<AB>(&local.selectors);
 
-        //// The syscall code is the read-in value of op_a at the start of the instruction.
-        //let syscall_code = local.op_a_access.prev_value();
+        // The syscall code is the read-in value of op_a at the start of the instruction.
+        let syscall_code = local.op_a_access.prev_value();
 
-        //// We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
-        //// with different information.
-        //let syscall_id = syscall_code[0];
-        //let send_to_table = syscall_code[1];
+        // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
+        // with different information.
+        let syscall_id = syscall_code[0];
+        let send_to_table = syscall_code[1];
 
-        //// Handle cases:
-        //// - is_ecall_instruction = 1 => ecall_mul_send_to_table == send_to_table
-        //// - is_ecall_instruction = 0 => ecall_mul_send_to_table == 0
-        //builder
-        //    .assert_eq(local.ecall_mul_send_to_table, send_to_table * is_ecall_instruction.clone());
+        // Handle cases:
+        // - is_ecall_instruction = 1 => ecall_mul_send_to_table == send_to_table
+        // - is_ecall_instruction = 0 => ecall_mul_send_to_table == 0
+        builder
+            .assert_eq(local.ecall_mul_send_to_table, send_to_table * is_ecall_instruction.clone());
 
-        //builder.send_syscall(
-        //    local.shard,
-        //    local.clk,
-        //    ecall_cols.syscall_nonce,
-        //    syscall_id,
-        //    local.op_b_val().reduce::<AB>(),
-        //    local.op_c_val().reduce::<AB>(),
-        //    local.ecall_mul_send_to_table,
-        //    InteractionScope::Local,
-        //);
+        builder.send_syscall(
+            local.shard,
+            local.clk,
+            ecall_cols.syscall_nonce,
+            syscall_id,
+            local.op_b_val().reduce::<AB>(),
+            local.op_c_val().reduce::<AB>(),
+            local.ecall_mul_send_to_table,
+            InteractionScope::Local,
+        );
 
-        //// Compute whether this ecall is ENTER_UNCONSTRAINED.
-        //let is_enter_unconstrained = {
-        //    IsZeroOperation::<AB::F>::eval(
-        //        builder,
-        //        syscall_id
-        //            - AB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
-        //        ecall_cols.is_enter_unconstrained,
-        //        is_ecall_instruction.clone(),
-        //    );
-        //    ecall_cols.is_enter_unconstrained.result
-        //};
+        // Compute whether this ecall is ENTER_UNCONSTRAINED.
+        let is_enter_unconstrained = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id
+                    - AB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
+                ecall_cols.is_enter_unconstrained,
+                is_ecall_instruction.clone(),
+            );
+            ecall_cols.is_enter_unconstrained.result
+        };
 
-        //// Compute whether this ecall is HINT_LEN.
-        //let is_hint_len = {
-        //    IsZeroOperation::<AB::F>::eval(
-        //        builder,
-        //        syscall_id - AB::Expr::from_canonical_u32(SyscallCode::HINT_LEN.syscall_id()),
-        //        ecall_cols.is_hint_len,
-        //        is_ecall_instruction.clone(),
-        //    );
-        //    ecall_cols.is_hint_len.result
-        //};
+        // Compute whether this ecall is HINT_LEN.
+        let is_hint_len = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
+                ecall_cols.is_hint_len,
+                is_ecall_instruction.clone(),
+            );
+            ecall_cols.is_hint_len.result
+        };
 
-        //// When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
-        //let zero_word = Word::<AB::F>::from(0);
-        //builder
-        //    .when(is_ecall_instruction.clone() * is_enter_unconstrained)
-        //    .assert_word_eq(local.op_a_val(), zero_word);
+        // When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
+        let zero_word = Word::<AB::F>::from(0);
+        builder
+            .when(is_ecall_instruction.clone() * is_enter_unconstrained)
+            .assert_word_eq(local.op_a_val(), zero_word);
 
-        //// When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
-        //builder
-        //    .when(is_ecall_instruction.clone())
-        //    .when_not(is_enter_unconstrained + is_hint_len)
-        //    .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
+        // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
+        builder
+            .when(is_ecall_instruction.clone())
+            .when_not(is_enter_unconstrained + is_hint_len)
+            .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
 
-        //// Verify value of ecall_range_check_operand column.
-        //builder.assert_eq(
-        //    local.ecall_range_check_operand,
-        //    is_ecall_instruction
-        //        * (ecall_cols.is_halt.result + ecall_cols.is_commit_deferred_proofs.result),
-        //);
+        // Verify value of ecall_range_check_operand column.
+        builder.assert_eq(
+            local.ecall_range_check_operand,
+            is_ecall_instruction
+                * (ecall_cols.is_halt.result + ecall_cols.is_commit_deferred_proofs.result),
+        );
 
-        //// Babybear range check the operand_to_check word.
-        //BabyBearWordRangeChecker::<AB::F>::range_check::<AB>(
-        //    builder,
-        //    ecall_cols.operand_to_check,
-        //    ecall_cols.operand_range_check_cols,
-        //    local.ecall_range_check_operand.into(),
-        //);
+        // Babybear range check the operand_to_check word.
+        BabyBearWordRangeChecker::<AB::F>::range_check::<AB>(
+            builder,
+            ecall_cols.operand_to_check,
+            ecall_cols.operand_range_check_cols,
+            local.ecall_range_check_operand.into(),
+        );
     }
 
     /// Constraints related to the COMMIT and COMMIT_DEFERRED_PROOFS instructions.
@@ -229,27 +228,26 @@ impl CpuChip {
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
     ) -> AB::Expr {
-		panic!("Unimpl")
-        //let ecall_cols = local.opcode_specific_columns.ecall();
-        //let is_ecall_instruction = self.is_ecall_instruction::<AB>(&local.selectors);
+        let ecall_cols = local.opcode_specific_columns.ecall();
+        let is_ecall_instruction = self.is_ecall_instruction::<AB>(&local.selectors);
 
-        //// The syscall code is the read-in value of op_a at the start of the instruction.
-        //let syscall_code = local.op_a_access.prev_value();
+        // The syscall code is the read-in value of op_a at the start of the instruction.
+        let syscall_code = local.op_a_access.prev_value();
 
-        //let syscall_id = syscall_code[0];
+        let syscall_id = syscall_code[0];
 
-        //// Compute whether this ecall is HALT.
-        //let is_halt = {
-        //    IsZeroOperation::<AB::F>::eval(
-        //        builder,
-        //        syscall_id - AB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
-        //        ecall_cols.is_halt,
-        //        is_ecall_instruction.clone(),
-        //    );
-        //    ecall_cols.is_halt.result
-        //};
+        // Compute whether this ecall is HALT.
+        let is_halt = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
+                ecall_cols.is_halt,
+                is_ecall_instruction.clone(),
+            );
+            ecall_cols.is_halt.result
+        };
 
-        //is_halt * is_ecall_instruction
+        is_halt * is_ecall_instruction
     }
 
     /// Returns two boolean expression indicating whether the instruction is a COMMIT or
@@ -259,42 +257,41 @@ impl CpuChip {
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
     ) -> (AB::Expr, AB::Expr) {
-        panic!("Umimpl")
-        //let ecall_cols = local.opcode_specific_columns.ecall();
+        let ecall_cols = local.opcode_specific_columns.ecall();
 
-        //let is_ecall_instruction = self.is_ecall_instruction::<AB>(&local.selectors);
+        let is_ecall_instruction = self.is_ecall_instruction::<AB>(&local.selectors);
 
-        //// The syscall code is the read-in value of op_a at the start of the instruction.
-        //let syscall_code = local.op_a_access.prev_value();
+        // The syscall code is the read-in value of op_a at the start of the instruction.
+        let syscall_code = local.op_a_access.prev_value();
 
-        //let syscall_id = syscall_code[0];
+        let syscall_id = syscall_code[0];
 
-        //// Compute whether this ecall is COMMIT.
-        //let is_commit = {
-        //    IsZeroOperation::<AB::F>::eval(
-        //        builder,
-        //        syscall_id - AB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
-        //        ecall_cols.is_commit,
-        //        is_ecall_instruction.clone(),
-        //    );
-        //    ecall_cols.is_commit.result
-        //};
+        // Compute whether this ecall is COMMIT.
+        let is_commit = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
+                ecall_cols.is_commit,
+                is_ecall_instruction.clone(),
+            );
+            ecall_cols.is_commit.result
+        };
 
-        //// Compute whether this ecall is COMMIT_DEFERRED_PROOFS.
-        //let is_commit_deferred_proofs = {
-        //    IsZeroOperation::<AB::F>::eval(
-        //        builder,
-        //        syscall_id
-        //            - AB::Expr::from_canonical_u32(
-        //                SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id(),
-        //            ),
-        //        ecall_cols.is_commit_deferred_proofs,
-        //        is_ecall_instruction.clone(),
-        //    );
-        //    ecall_cols.is_commit_deferred_proofs.result
-        //};
+        // Compute whether this ecall is COMMIT_DEFERRED_PROOFS.
+        let is_commit_deferred_proofs = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id
+                    - AB::Expr::from_canonical_u32(
+                        SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id(),
+                    ),
+                ecall_cols.is_commit_deferred_proofs,
+                is_ecall_instruction.clone(),
+            );
+            ecall_cols.is_commit_deferred_proofs.result
+        };
 
-        //(is_commit.into(), is_commit_deferred_proofs.into())
+        (is_commit.into(), is_commit_deferred_proofs.into())
     }
 
     /// Returns the number of extra cycles from an ECALL instruction.

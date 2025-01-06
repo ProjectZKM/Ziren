@@ -1,12 +1,12 @@
 use hashbrown::HashMap;
-use itertools::Itertools;
+use itertools::{EitherOrBoth, Itertools};
 use p3_field::{FieldAlgebra, PrimeField};
-use std::sync::Arc;
 use zkm2_stark::{
     air::{MachineAir, PublicValues},
     MachineRecord, SplitOpts, ZKMCoreOpts,
 };
 
+use std::{mem::take, sync::Arc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -170,8 +170,6 @@ impl ExecutionRecord {
     /// included in every shard.
     #[must_use]
     pub fn defer(&mut self) -> ExecutionRecord {
-        panic!("Umple")
-        /*
         let mut execution_record = ExecutionRecord::new(self.program.clone());
         execution_record.precompile_events = std::mem::take(&mut self.precompile_events);
         execution_record.global_memory_initialize_events =
@@ -179,87 +177,85 @@ impl ExecutionRecord {
         execution_record.global_memory_finalize_events =
             std::mem::take(&mut self.global_memory_finalize_events);
         execution_record
-            */
     }
 
     /// Splits the deferred [`ExecutionRecord`] into multiple [`ExecutionRecord`]s, each which
     /// contain a "reasonable" number of deferred events.
     pub fn split(&mut self, last: bool, opts: SplitOpts) -> Vec<ExecutionRecord> {
-        //     let mut shards = Vec::new();
-        //
-        //     let precompile_events = take(&mut self.precompile_events);
-        //
-        //     for (syscall_code, events) in precompile_events.into_iter() {
-        //         let threshold = match syscall_code {
-        //             SyscallCode::KECCAK_PERMUTE => opts.keccak,
-        //             SyscallCode::SHA_EXTEND => opts.sha_extend,
-        //             SyscallCode::SHA_COMPRESS => opts.sha_compress,
-        //             _ => opts.deferred,
-        //         };
-        //
-        //         let chunks = events.chunks_exact(threshold);
-        //         if last {
-        //             let remainder = chunks.remainder().to_vec();
-        //             if !remainder.is_empty() {
-        //                 let mut execution_record = ExecutionRecord::new(self.program.clone());
-        //                 execution_record.precompile_events.insert(syscall_code, remainder);
-        //                 shards.push(execution_record);
-        //             }
-        //         } else {
-        //             self.precompile_events.insert(syscall_code, chunks.remainder().to_vec());
-        //         }
-        //         let mut event_shards = chunks
-        //             .map(|chunk| {
-        //                 let mut execution_record = ExecutionRecord::new(self.program.clone());
-        //                 execution_record.precompile_events.insert(syscall_code, chunk.to_vec());
-        //                 execution_record
-        //             })
-        //             .collect::<Vec<_>>();
-        //         shards.append(&mut event_shards);
-        //     }
-        //
-        //     if last {
-        //         self.global_memory_initialize_events.sort_by_key(|event| event.addr);
-        //         self.global_memory_finalize_events.sort_by_key(|event| event.addr);
-        //
-        //         let mut init_addr_bits = [0; 32];
-        //         let mut finalize_addr_bits = [0; 32];
-        //         for mem_chunks in self
-        //             .global_memory_initialize_events
-        //             .chunks(opts.memory)
-        //             .zip_longest(self.global_memory_finalize_events.chunks(opts.memory))
-        //         {
-        //             let (mem_init_chunk, mem_finalize_chunk) = match mem_chunks {
-        //                 EitherOrBoth::Both(mem_init_chunk, mem_finalize_chunk) => {
-        //                     (mem_init_chunk, mem_finalize_chunk)
-        //                 }
-        //                 EitherOrBoth::Left(mem_init_chunk) => (mem_init_chunk, [].as_slice()),
-        //                 EitherOrBoth::Right(mem_finalize_chunk) => ([].as_slice(), mem_finalize_chunk),
-        //             };
-        //             let mut shard = ExecutionRecord::new(self.program.clone());
-        //             shard.global_memory_initialize_events.extend_from_slice(mem_init_chunk);
-        //             shard.public_values.previous_init_addr_bits = init_addr_bits;
-        //             if let Some(last_event) = mem_init_chunk.last() {
-        //                 let last_init_addr_bits = core::array::from_fn(|i| (last_event.addr >> i) & 1);
-        //                 init_addr_bits = last_init_addr_bits;
-        //             }
-        //             shard.public_values.last_init_addr_bits = init_addr_bits;
-        //
-        //             shard.global_memory_finalize_events.extend_from_slice(mem_finalize_chunk);
-        //             shard.public_values.previous_finalize_addr_bits = finalize_addr_bits;
-        //             if let Some(last_event) = mem_finalize_chunk.last() {
-        //                 let last_finalize_addr_bits =
-        //                     core::array::from_fn(|i| (last_event.addr >> i) & 1);
-        //                 finalize_addr_bits = last_finalize_addr_bits;
-        //             }
-        //             shard.public_values.last_finalize_addr_bits = finalize_addr_bits;
-        //
-        //             shards.push(shard);
-        //         }
-        //     }
-        //
-        //     shards
-        panic!("Umpl")
+        let mut shards = Vec::new();
+
+        let precompile_events = take(&mut self.precompile_events);
+
+        for (syscall_code, events) in precompile_events.into_iter() {
+            let threshold = match syscall_code {
+                SyscallCode::KECCAK_PERMUTE => opts.keccak,
+                SyscallCode::SHA_EXTEND => opts.sha_extend,
+                SyscallCode::SHA_COMPRESS => opts.sha_compress,
+                _ => opts.deferred,
+            };
+
+            let chunks = events.chunks_exact(threshold);
+            if last {
+                let remainder = chunks.remainder().to_vec();
+                if !remainder.is_empty() {
+                    let mut execution_record = ExecutionRecord::new(self.program.clone());
+                    execution_record.precompile_events.insert(syscall_code, remainder);
+                    shards.push(execution_record);
+                }
+            } else {
+                self.precompile_events.insert(syscall_code, chunks.remainder().to_vec());
+            }
+            let mut event_shards = chunks
+                .map(|chunk| {
+                    let mut execution_record = ExecutionRecord::new(self.program.clone());
+                    execution_record.precompile_events.insert(syscall_code, chunk.to_vec());
+                    execution_record
+                })
+            .collect::<Vec<_>>();
+            shards.append(&mut event_shards);
+        }
+
+        if last {
+            self.global_memory_initialize_events.sort_by_key(|event| event.addr);
+            self.global_memory_finalize_events.sort_by_key(|event| event.addr);
+
+            let mut init_addr_bits = [0; 32];
+            let mut finalize_addr_bits = [0; 32];
+            for mem_chunks in self
+                .global_memory_initialize_events
+                    .chunks(opts.memory)
+                    .zip_longest(self.global_memory_finalize_events.chunks(opts.memory))
+                    {
+                        let (mem_init_chunk, mem_finalize_chunk) = match mem_chunks {
+                            EitherOrBoth::Both(mem_init_chunk, mem_finalize_chunk) => {
+                                (mem_init_chunk, mem_finalize_chunk)
+                            }
+                            EitherOrBoth::Left(mem_init_chunk) => (mem_init_chunk, [].as_slice()),
+                            EitherOrBoth::Right(mem_finalize_chunk) => ([].as_slice(), mem_finalize_chunk),
+                        };
+                        let mut shard = ExecutionRecord::new(self.program.clone());
+                        shard.global_memory_initialize_events.extend_from_slice(mem_init_chunk);
+                        shard.public_values.previous_init_addr_bits = init_addr_bits;
+                        if let Some(last_event) = mem_init_chunk.last() {
+                            let last_init_addr_bits = core::array::from_fn(|i| (last_event.addr >> i) & 1);
+                            init_addr_bits = last_init_addr_bits;
+                        }
+                        shard.public_values.last_init_addr_bits = init_addr_bits;
+
+                        shard.global_memory_finalize_events.extend_from_slice(mem_finalize_chunk);
+                        shard.public_values.previous_finalize_addr_bits = finalize_addr_bits;
+                        if let Some(last_event) = mem_finalize_chunk.last() {
+                            let last_finalize_addr_bits =
+                                core::array::from_fn(|i| (last_event.addr >> i) & 1);
+                            finalize_addr_bits = last_finalize_addr_bits;
+                        }
+                        shard.public_values.last_finalize_addr_bits = finalize_addr_bits;
+
+                        shards.push(shard);
+                    }
+        }
+
+        shards
     }
 
     /// Return the number of rows needed for a chip, according to the proof shape specified in the
