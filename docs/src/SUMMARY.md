@@ -31,4 +31,5 @@
         - [Proof Composition](./design/proof-composition.md)
     - [Continuation](./design/continuation.md)
 - [Background Material](./background.md)
+    - [Circle STARK](./Circle-STARK.md)
 - [Chapter template](./chapter_template.md)
