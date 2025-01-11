@@ -6,7 +6,7 @@ and its extension field \\( F_{p^2} = \\{(x,y): x,y \in F_p\\} \\) as fundamenta
 
 The multiplication in
 \\( F_{p^{2}} \\),
-is defined as \\( (x_1,y_1) \cdot (x_2,y_2) = (cdx_1x_2-y_1y_2, x_1y_2 + x_2y_1) \\).  The multiplicative group \\( F_{p^2}  \setminus \\{0,0\\} \\) has an order of \\( p^2 - 1 = 2^{31}\cdot (2^{31}-2) \\), and there exists a cyclic subgroup of order \\( 2^{31} \\) given by \\( \mathbb{C} = \\{(x,y) : x^2 + y^2 = 1, x,y \in F_p\\} \\).
+is defined as \\( (x_1,y_1) \cdot (x_2,y_2) = (x_1x_2-y_1y_2, x_1y_2 + x_2y_1) \\).  The multiplicative group \\( F_{p^2}  \setminus \\{0,0\\} \\) has an order of \\( p^2 - 1 = 2^{31}\cdot (2^{31}-2) \\), and there exists a cyclic subgroup of order \\( 2^{31} \\) given by \\( \mathbb{C} = \\{(x,y) : x^2 + y^2 = 1, x,y \in F_p\\} \\).
 
 ## The "polynomials" in circle STARK
 
@@ -122,4 +122,4 @@ In the circle STARK protocol, we prove that \\( v_1 = F(x_1,y_1) \\), where  \\(
 
 Select any point  \\( (x_2,y_2) \\) such that \\(x_2 \neq x_1 \\) and \\( y_2 \neq y_1 \\), and suppose \\( v_2 = F(x_2,y_2) \\). Denote the line through the points \\( (x_1,y_1), (x_2,y_2) \\) as \\( ax+by+c = 0 \\), and denote \\( L(x,y) = ax+by+c \\). The interpolation through the points \\( (y_1,v_1), (y_2,v_2)\\) is given by \\( I(y):v_1+(v_2-v_1)\frac{y-y_1}{y_2-y_1} \\). Then \\( v_1 = F(x_1,y_1) \\) is equivalent to saying that  \\( \frac{F(x,y)-I(y)}{L(x,y)}\\) is a polynomial. 
 
-Explanition note：If exists \\( H(x,y) \\), such that \\( F(x,y)-I(y) = H(x,y)L(x,y) \\), then \\( v_1 = F(x_1,y_1) \\). Conversely, if \\( v_1 = F(x_1,y_1) \\) and \\( v_2 = F(x_2,y_2) \\), by selecting \\( N-2 \\) points do not lie on the line \\( L(x,y) = 0 \\) ,  the values of these $N-2$ points on \\( \frac{F(x,y)-I(y)}{L(x,y)} \\) uniquely determine \\( H(x,y) \in \mathbb{L}_{N-1}(F) \\).
+Explanition note：If exists \\( H(x,y) \\), such that \\( F(x,y)-I(y) = H(x,y)L(x,y) \\), then \\( v_1 = F(x_1,y_1) \\). Conversely, if \\( v_1 = F(x_1,y_1) \\) and \\( v_2 = F(x_2,y_2) \\), by selecting \\( N-2 \\) points do not lie on the line \\( L(x,y) = 0 \\) ,  the values of these \\(N-2\\) points on \\( \frac{F(x,y)-I(y)}{L(x,y)} \\) uniquely determine \\( H(x,y) \in \mathbb{L}_{N-1}(F) \\).
