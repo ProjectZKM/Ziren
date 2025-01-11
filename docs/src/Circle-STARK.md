@@ -6,7 +6,7 @@ and its extension field \\( F_{p^2} = \\{(x,y): x,y \in F_p\\} \\) as fundamenta
 
 The multiplication in
 \\( F_{p^{2}} \\),
-is defined as \\( (x_1,y_1) \cdot (x_2,y_2) = (x_1x_2-y_1y_2, x_1y_2 + x_2y_1) \\).  The multiplicative group \\( F_{p^2}  \setminus \\{0,0\\} \\) has an order of \\( p^2 - 1 = 2^{31}\cdot (2^{31}-2) \\), and there exists a cyclic subgroup of order \\( 2^{31} \\) given by \\( \mathbb{C} = \\{(x,y) : x^2 + y^2 = 1, x,y \in F_p\\} \\).
+is defined as \\( (x_1,y_1) \cdot (x_2,y_2) = (cdx_1x_2-y_1y_2, x_1y_2 + x_2y_1) \\).  The multiplicative group \\( F_{p^2}  \setminus \\{0,0\\} \\) has an order of \\( p^2 - 1 = 2^{31}\cdot (2^{31}-2) \\), and there exists a cyclic subgroup of order \\( 2^{31} \\) given by \\( \mathbb{C} = \\{(x,y) : x^2 + y^2 = 1, x,y \in F_p\\} \\).
 
 ## The "polynomials" in circle STARK
 
