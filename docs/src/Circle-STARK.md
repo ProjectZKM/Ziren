@@ -1,4 +1,4 @@
-# An Introduction to Circle STARK 
+# Circle STARK 
 
 Circle STARK utilizes Mersenne prime M31
 \\( p = 2^{31} - 1 \\)
