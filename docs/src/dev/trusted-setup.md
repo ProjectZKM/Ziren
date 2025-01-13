@@ -2,7 +2,7 @@
 
 The zk-SNARK protocols often require a trusted setup to generate a CRS (Common Reference String), proving key and verification key.
 
-Groth16 requires sampling five random field elements to generate the proving and verifying keys:  $\tau, \alpha, \beta, \gamma, \sigma$. These are considered toxic waste and should be discarded and completely forgotten once the keys have been generated, as they could be used to create fake proofs that the verifier would accept. The main solution to this deployment issue is to run the setup through an MPC (multi-party computation).
+Groth16 requires sampling five random field elements to generate the proving and verifying keys: τ, α, β, γ, and σ. These are considered toxic waste and should be discarded and completely forgotten once the keys have been generated, as they could be used to create fake proofs that the verifier would accept. The main solution to this deployment issue is to run the setup through an MPC (multi-party computation).
 
 ## Example: [sha2-rust](https://github.com/zkMIPS/zkm-project-template/blob/main/host-program/sha2-rust/src/main.rs)
 

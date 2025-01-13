@@ -12,7 +12,7 @@ ZkMIPS provides Golang and Rust runtime libraries for guests to obtain input and
 ```zkm_runtime::io::commit```
 
 example:
-```
+```rust
 #![no_std]
 #![no_main]
 
@@ -43,7 +43,7 @@ pub fn main() {
 ```zkm_runtime.Commit```
 
 example:
-```
+```go
 package main
 
 import (

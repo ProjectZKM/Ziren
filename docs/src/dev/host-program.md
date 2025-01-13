@@ -20,7 +20,7 @@ Step1. Read environment variables. The default values can be found in [run-provi
 
 > When generating proofs on the local machine, if the log shows "[the seg_num is:1 ]", please reduce `SEG_SIZE` or increase the input. If generating proofs through the proof network, `SEG_SIZE` must be within the range [65536, 262144].
 
-> When generating the proof via restful API, must set the `PRIVATE_KEY` and `ZKM_PROVER=network`. The `PRIVATE_KEY` can be applied for through [Apply](https://www.zkm.io/apply).
+> When generating the proof via restful API, must set the `PRIVATE_KEY` and `ZKM_PROVER=network`. The `PRIVATE_KEY` can be applied for through the [application platform](https://www.zkm.io/apply).
 
 ```rust
 env_logger::try_init().unwrap_or_default();
