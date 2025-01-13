@@ -183,7 +183,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .parse()
                 .unwrap_or(CORE_CACHE_SIZE),
         )
-        .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
+            .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
 
         let compress_cache_size = NonZeroUsize::new(
             env::var("PROVER_COMPRESS_CACHE_SIZE")
@@ -191,7 +191,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .parse()
                 .unwrap_or(COMPRESS_CACHE_SIZE),
         )
-        .expect("PROVER_COMPRESS_CACHE_SIZE must be a non-zero usize");
+            .expect("PROVER_COMPRESS_CACHE_SIZE must be a non-zero usize");
 
         let core_shape_config = env::var("FIX_CORE_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
@@ -259,7 +259,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Get a program with an allowed preprocessed shape.
     pub fn get_program(&self, elf: &[u8]) -> eyre::Result<Program> {
         let max_mem = 0x80000000;
-        let mut program = Program::from(elf, max_mem).unwrap();
+        let mut program = Program::from(elf, max_mem, vec![]).unwrap();
         if let Some(core_shape_config) = &self.core_shape_config {
             core_shape_config.fix_preprocessed_shape(&mut program)?;
         }
@@ -744,30 +744,30 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             let (program, witness_stream) = tracing::debug_span!(
                                 "get program and witness stream"
                             )
-                            .in_scope(|| match input {
-                                ZKMCircuitWitness::Core(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.recursion_program(&input), witness_stream)
-                                }
-                                ZKMCircuitWitness::Deferred(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.deferred_program(&input), witness_stream)
-                                }
-                                ZKMCircuitWitness::Compress(input) => {
-                                    let mut witness_stream = Vec::new();
+                                .in_scope(|| match input {
+                                    ZKMCircuitWitness::Core(input) => {
+                                        let mut witness_stream = Vec::new();
+                                        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                        (self.recursion_program(&input), witness_stream)
+                                    }
+                                    ZKMCircuitWitness::Deferred(input) => {
+                                        let mut witness_stream = Vec::new();
+                                        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                        (self.deferred_program(&input), witness_stream)
+                                    }
+                                    ZKMCircuitWitness::Compress(input) => {
+                                        let mut witness_stream = Vec::new();
 
-                                    let input_with_merkle = self.make_merkle_proofs(input);
+                                        let input_with_merkle = self.make_merkle_proofs(input);
 
-                                    Witnessable::<InnerConfig>::write(
-                                        &input_with_merkle,
-                                        &mut witness_stream,
-                                    );
+                                        Witnessable::<InnerConfig>::write(
+                                            &input_with_merkle,
+                                            &mut witness_stream,
+                                        );
 
-                                    (self.compress_program(&input_with_merkle), witness_stream)
-                                }
-                            });
+                                        (self.compress_program(&input_with_merkle), witness_stream)
+                                    }
+                                });
 
                             // Execute the runtime.
                             let record = tracing::debug_span!("execute runtime").in_scope(|| {
@@ -1288,7 +1288,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
 #[cfg(any(test, feature = "export-tests"))]
 pub mod tests {
-
     use std::{
         collections::BTreeSet,
         fs::File,

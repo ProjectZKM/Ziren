@@ -211,7 +211,7 @@ impl ExecutionRecord {
                     execution_record.precompile_events.insert(syscall_code, chunk.to_vec());
                     execution_record
                 })
-            .collect::<Vec<_>>();
+                .collect::<Vec<_>>();
             shards.append(&mut event_shards);
         }
 
@@ -223,35 +223,36 @@ impl ExecutionRecord {
             let mut finalize_addr_bits = [0; 32];
             for mem_chunks in self
                 .global_memory_initialize_events
-                    .chunks(opts.memory)
-                    .zip_longest(self.global_memory_finalize_events.chunks(opts.memory))
-                    {
-                        let (mem_init_chunk, mem_finalize_chunk) = match mem_chunks {
-                            EitherOrBoth::Both(mem_init_chunk, mem_finalize_chunk) => {
-                                (mem_init_chunk, mem_finalize_chunk)
-                            }
-                            EitherOrBoth::Left(mem_init_chunk) => (mem_init_chunk, [].as_slice()),
-                            EitherOrBoth::Right(mem_finalize_chunk) => ([].as_slice(), mem_finalize_chunk),
-                        };
-                        let mut shard = ExecutionRecord::new(self.program.clone());
-                        shard.global_memory_initialize_events.extend_from_slice(mem_init_chunk);
-                        shard.public_values.previous_init_addr_bits = init_addr_bits;
-                        if let Some(last_event) = mem_init_chunk.last() {
-                            let last_init_addr_bits = core::array::from_fn(|i| (last_event.addr >> i) & 1);
-                            init_addr_bits = last_init_addr_bits;
-                        }
-                        shard.public_values.last_init_addr_bits = init_addr_bits;
-
-                        shard.global_memory_finalize_events.extend_from_slice(mem_finalize_chunk);
-                        shard.public_values.previous_finalize_addr_bits = finalize_addr_bits;
-                        if let Some(last_event) = mem_finalize_chunk.last() {
-                            let last_finalize_addr_bits =
-                                core::array::from_fn(|i| (last_event.addr >> i) & 1);
-                            finalize_addr_bits = last_finalize_addr_bits;
-                        }
-                        shard.public_values.last_finalize_addr_bits = finalize_addr_bits;
-                        shards.push(shard);
+                .chunks(opts.memory)
+                .zip_longest(self.global_memory_finalize_events.chunks(opts.memory))
+            {
+                let (mem_init_chunk, mem_finalize_chunk) = match mem_chunks {
+                    EitherOrBoth::Both(mem_init_chunk, mem_finalize_chunk) => {
+                        (mem_init_chunk, mem_finalize_chunk)
                     }
+                    EitherOrBoth::Left(mem_init_chunk) => (mem_init_chunk, [].as_slice()),
+                    EitherOrBoth::Right(mem_finalize_chunk) => ([].as_slice(), mem_finalize_chunk),
+                };
+                let mut shard = ExecutionRecord::new(self.program.clone());
+                shard.global_memory_initialize_events.extend_from_slice(mem_init_chunk);
+                shard.public_values.previous_init_addr_bits = init_addr_bits;
+                if let Some(last_event) = mem_init_chunk.last() {
+                    let last_init_addr_bits = core::array::from_fn(|i| (last_event.addr >> i) & 1);
+                    init_addr_bits = last_init_addr_bits;
+                }
+                shard.public_values.last_init_addr_bits = init_addr_bits;
+
+                shard.global_memory_finalize_events.extend_from_slice(mem_finalize_chunk);
+                shard.public_values.previous_finalize_addr_bits = finalize_addr_bits;
+                if let Some(last_event) = mem_finalize_chunk.last() {
+                    let last_finalize_addr_bits =
+                        core::array::from_fn(|i| (last_event.addr >> i) & 1);
+                    finalize_addr_bits = last_finalize_addr_bits;
+                }
+                shard.public_values.last_finalize_addr_bits = finalize_addr_bits;
+
+                shards.push(shard);
+            }
         }
 
         shards
@@ -316,6 +317,11 @@ pub struct MemoryAccessRecord {
     pub b: Option<MemoryRecordEnum>,
     /// The memory access of the `c` register.
     pub c: Option<MemoryRecordEnum>,
+    /// The memory access of the `hi` register and other special registers.
+    pub ah: Option<MemoryRecordEnum>,
+    /// The memory access of the special registers for syscalls.
+    /// todo: check if it's correct
+    pub s: Option<MemoryRecordEnum>,
     /// The memory access of the `memory` register.
     pub memory: Option<MemoryRecordEnum>,
 }

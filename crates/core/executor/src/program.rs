@@ -6,6 +6,7 @@ use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::BigEndian, file::Class, ElfBytes};
 use std::io::Read;
+use num::PrimInt;
 use zkm2_core_emulator::memory::{INIT_SP, WORD_SIZE};
 
 use p3_field::Field;
@@ -64,7 +65,7 @@ impl Program {
     }
 
     /// Initialize a MIPS Program from an appropriate ELF file
-    pub fn from(input: &[u8], max_mem: u32) -> Result<Program> {
+    pub fn from(input: &[u8], max_mem: u32, args: Vec<&str>) -> Result<Program> {
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();
         let elf = ElfBytes::<BigEndian>::minimal_parse(input)
             .map_err(|err| anyhow!("Elf parse error: {err}"))?;
@@ -145,7 +146,8 @@ impl Program {
                     for j in 0..len {
                         let offset = (offset + i + j) as usize;
                         let byte = input.get(offset).context("Invalid segment offset")?;
-                        word |= (*byte as u32) << (j * 8);
+                        // todo: check it BIG_ENDIAN
+                        word |= (*byte as u32) << (24 - j * 8);
                     }
                     image.insert(addr, word);
                     // todo: check it
@@ -164,6 +166,7 @@ impl Program {
             .expect("Failed to find symbol table");
 
         // PatchGO
+        // update instructions
         for symbol in symtab.iter() {
             let name = strtab
                 .get(symbol.st_name as usize)
@@ -175,31 +178,41 @@ impl Program {
                 .map_err(|err| anyhow!("offset is larger than 32 bits. {err}"))?;
 
             match name {
-                "runtime.gcenable" |
-                "runtime.init.5" |         // patch out: init() { go forcegchelper() }
-                "runtime.main.func1" |        // patch out: main.func() { newm(sysmon, ....) }
-                "runtime.deductSweepCredit" | // uses floating point nums and interacts with gc we disabled
-                "runtime.(*gcControllerState).commit" |
-                // these prometheus packages rely on concurrent background things. We cannot run those.
-                "github.com/prometheus/client_golang/prometheus.init" |
-                "github.com/prometheus/client_golang/prometheus.init.0" |
-                "github.com/prometheus/procfs.init" |
-                "github.com/prometheus/common/model.init" |
-                "github.com/prometheus/client_model/go.init" |
-                "github.com/prometheus/client_model/go.init.0" |
-                "github.com/prometheus/client_model/go.init.1" |
-                // skip flag pkg init, we need to debug arg-processing more to see why this fails
-                "flag.init" |
-                // We need to patch this out, we don't pass float64nan because we don't support floats
-                "runtime.check" => {
+                "runtime.gcenable"
+                | "runtime.init.5"
+                | "runtime.main.func1"
+                | "runtime.deductSweepCredit"
+                | "runtime.(*gcControllerState).commit"
+                | "github.com/prometheus/client_golang/prometheus.init"
+                | "github.com/prometheus/client_golang/prometheus.init.0"
+                | "github.com/prometheus/procfs.init"
+                | "github.com/prometheus/common/model.init"
+                | "github.com/prometheus/client_model/go.init"
+                | "github.com/prometheus/client_model/go.init.0"
+                | "github.com/prometheus/client_model/go.init.1"
+                | "flag.init"
+                | "runtime.check"
+                | "runtime.checkfds"
+                | "_dl_discover_osversion" => {
                     // MIPS32 patch: ret (pseudo instruction)
                     // 03e00008 = jr $ra = ret (pseudo instruction)
                     // 00000000 = nop (executes with delay-slot, but does nothing)
-                    image.insert(addr, 0x0800e003);
+                    image.insert(addr, 0x0800e003u32.to_be());
                     image.insert(addr + 4, 0);
-                },
-                "runtime.MemProfileRate" => { image.insert(addr, 0) ; },
-                &_ => (),
+
+                    // log::debug!("patch addr: {}, {}", addr, 0x0800e003u32.to_be());
+                    let pc = ((addr - base_address) / 4) as usize;
+                    instructions[pc] = 0x0800e003u32.to_be();
+                    instructions[pc + 1] = 0;
+                }
+                "runtime.MemProfileRate" => {
+                    image.insert(addr, 0);
+                }
+                &_ => {
+                    if name.contains("sys_common") && name.contains("thread_info") {
+                        image.insert(addr, 0);
+                    }
+                }
             }
         }
 
@@ -211,20 +224,97 @@ impl Program {
         }
 
         sp = INIT_SP;
-        // init argc, argv, aux on stack
-        image.insert(sp + 4, 0x42u32.to_be()); // argc = 0 (argument count)
-        image.insert(sp + 4 * 2, 0x35u32.to_be()); // argv[n] = 0 (terminating argv)
-        image.insert(sp + 4 * 3, 0); // envp[term] = 0 (no env vars)
-        image.insert(sp + 4 * 4, 6u32.to_be()); // auxv[0] = _AT_PAGESZ = 6 (key)
-        image.insert(sp + 4 * 5, 4096u32.to_be()); // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
-        image.insert(sp + 4 * 6, 25u32.to_be()); // auxv[2] = AT_RANDOM
-        image.insert(sp + 4 * 7, (sp + 4 * 9).to_be()); // auxv[3] = address of 16 bytes containing random value
-        image.insert(sp + 4 * 8, 0); // auxv[term] = 0
 
-        image.insert(sp + 4 * 9, 0x34322343u32.to_be());
-        image.insert(sp + 4 * 10, 0x54323423u32.to_be());
-        image.insert(sp + 4 * 11, 0x44572234u32.to_be());
-        image.insert(sp + 4 * 12, 0x90032dd2u32.to_be());
+        let mut items: BTreeMap<u32, &str> = BTreeMap::new();
+        let mut index = 0;
+        for item in args {
+            items.insert(index, item);
+            index += 1u32;
+        }
+        log::debug!("count {} items {:?}", index, items);
+
+        // init argc, argv, aux on stack
+        image.insert(sp, index);
+        let mut cur_sp = sp + 4 * (index + 1);
+        image.insert(cur_sp, 0x00); // argv[n] = 0 (terminating argv)
+        cur_sp += 4;
+        image.insert(cur_sp, 0x00); // envp[term] = 0 (no env vars)
+        cur_sp += 4;
+
+        image.insert(cur_sp, 0x06); // auxv[0] = _AT_PAGESZ = 6 (key)
+        image.insert(cur_sp + 4, 0x1000); // auxv[1] = page size of 4 KiB (value)
+        cur_sp += 8;
+
+        image.insert(cur_sp, 0x0b); // auxv[0] = AT_UID = 11 (key)
+        image.insert(cur_sp + 4, 0x3e8); // auxv[1] = Real uid (value)
+        cur_sp += 8;
+        image.insert(cur_sp, 0x0c); // auxv[0] = AT_EUID = 12 (key)
+        image.insert(cur_sp + 4, 0x3e8); // auxv[1] = Effective uid (value)
+        cur_sp += 8;
+        image.insert(cur_sp, 0x0d); // auxv[0] = AT_GID = 13 (key)
+        image.insert(cur_sp + 4, 0x3e8); // auxv[1] = Real gid (value)
+        cur_sp += 8;
+        image.insert(cur_sp, 0x0e); // auxv[0] = AT_EGID = 14 (key)
+        image.insert(cur_sp + 4, 0x3e8); // auxv[1] = Effective gid (value)
+        cur_sp += 8;
+        image.insert(cur_sp, 0x10); // auxv[0] = AT_HWCAP = 16 (key)
+        image.insert(cur_sp + 4, 0x00); // auxv[1] =  arch dependent hints at CPU capabilities (value)
+        cur_sp += 8;
+        image.insert(cur_sp, 0x11); // auxv[0] = AT_CLKTCK = 17 (key)
+        image.insert(cur_sp + 4, 0x64); // auxv[1] = Frequency of times() (value)
+        cur_sp += 8;
+        image.insert(cur_sp, 0x17); // auxv[0] = AT_SECURE = 23 (key)
+        image.insert(cur_sp + 4, 0x00); // auxv[1] = secure mode boolean (value)
+        cur_sp += 8;
+
+        image.insert(cur_sp, 0x19); // auxv[4] = AT_RANDOM = 25 (key)
+        image.insert(cur_sp + 4, (cur_sp + 12)); // auxv[5] = address of 16 bytes containing random value
+        cur_sp += 8;
+        image.insert(cur_sp, 0); // auxv[term] = 0
+        cur_sp += 4;
+        image.insert(cur_sp, 0x5f28df1du32); // auxv[term] = 0
+        image.insert(cur_sp + 4, 0x2cd1002au32); // auxv[term] = 0
+        image.insert(cur_sp + 8, 0x5ff9f682u32); // auxv[term] = 0
+        image.insert(cur_sp + 12, 0xd4d8d538u32); // auxv[term] = 0
+        cur_sp += 16;
+        image.insert(cur_sp, 0x00); // auxv[term] = 0
+        cur_sp += 4;
+        log::debug!("cur_sp {}", cur_sp);
+
+        let mut store_mem_str = |paddr: u32, daddr: u32, str: &str| {
+            image.insert(paddr, daddr.to_be());
+            let str_bytes = str.as_bytes();
+
+            let mut addr = daddr;
+            for chunk in str_bytes.chunks(4) {
+                let mut word = 0u32;
+                for (i, &byte) in chunk.iter().enumerate() {
+                    word |= (byte as u32) << (24 - i * 8);
+                }
+                image.insert(addr, word);
+                addr += 4;
+            }
+        };
+
+        for (idx, inp) in items.into_iter() {
+            store_mem_str(sp + 4 * (idx + 1), cur_sp, inp);
+            cur_sp += inp.len() as u32 + 1;
+        }
+        log::debug!("cur_sp {}", cur_sp);
+
+        // image.insert(sp + 4, 0x42u32.to_be()); // argc = 0 (argument count)
+        // image.insert(sp + 4 * 2, 0x35u32.to_be()); // argv[n] = 0 (terminating argv)
+        // image.insert(sp + 4 * 3, 0); // envp[term] = 0 (no env vars)
+        // image.insert(sp + 4 * 4, 6u32.to_be()); // auxv[0] = _AT_PAGESZ = 6 (key)
+        // image.insert(sp + 4 * 5, 4096u32.to_be()); // auxv[1] = page size of 4 KiB (value) - (== minPhysPageSize)
+        // image.insert(sp + 4 * 6, 25u32.to_be()); // auxv[2] = AT_RANDOM
+        // image.insert(sp + 4 * 7, (sp + 4 * 9).to_be()); // auxv[3] = address of 16 bytes containing random value
+        // image.insert(sp + 4 * 8, 0); // auxv[term] = 0
+        //
+        // image.insert(sp + 4 * 9, 0x34322343u32.to_be());
+        // image.insert(sp + 4 * 10, 0x54323423u32.to_be());
+        // image.insert(sp + 4 * 11, 0x44572234u32.to_be());
+        // image.insert(sp + 4 * 12, 0x90032dd2u32.to_be());
 
         let mut gprs = [0; 32];
         gprs[29] = INIT_SP as usize;
@@ -232,7 +322,18 @@ impl Program {
         let lo = 0;
         let hi = 0;
         let heap = 0x20000000;
+        let local_user = 0;
         let end_pc: u32 = 0;
+
+        // initialize gprs
+        gprs.iter().enumerate().for_each(|(i, &x)| {
+            image.insert(i as u32, x as u32);
+        });
+        image.insert(32, lo as u32);
+        image.insert(33, hi as u32);
+        image.insert(34, heap as u32);
+        image.insert(35, brk);
+        image.insert(36, local_user as u32);
 
         // this is just for test
         let mut final_data = [0u8; 36];
@@ -277,7 +378,7 @@ impl Program {
             hi,
             heap,
             brk: brk as usize,
-            local_user: 0,
+            local_user,
             end_pc: end_pc as usize,
             step: 0,
             image_id: image_id.try_into().unwrap(),
@@ -304,7 +405,7 @@ impl Program {
         let mut elf_code = Vec::new();
         std::fs::File::open(path)?.read_to_end(&mut elf_code)?;
         let max_mem = 0x80000000;
-        Ok(Program::from(&elf_code, max_mem).unwrap())
+        Ok(Program::from(&elf_code, max_mem, vec![]).unwrap())
     }
 
     /// Custom logic for padding the trace to a power of two according to the proof shape.

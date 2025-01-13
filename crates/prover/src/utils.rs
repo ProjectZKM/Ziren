@@ -108,7 +108,7 @@ impl ZKMCoreProofData {
 /// Get the number of cycles for a given program.
 pub fn get_cycles(elf: &[u8], stdin: &ZKMStdin) -> u64 {
     let max_mem = 0x80000000;
-    let program = Program::from(elf, max_mem).unwrap();
+    let program = Program::from(elf, max_mem, vec![]).unwrap();
     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
     runtime.write_vecs(&stdin.buffer);
     runtime.run_fast().unwrap();
@@ -166,7 +166,7 @@ pub fn words_to_bytes_be(words: &[u32; 8]) -> [u8; 32] {
     bytes
 }
 
-pub trait MaybeTakeIterator<I: Iterator>: Iterator<Item = I::Item> {
+pub trait MaybeTakeIterator<I: Iterator>: Iterator<Item=I::Item> {
     fn maybe_skip(self, bound: Option<usize>) -> RangedIterator<Self>
     where
         Self: Sized,

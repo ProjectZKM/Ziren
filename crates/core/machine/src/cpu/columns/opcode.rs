@@ -93,11 +93,12 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
                 //Opcode::BGEU => self.is_bgeu = F::ONE,
                 _ => unreachable!(),
             }
-        } else if instruction.opcode == Opcode::JAL {
-            self.is_jal = F::ONE;
-        } else if instruction.opcode == Opcode::JALR {
-            self.is_jalr = F::ONE;
         }
+        // else if instruction.opcode == Opcode::JAL {
+        //     self.is_jal = F::ONE;
+        // } else if instruction.opcode == Opcode::JALR {
+        //     self.is_jalr = F::ONE;
+        // }
         //else if instruction.opcode == Opcode::AUIPC {
         //    self.is_auipc = F::ONE;
         //} else if instruction.opcode == Opcode::UNIMP {

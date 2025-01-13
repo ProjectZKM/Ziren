@@ -188,7 +188,7 @@ impl Instruction {
             // (0b000000, 0b000000) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::SLL, sa, rt, rd))
             // } // SLL: rd = rt << sa
-            (0b000000, 0b000000) => Ok(Self::new(Opcode::SLL, rd, rt, sa, 0, false, false)), // SLL: rd = rt << sa
+            (0b000000, 0b000000) => Ok(Self::new(Opcode::SLL, rd, rt, sa, 0, false, true)), // SLL: rd = rt << sa
             // (0b000000, 0b000010) => {
             //     if rs == 1 {
             //         Ok(Operation::Ror(rd, rt, sa))
@@ -249,14 +249,14 @@ impl Instruction {
             // (0b000000, 0b011010) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::DIV, rs, rt, rd))
             // } // DIV: (hi, lo) = rt / rs
-            (0b000000, 0b011010) => Ok(Self::new(Opcode::DIV, rd, rt, rs, 0, false, false)), // DIV: (hi, lo) = rt / rs
+            (0b000000, 0b011010) => Ok(Self::new(Opcode::DIV, rd, rs, rt, 0, false, false)), // DIV: (hi, lo) = rs / rt
             // (0b000000, 0b011011) => Ok(Operation::BinaryArithmetic(
             //     BinaryOperator::DIVU,
             //     rs,
             //     rt,
             //     rd,
             // )), // DIVU: (hi, lo) = rt / rs
-            (0b000000, 0b011011) => Ok(Self::new(Opcode::DIVU, rd, rt, rs, 0, false, false)), // DIVU: (hi, lo) = rt / rs
+            (0b000000, 0b011011) => Ok(Self::new(Opcode::DIVU, rd, rs, rt, 0, false, false)), // DIVU: (hi, lo) = rs / rt
             // (0b000000, 0b010000) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MFHI, 33, 0, rd))
             // } // MFHI: rd = hi
@@ -289,7 +289,7 @@ impl Instruction {
                     Ok(Self::new(
                         Opcode::BGE,
                         rs as u8,
-                        032,
+                        0u32,
                         offset,
                         0,
                         false,
@@ -311,7 +311,8 @@ impl Instruction {
                     Ok(Self::new(Opcode::JumpDirect, 31, offset, 0, 0, true, true))
                 } else {
                     // todo: change to ProgramError later
-                    Ok(Self::new(Opcode::INVALID, 0, 0, 0, 0,  false, false))
+                    // panic!("InvalidOpcode")
+                    Ok(Self::new(Opcode::UNIMPL, 0, 0, 0, 0, true, true))
                 }
             }
             // (0x02, _) => Ok(Operation::Jumpi(0u8, target)), // J
@@ -344,33 +345,33 @@ impl Instruction {
             )), // BGTZ
 
             // (0b100000, _) => Ok(Operation::MloadGeneral(MemOp::LB, rs, rt, offset)),
-            (0b100000, _) => Ok(Self::new(Opcode::LB, rs as u8, rt, offset, 0, false, true)),
+            (0b100000, _) => Ok(Self::new(Opcode::LB, rt as u8, rs, offset, 0, false, true)),
             // (0b100001, _) => Ok(Operation::MloadGeneral(MemOp::LH, rs, rt, offset)),
-            (0b100001, _) => Ok(Self::new(Opcode::LH, rs as u8, rt, offset, 0, false, true)),
+            (0b100001, _) => Ok(Self::new(Opcode::LH, rt as u8, rs, offset, 0, false, true)),
             // (0b100010, _) => Ok(Operation::MloadGeneral(MemOp::LWL, rs, rt, offset)),
-            (0b100010, _) => Ok(Self::new(Opcode::LWL, rs as u8, rt, offset, 0, false, true)),
+            (0b100010, _) => Ok(Self::new(Opcode::LWL, rt as u8, rs, offset, 0, false, true)),
             // (0b100011, _) => Ok(Operation::MloadGeneral(MemOp::LW, rs, rt, offset)),
-            (0b100011, _) => Ok(Self::new(Opcode::LW, rs as u8, rt, offset, 0, false, true)),
+            (0b100011, _) => Ok(Self::new(Opcode::LW, rt as u8, rs, offset, 0, false, true)),
             // (0b100100, _) => Ok(Operation::MloadGeneral(MemOp::LBU, rs, rt, offset)),
-            (0b100100, _) => Ok(Self::new(Opcode::LBU, rs as u8, rt, offset, 0, false, true)),
+            (0b100100, _) => Ok(Self::new(Opcode::LBU, rt as u8, rs, offset, 0, false, true)),
             // (0b100101, _) => Ok(Operation::MloadGeneral(MemOp::LHU, rs, rt, offset)),
-            (0b100101, _) => Ok(Self::new(Opcode::LHU, rs as u8, rt, offset, 0, false, true)),
+            (0b100101, _) => Ok(Self::new(Opcode::LHU, rt as u8, rs, offset, 0, false, true)),
             // (0b100110, _) => Ok(Operation::MloadGeneral(MemOp::LWR, rs, rt, offset)),
-            (0b100110, _) => Ok(Self::new(Opcode::LWR, rs as u8, rt, offset, 0, false, true)),
+            (0b100110, _) => Ok(Self::new(Opcode::LWR, rt as u8, rs, offset, 0, false, true)),
             // (0b110000, _) => Ok(Operation::MloadGeneral(MemOp::LL, rs, rt, offset)),
-            (0b110000, _) => Ok(Self::new(Opcode::LL, rs as u8, rt, offset, 0, false, true)),
+            (0b110000, _) => Ok(Self::new(Opcode::LL, rt as u8, rs, offset, 0, false, true)),
             // (0b101000, _) => Ok(Operation::MstoreGeneral(MemOp::SB, rs, rt, offset)),
-            (0b101000, _) => Ok(Self::new(Opcode::SB, rs as u8, rt, offset, 0, false, true)),
+            (0b101000, _) => Ok(Self::new(Opcode::SB, rt as u8, rs, offset, 0, false, true)),
             // (0b101001, _) => Ok(Operation::MstoreGeneral(MemOp::SH, rs, rt, offset)),
-            (0b101001, _) => Ok(Self::new(Opcode::SH, rs as u8, rt, offset, 0, false, true)),
+            (0b101001, _) => Ok(Self::new(Opcode::SH, rt as u8, rs, offset, 0, false, true)),
             // (0b101010, _) => Ok(Operation::MstoreGeneral(MemOp::SWL, rs, rt, offset)),
-            (0b101010, _) => Ok(Self::new(Opcode::SWL, rs as u8, rt, offset, 0, false, true)),
+            (0b101010, _) => Ok(Self::new(Opcode::SWL, rt as u8, rs, offset, 0, false, true)),
             // (0b101011, _) => Ok(Operation::MstoreGeneral(MemOp::SW, rs, rt, offset)),
-            (0b101011, _) => Ok(Self::new(Opcode::SW, rs as u8, rt, offset, 0, false, true)),
+            (0b101011, _) => Ok(Self::new(Opcode::SW, rt as u8, rs, offset, 0, false, true)),
             // (0b101110, _) => Ok(Operation::MstoreGeneral(MemOp::SWR, rs, rt, offset)),
-            (0b101110, _) => Ok(Self::new(Opcode::SWR, rs as u8, rt, offset, 0, false, true)),
+            (0b101110, _) => Ok(Self::new(Opcode::SWR, rt as u8, rs, offset, 0, false, true)),
             // (0b111000, _) => Ok(Operation::MstoreGeneral(MemOp::SC, rs, rt, offset)),
-            (0b111000, _) => Ok(Self::new(Opcode::SC, rs as u8, rt, offset, 0, false, true)),
+            (0b111000, _) => Ok(Self::new(Opcode::SC, rt as u8, rs, offset, 0, false, true)),
             // (0b111101, _) => Ok(Operation::MstoreGeneral(MemOp::SDC1, rs, rt, offset)),
             (0b111101, _) => Ok(Self::new(
                 Opcode::SDC1,
@@ -442,7 +443,7 @@ impl Instruction {
                 offset,
                 0,
                 false,
-                false,
+                true,
             )), // SLTIU: rt = rs < sext(imm)
 
             // (0b000000, 0b101010) => {
@@ -553,14 +554,17 @@ impl Instruction {
                     //             sa
                     //         );
                     //         // todo: change to ProgramError later
-                    panic!("InvalidOpcode")
+                    // panic!("InvalidOpcode")
+                    Ok(Self::new(Opcode::UNIMPL, 0, 0, 0, 0, true, true))
                 }
             }
             // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rd, rs, rt, 0, false, false)), // teq
             _ => {
                 log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
-                Ok(Self::new(Opcode::INVALID, 0, 0, 0, 0,  false, false))
+                // todo: change to ProgramError later
+                // panic!("InvalidOpcode")
+                Ok(Self::new(Opcode::UNIMPL, 0, 0, 0, 0, true, true))
             }
         }
     }

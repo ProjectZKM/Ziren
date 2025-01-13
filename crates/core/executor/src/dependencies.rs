@@ -3,13 +3,12 @@ use crate::{
     utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
     Executor,
     Opcode,
-    //BinaryOperator,
 };
 
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
 pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
-    panic!("Unimplemented")
+    todo!("impl")
     /*
     let shard = executor.shard();
     let (quotient, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
@@ -29,7 +28,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             lookup_id: event.sub_lookups[4],
             shard,
             clk: event.clk,
-            opcode: BinaryOperator::ADD,
+            opcode: Opcode::ADD,
             a: 0,
             b: event.c,
             c: (event.c as i32).unsigned_abs(),
@@ -42,7 +41,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             lookup_id: event.sub_lookups[5],
             shard,
             clk: event.clk,
-            opcode: BinaryOperator::ADD,
+            opcode: Opcode::ADD,
             a: 0,
             b: remainder,
             c: (remainder as i32).unsigned_abs(),
@@ -64,7 +63,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         lookup_id: event.sub_lookups[0],
         shard,
         clk: event.clk,
-        opcode: BinaryOperator::MUL,
+        opcode: Opcode::MUL,
         a: lower_word,
         c: event.c,
         b: quotient,
@@ -78,9 +77,9 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         clk: event.clk,
         opcode: {
             if is_signed_operation {
-                BinaryOperator::MULH
+                Opcode::MULT
             } else {
-                BinaryOperator::MULHU
+                Opcode::MULTU
             }
         },
         a: upper_word,
@@ -94,7 +93,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         AluEvent {
             lookup_id: event.sub_lookups[2],
             shard,
-            opcode: BinaryOperator::SLTU,
+            opcode: Opcode::SLTU,
             a: 1,
             b: (remainder as i32).unsigned_abs(),
             c: u32::max(1, (event.c as i32).unsigned_abs()),
@@ -105,7 +104,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         AluEvent {
             lookup_id: event.sub_lookups[3],
             shard,
-            opcode: BinaryOperator::SLTU,
+            opcode: Opcode::SLTU,
             a: 1,
             b: remainder,
             c: u32::max(1, event.c),
@@ -238,8 +237,9 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
         let branching = match instruction.opcode {
             Opcode::BEQ => a_eq_b,
             Opcode::BNE => !a_eq_b,
-            //Opcode::BLT | Opcode::BLTU => a_lt_b,
-            //Opcode::BGE | Opcode::BGEU => a_eq_b || a_gt_b,
+            // todo: fix
+            Opcode::BLT | Opcode::BLE => a_lt_b,
+            Opcode::BGE | Opcode::BGT => a_eq_b || a_gt_b,
             _ => unreachable!(),
         };
         if branching {
@@ -258,37 +258,38 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
         }
     }
 
-    if instruction.is_jump_instruction() {
-        match instruction.opcode {
-            Opcode::JAL => {
-                let next_pc = event.pc.wrapping_add(event.b);
-                let add_event = AluEvent {
-                    lookup_id: event.jump_jal_lookup_id,
-                    shard,
-                    clk: event.clk,
-                    opcode: Opcode::ADD,
-                    a: next_pc,
-                    b: event.pc,
-                    c: event.b,
-                    sub_lookups: executor.record.create_lookup_ids(),
-                };
-                executor.record.add_events.push(add_event);
-            }
-            Opcode::JALR => {
-                let next_pc = event.b.wrapping_add(event.c);
-                let add_event = AluEvent {
-                    lookup_id: event.jump_jalr_lookup_id,
-                    shard,
-                    clk: event.clk,
-                    opcode: Opcode::ADD,
-                    a: next_pc,
-                    b: event.b,
-                    c: event.c,
-                    sub_lookups: executor.record.create_lookup_ids(),
-                };
-                executor.record.add_events.push(add_event);
-            }
-            _ => unreachable!(),
-        }
-    }
+    // todo: process jump instructions
+    // if instruction.is_jump_instruction() {
+    //     match instruction.opcode {
+    //         Opcode::JAL => {
+    //             let next_pc = event.pc.wrapping_add(event.b);
+    //             let add_event = AluEvent {
+    //                 lookup_id: event.jump_jal_lookup_id,
+    //                 shard,
+    //                 clk: event.clk,
+    //                 opcode: Opcode::ADD,
+    //                 a: next_pc,
+    //                 b: event.pc,
+    //                 c: event.b,
+    //                 sub_lookups: executor.record.create_lookup_ids(),
+    //             };
+    //             executor.record.add_events.push(add_event);
+    //         }
+    //         Opcode::JALR => {
+    //             let next_pc = event.b.wrapping_add(event.c);
+    //             let add_event = AluEvent {
+    //                 lookup_id: event.jump_jalr_lookup_id,
+    //                 shard,
+    //                 clk: event.clk,
+    //                 opcode: Opcode::ADD,
+    //                 a: next_pc,
+    //                 b: event.b,
+    //                 c: event.c,
+    //                 sub_lookups: executor.record.create_lookup_ids(),
+    //             };
+    //             executor.record.add_events.push(add_event);
+    //         }
+    //         _ => unreachable!(),
+    //     }
+    // }
 }

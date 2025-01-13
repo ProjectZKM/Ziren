@@ -58,7 +58,7 @@ pub trait Syscall: Send + Sync {
     /// Executes the syscall.
     ///
     /// Returns the resulting value of register a0. `arg1` and `arg2` are the values in registers
-    /// X10 and X11, respectively. While not a hard requirement, the convention is that the return
+    /// A0 and A1, respectively. While not a hard requirement, the convention is that the return
     /// value is only for system calls such as `HALT`. Most precompiles use `arg1` and `arg2` to
     /// denote the addresses of the input data, and write the result to the memory at `arg1`.
     fn execute(

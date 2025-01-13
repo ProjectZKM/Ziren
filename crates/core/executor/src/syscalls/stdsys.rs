@@ -1,3 +1,4 @@
+use crate::events::MemoryAccessPosition;
 use super::{context::SyscallContext, Syscall, SyscallCode};
 
 pub const PAGE_ADDR_SIZE: usize = 12;
@@ -26,7 +27,7 @@ impl Syscall for MmapSyscall {
         }
         if hint == 0 {
             v0 = ctx.rt.register(crate::Register::HEAP);
-            ctx.rt.rw(crate::Register::HEAP, v0 + final_size);
+            ctx.rt.rw(crate::Register::HEAP, v0 + final_size, MemoryAccessPosition::S);
         } else {
             v0 = hint;
         }
@@ -137,7 +138,7 @@ impl Syscall for SetThreadAreaSyscall {
         a0: u32,
         _: u32,
     ) -> Option<(u32, u32)> {
-        ctx.rt.rw(crate::Register::LOCAL_USER, a0);
+        ctx.rt.rw(crate::Register::LOCAL_USER, a0, MemoryAccessPosition::S);
         Some((0, 0))
     }
 }

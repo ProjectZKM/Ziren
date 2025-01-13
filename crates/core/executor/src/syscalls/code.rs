@@ -19,7 +19,18 @@ use strum_macros::EnumIter;
 ///   memory accesses is bounded.
 /// - Byte 3: Currently unused.
 #[derive(
-    Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, Ord, PartialOrd, Serialize, Deserialize, Enum,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    EnumIter,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Enum,
 )]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
@@ -37,8 +48,6 @@ pub enum SyscallCode {
     SYSHINTLEN = 0x00_00_00_F0,
     SYSHINTREAD = 0x00_00_00_F1,
     SYSVERIFY = 0x00_00_00_F2,
-
-
 
     /// Halts the program.
     HALT = 0x00_00_00_00,
@@ -156,6 +165,8 @@ pub enum SyscallCode {
 
     /// Executes the `SECP256R1_DECOMPRESS` precompile.
     SECP256R1_DECOMPRESS = 0x00_00_01_2E,
+
+    UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
 
 impl SyscallCode {
@@ -215,7 +226,8 @@ impl SyscallCode {
             0x00_01_01_2C => SyscallCode::SECP256R1_ADD,
             0x00_00_01_2D => SyscallCode::SECP256R1_DOUBLE,
             0x00_00_01_2E => SyscallCode::SECP256R1_DECOMPRESS,
-            _ => panic!("invalid syscall number: {value}"),
+            // _ => panic!("invalid syscall number: {value}"),
+            _ => SyscallCode::UNIMPLEMENTED
         }
     }
 
