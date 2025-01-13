@@ -6,7 +6,7 @@ Any program written in C, Go, Rust, etc. can be compiled into a MIPS R3000 be EL
 
 ZkMIPS provides Golang and Rust runtime libraries for guests to obtain input and commit output.
 
-## RUST
+## Example: [RUST](https://github.com/zkMIPS/zkm-project-template/blob/main/guest-program/sha2-rust/src/main.rs)
 
 ```zkm_runtime::io::read```
 ```zkm_runtime::io::commit```
@@ -37,7 +37,7 @@ pub fn main() {
 }
 ```
 
-## GOLANG
+## Example: [GOLANG](https://github.com/zkMIPS/zkm-project-template/blob/main/guest-program/sha2-go/main.go)
 
 ```zkm_runtime.Read[T]()```
 ```zkm_runtime.Commit```

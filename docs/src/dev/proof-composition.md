@@ -10,7 +10,7 @@ You can verify other receipts in the guest use ```zkm_runtime::io::verify```
 
 ## Example
 
-```
+```rust
 #![no_std]
 #![no_main]
 
@@ -35,5 +35,4 @@ pub fn main() {
 
     zkm_runtime::io::commit::<[u8; 32]>(&output);
 }
-
 ```

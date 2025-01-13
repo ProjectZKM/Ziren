@@ -2,18 +2,24 @@
 
 ## ELF Loader
 
-```zkm_emulator::utils::load_elf_with_patch```
+```rust
+zkm_emulator::utils::load_elf_with_patch
+```
 
 ## MIPS VM
 
-```zkm_emulator::utils::split_prog_into_segs```
+```rust
+zkm_emulator::utils::split_prog_into_segs
+```
 
 ## Proving
 
-```zkm_utils::utils::prove_segments```
+```rust
+zkm_utils::utils::prove_segments
+```
 
 ## Example
-```
+```rust
 use std::env;
 
 use zkm_emulator::utils::{load_elf_with_patch, split_prog_into_segs};
@@ -56,5 +62,4 @@ fn main() {
     env_logger::try_init().unwrap_or_default();
     prove_sha2_rust();
 }
-
 ```
