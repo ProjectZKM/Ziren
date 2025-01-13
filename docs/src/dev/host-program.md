@@ -9,25 +9,18 @@ This host program sends the private input pri_input = vec![5u8; 1024] and its ha
 Step1. Read environment variables. The default values can be found in [run-proving.sh](https://github.com/zkMIPS/zkm-project-template/blob/main/host-program/run-proving.sh)
 
 > If the environmental variable `PROOF_RESULTS_PATH` is not set, the proof results file will be saved in zkm-project-template/contracts/{src, verifier}; if the environmental variable `PROOF_RESULTS_PATH` is set, after the proof is completed, the proof results file needs to be copied from from `PROOF_RESULTS_PATH`/{src, verifier} to the corresponding zkm-project-template/contracts/{src, verifier}.
->
 
 > The environment variable `VERIFYING_KEY_PATH` specifies the location of the verification key (vk). If this variable is not set to zkm-project-template/contracts/src, you should copy the `VERIFYING_KEY_PATH`/verifier.sol to zkm-project-template/contracts/src/ after executing the host program.
->
 
 > The environment variable `SETUP_FLAG` is set to "true", it will generate the proving key (pk), the verification key (vk) and the verifier contract and store them at the path indicated by `VERIFYING_KEY_PATH`.Then, the `SETUP_FLAG` should be set to "false" , next executing the host will generate the snark proof using the same pk and vk.
->
 
 > The environmental variable `SEG_SIZE` in the run_proving.sh affects the final proof generation.
->
 
 > The guest program's ELF with the input is split into segments according the `SEG_SIZE`, based on the cycle count.
->
 
 > When generating proofs on the local machine, if the log shows "[the seg_num is:1 ]", please reduce `SEG_SIZE` or increase the input. If generating proofs through the proof network, `SEG_SIZE` must be within the range [65536, 262144].
->
 
 > When generating the proof via restful API, must set the `PRIVATE_KEY` and `ZKM_PROVER=network`. The `PRIVATE_KEY` can be applied for through [Apply](https://www.zkm.io/apply).
->
 
 ```rust
 env_logger::try_init().unwrap_or_default();
