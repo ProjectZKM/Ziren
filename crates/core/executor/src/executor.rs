@@ -1229,7 +1229,7 @@ impl<'a> Executor<'a> {
 
         let a = if b == 0 {
             1
-        } else if b == 29 {
+        } else if rd == Register::SP {
             c
         } else {
             0
@@ -1670,7 +1670,7 @@ impl<'a> Executor<'a> {
         if !self.unconstrained {
             // If there's not enough cycles left for another instruction, move to the next shard.
             let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
-            println!("cpu exit {cpu_exit}, {} {}, {}", self.max_syscall_cycles, self.state.clk, self.shard_size);
+            // println!("cpu exit {cpu_exit}, {} {}, {}", self.max_syscall_cycles, self.state.clk, self.shard_size);
 
             // Every N cycles, check if there exists at least one shape that fits.
             //
@@ -2026,6 +2026,7 @@ impl<'a> Executor<'a> {
 
             // Push the remaining execution record with memory initialize & finalize events.
             self.bump_record();
+            log::debug!("last step {}", self.state.global_clk);
         }
 
         // Push the remaining execution record, if there are any CPU events.

@@ -544,8 +544,7 @@ impl Instruction {
                     Ok(Self::new(Opcode::SIGNEXT, rd, rt, 16, 0, true, false)) // seh
                 } else if sa == 0b010000 {
                     //         Ok(Operation::Signext(rd, rt, 8)) // seb
-                    Ok(Self::new(Opcode::SIGNEXT, rd, rt, 8, 0, true, false)) // seh
-                // seh
+                    Ok(Self::new(Opcode::SIGNEXT, rd, rt, 8, 0, true, false)) // seb
                 } else {
                     //         log::warn!(
                     //             "decode: invalid opcode {:#08b} {:#08b} {:#08b}",

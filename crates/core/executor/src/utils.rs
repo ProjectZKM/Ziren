@@ -20,11 +20,11 @@ pub fn deserialize_hashmap_as_vec<'de, V: Deserialize<'de>, D: Deserializer<'de>
     Ok(seq.into_iter().collect())
 }
 
-/// Returns `true` if the given `BinaryOperator` is a signed operation.
+/// Returns `true` if the given opcode is a signed operation.
 #[must_use]
 pub fn is_signed_operation(opcode: Opcode) -> bool {
-    todo!("implement this function.")
-    // opcode == BinaryOperator::DIV || opcode == BinaryOperator::REM
+    // todo: add more signed operations
+    opcode == Opcode::DIV
 }
 
 /// Calculate the correct `quotient` and `remainder` for the given `b` and `c` per RISC-V spec.

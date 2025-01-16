@@ -28,7 +28,7 @@ use precompiles::{
     fptower::{Fp2AddSubSyscall, Fp2MulSyscall, FpOpSyscall},
     keccak256::permute::Keccak256PermuteSyscall,
     sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
-//    u256x2048_mul::U256xU2048MulSyscall,
+    //    u256x2048_mul::U256xU2048MulSyscall,
     uint256::Uint256MulSyscall,
     weierstrass::{
         add::WeierstrassAddAssignSyscall, decompress::WeierstrassDecompressSyscall,
@@ -83,7 +83,6 @@ pub trait Syscall: Send + Sync {
 pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     let mut syscall_map = HashMap::<SyscallCode, Arc<dyn Syscall>>::default();
 
-    syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
 
     syscall_map.insert(SyscallCode::SHA_EXTEND, Arc::new(Sha256ExtendSyscall));
 
@@ -95,10 +94,18 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
         SyscallCode::ED_DECOMPRESS,
         Arc::new(EdwardsDecompressSyscall::<Ed25519Parameters>::new()),
     );
+    // todo: use HALT or both?
+    syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
+    syscall_map.insert(SyscallCode::SYSEXITGROUP, Arc::new(HaltSyscall));
 
     syscall_map.insert(SyscallCode::SYSMMAP2, Arc::new(MmapSyscall));
+    syscall_map.insert(SyscallCode::SYSMMAP, Arc::new(MmapSyscall));
     syscall_map.insert(SyscallCode::SYSCLONE, Arc::new(CloneSyscall));
     syscall_map.insert(SyscallCode::SYSBRK, Arc::new(BrkSyscall));
+    syscall_map.insert(SyscallCode::SYSFCNTL, Arc::new(FcntlSyscall));
+    syscall_map.insert(SyscallCode::SYSSETTHREADAREA, Arc::new(SetThreadAreaSyscall));
+    syscall_map.insert(SyscallCode::SYSWRITE, Arc::new(WriteSyscall));
+    syscall_map.insert(SyscallCode::SYSREAD, Arc::new(ReadSyscall));
 
     syscall_map.insert(SyscallCode::KECCAK_PERMUTE, Arc::new(Keccak256PermuteSyscall));
 
@@ -214,13 +221,15 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(SyscallCode::EXIT_UNCONSTRAINED, Arc::new(ExitUnconstrainedSyscall));
 
-    syscall_map.insert(SyscallCode::WRITE, Arc::new(WriteSyscall));
+    // syscall_map.insert(SyscallCode::WRITE, Arc::new(WriteSyscall));
 
     syscall_map.insert(SyscallCode::COMMIT, Arc::new(CommitSyscall));
 
     syscall_map.insert(SyscallCode::COMMIT_DEFERRED_PROOFS, Arc::new(CommitDeferredSyscall));
 
+    // todo: choose one
     syscall_map.insert(SyscallCode::VERIFY_SP1_PROOF, Arc::new(VerifySyscall));
+    syscall_map.insert(SyscallCode::SYSVERIFY, Arc::new(VerifySyscall));
 
     syscall_map.insert(SyscallCode::SYSHINTLEN, Arc::new(HintLenSyscall));
 

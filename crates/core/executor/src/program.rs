@@ -168,6 +168,9 @@ impl Program {
         // PatchGO
         // update instructions
         for symbol in symtab.iter() {
+            if symbol.st_symtype() != elf::abi::STT_FUNC {
+                continue;
+            }
             let name = strtab
                 .get(symbol.st_name as usize)
                 .expect("Failed to get name from strtab");
@@ -200,7 +203,6 @@ impl Program {
                     image.insert(addr, 0x0800e003u32.to_be());
                     image.insert(addr + 4, 0);
 
-                    // log::debug!("patch addr: {}, {}", addr, 0x0800e003u32.to_be());
                     let pc = ((addr - base_address) / 4) as usize;
                     instructions[pc] = 0x0800e003u32.to_be();
                     instructions[pc + 1] = 0;
@@ -210,7 +212,12 @@ impl Program {
                 }
                 &_ => {
                     if name.contains("sys_common") && name.contains("thread_info") {
-                        image.insert(addr, 0);
+                        image.insert(addr, 0x0800e003u32.to_be());
+                        image.insert(addr + 4, 0);
+
+                        let pc = ((addr - base_address) / 4) as usize;
+                        instructions[pc] = 0x0800e003u32.to_be();
+                        instructions[pc + 1] = 0;
                     }
                 }
             }
