@@ -52,6 +52,7 @@ pub struct Executor<'a> {
     /// In unconstrained mode, any events, clock, register, or memory changes are reset after
     /// leaving the unconstrained block. The only thing preserved is written to the input
     /// stream.
+    /// todo: check
     pub unconstrained: bool,
 
     /// Whether we should write to the report.
@@ -1149,7 +1150,8 @@ impl<'a> Executor<'a> {
         self.state.next_pc = next_next_pc;
 
         // Update the clk to the next cycle.
-        self.state.clk += 5;
+        // todo: 5 -> 7 because of adding memory access position
+        self.state.clk += 7;
 
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {

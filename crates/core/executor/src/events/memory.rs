@@ -36,6 +36,7 @@ pub enum MemoryAccessPosition {
     /// could be used in HI register and other special registers
     AH = 4,
     ///  special registers for syscalls
+    /// todo: rename S1, add S2
     S = 5,
 }
 

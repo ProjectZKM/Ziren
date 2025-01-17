@@ -200,9 +200,11 @@ impl Program {
                     // MIPS32 patch: ret (pseudo instruction)
                     // 03e00008 = jr $ra = ret (pseudo instruction)
                     // 00000000 = nop (executes with delay-slot, but does nothing)
+                    // todo: jr constant global
                     image.insert(addr, 0x0800e003u32.to_be());
                     image.insert(addr + 4, 0);
 
+                    // log::debug!("patch addr: {}, {}", addr, 0x0800e003u32.to_be());
                     let pc = ((addr - base_address) / 4) as usize;
                     instructions[pc] = 0x0800e003u32.to_be();
                     instructions[pc + 1] = 0;

@@ -18,11 +18,15 @@ pub struct Instruction {
     /// The third operand.
     pub op_c: u32,
     /// The forth operand.
+    /// todo: remove
     pub op_d: u32,
     /// Whether the second operand is an immediate value.
     pub imm_b: bool,
     /// Whether the third operand is an immediate value.
     pub imm_c: bool,
+    // raw instruction
+    // todo: add raw instruction
+    // pub raw: u32,
 }
 
 impl Instruction {
