@@ -27,68 +27,68 @@ pub fn sha_extend(w: &mut [u32]) {
     }
 }
 
-//#[cfg(test)]
-//pub mod extend_tests {
-//
-//    use p3_baby_bear::BabyBear;
-//
-//    use p3_matrix::dense::RowMajorMatrix;
-//    use zkm2_core_executor::{
-//        events::AluEvent, syscalls::SyscallCode, ExecutionRecord, Instruction, Opcode, Program,
-//    };
-//    use zkm2_stark::{air::MachineAir, CpuProver};
-//    use test_artifacts::{SHA2_ELF, SHA_EXTEND_ELF};
-//
-//    use crate::utils::{self, run_test};
-//
-//    use super::ShaExtendChip;
-//
-//    pub fn sha_extend_program() -> Program {
-//        let w_ptr = 100;
-//        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, false, true)];
-//        for i in 0..64 {
-//            instructions.extend(vec![
-//                Instruction::new(Opcode::ADD, 30, 0, w_ptr + i * 4, false, true),
-//                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
-//            ]);
-//        }
-//        instructions.extend(vec![
-//            Instruction::new(Opcode::ADD, 5, 0, SyscallCode::SHA_EXTEND as u32, false, true),
-//            Instruction::new(Opcode::ADD, 10, 0, w_ptr, false, true),
-//            Instruction::new(Opcode::ADD, 11, 0, 0, false, true),
-//            Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
-//        ]);
-//        Program::new(instructions, 0, 0)
-//    }
-//
-//    #[test]
-//    fn generate_trace() {
-//        let mut shard = ExecutionRecord::default();
-//        shard.add_events = vec![AluEvent::new(0, 0, Opcode::ADD, 14, 8, 6)];
-//        let chip = ShaExtendChip::new();
-//        let trace: RowMajorMatrix<BabyBear> =
-//            chip.generate_trace(&shard, &mut ExecutionRecord::default());
-//        println!("{:?}", trace.values)
-//    }
-//
-//    #[test]
-//    fn test_sha_prove() {
-//        utils::setup_logger();
-//        let program = sha_extend_program();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//
-//    #[test]
-//    fn test_sha256_program() {
-//        utils::setup_logger();
-//        let program = Program::from(SHA2_ELF).unwrap();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//
-//    #[test]
-//    fn test_sha_extend_program() {
-//        utils::setup_logger();
-//        let program = Program::from(SHA_EXTEND_ELF).unwrap();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//}
+#[cfg(test)]
+pub mod extend_tests {
+
+    use p3_baby_bear::BabyBear;
+
+    use p3_matrix::dense::RowMajorMatrix;
+    use zkm2_core_executor::{
+        events::AluEvent, syscalls::SyscallCode, ExecutionRecord, Instruction, Opcode, Program,
+    };
+    use zkm2_stark::{air::MachineAir, CpuProver};
+    use test_artifacts::{SHA2_ELF, SHA_EXTEND_ELF};
+
+    use crate::utils::{self, run_test};
+
+    use super::ShaExtendChip;
+
+    pub fn sha_extend_program() -> Program {
+        let w_ptr = 100;
+        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true)];
+        for i in 0..64 {
+            instructions.extend(vec![
+                Instruction::new(Opcode::ADD, 30, 0, w_ptr + i * 4, 0, false, true),
+                Instruction::new(Opcode::SW, 29, 30, 0, 0, false, true),
+            ]);
+        }
+        instructions.extend(vec![
+            Instruction::new(Opcode::ADD, 5, 0, SyscallCode::SHA_EXTEND as u32, 0, false, true),
+            Instruction::new(Opcode::ADD, 10, 0, w_ptr, 0, false, true),
+            Instruction::new(Opcode::ADD, 11, 0, 0, 0, false, true),
+            Instruction::new(Opcode::SYSCALL, 5, 10, 11, 0, false, false),
+        ]);
+        Program::new(instructions, 0, 0)
+    }
+
+    #[test]
+    fn generate_trace() {
+        let mut shard = ExecutionRecord::default();
+        shard.add_events = vec![AluEvent::new(0, 0, Opcode::ADD, 14, 8, 6)];
+        let chip = ShaExtendChip::new();
+        let trace: RowMajorMatrix<BabyBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        println!("{:?}", trace.values)
+    }
+
+    #[test]
+    fn test_sha_prove() {
+        utils::setup_logger();
+        let program = sha_extend_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_sha256_program() {
+        utils::setup_logger();
+        let program = Program::from_elf(SHA2_ELF).unwrap();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_sha_extend_program() {
+        utils::setup_logger();
+        let program = Program::from_elf(SHA_EXTEND_ELF).unwrap();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}

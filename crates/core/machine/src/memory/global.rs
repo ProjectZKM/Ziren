@@ -359,95 +359,95 @@ where
     }
 }
 
-//#[cfg(test)]
-//mod tests {
-//
-//    use super::*;
-//    use crate::{
-//        mips::MipsAir, syscall::precompiles::sha256::extend_tests::sha_extend_program,
-//        utils::setup_logger,
-//    };
-//    use p3_baby_bear::BabyBear;
-//    use zkm2_core_executor::{programs::tests::simple_program, Executor};
-//    use zkm2_stark::{
-//        baby_bear_poseidon2::BabyBearPoseidon2, debug_interactions_with_all_chips, ZKMCoreOpts,
-//        StarkMachine,
-//    };
-//
-//    #[test]
-//    fn test_memory_generate_trace() {
-//        let program = simple_program();
-//        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-//        runtime.run().unwrap();
-//        let shard = runtime.record.clone();
-//
-//        let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Initialize);
-//
-//        let trace: RowMajorMatrix<BabyBear> =
-//            chip.generate_trace(&shard, &mut ExecutionRecord::default());
-//        println!("{:?}", trace.values);
-//
-//        let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Finalize);
-//        let trace: RowMajorMatrix<BabyBear> =
-//            chip.generate_trace(&shard, &mut ExecutionRecord::default());
-//        println!("{:?}", trace.values);
-//
-//        for mem_event in shard.global_memory_finalize_events {
-//            println!("{:?}", mem_event);
-//        }
-//    }
-//
-//    #[test]
-//    fn test_memory_lookup_interactions() {
-//        setup_logger();
-//        let program = sha_extend_program();
-//        let program_clone = program.clone();
-//        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-//        runtime.run().unwrap();
-//        let machine: StarkMachine<BabyBearPoseidon2, MipsAir<BabyBear>> =
-//            MipsAir::machine(BabyBearPoseidon2::new());
-//        let (pkey, _) = machine.setup(&program_clone);
-//        let opts = ZKMCoreOpts::default();
-//        machine.generate_dependencies(&mut runtime.records, &opts, None);
-//
-//        let shards = runtime.records;
-//        for shard in shards.clone() {
-//            debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
-//                &machine,
-//                &pkey,
-//                &[shard],
-//                vec![InteractionKind::Memory],
-//                InteractionScope::Local,
-//            );
-//        }
-//        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
-//            &machine,
-//            &pkey,
-//            &shards,
-//            vec![InteractionKind::Memory],
-//            InteractionScope::Global,
-//        );
-//    }
-//
-//    #[test]
-//    fn test_byte_lookup_interactions() {
-//        setup_logger();
-//        let program = sha_extend_program();
-//        let program_clone = program.clone();
-//        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-//        runtime.run().unwrap();
-//        let machine = MipsAir::machine(BabyBearPoseidon2::new());
-//        let (pkey, _) = machine.setup(&program_clone);
-//        let opts = ZKMCoreOpts::default();
-//        machine.generate_dependencies(&mut runtime.records, &opts, None);
-//
-//        let shards = runtime.records;
-//        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
-//            &machine,
-//            &pkey,
-//            &shards,
-//            vec![InteractionKind::Byte],
-//            InteractionScope::Global,
-//        );
-//    }
-//}
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::{
+        mips::MipsAir, syscall::precompiles::sha256::extend_tests::sha_extend_program,
+        utils::setup_logger,
+    };
+    use p3_baby_bear::BabyBear;
+    use zkm2_core_executor::{programs::tests::simple_program, Executor};
+    use zkm2_stark::{
+        baby_bear_poseidon2::BabyBearPoseidon2, debug_interactions_with_all_chips, ZKMCoreOpts,
+        StarkMachine,
+    };
+
+    #[test]
+    fn test_memory_generate_trace() {
+        let program = simple_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let shard = runtime.record.clone();
+
+        let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Initialize);
+
+        let trace: RowMajorMatrix<BabyBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        println!("{:?}", trace.values);
+
+        let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Finalize);
+        let trace: RowMajorMatrix<BabyBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        println!("{:?}", trace.values);
+
+        for mem_event in shard.global_memory_finalize_events {
+            println!("{:?}", mem_event);
+        }
+    }
+
+    #[test]
+    fn test_memory_lookup_interactions() {
+        setup_logger();
+        let program = sha_extend_program();
+        let program_clone = program.clone();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let machine: StarkMachine<BabyBearPoseidon2, MipsAir<BabyBear>> =
+            MipsAir::machine(BabyBearPoseidon2::new());
+        let (pkey, _) = machine.setup(&program_clone);
+        let opts = ZKMCoreOpts::default();
+        machine.generate_dependencies(&mut runtime.records, &opts, None);
+
+        let shards = runtime.records;
+        for shard in shards.clone() {
+            debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+                &machine,
+                &pkey,
+                &[shard],
+                vec![InteractionKind::Memory],
+                InteractionScope::Local,
+            );
+        }
+        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+            &machine,
+            &pkey,
+            &shards,
+            vec![InteractionKind::Memory],
+            InteractionScope::Global,
+        );
+    }
+
+    #[test]
+    fn test_byte_lookup_interactions() {
+        setup_logger();
+        let program = sha_extend_program();
+        let program_clone = program.clone();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let machine = MipsAir::machine(BabyBearPoseidon2::new());
+        let (pkey, _) = machine.setup(&program_clone);
+        let opts = ZKMCoreOpts::default();
+        machine.generate_dependencies(&mut runtime.records, &opts, None);
+
+        let shards = runtime.records;
+        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+            &machine,
+            &pkey,
+            &shards,
+            vec![InteractionKind::Byte],
+            InteractionScope::Global,
+        );
+    }
+}

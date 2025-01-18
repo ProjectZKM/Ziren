@@ -10,7 +10,6 @@ mod precompiles;
 mod unconstrained;
 mod verify;
 mod write;
-mod stdsys;
 
 use std::sync::Arc;
 
@@ -21,7 +20,6 @@ use hashbrown::HashMap;
 
 pub use code::*;
 pub use context::*;
-pub use stdsys::*;
 use hint::{HintLenSyscall, HintReadSyscall};
 use precompiles::{
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
@@ -96,16 +94,6 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     );
     // todo: use HALT or both?
     syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
-    syscall_map.insert(SyscallCode::SYSEXITGROUP, Arc::new(HaltSyscall));
-
-    syscall_map.insert(SyscallCode::SYSMMAP2, Arc::new(MmapSyscall));
-    syscall_map.insert(SyscallCode::SYSMMAP, Arc::new(MmapSyscall));
-    syscall_map.insert(SyscallCode::SYSCLONE, Arc::new(CloneSyscall));
-    syscall_map.insert(SyscallCode::SYSBRK, Arc::new(BrkSyscall));
-    syscall_map.insert(SyscallCode::SYSFCNTL, Arc::new(FcntlSyscall));
-    syscall_map.insert(SyscallCode::SYSSETTHREADAREA, Arc::new(SetThreadAreaSyscall));
-    syscall_map.insert(SyscallCode::SYSWRITE, Arc::new(WriteSyscall));
-    syscall_map.insert(SyscallCode::SYSREAD, Arc::new(ReadSyscall));
 
     syscall_map.insert(SyscallCode::KECCAK_PERMUTE, Arc::new(Keccak256PermuteSyscall));
 
@@ -221,7 +209,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(SyscallCode::EXIT_UNCONSTRAINED, Arc::new(ExitUnconstrainedSyscall));
 
-    // syscall_map.insert(SyscallCode::WRITE, Arc::new(WriteSyscall));
+    syscall_map.insert(SyscallCode::WRITE, Arc::new(WriteSyscall));
 
     syscall_map.insert(SyscallCode::COMMIT, Arc::new(CommitSyscall));
 
