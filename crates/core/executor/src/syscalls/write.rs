@@ -2,7 +2,14 @@ use zkm2_primitives::consts::num_to_comma_separated;
 
 use crate::{Executor, Register};
 
-use super::{Syscall, SyscallCode, SyscallContext, MIPS_EBADF};
+use super::{Syscall, SyscallCode, SyscallContext};
+
+pub const MIPS_EBADF: u32 = 9;
+pub const FD_STDIN: u32 = 0;
+pub const FD_STDOUT: u32 = 1;
+pub const FD_STDERR: u32 = 2;
+pub const FD_PUBLIC_VALUE: u32 = 3;
+pub const FD_READ_HINT: u32 = 4;
 
 pub(crate) struct WriteSyscall;
 
@@ -27,7 +34,7 @@ impl Syscall for WriteSyscall {
             .map(|i| rt.byte(write_buf + i))
             .collect::<Vec<u8>>();
         let slice = bytes.as_slice();
-        if fd == 1 {
+        if fd == FD_STDOUT {
             let s = core::str::from_utf8(slice).unwrap();
             match parse_cycle_tracker_command(s) {
                 Some(command) => handle_cycle_tracker_command(rt, command),
@@ -41,7 +48,7 @@ impl Syscall for WriteSyscall {
                     }
                 }
             }
-        } else if fd == 2 {
+        } else if fd == FD_STDERR {
             let s = core::str::from_utf8(slice).unwrap();
             let flush_s = update_io_buf(ctx, fd, s);
             if !flush_s.is_empty() {
@@ -49,9 +56,9 @@ impl Syscall for WriteSyscall {
                     .into_iter()
                     .for_each(|line| println!("stderr: {}", line));
             }
-        } else if fd == 3 {
+        } else if fd == FD_PUBLIC_VALUE {
             rt.state.public_values_stream.extend_from_slice(slice);
-        } else if fd == 4 {
+        } else if fd == FD_READ_HINT {
             rt.state.input_stream.push(slice.to_vec());
         } else {
             tracing::warn!("tried to write to unknown file descriptor {fd}");

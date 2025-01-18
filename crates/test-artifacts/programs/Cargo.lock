@@ -35,7 +35,7 @@ dependencies = [
  "itoa",
  "ruint",
  "serde",
- "tiny-keccak",
+ "tiny-keccak 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -433,7 +433,22 @@ dependencies = [
  "cfg-if",
  "ecdsa",
  "elliptic-curve",
- "sha2",
+ "sha2 0.10.8",
+]
+
+[[package]]
+name = "keccak-permute-test"
+version = "1.1.0"
+dependencies = [
+ "zkm2-zkvm",
+]
+
+[[package]]
+name = "keccak256-test"
+version = "1.1.0"
+dependencies = [
+ "tiny-keccak 2.0.2 (git+https://github.com/sp1-patches/tiny-keccak?branch=patch-v2.0.2)",
+ "zkm2-zkvm",
 ]
 
 [[package]]
@@ -564,6 +579,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
 
 [[package]]
+name = "panic-test"
+version = "1.1.0"
+dependencies = [
+ "zkm2-zkvm",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -680,7 +702,7 @@ dependencies = [
  "once_cell",
  "revm-primitives",
  "ripemd",
- "sha2",
+ "sha2 0.10.8",
  "substrate-bn",
 ]
 
@@ -826,6 +848,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha-compress-test"
+version = "1.1.0"
+dependencies = [
+ "zkm2-zkvm",
+]
+
+[[package]]
+name = "sha-extend-test"
+version = "1.1.0"
+dependencies = [
+ "zkm2-zkvm",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.6"
+source = "git+https://github.com/succinctbot/RustCrypto-hashes.git#482efd7c1a750c300f3740a2c75dda9eb4eb1ddd"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -840,7 +886,7 @@ dependencies = [
 name = "sha2-precompile"
 version = "0.1.0"
 dependencies = [
- "sha2",
+ "sha2 0.10.8",
  "zkm2-zkvm",
 ]
 
@@ -848,7 +894,17 @@ dependencies = [
 name = "sha2-rust"
 version = "0.1.0"
 dependencies = [
- "sha2",
+ "sha2 0.10.8",
+ "zkm2-zkvm",
+]
+
+[[package]]
+name = "sha2-test"
+version = "1.1.0"
+dependencies = [
+ "hex",
+ "hex-literal",
+ "sha2 0.10.6",
  "zkm2-zkvm",
 ]
 
@@ -925,6 +981,15 @@ version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
 dependencies = [
+ "crunchy",
+]
+
+[[package]]
+name = "tiny-keccak"
+version = "2.0.2"
+source = "git+https://github.com/sp1-patches/tiny-keccak?branch=patch-v2.0.2#bf0b28f63510a90c7b6c21ac6ff461c93ecd2331"
+dependencies = [
+ "cfg-if",
  "crunchy",
 ]
 
@@ -1021,7 +1086,7 @@ dependencies = [
  "bincode",
  "cfg-if",
  "serde",
- "sha2",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -1035,6 +1100,6 @@ dependencies = [
  "libm",
  "rand",
  "serde",
- "sha2",
+ "sha2 0.10.8",
  "zkm2-lib",
 ]

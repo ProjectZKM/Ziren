@@ -28,6 +28,9 @@ pub struct ExecutionState {
     /// The shard clock keeps track of how many shards have been executed.
     pub current_shard: u32,
 
+    /// if exit
+    pub exited: bool,
+
     /// The memory which instructions operate over. Values contain the memory value and last shard
     /// + timestamp that each memory address was accessed.
     pub memory: PagedMemory<MemoryRecord>,
@@ -79,6 +82,7 @@ impl ExecutionState {
             clk: 0,
             pc: pc_start,
             next_pc,
+            exited: false,
             memory: PagedMemory::new_preallocated(),
             uninitialized_memory: PagedMemory::default(),
             input_stream: Vec::new(),

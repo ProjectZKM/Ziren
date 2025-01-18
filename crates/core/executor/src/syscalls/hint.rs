@@ -19,7 +19,7 @@ impl Syscall for HintLenSyscall {
         }
         Some((
             ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as u32,
-            0,
+            0
         ))
     }
 }

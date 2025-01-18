@@ -17,6 +17,7 @@ use crate::{
         AluEvent, CpuEvent, LookupId, MemoryAccessPosition, MemoryInitializeFinalizeEvent,
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord, SyscallEvent,
     },
+    hook::{HookEnv, HookRegistry},
     memory::{Entry, PagedMemory},
     record::{ExecutionRecord, MemoryAccessRecord},
     sign_extend,
@@ -51,6 +52,7 @@ pub struct Executor<'a> {
     /// In unconstrained mode, any events, clock, register, or memory changes are reset after
     /// leaving the unconstrained block. The only thing preserved is written to the input
     /// stream.
+    /// todo: check
     pub unconstrained: bool,
 
     /// Whether we should write to the report.
@@ -121,8 +123,8 @@ pub struct Executor<'a> {
     /// Verifier used to sanity check `verify_sp1_proof` during runtime.
     pub subproof_verifier: Arc<dyn SubproofVerifier + 'a>,
 
-    // /// Registry of hooks, to be invoked by writing to certain file descriptors.
-    // pub hook_registry: HookRegistry<'a>,
+    /// Registry of hooks, to be invoked by writing to certain file descriptors.
+    pub hook_registry: HookRegistry<'a>,
     /// The maximal shapes for the program.
     pub maximal_shapes: Option<Vec<HashMap<String, usize>>>,
 }
@@ -221,7 +223,7 @@ impl<'a> Executor<'a> {
         let subproof_verifier = context
             .subproof_verifier
             .unwrap_or_else(|| Arc::new(DefaultSubproofVerifier::new()));
-        // let hook_registry = context.hook_registry.unwrap_or_default();
+        let hook_registry = context.hook_registry.unwrap_or_default();
 
         Self {
             record,
@@ -243,7 +245,7 @@ impl<'a> Executor<'a> {
             report: ExecutionReport::default(),
             print_report: false,
             subproof_verifier,
-            // hook_registry,
+            hook_registry,
             opts,
             max_cycles: context.max_cycles,
             deferred_proof_verification: if context.skip_deferred_proof_verification {
@@ -258,7 +260,6 @@ impl<'a> Executor<'a> {
         }
     }
 
-    /*
     /// Invokes a hook with the given file descriptor `fd` with the data `buf`.
     ///
     /// # Errors
@@ -278,7 +279,6 @@ impl<'a> Executor<'a> {
     pub fn hook_env<'b>(&'b self) -> HookEnv<'b, 'a> {
         HookEnv { runtime: self }
     }
-     */
 
     /// Recover runtime state from a program and existing execution state.
     #[must_use]
@@ -323,7 +323,8 @@ impl<'a> Executor<'a> {
         }
     */
 
-    /// Get the current value of a register.
+    /// Get the current value of a register, but doesn't use a memory record.
+    /// Careful call it directly.
     #[must_use]
     pub fn register(&mut self, register: Register) -> u32 {
         let addr = register as u32;
@@ -377,7 +378,7 @@ impl<'a> Executor<'a> {
     #[must_use]
     pub fn byte(&mut self, addr: u32) -> u8 {
         let word = self.word(addr - addr % 4);
-        (word >> ((addr % 4) * 8)) as u8
+        (word >> (24 - (addr % 4) * 8)) as u8
     }
 
     /// Get the current timestamp for a given memory access position.
@@ -585,6 +586,8 @@ impl<'a> Executor<'a> {
                 MemoryAccessPosition::A => self.memory_accesses.a = Some(record.into()),
                 MemoryAccessPosition::B => self.memory_accesses.b = Some(record.into()),
                 MemoryAccessPosition::C => self.memory_accesses.c = Some(record.into()),
+                MemoryAccessPosition::AH => self.memory_accesses.ah = Some(record.into()),
+                MemoryAccessPosition::S => self.memory_accesses.s = Some(record.into()),
                 MemoryAccessPosition::Memory => self.memory_accesses.memory = Some(record.into()),
             }
         }
@@ -619,6 +622,14 @@ impl<'a> Executor<'a> {
                     debug_assert!(self.memory_accesses.c.is_none());
                     self.memory_accesses.c = Some(record.into());
                 }
+                MemoryAccessPosition::AH => {
+                    debug_assert!(self.memory_accesses.ah.is_none());
+                    self.memory_accesses.ah = Some(record.into());
+                }
+                MemoryAccessPosition::S => {
+                    debug_assert!(self.memory_accesses.s.is_none());
+                    self.memory_accesses.s = Some(record.into());
+                }
                 MemoryAccessPosition::Memory => {
                     debug_assert!(self.memory_accesses.memory.is_none());
                     self.memory_accesses.memory = Some(record.into());
@@ -632,15 +643,15 @@ impl<'a> Executor<'a> {
         self.mr_cpu(register as u32, position)
     }
 
-    /// Write to a register.
-    // todo: specify MemoryAccessPosition
-    pub fn rw(&mut self, register: Register, value: u32) {
-        // The only time we are writing to a register is when it is in operand A.
+    /// Write to a register A or AH
+    pub fn rw(&mut self, register: Register, value: u32, position: MemoryAccessPosition) {
+        // The only time we are writing to a register is when it is in operand A or AH.
+        debug_assert!(vec![MemoryAccessPosition::A, MemoryAccessPosition::AH, MemoryAccessPosition::S].contains(&position));
         // Register 0 should always be 0
         if register == Register::ZERO {
-            self.mw_cpu(register as u32, 0, MemoryAccessPosition::A);
+            self.mw_cpu(register as u32, 0, position);
         } else {
-            self.mw_cpu(register as u32, value, MemoryAccessPosition::A);
+            self.mw_cpu(register as u32, value, position);
         }
     }
 
@@ -694,7 +705,6 @@ impl<'a> Executor<'a> {
             auipc_lookup_id,
         });
 
-        // todo: impl
         emit_cpu_dependencies(self, self.record.cpu_events.len() - 1);
     }
 
@@ -820,11 +830,11 @@ impl<'a> Executor<'a> {
         lookup_id: LookupId,
     ) -> (Option<u32>, u32, u32, u32) {
         let hi = if op.opcode.is_use_lo_hi_alu() {
-            self.rw(Register::LO, a);
-            self.rw(Register::HI, hi);
+            self.rw(Register::LO, a, MemoryAccessPosition::A);
+            self.rw(Register::HI, hi, MemoryAccessPosition::AH);
             Some(hi)
         } else {
-            self.rw(rd.into(), a);
+            self.rw(rd.into(), a, MemoryAccessPosition::A);
             None
         };
 
@@ -838,13 +848,13 @@ impl<'a> Executor<'a> {
     /// Fetch the input operand values for a load instruction.
     /// rs_reg,rt_reg,imm=a,b,c
     fn load_rr(&mut self, instruction: &Instruction) -> (Register, u32, u32, u32, u32) {
-        let (rs_reg, rt_reg, offset) = (
+        let (rt_reg, rs_reg, offset) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
             instruction.op_c,
         );
-        let rs = self.rr(rs_reg, MemoryAccessPosition::A);
-        let rt = self.rr(rt_reg, MemoryAccessPosition::B);
+        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
+        let rt = self.rr(rt_reg, MemoryAccessPosition::A);
 
         let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
         let virt = virt_raw & 0xFFFF_FFFC;
@@ -855,20 +865,20 @@ impl<'a> Executor<'a> {
 
     /// Fetch the input operand values for a store instruction.
     fn store_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32, u32, Register) {
-        let (rs_reg, rt_reg, offset) = (
+        let (rt_reg, rs_reg, offset) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
             instruction.op_c,
         );
-        let rs = self.rr(rs_reg, MemoryAccessPosition::A);
-        let rt = self.rr(rt_reg, MemoryAccessPosition::B);
+        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
+        let rt = self.rr(rt_reg, MemoryAccessPosition::A);
 
         let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
         let virt = virt_raw & 0xFFFF_FFFC;
 
         let memory_value = self.word(virt);
 
-        (rs, rt, virt_raw, offset, memory_value, rt_reg)
+        (rt, rs, virt_raw, offset, memory_value, rt_reg)
     }
 
     /// Fetch the input operand values for a branch instruction.
@@ -953,8 +963,8 @@ impl<'a> Executor<'a> {
             // syscall
             Opcode::SYSCALL => {
                 let syscall_id = self.register(Register::V0);
-                b = self.rr(Register::A0, MemoryAccessPosition::C);
-                c = self.rr(Register::A1, MemoryAccessPosition::B);
+                c = self.rr(Register::A1, MemoryAccessPosition::C);
+                b = self.rr(Register::A0, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
 
                 if self.print_report && !self.unconstrained {
@@ -969,9 +979,9 @@ impl<'a> Executor<'a> {
                     .entry(syscall_for_count)
                     .or_insert(0);
                 let (threshold, multiplier) = match syscall_for_count {
-                    // SyscallCode::KECCAK_PERMUTE => (self.opts.split_opts.keccak, 24),
-                    // SyscallCode::SHA_EXTEND => (self.opts.split_opts.sha_extend, 48),
-                    // SyscallCode::SHA_COMPRESS => (self.opts.split_opts.sha_compress, 80),
+                    SyscallCode::KECCAK_PERMUTE => (self.opts.split_opts.keccak, 24),
+                    SyscallCode::SHA_EXTEND => (self.opts.split_opts.sha_extend, 48),
+                    SyscallCode::SHA_COMPRESS => (self.opts.split_opts.sha_compress, 80),
                     _ => (self.opts.split_opts.deferred, 1),
                 };
                 let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
@@ -999,7 +1009,7 @@ impl<'a> Executor<'a> {
                         }
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                        if syscall == SyscallCode::SYSBRK && precompile_rt.exit_code != 0 {
+                        if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
                             return Err(ExecutionError::HaltWithNonZeroExitCode(
                                 precompile_rt.exit_code,
                             ));
@@ -1011,15 +1021,21 @@ impl<'a> Executor<'a> {
                             precompile_rt.exit_code,
                         )
                     } else {
-                        return Err(ExecutionError::UnsupportedSyscall(syscall_id));
+                        // return Err(ExecutionError::UnsupportedSyscall(syscall_id));
+                        (self.state.next_pc, 5, 0)
                     };
+
+                if syscall == SyscallCode::HALT && returned_exit_code == 0 {
+                    self.state.exited = true;
+                }
 
                 // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)
                 clk = self.state.clk;
                 pc = self.state.pc;
 
-                self.rw(Register::V0, a);
-                self.rw(Register::V1, v1);
+                // todo: update circuit
+                self.rw(Register::V0, a, MemoryAccessPosition::A);
+                self.rw(Register::A3, v1, MemoryAccessPosition::AH);
                 next_pc = precompile_next_pc;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
@@ -1078,7 +1094,7 @@ impl<'a> Executor<'a> {
             }
 
             // Store instructions.
-            Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SDC1 => {
+            Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SDC1 | Opcode::SC => {
                 (a, b, c) = self.execute_store(instruction)?;
             }
 
@@ -1098,7 +1114,7 @@ impl<'a> Executor<'a> {
                 (a, b, c, next_next_pc) = self.execute_jump_direct(instruction);
             }
 
-            Opcode::GetContext | Opcode::SetContext => {}
+            // Opcode::GetContext | Opcode::SetContext => {}
 
             Opcode::NOP => {}
 
@@ -1120,15 +1136,13 @@ impl<'a> Executor<'a> {
             Opcode::SIGNEXT => {
                 (a, b, c) = self.execute_signext(instruction);
             }
-            Opcode::SWAP_HALF => {
-                (a, b, c) = self.execute_swaphalf(instruction);
-            }
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
-            _ => {
-                unreachable!("Unimplemented operation: {:?}", instruction);
-            }
+            // Opcode::PC => {}
+            // Opcode::JAL => {}
+            // Opcode::JALR => {}
+            Opcode::UNIMPL => { log::warn!("Unimplemented code") }
         }
 
         // Update the program counter.
@@ -1136,7 +1150,8 @@ impl<'a> Executor<'a> {
         self.state.next_pc = next_next_pc;
 
         // Update the clk to the next cycle.
-        self.state.clk += 4;
+        // todo: 5 -> 7 because of adding memory access position
+        self.state.clk += 7;
 
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
@@ -1169,7 +1184,7 @@ impl<'a> Executor<'a> {
         let mask_msb = (1 << (msbd + lsb + 1)) - 1;
         let a = (b & mask_msb) >> lsb;
 
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, 0)
     }
 
@@ -1188,7 +1203,7 @@ impl<'a> Executor<'a> {
         let mask_field = mask << lsb;
         let a = (rt & !mask_field) | ((b << lsb) & mask_field);
 
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, 0)
     }
 
@@ -1204,24 +1219,25 @@ impl<'a> Executor<'a> {
         let sin = (b as u64) + ((b as u64) << 32);
         let a = (sin >> sa) as u32;
 
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, 0)
     }
 
     fn execute_rdhwr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (rt, rd) = (instruction.op_a.into(), (instruction.op_b as u8).into());
 
+        let c = self.rr(Register::LOCAL_USER, MemoryAccessPosition::C);
         let b = self.rr(rd, MemoryAccessPosition::B);
 
         let a = if b == 0 {
             1
-        } else if b == 29 {
-            self.register(Register::LOCAL_USER)
+        } else if rd == Register::SP {
+            c
         } else {
             0
         };
-        self.rw(rt, a);
-        (a, b, 0)
+        self.rw(rt, a, MemoryAccessPosition::A);
+        (a, b, c)
     }
 
     fn execute_signext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
@@ -1242,7 +1258,7 @@ impl<'a> Executor<'a> {
         } else {
             b & mask
         };
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, 0)
     }
 
@@ -1256,7 +1272,7 @@ impl<'a> Executor<'a> {
             | ((b & 0xFF) << 8)
             | ((b >> 8) & 0xFF);
 
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, 0)
     }
 
@@ -1290,8 +1306,9 @@ impl<'a> Executor<'a> {
         let (result, _) = mul.overflowing_add(addend);
         let a = result as u32;
         let hi = (result >> 32) as u32;
-        self.rw(Register::HI, hi);
-        self.rw(Register::LO, a);
+        self.rw(Register::LO, a, MemoryAccessPosition::A);
+        self.rw(Register::HI, hi, MemoryAccessPosition::AH);
+
         (Some(hi), a, b, c)
     }
 
@@ -1313,7 +1330,7 @@ impl<'a> Executor<'a> {
         };
 
         let a = if mov { b } else { a };
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, c)
     }
 
@@ -1328,7 +1345,7 @@ impl<'a> Executor<'a> {
             }
         };
         let a = value.leading_zeros();
-        self.rw(rd, a);
+        self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, 0)
     }
 
@@ -1434,7 +1451,22 @@ impl<'a> Executor<'a> {
         &mut self,
         instruction: &Instruction,
     ) -> Result<(u32, u32, u32), ExecutionError> {
-        let (rt_reg, rt, rs, offset, mem) = self.load_rr(instruction);
+        let (rt_reg, rs_reg, offset) = (
+            instruction.op_a.into(),
+            (instruction.op_b as u8).into(),
+            instruction.op_c,
+        );
+        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
+        // We needn't the memory access record here, because we will write to rt_reg,
+        // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
+        let rt = self.register(rt_reg);
+
+        let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
+        let virt = virt_raw & 0xFFFF_FFFC;
+
+        let mem = self.mr_cpu(virt, MemoryAccessPosition::Memory);
+        let rs = virt_raw;
+
         let val = match instruction.opcode {
             Opcode::LH => {
                 let mem_fc = |i: u32| -> u32 { sign_extend::<16>((mem >> (16 - i * 8)) & 0xffff) };
@@ -1472,15 +1504,32 @@ impl<'a> Executor<'a> {
             }
             _ => unreachable!(),
         };
-        self.rw(rt_reg, val);
-        Ok((rs, val, offset))
+        self.rw(rt_reg, val, MemoryAccessPosition::A);
+        Ok((val, rs, offset))
     }
 
     fn execute_store(
         &mut self,
         instruction: &Instruction,
     ) -> Result<(u32, u32, u32), ExecutionError> {
-        let (rs, rt, virt_raw, offset, mem, rt_reg) = self.store_rr(instruction);
+        let (rt_reg, rs_reg, offset) = (
+            instruction.op_a.into(),
+            (instruction.op_b as u8).into(),
+            instruction.op_c,
+        );
+        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
+        // todo: add constraints in cpu chip
+        let rt = if instruction.opcode == Opcode::SC {
+            self.register(rt_reg)
+        } else {
+            self.rr(rt_reg, MemoryAccessPosition::A)
+        };
+
+        let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
+        let virt = virt_raw & 0xFFFF_FFFC;
+
+        let mem = self.word(virt);
+
         let val = match instruction.opcode {
             Opcode::SB => {
                 let out = |i: u32| -> u32 {
@@ -1525,9 +1574,12 @@ impl<'a> Executor<'a> {
             MemoryAccessPosition::Memory,
         );
         if instruction.opcode == Opcode::SC {
-            self.rw(rt_reg, val);
+            self.rw(rt_reg, 1, MemoryAccessPosition::A);
+
+            Ok((val, rs, offset))
+        } else {
+            Ok((rt, rs, offset))
         }
-        Ok((rs, rt, offset))
     }
 
     fn execute_branch(
@@ -1567,7 +1619,7 @@ impl<'a> Executor<'a> {
         let target_pc = self.rr(target, MemoryAccessPosition::B);
         // maybe rename it
         let next_pc = self.state.pc.wrapping_add(8);
-        self.rw(link, next_pc);
+        self.rw(link, next_pc, MemoryAccessPosition::A);
 
         (next_pc, target_pc, c, target_pc)
     }
@@ -1576,11 +1628,11 @@ impl<'a> Executor<'a> {
 
         let (target_pc, _) = target.overflowing_shl(2);
         //todo: check if necessary
-        self.rw(Register::ZERO, target_pc);
+        // self.rw(Register::ZERO, target_pc);
         // maybe rename it
         let pc = self.state.pc;
         let next_pc = pc.wrapping_add(8);
-        self.rw(link, next_pc);
+        self.rw(link, next_pc, MemoryAccessPosition::A);
 
         (next_pc, target, c, target_pc)
     }
@@ -1590,12 +1642,12 @@ impl<'a> Executor<'a> {
         let target = sign_extend::<16>(imm);
         let (target_pc, _) = target.overflowing_shl(2);
         //todo: check if necessary
-        self.rw(Register::ZERO, target_pc);
+        // self.rw(Register::ZERO, target_pc);
         let pc = self.state.pc;
         let target_pc = target_pc.wrapping_add(pc + 4);
         // maybe rename it
         let next_pc = pc.wrapping_add(8);
-        self.rw(link, next_pc);
+        self.rw(link, next_pc, MemoryAccessPosition::A);
 
         (next_pc, imm, c, target_pc)
     }
@@ -1620,6 +1672,7 @@ impl<'a> Executor<'a> {
         if !self.unconstrained {
             // If there's not enough cycles left for another instruction, move to the next shard.
             let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
+            // println!("cpu exit {cpu_exit}, {} {}, {}", self.max_syscall_cycles, self.state.clk, self.shard_size);
 
             // Every N cycles, check if there exists at least one shape that fits.
             //
@@ -1715,9 +1768,9 @@ impl<'a> Executor<'a> {
                             divrem_distance,
                             lt_distance,
                         ]
-                        .into_iter()
-                        .min()
-                        .unwrap();
+                            .into_iter()
+                            .min()
+                            .unwrap();
 
                         if l_infinity >= 32 {
                             shape_match_found = true;
@@ -1766,8 +1819,9 @@ impl<'a> Executor<'a> {
 
         // todo: check done
         let done = self.state.pc == 0
+            || self.state.exited
             || self.state.pc.wrapping_sub(self.program.pc_base)
-                >= (self.program.instructions.len() * 4) as u32;
+            >= (self.program.instructions.len() * 4) as u32;
         if done && self.unconstrained {
             log::error!(
                 "program ended in unconstrained mode at clk {}",
@@ -1896,6 +1950,13 @@ impl<'a> Executor<'a> {
         }
     }
 
+    pub fn run_very_fast(&mut self) -> Result<(), ExecutionError> {
+        self.executor_mode = ExecutorMode::Simple;
+        self.print_report = false;
+        while !self.execute()? {}
+        Ok(())
+    }
+
     /// Executes the program without tracing and without emitting events.
     ///
     /// # Errors
@@ -1967,6 +2028,7 @@ impl<'a> Executor<'a> {
 
             // Push the remaining execution record with memory initialize & finalize events.
             self.bump_record();
+            log::debug!("last step {}", self.state.global_clk);
         }
 
         // Push the remaining execution record, if there are any CPU events.
@@ -2033,7 +2095,7 @@ impl<'a> Executor<'a> {
 
         if self.emit_global_memory_events
             && (self.executor_mode == ExecutorMode::Trace
-                || self.executor_mode == ExecutorMode::Checkpoint)
+            || self.executor_mode == ExecutorMode::Checkpoint)
         {
             // SECTION: Set up all MemoryInitializeFinalizeEvents needed for memory argument.
             let memory_finalize_events = &mut self.record.global_memory_finalize_events;
@@ -2111,6 +2173,11 @@ impl<'a> Executor<'a> {
             );
         }
     }
+
+    fn show_regs(&self) {
+        let regs = (0..37).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
+        println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
+    }
 }
 
 impl Default for ExecutorMode {
@@ -2134,10 +2201,10 @@ fn log2_ceil_usize(n: usize) -> usize {
 mod tests {
     use zkm2_stark::ZKMCoreOpts;
     use crate::programs::tests::{
-         fibonacci_program,
-         // anic_program, secp256r1_add_program, secp256r1_double_program,
-         simple_program,
-         //simple_memory_program, ssz_withdrawals_program, u256xu2048_mul_program,
+        fibonacci_program,
+        // anic_program, secp256r1_add_program, secp256r1_double_program,
+        simple_program,
+        //simple_memory_program, ssz_withdrawals_program, u256xu2048_mul_program,
     };
 
     use crate::{Instruction, Opcode, Register};
@@ -2163,7 +2230,21 @@ mod tests {
     fn test_fibonacci_program_run() {
         let program = fibonacci_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.run().unwrap();
+        runtime.run_very_fast().unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn test_hello_program_run() {
+        use log::LevelFilter;
+        use env_logger;
+
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+        let program = Program::from_elf("../emulator/test-vectors/hello").unwrap();
+        // let program = Program::from_elf("crates/core/emulator/test-vectors/hello").unwrap();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run_very_fast().unwrap();
     }
     //
     // #[test]
@@ -2296,7 +2377,7 @@ mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, 0, false, true),
-            Instruction::new(Opcode::SLL, 31, 30, 29, 0, false, false),
+            Instruction::new(Opcode::SLL, 31, 30, 29, 0, false, false)
         ];
         let program = Program::new(instructions, 0, 0);
 
@@ -2313,7 +2394,7 @@ mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, 0, false, true),
-            Instruction::new(Opcode::SRL, 31, 30, 29, 0, false, false),
+            Instruction::new(Opcode::SRL, 31, 30, 29, 0, false, false)
         ];
         let program = Program::new(instructions, 0, 0);
 
@@ -2330,7 +2411,7 @@ mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, 0, false, true),
-            Instruction::new(Opcode::SRA, 31, 30, 29, 0, false, false),
+            Instruction::new(Opcode::SRA, 31, 30, 29, 0, false, false)
         ];
         let program = Program::new(instructions, 0, 0);
 

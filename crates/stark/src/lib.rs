@@ -11,7 +11,6 @@ mod config;
 mod debug;
 mod evaluation_frame;
 mod folder;
-mod generation;
 mod lookup;
 mod machine;
 mod opts;

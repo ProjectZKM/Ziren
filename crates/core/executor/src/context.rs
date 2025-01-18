@@ -4,7 +4,7 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::{
-    // hook::{hookify, BoxedHook, HookEnv, HookRegistry},
+    hook::{hookify, BoxedHook, HookEnv, HookRegistry},
     subproof::SubproofVerifier,
 };
 
@@ -13,9 +13,8 @@ use crate::{
 pub struct ZKMContext<'a> {
     /// The registry of hooks invocable from inside SP1.
     ///
-    // /// Note: `None` denotes the default list of hooks.
-    // todo: check if this field is necessary
-    // pub hook_registry: Option<HookRegistry<'a>>,
+    /// Note: `None` denotes the default list of hooks.
+    pub hook_registry: Option<HookRegistry<'a>>,
 
     /// The verifier for verifying subproofs.
     pub subproof_verifier: Option<Arc<dyn SubproofVerifier + 'a>>,
@@ -30,8 +29,8 @@ pub struct ZKMContext<'a> {
 /// A builder for [`ZKMContext`].
 #[derive(Clone, Default)]
 pub struct ZKMContextBuilder<'a> {
-    // no_default_hooks: bool,
-    // hook_registry_entries: Vec<(u32, BoxedHook<'a>)>,
+    no_default_hooks: bool,
+    hook_registry_entries: Vec<(u32, BoxedHook<'a>)>,
     subproof_verifier: Option<Arc<dyn SubproofVerifier + 'a>>,
     max_cycles: Option<u64>,
     skip_deferred_proof_verification: bool,
@@ -58,31 +57,30 @@ impl<'a> ZKMContextBuilder<'a> {
     ///
     /// Clears and resets the builder, allowing it to be reused.
     pub fn build(&mut self) -> ZKMContext<'a> {
-        // // If hook_registry_entries is nonempty or no_default_hooks true,
-        // // indicating a non-default value of hook_registry.
-        // let hook_registry =
-        //     (!self.hook_registry_entries.is_empty() || self.no_default_hooks).then(|| {
-        //         let mut table = if take(&mut self.no_default_hooks) {
-        //             HashMap::default()
-        //         } else {
-        //             HookRegistry::default().table
-        //         };
-        //         // Allows overwriting default hooks.
-        //         table.extend(take(&mut self.hook_registry_entries));
-        //         HookRegistry { table }
-        //     });
+        // If hook_registry_entries is nonempty or no_default_hooks true,
+        // indicating a non-default value of hook_registry.
+        let hook_registry =
+            (!self.hook_registry_entries.is_empty() || self.no_default_hooks).then(|| {
+                let mut table = if take(&mut self.no_default_hooks) {
+                    HashMap::default()
+                } else {
+                    HookRegistry::default().table
+                };
+                // Allows overwriting default hooks.
+                table.extend(take(&mut self.hook_registry_entries));
+                HookRegistry { table }
+            });
         let subproof_verifier = take(&mut self.subproof_verifier);
         let cycle_limit = take(&mut self.max_cycles);
         let skip_deferred_proof_verification = take(&mut self.skip_deferred_proof_verification);
         ZKMContext {
-            // hook_registry,
+            hook_registry,
             subproof_verifier,
             max_cycles: cycle_limit,
             skip_deferred_proof_verification,
         }
     }
 
-    /*
     /// Add a runtime [Hook](super::Hook) into the context.
     ///
     /// Hooks may be invoked from within SP1 by writing to the specified file descriptor `fd`
@@ -105,7 +103,6 @@ impl<'a> ZKMContextBuilder<'a> {
         self.no_default_hooks = true;
         self
     }
-     */
 
     /// Add a subproof verifier.
     ///
@@ -137,7 +134,6 @@ mod tests {
 
     use crate::{subproof::DefaultSubproofVerifier, ZKMContext};
 
-    /*
     #[test]
     fn defaults() {
         let ZKMContext {
@@ -176,7 +172,6 @@ mod tests {
             &[30]
         );
     }
-     */
 
     #[test]
     fn subproof_verifier() {

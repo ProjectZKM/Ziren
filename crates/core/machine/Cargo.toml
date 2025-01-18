@@ -26,11 +26,11 @@ p3-uni-stark = { workspace = true }
 p3-util = { workspace = true }
 zkm2-derive = { workspace = true }
 zkm2-primitives = { workspace = true }
-zkm2-core-executor = { workspace = true }
+zkm2-core-executor = { workspace = true, default-features = true }
 zkm2-curves = { workspace = true }
 
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = [
-  "bls381",
+    "bls381",
 ] }
 cfg-if = "1.0.0"
 generic-array = { version = "1.1.0", features = ["alloc", "serde"] }

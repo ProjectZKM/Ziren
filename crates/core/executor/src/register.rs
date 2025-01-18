@@ -38,10 +38,8 @@ pub enum Register {
     LO = 32,
     HI = 33,
     HEAP = 34,
-    PC = 35,
-    NEXT_PC = 36,
-    BRK = 37,
-    LOCAL_USER = 38,
+    BRK = 35,
+    LOCAL_USER = 36,
 }
 
 impl From<u8> for Register {
@@ -82,10 +80,8 @@ impl From<u8> for Register {
             32 => Register::LO,
             33 => Register::HI,
             34 => Register::HEAP,
-            35 => Register::PC,
-            36 => Register::NEXT_PC,
-            37 => Register::BRK,
-            38 => Register::LOCAL_USER,
+            35 => Register::BRK,
+            36 => Register::LOCAL_USER,
             _ => panic!("invalid register {value}"),
         }
     }

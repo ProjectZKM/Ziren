@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 
 use crate::{
-    events::{LookupId, MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, SyscallEvent},
+    events::{LookupId, MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, SyscallEvent, PrecompileEvent},
     record::ExecutionRecord,
     Executor, ExecutorMode, Register,
 };
@@ -49,7 +49,6 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
         &mut self.rt.record
     }
 
-    /*
     #[inline]
     /// Add a precompile event to the execution record.
     pub fn add_precompile_event(
@@ -62,7 +61,6 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
             self.record_mut().precompile_events.add_event(syscall_code, syscall_event, event);
         }
     }
-    */
 
     /// Get the current shard.
     #[must_use]

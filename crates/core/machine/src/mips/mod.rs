@@ -36,23 +36,23 @@ pub(crate) mod mips_chips {
     pub use crate::{
         alu::{AddSubChip, BitwiseChip, DivRemChip, LtChip, MulChip, ShiftLeft, ShiftRightChip},
         bytes::ByteChip,
-                cpu::CpuChip,
-                memory::MemoryGlobalChip,
-                program::ProgramChip,
-                syscall::{
-                    chip::SyscallChip,
-                    precompiles::{
-                        edwards::{EdAddAssignChip, EdDecompressChip},
-                        keccak256::KeccakPermuteChip,
-                        sha256::{ShaCompressChip, ShaExtendChip},
-                        // u256x2048_mul::U256x2048MulChip,
-                        uint256::Uint256MulChip,
-                        weierstrass::{
-                            WeierstrassAddAssignChip, WeierstrassDecompressChip,
-                            WeierstrassDoubleAssignChip,
-                        },
-                    },
+        cpu::CpuChip,
+        memory::MemoryGlobalChip,
+        program::ProgramChip,
+        syscall::{
+            chip::SyscallChip,
+            precompiles::{
+                edwards::{EdAddAssignChip, EdDecompressChip},
+                keccak256::KeccakPermuteChip,
+                sha256::{ShaCompressChip, ShaExtendChip},
+                // u256x2048_mul::U256x2048MulChip,
+                uint256::Uint256MulChip,
+                weierstrass::{
+                    WeierstrassAddAssignChip, WeierstrassDecompressChip,
+                    WeierstrassDoubleAssignChip,
                 },
+            },
+        },
     };
     pub use zkm2_curves::{
         edwards::{ed25519::Ed25519Parameters, EdwardsCurve},
@@ -155,7 +155,7 @@ pub enum MipsAir<F: PrimeField32> {
 
 impl<F: PrimeField32> MipsAir<F> {
     #[instrument("construct MipsAir machine", level = "debug", skip_all)]
-    pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
+    pub fn machine<SC: StarkGenericConfig<Val=F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS, true)
     }
@@ -487,58 +487,58 @@ impl<F: PrimeField32> MipsAir<F> {
             .collect()
     }
 
-     pub(crate) fn rows_per_event(&self) -> usize {
-         match self {
-             Self::Sha256Compress(_) => 80,
-             Self::Sha256Extend(_) => 48,
-             Self::KeccakP(_) => 24,
-             _ => 1,
-         }
-     }
+    pub(crate) fn rows_per_event(&self) -> usize {
+        match self {
+            Self::Sha256Compress(_) => 80,
+            Self::Sha256Extend(_) => 48,
+            Self::KeccakP(_) => 24,
+            _ => 1,
+        }
+    }
 
-     pub(crate) fn syscall_code(&self) -> SyscallCode {
-         match self {
-             Self::Bls12381Add(_) => SyscallCode::BLS12381_ADD,
-             Self::Bn254Add(_) => SyscallCode::BN254_ADD,
-             Self::Bn254Double(_) => SyscallCode::BN254_DOUBLE,
-             Self::Bn254Fp(_) => SyscallCode::BN254_FP_ADD,
-             Self::Bn254Fp2AddSub(_) => SyscallCode::BN254_FP2_ADD,
-             Self::Bn254Fp2Mul(_) => SyscallCode::BN254_FP2_MUL,
-             Self::Ed25519Add(_) => SyscallCode::ED_ADD,
-             Self::Ed25519Decompress(_) => SyscallCode::ED_DECOMPRESS,
-             Self::KeccakP(_) => SyscallCode::KECCAK_PERMUTE,
-             Self::Secp256k1Add(_) => SyscallCode::SECP256K1_ADD,
-             Self::Secp256k1Double(_) => SyscallCode::SECP256K1_DOUBLE,
-             Self::Secp256r1Add(_) => SyscallCode::SECP256R1_ADD,
-             Self::Secp256r1Double(_) => SyscallCode::SECP256R1_DOUBLE,
-             Self::Sha256Compress(_) => SyscallCode::SHA_COMPRESS,
-             Self::Sha256Extend(_) => SyscallCode::SHA_EXTEND,
-             Self::Uint256Mul(_) => SyscallCode::UINT256_MUL,
-             //Self::U256x2048Mul(_) => SyscallCode::U256XU2048_MUL,
-             Self::Bls12381Decompress(_) => SyscallCode::BLS12381_DECOMPRESS,
-             Self::K256Decompress(_) => SyscallCode::SECP256K1_DECOMPRESS,
-             Self::P256Decompress(_) => SyscallCode::SECP256R1_DECOMPRESS,
-             Self::Bls12381Double(_) => SyscallCode::BLS12381_DOUBLE,
-             Self::Bls12381Fp(_) => SyscallCode::BLS12381_FP_ADD,
-             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
-             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
-             Self::Add(_) => unreachable!("Invalid for core chip"),
-             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
-             Self::DivRem(_) => unreachable!("Invalid for core chip"),
-             Self::Cpu(_) => unreachable!("Invalid for core chip"),
-             Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
-             Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),
-             Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),
-             Self::ProgramMemory(_) => unreachable!("Invalid for memory program"),
-             Self::Program(_) => unreachable!("Invalid for core chip"),
-             Self::Mul(_) => unreachable!("Invalid for core chip"),
-             Self::Lt(_) => unreachable!("Invalid for core chip"),
-             Self::ShiftRight(_) => unreachable!("Invalid for core chip"),
-             Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
-             Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
-             Self::SyscallCore(_) => unreachable!("Invalid for core chip"),
-             Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),
-         }
+    pub(crate) fn syscall_code(&self) -> SyscallCode {
+        match self {
+            Self::Bls12381Add(_) => SyscallCode::BLS12381_ADD,
+            Self::Bn254Add(_) => SyscallCode::BN254_ADD,
+            Self::Bn254Double(_) => SyscallCode::BN254_DOUBLE,
+            Self::Bn254Fp(_) => SyscallCode::BN254_FP_ADD,
+            Self::Bn254Fp2AddSub(_) => SyscallCode::BN254_FP2_ADD,
+            Self::Bn254Fp2Mul(_) => SyscallCode::BN254_FP2_MUL,
+            Self::Ed25519Add(_) => SyscallCode::ED_ADD,
+            Self::Ed25519Decompress(_) => SyscallCode::ED_DECOMPRESS,
+            Self::KeccakP(_) => SyscallCode::KECCAK_PERMUTE,
+            Self::Secp256k1Add(_) => SyscallCode::SECP256K1_ADD,
+            Self::Secp256k1Double(_) => SyscallCode::SECP256K1_DOUBLE,
+            Self::Secp256r1Add(_) => SyscallCode::SECP256R1_ADD,
+            Self::Secp256r1Double(_) => SyscallCode::SECP256R1_DOUBLE,
+            Self::Sha256Compress(_) => SyscallCode::SHA_COMPRESS,
+            Self::Sha256Extend(_) => SyscallCode::SHA_EXTEND,
+            Self::Uint256Mul(_) => SyscallCode::UINT256_MUL,
+            //Self::U256x2048Mul(_) => SyscallCode::U256XU2048_MUL,
+            Self::Bls12381Decompress(_) => SyscallCode::BLS12381_DECOMPRESS,
+            Self::K256Decompress(_) => SyscallCode::SECP256K1_DECOMPRESS,
+            Self::P256Decompress(_) => SyscallCode::SECP256R1_DECOMPRESS,
+            Self::Bls12381Double(_) => SyscallCode::BLS12381_DOUBLE,
+            Self::Bls12381Fp(_) => SyscallCode::BLS12381_FP_ADD,
+            Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
+            Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
+            Self::Add(_) => unreachable!("Invalid for core chip"),
+            Self::Bitwise(_) => unreachable!("Invalid for core chip"),
+            Self::DivRem(_) => unreachable!("Invalid for core chip"),
+            Self::Cpu(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
+            Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),
+            Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),
+            Self::ProgramMemory(_) => unreachable!("Invalid for memory program"),
+            Self::Program(_) => unreachable!("Invalid for core chip"),
+            Self::Mul(_) => unreachable!("Invalid for core chip"),
+            Self::Lt(_) => unreachable!("Invalid for core chip"),
+            Self::ShiftRight(_) => unreachable!("Invalid for core chip"),
+            Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
+            Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
+            Self::SyscallCore(_) => unreachable!("Invalid for core chip"),
+            Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),
+        }
     }
 
     /// Get the height of the corresponding precompile chip.
@@ -580,7 +580,6 @@ impl<F: PrimeField32> core::hash::Hash for MipsAir<F> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 pub mod tests {
-
     use crate::{
         io::ZKMStdin,
         mips::MipsAir,
@@ -630,9 +629,9 @@ pub mod tests {
     fn test_sub_prove() {
         utils::setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 29, 0, 5,  0, false, true),
-            Instruction::new(Opcode::ADD, 30, 0, 8,  0, false, true),
-            Instruction::new(Opcode::SUB, 31, 30, 29,0, false, false),
+            Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
+            Instruction::new(Opcode::SUB, 31, 30, 29, 0, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
@@ -642,9 +641,9 @@ pub mod tests {
     fn test_add_prove() {
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 29, 0, 5,  0, false, true),
-            Instruction::new(Opcode::ADD, 30, 0, 8,  0, false, true),
-            Instruction::new(Opcode::ADD, 31, 30, 29,0, false, false),
+            Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
+            Instruction::new(Opcode::ADD, 31, 30, 29, 0, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
@@ -661,7 +660,7 @@ pub mod tests {
                 let instructions = vec![
                     Instruction::new(Opcode::ADD, 29, 0, operand.0, 0, false, true),
                     Instruction::new(Opcode::ADD, 30, 0, operand.1, 0, false, true),
-                    Instruction::new(*mul_op, 31, 30, 29,           0, false, false),
+                    Instruction::new(*mul_op, 31, 30, 29, 0, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();
@@ -677,7 +676,7 @@ pub mod tests {
             let instructions = vec![
                 Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
                 Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
-                Instruction::new(*lt_op, 31, 30, 29,    0, false, false),
+                Instruction::new(*lt_op, 31, 30, 29, 0, false, false),
             ];
             let program = Program::new(instructions, 0, 0);
             run_test::<CpuProver<_, _>>(program).unwrap();
@@ -691,8 +690,8 @@ pub mod tests {
 
         for bitwise_op in bitwise_opcodes.iter() {
             let instructions = vec![
-                Instruction::new(Opcode::ADD, 29, 0, 5,   0, false, true),
-                Instruction::new(Opcode::ADD, 30, 0, 8,   0, false, true),
+                Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
+                Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
                 Instruction::new(*bitwise_op, 31, 30, 29, 0, false, false),
             ];
             let program = Program::new(instructions, 0, 0);
@@ -714,9 +713,9 @@ pub mod tests {
         for div_rem_op in div_rem_ops.iter() {
             for op in operands.iter() {
                 let instructions = vec![
-                    Instruction::new(Opcode::ADD, 29, 0, op.0, 0, false, true),
+                    Instruction::new(Opcode::ADD, 29, 0, op.0, 0, false, true, ),
                     Instruction::new(Opcode::ADD, 30, 0, op.1, 0, false, true),
-                    Instruction::new(*div_rem_op, 31, 29, 30,  0, false, false),
+                    Instruction::new(*div_rem_op, 31, 29, 30, 0, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();
@@ -755,7 +754,7 @@ pub mod tests {
             ZKMCoreOpts::default(),
             None,
         )
-        .unwrap();
+            .unwrap();
     }
 
     #[test]

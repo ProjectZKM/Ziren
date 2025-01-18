@@ -562,6 +562,7 @@ where
                             // Fix the shape of the records.
                             if let Some(shape_config) = shape_config {
                                 for record in records.iter_mut() {
+                                    tracing::debug!("fixing shape in phase 1");
                                     shape_config.fix_shape(record).unwrap();
                                 }
                             }

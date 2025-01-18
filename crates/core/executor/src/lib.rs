@@ -18,6 +18,7 @@ pub mod subproof;
 pub mod syscalls;
 mod utils;
 pub mod programs;
+pub mod hook;
 
 pub use context::*;
 pub use executor::*;
@@ -34,3 +35,4 @@ pub use state::*;
 pub use subproof::*;
 pub use utils::*;
 pub use programs::*;
+pub use hook::*;
