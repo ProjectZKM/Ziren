@@ -1008,7 +1008,7 @@ impl<'a> Executor<'a> {
                         }
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                        if syscall == SyscallCode::SYSBRK && precompile_rt.exit_code != 0 {
+                        if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
                             return Err(ExecutionError::HaltWithNonZeroExitCode(
                                 precompile_rt.exit_code,
                             ));
@@ -1024,7 +1024,7 @@ impl<'a> Executor<'a> {
                         (self.state.next_pc, 5, 0)
                     };
 
-                if syscall == SyscallCode::SYSEXITGROUP && returned_exit_code == 0 {
+                if syscall == SyscallCode::HALT && returned_exit_code == 0 {
                     self.state.exited = true;
                 }
 

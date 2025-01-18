@@ -35,16 +35,6 @@ use strum_macros::EnumIter;
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum SyscallCode {
-    // SYSGETPID = 4020,
-    SYSMMAP2 = 4210,
-    SYSMMAP = 4090,
-    SYSBRK = 4045,
-    SYSCLONE = 4120,
-    SYSEXITGROUP = 4246,
-    SYSREAD = 4003,
-    SYSWRITE = 4004,
-    SYSFCNTL = 4055,
-    SYSSETTHREADAREA = 4283,
     SYSHINTLEN = 0x00_00_00_F0,
     SYSHINTREAD = 0x00_00_00_F1,
     SYSVERIFY = 0x00_00_00_F2,
@@ -174,16 +164,6 @@ impl SyscallCode {
     #[must_use]
     pub fn from_u32(value: u32) -> Self {
         match value {
-            // 4020 => SyscallCode::SYSGETPID,
-            4210 => SyscallCode::SYSMMAP2,
-            4090 => SyscallCode::SYSMMAP,
-            4045 => SyscallCode::SYSBRK,
-            4120 => SyscallCode::SYSCLONE,
-            4246 => SyscallCode::SYSEXITGROUP,
-            4003 => SyscallCode::SYSREAD,
-            4004 => SyscallCode::SYSWRITE,
-            4055 => SyscallCode::SYSFCNTL,
-            4283 => SyscallCode::SYSSETTHREADAREA,
             0x00_00_00_F0 => SyscallCode::SYSHINTLEN,
             0x00_00_00_F1 => SyscallCode::SYSHINTREAD,
             0x00_00_00_F2 => SyscallCode::SYSVERIFY,
