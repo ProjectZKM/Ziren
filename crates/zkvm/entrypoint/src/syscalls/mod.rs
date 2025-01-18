@@ -5,10 +5,17 @@ mod io;
 mod memory;
 mod sys;
 
+mod sha_compress;
+mod sha_extend;
+mod keccak_permute;
+
 pub use halt::*;
 pub use io::*;
 pub use memory::*;
 pub use sys::*;
+pub use sha_compress::*;
+pub use sha_extend::*;
+pub use keccak_permute::*;
 
 /// These codes MUST match the codes in `core/src/runtime/syscall.rs`. There is a derived test
 /// that checks that the enum is consistent with the syscalls.
@@ -27,3 +34,12 @@ pub const HINT_READ: u32 = 0x00_00_00_F1;
 
 /// Executes `HINT_READ`.
 pub const VERIFY: u32 = 0x00_00_00_F2;
+
+/// Executes `SHA_EXTEND`.
+pub const SHA_EXTEND: u32 = 0x00_30_01_05;
+
+/// Executes `SHA_COMPRESS`.
+pub const SHA_COMPRESS: u32 = 0x00_01_01_06;
+
+/// Executes `KECCAK_PERMUTE`.
+pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;

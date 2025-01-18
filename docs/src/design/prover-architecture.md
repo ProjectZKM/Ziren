@@ -1,7 +1,7 @@
 # Prover Architecture
 
 1. Create a program with instruction list;
-2. Create a runtime with the executor;
+2. Create a runtime with the executor, and generate the runtime state and event for each instruction;
 
 ```
 let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
@@ -17,11 +17,15 @@ let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
 }
 ```
 
+Where the runtime performs each transaction by `execute_cycle` to generate the event for each transaction, and create a `LookupId` for each event.
+
+Unconstained Mode: In this mode, any events, clock, register, or memory changes are reset after leaving the unconstrained block. The only thing preserved is written to the input stream.
+
 3. Create a Machine prover with [Stark config](./stark.md);
 4. Run the setup for [PAIR](./arithmetization.md) to generate the preprocessed traces(constant vairables, which is shared by all prover instance for a program), and generate PCS for the traces. A proving key (the traces and prover data(Merkle Tree)) and a verification key (the commit of the traces) are generated.
 5. Prove the program:
 
-> Phase 0: initialize the memory space, and generate checkpoint for each shard;
+> Phase 0: Generate checkpoint for each shard;
 
 ```rust
 
@@ -32,7 +36,7 @@ let (checkpoint, done) = runtime
 
 ```
 
-> Phase 1: read the checkpoint, and generate `ExectionRecord` and its trace for each instraction;
+> Phase 1: Read the checkpoint, and generate `ExectionRecord` and its trace for each instraction
 ```rust
 trace_checkpoint::<SC>(
     program.clone(),
