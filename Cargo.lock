@@ -2107,6 +2107,7 @@ dependencies = [
 name = "p3-util"
 version = "0.1.0"
 dependencies = [
+ "lock_api",
  "serde",
 ]
 
