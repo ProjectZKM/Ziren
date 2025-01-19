@@ -5,7 +5,7 @@ use zkm2_core_executor::{
     syscalls::SyscallCode,
     ByteOpcode::{self, U16Range},
     ExecutionRecord, Instruction, Opcode, Program,
-    //Register::X0,
+    Register::ZERO,
 };
 use zkm2_primitives::consts::WORD_SIZE;
 use zkm2_stark::{air::MachineAir, Word};
@@ -258,12 +258,19 @@ impl CpuChip {
             instruction.opcode,
             Opcode::LB
                 | Opcode::LH
+                | Opcode::LL
                 | Opcode::LW
+                | Opcode::LWL
+                | Opcode::LWR
                 | Opcode::LBU
                 | Opcode::LHU
                 | Opcode::SB
                 | Opcode::SH
                 | Opcode::SW
+                | Opcode::SC
+                | Opcode::SWL
+                | Opcode::SWR
+                | Opcode::SDC1
         ) {
             return;
         }
@@ -296,7 +303,7 @@ impl CpuChip {
         let mem_value = event.memory_record.unwrap().value();
         if matches!(
             instruction.opcode,
-            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW
+            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR
         ) {
             match instruction.opcode {
                 Opcode::LB | Opcode::LBU => {
@@ -330,25 +337,24 @@ impl CpuChip {
                         F::from_canonical_u8(most_sig_mem_value_byte >> i & 0x01);
                 }
                 if memory_columns.most_sig_byte_decomp[7] == F::ONE {
-                    panic!("X0 not found")
-                    //cols.mem_value_is_neg_not_x0 = F::from_bool(instruction.op_a != (X0 as u8));
-                    //cols.unsigned_mem_val_nonce = F::from_canonical_u32(
-                    //    nonce_lookup
-                    //        .get(event.memory_sub_lookup_id.0 as usize)
-                    //        .copied()
-                    //        .unwrap_or_default(),
-                    //);
+                    // FIXME: ZERO is X0, is it correct?
+                    cols.mem_value_is_neg_not_x0 = F::from_bool(instruction.op_a != (ZERO as u8));
+                    cols.unsigned_mem_val_nonce = F::from_canonical_u32(
+                        nonce_lookup
+                            .get(event.memory_sub_lookup_id.0 as usize)
+                            .copied()
+                            .unwrap_or_default(),
+                    );
                 }
             }
 
-            panic!("X0 not found")
             // Set the `mem_value_is_pos_not_x0` composite flag.
-            //cols.mem_value_is_pos_not_x0 = F::from_bool(
-            //    ((matches!(instruction.opcode, Opcode::LB | Opcode::LH)
-            //        && (memory_columns.most_sig_byte_decomp[7] == F::ZERO))
-            //        || matches!(instruction.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW))
-            //        && instruction.op_a != (X0 as u8),
-            //);
+            cols.mem_value_is_pos_not_x0 = F::from_bool(
+                ((matches!(instruction.opcode, Opcode::LB | Opcode::LH)
+                    && (memory_columns.most_sig_byte_decomp[7] == F::ZERO))
+                    || matches!(instruction.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW))
+                    && instruction.op_a != (ZERO as u8),
+            );
         }
 
         // Add event to byte lookup for byte range checking each byte in the memory addr
