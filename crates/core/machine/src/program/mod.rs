@@ -200,9 +200,9 @@ mod tests {
         //     addi x30, x0, 37
         //     add x31, x30, x29
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
-            Instruction::new(Opcode::ADD, 30, 0, 37, 0, false, true),
-            Instruction::new(Opcode::ADD, 31, 30, 29, 0, false, false),
+            Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
+            Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
         ];
         // FIXME stephen
         let shard = ExecutionRecord {

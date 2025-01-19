@@ -32,12 +32,10 @@ pub enum MemoryAccessPosition {
     /// A register access position.
     A = 3,
     // todo: update memory access constraints in circuit
-    /// AH register access position.
     /// could be used in HI register and other special registers
-    AH = 4,
+    S1 = 4,
     ///  special registers for syscalls
-    /// todo: rename S1, add S2
-    S = 5,
+    S2 = 5,
 }
 
 /// Memory Read Record.

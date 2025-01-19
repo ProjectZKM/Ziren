@@ -615,9 +615,9 @@ pub mod tests {
         for shift_op in shift_ops.iter() {
             for op in operands.iter() {
                 let instructions = vec![
-                    Instruction::new(Opcode::ADD, 29, 0, op.0, 0, false, true),
-                    Instruction::new(Opcode::ADD, 30, 0, op.1, 0, false, true),
-                    Instruction::new(*shift_op, 31, 29, 3, 0, false, false),
+                    Instruction::new(Opcode::ADD, 29, 0, op.0, false, true),
+                    Instruction::new(Opcode::ADD, 30, 0, op.1, false, true),
+                    Instruction::new(*shift_op, 31, 29, 3, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();
@@ -629,9 +629,9 @@ pub mod tests {
     fn test_sub_prove() {
         utils::setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
-            Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
-            Instruction::new(Opcode::SUB, 31, 30, 29, 0, false, false),
+            Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 8, false, true),
+            Instruction::new(Opcode::SUB, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
@@ -641,9 +641,9 @@ pub mod tests {
     fn test_add_prove() {
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
-            Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
-            Instruction::new(Opcode::ADD, 31, 30, 29, 0, false, false),
+            Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 8, false, true),
+            Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
@@ -658,9 +658,9 @@ pub mod tests {
         for mul_op in mul_ops.iter() {
             for operand in operands.iter() {
                 let instructions = vec![
-                    Instruction::new(Opcode::ADD, 29, 0, operand.0, 0, false, true),
-                    Instruction::new(Opcode::ADD, 30, 0, operand.1, 0, false, true),
-                    Instruction::new(*mul_op, 31, 30, 29, 0, false, false),
+                    Instruction::new(Opcode::ADD, 29, 0, operand.0, false, true),
+                    Instruction::new(Opcode::ADD, 30, 0, operand.1, false, true),
+                    Instruction::new(*mul_op, 31, 30, 29, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();
@@ -674,9 +674,9 @@ pub mod tests {
         let less_than = [Opcode::SLT, Opcode::SLTU];
         for lt_op in less_than.iter() {
             let instructions = vec![
-                Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
-                Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
-                Instruction::new(*lt_op, 31, 30, 29, 0, false, false),
+                Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
+                Instruction::new(Opcode::ADD, 30, 0, 8, false, true),
+                Instruction::new(*lt_op, 31, 30, 29, false, false),
             ];
             let program = Program::new(instructions, 0, 0);
             run_test::<CpuProver<_, _>>(program).unwrap();
@@ -690,9 +690,9 @@ pub mod tests {
 
         for bitwise_op in bitwise_opcodes.iter() {
             let instructions = vec![
-                Instruction::new(Opcode::ADD, 29, 0, 5, 0, false, true),
-                Instruction::new(Opcode::ADD, 30, 0, 8, 0, false, true),
-                Instruction::new(*bitwise_op, 31, 30, 29, 0, false, false),
+                Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
+                Instruction::new(Opcode::ADD, 30, 0, 8, false, true),
+                Instruction::new(*bitwise_op, 31, 30, 29, false, false),
             ];
             let program = Program::new(instructions, 0, 0);
             run_test::<CpuProver<_, _>>(program).unwrap();
@@ -713,9 +713,9 @@ pub mod tests {
         for div_rem_op in div_rem_ops.iter() {
             for op in operands.iter() {
                 let instructions = vec![
-                    Instruction::new(Opcode::ADD, 29, 0, op.0, 0, false, true, ),
-                    Instruction::new(Opcode::ADD, 30, 0, op.1, 0, false, true),
-                    Instruction::new(*div_rem_op, 31, 29, 30, 0, false, false),
+                    Instruction::new(Opcode::ADD, 29, 0, op.0, false, true),
+                    Instruction::new(Opcode::ADD, 30, 0, op.1, false, true),
+                    Instruction::new(*div_rem_op, 31, 29, 30, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();

@@ -311,17 +311,18 @@ impl ExecutionRecord {
 /// todo: use mips
 #[derive(Debug, Copy, Clone, Default)]
 pub struct MemoryAccessRecord {
-    /// The memory access of the `a` register.
+    /// The memory access of the `a` register. read && write
     pub a: Option<MemoryRecordEnum>,
     /// The memory access of the `b` register.
     pub b: Option<MemoryRecordEnum>,
     /// The memory access of the `c` register.
     pub c: Option<MemoryRecordEnum>,
     /// The memory access of the `hi` register and other special registers.
-    pub ah: Option<MemoryRecordEnum>,
+    /// read && write
+    pub s1: Option<MemoryRecordEnum>,
     /// The memory access of the special registers for syscalls.
-    /// todo: check if it's correct
-    pub s: Option<MemoryRecordEnum>,
+    /// read
+    pub s2: Option<MemoryRecordEnum>,
     /// The memory access of the `memory` register.
     pub memory: Option<MemoryRecordEnum>,
 }
