@@ -13,3 +13,4 @@ pub const SHA_COMPRESS_ELF: &str = include_elf!("sha-compress-test");
 
 pub const KECCAK256_ELF: &str = include_elf!("keccak256-test");
 pub const KECCAK_PERMUTE_ELF: &str = include_elf!("keccak-permute-test");
+pub const PANIC_ELF: &str = include_elf!("panic-test");

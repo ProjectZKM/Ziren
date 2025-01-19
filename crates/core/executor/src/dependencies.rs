@@ -8,8 +8,6 @@ use crate::{
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
 pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
-    todo!("impl")
-    /*
     let shard = executor.shard();
     let (quotient, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
     let c_msb = get_msb(event.c);
@@ -116,7 +114,6 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     if event.c != 0 {
         executor.record.lt_events.push(lt_event);
     }
-    */
 }
 
 /// Emit the dependencies for CPU events.
