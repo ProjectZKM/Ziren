@@ -935,7 +935,7 @@ impl<'a> Executor<'a> {
             self.report.event_counts[instruction.opcode] += 1;
             match instruction.opcode {
                 // todo: check all
-                Opcode::LB | Opcode::LH | Opcode::LW | Opcode::LBU | Opcode::LHU => {
+                Opcode::LB | Opcode::LH | Opcode::LW | Opcode::LBU | Opcode::LHU | Opcode::LWL | Opcode::LWR => {
                     self.report.event_counts[Opcode::ADD] += 2;
                 }
                 Opcode::Jump | Opcode::Jumpi | Opcode::JumpDirect => {
@@ -943,10 +943,10 @@ impl<'a> Executor<'a> {
                 }
                 Opcode::BEQ
                 | Opcode::BNE
-                | Opcode::BLT
-                | Opcode::BGE
-                | Opcode::BLE
-                | Opcode::BGT => {
+                | Opcode::BLTZ
+                | Opcode::BGEZ
+                | Opcode::BLEZ
+                | Opcode::BGTZ => {
                     self.report.event_counts[Opcode::ADD] += 1;
                     self.report.event_counts[Opcode::SLTU] += 2;
                 }
@@ -1099,7 +1099,7 @@ impl<'a> Executor<'a> {
             }
 
             // Branch instructions.
-            Opcode::BEQ | Opcode::BNE | Opcode::BGE | Opcode::BLE | Opcode::BGT | Opcode::BLT => {
+            Opcode::BEQ | Opcode::BNE | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => {
                 (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
             }
 
@@ -1592,10 +1592,10 @@ impl<'a> Executor<'a> {
         let should_jump = match instruction.opcode {
             Opcode::BEQ => src1 == src2,
             Opcode::BNE => src1 != src2,
-            Opcode::BGE => (src1 as i32) >= (src2 as i32),
-            Opcode::BLE => (src1 as i32) <= (src2 as i32),
-            Opcode::BGT => (src1 as i32) > (src2 as i32),
-            Opcode::BLT => (src1 as i32) < (src2 as i32),
+            Opcode::BGEZ => (src1 as i32) >= (src2 as i32),
+            Opcode::BLEZ => (src1 as i32) <= (src2 as i32),
+            Opcode::BGTZ => (src1 as i32) > (src2 as i32),
+            Opcode::BLTZ => (src1 as i32) < (src2 as i32),
             _ => {
                 unreachable!()
             }

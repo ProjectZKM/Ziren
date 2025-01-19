@@ -54,10 +54,10 @@ pub struct OpcodeSelectorCols<T> {
     /// Branch Instructions.
     pub is_beq: T,
     pub is_bne: T,
-    pub is_blt: T,
-    pub is_bge: T,
-    pub is_bltu: T,
-    pub is_bgeu: T,
+    pub is_bltz: T,
+    pub is_blez: T,
+    pub is_bgtz: T,
+    pub is_bgez: T,
 
     /// Jump Instructions.
     pub is_jalr: T,
@@ -99,10 +99,10 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
             match instruction.opcode {
                 Opcode::BEQ => self.is_beq = F::ONE,
                 Opcode::BNE => self.is_bne = F::ONE,
-                Opcode::BLT => self.is_blt = F::ONE,
-                Opcode::BGE => self.is_bge = F::ONE,
-                //Opcode::BLTU => self.is_bltu = F::ONE,
-                //Opcode::BGEU => self.is_bgeu = F::ONE,
+                Opcode::BLTZ => self.is_bltz = F::ONE,
+                Opcode::BLEZ => self.is_blez = F::ONE,
+                Opcode::BGTZ => self.is_bgtz = F::ONE,
+                Opcode::BGEZ => self.is_bgez = F::ONE,
                 _ => unreachable!(),
             }
         }
@@ -145,10 +145,10 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.is_sc,
             self.is_beq,
             self.is_bne,
-            self.is_blt,
-            self.is_bge,
-            self.is_bltu,
-            self.is_bgeu,
+            self.is_bltz,
+            self.is_blez,
+            self.is_bgtz,
+            self.is_bgez,
             self.is_jalr,
             self.is_jal,
             self.is_auipc,

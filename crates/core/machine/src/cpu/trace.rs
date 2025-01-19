@@ -384,7 +384,8 @@ impl CpuChip {
 
             let a_eq_b = event.a == event.b;
 
-            let use_signed_comparison = matches!(instruction.opcode, Opcode::BLT | Opcode::BGE);
+            // FIXME: MIPS uses sign extenion
+            let use_signed_comparison = matches!(instruction.opcode, Opcode::BLTZ | Opcode::BGEZ);
 
             let a_lt_b = if use_signed_comparison {
                 (event.a as i32) < (event.b as i32)
@@ -412,9 +413,11 @@ impl CpuChip {
             let branching = match instruction.opcode {
                 Opcode::BEQ => a_eq_b,
                 Opcode::BNE => !a_eq_b,
-                //Opcode::BLT | Opcode::BLTU => a_lt_b,
-                //Opcode::BGE | Opcode::BGEU => a_eq_b || a_gt_b,
-                _ => unreachable!(),
+                Opcode::BLTZ => a_lt_b,
+                Opcode::BLEZ => a_lt_b || a_eq_b,
+                Opcode::BGTZ => a_gt_b,
+                Opcode::BGEZ => a_eq_b || a_gt_b,
+                _ => panic!("Invalid opcode: {}", instruction.opcode)
             };
 
             let next_pc = event.pc.wrapping_add(event.c);

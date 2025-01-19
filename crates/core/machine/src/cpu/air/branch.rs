@@ -24,10 +24,10 @@ impl CpuChip {
     ) -> AB::Expr {
         opcode_selectors.is_beq
             + opcode_selectors.is_bne
-            + opcode_selectors.is_blt
-            + opcode_selectors.is_bge
-            + opcode_selectors.is_bltu
-            + opcode_selectors.is_bgeu
+            + opcode_selectors.is_bltz
+            + opcode_selectors.is_blez
+            + opcode_selectors.is_bgtz
+            + opcode_selectors.is_bgez
     }
 
     /// Verifies all the branching related columns.
@@ -144,25 +144,25 @@ impl CpuChip {
 
             // When the opcode is BLT or BLTU and we are branching, assert that a_lt_b is true.
             builder
-                .when((local.selectors.is_blt + local.selectors.is_bltu) * local.branching)
+                .when((local.selectors.is_bltz + local.selectors.is_blez) * local.branching)
                 .assert_one(branch_cols.a_lt_b);
 
             // When the opcode is BLT or BLTU and we are not branching, assert that either a_eq_b
             // or a_gt_b is true.
             builder
-                .when(local.selectors.is_blt + local.selectors.is_bltu)
+                .when(local.selectors.is_bltz + local.selectors.is_blez)
                 .when_not(local.branching)
                 .assert_one(branch_cols.a_eq_b + branch_cols.a_gt_b);
 
             // When the opcode is BGE or BGEU and we are branching, assert that a_gt_b is true.
             builder
-                .when((local.selectors.is_bge + local.selectors.is_bgeu) * local.branching)
+                .when((local.selectors.is_bgez + local.selectors.is_bgtz) * local.branching)
                 .assert_one(branch_cols.a_gt_b + branch_cols.a_eq_b);
 
             // When the opcode is BGE or BGEU and we are not branching, assert that either a_eq_b
             // or a_lt_b is true.
             builder
-                .when(local.selectors.is_bge + local.selectors.is_bgeu)
+                .when(local.selectors.is_bgez + local.selectors.is_bgtz)
                 .when_not(local.branching)
                 .assert_one(branch_cols.a_lt_b);
         }
@@ -176,7 +176,8 @@ impl CpuChip {
         builder.when_not(is_branch_instruction.clone()).assert_zero(local.branching);
 
         // Calculate a_lt_b <==> a < b (using appropriate signedness).
-        let use_signed_comparison = local.selectors.is_blt + local.selectors.is_bge;
+        // FIXME: stephen
+        let use_signed_comparison = local.selectors.is_bltz + local.selectors.is_bgez;
         builder.send_alu(
             use_signed_comparison.clone() * Opcode::SLT.as_field::<AB::F>()
                 + (AB::Expr::ONE - use_signed_comparison.clone())

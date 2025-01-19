@@ -123,7 +123,7 @@ impl Instruction {
     pub const fn is_branch_instruction(&self) -> bool {
         matches!(
             self.opcode,
-            Opcode::BEQ | Opcode::BNE | Opcode::BLT | Opcode::BGE | Opcode::BLE | Opcode::BGT
+            Opcode::BEQ | Opcode::BNE | Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ
         )
     }
 
@@ -291,7 +291,7 @@ impl Instruction {
                 if rt == 1 {
                     // Ok(Operation::Branch(BranchCond::GE, rs, 0u8, offset)) // BGEZ
                     Ok(Self::new(
-                        Opcode::BGE,
+                        Opcode::BGEZ,
                         rs as u8,
                         0u32,
                         offset,
@@ -302,7 +302,7 @@ impl Instruction {
                 } else if rt == 0 {
                     // Ok(Operation::Branch(BranchCond::LT, rs, 0u8, offset)) // BLTZ
                     Ok(Self::new(
-                        Opcode::BLT,
+                        Opcode::BLTZ,
                         rs as u8,
                         0u32,
                         offset,
@@ -329,7 +329,7 @@ impl Instruction {
             (0x05, _) => Ok(Self::new(Opcode::BNE, rs as u8, rt, offset, 0, false, true)), // BNE
             // (0x06, _) => Ok(Operation::Branch(BranchCond::LE, rs, 0u8, offset)),        // BLEZ
             (0x06, _) => Ok(Self::new(
-                Opcode::BLE,
+                Opcode::BLEZ,
                 rs as u8,
                 0u32,
                 offset,
@@ -339,7 +339,7 @@ impl Instruction {
             )), // BLEZ
             // (0x07, _) => Ok(Operation::Branch(BranchCond::GT, rs, 0u8, offset)),         // BGTZ
             (0x07, _) => Ok(Self::new(
-                Opcode::BGT,
+                Opcode::BGTZ,
                 rs as u8,
                 0u32,
                 offset,

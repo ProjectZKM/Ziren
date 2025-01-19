@@ -191,7 +191,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
 
     if instruction.is_branch_instruction() {
         let a_eq_b = event.a == event.b;
-        let use_signed_comparison = matches!(instruction.opcode, Opcode::BLT | Opcode::BGE);
+        let use_signed_comparison = matches!(instruction.opcode, Opcode::BLTZ | Opcode::BGEZ);
         let a_lt_b = if use_signed_comparison {
             (event.a as i32) < (event.b as i32)
         } else {
@@ -234,9 +234,8 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
         let branching = match instruction.opcode {
             Opcode::BEQ => a_eq_b,
             Opcode::BNE => !a_eq_b,
-            // todo: fix
-            Opcode::BLT | Opcode::BLE => a_lt_b,
-            Opcode::BGE | Opcode::BGT => a_eq_b || a_gt_b,
+            Opcode::BLTZ | Opcode::BLEZ => a_lt_b,
+            Opcode::BGEZ | Opcode::BGTZ => a_eq_b || a_gt_b,
             _ => unreachable!(),
         };
         if branching {
