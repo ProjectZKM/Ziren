@@ -28,6 +28,14 @@ pub struct CpuEvent {
     pub c: u32,
     /// The third operand memory record.
     pub c_record: Option<MemoryRecordEnum>,
+    /// The forth operand.
+    pub s1: Option<u32>,
+    /// The forth operand memory record.
+    pub s1_record: Option<MemoryRecordEnum>,
+    /// The fifth operand.
+    pub s2: Option<u32>,
+    /// The fifth operand memory record.
+    pub s2_record: Option<MemoryRecordEnum>,
     /// The memory record.
     pub memory_record: Option<MemoryRecordEnum>,
     /// The exit code.

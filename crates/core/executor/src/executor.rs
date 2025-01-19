@@ -667,6 +667,8 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
+        s1: Option<u32>,
+        s2: Option<u32>,
         record: MemoryAccessRecord,
         exit_code: u32,
         lookup_id: LookupId,
@@ -691,6 +693,10 @@ impl<'a> Executor<'a> {
             b_record: record.b,
             c,
             c_record: record.c,
+            s1,
+            s1_record: record.s1,
+            s2,
+            s2_record: record.s2,
             memory_record: record.memory,
             exit_code,
             alu_lookup_id: lookup_id,
@@ -914,7 +920,9 @@ impl<'a> Executor<'a> {
         let mut a = 0u32;
         let mut b = 0u32;
         let mut c = 0u32;
-        let hi: Option<u32>;
+        let mut s1 = None;
+        // todo: syscall write
+        let mut s2 = None;
 
         if self.executor_mode == ExecutorMode::Trace {
             self.memory_accesses = MemoryAccessRecord::default();
@@ -1036,6 +1044,7 @@ impl<'a> Executor<'a> {
                 // todo: update circuit
                 self.rw(Register::V0, a, MemoryAccessPosition::A);
                 self.rw(Register::A3, v1, MemoryAccessPosition::S1);
+                s1 = Some(v1);
                 next_pc = precompile_next_pc;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
@@ -1078,7 +1087,7 @@ impl<'a> Executor<'a> {
             | Opcode::OR
             | Opcode::XOR
             | Opcode::NOR => {
-                (hi, a, b, c) = self.execute_alu(instruction, lookup_id);
+                (s1, a, b, c) = self.execute_alu(instruction, lookup_id);
             }
 
             // Load instructions.
@@ -1125,7 +1134,7 @@ impl<'a> Executor<'a> {
                 (a, b, c) = self.execute_ins(instruction);
             }
             Opcode::MADDU => {
-                (hi, a, b, c) = self.execute_maddu(instruction);
+                (s1, a, b, c) = self.execute_maddu(instruction);
             }
             Opcode::ROR => {
                 (a, b, c) = self.execute_ror(instruction);
@@ -1163,6 +1172,8 @@ impl<'a> Executor<'a> {
                 a,
                 b,
                 c,
+                s1,
+                s2,
                 self.memory_accesses,
                 exit_code,
                 lookup_id,
