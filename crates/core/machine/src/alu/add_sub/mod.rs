@@ -160,7 +160,8 @@ impl AddSubChip {
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
         cols.is_subu = F::from_bool(event.opcode == Opcode::SUBU);
 
-        let operand_1 = if event.opcode.is_add() { event.b } else { event.a };
+        let is_add = event.opcode == Opcode::ADD || event.opcode == Opcode::ADDU;
+        let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
         cols.add_operation.populate(blu, event.shard, operand_1, operand_2);
