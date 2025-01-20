@@ -87,23 +87,17 @@ pub enum SyscallCode {
     /// Executes the `COMMIT_DEFERRED_PROOFS` precompile.
     COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A,
 
-    /// Executes the `VERIFY_SP1_PROOF` precompile.
-    VERIFY_SP1_PROOF = 0x00_00_00_1B,
+    /// Executes the `VERIFY_ZKM_PROOF` precompile.
+    VERIFY_ZKM_PROOF = 0x00_00_00_1B,
 
     /// Executes the `BLS12381_DECOMPRESS` precompile.
     BLS12381_DECOMPRESS = 0x00_00_01_1C,
 
-    // /// Executes the `HINT_LEN` precompile.
-    // HINT_LEN = 0x00_00_00_F0,
-
-    // /// Executes the `HINT_READ` precompile.
-    // HINT_READ = 0x00_00_00_F1,
-
     /// Executes the `UINT256_MUL` precompile.
     UINT256_MUL = 0x00_01_01_1D,
 
-    // /// Executes the `U256XU2048_MUL` precompile.
-    // U256XU2048_MUL = 0x00_01_01_2F,
+    /// Executes the `U256XU2048_MUL` precompile.
+    U256XU2048_MUL = 0x00_01_01_2F,
 
     /// Executes the `BLS12381_ADD` precompile.
     BLS12381_ADD = 0x00_01_01_1E,
@@ -186,11 +180,9 @@ impl SyscallCode {
             0x00_00_01_1F => SyscallCode::BLS12381_DOUBLE,
             0x00_00_00_10 => SyscallCode::COMMIT,
             0x00_00_00_1A => SyscallCode::COMMIT_DEFERRED_PROOFS,
-            0x00_00_00_1B => SyscallCode::VERIFY_SP1_PROOF,
-            //0x00_00_00_F0 => SyscallCode::HINT_LEN,
-            //0x00_00_00_F1 => SyscallCode::HINT_READ,
+            0x00_00_00_1B => SyscallCode::VERIFY_ZKM_PROOF,
             0x00_01_01_1D => SyscallCode::UINT256_MUL,
-            //0x00_01_01_2F => SyscallCode::U256XU2048_MUL,
+            0x00_01_01_2F => SyscallCode::U256XU2048_MUL,
             0x00_01_01_20 => SyscallCode::BLS12381_FP_ADD,
             0x00_01_01_21 => SyscallCode::BLS12381_FP_SUB,
             0x00_01_01_22 => SyscallCode::BLS12381_FP_MUL,

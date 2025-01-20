@@ -8,7 +8,6 @@ members = [
   "keccak256",
   "panic",
   "sha-compress",
-  "sha2-precompile",
   "fibonacci",
 ]
 resolver = "2"

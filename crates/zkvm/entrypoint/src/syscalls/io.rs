@@ -1,17 +1,18 @@
-//! Ported from Entrypoint for SP1 zkVM.
-
 cfg_if::cfg_if! {
     if #[cfg(target_os = "zkvm")] {
         use core::arch::asm;
+        use crate::zkvm;
+        use sha2::digest::Update;
     }
 }
 
-/// Write data to the prover.
+/// Write `nbytes` of data to the prover to a given file descriptor `fd` from `write_buf`.
 #[allow(unused_variables)]
 #[no_mangle]
 pub extern "C" fn syscall_write(fd: u32, write_buf: *const u8, nbytes: usize) {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "zkvm")] {
+            const FD_PUBLIC_VALUES: u32 = 3;
             unsafe {
                 asm!(
                     "syscall",
@@ -21,12 +22,21 @@ pub extern "C" fn syscall_write(fd: u32, write_buf: *const u8, nbytes: usize) {
                     in("$6") nbytes,
                 );
             }
+
+            // For writes to the public values fd, we update a global program hasher with the bytes
+            // being written. At the end of the program, we call the COMMIT syscall with the finalized
+            // version of this hash.
+            if fd == FD_PUBLIC_VALUES {
+                let pi_slice: &[u8] = unsafe { core::slice::from_raw_parts(write_buf, nbytes) };
+                unsafe { zkvm::PUBLIC_VALUES_HASHER.as_mut().unwrap().update(pi_slice) };
+            }
         } else {
             unreachable!()
         }
     }
 }
 
+/// Returns the length of the next element in the hint stream.
 #[allow(unused_variables)]
 #[no_mangle]
 pub extern "C" fn syscall_hint_len() -> usize {
@@ -45,6 +55,7 @@ pub extern "C" fn syscall_hint_len() -> usize {
     unreachable!()
 }
 
+/// Reads the next element in the hint stream into the given buffer.
 #[allow(unused_variables)]
 #[no_mangle]
 pub extern "C" fn syscall_hint_read(ptr: *mut u8, len: usize) {
@@ -60,26 +71,4 @@ pub extern "C" fn syscall_hint_read(ptr: *mut u8, len: usize) {
 
     #[cfg(not(target_os = "zkvm"))]
     unreachable!()
-}
-
-#[allow(unused_variables)]
-#[no_mangle]
-pub extern "C" fn syscall_verify(claim_digest: &[u8; 32]) {
-    let mut to_host = [0u8; 32];
-    to_host[..32].copy_from_slice(claim_digest);
-
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "zkvm")] {
-            unsafe {
-                asm!(
-                    "syscall",
-                    in("$2") crate::syscalls::VERIFY,
-                    in("$5") to_host.as_ptr() as u32,
-                    in("$6") 32u32,
-                )
-            }
-        } else {
-            unreachable!()
-        }
-    }
 }

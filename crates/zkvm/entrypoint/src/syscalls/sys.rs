@@ -1,5 +1,3 @@
-//! Ported from Entrypoint for SP1 zkVM.
-
 use std::sync::Mutex;
 
 use lazy_static::lazy_static;
@@ -28,7 +26,7 @@ static SYS_RAND_WARNING: std::sync::Once = std::sync::Once::new();
 #[no_mangle]
 pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
     SYS_RAND_WARNING.call_once(|| {
-        println!("WARNING: Using insecure random number generator.");
+        eprintln!("WARNING: Using insecure random number generator.");
     });
     let mut rng = RNG.lock().unwrap();
     for i in 0..words {

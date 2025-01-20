@@ -147,7 +147,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(SyscallCode::UINT256_MUL, Arc::new(Uint256MulSyscall));
 
-    //syscall_map.insert(SyscallCode::U256XU2048_MUL, Arc::new(U256xU2048MulSyscall));
+    syscall_map.insert(SyscallCode::U256XU2048_MUL, Arc::new(U256xU2048MulSyscall));
 
     syscall_map.insert(
         SyscallCode::BLS12381_FP_ADD,
@@ -216,7 +216,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::COMMIT_DEFERRED_PROOFS, Arc::new(CommitDeferredSyscall));
 
     // todo: choose one
-    syscall_map.insert(SyscallCode::VERIFY_SP1_PROOF, Arc::new(VerifySyscall));
+    syscall_map.insert(SyscallCode::VERIFY_ZKM_PROOF, Arc::new(VerifySyscall));
     syscall_map.insert(SyscallCode::SYSVERIFY, Arc::new(VerifySyscall));
 
     syscall_map.insert(SyscallCode::SYSHINTLEN, Arc::new(HintLenSyscall));
