@@ -538,109 +538,109 @@ where
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::{io::ZKMStdin, utils};
-//     use amcl::{
-//         bls381::bls381::{basic::key_pair_generate_g2, utils::deserialize_g1},
-//         rand::RAND,
-//     };
-//     use elliptic_curve::sec1::ToEncodedPoint;
-//     use rand::{thread_rng, Rng};
-//     use zkm2_core_executor::Program;
-//     use zkm2_stark::CpuProver;
-//     use test_artifacts::{
-//         BLS12381_DECOMPRESS_ELF, SECP256K1_DECOMPRESS_ELF, SECP256R1_DECOMPRESS_ELF,
-//     };
+#[cfg(test)]
+mod tests {
+    use crate::{io::ZKMStdin, utils};
+    use amcl::{
+        bls381::bls381::{basic::key_pair_generate_g2, utils::deserialize_g1},
+        rand::RAND,
+    };
+    use elliptic_curve::sec1::ToEncodedPoint;
+    use rand::{thread_rng, Rng};
+    use zkm2_core_executor::Program;
+    use zkm2_stark::CpuProver;
+    use test_artifacts::{
+        BLS12381_DECOMPRESS_ELF, SECP256K1_DECOMPRESS_ELF, SECP256R1_DECOMPRESS_ELF,
+    };
 //
-//     use crate::utils::run_test_io;
+    use crate::utils::run_test_io;
 //
-//     #[test]
-//     fn test_weierstrass_bls_decompress() {
-//         utils::setup_logger();
-//         let mut rng = thread_rng();
-//         let mut rand = RAND::new();
+    #[test]
+    fn test_weierstrass_bls_decompress() {
+        utils::setup_logger();
+        let mut rng = thread_rng();
+        let mut rand = RAND::new();
 //
-//         let len = 100;
-//         let num_tests = 10;
-//         let random_slice = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<u8>>();
-//         rand.seed(len, &random_slice);
+        let len = 100;
+        let num_tests = 10;
+        let random_slice = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<u8>>();
+        rand.seed(len, &random_slice);
 //
-//         for _ in 0..num_tests {
-//             let (_, compressed) = key_pair_generate_g2(&mut rand);
+        for _ in 0..num_tests {
+            let (_, compressed) = key_pair_generate_g2(&mut rand);
 //
-//             let stdin = ZKMStdin::from(&compressed);
-//             let mut public_values = run_test_io::<CpuProver<_, _>>(
-//                 Program::from(BLS12381_DECOMPRESS_ELF).unwrap(),
-//                 stdin,
-//             )
-//             .unwrap();
+            let stdin = ZKMStdin::from(&compressed);
+            let mut public_values = run_test_io::<CpuProver<_, _>>(
+                Program::from_elf(BLS12381_DECOMPRESS_ELF).unwrap(),
+                stdin,
+            )
+            .unwrap();
 //
-//             let mut result = [0; 96];
-//             public_values.read_slice(&mut result);
+            let mut result = [0; 96];
+            public_values.read_slice(&mut result);
 //
-//             let point = deserialize_g1(&compressed).unwrap();
-//             let x = point.getx().to_string();
-//             let y = point.gety().to_string();
-//             let decompressed = hex::decode(format!("{x}{y}")).unwrap();
-//             assert_eq!(result, decompressed.as_slice());
-//         }
-//     }
+            let point = deserialize_g1(&compressed).unwrap();
+            let x = point.getx().to_string();
+            let y = point.gety().to_string();
+            let decompressed = hex::decode(format!("{x}{y}")).unwrap();
+            assert_eq!(result, decompressed.as_slice());
+        }
+    }
 //
-//     #[test]
-//     fn test_weierstrass_k256_decompress() {
-//         utils::setup_logger();
+    #[test]
+    fn test_weierstrass_k256_decompress() {
+        utils::setup_logger();
 //
-//         let mut rng = thread_rng();
+        let mut rng = thread_rng();
 //
-//         let num_tests = 10;
+        let num_tests = 10;
 //
-//         for _ in 0..num_tests {
-//             let secret_key = k256::SecretKey::random(&mut rng);
-//             let public_key = secret_key.public_key();
-//             let encoded = public_key.to_encoded_point(false);
-//             let decompressed = encoded.as_bytes();
-//             let compressed = public_key.to_sec1_bytes();
+        for _ in 0..num_tests {
+            let secret_key = k256::SecretKey::random(&mut rng);
+            let public_key = secret_key.public_key();
+            let encoded = public_key.to_encoded_point(false);
+            let decompressed = encoded.as_bytes();
+            let compressed = public_key.to_sec1_bytes();
 //
-//             let inputs = ZKMStdin::from(&compressed);
+            let inputs = ZKMStdin::from(&compressed);
 //
-//             let mut public_values = run_test_io::<CpuProver<_, _>>(
-//                 Program::from(SECP256K1_DECOMPRESS_ELF).unwrap(),
-//                 inputs,
-//             )
-//             .unwrap();
-//             let mut result = [0; 65];
-//             public_values.read_slice(&mut result);
-//             assert_eq!(result, decompressed);
-//         }
-//     }
+            let mut public_values = run_test_io::<CpuProver<_, _>>(
+                Program::from_elf(SECP256K1_DECOMPRESS_ELF).unwrap(),
+                inputs,
+            )
+            .unwrap();
+            let mut result = [0; 65];
+            public_values.read_slice(&mut result);
+            assert_eq!(result, decompressed);
+        }
+    }
 //
-//     #[test]
-//     fn test_weierstrass_p256_decompress() {
-//         utils::setup_logger();
+    #[test]
+    fn test_weierstrass_p256_decompress() {
+        utils::setup_logger();
 //
-//         let mut rng = thread_rng();
+        let mut rng = thread_rng();
 //
-//         let num_tests = 1;
+        let num_tests = 1;
 //
-//         for _ in 0..num_tests {
-//             let secret_key = p256::SecretKey::random(&mut rng);
-//             let public_key = secret_key.public_key();
-//             let encoded = public_key.to_encoded_point(false);
-//             let decompressed = encoded.as_bytes();
-//             let encoded_compressed = public_key.to_encoded_point(true);
-//             let compressed = encoded_compressed.as_bytes();
+        for _ in 0..num_tests {
+            let secret_key = p256::SecretKey::random(&mut rng);
+            let public_key = secret_key.public_key();
+            let encoded = public_key.to_encoded_point(false);
+            let decompressed = encoded.as_bytes();
+            let encoded_compressed = public_key.to_encoded_point(true);
+            let compressed = encoded_compressed.as_bytes();
 //
-//             let inputs = ZKMStdin::from(compressed);
+            let inputs = ZKMStdin::from(compressed);
 //
-//             let mut public_values = run_test_io::<CpuProver<_, _>>(
-//                 Program::from(SECP256R1_DECOMPRESS_ELF).unwrap(),
-//                 inputs,
-//             )
-//             .unwrap();
-//             let mut result = [0; 65];
-//             public_values.read_slice(&mut result);
-//             assert_eq!(result, decompressed);
-//         }
-//     }
-// }
+            let mut public_values = run_test_io::<CpuProver<_, _>>(
+                Program::from_elf(SECP256R1_DECOMPRESS_ELF).unwrap(),
+                inputs,
+            )
+            .unwrap();
+            let mut result = [0; 65];
+            public_values.read_slice(&mut result);
+            assert_eq!(result, decompressed);
+        }
+    }
+}

@@ -338,25 +338,33 @@ where
     }
 }
 
-//#[cfg(test)]
-//mod tests {
-//    use zkm2_core_executor::Program;
-//    use zkm2_stark::CpuProver;
-//    use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
-//
-//    use crate::utils;
-//
-//    #[test]
-//    fn test_ed_add_simple() {
-//        utils::setup_logger();
-//        let program = Program::from(ED_ADD_ELF).unwrap();
-//        utils::run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//
-//    #[test]
-//    fn test_ed25519_program() {
-//        utils::setup_logger();
-//        let program = Program::from(ED25519_ELF).unwrap();
-//        utils::run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//}
+#[cfg(test)]
+mod tests {
+    use zkm2_core_executor::Program;
+    use zkm2_stark::{CpuProver, ZKMCoreOpts};
+    use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
+    use zkm2_core_executor::Executor;
+    use crate::utils;
+
+    #[test]
+    pub fn test_ed_add_program_execute() {
+        utils::setup_logger();
+        let program = Program::from_elf(ED_ADD_ELF).unwrap();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
+
+    #[test]
+    fn test_ed_add_simple() {
+        utils::setup_logger();
+        let program = Program::from_elf(ED_ADD_ELF).unwrap();
+        utils::run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_ed25519_program() {
+        utils::setup_logger();
+        let program = Program::from_elf(ED25519_ELF).unwrap();
+        utils::run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}

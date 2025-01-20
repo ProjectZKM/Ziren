@@ -52,10 +52,10 @@ pub mod extend_tests {
             ]);
         }
         instructions.extend(vec![
-            Instruction::new(Opcode::ADD, 5, 0, SyscallCode::SHA_EXTEND as u32, false, true),
-            Instruction::new(Opcode::ADD, 10, 0, w_ptr, false, true),
-            Instruction::new(Opcode::ADD, 11, 0, 0, false, true),
-            Instruction::new(Opcode::SYSCALL, 5, 10, 11, false, false),
+            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::SHA_EXTEND as u32, false, true),
+            Instruction::new(Opcode::ADD, 4, 0, w_ptr, false, true),
+            Instruction::new(Opcode::ADD, 5, 0, 0, false, true),
+            Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
         ]);
         Program::new(instructions, 0, 0)
     }

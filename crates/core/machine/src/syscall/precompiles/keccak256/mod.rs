@@ -38,8 +38,8 @@ pub mod permute_tests {
         }
         instructions.extend(vec![
             Instruction::new(Opcode::ADD, 2, 0, SyscallCode::KECCAK_PERMUTE as u32, false, true),
-            Instruction::new(Opcode::ADD, 6, 0, digest_ptr, false, true),
-            Instruction::new(Opcode::SYSCALL, 2, 6, 7, false, false),
+            Instruction::new(Opcode::ADD, 4, 0, digest_ptr, false, true),
+            Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
         ]);
 
         Program::new(instructions, 0, 0)
@@ -48,7 +48,7 @@ pub mod permute_tests {
     #[test]
     pub fn test_keccak_permute_program_execute() {
         utils::setup_logger();
-        let program = keccak_permute_program();
+        let program = Program::from_elf(KECCAK_PERMUTE_ELF).unwrap();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }

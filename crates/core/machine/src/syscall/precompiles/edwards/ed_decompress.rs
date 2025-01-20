@@ -294,18 +294,18 @@ where
     }
 }
 
-//#[cfg(test)]
-//pub mod tests {
-//    use zkm2_core_executor::Program;
-//    use zkm2_stark::CpuProver;
-//    use test_artifacts::ED_DECOMPRESS_ELF;
-//
-//    use crate::utils;
-//
-//    #[test]
-//    fn test_ed_decompress() {
-//        utils::setup_logger();
-//        let program = Program::from(ED_DECOMPRESS_ELF).unwrap();
-//        utils::run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//}
+#[cfg(test)]
+pub mod tests {
+    use zkm2_core_executor::Program;
+    use zkm2_stark::CpuProver;
+    use test_artifacts::ED_DECOMPRESS_ELF;
+
+    use crate::utils;
+
+    #[test]
+    fn test_ed_decompress() {
+        utils::setup_logger();
+        let program = Program::from_elf(ED_DECOMPRESS_ELF).unwrap();
+        utils::run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}

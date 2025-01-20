@@ -20,7 +20,7 @@ mod tests {
     use zkm2_stark::{
         air::MachineAir, baby_bear_poseidon2::BabyBearPoseidon2, CpuProver, StarkGenericConfig,
     };
-    //use test_artifacts::U256XU2048_MUL_ELF;
+    use test_artifacts::U256XU2048_MUL_ELF;
 
     use crate::{
         io::ZKMStdin,
@@ -165,14 +165,22 @@ mod tests {
         execution_record
     }
 
-/*
+
+    use zkm2_stark::ZKMCoreOpts;
+    use zkm2_core_executor::Executor;
+    #[test]
+    pub fn test_uint256_mul_program_execute() {
+        utils::setup_logger();
+        let program = Program::from_elf(U256XU2048_MUL_ELF).unwrap();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
     #[test]
     fn test_uint256_mul() {
         utils::setup_logger();
-        let program = Program::from(U256XU2048_MUL_ELF).unwrap();
+        let program = Program::from_elf(U256XU2048_MUL_ELF).unwrap();
         run_test_io::<CpuProver<_, _>>(program, ZKMStdin::new()).unwrap();
     }
- */
 
     #[test]
     fn test_u256x2048_mul_pass() {

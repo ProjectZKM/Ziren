@@ -29,51 +29,51 @@ impl ShaCompressChip {
     }
 }
 
-//#[cfg(test)]
-//pub mod compress_tests {
-//
-//    use zkm2_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
-//    use zkm2_stark::CpuProver;
-//    use test_artifacts::SHA_COMPRESS_ELF;
-//
-//    use crate::utils::{run_test, setup_logger};
-//
-//    pub fn sha_compress_program() -> Program {
-//        let w_ptr = 100;
-//        let h_ptr = 1000;
-//        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, false, true)];
-//        for i in 0..64 {
-//            instructions.extend(vec![
-//                Instruction::new(Opcode::ADD, 30, 0, w_ptr + i * 4, false, true),
-//                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
-//            ]);
-//        }
-//        for i in 0..8 {
-//            instructions.extend(vec![
-//                Instruction::new(Opcode::ADD, 30, 0, h_ptr + i * 4, false, true),
-//                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
-//            ]);
-//        }
-//        instructions.extend(vec![
-//            Instruction::new(Opcode::ADD, 5, 0, SyscallCode::SHA_COMPRESS as u32, false, true),
-//            Instruction::new(Opcode::ADD, 10, 0, w_ptr, false, true),
-//            Instruction::new(Opcode::ADD, 11, 0, h_ptr, false, true),
-//            Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
-//        ]);
-//        Program::new(instructions, 0, 0)
-//    }
-//
-//    #[test]
-//    fn prove_babybear() {
-//        setup_logger();
-//        let program = sha_compress_program();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//
-//    #[test]
-//    fn test_sha_compress_program() {
-//        setup_logger();
-//        let program = Program::from(SHA_COMPRESS_ELF).unwrap();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//}
+#[cfg(test)]
+pub mod compress_tests {
+
+    use zkm2_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
+    use zkm2_stark::CpuProver;
+    use test_artifacts::SHA_COMPRESS_ELF;
+
+    use crate::utils::{run_test, setup_logger};
+
+    pub fn sha_compress_program() -> Program {
+        let w_ptr = 100;
+        let h_ptr = 1000;
+        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 5, false, true)];
+        for i in 0..64 {
+            instructions.extend(vec![
+                Instruction::new(Opcode::ADD, 30, 0, w_ptr + i * 4, false, true),
+                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
+            ]);
+        }
+        for i in 0..8 {
+            instructions.extend(vec![
+                Instruction::new(Opcode::ADD, 30, 0, h_ptr + i * 4, false, true),
+                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
+            ]);
+        }
+        instructions.extend(vec![
+            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::SHA_COMPRESS as u32, false, true),
+            Instruction::new(Opcode::ADD, 4, 0, w_ptr, false, true),
+            Instruction::new(Opcode::ADD, 5, 0, h_ptr, false, true),
+            Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),
+        ]);
+        Program::new(instructions, 0, 0)
+    }
+
+    #[test]
+    fn prove_babybear() {
+        setup_logger();
+        let program = sha_compress_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_sha_compress_program() {
+        setup_logger();
+        let program = Program::from_elf(SHA_COMPRESS_ELF).unwrap();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}
