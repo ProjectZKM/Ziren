@@ -19,52 +19,52 @@ impl KeccakPermuteChip {
     }
 }
 
-//#[cfg(test)]
-//pub mod permute_tests {
-//    use zkm2_core_executor::{syscalls::SyscallCode, Executor, Instruction, Opcode, Program};
-//    use zkm2_stark::{CpuProver, ZKMCoreOpts};
-//    use test_artifacts::KECCAK_PERMUTE_ELF;
-//
-//    use crate::utils::{self, run_test};
-//
-//    pub fn keccak_permute_program() -> Program {
-//        let digest_ptr = 100;
-//        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 1, false, true)];
-//        for i in 0..(25 * 8) {
-//            instructions.extend(vec![
-//                Instruction::new(Opcode::ADD, 30, 0, digest_ptr + i * 4, false, true),
-//                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
-//            ]);
-//        }
-//        instructions.extend(vec![
-//            Instruction::new(Opcode::ADD, 5, 0, SyscallCode::KECCAK_PERMUTE as u32, false, true),
-//            Instruction::new(Opcode::ADD, 10, 0, digest_ptr, false, true),
-//            Instruction::new(Opcode::ECALL, 5, 10, 11, false, false),
-//        ]);
-//
-//        Program::new(instructions, 0, 0)
-//    }
-//
-//    #[test]
-//    pub fn test_keccak_permute_program_execute() {
-//        utils::setup_logger();
-//        let program = keccak_permute_program();
-//        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-//        runtime.run().unwrap();
-//    }
-//
-//    #[test]
-//    fn test_keccak_permute_prove_babybear() {
-//        utils::setup_logger();
-//
-//        let program = keccak_permute_program();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//
-//    #[test]
-//    fn test_keccak_permute_program_prove() {
-//        utils::setup_logger();
-//        let program = Program::from(KECCAK_PERMUTE_ELF).unwrap();
-//        run_test::<CpuProver<_, _>>(program).unwrap();
-//    }
-//}
+#[cfg(test)]
+pub mod permute_tests {
+    use zkm2_core_executor::{syscalls::SyscallCode, Executor, Instruction, Opcode, Program};
+    use zkm2_stark::{CpuProver, ZKMCoreOpts};
+    use test_artifacts::KECCAK_PERMUTE_ELF;
+
+    use crate::utils::{self, run_test};
+
+    pub fn keccak_permute_program() -> Program {
+        let digest_ptr = 100;
+        let mut instructions = vec![Instruction::new(Opcode::ADD, 29, 0, 1, false, true)];
+        for i in 0..(25 * 8) {
+            instructions.extend(vec![
+                Instruction::new(Opcode::ADD, 30, 0, digest_ptr + i * 4, false, true),
+                Instruction::new(Opcode::SW, 29, 30, 0, false, true),
+            ]);
+        }
+        instructions.extend(vec![
+            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::KECCAK_PERMUTE as u32, false, true),
+            Instruction::new(Opcode::ADD, 6, 0, digest_ptr, false, true),
+            Instruction::new(Opcode::SYSCALL, 2, 6, 7, false, false),
+        ]);
+
+        Program::new(instructions, 0, 0)
+    }
+
+    #[test]
+    pub fn test_keccak_permute_program_execute() {
+        utils::setup_logger();
+        let program = keccak_permute_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
+
+    #[test]
+    fn test_keccak_permute_prove_babybear() {
+        utils::setup_logger();
+
+        let program = keccak_permute_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_keccak_permute_program_prove() {
+        utils::setup_logger();
+        let program = Program::from_elf(KECCAK_PERMUTE_ELF).unwrap();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+}
