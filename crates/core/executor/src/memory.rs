@@ -49,7 +49,7 @@ impl<V: Copy> PagedMemory<V> {
     /// The number of lower bits to ignore, since addresses (except registers) are a multiple of 4.
     const NUM_IGNORED_LOWER_BITS: usize = 2;
     /// The number of registers in the virtual machine.
-    const NUM_REGISTERS: usize = 37;
+    const NUM_REGISTERS: usize = 34;
     /// The offset subtracted from the main address space to make it contiguous.
     const ADDR_COMPRESS_OFFSET: usize = Self::NUM_REGISTERS;
 
