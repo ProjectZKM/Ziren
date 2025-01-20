@@ -197,13 +197,6 @@ impl Opcode {
             _ => false,
         }
     }
-
-    pub fn is_signed(&self) -> bool {
-        match self {
-            Opcode::ADD | Opcode::ADDI | Opcode::SUB => true,
-            _ => false,
-        }
-    }
 }
 
 impl Display for Opcode {

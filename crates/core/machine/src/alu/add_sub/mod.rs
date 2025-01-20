@@ -56,17 +56,17 @@ pub struct AddSubCols<T> {
     /// The second input operand.  This will be `c` for both operations.
     pub operand_2: Word<T>,
 
-    /// Boolean to indicate whether the row is for an add operation.
+    /// Boolean to indicate whether the row is for an add operation on signed integers.
     pub is_add: T,
 
-    /// Boolean to indicate whether the row is for a sub operation.
+    /// Boolean to indicate whether the row is for an add operation on unsigned integers.
+    pub is_addu: T,
+
+    /// Boolean to indicate whether the row is for a sub operation on signed integers.
     pub is_sub: T,
 
-    /// Boolean to indicate whether the row is for a signed operation.
-    pub is_signed: T,
-
-    /// Boolean to indicate whether the row is for an unsigned operation.
-    pub is_unsigned: T,
+    /// Boolean to indicate whether the row is for a sub operation on unsigned integers.
+    pub is_subu: T,
 }
 
 impl<F: PrimeField> MachineAir<F> for AddSubChip {
@@ -155,18 +155,15 @@ impl AddSubChip {
     ) {
         cols.shard = F::from_canonical_u32(event.shard);
 
-        let is_signed = event.opcode.is_signed();
-        cols.is_signed = F::from_bool(is_signed);
-        cols.is_unsigned = F::from_bool(!is_signed);
+        cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
+        cols.is_addu = F::from_bool(event.opcode == Opcode::ADDU);
+        cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
+        cols.is_subu = F::from_bool(event.opcode == Opcode::SUBU);
 
-        let is_add = event.opcode.is_add();
-        cols.is_add = F::from_bool(is_add);
-        cols.is_sub = F::from_bool(!is_add);
-
-        let operand_1 = if is_add { event.b } else { event.a };
+        let operand_1 = if event.opcode.is_add() { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation.populate(blu, event.shard, operand_1, operand_2, is_signed);
+        cols.add_operation.populate(blu, event.shard, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
     }
@@ -199,14 +196,13 @@ where
             local.operand_1,
             local.operand_2,
             local.add_operation,
-            local.is_add + local.is_sub,
+            local.is_add + local.is_sub + local.is_addu + local.is_subu,
         );
 
         // Receive the arguments.  There are separate receives for ADD and SUB.
         // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            local.is_signed * AB::F::from_canonical_u32(Opcode::ADD as u32)
-                + local.is_unsigned * AB::F::from_canonical_u32(Opcode::ADDU as u32),
+            Opcode::ADD.as_field::<AB::F>(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
@@ -214,11 +210,19 @@ where
             local.nonce,
             local.is_add,
         );
+        builder.receive_alu(
+            Opcode::ADDU.as_field::<AB::F>(),
+            local.add_operation.value,
+            local.operand_1,
+            local.operand_2,
+            local.shard,
+            local.nonce,
+            local.is_addu,
+        );
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            local.is_signed * AB::F::from_canonical_u32(Opcode::SUB as u32)
-                + local.is_unsigned * AB::F::from_canonical_u32(Opcode::SUBU as u32),
+            Opcode::SUB.as_field::<AB::F>(),
             local.operand_1,
             local.add_operation.value,
             local.operand_2,
@@ -226,10 +230,21 @@ where
             local.nonce,
             local.is_sub,
         );
+        builder.receive_alu(
+            Opcode::SUBU.as_field::<AB::F>(),
+            local.operand_1,
+            local.add_operation.value,
+            local.operand_2,
+            local.shard,
+            local.nonce,
+            local.is_subu,
+        );
 
-        let is_real = local.is_add + local.is_sub;
+        let is_real = local.is_add + local.is_sub + local.is_addu + local.is_subu;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
+        builder.assert_bool(local.is_addu);
+        builder.assert_bool(local.is_subu);
         builder.assert_bool(is_real);
     }
 }
