@@ -205,7 +205,7 @@ impl Instruction {
             // } // SRL: rd = rt >> sa
             (0b000000, 0b000010) => {
                 if rs == 1 {
-                    Ok(Self::new(Opcode::ROR, rd, rt, sa, false, true)) // rt >>> sa, sa is imm
+                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, 0, true, true, insn))
                 } else {
                     Ok(Self::new(Opcode::SRL, rd, rt, sa, false, true)) // SRL: rd = rt >> sa
                 }
@@ -504,56 +504,6 @@ impl Instruction {
             (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 0, 0, 0, true, true)), // Syscall
             // (0b110011, _) => Ok(Operation::Nop),            // Pref
             (0b110011, _) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // Pref
-            // (0b011100, 0b000001) => Ok(Operation::Maddu(rt, rs)), // maddu
-            (0b011100, 0b000001) => Ok(Self::new(Opcode::MADDU, rd, rs, rt, false, false)), // maddu
-            // (0b011111, 0b000000) => Ok(Operation::Ext(rt, rs, rd, sa)), // ext
-            (0b011111, 0b000000) => Ok(Self::new_with_raw(
-                Opcode::EXT,
-                rt as u8,
-                rs,
-                rd as u32,
-                false,
-                false,
-                insn,
-            )), //ext
-            // (0b011111, 0b000100) => Ok(Operation::Ins(rt, rs, rd, sa)), // ins
-            (0b011111, 0b000100) => Ok(Self::new_with_raw(
-                Opcode::INS,
-                rt as u8,
-                rs,
-                rd as u32,
-                false,
-                false,
-                insn,
-            )), //ins
-            // (0b011111, 0b111011) => Ok(Operation::Rdhwr(rt, rd)), // rdhwr
-            (0b011111, 0b111011) => Ok(Self::new(
-                Opcode::RDHWR,
-                rt as u8,
-                rd as u32,
-                0,
-                false,
-                false,
-            )), // rdhwr
-            (0b011111, 0b100000) => {
-                if sa == 0b011000 {
-                    //         Ok(Operation::Signext(rd, rt, 16)) // seh
-                    Ok(Self::new(Opcode::SIGNEXT, rd, rt, 16, true, false)) // seh
-                } else if sa == 0b010000 {
-                    //         Ok(Operation::Signext(rd, rt, 8)) // seb
-                    Ok(Self::new(Opcode::SIGNEXT, rd, rt, 8, true, false)) // seb
-                } else {
-                    //         log::warn!(
-                    //             "decode: invalid opcode {:#08b} {:#08b} {:#08b}",
-                    //             opcode,
-                    //             func,
-                    //             sa
-                    //         );
-                    //         // todo: change to ProgramError later
-                    // panic!("InvalidOpcode")
-                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, 0, true, true, insn))
-                }
-            }
             // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rd, rs, rt, false, false)), // teq
             _ => {

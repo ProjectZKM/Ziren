@@ -16,7 +16,6 @@ members = [
     "crates/recursion/core",
     "crates/core/machine",
     "crates/core/executor",
-    "crates/core/emulator",
     "crates/recursion/derive",
     "crates/recursion/circuit",
     "crates/recursion/gnark-ffi",

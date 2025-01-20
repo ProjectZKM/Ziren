@@ -2107,7 +2107,6 @@ dependencies = [
 name = "p3-util"
 version = "0.1.0"
 dependencies = [
- "lock_api",
  "serde",
 ]
 
@@ -3557,22 +3556,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-core-emulator"
-version = "0.0.1"
-dependencies = [
- "bincode",
- "byteorder",
- "elf",
- "hex",
- "itertools 0.13.0",
- "lazy_static",
- "log",
- "serde",
- "serde_json",
- "sha3",
-]
-
-[[package]]
 name = "zkm2-core-executor"
 version = "0.0.1"
 dependencies = [
@@ -3605,7 +3588,6 @@ dependencies = [
  "tracing-subscriber",
  "typenum",
  "vec_map",
- "zkm2-core-emulator",
  "zkm2-curves",
  "zkm2-lib",
  "zkm2-primitives",

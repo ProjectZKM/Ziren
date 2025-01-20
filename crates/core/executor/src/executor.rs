@@ -1077,24 +1077,6 @@ impl<'a> Executor<'a> {
 
             Opcode::NOP => {}
 
-            Opcode::EXT => {
-                (a, b, c) = self.execute_ext(instruction);
-            }
-            Opcode::INS => {
-                (a, b, c) = self.execute_ins(instruction);
-            }
-            Opcode::MADDU => {
-                (s1, a, b, c) = self.execute_maddu(instruction);
-            }
-            Opcode::ROR => {
-                (a, b, c) = self.execute_ror(instruction);
-            }
-            Opcode::RDHWR => {
-                (a, b, c) = self.execute_rdhwr(instruction);
-            }
-            Opcode::SIGNEXT => {
-                (a, b, c) = self.execute_signext(instruction);
-            }
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
@@ -1133,113 +1115,6 @@ impl<'a> Executor<'a> {
         Ok(())
     }
 
-    fn execute_ext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rs) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-        );
-        let insn = instruction.raw.expect("should exist");
-        let msb = ((insn >> 11) & 0x1F).to_le_bytes()[0];
-        let lsb = ((insn >> 6) & 0x1F).to_le_bytes()[0];
-
-        assert!(msb + lsb < 32);
-        let b = self.rr(rs, MemoryAccessPosition::B);
-        let mask_msb = (1 << (msb + lsb + 1)) - 1;
-        let a = (b & mask_msb) >> lsb;
-
-        self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
-    }
-
-    fn execute_ins(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rs) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-        );
-        let insn = instruction.raw.expect("should exist");
-        let msb = ((insn >> 11) & 0x1F).to_le_bytes()[0];
-        let lsb = ((insn >> 6) & 0x1F).to_le_bytes()[0];
-        assert!(msb < 32);
-        assert!(lsb <= msb);
-        let rt = self.register(rd);
-        let b = self.rr(rs, MemoryAccessPosition::B);
-        let mask = (1 << (msb - lsb + 1)) - 1;
-        let mask_field = mask << lsb;
-        let a = (rt & !mask_field) | ((b << lsb) & mask_field);
-
-        self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
-    }
-
-    fn execute_ror(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt, sa) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c as u8,
-        );
-
-        let b = self.rr(rt, MemoryAccessPosition::B);
-
-        let sin = (b as u64) + ((b as u64) << 32);
-        let a = (sin >> sa) as u32;
-
-        self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
-    }
-
-    fn execute_rdhwr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rt, rd) = (instruction.op_a.into(), (instruction.op_b as u8).into());
-
-        let c = self.rr(Register::LOCAL_USER, MemoryAccessPosition::C);
-        let b = self.rr(rd, MemoryAccessPosition::B);
-
-        let a = if b == 0 {
-            1
-        } else if rd == Register::SP {
-            c
-        } else {
-            0
-        };
-        self.rw(rt, a, MemoryAccessPosition::A);
-        (a, b, c)
-    }
-
-    fn execute_signext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt, bits) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c as u8,
-        );
-
-        let b = self.rr(rt, MemoryAccessPosition::B);
-
-        let bits = bits as usize;
-        let is_signed = ((b >> (bits - 1)) & 0x1) != 0;
-        let signed = ((1 << (32 - bits)) - 1) << bits;
-        let mask = (1 << bits) - 1;
-        let a = if is_signed {
-            b & mask | signed
-        } else {
-            b & mask
-        };
-        self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
-    }
-
-    fn execute_swaphalf(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt) = (instruction.op_a.into(), (instruction.op_b as u8).into());
-
-        let b = self.rr(rt, MemoryAccessPosition::B);
-
-        let a = (((b >> 16) & 0xFF) << 24)
-            | (((b >> 24) & 0xFF) << 16)
-            | ((b & 0xFF) << 8)
-            | ((b >> 8) & 0xFF);
-
-        self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
-    }
-
     fn execute_teq(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (rs, rt) = (
             (instruction.op_b as u8).into(),
@@ -1253,27 +1128,6 @@ impl<'a> Executor<'a> {
             panic!("Trap Error");
         }
         (0, b, c)
-    }
-
-    fn execute_maddu(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
-        let (rs1, rs2) = (
-            (instruction.op_b as u8).into(),
-            (instruction.op_c as u8).into(),
-        );
-        let lo = self.register(Register::LO) as u64;
-        let hi = self.register(Register::HI) as u64;
-        let addend = (hi << 32) + lo;
-
-        let c = self.rr(rs2, MemoryAccessPosition::C);
-        let b = self.rr(rs1, MemoryAccessPosition::B);
-        let mul = (c as u64) * (b as u64);
-        let (result, _) = mul.overflowing_add(addend);
-        let a = result as u32;
-        let hi = (result >> 32) as u32;
-        self.rw(Register::LO, a, MemoryAccessPosition::A);
-        self.rw(Register::HI, hi, MemoryAccessPosition::S1);
-
-        (Some(hi), a, b, c)
     }
 
     fn execute_condmov(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
@@ -2146,19 +2000,6 @@ mod tests {
         runtime.run_very_fast().unwrap();
     }
 
-    #[test]
-    #[ignore]
-    fn test_hello_program_run() {
-        use log::LevelFilter;
-        use env_logger;
-
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-        let program = Program::from_elf("../emulator/test-vectors/hello").unwrap();
-        // let program = Program::from_elf("crates/core/emulator/test-vectors/hello").unwrap();
-        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.run_very_fast().unwrap();
-    }
     //
     // #[test]
     // fn test_secp256r1_add_program_run() {

@@ -1,4 +1,4 @@
-//! Registers for the SP1 zkVM.
+//! Registers for the Zkm zkVM.
 
 /// A register stores a 32-bit value used by operations.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,9 +37,6 @@ pub enum Register {
     RA = 31,
     LO = 32,
     HI = 33,
-    HEAP = 34,
-    BRK = 35,
-    LOCAL_USER = 36,
 }
 
 impl From<u8> for Register {
@@ -79,9 +76,6 @@ impl From<u8> for Register {
             31 => Register::RA,
             32 => Register::LO,
             33 => Register::HI,
-            34 => Register::HEAP,
-            35 => Register::BRK,
-            36 => Register::LOCAL_USER,
             _ => panic!("invalid register {value}"),
         }
     }

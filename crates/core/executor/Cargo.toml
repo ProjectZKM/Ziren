@@ -13,7 +13,6 @@ categories = { workspace = true }
 zkm2-primitives = { workspace = true }
 zkm2-curves = { workspace = true }
 zkm2-stark = { workspace = true }
-zkm2-core-emulator = { workspace = true }
 
 # p3
 p3-field = { workspace = true }
