@@ -234,10 +234,10 @@ impl ShaCompressChip {
             let maj_intermediate = cols.maj_intermediate.populate(blu, shard, a_and_b, a_and_c);
             let maj = cols.maj.populate(blu, shard, maj_intermediate, b_and_c);
 
-            let temp2 = cols.temp2.populate(blu, shard, s0, maj);
+            let temp2 = cols.temp2.populate(blu, shard, s0, maj, false);
 
-            let d_add_temp1 = cols.d_add_temp1.populate(blu, shard, d, temp1);
-            let temp1_add_temp2 = cols.temp1_add_temp2.populate(blu, shard, temp1, temp2);
+            let d_add_temp1 = cols.d_add_temp1.populate(blu, shard, d, temp1, false);
+            let temp1_add_temp2 = cols.temp1_add_temp2.populate(blu, shard, temp1, temp2, false);
 
             h_array[7] = g;
             h_array[6] = f;
@@ -273,7 +273,7 @@ impl ShaCompressChip {
             cols.octet_num[octet_num_idx] = F::ONE;
             cols.is_finalize = F::ONE;
 
-            cols.finalize_add.populate(blu, shard, og_h[j], h_array[j]);
+            cols.finalize_add.populate(blu, shard, og_h[j], h_array[j], false);
             cols.mem.populate_write(event.h_write_records[j], blu);
             cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
 

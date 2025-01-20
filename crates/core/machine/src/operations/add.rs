@@ -15,7 +15,10 @@ pub struct AddOperation<T> {
     pub value: Word<T>,
 
     /// Trace.
-    pub carry: [T; 3],
+    pub carry: [T; 4],
+
+    /// Whether the operation is signed.
+    pub is_signed: T,
 }
 
 impl<F: Field> AddOperation<F> {
@@ -25,9 +28,12 @@ impl<F: Field> AddOperation<F> {
         shard: u32,
         a_u32: u32,
         b_u32: u32,
+        is_signed: bool,
     ) -> u32 {
         let expected = a_u32.wrapping_add(b_u32);
         self.value = Word::from(expected);
+        self.is_signed = F::from_bool(is_signed);
+
         let a = a_u32.to_le_bytes();
         let b = b_u32.to_le_bytes();
 
@@ -43,6 +49,9 @@ impl<F: Field> AddOperation<F> {
         if (a[2] as u32) + (b[2] as u32) + (carry[1] as u32) > 255 {
             carry[2] = 1;
             self.carry[2] = F::ONE;
+        }
+        if (a[3] as u32) + (b[3] as u32) + (carry[2] as u32) > 255 && is_signed {
+            self.carry[3] = F::ONE
         }
 
         let base = 256u32;
@@ -85,16 +94,21 @@ impl<F: Field> AddOperation<F> {
         builder_is_real.assert_zero(cols.carry[0] * (overflow_0.clone() - base));
         builder_is_real.assert_zero(cols.carry[1] * (overflow_1.clone() - base));
         builder_is_real.assert_zero(cols.carry[2] * (overflow_2.clone() - base));
+        // todo
+        // builder_is_real.assert_zero(cols.carry[3] * (overflow_3.clone() - base) * cols.is_signed.clone());
 
         // If the carry is not one, then the overflow must be zero.
         builder_is_real.assert_zero((cols.carry[0] - one.clone()) * overflow_0.clone());
         builder_is_real.assert_zero((cols.carry[1] - one.clone()) * overflow_1.clone());
         builder_is_real.assert_zero((cols.carry[2] - one.clone()) * overflow_2.clone());
+        // todo
+        // builder_is_real.assert_zero((cols.carry[3] - one.clone()) * overflow_3.clone() * cols.is_signed.clone());
 
         // Assert that the carry is either zero or one.
         builder_is_real.assert_bool(cols.carry[0]);
         builder_is_real.assert_bool(cols.carry[1]);
         builder_is_real.assert_bool(cols.carry[2]);
+        builder_is_real.assert_bool(cols.carry[3]);
         builder_is_real.assert_bool(is_real.clone());
 
         // Range check each byte.

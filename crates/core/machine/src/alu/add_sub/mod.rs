@@ -27,7 +27,7 @@ use crate::{
 /// The number of main trace columns for `AddSubChip`.
 pub const NUM_ADD_SUB_COLS: usize = size_of::<AddSubCols<u8>>();
 
-/// A chip that implements addition for the opcode ADD and SUB.
+/// A chip that implements addition for the opcode ADD, ADDU, ADDI, ADDIU, SUB and SUBU.
 ///
 /// SUB is basically an ADD with a re-arrangement of the operands and result.
 /// E.g. given the standard ALU op variable name and positioning of `a` = `b` OP `c`,
@@ -50,7 +50,7 @@ pub struct AddSubCols<T> {
     /// It's result will be `a` for the add operation and `b` for the sub operation.
     pub add_operation: AddOperation<T>,
 
-    /// The first input operand.  This will be `b` for add operations and `c` for sub operations.
+    /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
     pub operand_1: Word<T>,
 
     /// The second input operand.  This will be `c` for both operations.
@@ -61,6 +61,12 @@ pub struct AddSubCols<T> {
 
     /// Boolean to indicate whether the row is for a sub operation.
     pub is_sub: T,
+
+    /// Boolean to indicate whether the row is for a signed operation.
+    pub is_signed: T,
+
+    /// Boolean to indicate whether the row is for an unsigned operation.
+    pub is_unsigned: T,
 }
 
 impl<F: PrimeField> MachineAir<F> for AddSubChip {
@@ -147,15 +153,20 @@ impl AddSubChip {
         cols: &mut AddSubCols<F>,
         blu: &mut impl ByteRecord,
     ) {
-        let is_add = event.opcode == Opcode::ADD;
         cols.shard = F::from_canonical_u32(event.shard);
+
+        let is_signed = event.opcode.is_signed();
+        cols.is_signed = F::from_bool(is_signed);
+        cols.is_unsigned = F::from_bool(!is_signed);
+
+        let is_add = event.opcode.is_add();
         cols.is_add = F::from_bool(is_add);
         cols.is_sub = F::from_bool(!is_add);
 
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation.populate(blu, event.shard, operand_1, operand_2);
+        cols.add_operation.populate(blu, event.shard, operand_1, operand_2, is_signed);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
     }
@@ -194,7 +205,8 @@ where
         // Receive the arguments.  There are separate receives for ADD and SUB.
         // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            Opcode::ADD.as_field::<AB::F>(),
+            local.is_signed * AB::F::from_canonical_u32(Opcode::ADD as u32)
+                + local.is_unsigned * AB::F::from_canonical_u32(Opcode::ADDU as u32),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
@@ -205,7 +217,8 @@ where
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            Opcode::SUB.as_field::<AB::F>(),
+            local.is_signed * AB::F::from_canonical_u32(Opcode::SUB as u32)
+                + local.is_unsigned * AB::F::from_canonical_u32(Opcode::SUBU as u32),
             local.operand_1,
             local.add_operation.value,
             local.operand_2,
