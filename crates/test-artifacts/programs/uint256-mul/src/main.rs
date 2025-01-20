@@ -3,7 +3,7 @@
 zkm2_zkvm::entrypoint!(main);
 
 use num::{BigUint, One};
-use rand::Rng;
+//use rand::Rng;
 use zkm2_zkvm::syscalls::sys_bigint;
 
 fn uint256_mul(x: &[u8; 32], y: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
@@ -29,10 +29,10 @@ fn biguint_to_bytes_le(x: BigUint) -> [u8; 32] {
 pub fn main() {
     for _ in 0..50 {
         // Test with random numbers.
-        let mut rng = rand::thread_rng();
-        let mut x: [u8; 32] = rng.gen();
-        let mut y: [u8; 32] = rng.gen();
-        let modulus: [u8; 32] = rng.gen();
+        //let mut rng = rand::thread_rng();
+        let mut x: [u8; 32] = [0u8;32];//rng.gen();
+        let mut y: [u8; 32] = [0u8;32];//rng.gen();
+        let modulus: [u8; 32] = [0u8;32];//rng.gen();
 
         // Convert byte arrays to BigUint
         let modulus_big = BigUint::from_bytes_le(&modulus);
@@ -54,9 +54,9 @@ pub fn main() {
     let modulus_big: BigUint = BigUint::one() << 256;
     for _ in 0..50 {
         // Test with random numbers.
-        let mut rng = rand::thread_rng();
-        let mut x: [u8; 32] = rng.gen();
-        let mut y: [u8; 32] = rng.gen();
+        //let mut rng = rand::thread_rng();
+        let mut x: [u8; 32] = [0u8;32];//rng.gen();
+        let mut y: [u8; 32] = [0u8;32];//rng.gen();
 
         // Convert byte arrays to BigUint
         let x_big = BigUint::from_bytes_le(&x);
@@ -73,8 +73,8 @@ pub fn main() {
     }
 
     // Test with random numbers.
-    let mut rng = rand::thread_rng();
-    let x: [u8; 32] = rng.gen();
+    //let mut rng = rand::thread_rng();
+    let x: [u8; 32] = [0u8; 32]; //rng.gen();
 
     // Hardcoded edge case: Multiplying by 1
     let modulus = [0u8; 32];

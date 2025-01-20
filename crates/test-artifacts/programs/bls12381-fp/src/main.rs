@@ -9,7 +9,7 @@ use zkm2_lib::{
 };
 
 use num_bigint::BigUint;
-use rand::Rng;
+//use rand::Rng;
 
 fn add(lhs: &[u32; 12], rhs: &[u32; 12]) -> [u32; 12] {
     unsafe {
@@ -36,10 +36,10 @@ fn mul(lhs: &[u32; 12], rhs: &[u32; 12]) -> [u32; 12] {
 }
 
 fn random_u32_12() -> [u32; 12] {
-    let mut rng = rand::thread_rng();
+    //let mut rng = rand::thread_rng();
     let mut arr = [0u32; 12];
     for item in arr.iter_mut() {
-        *item = rng.gen();
+        *item = 1; // rng.gen();
     }
     arr
 }

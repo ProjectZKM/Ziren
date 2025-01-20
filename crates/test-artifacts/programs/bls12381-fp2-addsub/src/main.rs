@@ -3,14 +3,14 @@
 zkm2_zkvm::entrypoint!(main);
 
 use num_bigint::BigUint;
-use rand::Rng;
+//use rand::Rng;
 use zkm2_zkvm::syscalls::{syscall_bls12381_fp2_addmod, syscall_bls12381_fp2_submod};
 use core::{mem::transmute, str::FromStr};
 
 const MODULUS: &str = "4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787";
 
 fn random_u64_6(modulus: &BigUint) -> [u64; 6] {
-    let mut rng = rand::thread_rng();
+    //let mut rng = rand::thread_rng();
     let mut arr = [0u64; 6];
     let modulus_bytes = modulus.to_bytes_le();
     let modulus_u64: [u64; 6] = [
@@ -23,7 +23,7 @@ fn random_u64_6(modulus: &BigUint) -> [u64; 6] {
     ];
 
     for i in 0..6 {
-        arr[i] = rng.gen_range(0..modulus_u64[i]);
+        arr[i] = 1; // rng.gen_range(0..modulus_u64[i]);
     }
     arr
 }

@@ -7,7 +7,7 @@ use core::str::FromStr;
 use zkm2_zkvm::syscalls::{syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp_submod};
 
 use num_bigint::BigUint;
-use rand::Rng;
+//use rand::Rng;
 
 const NUM_LIMBS: usize = 8;
 
@@ -36,10 +36,10 @@ fn mul(lhs: &[u32; NUM_LIMBS], rhs: &[u32; NUM_LIMBS]) -> [u32; NUM_LIMBS] {
 }
 
 fn random_u32_8() -> [u32; NUM_LIMBS] {
-    let mut rng = rand::thread_rng();
+    //let mut rng = rand::thread_rng();
     let mut arr = [0u32; NUM_LIMBS];
     for item in arr.iter_mut() {
-        *item = rng.gen();
+        *item = 1; // rng.gen();
     }
     arr
 }

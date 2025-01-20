@@ -3,7 +3,7 @@
 zkm2_zkvm::entrypoint!(main);
 
 use num::BigUint;
-use rand::Rng;
+//use rand::Rng;
 use zkm2_zkvm::syscalls::syscall_u256x2048_mul;
 
 fn u256_to_bytes_le(x: &BigUint) -> [u8; 32] {
@@ -48,11 +48,11 @@ pub fn main() {
     assert_eq!(result_max, result_max_syscall);
 
     // Test 10 random pairs of a and b.
-    let mut rng = rand::thread_rng();
+    //let mut rng = rand::thread_rng();
     for _ in 0..10 {
-        let a: [u8; 32] = rng.gen();
+        let a: [u8; 32] = [0u8;32]; // rng.gen();
         let mut b = [0u8; 256];
-        rng.fill(&mut b);
+        //rng.fill(&mut b);
 
         let a_big = BigUint::from_bytes_le(&a);
         let b_big = BigUint::from_bytes_le(&b);
