@@ -1,0 +1,11 @@
+[package]
+name = "bn254-add-test"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+common-test-utils = { path = "../common" }
+zkm2-lib = { path = "../../../../crates/zkvm/lib" }
+zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm2-curves = { path = "../../../../crates/curves" }

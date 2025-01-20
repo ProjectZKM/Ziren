@@ -1,0 +1,12 @@
+[package]
+name = "bls12381-fp2-mul-test"
+version = "1.1.1"
+edition = "2021"
+publish = false
+
+
+[dependencies]
+zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm2-lib = { path = "../../../../crates/zkvm/lib" }
+num-bigint = "0.4.6"
+rand = "0.8.5"

@@ -5,7 +5,7 @@ pub mod syscalls;
 pub mod io {
     pub use zkm2_lib::io::*;
 }
-pub mod precompiles {
+pub mod lib {
     pub use zkm2_lib::*;
 }
 
@@ -31,6 +31,7 @@ macro_rules! entrypoint {
     };
 }
 
+#[cfg(all(target_os = "zkvm", feature = "libm"))]
 mod libm;
 
 /// The number of 32 bit words that the public values digest is composed of.
@@ -41,8 +42,18 @@ pub const POSEIDON_NUM_WORDS: usize = 8;
 mod zkvm {
     use crate::syscalls::syscall_halt;
 
+    use cfg_if::cfg_if;
     use getrandom::{register_custom_getrandom, Error};
     use sha2::{Digest, Sha256};
+
+    cfg_if! {
+        if #[cfg(feature = "verify")] {
+            use p3_baby_bear::BabyBear;
+            use p3_field::FieldAlgebra;
+
+            pub static mut DEFERRED_PROOFS_DIGEST: Option<[BabyBear; 8]> = None;
+        }
+    }
 
     pub static mut PUBLIC_VALUES_HASHER: Option<Sha256> = None;
 
@@ -50,7 +61,10 @@ mod zkvm {
     fn main() {
         unsafe {
             PUBLIC_VALUES_HASHER = Some(Sha256::new());
-
+            #[cfg(feature = "verify")]
+            {
+                DEFERRED_PROOFS_DIGEST = Some([BabyBear::ZERO; 8]);
+            }
             extern "C" {
                 fn start();
             }

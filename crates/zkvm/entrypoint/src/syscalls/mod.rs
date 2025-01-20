@@ -15,6 +15,8 @@ mod sys;
 mod u256x2048_mul;
 mod uint256_mul;
 mod unconstrained;
+#[cfg(feature = "verify")]
+mod verify;
 
 pub use bigint::*;
 pub use bls12381::*;
@@ -33,6 +35,8 @@ pub use sys::*;
 pub use u256x2048_mul::*;
 pub use uint256_mul::*;
 pub use unconstrained::*;
+#[cfg(feature = "verify")]
+pub use verify::*;
 
 /// These codes MUST match the codes in `core/src/runtime/syscall.rs`. There is a derived test
 /// that checks that the enum is consistent with the syscalls.

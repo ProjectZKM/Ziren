@@ -4,30 +4,28 @@ use core::arch::asm;
 cfg_if::cfg_if! {
     if #[cfg(target_os = "zkvm")] {
         use crate::syscalls::VERIFY_ZKM_PROOF;
-        /*
         use crate::zkvm::DEFERRED_PROOFS_DIGEST;
         use p3_baby_bear::BabyBear;
-        use p3_field::AbstractField;
-        use sp1_primitives::hash_deferred_proof;
-         */
+        use p3_field::FieldAlgebra;
+        use zkm2_primitives::hash_deferred_proof;
     }
 }
 
 #[no_mangle]
 #[allow(unused_variables)]
-pub fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]) {
+pub extern "C" fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]) {
     #[cfg(target_os = "zkvm")]
     {
         // Call syscall to verify the next proof at runtime
         unsafe {
             asm!(
-                "ecall",
-                in("t0") VERIFY_ZKM_PROOF,
-                in("a0") vk_digest.as_ptr(),
-                in("a1") pv_digest.as_ptr(),
+                "syscall",
+                in("$2") VERIFY_ZKM_PROOF,
+                in("$4") vk_digest.as_ptr(),
+                in("$5") pv_digest.as_ptr(),
             );
         }
-        /*
+
         // Update digest to p2_hash(prev_digest[0..8] || vkey_digest[0..8] || pv_digest[0..32])
         let mut hash_input = Vec::with_capacity(48);
         // First 8 elements are previous hash (initially zero)
@@ -50,7 +48,6 @@ pub fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]) {
             &vk_digest_babybear.try_into().unwrap(),
             &pv_digest_babybear.try_into().unwrap(),
         );
-         */
     }
 
     #[cfg(not(target_os = "zkvm"))]

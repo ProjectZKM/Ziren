@@ -1,4 +1,8 @@
+#![no_std]
 #![no_main]
+extern crate alloc;
+use alloc::vec::Vec;
+
 zkm2_zkvm::entrypoint!(main);
 
 use tiny_keccak::{Hasher, Keccak};

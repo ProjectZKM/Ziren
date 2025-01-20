@@ -11,6 +11,8 @@ pub mod secp256k1;
 pub mod secp256r1;
 pub mod unconstrained;
 pub mod utils;
+#[cfg(feature = "verify")]
+pub mod verify;
 
 extern "C" {
     /// Halts the program with the given exit code.

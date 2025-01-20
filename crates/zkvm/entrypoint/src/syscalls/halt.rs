@@ -7,13 +7,13 @@ cfg_if::cfg_if! {
     }
 }
 
-/*
+
 cfg_if::cfg_if! {
     if #[cfg(all(target_os = "zkvm", feature = "verify"))] {
         use p3_field::PrimeField32;
+        use p3_field::FieldAlgebra;
     }
 }
-*/
 
 /// Halts the program with the given exit code.
 ///
@@ -37,22 +37,21 @@ pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
             let word = u32::from_le_bytes(pv_digest_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
             asm!("syscall", in("$2") crate::syscalls::COMMIT, in("$4") i, in("$5") word);
         }
-        /*
+    
         cfg_if::cfg_if! {
             if #[cfg(feature = "verify")] {
                 let deferred_proofs_digest = zkvm::DEFERRED_PROOFS_DIGEST.as_mut().unwrap();
 
                 for i in 0..POSEIDON_NUM_WORDS {
                     let word = deferred_proofs_digest[i].as_canonical_u32();
-                    asm!("ecall", in("t0") crate::syscalls::COMMIT_DEFERRED_PROOFS, in("a0") i, in("a1") word);
+                    asm!("syscall", in("$2") crate::syscalls::COMMIT_DEFERRED_PROOFS, in("$4") i, in("$5") word);
                 }
             } else {
                 for i in 0..POSEIDON_NUM_WORDS {
-                    asm!("ecall", in("t0") crate::syscalls::COMMIT_DEFERRED_PROOFS, in("a0") i, in("a1") 0);
+                    asm!("syscall", in("$2") crate::syscalls::COMMIT_DEFERRED_PROOFS, in("$4") i, in("$5") 0);
                 }
             }
         }
-        */
 
         asm!(
             "syscall",

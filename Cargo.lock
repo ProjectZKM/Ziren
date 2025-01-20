@@ -3918,8 +3918,11 @@ dependencies = [
  "getrandom",
  "lazy_static",
  "libm",
+ "p3-baby-bear",
+ "p3-field",
  "rand",
  "serde",
  "sha2",
  "zkm2-lib",
+ "zkm2-primitives",
 ]
