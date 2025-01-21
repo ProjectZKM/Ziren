@@ -27,6 +27,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             shard,
             clk: event.clk,
             opcode: Opcode::ADD,
+            hi: 0,
             a: 0,
             b: event.c,
             c: (event.c as i32).unsigned_abs(),
@@ -40,6 +41,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             shard,
             clk: event.clk,
             opcode: Opcode::ADD,
+            hi: 0,
             a: 0,
             b: remainder,
             c: (remainder as i32).unsigned_abs(),
@@ -57,19 +59,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     let lower_word = u32::from_le_bytes(c_times_quotient[0..4].try_into().unwrap());
     let upper_word = u32::from_le_bytes(c_times_quotient[4..8].try_into().unwrap());
 
-    let lower_multiplication = AluEvent {
-        lookup_id: event.sub_lookups[0],
-        shard,
-        clk: event.clk,
-        opcode: Opcode::MUL,
-        a: lower_word,
-        c: event.c,
-        b: quotient,
-        sub_lookups: executor.record.create_lookup_ids(),
-    };
-    executor.record.mul_events.push(lower_multiplication);
-
-    let upper_multiplication = AluEvent {
+    let multiplication = AluEvent {
         lookup_id: event.sub_lookups[1],
         shard,
         clk: event.clk,
@@ -80,18 +70,20 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
                 Opcode::MULTU
             }
         },
-        a: upper_word,
+        hi: upper_word,
+        a: lower_word,
         c: event.c,
         b: quotient,
         sub_lookups: executor.record.create_lookup_ids(),
     };
-    executor.record.mul_events.push(upper_multiplication);
+    executor.record.mul_events.push(multiplication);
 
     let lt_event = if is_signed_operation {
         AluEvent {
             lookup_id: event.sub_lookups[2],
             shard,
             opcode: Opcode::SLTU,
+            hi: 0,
             a: 1,
             b: (remainder as i32).unsigned_abs(),
             c: u32::max(1, (event.c as i32).unsigned_abs()),
@@ -103,6 +95,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             lookup_id: event.sub_lookups[3],
             shard,
             opcode: Opcode::SLTU,
+            hi: 0,
             a: 1,
             b: remainder,
             c: u32::max(1, event.c),
@@ -140,6 +133,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             shard,
             clk: event.clk,
             opcode: Opcode::ADD,
+            hi: 0,
             a: memory_addr,
             b: event.b,
             c: event.c,
@@ -179,6 +173,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
                     shard,
                     clk: event.clk,
                     opcode: Opcode::SUB,
+                    hi: 0,
                     a: event.a,
                     b: unsigned_mem_val,
                     c: sign_value,
@@ -215,6 +210,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             shard,
             clk: event.clk,
             opcode: alu_op_code,
+            hi: 0,
             a: a_lt_b as u32,
             b: event.a,
             c: event.b,
@@ -225,6 +221,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             shard,
             clk: event.clk,
             opcode: alu_op_code,
+            hi: 0,
             a: a_gt_b as u32,
             b: event.b,
             c: event.a,
@@ -248,6 +245,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
                 shard,
                 clk: event.clk,
                 opcode: Opcode::ADD,
+                hi: 0,
                 a: next_pc,
                 b: event.pc,
                 c: event.c,

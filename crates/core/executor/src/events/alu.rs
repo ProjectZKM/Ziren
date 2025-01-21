@@ -16,12 +16,13 @@ pub struct AluEvent {
     pub clk: u32,
     /// The opcode.
     pub opcode: Opcode,
-    /// The first operand.
+    /// The upper bits of the output operand.
+    pub hi: u32,
+    /// The output operand.
     pub a: u32,
-    /// The second operand.
+    /// The first operand.
     pub b: u32,
-    /// The third operand.
-    /// todo: remove it
+    /// The second operand.
     pub c: u32,
     /// The result of the operation in the format of [``LookupId``; 6]
     pub sub_lookups: [LookupId; 6],
@@ -36,6 +37,7 @@ impl AluEvent {
             shard,
             clk,
             opcode,
+            hi: 0,
             a,
             b,
             c,
