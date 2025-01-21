@@ -13,6 +13,9 @@ pub struct InstructionCols<T> {
     /// The opcode for this cycle.
     pub opcode: T,
 
+    /// Store the higher bits of the output.
+    pub op_hi: Word<T>,
+
     /// The first operand for this instruction.
     pub op_a: Word<T>,
 
@@ -29,7 +32,12 @@ pub struct InstructionCols<T> {
 impl<F: PrimeField> InstructionCols<F> {
     pub fn populate(&mut self, instruction: &Instruction) {
         self.opcode = instruction.opcode.as_field::<F>();
-        self.op_a = (instruction.op_a as u32).into();
+        if instruction.opcode.is_use_lo_hi_alu() {
+            self.op_hi = (Register::HI as u32).into();
+            self.op_a = (Register::LO as u32).into();
+        } else {
+            self.op_a = (instruction.op_a as u32).into();
+        }
         self.op_b = instruction.op_b.into();
         self.op_c = instruction.op_c.into();
 

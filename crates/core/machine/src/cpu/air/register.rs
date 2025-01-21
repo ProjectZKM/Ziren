@@ -54,6 +54,15 @@ impl CpuChip {
             local.is_real,
         );
 
+        // Write the HI register
+        builder.eval_memory_access(
+            local.shard,
+            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::S1 as u32),
+            local.instruction.op_hi[0],
+            &local.op_hi_access,
+            local.selectors.has_hi,
+        );
+
         // Always range check the word value in `op_a`, as JUMP instructions may witness
         // an invalid word and write it to memory.
         builder.slice_range_check_u8(&local.op_a_access.access.value.0, local.is_real);

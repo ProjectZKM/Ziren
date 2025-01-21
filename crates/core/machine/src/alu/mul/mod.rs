@@ -23,10 +23,10 @@
 //!     carry[i] = x / 256
 //!     m[i] = x % 256
 //!
-//! if upper_half:
+//! assert_eq(a, m[0..4])
+//!
+//! if mult or multu:
 //!     assert_eq(hi, m[4..8])
-//! if lower_half:
-//!     assert_eq(a, m[0..4])
 
 mod utils;
 
@@ -437,7 +437,7 @@ where
             local.b,
             local.c,
             local.shard,
-            local.nonce, // todo: should it accept the nonce?
+            local.nonce,
             local.is_real,
         );
     }
@@ -458,7 +458,7 @@ mod tests {
     fn generate_trace_mul() {
        let mut shard = ExecutionRecord::default();
 
-       // Fill mul_events with 10 MULT events.
+       // Fill mul_events with 10 MUL events.
        let mut mul_events: Vec<AluEvent> = Vec::new();
        for _ in 0..10 {
            mul_events.push(AluEvent::new(

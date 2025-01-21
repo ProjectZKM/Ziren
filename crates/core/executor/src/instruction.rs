@@ -26,7 +26,7 @@ pub struct Instruction {
 }
 
 impl Instruction {
-    /// Create a new [`RiscvInstruction`].
+    /// Create a new [`MipsInstruction`].
     pub const fn new(
         opcode: Opcode,
         op_a: u8,
