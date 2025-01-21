@@ -9,15 +9,49 @@ use zkm2_zkvm::syscalls::sys_bigint;
 fn uint256_mul(x: &[u8; 32], y: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
     // println!("cycle-tracker-start: uint256_mul");
     let mut result = [0u32; 8];
+    let mut x_word: [u32; 8] = [0; 8];
+        for i in 0..8 {
+            x_word[i] = u32::from_le_bytes([
+                x[i * 4],
+                x[i * 4 + 1],
+                x[i * 4 + 2],
+                x[i * 4 + 3],
+            ]);
+        }
+    
+        let mut y_word: [u32; 8] = [0; 8];
+        for i in 0..8 {
+            y_word[i] = u32::from_le_bytes([
+                y[i * 4],
+                y[i * 4 + 1],
+                y[i * 4 + 2],
+                y[i * 4 + 3],
+            ]);
+        }
+    
+        let mut modulus_word: [u32; 8] = [0; 8];
+        for i in 0..8 {
+            modulus_word[i] = u32::from_le_bytes([
+                modulus[i * 4],
+                modulus[i * 4 + 1],
+                modulus[i * 4 + 2],
+                modulus[i * 4 + 3],
+            ]);
+        }
     sys_bigint(
         result.as_mut_ptr() as *mut [u32; 8],
         0,
-        x.as_ptr() as *const [u32; 8],
-        y.as_ptr() as *const [u32; 8],
-        modulus.as_ptr() as *const [u32; 8],
+        x_word.as_ptr() as *const [u32; 8],
+        y_word.as_ptr() as *const [u32; 8],
+        modulus_word.as_ptr() as *const [u32; 8],
     );
     // println!("cycle-tracker-end: uint256_mul");
-    bytemuck::cast::<[u32; 8], [u8; 32]>(result)
+    //bytemuck::cast::<[u32; 8], [u8; 32]>(result)
+    let mut result_b: [u8; 32] = [0; 32];
+    for i in 0..8 {
+        result_b[i*4..i*4+4].copy_from_slice(&result[i].to_le_bytes()[0..]);
+    }
+    result_b
 }
 
 fn biguint_to_bytes_le(x: BigUint) -> [u8; 32] {
@@ -27,12 +61,16 @@ fn biguint_to_bytes_le(x: BigUint) -> [u8; 32] {
 }
 
 pub fn main() {
-    for _ in 0..50 {
+    for j in 0..50 {
         // Test with random numbers.
         //let mut rng = rand::thread_rng();
         let mut x: [u8; 32] = [0u8;32];//rng.gen();
+        x[j/2] = 1;
         let mut y: [u8; 32] = [0u8;32];//rng.gen();
-        let modulus: [u8; 32] = [0u8;32];//rng.gen();
+        y[j/2 + 2] = 3;
+        let mut modulus: [u8; 32] = [0u8;32];//rng.gen();
+        modulus[0] = 1;
+        modulus[j/2 + 5] = 5;;
 
         // Convert byte arrays to BigUint
         let modulus_big = BigUint::from_bytes_le(&modulus);
@@ -52,12 +90,13 @@ pub fn main() {
     // Modulus zero tests
     let modulus = [0u8; 32];
     let modulus_big: BigUint = BigUint::one() << 256;
-    for _ in 0..50 {
+    for j in 0..50 {
         // Test with random numbers.
         //let mut rng = rand::thread_rng();
         let mut x: [u8; 32] = [0u8;32];//rng.gen();
+        x[j/2] = 1;
         let mut y: [u8; 32] = [0u8;32];//rng.gen();
-
+        y[j/2 + 2] = 3;
         // Convert byte arrays to BigUint
         let x_big = BigUint::from_bytes_le(&x);
         x = biguint_to_bytes_le(&x_big % &modulus_big);
