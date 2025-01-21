@@ -72,31 +72,18 @@ impl Instruction {
         matches!(
             self.opcode,
             Opcode::ADD
-                | Opcode::ADDU
-                | Opcode::ADDI
-                | Opcode::ADDIU
                 | Opcode::SUB
-                | Opcode::SUBU
                 | Opcode::MULT
                 | Opcode::MULTU
                 | Opcode::MUL
                 | Opcode::DIV
                 | Opcode::DIVU
-                | Opcode::SLLV
-                | Opcode::SRLV
-                | Opcode::SRAV
                 | Opcode::SLL
                 | Opcode::SRL
                 | Opcode::SRA
                 | Opcode::SLT
                 | Opcode::SLTU
-                | Opcode::SLTI
-                | Opcode::SLTIU
                 | Opcode::LUI
-                | Opcode::MFHI
-                | Opcode::MTHI
-                | Opcode::MFLO
-                | Opcode::MTLO
                 | Opcode::AND
                 | Opcode::OR
                 | Opcode::XOR
@@ -192,7 +179,7 @@ impl Instruction {
             //     rt,
             //     rd,
             // )), // ADDU: rd = rs+rt
-            (0b000000, 0b100001) => Ok(Self::new(Opcode::ADDU, rd, rs, rt, false, false)), // ADDU: rd = rs+rt
+            (0b000000, 0b100001) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)), // ADDU: rd = rs+rt
             // (0b000000, 0b100010) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::SUB, rs, rt, rd))
             // } // SUB: rd = rs-rt
@@ -205,7 +192,7 @@ impl Instruction {
             //     rt,
             //     rd,
             // )), // SUBU: rd = rs-rt
-            (0b000000, 0b100011) => Ok(Self::new(Opcode::SUBU, rd, rs, rt, false, false)), // SUBU: rd = rs-rt
+            (0b000000, 0b100011) => Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)), // SUBU: rd = rs-rt
             // (0b000000, 0b000000) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::SLL, sa, rt, rd))
             // } // SLL: rd = rt << sa
@@ -234,21 +221,21 @@ impl Instruction {
             //     rt,
             //     rd,
             // )), // SLLV: rd = rt << rs[4:0]
-            (0b000000, 0b000100) => Ok(Self::new(Opcode::SLLV, rd, rt, rs, false, false)), // SLLV: rd = rt << rs[4:0]
+            (0b000000, 0b000100) => Ok(Self::new(Opcode::SLL, rd, rt, rs, false, false)), // SLLV: rd = rt << rs[4:0]
             // (0b000000, 0b000110) => Ok(Operation::BinaryArithmetic(
             //     BinaryOperator::SRLV,
             //     rs,
             //     rt,
             //     rd,
             // )), // SRLV: rd = rt >> rs[4:0]
-            (0b000000, 0b000110) => Ok(Self::new(Opcode::SRLV, rd, rt, rs, false, false)), // SRLV: rd = rt >> rs[4:0]
+            (0b000000, 0b000110) => Ok(Self::new(Opcode::SRL, rd, rt, rs, false, false)), // SRLV: rd = rt >> rs[4:0]
             // (0b000000, 0b000111) => Ok(Operation::BinaryArithmetic(
             //     BinaryOperator::SRAV,
             //     rs,
             //     rt,
             //     rd,
             // )), // SRAV: rd = rt >> rs[4:0]
-            (0b000000, 0b000111) => Ok(Self::new(Opcode::SRAV, rd, rt, rs, false, false)), // SRAV: rd = rt >> rs[4:0]
+            (0b000000, 0b000111) => Ok(Self::new(Opcode::SRA, rd, rt, rs, false, false)), // SRAV: rd = rt >> rs[4:0]
             // (0b011100, 0b000010) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MUL, rs, rt, rd))
             // } // MUL: rd = rt * rs
@@ -281,19 +268,19 @@ impl Instruction {
             // (0b000000, 0b010000) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MFHI, 33, 0, rd))
             // } // MFHI: rd = hi
-            (0b000000, 0b010000) => Ok(Self::new(Opcode::MFHI, rd, 33, 0, false, true)), // MFHI: rd = hi
+            (0b000000, 0b010000) => Ok(Self::new(Opcode::ADD, rd, 33, 0, false, true)), // MFHI: rd = hi
             // (0b000000, 0b010001) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MTHI, rs, 0, 33))
             // } // MTHI: hi = rs
-            (0b000000, 0b010001) => Ok(Self::new(Opcode::MTHI, 33, rs, 0, false, true)), // MTHI: hi = rs
+            (0b000000, 0b010001) => Ok(Self::new(Opcode::ADD, 33, rs, 0, false, true)), // MTHI: hi = rs
             // (0b000000, 0b010010) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MFLO, 32, 0, rd))
             // } // MFLO: rd = lo
-            (0b000000, 0b010010) => Ok(Self::new(Opcode::MFLO, rd, 32, 0, false, true)), // MFLO: rd = lo
+            (0b000000, 0b010010) => Ok(Self::new(Opcode::ADD, rd, 32, 0, false, true)), // MFLO: rd = lo
             // (0b000000, 0b010011) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MTLO, rs, 0, 32))
             // } // MTLO: lo = rs
-            (0b000000, 0b010011) => Ok(Self::new(Opcode::MTLO, 32, rs, 0, false, true)), // MTLO: lo = rs
+            (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)), // MTLO: lo = rs
             // (0b000000, 0b001111) => Ok(Operation::Nop),                                  // SYNC
             (0b000000, 0b001111) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // SYNC
             // (0b011100, 0b100000) => Ok(Operation::Count(false, rs, rd)), // CLZ: rd = count_leading_zeros(rs)
@@ -405,7 +392,7 @@ impl Instruction {
             //     offset,
             // )), // ADDI: rt = rs + sext(imm)
             (0b001000, _) => Ok(Self::new(
-                Opcode::ADDI,
+                Opcode::ADD,
                 rt as u8,
                 rs,
                 offset_ext16,
@@ -420,7 +407,7 @@ impl Instruction {
             //     offset,
             // )), // ADDIU: rt = rs + sext(imm)
             (0b001001, _) => Ok(Self::new(
-                Opcode::ADDIU,
+                Opcode::ADD,
                 rt as u8,
                 rs,
                 offset_ext16,
@@ -435,7 +422,7 @@ impl Instruction {
             //     offset,
             // )), // SLTI: rt = rs < sext(imm)
             (0b001010, _) => Ok(Self::new(
-                Opcode::SLTI,
+                Opcode::SLT,
                 rt as u8,
                 rs,
                 offset_ext16,
@@ -450,7 +437,7 @@ impl Instruction {
             //     offset,
             // )), // SLTIU: rt = rs < sext(imm)
             (0b001011, _) => Ok(Self::new(
-                Opcode::SLTIU,
+                Opcode::SLTU,
                 rt as u8,
                 rs,
                 offset_ext16,

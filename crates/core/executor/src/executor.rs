@@ -737,22 +737,22 @@ impl<'a> Executor<'a> {
             sub_lookups: self.record.create_lookup_ids(),
         };
         match opcode {
-            Opcode::ADD | Opcode::ADDI | Opcode::ADDU | Opcode::ADDIU => {
+            Opcode::ADD => {
                 self.record.add_events.push(event);
             }
-            Opcode::SUB | Opcode::SUBU => {
+            Opcode::SUB => {
                 self.record.sub_events.push(event);
             }
             Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
                 self.record.bitwise_events.push(event);
             }
-            Opcode::SLL | Opcode::SLLV => {
+            Opcode::SLL => {
                 self.record.shift_left_events.push(event);
             }
-            Opcode::SRL | Opcode::SRA | Opcode::SRLV | Opcode::SRAV => {
+            Opcode::SRL | Opcode::SRA => {
                 self.record.shift_right_events.push(event);
             }
-            Opcode::SLT | Opcode::SLTU | Opcode::SLTI | Opcode::SLTIU => {
+            Opcode::SLT | Opcode::SLTU => {
                 self.record.lt_events.push(event);
             }
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
@@ -1022,31 +1022,18 @@ impl<'a> Executor<'a> {
 
             // Arithmetic instructions
             Opcode::ADD
-            | Opcode::ADDU
-            | Opcode::ADDI
-            | Opcode::ADDIU
             | Opcode::SUB
-            | Opcode::SUBU
             | Opcode::MULT
             | Opcode::MULTU
             | Opcode::MUL
             | Opcode::DIV
             | Opcode::DIVU
-            | Opcode::SLLV
-            | Opcode::SRLV
-            | Opcode::SRAV
             | Opcode::SLL
             | Opcode::SRL
             | Opcode::SRA
             | Opcode::SLT
             | Opcode::SLTU
-            | Opcode::SLTI
-            | Opcode::SLTIU
             | Opcode::LUI
-            | Opcode::MFHI
-            | Opcode::MTHI
-            | Opcode::MFLO
-            | Opcode::MTLO
             | Opcode::AND
             | Opcode::OR
             | Opcode::XOR
@@ -1335,23 +1322,11 @@ impl<'a> Executor<'a> {
         let (rd, b, c) = self.alu_rr(instruction);
         let (a, hi) = match instruction.opcode {
             Opcode::ADD => (b.overflowing_add(c).0, 0),
-            Opcode::ADDU => (b.overflowing_add(c).0, 0),
-            Opcode::ADDI => (b.overflowing_add(c).0, 0),
-            Opcode::ADDIU => (b.overflowing_add(c).0, 0),
             Opcode::SUB => (b.overflowing_sub(c).0, 0),
-            Opcode::SUBU => (b.overflowing_sub(c).0, 0),
 
-            Opcode::SLL => (if c > 31 { 0 } else { b << c }, 0),
-            Opcode::SRL => (if c > 31 { 0 } else { b >> c }, 0),
+            Opcode::SLL => (b << (c & 0x1f), 0),
+            Opcode::SRL => (b >> (c & 0x1F), 0),
             Opcode::SRA => {
-                let sin = b as i32;
-                let sout = if c > 31 { 0 } else { sin >> c };
-                (sout as u32, 0)
-            }
-
-            Opcode::SLLV => (b << (c & 0x1f), 0),
-            Opcode::SRLV => (b >> (c & 0x1F), 0),
-            Opcode::SRAV => {
                 // same as SRA
                 let sin = b as i32;
                 let sout = sin >> (c & 0x1f);
@@ -1366,20 +1341,6 @@ impl<'a> Executor<'a> {
                 }
             }
             Opcode::SLT => {
-                if (b as i32) < (c as i32) {
-                    (1, 0)
-                } else {
-                    (0, 0)
-                }
-            }
-            Opcode::SLTIU => {
-                if b < c {
-                    (1, 0)
-                } else {
-                    (0, 0)
-                }
-            }
-            Opcode::SLTI => {
                 if (b as i32) < (c as i32) {
                     (1, 0)
                 } else {
@@ -1401,7 +1362,6 @@ impl<'a> Executor<'a> {
                 ((b as i32) % (c as i32)) as u32, // hi
             ),
             Opcode::DIVU => (b / c, b % c), //lo,hi
-            Opcode::MFHI | Opcode::MTHI | Opcode::MFLO | Opcode::MTLO => (b, 0),
             Opcode::AND => (b & c, 0),
             Opcode::OR => (b | c, 0),
             Opcode::XOR => (b ^ c, 0),
@@ -1646,11 +1606,7 @@ impl<'a> Executor<'a> {
             if self.state.global_clk % 16 == 0 {
                 // todo: MFHI/MTHI/MFLO/MTLO/LUI or others?
                 let addsub_count = (self.report.event_counts[Opcode::ADD]
-                    + self.report.event_counts[Opcode::ADDI]
-                    + self.report.event_counts[Opcode::ADDU]
-                    + self.report.event_counts[Opcode::ADDIU]
-                    + self.report.event_counts[Opcode::SUB]
-                    + self.report.event_counts[Opcode::SUBU])
+                    + self.report.event_counts[Opcode::SUB])
                     as usize;
                 let mul_count = (self.report.event_counts[Opcode::MUL]
                     + self.report.event_counts[Opcode::MULT]
@@ -1661,21 +1617,15 @@ impl<'a> Executor<'a> {
                     + self.report.event_counts[Opcode::NOR]
                     + self.report.event_counts[Opcode::AND])
                     as usize;
-                let shift_left_count = (self.report.event_counts[Opcode::SLL]
-                    + self.report.event_counts[Opcode::SLLV])
-                    as usize;
+                let shift_left_count = self.report.event_counts[Opcode::SLL] as usize;
                 let shift_right_count = (self.report.event_counts[Opcode::SRL]
                     + self.report.event_counts[Opcode::SRA]
-                    + self.report.event_counts[Opcode::SRLV]
-                    + self.report.event_counts[Opcode::SRAV])
-                    as usize;
+                ) as usize;
                 let divrem_count = (self.report.event_counts[Opcode::DIV]
                     + self.report.event_counts[Opcode::DIVU])
                     as usize;
                 let lt_count = (self.report.event_counts[Opcode::SLT]
-                    + self.report.event_counts[Opcode::SLTU]
-                    + self.report.event_counts[Opcode::SLTIU]
-                    + self.report.event_counts[Opcode::SLTI])
+                    + self.report.event_counts[Opcode::SLTU])
                     as usize;
 
                 if let Some(maximal_shapes) = &self.maximal_shapes {

@@ -136,25 +136,25 @@ impl ExecutionRecord {
     pub fn add_alu_events(&mut self, mut alu_events: HashMap<Opcode, Vec<AluEvent>>) {
         for (opcode, value) in &mut alu_events {
             match opcode {
-                Opcode::ADD | Opcode::ADDI | Opcode::ADDIU | Opcode::ADDU => {
+                Opcode::ADD => {
                     self.add_events.append(value);
                 }
                 Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
                     self.mul_events.append(value);
                 }
-                Opcode::SUB | Opcode::SUBU => {
+                Opcode::SUB => {
                     self.sub_events.append(value);
                 }
                 Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
                     self.bitwise_events.append(value);
                 }
-                Opcode::SLL | Opcode::SLLV => {
+                Opcode::SLL => {
                     self.shift_left_events.append(value);
                 }
-                Opcode::SRL | Opcode::SRLV | Opcode::SRA | Opcode::SRAV => {
+                Opcode::SRL | Opcode::SRA => {
                     self.shift_right_events.append(value);
                 }
-                Opcode::SLT | Opcode::SLTU | Opcode::SLTI | Opcode::SLTIU => {
+                Opcode::SLT | Opcode::SLTU => {
                     self.lt_events.append(value);
                 }
                 _ => {

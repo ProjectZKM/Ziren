@@ -59,20 +59,8 @@ pub struct AddSubCols<T> {
     /// Flag indicating whether the opcode is `ADD`.
     pub is_add: T,
 
-    /// Flag indicating whether the opcode is `ADDU`.
-    pub is_addu: T,
-
-    /// Flag indicating whether the opcode is `ADDI`.
-    pub is_addi: T,
-
-    /// Flag indicating whether the opcode is `ADDIU`.
-    pub is_addiu: T,
-
     /// Flag indicating whether the opcode is `SUB`.
     pub is_sub: T,
-
-    /// Flag indicating whether the opcode is `SUBU`.
-    pub is_subu: T,
 }
 
 impl<F: PrimeField> MachineAir<F> for AddSubChip {
@@ -162,13 +150,9 @@ impl AddSubChip {
         cols.shard = F::from_canonical_u32(event.shard);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
-        cols.is_addu = F::from_bool(event.opcode == Opcode::ADDU);
-        cols.is_addi = F::from_bool(event.opcode == Opcode::ADDI);
-        cols.is_addiu = F::from_bool(event.opcode == Opcode::ADDIU);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
-        cols.is_subu = F::from_bool(event.opcode == Opcode::SUBU);
 
-        let is_add = event.opcode.is_add();
+        let is_add = event.opcode == Opcode::ADD;
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
@@ -205,24 +189,17 @@ where
             local.operand_1,
             local.operand_2,
             local.add_operation,
-            local.is_add + local.is_sub + local.is_addu + local.is_subu,
+            local.is_add + local.is_sub,
         );
 
         let add_opcode = {
             let add: AB::Expr = AB::F::from_canonical_u32(Opcode::ADD as u32).into();
-            let addu: AB::Expr = AB::F::from_canonical_u32(Opcode::ADDU as u32).into();
-            let addi: AB::Expr = AB::F::from_canonical_u32(Opcode::ADDI as u32).into();
-            let addiu: AB::Expr = AB::F::from_canonical_u32(Opcode::ADDIU as u32).into();
             local.is_add * add
-                + local.is_addu * addu
-                + local.is_addi * addi
-                + local.is_addiu * addiu
         };
 
         let sub_opcode = {
             let sub: AB::Expr = AB::F::from_canonical_u32(Opcode::SUB as u32).into();
-            let subu: AB::Expr = AB::F::from_canonical_u32(Opcode::SUBU as u32).into();
-            local.is_sub * sub + local.is_subu * subu
+            local.is_sub * sub
         };
 
         // Receive the arguments.  There are separate receives for ADD and SUB.
@@ -234,7 +211,7 @@ where
             local.operand_2,
             local.shard,
             local.nonce,
-            local.is_add + local.is_addu + local.is_addi + local.is_addiu,
+            local.is_add,
         );
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
@@ -245,21 +222,13 @@ where
             local.operand_2,
             local.shard,
             local.nonce,
-            local.is_sub + local.is_subu,
+            local.is_sub,
         );
 
         let is_real = local.is_add
-            + local.is_sub
-            + local.is_addu
-            + local.is_subu
-            + local.is_addi
-            + local.is_addiu;
+            + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
-        builder.assert_bool(local.is_addu);
-        builder.assert_bool(local.is_subu);
-        builder.assert_bool(local.is_addi);
-        builder.assert_bool(local.is_addiu);
         builder.assert_bool(is_real);
     }
 }

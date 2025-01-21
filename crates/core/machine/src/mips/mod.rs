@@ -638,18 +638,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_subu_prove() {
-        utils::setup_logger();
-        let instructions = vec![
-            Instruction::new(Opcode::ADDU, 29, 0, 5, false, true),
-            Instruction::new(Opcode::ADDU, 30, 0, 8, false, true),
-            Instruction::new(Opcode::SUBU, 31, 30, 29, false, false),
-        ];
-        let program = Program::new(instructions, 0, 0);
-        run_test::<CpuProver<_, _>>(program).unwrap();
-    }
-
-    #[test]
     fn test_add_prove() {
         setup_logger();
         let instructions = vec![
@@ -668,30 +656,6 @@ pub mod tests {
             Instruction::new(Opcode::ADD, 29, 0, 0xEFFF_FFFF, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 2, false, true),
             Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
-        ];
-        let program = Program::new(instructions, 0, 0);
-        run_test::<CpuProver<_, _>>(program).unwrap();
-    }
-
-    #[test]
-    fn test_addu_prove() {
-        setup_logger();
-        let instructions = vec![
-            Instruction::new(Opcode::ADDU, 29, 0, 5, false, true),
-            Instruction::new(Opcode::ADDU, 30, 0, 8, false, true),
-            Instruction::new(Opcode::ADDU, 31, 30, 29, false, false),
-        ];
-        let program = Program::new(instructions, 0, 0);
-        run_test::<CpuProver<_, _>>(program).unwrap();
-    }
-
-    #[test]
-    fn test_addu_overflow_prove() {
-        setup_logger();
-        let instructions = vec![
-            Instruction::new(Opcode::ADDU, 29, 0, 0xEFFF_FFFF, false, true),
-            Instruction::new(Opcode::ADDU, 30, 0, 2, false, true),
-            Instruction::new(Opcode::ADDU, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
