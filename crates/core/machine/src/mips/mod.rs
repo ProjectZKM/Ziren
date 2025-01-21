@@ -665,8 +665,8 @@ pub mod tests {
     fn test_add_overflow_prove() {
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 29, 0, 3_000_000_000, false, true),
-            Instruction::new(Opcode::ADD, 30, 0, 3_000_000_000, false, true),
+            Instruction::new(Opcode::ADD, 29, 0, 0xFFFF_FFFF, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 2, false, true),
             Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
@@ -689,8 +689,8 @@ pub mod tests {
     fn test_addu_overflow_prove() {
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADDU, 29, 0, 5, false, true),
-            Instruction::new(Opcode::ADDU, 30, 0, 8, false, true),
+            Instruction::new(Opcode::ADDU, 29, 0, 0xFFFF_FFFF, false, true),
+            Instruction::new(Opcode::ADDU, 30, 0, 2, false, true),
             Instruction::new(Opcode::ADDU, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);

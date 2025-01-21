@@ -190,6 +190,13 @@ impl Opcode {
             _ => false,
         }
     }
+
+    pub fn is_add(&self) -> bool {
+        match self {
+            Opcode::ADD | Opcode::ADDU | Opcode::ADDI | Opcode::ADDIU => true,
+            _ => false,
+        }
+    }
 }
 
 impl Display for Opcode {

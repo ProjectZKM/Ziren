@@ -403,7 +403,7 @@ impl Instruction {
             //     offset,
             // )), // ADDI: rt = rs + sext(imm)
             (0b001000, _) => Ok(Self::new(
-                Opcode::ADD,
+                Opcode::ADDI,
                 rt as u8,
                 rs,
                 offset,
@@ -418,7 +418,7 @@ impl Instruction {
             //     offset,
             // )), // ADDIU: rt = rs + sext(imm)
             (0b001001, _) => Ok(Self::new(
-                Opcode::ADDU,
+                Opcode::ADDIU,
                 rt as u8,
                 rs,
                 offset,
