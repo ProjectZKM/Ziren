@@ -851,42 +851,6 @@ impl<'a> Executor<'a> {
         (hi, a, b, c)
     }
 
-    /// Fetch the input operand values for a load instruction.
-    /// rs_reg,rt_reg,imm=a,b,c
-    fn load_rr(&mut self, instruction: &Instruction) -> (Register, u32, u32, u32, u32) {
-        let (rt_reg, rs_reg, offset) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c,
-        );
-        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
-        let rt = self.rr(rt_reg, MemoryAccessPosition::A);
-
-        let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
-        let virt = virt_raw & 0xFFFF_FFFC;
-
-        let memory_value = self.mr_cpu(virt, MemoryAccessPosition::Memory);
-        (rt_reg, rt, virt_raw, offset, memory_value)
-    }
-
-    /// Fetch the input operand values for a store instruction.
-    fn store_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32, u32, Register) {
-        let (rt_reg, rs_reg, offset) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c,
-        );
-        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
-        let rt = self.rr(rt_reg, MemoryAccessPosition::A);
-
-        let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
-        let virt = virt_raw & 0xFFFF_FFFC;
-
-        let memory_value = self.word(virt);
-
-        (rt, rs, virt_raw, offset, memory_value, rt_reg)
-    }
-
     /// Fetch the input operand values for a branch instruction.
     fn branch_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (src1, src2, target) = (
@@ -1372,14 +1336,8 @@ impl<'a> Executor<'a> {
         let (a, hi) = match instruction.opcode {
             Opcode::ADD => (b.overflowing_add(c).0, 0),
             Opcode::ADDU => (b.overflowing_add(c).0, 0),
-            Opcode::ADDI => {
-                let sein = sign_extend::<16>(c);
-                (b.overflowing_add(sein).0, 0)
-            }
-            Opcode::ADDIU => {
-                let sein = sign_extend::<16>(c);
-                (b.overflowing_add(sein).0, 0)
-            }
+            Opcode::ADDI => (b.overflowing_add(c).0, 0),
+            Opcode::ADDIU => (b.overflowing_add(c).0, 0),
             Opcode::SUB => (b.overflowing_sub(c).0, 0),
             Opcode::SUBU => (b.overflowing_sub(c).0, 0),
 
@@ -1415,25 +1373,20 @@ impl<'a> Executor<'a> {
                 }
             }
             Opcode::SLTIU => {
-                let out = sign_extend::<16>(c);
-                if b < out {
+                if b < c {
                     (1, 0)
                 } else {
                     (0, 0)
                 }
             }
             Opcode::SLTI => {
-                let out = sign_extend::<16>(c);
-                if (b as i32) < (out as i32) {
+                if (b as i32) < (c as i32) {
                     (1, 0)
                 } else {
                     (0, 0)
                 }
             }
-            Opcode::LUI => {
-                let out = sign_extend::<16>(b);
-                (out.overflowing_shl(16).0, 0)
-            }
+            Opcode::LUI => (b.overflowing_shl(16).0, 0),
 
             Opcode::MULT => {
                 let out = (((b as i32) as i64) * ((c as i32) as i64)) as u64;
@@ -1465,7 +1418,7 @@ impl<'a> Executor<'a> {
         &mut self,
         instruction: &Instruction,
     ) -> Result<(u32, u32, u32), ExecutionError> {
-        let (rt_reg, rs_reg, offset) = (
+        let (rt_reg, rs_reg, offset_ext) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
             instruction.op_c,
@@ -1475,7 +1428,7 @@ impl<'a> Executor<'a> {
         // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
         let rt = self.register(rt_reg);
 
-        let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
+        let virt_raw = rs.wrapping_add(offset_ext);
         let virt = virt_raw & 0xFFFF_FFFC;
 
         let mem = self.mr_cpu(virt, MemoryAccessPosition::Memory);
@@ -1519,14 +1472,14 @@ impl<'a> Executor<'a> {
             _ => unreachable!(),
         };
         self.rw(rt_reg, val, MemoryAccessPosition::A);
-        Ok((val, rs, offset))
+        Ok((val, rs, offset_ext))
     }
 
     fn execute_store(
         &mut self,
         instruction: &Instruction,
     ) -> Result<(u32, u32, u32), ExecutionError> {
-        let (rt_reg, rs_reg, offset) = (
+        let (rt_reg, rs_reg, offset_ext) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
             instruction.op_c,
@@ -1539,7 +1492,7 @@ impl<'a> Executor<'a> {
             self.rr(rt_reg, MemoryAccessPosition::A)
         };
 
-        let virt_raw = rs.wrapping_add(sign_extend::<16>(offset));
+        let virt_raw = rs.wrapping_add(offset_ext);
         let virt = virt_raw & 0xFFFF_FFFC;
 
         let mem = self.word(virt);
@@ -1590,9 +1543,9 @@ impl<'a> Executor<'a> {
         if instruction.opcode == Opcode::SC {
             self.rw(rt_reg, 1, MemoryAccessPosition::A);
 
-            Ok((val, rs, offset))
+            Ok((val, rs, offset_ext))
         } else {
-            Ok((rt, rs, offset))
+            Ok((rt, rs, offset_ext))
         }
     }
 
@@ -1602,7 +1555,7 @@ impl<'a> Executor<'a> {
         next_pc: u32,
         mut next_next_pc: u32,
     ) -> (u32, u32, u32, u32) {
-        let (src1, src2, target) = self.branch_rr(instruction);
+        let (src1, src2, target_ext) = self.branch_rr(instruction);
         let should_jump = match instruction.opcode {
             Opcode::BEQ => src1 == src2,
             Opcode::BNE => src1 != src2,
@@ -1615,13 +1568,12 @@ impl<'a> Executor<'a> {
             }
         };
 
-        let target = sign_extend::<16>(target);
-        let (mut target_pc, _) = target.overflowing_shl(2);
+        let (mut target_pc, _) = target_ext.overflowing_shl(2);
 
         if should_jump {
             next_next_pc = target_pc.wrapping_add(next_pc);
         }
-        (src1, src2, target, next_next_pc)
+        (src1, src2, target_ext, next_next_pc)
     }
 
     fn execute_jump(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
@@ -1651,10 +1603,9 @@ impl<'a> Executor<'a> {
         (next_pc, target, c, target_pc)
     }
     fn execute_jump_direct(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
-        let (link, imm, c) = (instruction.op_a.into(), instruction.op_b, instruction.op_c);
+        let (link, target_ext, c) = (instruction.op_a.into(), instruction.op_b, instruction.op_c);
 
-        let target = sign_extend::<16>(imm);
-        let (target_pc, _) = target.overflowing_shl(2);
+        let (target_pc, _) = target_ext.overflowing_shl(2);
         //todo: check if necessary
         // self.rw(Register::ZERO, target_pc);
         let pc = self.state.pc;
@@ -1663,7 +1614,7 @@ impl<'a> Executor<'a> {
         let next_pc = pc.wrapping_add(8);
         self.rw(link, next_pc, MemoryAccessPosition::A);
 
-        (next_pc, imm, c, target_pc)
+        (next_pc, target_ext, c, target_pc)
     }
 
     /// Executes one cycle of the program, returning whether the program has finished.
