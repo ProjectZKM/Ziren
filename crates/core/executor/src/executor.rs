@@ -1033,7 +1033,6 @@ impl<'a> Executor<'a> {
             | Opcode::SRA
             | Opcode::SLT
             | Opcode::SLTU
-            | Opcode::LUI
             | Opcode::AND
             | Opcode::OR
             | Opcode::XOR
@@ -1347,7 +1346,6 @@ impl<'a> Executor<'a> {
                     (0, 0)
                 }
             }
-            Opcode::LUI => (b.overflowing_shl(16).0, 0),
 
             Opcode::MULT => {
                 let out = (((b as i32) as i64) * ((c as i32) as i64)) as u64;

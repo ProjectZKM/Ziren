@@ -83,7 +83,6 @@ impl Instruction {
                 | Opcode::SRA
                 | Opcode::SLT
                 | Opcode::SLTU
-                | Opcode::LUI
                 | Opcode::AND
                 | Opcode::OR
                 | Opcode::XOR
@@ -464,7 +463,7 @@ impl Instruction {
             //     rt,
             //     offset,
             // )), // LUI: rt = imm << 16
-            (0b001111, _) => Ok(Self::new(Opcode::LUI, rt as u8, offset_ext16, 0, true, true)), // LUI: rt = imm << 16
+            (0b001111, _) => Ok(Self::new(Opcode::SLL, rt as u8, offset_ext16, 16, true, true)), // LUI: rt = imm << 16
             // (0b000000, 0b100100) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::AND, rs, rt, rd))
             // } // AND: rd = rs & rt
