@@ -23,7 +23,7 @@ impl Syscall for Keccak256PermuteSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let start_clk = rt.clk;
         let state_ptr = arg1;
         if arg2 != 0 {

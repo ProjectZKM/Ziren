@@ -7,7 +7,7 @@ use super::{Syscall, SyscallCode, SyscallContext};
 pub(crate) struct EnterUnconstrainedSyscall;
 
 impl Syscall for EnterUnconstrainedSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<(u32, u32)> {
+    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
         if ctx.rt.unconstrained {
             panic!("Unconstrained block is already active.");
         }
@@ -22,14 +22,14 @@ impl Syscall for EnterUnconstrainedSyscall {
             executor_mode: ctx.rt.executor_mode,
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
-        Some((1, 0))
+        Some(1)
     }
 }
 
 pub(crate) struct ExitUnconstrainedSyscall;
 
 impl Syscall for ExitUnconstrainedSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<(u32, u32)> {
+    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
         // Reset the state of the runtime.
         if ctx.rt.unconstrained {
             ctx.rt.state.global_clk = ctx.rt.unconstrained_state.global_clk;
@@ -52,6 +52,6 @@ impl Syscall for ExitUnconstrainedSyscall {
             ctx.rt.unconstrained = false;
         }
         ctx.rt.unconstrained_state = ForkState::default();
-        Some((0, 0))
+        Some(0)
     }
 }

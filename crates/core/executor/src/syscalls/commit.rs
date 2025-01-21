@@ -10,7 +10,7 @@ impl Syscall for CommitSyscall {
         _: SyscallCode,
         word_idx: u32,
         public_values_digest_word: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let rt = &mut ctx.rt;
 
         rt.record.public_values.committed_value_digest[word_idx as usize] =

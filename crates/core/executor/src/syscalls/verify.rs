@@ -12,7 +12,7 @@ impl Syscall for VerifySyscall {
         _: SyscallCode,
         vkey_ptr: u32,
         pv_digest_ptr: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let rt = &mut ctx.rt;
 
         // vkey_ptr is a pointer to [u32; 8] which contains the verification key.
@@ -55,6 +55,6 @@ impl Syscall for VerifySyscall {
             DeferredProofVerification::Disabled => {}
         }
 
-        Some((0, 0))
+        None
     }
 }

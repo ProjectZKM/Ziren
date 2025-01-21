@@ -29,7 +29,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let clk = rt.clk;
         let x_ptr = arg1;
         if x_ptr % 4 != 0 {

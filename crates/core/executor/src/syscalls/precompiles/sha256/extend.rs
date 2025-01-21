@@ -16,7 +16,7 @@ impl Syscall for Sha256ExtendSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let clk_init = rt.clk;
         let w_ptr = arg1;
         assert!(arg2 == 0, "arg2 must be 0");

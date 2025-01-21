@@ -29,7 +29,7 @@ impl Syscall for Sha256CompressSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let w_ptr = arg1;
         let h_ptr = arg2;
         assert_ne!(w_ptr, h_ptr);
