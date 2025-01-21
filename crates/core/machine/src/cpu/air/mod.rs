@@ -308,12 +308,12 @@ impl CpuChip {
             .when_transition()
             .when(next.is_real)
             .when(local.is_sequential_instr)
-            .assert_eq(next.pc + AB::Expr::from_canonical_u8(4), next.next_pc);
+            .assert_eq(local.next_pc + AB::Expr::from_canonical_u8(4), next.next_pc);
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> next.pc
         builder
-            .when(local.is_real)
+            .when(next.is_real)
             .assert_eq(local.next_pc, next.pc);
     }
 
@@ -330,6 +330,7 @@ impl CpuChip {
 
         // Verify the public value's start pc.
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
+        builder.when_first_row().assert_eq(public_values.next_pc, local.next_pc);
 
         // Verify the public value's next pc.  We need to handle two cases:
         // 1. The last real row is a transition row.
