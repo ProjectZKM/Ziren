@@ -349,10 +349,10 @@ impl Instruction {
         )
     }
 
-    /// Returns if the instruction is a ecall instruction.
+    /// Returns if the instruction is a syscall instruction.
     #[must_use]
-    pub fn is_ecall_instruction(&self) -> bool {
-        self.opcode == Opcode::ECALL
+    pub fn is_syscall_instruction(&self) -> bool {
+        self.opcode == Opcode::SYSCALL
     }
 
     /// Returns if the instruction is a memory instruction.

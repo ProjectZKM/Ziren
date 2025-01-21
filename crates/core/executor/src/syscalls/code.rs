@@ -4,7 +4,7 @@ use strum_macros::EnumIter;
 
 /// System Calls.
 ///
-/// A system call is invoked by the the `ecall` instruction with a specific value in register t0.
+/// A system call is invoked by the the `syscall` instruction with a specific value in register t0.
 /// The syscall number is a 32-bit integer with the following little-endian layout:
 ///
 /// | Byte 0 | Byte 1 | Byte 2 | Byte 3 |

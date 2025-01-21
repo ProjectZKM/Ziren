@@ -1,5 +1,5 @@
 pub mod branch;
-pub mod ecall;
+pub mod syscall;
 pub mod memory;
 pub mod register;
 
@@ -77,12 +77,12 @@ where
         self.eval_jump_ops::<AB>(builder, local, next);
 
         // AUIPC instruction.
-        self.eval_auipc(builder, local);
+        //self.eval_auipc(builder, local);
 
-        // ECALL instruction.
-        self.eval_ecall(builder, local);
+        // syscall instruction.
+        self.eval_syscall(builder, local);
 
-        // COMMIT/COMMIT_DEFERRED_PROOFS ecall instruction.
+        // COMMIT/COMMIT_DEFERRED_PROOFS syscall instruction.
         let public_values_slice: [AB::PublicVar; ZKM_PROOF_NUM_PV_ELTS] =
             core::array::from_fn(|i| builder.public_values()[i]);
         let public_values: &PublicValues<Word<AB::PublicVar>, AB::PublicVar> =
@@ -94,7 +94,7 @@ where
             public_values.deferred_proofs_digest,
         );
 
-        // HALT ecall and UNIMPL instruction.
+        // HALT syscall and UNIMPL instruction.
         self.eval_halt_unimpl(builder, local, next, public_values);
 
         // Check that the shard and clk is updated correctly.
@@ -212,33 +212,33 @@ impl CpuChip {
         );
     }
 
-    /// Constraints related to the AUIPC opcode.
-    pub(crate) fn eval_auipc<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
-        // Get the auipc specific columns.
-        let auipc_columns = local.opcode_specific_columns.auipc();
-
-        // Verify that the word form of local.pc is correct.
-        builder.when(local.selectors.is_auipc).assert_eq(auipc_columns.pc.reduce::<AB>(), local.pc);
-
-        // Range check the pc.
-        BabyBearWordRangeChecker::<AB::F>::range_check(
-            builder,
-            auipc_columns.pc,
-            auipc_columns.pc_range_checker,
-            local.selectors.is_auipc.into(),
-        );
-
-        // Verify that op_a == pc + op_b.
-        builder.send_alu(
-            AB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            local.op_a_val(),
-            auipc_columns.pc,
-            local.op_b_val(),
-            local.shard,
-            auipc_columns.auipc_nonce,
-            local.selectors.is_auipc,
-        );
-    }
+    // /// Constraints related to the AUIPC opcode.
+    // pub(crate) fn eval_auipc<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
+    //    // Get the auipc specific columns.
+    //     let auipc_columns = local.opcode_specific_columns.auipc();
+    // 
+    //     // Verify that the word form of local.pc is correct.
+    //     builder.when(local.selectors.is_auipc).assert_eq(auipc_columns.pc.reduce::<AB>(), local.pc);
+    // 
+    //     // Range check the pc.
+    //     BabyBearWordRangeChecker::<AB::F>::range_check(
+    //         builder,
+    //         auipc_columns.pc,
+    //         auipc_columns.pc_range_checker,
+    //         local.selectors.is_auipc.into(),
+    //     );
+    // 
+    //     // Verify that op_a == pc + op_b.
+    //     builder.send_alu(
+    //         AB::Expr::from_canonical_u32(Opcode::ADD as u32),
+    //         local.op_a_val(),
+    //         auipc_columns.pc,
+    //         local.op_b_val(),
+    //         local.shard,
+    //         auipc_columns.auipc_nonce,
+    //         local.selectors.is_auipc,
+    //     );
+    // }
 
     /// Constraints related to the shard and clk.
     ///
@@ -270,7 +270,7 @@ impl CpuChip {
 
         // Verify that the clk increments are correct.  Most clk increment should be 4, but for some
         // precompiles, there are additional cycles.
-        let num_extra_cycles = self.get_num_extra_ecall_cycles::<AB>(local);
+        let num_extra_cycles = self.get_num_extra_syscall_cycles::<AB>(local);
 
         // We already assert that `local.clk < 2^24`. `num_extra_cycles` is an entry of a word and
         // therefore less than `2^8`, this means that the sum cannot overflow in a 31 bit field.
@@ -314,7 +314,7 @@ impl CpuChip {
         );
 
         // Verify that the pc increments by 4 for all instructions except branch, jump and halt
-        // instructions. The other case is handled by eval_jump, eval_branch and eval_ecall
+        // instructions. The other case is handled by eval_jump, eval_branch and eval_syscall
         // (for halt).
         builder
             .when_transition()

@@ -33,7 +33,7 @@ pub struct OpcodeSelectorCols<T> {
     pub is_alu: T,
 
     /// Table selectors for opcodes.
-    pub is_ecall: T,
+    pub is_syscall: T,
 
     /// Memory Instructions.
     pub is_lb: T,
@@ -75,8 +75,8 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
 
         if instruction.is_alu_instruction() {
             self.is_alu = F::ONE;
-        } else if instruction.is_ecall_instruction() {
-            self.is_ecall = F::ONE;
+        } else if instruction.is_syscall_instruction() {
+            self.is_syscall = F::ONE;
         } else if instruction.is_memory_instruction() {
             match instruction.opcode {
                 Opcode::LB => self.is_lb = F::ONE,
@@ -111,11 +111,6 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
         // } else if instruction.opcode == Opcode::JALR {
         //     self.is_jalr = F::ONE;
         // }
-        //else if instruction.opcode == Opcode::AUIPC {
-        //    self.is_auipc = F::ONE;
-        //} else if instruction.opcode == Opcode::UNIMP {
-        //    self.is_unimpl = F::ONE;
-        //}
     }
 }
 
@@ -128,7 +123,7 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.imm_b,
             self.imm_c,
             self.is_alu,
-            self.is_ecall,
+            self.is_syscall,
             self.is_lb,
             self.is_lbu,
             self.is_lh,

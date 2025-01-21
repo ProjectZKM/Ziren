@@ -1,4 +1,4 @@
-use crate::cpu::columns::{AuipcCols, BranchCols, JumpCols, MemoryColumns};
+use crate::cpu::columns::{BranchCols, JumpCols, MemoryColumns};
 use std::{
     fmt::{Debug, Formatter},
     mem::{size_of, transmute},
@@ -6,7 +6,7 @@ use std::{
 
 use static_assertions::const_assert;
 
-use super::ecall::EcallCols;
+use super::syscall::SyscallCols;
 
 pub const NUM_OPCODE_SPECIFIC_COLS: usize = size_of::<OpcodeSpecificCols<u8>>();
 
@@ -17,8 +17,7 @@ pub union OpcodeSpecificCols<T: Copy> {
     memory: MemoryColumns<T>,
     branch: BranchCols<T>,
     jump: JumpCols<T>,
-    auipc: AuipcCols<T>,
-    ecall: EcallCols<T>,
+    syscall: SyscallCols<T>,
 }
 
 impl<T: Copy + Default> Default for OpcodeSpecificCols<T> {
@@ -58,16 +57,10 @@ impl<T: Copy> OpcodeSpecificCols<T> {
     pub fn jump_mut(&mut self) -> &mut JumpCols<T> {
         unsafe { &mut self.jump }
     }
-    pub fn auipc(&self) -> &AuipcCols<T> {
-        unsafe { &self.auipc }
+    pub fn syscall(&self) -> &SyscallCols<T> {
+        unsafe { &self.syscall }
     }
-    pub fn auipc_mut(&mut self) -> &mut AuipcCols<T> {
-        unsafe { &mut self.auipc }
-    }
-    pub fn ecall(&self) -> &EcallCols<T> {
-        unsafe { &self.ecall }
-    }
-    pub fn ecall_mut(&mut self) -> &mut EcallCols<T> {
-        unsafe { &mut self.ecall }
+    pub fn syscall_mut(&mut self) -> &mut SyscallCols<T> {
+        unsafe { &mut self.syscall }
     }
 }

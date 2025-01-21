@@ -1969,9 +1969,9 @@ mod tests {
     use zkm2_stark::ZKMCoreOpts;
     use crate::programs::tests::{
         fibonacci_program,
-        // anic_program, secp256r1_add_program, secp256r1_double_program,
+        panic_program, secp256r1_add_program, secp256r1_double_program,
         simple_program,
-        //simple_memory_program, ssz_withdrawals_program, u256xu2048_mul_program,
+        simple_memory_program, ssz_withdrawals_program, u256xu2048_mul_program,
     };
 
     use crate::{Instruction, Opcode, Register};
@@ -2001,41 +2001,41 @@ mod tests {
     }
 
     //
-    // #[test]
-    // fn test_secp256r1_add_program_run() {
-    //     let program = secp256r1_add_program();
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    // }
+    #[test]
+    fn test_secp256r1_add_program_run() {
+        let program = secp256r1_add_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
     //
-    // #[test]
-    // fn test_secp256r1_double_program_run() {
-    //     let program = secp256r1_double_program();
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    // }
+    #[test]
+    fn test_secp256r1_double_program_run() {
+        let program = secp256r1_double_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
     //
-    // #[test]
-    // fn test_u256xu2048_mul() {
-    //     let program = u256xu2048_mul_program();
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    // }
+    #[test]
+    fn test_u256xu2048_mul() {
+        let program = u256xu2048_mul_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
     //
-    // #[test]
-    // fn test_ssz_withdrawals_program_run() {
-    //     let program = ssz_withdrawals_program();
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    // }
+    #[test]
+    fn test_ssz_withdrawals_program_run() {
+        let program = ssz_withdrawals_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
     //
-    // #[test]
-    // #[should_panic]
-    // fn test_panic() {
-    //     let program = panic_program();
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    // }
+    #[test]
+    #[should_panic]
+    fn test_panic() {
+        let program = panic_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+    }
     //
     #[test]
     fn test_add() {

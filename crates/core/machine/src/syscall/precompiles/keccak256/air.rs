@@ -62,7 +62,7 @@ where
         }
 
         // Receive the syscall in the first row of each 24-cycle
-        builder.assert_eq(local.receive_ecall, first_step * local.is_real);
+        builder.assert_eq(local.receive_syscall, first_step * local.is_real);
         builder.receive_syscall(
             local.shard,
             local.clk,
@@ -70,7 +70,7 @@ where
             AB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
             local.state_addr,
             AB::Expr::ZERO,
-            local.receive_ecall,
+            local.receive_syscall,
             InteractionScope::Local,
         );
 

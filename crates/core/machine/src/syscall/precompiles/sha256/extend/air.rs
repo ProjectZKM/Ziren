@@ -220,7 +220,7 @@ where
             .when_not(local.cycle_48_end)
             .assert_eq(local.is_real, next.is_real);
 
-        // Assert that the table ends in nonreal columns. Since each extend ecall is 48 cycles and
+        // Assert that the table ends in nonreal columns. Since each extend syscall is 48 cycles and
         // the table is padded to a power of 2, the last row of the table should always be padding.
         builder.when_last_row().assert_zero(local.is_real);
     }

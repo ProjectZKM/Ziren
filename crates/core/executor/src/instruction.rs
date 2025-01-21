@@ -92,7 +92,7 @@ impl Instruction {
 
     /// Returns if the instruction is a syscall instruction.
     #[must_use]
-    pub fn is_ecall_instruction(&self) -> bool {
+    pub fn is_syscall_instruction(&self) -> bool {
         self.opcode == Opcode::SYSCALL
     }
 

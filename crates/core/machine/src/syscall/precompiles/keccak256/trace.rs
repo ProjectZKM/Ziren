@@ -149,7 +149,7 @@ impl KeccakPermuteChip {
                         .add_u8_range_checks(shard, &read_record.value.to_le_bytes());
                 }
                 cols.do_memory_check = F::ONE;
-                cols.receive_ecall = F::ONE;
+                cols.receive_syscall = F::ONE;
             }
 
             // If this is the last row, then populate write memory accesses

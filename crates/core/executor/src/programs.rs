@@ -8,7 +8,7 @@ pub mod tests {
     use test_artifacts::{
         FIBONACCI_ELF,
         KECCAK_PERMUTE_ELF, PANIC_ELF,
-        // SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, U256XU2048_MUL_ELF,
+        SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, U256XU2048_MUL_ELF,
     };
 
     #[must_use]
@@ -31,35 +31,35 @@ pub mod tests {
         Program::from_elf(FIBONACCI_ELF).unwrap()
     }
 
-    // /// Get the secp256r1 add program.
-    // ///
-    // /// # Panics
-    // ///
-    // /// This function will panic if the program fails to load.
-    // #[must_use]
-    // pub fn secp256r1_add_program() -> Program {
-    //     Program::from_elf(SECP256R1_ADD_ELF).unwrap()
-    // }
+    /// Get the secp256r1 add program.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the program fails to load.
+    #[must_use]
+    pub fn secp256r1_add_program() -> Program {
+        Program::from_elf(SECP256R1_ADD_ELF).unwrap()
+    }
 
-    // /// Get the secp256r1 double program.
-    // ///
-    // /// # Panics
-    // ///
-    // /// This function will panic if the program fails to load.
-    // #[must_use]
-    // pub fn secp256r1_double_program() -> Program {
-    //     Program::from_elf(SECP256R1_DOUBLE_ELF).unwrap()
-    // }
+    /// Get the secp256r1 double program.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the program fails to load.
+    #[must_use]
+    pub fn secp256r1_double_program() -> Program {
+        Program::from_elf(SECP256R1_DOUBLE_ELF).unwrap()
+    }
 
-    // /// Get the u256x2048 mul program.
-    // ///
-    // /// # Panics
-    // ///
-    // /// This function will panic if the program fails to load.
-    // #[must_use]
-    // pub fn u256xu2048_mul_program() -> Program {
-    //     Program::from_elf(U256XU2048_MUL_ELF).unwrap()
-    // }
+    /// Get the u256x2048 mul program.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the program fails to load.
+    #[must_use]
+    pub fn u256xu2048_mul_program() -> Program {
+        Program::from_elf(U256XU2048_MUL_ELF).unwrap()
+    }
 
     /// Get the SSZ withdrawals program.
     ///
