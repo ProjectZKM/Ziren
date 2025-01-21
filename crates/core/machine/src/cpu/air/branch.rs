@@ -50,6 +50,13 @@ impl CpuChip {
 
         // Evaluate program counter constraints.
         {
+            // When we are branching, assert that local.next_pc <==> branch_columns.next_pc as Word.
+            builder
+                .when_transition()
+                .when(next.is_real)
+                .when(local.branching)
+                .assert_eq(branch_cols.next_pc.reduce::<AB>(), local.next_pc);
+
             // When we are branching, assert that next.next_pc <==> branch_columns.target_pc as Word.
             builder
                 .when_transition()
@@ -71,7 +78,7 @@ impl CpuChip {
                 is_branch_instruction.clone(),
             );
 
-            // When we are branching, calculate branch_cols.next_pc <==> branch_cols.pc + c.
+            // When we are branching, calculate branch_cols.target_pc <==> branch_cols.next_pc + c.
             builder.send_alu(
                 Opcode::ADD.as_field::<AB::F>(),
                 branch_cols.target_pc,
