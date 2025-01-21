@@ -420,15 +420,15 @@ impl CpuChip {
                 _ => panic!("Invalid opcode: {}", instruction.opcode)
             };
 
-            let next_pc = event.pc.wrapping_add(event.c);
-            branch_columns.pc = Word::from(event.pc);
-            branch_columns.next_pc = Word::from(next_pc);
-            branch_columns.pc_range_checker.populate(event.pc);
-            branch_columns.next_pc_range_checker.populate(next_pc);
+            let target_pc = event.next_pc.wrapping_add(event.c);
+            branch_columns.next_pc = Word::from(event.next_pc);
+            branch_columns.target_pc = Word::from(target_pc);
+            branch_columns.next_pc_range_checker.populate(event.next_pc);
+            branch_columns.target_pc_range_checker.populate(target_pc);
 
             if branching {
                 cols.branching = F::ONE;
-                branch_columns.next_pc_nonce = F::from_canonical_u32(
+                branch_columns.target_pc_nonce = F::from_canonical_u32(
                     nonce_lookup
                         .get(event.branch_add_lookup_id.0 as usize)
                         .copied()
@@ -448,39 +448,39 @@ impl CpuChip {
         nonce_lookup: &[u32],
         instruction: &Instruction,
     ) {
-        // if instruction.is_jump_instruction() {
-        //     let jump_columns = cols.opcode_specific_columns.jump_mut();
-        //
-        //     match instruction.opcode {
-        //         Opcode::JAL => {
-        //             let next_pc = event.pc.wrapping_add(event.b);
-        //             jump_columns.op_a_range_checker.populate(event.a);
-        //             jump_columns.pc = Word::from(event.pc);
-        //             jump_columns.pc_range_checker.populate(event.pc);
-        //             jump_columns.next_pc = Word::from(next_pc);
-        //             jump_columns.next_pc_range_checker.populate(next_pc);
-        //             jump_columns.jal_nonce = F::from_canonical_u32(
-        //                 nonce_lookup
-        //                     .get(event.jump_jal_lookup_id.0 as usize)
-        //                     .copied()
-        //                     .unwrap_or_default(),
-        //             );
-        //         }
-        //         Opcode::JALR => {
-        //             let next_pc = event.b.wrapping_add(event.c);
-        //             jump_columns.op_a_range_checker.populate(event.a);
-        //             jump_columns.next_pc = Word::from(next_pc);
-        //             jump_columns.next_pc_range_checker.populate(next_pc);
-        //             jump_columns.jalr_nonce = F::from_canonical_u32(
-        //                 nonce_lookup
-        //                     .get(event.jump_jalr_lookup_id.0 as usize)
-        //                     .copied()
-        //                     .unwrap_or_default(),
-        //             );
-        //         }
-        //         _ => unreachable!(),
-        //     }
-        // }
+        if instruction.is_jump_instruction() {
+             let jump_columns = cols.opcode_specific_columns.jump_mut();
+        
+             match instruction.opcode {
+                 Opcode::Jump | Opcode::Jumpi => {
+                     let target_pc = event.b;
+                     jump_columns.op_a_range_checker.populate(event.a);
+                     jump_columns.target_pc = Word::from(target_pc);
+                     jump_columns.target_pc_range_checker.populate(target_pc);
+                     jump_columns.jump_nonce = F::from_canonical_u32(
+                         nonce_lookup
+                             .get(event.jump_jump_lookup_id.0 as usize)
+                             .copied()
+                             .unwrap_or_default(),
+                     );
+                 }
+                 Opcode::JumpDirect => {
+                    let target_pc = event.next_pc.wrapping_add(event.b);
+                    jump_columns.op_a_range_checker.populate(event.a);
+                    jump_columns.next_pc = Word::from(event.next_pc);
+                    jump_columns.next_pc_range_checker.populate(event.next_pc);
+                    jump_columns.target_pc = Word::from(target_pc);
+                    jump_columns.target_pc_range_checker.populate(target_pc);
+                    jump_columns.jumpd_nonce = F::from_canonical_u32(
+                        nonce_lookup
+                            .get(event.jump_jumpd_lookup_id.0 as usize)
+                            .copied()
+                            .unwrap_or_default(),
+                    );
+                }
+                 _ => unreachable!(),
+             }
+         }
     }
 
     // /// Populate columns related to AUIPC.

@@ -10,13 +10,13 @@ pub const NUM_BRANCH_COLS: usize = size_of::<BranchCols<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct BranchCols<T> {
-    /// The current program counter.
-    pub pc: Word<T>,
-    pub pc_range_checker: BabyBearWordRangeChecker<T>,
-
     /// The next program counter.
     pub next_pc: Word<T>,
     pub next_pc_range_checker: BabyBearWordRangeChecker<T>,
+
+    /// The target program counter.
+    pub target_pc: Word<T>,
+    pub target_pc_range_checker: BabyBearWordRangeChecker<T>,
 
     /// Whether a equals b.
     pub a_eq_b: T,
@@ -33,6 +33,6 @@ pub struct BranchCols<T> {
     /// The nonce of the operation to compute `a_gt_b`.
     pub a_gt_b_nonce: T,
 
-    /// The nonce of the operation to compute `next_pc`.
-    pub next_pc_nonce: T,
+    /// The nonce of the operation to compute `target_pc`.
+    pub target_pc_nonce: T,
 }

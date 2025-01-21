@@ -50,64 +50,47 @@ impl CpuChip {
 
         // Evaluate program counter constraints.
         {
-            // When we are branching, assert local.pc <==> branch_cols.pc as Word.
-            builder.when(local.branching).assert_eq(branch_cols.pc.reduce::<AB>(), local.pc);
-
-            // When we are branching, assert that next.pc <==> branch_columns.next_pc as Word.
+            // When we are branching, assert that next.next_pc <==> branch_columns.target_pc as Word.
             builder
                 .when_transition()
                 .when(next.is_real)
                 .when(local.branching)
-                .assert_eq(branch_cols.next_pc.reduce::<AB>(), next.pc);
-
-            // When the current row is real and local.branching, assert that local.next_pc <==>
-            // branch_columns.next_pc as Word.
-            builder
-                .when(local.is_real)
-                .when(local.branching)
-                .assert_eq(branch_cols.next_pc.reduce::<AB>(), local.next_pc);
+                .assert_eq(branch_cols.target_pc.reduce::<AB>(), next.next_pc);
 
             // Range check branch_cols.pc and branch_cols.next_pc.
-            BabyBearWordRangeChecker::<AB::F>::range_check(
-                builder,
-                branch_cols.pc,
-                branch_cols.pc_range_checker,
-                is_branch_instruction.clone(),
-            );
             BabyBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 branch_cols.next_pc,
                 branch_cols.next_pc_range_checker,
                 is_branch_instruction.clone(),
             );
+            BabyBearWordRangeChecker::<AB::F>::range_check(
+                builder,
+                branch_cols.target_pc,
+                branch_cols.target_pc_range_checker,
+                is_branch_instruction.clone(),
+            );
 
             // When we are branching, calculate branch_cols.next_pc <==> branch_cols.pc + c.
             builder.send_alu(
                 Opcode::ADD.as_field::<AB::F>(),
+                branch_cols.target_pc,
                 branch_cols.next_pc,
-                branch_cols.pc,
                 local.op_c_val(),
                 local.shard,
-                branch_cols.next_pc_nonce,
+                branch_cols.target_pc_nonce,
                 local.branching,
             );
 
-            // When we are not branching, assert that local.pc + 4 <==> next.pc.
+            // When we are not branching, assert that local.pc + 8 <==> next.next_pc.
             builder
                 .when_transition()
                 .when(next.is_real)
                 .when(local.not_branching)
-                .assert_eq(local.pc + AB::Expr::from_canonical_u8(4), next.pc);
+                .assert_eq(local.pc + AB::Expr::from_canonical_u8(8), next.next_pc);
 
             // When local.not_branching is true, assert that local.is_real is true.
             builder.when(local.not_branching).assert_one(local.is_real);
-
-            // When the last row is real and local.not_branching, assert that local.pc + 4 <==>
-            // local.next_pc.
-            builder
-                .when(local.is_real)
-                .when(local.not_branching)
-                .assert_eq(local.pc + AB::Expr::from_canonical_u8(4), local.next_pc);
 
             // Assert that either we are branching or not branching when the instruction is a
             // branch.

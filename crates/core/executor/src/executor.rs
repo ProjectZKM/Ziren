@@ -679,9 +679,8 @@ impl<'a> Executor<'a> {
         let branch_lt_lookup_id = self.record.create_lookup_id();
         let branch_gt_lookup_id = self.record.create_lookup_id();
         let branch_add_lookup_id = self.record.create_lookup_id();
-        let jump_jal_lookup_id = self.record.create_lookup_id();
-        let jump_jalr_lookup_id = self.record.create_lookup_id();
-        let auipc_lookup_id = self.record.create_lookup_id();
+        let jump_jump_lookup_id = self.record.create_lookup_id();
+        let jump_jumpd_lookup_id = self.record.create_lookup_id();
         self.record.cpu_events.push(CpuEvent {
             clk,
             pc,
@@ -706,9 +705,8 @@ impl<'a> Executor<'a> {
             branch_lt_lookup_id,
             branch_gt_lookup_id,
             branch_add_lookup_id,
-            jump_jal_lookup_id,
-            jump_jalr_lookup_id,
-            auipc_lookup_id,
+            jump_jump_lookup_id,
+            jump_jumpd_lookup_id,
         });
 
         emit_cpu_dependencies(self, self.record.cpu_events.len() - 1);
@@ -910,7 +908,7 @@ impl<'a> Executor<'a> {
                 Opcode::LB | Opcode::LH | Opcode::LW | Opcode::LBU | Opcode::LHU | Opcode::LWL | Opcode::LWR => {
                     self.report.event_counts[Opcode::ADD] += 2;
                 }
-                Opcode::Jump | Opcode::Jumpi | Opcode::JumpDirect => {
+                Opcode::JumpDirect => {
                     self.report.event_counts[Opcode::ADD] += 1;
                 }
                 Opcode::BEQ
@@ -1080,9 +1078,6 @@ impl<'a> Executor<'a> {
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
-            // Opcode::PC => {}
-            // Opcode::JAL => {}
-            // Opcode::JALR => {}
             Opcode::UNIMPL => { log::warn!("Unimplemented code") }
         }
 
@@ -1367,7 +1362,7 @@ impl<'a> Executor<'a> {
         next_pc: u32,
         mut next_next_pc: u32,
     ) -> (u32, u32, u32, u32) {
-        let (src1, src2, target_ext) = self.branch_rr(instruction);
+        let (src1, src2, target_pc) = self.branch_rr(instruction);
         let should_jump = match instruction.opcode {
             Opcode::BEQ => src1 == src2,
             Opcode::BNE => src1 != src2,
@@ -1380,31 +1375,27 @@ impl<'a> Executor<'a> {
             }
         };
 
-        let (mut target_pc, _) = target_ext.overflowing_shl(2);
-
         if should_jump {
             next_next_pc = target_pc.wrapping_add(next_pc);
         }
-        (src1, src2, target_ext, next_next_pc)
+        (src1, src2, target_pc, next_next_pc)
     }
 
     fn execute_jump(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
-        let (link, target, c) = (
+        let (link, target) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
-            instruction.op_c,
         );
         let target_pc = self.rr(target, MemoryAccessPosition::B);
         // maybe rename it
         let next_pc = self.state.pc.wrapping_add(8);
         self.rw(link, next_pc, MemoryAccessPosition::A);
 
-        (next_pc, target_pc, c, target_pc)
+        (next_pc, target_pc, 0, target_pc)
     }
     fn execute_jumpi(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
-        let (link, target, c) = (instruction.op_a.into(), instruction.op_b, instruction.op_c);
+        let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
 
-        let (target_pc, _) = target.overflowing_shl(2);
         //todo: check if necessary
         // self.rw(Register::ZERO, target_pc);
         // maybe rename it
@@ -1412,12 +1403,10 @@ impl<'a> Executor<'a> {
         let next_pc = pc.wrapping_add(8);
         self.rw(link, next_pc, MemoryAccessPosition::A);
 
-        (next_pc, target, c, target_pc)
+        (next_pc, target_pc, 0, target_pc)
     }
     fn execute_jump_direct(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
-        let (link, target_ext, c) = (instruction.op_a.into(), instruction.op_b, instruction.op_c);
-
-        let (target_pc, _) = target_ext.overflowing_shl(2);
+        let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
         //todo: check if necessary
         // self.rw(Register::ZERO, target_pc);
         let pc = self.state.pc;
@@ -1426,7 +1415,7 @@ impl<'a> Executor<'a> {
         let next_pc = pc.wrapping_add(8);
         self.rw(link, next_pc, MemoryAccessPosition::A);
 
-        (next_pc, target_ext, c, target_pc)
+        (next_pc, target_pc, 0, target_pc)
     }
 
     /// Executes one cycle of the program, returning whether the program has finished.

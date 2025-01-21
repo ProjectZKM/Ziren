@@ -141,7 +141,7 @@ impl CpuChip {
         // Get the jump specific columns
         let jump_columns = local.opcode_specific_columns.jump();
 
-        let is_jump_instruction = local.selectors.is_jal + local.selectors.is_jalr;
+        let is_jump_instruction = local.selectors.is_jump + local.selectors.is_jumpd;
 
         // Verify that the local.pc + 4 is saved in op_a for both jump instructions.
         // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
@@ -150,10 +150,10 @@ impl CpuChip {
         builder
             .when(is_jump_instruction.clone())
             .when_not(local.instruction.op_a_0)
-            .assert_eq(local.op_a_val().reduce::<AB>(), local.pc + AB::F::from_canonical_u8(4));
+            .assert_eq(local.op_a_val().reduce::<AB>(), local.pc + AB::F::from_canonical_u8(8));
 
         // Verify that the word form of local.pc is correct for JAL instructions.
-        builder.when(local.selectors.is_jal).assert_eq(jump_columns.pc.reduce::<AB>(), local.pc);
+        builder.when(local.selectors.is_jumpd).assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
 
         // Verify that the word form of next.pc is correct for both jump instructions.
         builder
@@ -178,38 +178,28 @@ impl CpuChip {
         );
         BabyBearWordRangeChecker::<AB::F>::range_check(
             builder,
-            jump_columns.pc,
-            jump_columns.pc_range_checker,
-            local.selectors.is_jal.into(),
+            jump_columns.next_pc,
+            jump_columns.next_pc_range_checker,
+            local.selectors.is_jumpd.into(),
         );
         BabyBearWordRangeChecker::<AB::F>::range_check(
             builder,
-            jump_columns.next_pc,
-            jump_columns.next_pc_range_checker,
+            jump_columns.target_pc,
+            jump_columns.target_pc_range_checker,
             is_jump_instruction.clone(),
         );
 
-        // Verify that the new pc is calculated correctly for JAL instructions.
+        // Verify that the new pc is calculated correctly for Jumpdirect instructions.
         builder.send_alu(
             AB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            jump_columns.target_pc,
             jump_columns.next_pc,
-            jump_columns.pc,
             local.op_b_val(),
             local.shard,
-            jump_columns.jal_nonce,
-            local.selectors.is_jal,
+            jump_columns.jumpd_nonce,
+            local.selectors.is_jumpd,
         );
 
-        // Verify that the new pc is calculated correctly for JALR instructions.
-        builder.send_alu(
-            AB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            jump_columns.next_pc,
-            local.op_b_val(),
-            local.op_c_val(),
-            local.shard,
-            jump_columns.jalr_nonce,
-            local.selectors.is_jalr,
-        );
     }
 
     // /// Constraints related to the AUIPC opcode.
@@ -301,33 +291,30 @@ impl CpuChip {
         next: &CpuCols<AB::Var>,
         is_branch_instruction: AB::Expr,
     ) {
-        // When is_sequential_instr is true, assert that instruction is not branch, jump, or halt.
+        // When is_sequential_instr is true, assert that instruction is not branch, jump.
         // Note that the condition `when(local_is_real)` is implied from the previous constraint.
-        let is_halt = self.get_is_halt_syscall::<AB>(builder, local);
         builder.when(local.is_real).assert_eq(
             local.is_sequential_instr,
             AB::Expr::ONE
                 - (is_branch_instruction
-                    + local.selectors.is_jal
-                    + local.selectors.is_jalr
-                    + is_halt),
+                    + local.selectors.is_jump
+                    + local.selectors.is_jumpd),
         );
 
-        // Verify that the pc increments by 4 for all instructions except branch, jump and halt
+        // Verify that the pc increments by 4 for all instructions except instruction after branch, jump
         // instructions. The other case is handled by eval_jump, eval_branch and eval_syscall
         // (for halt).
         builder
             .when_transition()
             .when(next.is_real)
             .when(local.is_sequential_instr)
-            .assert_eq(local.pc + AB::Expr::from_canonical_u8(4), next.pc);
+            .assert_eq(next.pc + AB::Expr::from_canonical_u8(4), next.next_pc);
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
-        // <==> local.pc + 4
+        // <==> next.pc
         builder
             .when(local.is_real)
-            .when(local.is_sequential_instr)
-            .assert_eq(local.pc + AB::Expr::from_canonical_u8(4), local.next_pc);
+            .assert_eq(local.next_pc, next.pc);
     }
 
     /// Constraints related to the public values.

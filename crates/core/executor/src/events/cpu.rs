@@ -54,10 +54,8 @@ pub struct CpuEvent {
     pub branch_lt_lookup_id: LookupId,
     /// The branch add lookup id.
     pub branch_add_lookup_id: LookupId,
-    /// The jump jal lookup id.
-    pub jump_jal_lookup_id: LookupId,
-    /// The jump jalr lookup id.
-    pub jump_jalr_lookup_id: LookupId,
-    /// The auipc lookup id.
-    pub auipc_lookup_id: LookupId,
+    /// The jump jump/jumpi lookup id.
+    pub jump_jump_lookup_id: LookupId,
+    /// The jump jump_direct lookup id.
+    pub jump_jumpd_lookup_id: LookupId,
 }

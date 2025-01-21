@@ -297,7 +297,7 @@ impl Instruction {
                         Opcode::BGEZ,
                         rs as u8,
                         0u32,
-                        offset_ext16,
+                        offset_ext16.overflowing_shl(2).0,
                         false,
                         true,
                     ))
@@ -307,13 +307,13 @@ impl Instruction {
                         Opcode::BLTZ,
                         rs as u8,
                         0u32,
-                        offset_ext16,
+                        offset_ext16.overflowing_shl(2).0,
                         false,
                         true,
                     ))
                 } else if rt == 0x11 && rs == 0 {
                     // Ok(Operation::JumpDirect(31, offset)) // BAL
-                    Ok(Self::new(Opcode::JumpDirect, 31, offset_ext16, 0, true, true))
+                    Ok(Self::new(Opcode::JumpDirect, 31, offset_ext16.overflowing_shl(2).0, 0, true, true))
                 } else {
                     // todo: change to ProgramError later
                     // panic!("InvalidOpcode")
@@ -321,19 +321,19 @@ impl Instruction {
                 }
             }
             // (0x02, _) => Ok(Operation::Jumpi(0u8, target)), // J
-            (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target_ext, 0, true, true)), // J
+            (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true)), // J
             // (0x03, _) => Ok(Operation::Jumpi(31u8, target)),                       // JAL
-            (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target_ext, 0, true, true)), // JAL
+            (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true)), // JAL
             // (0x04, _) => Ok(Operation::Branch(BranchCond::EQ, rs, rt, offset)),     // BEQ
-            (0x04, _) => Ok(Self::new(Opcode::BEQ, rs as u8, rt, offset_ext16, false, true)), // BEQ
+            (0x04, _) => Ok(Self::new(Opcode::BEQ, rs as u8, rt, offset_ext16.overflowing_shl(2).0, false, true)), // BEQ
             // (0x05, _) => Ok(Operation::Branch(BranchCond::NE, rs, rt, offset)),         // BNE
-            (0x05, _) => Ok(Self::new(Opcode::BNE, rs as u8, rt, offset_ext16, false, true)), // BNE
+            (0x05, _) => Ok(Self::new(Opcode::BNE, rs as u8, rt, offset_ext16.overflowing_shl(2).0, false, true)), // BNE
             // (0x06, _) => Ok(Operation::Branch(BranchCond::LE, rs, 0u8, offset)),        // BLEZ
             (0x06, _) => Ok(Self::new(
                 Opcode::BLEZ,
                 rs as u8,
                 0u32,
-                offset_ext16,
+                offset_ext16.overflowing_shl(2).0,
                 false,
                 true,
             )), // BLEZ
@@ -342,7 +342,7 @@ impl Instruction {
                 Opcode::BGTZ,
                 rs as u8,
                 0u32,
-                offset_ext16,
+                offset_ext16.overflowing_shl(2).0,
                 true,
                 true,
             )), // BGTZ
