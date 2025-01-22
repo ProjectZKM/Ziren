@@ -212,4 +212,6 @@ pub enum ByteOpcode {
     MSB = 7,
     /// Unsigned 16-bit Range Check.
     U16Range = 8,
+    /// Bitwise NOR.
+    NOR = 9,
 }

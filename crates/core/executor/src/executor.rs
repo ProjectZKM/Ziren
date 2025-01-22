@@ -964,16 +964,14 @@ impl<'a> Executor<'a> {
                 }
                 let mut precompile_rt = SyscallContext::new(self);
                 precompile_rt.syscall_lookup_id = syscall_lookup_id;
-                let mut v1 = 0u32;
                 let (precompile_next_pc, precompile_cycles, returned_exit_code) =
                     if let Some(syscall_impl) = syscall_impl {
                         // Executing a syscall optionally returns a value to write to the t0
                         // register. If it returns None, we just keep the
                         // syscall_id in t0.
                         let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c);
-                        if let Some((r0, r1)) = res {
+                        if let Some(r0) = res {
                             a = r0;
-                            v1 = r1;
                         } else {
                             a = syscall_id;
                         }
@@ -1003,10 +1001,7 @@ impl<'a> Executor<'a> {
                 clk = self.state.clk;
                 pc = self.state.pc;
 
-                // todo: update circuit
                 self.rw(Register::V0, a, MemoryAccessPosition::A);
-                self.rw(Register::A3, v1, MemoryAccessPosition::S1);
-                s1 = Some(v1);
                 next_pc = precompile_next_pc;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;

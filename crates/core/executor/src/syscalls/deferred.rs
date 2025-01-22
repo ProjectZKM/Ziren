@@ -10,7 +10,7 @@ impl Syscall for CommitDeferredSyscall {
         _: SyscallCode,
         word_idx: u32,
         word: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let rt = &mut ctx.rt;
 
         rt.record.public_values.deferred_proofs_digest[word_idx as usize] = word;

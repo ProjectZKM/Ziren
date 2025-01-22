@@ -17,7 +17,7 @@ impl Syscall for Uint256MulSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)> {
+    ) -> Option<u32> {
         let clk = rt.clk;
 
         let x_ptr = arg1;

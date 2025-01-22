@@ -65,7 +65,7 @@ pub trait Syscall: Send + Sync {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)>;
+    ) -> Option<u32>;
 
     /// The number of extra cycles that the syscall takes to execute.
     ///

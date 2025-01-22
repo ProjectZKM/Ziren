@@ -4,8 +4,6 @@ use crate::{Executor, Register};
 
 use super::{Syscall, SyscallCode, SyscallContext};
 
-pub const MIPS_EBADF: u32 = 9;
-pub const FD_STDIN: u32 = 0;
 pub const FD_STDOUT: u32 = 1;
 pub const FD_STDERR: u32 = 2;
 pub const FD_PUBLIC_VALUE: u32 = 3;
@@ -20,15 +18,12 @@ impl Syscall for WriteSyscall {
         _: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<(u32, u32)> {
-        let mut v0 = 0u32;
-        let mut v1 = 0u32;
+    ) -> Option<u32> {
         let a2 = Register::A2;
         let rt = &mut ctx.rt;
         let fd = arg1;
         let write_buf = arg2;
         let nbytes = rt.register(a2);
-        v0 = nbytes;
         // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes)
             .map(|i| rt.byte(write_buf + i))
@@ -60,12 +55,15 @@ impl Syscall for WriteSyscall {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == FD_READ_HINT {
             rt.state.input_stream.push(slice.to_vec());
+        }  else if let Some(mut hook) = rt.hook_registry.get(fd) {
+            let res = hook.invoke_hook(rt.hook_env(), slice);
+            // Add result vectors to the beginning of the stream.
+            let ptr = rt.state.input_stream_ptr;
+            rt.state.input_stream.splice(ptr..ptr, res);
         } else {
             tracing::warn!("tried to write to unknown file descriptor {fd}");
-            v0 = 0xffffffff;
-            v1 = MIPS_EBADF;
         }
-        Some((v0, v1))
+        None
     }
 }
 
