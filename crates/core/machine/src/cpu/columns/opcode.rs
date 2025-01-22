@@ -50,6 +50,7 @@ pub struct OpcodeSelectorCols<T> {
     pub is_swl: T,
     pub is_swr: T,
     pub is_sc: T,
+    pub is_sdc1: T,
 
     /// Branch Instructions.
     pub is_beq: T,
@@ -92,6 +93,7 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
                 Opcode::SWL => self.is_swl = F::ONE,
                 Opcode::SWR => self.is_swr = F::ONE,
                 Opcode::SC => self.is_sc = F::ONE,
+                Opcode::SDC1 => self.is_sdc1 = F::ONE,
                 _ => panic!("Invalid opcode: {}", instruction.opcode),
             }
         } else if instruction.is_branch_instruction() {
@@ -137,6 +139,7 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.is_swl,
             self.is_swr,
             self.is_sc,
+            self.is_sdc1,
             self.is_beq,
             self.is_bne,
             self.is_bltz,
