@@ -27,6 +27,9 @@ pub struct BytePreprocessedCols<T> {
     /// The result of the `XOR` operation on `a` and `b`
     pub xor: T,
 
+    /// The result of the `NOR` operation on `a` and `b`
+    pub nor: T,
+
     /// The result of the `SLL` operation on `a` and `b`
     pub sll: T,
 

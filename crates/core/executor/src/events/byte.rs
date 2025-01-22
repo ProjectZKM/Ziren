@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ByteOpcode, Opcode};
 
 /// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 9;
+pub const NUM_BYTE_OPS: usize = 10;
 
 /// Byte Lookup Event.
 ///
@@ -229,6 +229,7 @@ impl From<Opcode> for ByteOpcode {
             Opcode::OR => Self::OR,
             Opcode::XOR => Self::XOR,
             Opcode::SLL => Self::SLL,
+            Opcode::NOR => Self::NOR,
             _ => panic!("Invalid opcode for ByteChip: {value:?}"),
         }
     }
@@ -248,6 +249,7 @@ impl ByteOpcode {
             ByteOpcode::LTU,
             ByteOpcode::MSB,
             ByteOpcode::U16Range,
+            ByteOpcode::NOR,
         ];
         debug_assert_eq!(opcodes.len(), NUM_BYTE_OPS);
         opcodes

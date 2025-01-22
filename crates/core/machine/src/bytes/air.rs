@@ -39,6 +39,9 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                 ByteOpcode::XOR => {
                     builder.receive_byte(field_op, local.xor, local.b, local.c, mult)
                 }
+                ByteOpcode::NOR => {
+                    builder.receive_byte(field_op, local.nor, local.b, local.c, mult)
+                }
                 ByteOpcode::SLL => {
                     builder.receive_byte(field_op, local.sll, local.b, local.c, mult)
                 }
