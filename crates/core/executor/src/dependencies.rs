@@ -59,7 +59,20 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     let lower_word = u32::from_le_bytes(c_times_quotient[0..4].try_into().unwrap());
     let upper_word = u32::from_le_bytes(c_times_quotient[4..8].try_into().unwrap());
 
-    let multiplication = AluEvent {
+    let lower_multiplication = AluEvent {
+        lookup_id: event.sub_lookups[0],
+        shard,
+        clk: event.clk,
+        opcode: Opcode::MUL,
+        hi: 0,
+        a: lower_word,
+        c: event.c,
+        b: quotient,
+        sub_lookups: executor.record.create_lookup_ids(),
+    };
+    executor.record.mul_events.push(lower_multiplication);
+
+    let upper_multiplication = AluEvent {
         lookup_id: event.sub_lookups[1],
         shard,
         clk: event.clk,
@@ -70,13 +83,13 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
                 Opcode::MULTU
             }
         },
-        hi: upper_word,
-        a: lower_word,
+        hi: 0,
+        a: upper_word,
         c: event.c,
         b: quotient,
         sub_lookups: executor.record.create_lookup_ids(),
     };
-    executor.record.mul_events.push(multiplication);
+    executor.record.mul_events.push(upper_multiplication);
 
     let lt_event = if is_signed_operation {
         AluEvent {
