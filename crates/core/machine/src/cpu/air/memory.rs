@@ -23,10 +23,16 @@ impl CpuChip {
             + opcode_selectors.is_lbu
             + opcode_selectors.is_lh
             + opcode_selectors.is_lhu
+            + opcode_selectors.is_lwl
+            + opcode_selectors.is_lwr
+            + opcode_selectors.is_ll
             + opcode_selectors.is_lw
             + opcode_selectors.is_sb
             + opcode_selectors.is_sh
             + opcode_selectors.is_sw
+            + opcode_selectors.is_swl
+            + opcode_selectors.is_swr
+            + opcode_selectors.is_sc
     }
 
     /// Computes whether the opcode is a load instruction.
@@ -39,6 +45,9 @@ impl CpuChip {
             + opcode_selectors.is_lh
             + opcode_selectors.is_lhu
             + opcode_selectors.is_lw
+            + opcode_selectors.is_lwr
+            + opcode_selectors.is_lwl
+            + opcode_selectors.is_ll
     }
 
     /// Computes whether the opcode is a store instruction.
@@ -46,7 +55,9 @@ impl CpuChip {
         &self,
         opcode_selectors: &OpcodeSelectorCols<AB::Var>,
     ) -> AB::Expr {
-        opcode_selectors.is_sb + opcode_selectors.is_sh + opcode_selectors.is_sw
+
+        opcode_selectors.is_sb + opcode_selectors.is_sh + opcode_selectors.is_sw +
+            opcode_selectors.is_swr + opcode_selectors.is_swl + opcode_selectors.is_sc
     }
 
     /// Constrains the addr_aligned, addr_offset, and addr_word memory columns.
@@ -229,6 +240,8 @@ impl CpuChip {
             a_val[0] * memory_columns.offset_is_three
                 + (one.clone() - memory_columns.offset_is_three) * prev_mem_val[3],
         ]);
+
+        // FIXME: stephen add constraints for other instrs
         builder
             .when(local.selectors.is_sb)
             .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
