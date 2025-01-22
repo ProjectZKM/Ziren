@@ -331,9 +331,6 @@ impl CpuChip {
         // Verify the public value's start pc.
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
 
-        // FIXME: stephen & weiwei, should check the target pc
-        // builder.when_first_row().assert_eq(public_values.next_pc, local.next_pc);
-
         // Verify the public value's next pc.  We need to handle two cases:
         // 1. The last real row is a transition row.
         // 2. The last real row is the last row.
