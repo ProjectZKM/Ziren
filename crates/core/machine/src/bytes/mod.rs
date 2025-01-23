@@ -75,7 +75,7 @@ impl<F: Field> ByteChip<F> {
                     }
                     ByteOpcode::NOR => {
                         let nor = !(b | c);
-                        col.xor = F::from_canonical_u8(nor);
+                        col.nor = F::from_canonical_u8(nor);
                         ByteLookupEvent::new(shard, *opcode, nor as u16, 0, b, c)
                     }
                     ByteOpcode::SLL => {

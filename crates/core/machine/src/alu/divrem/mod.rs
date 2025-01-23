@@ -106,8 +106,11 @@ pub struct DivRemCols<T> {
     /// The nonce of the operation.
     pub nonce: T,
 
-    /// The output operand.
-    pub a: Word<T>,
+    /// The quotient operand.
+    pub lo: Word<T>,
+
+    /// The remainder operand.
+    pub hi: Word<T>,
 
     /// The first input operand.
     pub b: Word<T>,
@@ -183,6 +186,7 @@ pub struct DivRemCols<T> {
     pub lower_nonce: T,
 
     /// The upper nonce of the operation.
+    /// todo: remove
     pub upper_nonce: T,
 
     /// The absolute nonce of the operation.
@@ -222,15 +226,15 @@ impl<F: PrimeField> MachineAir<F> for DivRemChip {
         let divrem_events = input.divrem_events.clone();
         for event in divrem_events.iter() {
             assert!(
-                event.opcode == Opcode::DIVU
-                    || event.opcode == Opcode::DIV
+                event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV
             );
             let mut row = [F::ZERO; NUM_DIVREM_COLS];
             let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
 
             // Initialize cols with basic operands and flags derived from the current event.
             {
-                cols.a = Word::from(event.a);
+                cols.lo = Word::from(event.a);
+                cols.hi = Word::from(event.hi);
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
                 cols.shard = F::from_canonical_u32(event.shard);
@@ -271,7 +275,7 @@ impl<F: PrimeField> MachineAir<F> for DivRemChip {
                 cols.abs_c_alu_event_nonce = F::from_canonical_u32(
                     input
                         .nonce_lookup
-                        .get(event.sub_lookups[4].0 as usize)
+                        .get(event.sub_lookups[3].0 as usize)
                         .copied()
                         .unwrap_or_default(),
                 );
@@ -279,7 +283,7 @@ impl<F: PrimeField> MachineAir<F> for DivRemChip {
                 cols.abs_rem_alu_event_nonce = F::from_canonical_u32(
                     input
                         .nonce_lookup
-                        .get(event.sub_lookups[5].0 as usize)
+                        .get(event.sub_lookups[4].0 as usize)
                         .copied()
                         .unwrap_or_default(),
                 );
@@ -348,18 +352,11 @@ impl<F: PrimeField> MachineAir<F> for DivRemChip {
                             .copied()
                             .unwrap_or_default(),
                     );
-                    cols.upper_nonce = F::from_canonical_u32(
-                        input
-                            .nonce_lookup
-                            .get(event.sub_lookups[1].0 as usize)
-                            .copied()
-                            .unwrap_or_default(),
-                    );
                     if is_signed_operation(event.opcode) {
                         cols.abs_nonce = F::from_canonical_u32(
                             input
                                 .nonce_lookup
-                                .get(event.sub_lookups[2].0 as usize)
+                                .get(event.sub_lookups[1].0 as usize)
                                 .copied()
                                 .unwrap_or_default(),
                         );
@@ -367,7 +364,7 @@ impl<F: PrimeField> MachineAir<F> for DivRemChip {
                         cols.abs_nonce = F::from_canonical_u32(
                             input
                                 .nonce_lookup
-                                .get(event.sub_lookups[3].0 as usize)
+                                .get(event.sub_lookups[2].0 as usize)
                                 .copied()
                                 .unwrap_or_default(),
                         );
@@ -462,7 +459,6 @@ where
         // Calculate whether b, remainder, and c are negative.
         {
             // Negative if and only if op code is signed & MSB = 1.
-            let is_signed_type = local.is_div;
             let msb_sign_pairs = [
                 (local.b_msb, local.b_neg),
                 (local.rem_msb, local.rem_neg),
@@ -472,11 +468,11 @@ where
             for msb_sign_pair in msb_sign_pairs.iter() {
                 let msb = msb_sign_pair.0;
                 let is_negative = msb_sign_pair.1;
-                builder.assert_eq(msb * is_signed_type.clone(), is_negative);
+                builder.assert_eq(msb * local.is_div, is_negative);
             }
         }
 
-        // Use the mul table to compute c * quotient and compare it to local.c_times_quotient.
+        // Use the mult or multu table to compute c * quotient and compare it to local.c_times_quotient.
         {
             let lower_half: [AB::Expr; 4] = [
                 local.c_times_quotient[0].into(),
@@ -485,28 +481,6 @@ where
                 local.c_times_quotient[3].into(),
             ];
 
-            // The lower 4 bytes of c_times_quotient must match the lower 4 bytes of (c * quotient).
-            builder.send_alu(
-                AB::Expr::from_canonical_u32(Opcode::MUL as u32),
-                Word(lower_half),
-                local.quotient,
-                local.c,
-                local.shard,
-                local.lower_nonce,
-                local.is_real,
-            );
-
-            let opcode_for_upper_half = {
-                // let mulh = AB::Expr::from_canonical_u32(Opcode::MULH as u32);
-                // let mulhu = AB::Expr::from_canonical_u32(Opcode::MULHU as u32);
-                // FIXME stephen
-                let mulh = AB::Expr::from_canonical_u32(0); //Opcode::MULH as u32);
-                let mulhu = AB::Expr::from_canonical_u32(0); // Opcode::MULHU as u32);
-                let is_signed = local.is_div;
-                let is_unsigned = local.is_divu;
-                is_signed * mulh + is_unsigned * mulhu
-            };
-
             let upper_half: [AB::Expr; 4] = [
                 local.c_times_quotient[4].into(),
                 local.c_times_quotient[5].into(),
@@ -514,13 +488,22 @@ where
                 local.c_times_quotient[7].into(),
             ];
 
-            builder.send_alu(
-                opcode_for_upper_half,
-                Word(upper_half),
+            let opcode = {
+                let mult = AB::Expr::from_canonical_u32(Opcode::MULT as u32);
+                let multu = AB::Expr::from_canonical_u32(Opcode::MULTU as u32);
+                local.is_div * mult + local.is_divu * multu
+            };
+
+            // The lower 4 bytes of c_times_quotient must match the LO in (c * quotient).
+            // The upper 4 bytes of c_times_quotient must match the HI in (c * quotient).
+            builder.send_alu_with_hi(
+                opcode,
+                Word(lower_half),
                 local.quotient,
                 local.c,
+                Word(upper_half),
                 local.shard,
-                local.upper_nonce,
+                local.lower_nonce,
                 local.is_real,
             );
         }
@@ -543,13 +526,11 @@ where
                 local.is_real.into(),
             );
 
-            let is_signed = local.is_div;
-
             builder.assert_eq(
                 local.is_overflow,
                 local.is_overflow_b.is_diff_zero.result
                     * local.is_overflow_c.is_diff_zero.result
-                    * is_signed,
+                    * local.is_div,
             );
         }
 
@@ -609,9 +590,10 @@ where
             }
         }
 
-        // a must equal remainder or quotient depending on the opcode.
+        // lo must equal quotient, and hi must equal remainder
         for i in 0..WORD_SIZE {
-            builder.when(local.is_divu + local.is_div).assert_eq(local.quotient[i], local.a[i]);
+            builder.assert_eq(local.quotient[i], local.lo[i]);
+            builder.assert_eq(local.remainder[i], local.hi[i]);
         }
 
         // remainder and b must have the same sign. Due to the intricate nature of sign logic in ZK,
@@ -628,14 +610,15 @@ where
                 b_byte_sum = b_byte_sum + local.b[i].into();
             }
 
-            // // 1. If remainder < 0, then b < 0.
-            // builder
-            //     .when(local.rem_neg) // rem is negative.
-            //     .assert_one(local.b_neg); // b is negative.
+            // 1. If remainder < 0, then b < 0.
+            builder
+                .when(local.rem_neg) // rem is negative.
+                .assert_one(local.b_neg); // b is negative.
 
             // 2. If remainder > 0, then b >= 0.
             builder
                 .when(rem_byte_sum.clone()) // remainder is nonzero.
+                .when(one.clone() - local.rem_neg) // rem is not negative.
                 .assert_zero(local.b_neg); // b is not negative.
         }
 
@@ -653,7 +636,6 @@ where
             for i in 0..WORD_SIZE {
                 builder
                     .when(local.is_c_0.result)
-                    .when(local.is_divu + local.is_div)
                     .assert_eq(local.quotient[i], AB::F::from_canonical_u8(u8::MAX));
             }
         }
@@ -780,8 +762,8 @@ where
                 local.abs_rem_alu_event,
             ];
 
-            for flag in bool_flags.iter() {
-                builder.assert_bool(*flag);
+            for flag in bool_flags.into_iter() {
+                builder.assert_bool(flag);
             }
         }
 
@@ -797,15 +779,15 @@ where
                 let divu: AB::Expr = AB::F::from_canonical_u32(Opcode::DIVU as u32).into();
                 let div: AB::Expr = AB::F::from_canonical_u32(Opcode::DIV as u32).into();
 
-                local.is_divu * divu
-                    + local.is_div * div
+                local.is_divu * divu + local.is_div * div
             };
 
-            builder.receive_alu(
+            builder.receive_alu_with_hi(
                 opcode,
-                local.a,
+                local.lo,
                 local.b,
                 local.c,
+                local.hi,
                 local.shard,
                 local.nonce,
                 local.is_real,
@@ -816,7 +798,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use crate::utils::{uni_stark_prove, uni_stark_verify};
     use p3_baby_bear::BabyBear;
     use p3_matrix::dense::RowMajorMatrix;
@@ -846,29 +827,29 @@ mod tests {
 
         let mut divrem_events: Vec<AluEvent> = Vec::new();
 
-        let divrems: Vec<(Opcode, u32, u32, u32)> = vec![
-            (Opcode::DIVU, 3, 20, 6),
-            (Opcode::DIVU, 715827879, neg(20), 6),
-            (Opcode::DIVU, 0, 20, neg(6)),
-            (Opcode::DIVU, 0, neg(20), neg(6)),
-            (Opcode::DIVU, 1 << 31, 1 << 31, 1),
-            (Opcode::DIVU, 0, 1 << 31, neg(1)),
-            (Opcode::DIVU, u32::MAX, 1 << 31, 0),
-            (Opcode::DIVU, u32::MAX, 1, 0),
-            (Opcode::DIVU, u32::MAX, 0, 0),
-            (Opcode::DIV, 3, 18, 6),
-            (Opcode::DIV, neg(6), neg(24), 4),
-            (Opcode::DIV, neg(2), 16, neg(8)),
-            (Opcode::DIV, neg(1), 0, 0),
-            (Opcode::DIV, 1 << 31, 1 << 31, neg(1)),
+        let divrems: Vec<(Opcode, u32, u32, u32, u32)> = vec![
+            (Opcode::DIVU, 3, 20, 6, 2),
+            (Opcode::DIVU, 715827879, neg(20), 6, 2),
+            (Opcode::DIVU, 0, 20, neg(6), 20),
+            (Opcode::DIVU, 0, neg(20), neg(6), neg(20)),
+            (Opcode::DIVU, 1 << 31, 1 << 31, 1, 0),
+            (Opcode::DIVU, 0, 1 << 31, neg(1), 1 << 31),
+            (Opcode::DIVU, u32::MAX, 1 << 31, 0, 1 << 31),
+            (Opcode::DIVU, u32::MAX, 1, 0, 1),
+            (Opcode::DIVU, u32::MAX, 0, 0, 0),
+            (Opcode::DIV, 3, 18, 6, 0),
+            (Opcode::DIV, neg(6), neg(24), 4, 0),
+            (Opcode::DIV, neg(2), 16, neg(8), 0),
+            (Opcode::DIV, neg(1), 0, 0, 0),
+            (Opcode::DIV, 1 << 31, 1 << 31, neg(1), 0),
         ];
         for t in divrems.iter() {
-            divrem_events.push(AluEvent::new(0, 0, t.0, t.1, t.2, t.3));
+            divrem_events.push(AluEvent::new_with_hi(0, 0, t.0, t.1, t.2, t.3, t.4));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - divrems.len()) {
-            divrem_events.push(AluEvent::new(0, 0, Opcode::DIVU, 1, 1, 1));
+            divrem_events.push(AluEvent::new_with_hi(0, 0, Opcode::DIVU, 1, 1, 1, 0));
         }
 
         let mut shard = ExecutionRecord::default();

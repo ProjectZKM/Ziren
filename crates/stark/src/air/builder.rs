@@ -189,10 +189,28 @@ pub trait AluAirBuilder: BaseAirBuilder {
         nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
+        self.send_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), shard, nonce, multiplicity);
+    }
+
+    /// Sends an ALU operation with HI to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn send_alu_with_hi(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: Word<impl Into<Self::Expr>>,
+        b: Word<impl Into<Self::Expr>>,
+        c: Word<impl Into<Self::Expr>>,
+        // HI register is MULT MULTU DIV DIVU
+        hi: Word<impl Into<Self::Expr>>,
+        shard: impl Into<Self::Expr>,
+        nonce: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
         let values = once(opcode.into())
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
+            .chain(hi.0.into_iter().map(Into::into))
             .chain(once(shard.into()))
             .chain(once(nonce.into()))
             .collect();
@@ -215,10 +233,27 @@ pub trait AluAirBuilder: BaseAirBuilder {
         nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
+        self.receive_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), shard, nonce, multiplicity);
+    }
+
+    /// Receives an ALU operation with HI to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn receive_alu_with_hi(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: Word<impl Into<Self::Expr>>,
+        b: Word<impl Into<Self::Expr>>,
+        c: Word<impl Into<Self::Expr>>,
+        hi: Word<impl Into<Self::Expr>>,
+        shard: impl Into<Self::Expr>,
+        nonce: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
         let values = once(opcode.into())
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
+            .chain(hi.0.into_iter().map(Into::into))
             .chain(once(shard.into()))
             .chain(once(nonce.into()))
             .collect();

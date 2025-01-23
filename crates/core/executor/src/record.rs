@@ -118,7 +118,7 @@ impl ExecutionRecord {
     }
 
     /// Create 6 lookup ids for an ALU event.
-    pub fn create_lookup_ids(&mut self) -> [LookupId; 6] {
+    pub fn create_lookup_ids(&mut self) -> [LookupId; 5] {
         std::array::from_fn(|_| self.create_lookup_id())
     }
 

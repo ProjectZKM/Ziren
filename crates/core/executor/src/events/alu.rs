@@ -25,8 +25,8 @@ pub struct AluEvent {
     pub b: u32,
     /// The second input operand.
     pub c: u32,
-    /// The result of the operation in the format of [``LookupId``; 6]
-    pub sub_lookups: [LookupId; 6],
+    /// The result of the operation in the format of [``LookupId``; 5]
+    pub sub_lookups: [LookupId; 5],
 }
 
 impl AluEvent {
@@ -38,10 +38,28 @@ impl AluEvent {
             shard,
             clk,
             opcode,
-            hi: 0,
             a,
             b,
             c,
+            hi: 0,
+            sub_lookups: create_random_lookup_ids(),
+        }
+    }
+
+    /// Create a new [`AluEvent`].
+    /// Used for opcode with LO and HI registers
+    /// DIV DIVU MULT MULLTU
+    #[must_use]
+    pub fn new_with_hi(shard: u32, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32, hi: u32) -> Self {
+        Self {
+            lookup_id: LookupId::default(),
+            shard,
+            clk,
+            opcode,
+            a,
+            b,
+            c,
+            hi,
             sub_lookups: create_random_lookup_ids(),
         }
     }

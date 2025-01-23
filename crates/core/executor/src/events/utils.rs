@@ -8,7 +8,7 @@ pub struct LookupId(pub u64);
 /// Create a random lookup id. This is slower than `record.create_lookup_id()` but is useful for
 /// testing.
 #[must_use]
-pub(crate) fn create_random_lookup_ids() -> [LookupId; 6] {
+pub(crate) fn create_random_lookup_ids() -> [LookupId; 5] {
     std::array::from_fn(|_| LookupId(rand::random()))
 }
 
@@ -21,8 +21,8 @@ pub(crate) fn create_random_lookup_ids() -> [LookupId; 6] {
 /// 2. The table sorted first by count (descending) and then by label (ascending). The table
 ///    itself is an iterator of a tuple (label, count).
 pub fn sorted_table_lines<'a, K, V>(
-    table: impl IntoIterator<Item = (K, &'a V)> + 'a,
-) -> (usize, impl Iterator<Item = (String, &'a V)>)
+    table: impl IntoIterator<Item=(K, &'a V)> + 'a,
+) -> (usize, impl Iterator<Item=(String, &'a V)>)
 where
     K: Ord + Display + 'a,
     V: Ord + Display + 'a,
@@ -66,8 +66,8 @@ where
 ///
 /// It's possible to hide rows with 0 count by setting `hide_zeros` to true.
 pub fn generate_execution_report<'a, K, V>(
-    table: impl IntoIterator<Item = (K, &'a V)> + 'a,
-) -> impl Iterator<Item = String> + 'a
+    table: impl IntoIterator<Item=(K, &'a V)> + 'a,
+) -> impl Iterator<Item=String> + 'a
 where
     K: Ord + Display + 'a,
     V: Ord + PartialEq<u64> + Display + 'a,
