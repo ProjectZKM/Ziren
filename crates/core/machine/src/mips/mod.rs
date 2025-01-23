@@ -663,8 +663,8 @@ pub mod tests {
 
     #[test]
     fn test_mul_prove() {
-        let mul_ops = [Opcode::MUL];
         utils::setup_logger();
+        let mul_ops = [Opcode::MUL, Opcode::MULT, Opcode::MULTU];
         let operands =
             [(1, 1), (1234, 5678), (8765, 4321), (0xffff, 0xffff - 1), (u32::MAX - 1, u32::MAX)];
         for mul_op in mul_ops.iter() {

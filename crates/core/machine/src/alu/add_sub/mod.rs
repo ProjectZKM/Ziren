@@ -176,12 +176,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &AddSubCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &AddSubCols<AB::Var> = (*next).borrow();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // Evaluate the addition operation.
         AddOperation::<AB::F>::eval(
@@ -192,20 +186,10 @@ where
             local.is_add + local.is_sub,
         );
 
-        let add_opcode = {
-            let add: AB::Expr = AB::F::from_canonical_u32(Opcode::ADD as u32).into();
-            local.is_add * add
-        };
-
-        let sub_opcode = {
-            let sub: AB::Expr = AB::F::from_canonical_u32(Opcode::SUB as u32).into();
-            local.is_sub * sub
-        };
-
         // Receive the arguments.  There are separate receives for ADD and SUB.
         // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            add_opcode,
+            Opcode::ADD.as_field::<AB::F>(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
@@ -216,7 +200,7 @@ where
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
         builder.receive_alu(
-            sub_opcode,
+            Opcode::SUB.as_field::<AB::F>(),
             local.operand_1,
             local.add_operation.value,
             local.operand_2,
@@ -225,8 +209,7 @@ where
             local.is_sub,
         );
 
-        let is_real = local.is_add
-            + local.is_sub;
+        let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
         builder.assert_bool(is_real);

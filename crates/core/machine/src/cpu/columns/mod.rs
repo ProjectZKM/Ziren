@@ -54,6 +54,7 @@ pub struct CpuCols<T: Copy> {
     pub selectors: OpcodeSelectorCols<T>,
 
     /// Operand values, either from registers or immediate values.
+    pub op_hi_access: MemoryReadWriteCols<T>,
     pub op_a_access: MemoryReadWriteCols<T>,
     pub op_b_access: MemoryReadCols<T>,
     pub op_c_access: MemoryReadCols<T>,
@@ -113,6 +114,11 @@ pub struct CpuCols<T: Copy> {
 }
 
 impl<T: Copy> CpuCols<T> {
+    /// Gets the value of the upper bits of the output operand.
+    pub fn op_hi_val(&self) -> Word<T> {
+        *self.op_hi_access.value()
+    }
+
     /// Gets the value of the first operand.
     pub fn op_a_val(&self) -> Word<T> {
         *self.op_a_access.value()

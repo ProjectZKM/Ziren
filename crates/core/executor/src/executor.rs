@@ -713,12 +713,11 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit an ALU event.
-    // todo: use hi
     fn emit_alu(
         &mut self,
         clk: u32,
         opcode: Opcode,
-        _hi: Option<u32>,
+        hi: Option<u32>,
         a: u32,
         b: u32,
         c: u32,
@@ -729,6 +728,7 @@ impl<'a> Executor<'a> {
             shard: self.shard(),
             clk,
             opcode,
+            hi: hi.unwrap_or(0),
             a,
             b,
             c,

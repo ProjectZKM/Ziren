@@ -23,10 +23,10 @@
 //!     carry[i] = x / 256
 //!     m[i] = x % 256
 //!
-//! if upper_half:
-//!     assert_eq(a, m[4..8])
-//! if lower_half:
-//!     assert_eq(a, m[0..4])
+//! assert_eq(a, m[0..4])
+//!
+//! if mult or multu:
+//!     assert_eq(hi, m[4..8])
 
 mod utils;
 
@@ -67,7 +67,7 @@ const BYTE_SIZE: usize = 8;
 /// The mask for a byte.
 const BYTE_MASK: u8 = 0xff;
 
-/// A chip that implements multiplication for the multiplication opcodes.
+/// A chip that implements multiplication for the opcode MUL, MULT and MULTU.
 #[derive(Default)]
 pub struct MulChip;
 
@@ -80,6 +80,9 @@ pub struct MulCols<T> {
 
     /// The nonce of the operation.
     pub nonce: T,
+
+    /// The upper bits of the output operand.
+    pub hi: Word<T>,
 
     /// The output operand.
     pub a: Word<T>,
@@ -108,8 +111,14 @@ pub struct MulCols<T> {
     /// The sign extension of `c`.
     pub c_sign_extend: T,
 
-    /// Flag indicating whether the opcode is `MUL` (`u32 x u32`).
+    /// Flag indicating whether the opcode is `MUL`.
     pub is_mul: T,
+
+    /// Flag indicating whether the opcode is `MULT`.
+    pub is_mult: T,
+
+    /// Flag indicating whether the opcode is `MULTU`.
+    pub is_multu: T,
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
@@ -194,6 +203,9 @@ impl MulChip {
         cols: &mut MulCols<F>,
         blu: &mut impl ByteRecord,
     ) {
+        cols.shard = F::from_canonical_u32(event.shard);
+
+        let hi_word = event.hi.to_le_bytes();
         let a_word = event.a.to_le_bytes();
         let b_word = event.b.to_le_bytes();
         let c_word = event.c.to_le_bytes();
@@ -208,17 +220,17 @@ impl MulChip {
             let c_msb = get_msb(c_word);
             cols.c_msb = F::from_canonical_u8(c_msb);
 
-            // // If b is signed and it is negative, sign extend b.
-            // if (event.opcode == Opcode::MULH || event.opcode == Opcode::MULHSU) && b_msb == 1 {
-            //     cols.b_sign_extend = F::ONE;
-            //     b.resize(PRODUCT_SIZE, BYTE_MASK);
-            // }
+            // If b is signed and it is negative, sign extend b.
+            if event.opcode == Opcode::MULT && b_msb == 1 {
+                cols.b_sign_extend = F::ONE;
+                b.resize(PRODUCT_SIZE, BYTE_MASK);
+            }
 
-            // // If c is signed and it is negative, sign extend c.
-            // if event.opcode == Opcode::MULH && c_msb == 1 {
-            //     cols.c_sign_extend = F::ONE;
-            //     c.resize(PRODUCT_SIZE, BYTE_MASK);
-            // }
+            // If c is signed and it is negative, sign extend c.
+            if event.opcode == Opcode::MULT && c_msb == 1 {
+                cols.c_sign_extend = F::ONE;
+                c.resize(PRODUCT_SIZE, BYTE_MASK);
+            }
 
             // Insert the MSB lookup events.
             {
@@ -262,13 +274,14 @@ impl MulChip {
         }
 
         cols.product = product.map(F::from_canonical_u32);
+        cols.hi = Word(hi_word.map(F::from_canonical_u8));
         cols.a = Word(a_word.map(F::from_canonical_u8));
         cols.b = Word(b_word.map(F::from_canonical_u8));
         cols.c = Word(c_word.map(F::from_canonical_u8));
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
-        //cols.is_mulhsu = F::from_bool(event.opcode == Opcode::MULHSU);
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
+        cols.is_multu = F::from_bool(event.opcode == Opcode::MULTU);
 
         // Range check.
         {
@@ -292,17 +305,11 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &MulCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &MulCols<AB::Var> = (*next).borrow();
         let base = AB::F::from_canonical_u32(1 << 8);
 
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
         let byte_mask = AB::F::from_canonical_u8(BYTE_MASK);
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // Calculate the MSBs.
         let (b_msb, c_msb) = {
@@ -317,19 +324,15 @@ where
             (local.b_msb, local.c_msb)
         };
 
-        // // Calculate whether to extend b and c's sign.
-        // let (b_sign_extend, c_sign_extend) = {
-        //     // MULH or MULHSU
-        //     let is_b_i32 = local.is_mulh + local.is_mulhsu - local.is_mulh * local.is_mulhsu;
+        // Calculate whether to extend b and c's sign.
+        let (b_sign_extend, c_sign_extend) = {
+            let is_b_i32 = local.is_mult;
+            let is_c_i32 = local.is_mult;
 
-        //     let is_c_i32 = local.is_mulh;
-
-        //     builder.assert_eq(local.b_sign_extend, is_b_i32 * b_msb);
-        //     builder.assert_eq(local.c_sign_extend, is_c_i32 * c_msb);
-        //     (local.b_sign_extend, local.c_sign_extend)
-        // };
-        let b_sign_extend = AB::Expr::ZERO; // FIXME stephen
-        let c_sign_extend = AB::Expr::ZERO; // FIXME stephen
+            builder.assert_eq(local.b_sign_extend, is_b_i32 * b_msb);
+            builder.assert_eq(local.c_sign_extend, is_c_i32 * c_msb);
+            (local.b_sign_extend, local.c_sign_extend)
+        };
 
         // Sign extend local.b and local.c whenever appropriate.
         let (b, c) = {
@@ -374,9 +377,12 @@ where
 
         // Compare the product's appropriate bytes with that of the result.
         {
-            let is_lower = local.is_mul;
+            let has_hi = local.is_mult + local.is_multu;
             for i in 0..WORD_SIZE {
-                builder.when(is_lower).assert_eq(product[i], local.a[i]);
+                builder.assert_eq(product[i], local.a[i]);
+                builder
+                    .when(has_hi.clone())
+                    .assert_eq(product[i + WORD_SIZE], local.hi[i]);
             }
         }
 
@@ -388,6 +394,8 @@ where
                 local.b_sign_extend,
                 local.c_sign_extend,
                 local.is_mul,
+                local.is_mult,
+                local.is_multu,
                 local.is_real,
             ];
             for boolean in booleans.iter() {
@@ -402,12 +410,14 @@ where
         // Calculate the opcode.
         let opcode = {
             // Exactly one of the op codes must be on.
-            //builder
-            //    .when(local.is_real)
-            //    .assert_one(local.is_mul + local.is_mulhsu);
+            builder
+               .when(local.is_real)
+               .assert_one(local.is_mul + local.is_mult + local.is_multu);
 
             let mul: AB::Expr = AB::F::from_canonical_u32(Opcode::MUL as u32).into();
-            local.is_mul * mul
+            let mult: AB::Expr = AB::F::from_canonical_u32(Opcode::MULT as u32).into();
+            let multu: AB::Expr = AB::F::from_canonical_u32(Opcode::MULTU as u32).into();
+            local.is_mul * mul + local.is_mult * mult + local.is_multu * multu
         };
 
         // Range check.
@@ -421,7 +431,7 @@ where
         }
 
         // Receive the arguments.
-        builder.receive_alu(
+        builder.receive_alu( // todo: accept local.hi
             opcode,
             local.a,
             local.b,
@@ -444,27 +454,27 @@ mod tests {
 
     use super::MulChip;
 
-    //#[test]
-    //fn generate_trace_mul() {
-    //    let mut shard = ExecutionRecord::default();
+    #[test]
+    fn generate_trace_mul() {
+       let mut shard = ExecutionRecord::default();
 
-    //    // Fill mul_events with 10^7 MULHSU events.
-    //    let mut mul_events: Vec<AluEvent> = Vec::new();
-    //    for _ in 0..10i32.pow(7) {
-    //        mul_events.push(AluEvent::new(
-    //            0,
-    //            0,
-    //            Opcode::MULHSU,
-    //            0x80004000,
-    //            0x80000000,
-    //            0xffff8000,
-    //        ));
-    //    }
-    //    shard.mul_events = mul_events;
-    //    let chip = MulChip::default();
-    //    let _trace: RowMajorMatrix<BabyBear> =
-    //        chip.generate_trace(&shard, &mut ExecutionRecord::default());
-    //}
+       // Fill mul_events with 10 MUL events.
+       let mut mul_events: Vec<AluEvent> = Vec::new();
+       for _ in 0..10 {
+           mul_events.push(AluEvent::new(
+               0,
+               0,
+               Opcode::MUL,
+               0x80004000,
+               0x80000000,
+               0xffff8000,
+           ));
+       }
+       shard.mul_events = mul_events;
+       let chip = MulChip::default();
+       let _trace: RowMajorMatrix<BabyBear> =
+           chip.generate_trace(&shard, &mut ExecutionRecord::default());
+    }
 
     #[test]
     fn prove_babybear() {
