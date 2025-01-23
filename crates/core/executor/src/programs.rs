@@ -89,14 +89,14 @@ pub mod tests {
             // SW and LW
             Instruction::new(Opcode::SW, 29, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LW, 28, 0, 0x27654320, false, true),
-            // // LBU
-            // Instruction::new(Opcode::LBU, 27, 0, 0x27654320, false, true),
-            // Instruction::new(Opcode::LBU, 26, 0, 0x27654321, false, true),
-            // Instruction::new(Opcode::LBU, 25, 0, 0x27654322, false, true),
-            // Instruction::new(Opcode::LBU, 24, 0, 0x27654323, false, true),
-            // // LB
-            // Instruction::new(Opcode::LB, 23, 0, 0x27654320, false, true),
-            // Instruction::new(Opcode::LB, 22, 0, 0x27654321, false, true),
+            // LBU
+            Instruction::new(Opcode::LBU, 27, 0, 0x27654320, false, true),
+            Instruction::new(Opcode::LBU, 26, 0, 0x27654321, false, true),
+            Instruction::new(Opcode::LBU, 25, 0, 0x27654322, false, true),
+            Instruction::new(Opcode::LBU, 24, 0, 0x27654323, false, true),
+            // LB
+            Instruction::new(Opcode::LB, 23, 0, 0x27654320, false, true),
+            Instruction::new(Opcode::LB, 22, 0, 0x27654321, false, true),
             // // LHU
             // Instruction::new(Opcode::LHU, 21, 0, 0x27654320, false, true),
             // Instruction::new(Opcode::LHU, 20, 0, 0x27654322, false, true),

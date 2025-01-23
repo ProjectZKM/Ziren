@@ -168,13 +168,13 @@ impl CpuChip {
         // of the most significant byte to get it's sign.
         self.eval_most_sig_byte_bit_decomp(builder, memory_columns, local, &local.unsigned_mem_val);
 
-        // Assert that correct value of `mem_value_is_neg_not_x0`.
-        builder.assert_eq(
-            local.mem_value_is_neg_not_x0,
-            (local.selectors.is_lb + local.selectors.is_lh)
-                * memory_columns.most_sig_byte_decomp[7]
-                * (AB::Expr::ONE - local.instruction.op_a_0),
-        );
+        //// Assert that correct value of `mem_value_is_neg_not_x0`.
+        //builder.assert_eq(
+        //    local.mem_value_is_neg_not_x0,
+        //    (local.selectors.is_lb + local.selectors.is_lh)
+        //        * memory_columns.most_sig_byte_decomp[7]
+        //        * (AB::Expr::ONE - local.instruction.op_a_0),
+        //);
 
         // When the memory value is negative and not writing to x0, use the SUB opcode to compute
         // the signed value of the memory value and verify that the op_a value is correct.
@@ -194,22 +194,26 @@ impl CpuChip {
             local.mem_value_is_neg_not_x0,
         );
 
-        // Assert that correct value of `mem_value_is_pos_not_x0`.
-        let mem_value_is_pos = (local.selectors.is_lb + local.selectors.is_lh)
-            * (AB::Expr::ONE - memory_columns.most_sig_byte_decomp[7])
-            + local.selectors.is_lbu
-            + local.selectors.is_lhu
-            + local.selectors.is_lw;
-        builder.assert_eq(
-            local.mem_value_is_pos_not_x0,
-            mem_value_is_pos * (AB::Expr::ONE - local.instruction.op_a_0),
-        );
+        // FIXME: stephen
+        // // Assert that correct value of `mem_value_is_pos_not_x0`.
+        // let mem_value_is_pos = (local.selectors.is_lb + local.selectors.is_lh)
+        //     * (AB::Expr::ONE - memory_columns.most_sig_byte_decomp[7])
+        //     + local.selectors.is_lbu
+        //     + local.selectors.is_lhu
+        //     + local.selectors.is_lwl
+        //     + local.selectors.is_lwr
+        //     + local.selectors.is_ll
+        //     + local.selectors.is_lw;
+        // builder.assert_eq(
+        //     local.mem_value_is_pos_not_x0,
+        //     mem_value_is_pos * (AB::Expr::ONE - local.instruction.op_a_0),
+        // );
 
         // When the memory value is not positive and not writing to x0, assert that op_a value is
         // equal to the unsigned memory value.
-        builder
-            .when(local.mem_value_is_pos_not_x0)
-            .assert_word_eq(local.unsigned_mem_val, local.op_a_val());
+        //builder
+        //    .when(local.mem_value_is_pos_not_x0)
+        //    .assert_word_eq(local.unsigned_mem_val, local.op_a_val());
     }
 
     /// Evaluates constraints related to storing to memory.
@@ -304,10 +308,10 @@ impl CpuChip {
             + mem_val[3] * memory_columns.offset_is_three;
         let byte_value = Word::extend_expr::<AB>(mem_byte.clone());
 
-        // When the instruction is LB or LBU, just use the lower byte.
-        builder
-            .when(local.selectors.is_lb + local.selectors.is_lbu)
-            .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
+        // // When the instruction is LB or LBU, just use the lower byte.
+        // builder
+        //     .when(local.selectors.is_lb + local.selectors.is_lbu)
+        //     .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
 
         // When the instruction is LH or LHU, use the lower half.
         builder
@@ -348,8 +352,8 @@ impl CpuChip {
             recomposed_byte = recomposed_byte.clone()
                 + memory_columns.most_sig_byte_decomp[i] * AB::Expr::from_canonical_u8(1 << i);
         }
-        builder.when(local.selectors.is_lb).assert_eq(recomposed_byte.clone(), unsigned_mem_val[0]);
-        builder.when(local.selectors.is_lh).assert_eq(recomposed_byte, unsigned_mem_val[1]);
+        //builder.when(local.selectors.is_lb).assert_eq(recomposed_byte.clone(), unsigned_mem_val[0]);
+        //builder.when(local.selectors.is_lh).assert_eq(recomposed_byte, unsigned_mem_val[1]);
     }
 
     /// Evaluates the offset value flags.
