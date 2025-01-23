@@ -48,6 +48,14 @@ impl CpuChip {
         // Get the branch specific columns.
         let branch_cols = local.opcode_specific_columns.branch();
 
+        builder.assert_bool(local.selectors.is_beq);
+        builder.assert_bool(local.selectors.is_bne);
+        builder.assert_bool(local.selectors.is_bltz);
+        builder.assert_bool(local.selectors.is_bgez);
+        builder.assert_bool(local.selectors.is_blez);
+        builder.assert_bool(local.selectors.is_bgtz);
+        builder.assert_bool(is_branch_instruction.clone());
+
         // Evaluate program counter constraints.
         {
             // When we are branching, assert that local.next_pc <==> branch_columns.next_pc as Word.
@@ -99,8 +107,7 @@ impl CpuChip {
             // When local.not_branching is true, assert that local.is_real is true.
             builder.when(local.not_branching).assert_one(local.is_real);
 
-            // Assert that either we are branching or not branching when the instruction is a
-            // branch.
+            // Assert that either we are branching or not branching when the instruction is a branch.
             builder
                 .when(is_branch_instruction.clone())
                 .assert_one(local.branching + local.not_branching);
@@ -113,18 +120,16 @@ impl CpuChip {
             // When the opcode is BEQ and we are branching, assert that a_eq_b is true.
             builder.when(local.selectors.is_beq * local.branching).assert_one(branch_cols.a_eq_b);
 
-            // When the opcode is BEQ and we are not branching, assert that either a_gt_b or a_lt_b
-            // is true.
+            // When the opcode is BEQ and we are not branching, assert that a_eq_b is false.
             builder
                 .when(local.selectors.is_beq)
                 .when_not(local.branching)
-                .assert_one(branch_cols.a_gt_b + branch_cols.a_lt_b);
+                .assert_zero(branch_cols.a_eq_b);
 
-            // When the opcode is BNE and we are branching, assert that either a_gt_b or a_lt_b is
-            // true.
+            // When the opcode is BNE and we are branching, assert that a_eq_b is false.
             builder
                 .when(local.selectors.is_bne * local.branching)
-                .assert_one(branch_cols.a_gt_b + branch_cols.a_lt_b);
+                .assert_zero(branch_cols.a_eq_b);
 
             // When the opcode is BNE and we are not branching, assert that a_eq_b is true.
             builder
@@ -132,29 +137,49 @@ impl CpuChip {
                 .when_not(local.branching)
                 .assert_one(branch_cols.a_eq_b);
 
-            // When the opcode is BLT or BLTU and we are branching, assert that a_lt_b is true.
+            // When the opcode is BLTZ and we are branching, assert that either a_lt_0 is true.
             builder
-                .when((local.selectors.is_bltz + local.selectors.is_blez) * local.branching)
-                .assert_one(branch_cols.a_lt_b);
+                .when(local.selectors.is_bltz * local.branching)
+                .assert_one(branch_cols.a_lt_0);
 
-            // When the opcode is BLT or BLTU and we are not branching, assert that either a_eq_b
-            // or a_gt_b is true.
+            // When the opcode is BLTZ and we are not branching, assert that either a_eq_0 or a_gt_0 is true.
             builder
-                .when(local.selectors.is_bltz + local.selectors.is_blez)
+                .when(local.selectors.is_bltz)
                 .when_not(local.branching)
-                .assert_one(branch_cols.a_eq_b + branch_cols.a_gt_b);
+                .assert_one(branch_cols.a_eq_0 + branch_cols.a_gt_0);
 
-            // When the opcode is BGE or BGEU and we are branching, assert that a_gt_b is true.
+            // When the opcode is BGEZ and we are branching, assert that a_eq_0 or a_gt_0 is true.
             builder
-                .when((local.selectors.is_bgez + local.selectors.is_bgtz) * local.branching)
-                .assert_one(branch_cols.a_gt_b + branch_cols.a_eq_b);
+                .when(local.selectors.is_bgez * local.branching)
+                .assert_one(branch_cols.a_eq_0 + branch_cols.a_gt_0);
 
-            // When the opcode is BGE or BGEU and we are not branching, assert that either a_eq_b
-            // or a_lt_b is true.
+            // When the opcode is BGEZ and we are not branching, assert that either a_lt_0 is true.
             builder
-                .when(local.selectors.is_bgez + local.selectors.is_bgtz)
+                .when(local.selectors.is_bgez)
                 .when_not(local.branching)
-                .assert_one(branch_cols.a_lt_b);
+                .assert_one(branch_cols.a_lt_0);
+
+            // When the opcode is BLEZ and we are branching, assert that either a_eq_0 or a_lt_0 is true.
+            builder
+                .when(local.selectors.is_blez * local.branching)
+                .assert_one(branch_cols.a_eq_0 + branch_cols.a_lt_0);
+
+            // When the opcode is BLEZ and we are not branching, assert that a_gt_0 is true.
+            builder
+                .when(local.selectors.is_blez)
+                .when_not(local.branching)
+                .assert_one(branch_cols.a_gt_0);
+
+            // When the opcode is BGTZ and we are branching, assert that a_gt_0 is true.
+            builder
+                .when(local.selectors.is_bgtz * local.branching)
+                .assert_one(branch_cols.a_gt_0);
+
+            // When the opcode is BGTZ and we are not branching, assert that a_eq_0 or a_lt_0 is true.
+            builder
+                .when(local.selectors.is_bgez)
+                .when_not(local.branching)
+                .assert_one(branch_cols.a_eq_0 + branch_cols.a_lt_0);
         }
 
         // When it's a branch instruction and a_eq_b, assert that a == b.
@@ -162,34 +187,34 @@ impl CpuChip {
             .when(is_branch_instruction.clone() * branch_cols.a_eq_b)
             .assert_word_eq(local.op_a_val(), local.op_b_val());
 
+        // When it's a branch instruction and a_eq_0, assert that a == 0.
+        builder
+            .when(is_branch_instruction.clone() * branch_cols.a_eq_0)
+            .assert_word_eq(local.op_a_val(), Word::zero::<AB>());
+
         //  To prevent this ALU send to be arbitrarily large when is_branch_instruction is false.
         builder.when_not(is_branch_instruction.clone()).assert_zero(local.branching);
 
-        // Calculate a_lt_b <==> a < b (using appropriate signedness).
-        // FIXME: stephen
-        let use_signed_comparison = local.selectors.is_bltz + local.selectors.is_bgez;
-        builder.send_alu(
-            use_signed_comparison.clone() * Opcode::SLT.as_field::<AB::F>()
-                + (AB::Expr::ONE - use_signed_comparison.clone())
-                    * Opcode::SLTU.as_field::<AB::F>(),
-            Word::extend_var::<AB>(branch_cols.a_lt_b),
-            local.op_a_val(),
-            local.op_b_val(),
-            local.shard,
-            branch_cols.a_lt_b_nonce,
-            is_branch_instruction.clone(),
-        );
+        // // Calculate a_lt_0 <==> a < 0 (using appropriate signedness).
+        // builder.send_alu(
+        //     Opcode::SLTU.as_field::<AB::F>(),
+        //     Word::extend_var::<AB>(branch_cols.a_lt_0),
+        //     local.op_a_val(),
+        //     Word::zero::<AB>(),
+        //     local.shard,
+        //     branch_cols.a_lt_0_nonce,
+        //     is_branch_instruction.clone(),
+        // );
 
-        // Calculate a_gt_b <==> a > b (using appropriate signedness).
-        builder.send_alu(
-            use_signed_comparison.clone() * Opcode::SLT.as_field::<AB::F>()
-                + (AB::Expr::ONE - use_signed_comparison) * Opcode::SLTU.as_field::<AB::F>(),
-            Word::extend_var::<AB>(branch_cols.a_gt_b),
-            local.op_b_val(),
-            local.op_a_val(),
-            local.shard,
-            branch_cols.a_gt_b_nonce,
-            is_branch_instruction.clone(),
-        );
+        // // Calculate a_gt_0 <==> a > 0 (using appropriate signedness).
+        // builder.send_alu(
+        //      Opcode::SLTU.as_field::<AB::F>(),
+        //     Word::extend_var::<AB>(branch_cols.a_gt_0),
+        //     local.op_b_val(),
+        //     Word::zero::<AB>(),
+        //     local.shard,
+        //     branch_cols.a_gt_0_nonce,
+        //     is_branch_instruction.clone(),
+        // );
     }
 }

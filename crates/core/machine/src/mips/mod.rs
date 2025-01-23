@@ -607,6 +607,91 @@ pub mod tests {
     }
 
     #[test]
+    fn test_beq_jump_prove() {
+        utils::setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 1, false, true),
+            Instruction::new(Opcode::BEQ, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_beq_not_jump_prove() {
+        utils::setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 2, false, true),
+            // Instruction::new(Opcode::BEQ, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_bne_jump_prove() {
+        utils::setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 2, false, true),
+            Instruction::new(Opcode::BNE, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_bne_not_jump_prove() {
+        utils::setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 1, false, true),
+            Instruction::new(Opcode::BNE, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_beq_bne_prove() {
+        utils::setup_logger();
+        let branch_ops = [Opcode::BEQ, Opcode::BNE];
+        let operands = [(1, 1), (1, 2)];
+        for branch_op in branch_ops.iter() {
+            for operand in operands.iter() {
+                let instructions = vec![
+                    Instruction::new(Opcode::ADD, 29, 0, operand.0, false, true),
+                    Instruction::new(Opcode::ADD, 30, 0, operand.1, false, true),
+                    Instruction::new(*branch_op, 29, 30, 100, false, true),
+                ];
+                let program = Program::new(instructions, 0, 0);
+                run_test::<CpuProver<_, _>>(program).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_rest_branch_prove() {
+        utils::setup_logger();
+        let branch_ops = [Opcode::BLTZ];
+        let operands = vec![0];
+        // let branch_ops = [Opcode::BLTZ, Opcode::BGEZ, Opcode::BLEZ, Opcode::BGTZ];
+        // let operands = vec![0, 1, 0xFFFF_FFFF];
+        for branch_op in branch_ops.iter() {
+            for operand in operands.iter() {
+                let instructions = vec![
+                    Instruction::new(Opcode::ADD, 29, 0, *operand, false, true),
+                    Instruction::new(*branch_op, 29, 0, 100, false, true),
+                ];
+                let program = Program::new(instructions, 0, 0);
+                run_test::<CpuProver<_, _>>(program).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn test_shift_prove() {
         utils::setup_logger();
         let shift_ops = [Opcode::SRL, Opcode::SRA, Opcode::SLL];

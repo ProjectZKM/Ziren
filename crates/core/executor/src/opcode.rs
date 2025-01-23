@@ -178,6 +178,13 @@ impl Opcode {
             _ => false,
         }
     }
+
+    pub fn has_one_operand(&self) -> bool {
+        match self {
+            Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => true,
+            _ => false,
+        }
+    }
 }
 
 impl Display for Opcode {
