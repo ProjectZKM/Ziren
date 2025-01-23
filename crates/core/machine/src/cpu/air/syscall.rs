@@ -209,8 +209,6 @@ impl CpuChip {
             .when(is_halt.clone() + local.selectors.is_unimpl)
             .assert_zero(next.is_real);
 
-        builder.when(is_halt.clone()).assert_zero(local.next_pc);
-
         // Verify that the operand that was range checked is op_b.
         let syscall_columns = local.opcode_specific_columns.syscall();
         builder
