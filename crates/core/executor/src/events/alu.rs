@@ -17,12 +17,13 @@ pub struct AluEvent {
     /// The opcode.
     pub opcode: Opcode,
     /// The upper bits of the output operand.
+    /// This is used for the MULT, MULTU, DIV and DIVU opcodes.
     pub hi: u32,
     /// The output operand.
     pub a: u32,
-    /// The first operand.
+    /// The first input operand.
     pub b: u32,
-    /// The second operand.
+    /// The second input operand.
     pub c: u32,
     /// The result of the operation in the format of [``LookupId``; 6]
     pub sub_lookups: [LookupId; 6],
