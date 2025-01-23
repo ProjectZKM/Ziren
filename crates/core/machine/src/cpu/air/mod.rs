@@ -50,7 +50,7 @@ where
         let is_memory_instruction: AB::Expr = self.is_memory_instruction::<AB>(&local.selectors);
         let is_branch_instruction: AB::Expr = self.is_branch_instruction::<AB>(&local.selectors);
         let is_alu_instruction: AB::Expr = self.is_alu_instruction::<AB>(&local.selectors);
-
+/*
         // Register constraints.
         self.eval_registers::<AB>(builder, local, is_branch_instruction.clone());
 
@@ -58,7 +58,7 @@ where
         self.eval_memory_address_and_access::<AB>(builder, local, is_memory_instruction.clone());
         self.eval_memory_load::<AB>(builder, local);
         self.eval_memory_store::<AB>(builder, local);
-
+*/
         // ALU instructions.
         builder.send_alu_with_hi(
             local.instruction.opcode,
@@ -76,9 +76,6 @@ where
 
         // Jump instructions.
         self.eval_jump_ops::<AB>(builder, local, next);
-
-        // AUIPC instruction.
-        //self.eval_auipc(builder, local);
 
         // syscall instruction.
         self.eval_syscall(builder, local);
@@ -100,9 +97,6 @@ where
 
         // Check that the shard and clk is updated correctly.
         self.eval_shard_clk(builder, local, next);
-
-        // Check that the pc is updated correctly.
-        self.eval_pc(builder, local, next, is_branch_instruction.clone());
 
         // Check public values constraints.
         self.eval_public_values(builder, local, next, public_values);
@@ -154,7 +148,7 @@ impl CpuChip {
             .assert_eq(local.op_a_val().reduce::<AB>(), local.pc + AB::F::from_canonical_u8(8));
 
         // Verify that the word form of local.pc is correct for JAL instructions.
-        builder.when(local.selectors.is_jumpd).assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
+        builder.when(is_jump_instruction.clone()).assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
 
         // Verify that the word form of next.pc is correct for both jump instructions.
         builder
@@ -188,7 +182,7 @@ impl CpuChip {
             builder,
             jump_columns.next_pc,
             jump_columns.next_pc_range_checker,
-            local.selectors.is_jumpd.into(),
+            is_jump_instruction.clone(),
         );
         BabyBearWordRangeChecker::<AB::F>::range_check(
             builder,

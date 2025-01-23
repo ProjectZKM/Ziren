@@ -479,6 +479,8 @@ impl CpuChip {
                      let target_pc = event.b;
                      jump_columns.op_a_range_checker.populate(event.a);
                      jump_columns.target_pc = Word::from(target_pc);
+                     jump_columns.next_pc = Word::from(event.next_pc);
+                     jump_columns.next_pc_range_checker.populate(event.next_pc);
                      jump_columns.target_pc_range_checker.populate(target_pc);
                      jump_columns.jump_nonce = F::from_canonical_u32(
                          nonce_lookup
