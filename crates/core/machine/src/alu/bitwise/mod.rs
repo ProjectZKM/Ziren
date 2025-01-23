@@ -47,6 +47,9 @@ pub struct BitwiseCols<T> {
     /// The second input operand.
     pub c: Word<T>,
 
+    /// If the opcode is NOR.
+    pub is_nor: T,
+
     /// If the opcode is XOR.
     pub is_xor: T,
 
@@ -149,6 +152,7 @@ impl BitwiseChip {
         cols.b = Word::from(event.b);
         cols.c = Word::from(event.c);
 
+        cols.is_nor = F::from_bool(event.opcode == Opcode::NOR);
         cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
         cols.is_or = F::from_bool(event.opcode == Opcode::OR);
         cols.is_and = F::from_bool(event.opcode == Opcode::AND);
@@ -191,10 +195,11 @@ where
         // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<AB::F>()
             + local.is_or * ByteOpcode::OR.as_field::<AB::F>()
-            + local.is_and * ByteOpcode::AND.as_field::<AB::F>();
+            + local.is_and * ByteOpcode::AND.as_field::<AB::F>()
+            + local.is_nor * ByteOpcode::NOR.as_field::<AB::F>();
 
         // Get a multiplicity of `1` only for a true row.
-        let mult = local.is_xor + local.is_or + local.is_and;
+        let mult = local.is_xor + local.is_or + local.is_and + local.is_nor;
         for ((a, b), c) in local.a.into_iter().zip(local.b).zip(local.c) {
             builder.send_byte(opcode.clone(), a, b, c, mult.clone());
         }
@@ -202,7 +207,8 @@ where
         // Get the cpu opcode, which corresponds to the opcode being sent in the CPU table.
         let cpu_opcode = local.is_xor * Opcode::XOR.as_field::<AB::F>()
             + local.is_or * Opcode::OR.as_field::<AB::F>()
-            + local.is_and * Opcode::AND.as_field::<AB::F>();
+            + local.is_and * Opcode::AND.as_field::<AB::F>()
+            + local.is_nor * Opcode::NOR.as_field::<AB::F>();
 
         // Receive the arguments.
         builder.receive_alu(
@@ -212,13 +218,14 @@ where
             local.c,
             local.shard,
             local.nonce,
-            local.is_xor + local.is_or + local.is_and,
+            local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
 
-        let is_real = local.is_xor + local.is_or + local.is_and;
+        let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
+        builder.assert_bool(local.is_xor);
         builder.assert_bool(is_real);
     }
 }
@@ -237,7 +244,12 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.bitwise_events = vec![AluEvent::new(0, 0, Opcode::XOR, 25, 10, 19)];
+        shard.bitwise_events = vec![
+            AluEvent::new(0, 0, Opcode::XOR, 25, 10, 19),
+            AluEvent::new(0, 0, Opcode::OR, 27, 10, 19),
+            AluEvent::new(0, 0, Opcode::AND, 2, 10, 19),
+            AluEvent::new(0, 0, Opcode::NOR, 228, 10, 19)
+        ];
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<BabyBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -254,8 +266,9 @@ mod tests {
             AluEvent::new(0, 0, Opcode::XOR, 25, 10, 19),
             AluEvent::new(0, 0, Opcode::OR, 27, 10, 19),
             AluEvent::new(0, 0, Opcode::AND, 2, 10, 19),
+            AluEvent::new(0, 0, Opcode::NOR, 228, 10, 19)
         ]
-        .repeat(1000);
+            .repeat(1000);
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<BabyBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());

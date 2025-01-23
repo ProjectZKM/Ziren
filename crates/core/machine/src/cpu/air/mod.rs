@@ -60,11 +60,12 @@ where
         self.eval_memory_store::<AB>(builder, local);
 
         // ALU instructions.
-        builder.send_alu(
+        builder.send_alu_with_hi(
             local.instruction.opcode,
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
+            local.op_hi_val(),
             local.shard,
             local.nonce,
             is_alu_instruction,
@@ -199,7 +200,6 @@ impl CpuChip {
             jump_columns.jumpd_nonce,
             local.selectors.is_jumpd,
         );
-
     }
 
     // /// Constraints related to the AUIPC opcode.
@@ -297,8 +297,8 @@ impl CpuChip {
             local.is_sequential_instr,
             AB::Expr::ONE
                 - (is_branch_instruction
-                    + local.selectors.is_jump
-                    + local.selectors.is_jumpd),
+                + local.selectors.is_jump
+                + local.selectors.is_jumpd),
         );
 
         // Verify that the pc increments by 4 for all instructions except instruction after branch, jump
