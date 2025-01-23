@@ -431,11 +431,12 @@ where
         }
 
         // Receive the arguments.
-        builder.receive_alu( // todo: accept local.hi
+        builder.receive_alu_with_hi(
             opcode,
             local.a,
             local.b,
             local.c,
+            local.hi,
             local.shard,
             local.nonce,
             local.is_real,
