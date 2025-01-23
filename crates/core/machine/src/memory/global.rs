@@ -260,7 +260,7 @@ where
 
         // Make assertions for the initial comparison.
 
-        // We want to constrain that the `adrr` in the first row is larger than the previous
+        // We want to constrain that the `addr` in the first row is larger than the previous
         // initialized/finalized address, unless the previous address is zero. Since the previous
         // address is either zero or constrained by a different shard, we know it's an element of
         // the field, so we can get an element from the bit decomposition with no concern for
