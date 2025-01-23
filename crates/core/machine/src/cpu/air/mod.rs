@@ -98,6 +98,9 @@ where
         // Check that the shard and clk is updated correctly.
         self.eval_shard_clk(builder, local, next);
 
+        // Check that the pc is updated correctly.
+        self.eval_pc(builder, local, next, is_branch_instruction.clone());
+
         // Check public values constraints.
         self.eval_public_values(builder, local, next, public_values);
 
@@ -149,13 +152,6 @@ impl CpuChip {
 
         // Verify that the word form of local.pc is correct for JAL instructions.
         builder.when(is_jump_instruction.clone()).assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
-
-        // Verify that the word form of next.pc is correct for both jump instructions.
-        builder
-            .when_transition()
-            .when(next.is_real)
-            .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.next_pc.reduce::<AB>(), next.pc);
 
         // Verify that the word form of target.pc is correct for both jump instructions.
         builder
