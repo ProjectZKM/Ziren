@@ -144,7 +144,7 @@ impl CpuChip {
 
         let is_jump_instruction = local.selectors.is_jump + local.selectors.is_jumpd;
 
-        // Verify that the local.pc + 4 is saved in op_a for both jump instructions.
+        // Verify that the local.pc + 8 is saved in op_a for both jump instructions.
         // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
         // not have a return destination address (it is effectively a GOTO command).  In this case,
         // we shouldn't verify the return address.
@@ -162,6 +162,13 @@ impl CpuChip {
             .when(next.is_real)
             .when(is_jump_instruction.clone())
             .assert_eq(jump_columns.next_pc.reduce::<AB>(), next.pc);
+
+        // Verify that the word form of target.pc is correct for both jump instructions.
+        builder
+            .when_transition()
+            .when(next.is_real)
+            .when(is_jump_instruction.clone())
+            .assert_eq(jump_columns.target_pc.reduce::<AB>(), next.next_pc);
 
         // When the last row is real and it's a jump instruction, assert that local.next_pc <==>
         // jump_column.next_pc
