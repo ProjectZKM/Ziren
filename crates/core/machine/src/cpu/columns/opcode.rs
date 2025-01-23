@@ -98,7 +98,7 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
                 Opcode::SWR => self.is_swr = F::ONE,
                 Opcode::SC => self.is_sc = F::ONE,
                 Opcode::SDC1 => self.is_sdc1 = F::ONE,
-                _ => panic!("Invalid opcode: {}", instruction.opcode),
+                _ => unreachable!(),
             }
         } else if instruction.is_branch_instruction() {
             match instruction.opcode {
