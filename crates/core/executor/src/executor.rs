@@ -1225,12 +1225,12 @@ impl<'a> Executor<'a> {
             (instruction.op_b as u8).into(),
             instruction.op_c,
         );
-        let rs = self.rr(rs_reg, MemoryAccessPosition::B);
+        let rs_raw = self.rr(rs_reg, MemoryAccessPosition::B);
         // We needn't the memory access record here, because we will write to rt_reg,
         // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
         let rt = self.register(rt_reg);
 
-        let virt_raw = rs.wrapping_add(offset_ext);
+        let virt_raw = rs_raw.wrapping_add(offset_ext);
         let virt = virt_raw & 0xFFFF_FFFC;
 
         let mem = self.mr_cpu(virt, MemoryAccessPosition::Memory);
@@ -1274,7 +1274,8 @@ impl<'a> Executor<'a> {
             _ => unreachable!(),
         };
         self.rw(rt_reg, val, MemoryAccessPosition::A);
-        Ok((val, rs, offset_ext))
+
+        Ok((val, rs_raw, offset_ext))
     }
 
     fn execute_store(
