@@ -102,26 +102,26 @@ pub mod tests {
             Instruction::new(Opcode::LHU, 20, 0, 0x27654322, false, true),
             // LH
             Instruction::new(Opcode::LH, 19, 0, 0x27654320, false, true),
-            //Instruction::new(Opcode::LH, 18, 0, 0x27654322, false, true),
+            Instruction::new(Opcode::LH, 18, 0, 0x27654322, false, true),
             // SB
-            // Instruction::new(Opcode::ADD, 17, 0, 0x38276525, false, true),
-            // // Save the value 0x12348765 into address 0x43627530
-            // Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::SB, 17, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::LW, 16, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::SB, 17, 0, 0x43627531, false, true),
-            // Instruction::new(Opcode::LW, 15, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::SB, 17, 0, 0x43627532, false, true),
-            // Instruction::new(Opcode::LW, 14, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::SB, 17, 0, 0x43627533, false, true),
-            // Instruction::new(Opcode::LW, 13, 0, 0x43627530, false, true),
-            // // SH
-            // // Save the value 0x12348765 into address 0x43627530
-            // Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::SH, 17, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::LW, 12, 0, 0x43627530, false, true),
-            // Instruction::new(Opcode::SH, 17, 0, 0x43627532, false, true),
-            // Instruction::new(Opcode::LW, 11, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::ADD, 17, 0, 0x38276525, false, true),
+            // Save the value 0x12348765 into address 0x43627530
+            Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::SB, 17, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::LW, 16, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::SB, 17, 0, 0x43627531, false, true),
+            Instruction::new(Opcode::LW, 15, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::SB, 17, 0, 0x43627532, false, true),
+            Instruction::new(Opcode::LW, 14, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::SB, 17, 0, 0x43627533, false, true),
+            Instruction::new(Opcode::LW, 13, 0, 0x43627530, false, true),
+            // SH
+            // Save the value 0x12348765 into address 0x43627530
+            Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::SH, 17, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::LW, 12, 0, 0x43627530, false, true),
+            Instruction::new(Opcode::SH, 17, 0, 0x43627532, false, true),
+            Instruction::new(Opcode::LW, 11, 0, 0x43627530, false, true),
         ];
         Program::new(instructions, 0, 0)
     }

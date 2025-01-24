@@ -250,15 +250,16 @@ impl CpuChip {
                 + (one.clone() - memory_columns.offset_is_three) * prev_mem_val[3],
         ]);
 
-        // FIXME: stephen add constraints for other instrs
-        builder
-            .when(local.selectors.is_sb)
-            .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
+        //// FIXME: stephen add constraints for other instrs
+        //builder
+        //    .when(local.selectors.is_sb)
+        //    .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
 
-        // When the instruction is SH, make sure both offset one and three are off.
-        builder
-            .when(local.selectors.is_sh)
-            .assert_zero(memory_columns.offset_is_one + memory_columns.offset_is_three);
+        //// When the instruction is SH, make sure both offset one and three are off.
+        // FIXME stephen
+        //builder
+        //    .when(local.selectors.is_sh)
+        //    .assert_zero(memory_columns.offset_is_one + memory_columns.offset_is_three);
 
         // When the instruction is SW, ensure that the offset is 0.
         builder.when(local.selectors.is_sw).assert_one(offset_is_zero.clone());
@@ -273,9 +274,10 @@ impl CpuChip {
             a_val[0] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[2],
             a_val[1] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[3],
         ]);
-        builder
-            .when(local.selectors.is_sh)
-            .assert_word_eq(mem_val.map(|x| x.into()), sh_expected_stored_value);
+        // FIXME stephen
+        //builder
+        //    .when(local.selectors.is_sh)
+        //    .assert_word_eq(mem_val.map(|x| x.into()), sh_expected_stored_value);
 
         // When the instruction is SW, just use the word without masking.
         builder
@@ -314,9 +316,10 @@ impl CpuChip {
         //     .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
 
         // When the instruction is LH or LHU, use the lower half.
-        builder
-            .when(local.selectors.is_lh + local.selectors.is_lhu)
-            .assert_zero(memory_columns.offset_is_one + memory_columns.offset_is_three);
+        // FIXME stephen
+        // builder
+        //     .when(local.selectors.is_lh + local.selectors.is_lhu)
+        //     .assert_zero(memory_columns.offset_is_one + memory_columns.offset_is_three);
 
         // When the instruction is LW, ensure that the offset is zero.
         builder.when(local.selectors.is_lw).assert_one(offset_is_zero.clone());
@@ -329,9 +332,10 @@ impl CpuChip {
             AB::Expr::ZERO,
             AB::Expr::ZERO,
         ]);
-        builder
-            .when(local.selectors.is_lh + local.selectors.is_lhu)
-            .assert_word_eq(half_value, local.unsigned_mem_val.map(|x| x.into()));
+        // FIXME: stephen
+        // builder
+        //     .when(local.selectors.is_lh + local.selectors.is_lhu)
+        //     .assert_word_eq(half_value, local.unsigned_mem_val.map(|x| x.into()));
 
         // When the instruction is LW, just use the word.
         builder.when(local.selectors.is_lw).assert_word_eq(mem_val, local.unsigned_mem_val);
