@@ -148,8 +148,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
         if matches!(instruction.opcode, Opcode::LB | Opcode::LH) {
             let (unsigned_mem_val, most_sig_mem_value_byte, sign_value) = match instruction.opcode {
                 Opcode::LB => {
-                    // TODO: stephen, MIPS is using big-endian for memory values, we may use 3 -
-                    // addr_offset when we calculate add_offset.
+                    // TODO: stephen, MIPS is using big-endian for memory values, we may use 3 - addr_offset when we calculate add_offset.
                     let offset = 3 - addr_offset;
                     let most_sig_mem_value_byte = mem_value.to_le_bytes()[offset as usize];
                     let sign_value = 256;

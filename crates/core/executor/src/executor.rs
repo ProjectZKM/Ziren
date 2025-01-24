@@ -1245,7 +1245,8 @@ impl<'a> Executor<'a> {
         let val = match instruction.opcode {
             Opcode::LH => {
                 let mem_fc = |i: u32| -> u32 { sign_extend::<16>((mem >> (16 - i * 8)) & 0xffff) };
-                mem_fc(rs & 2)
+                let x = mem_fc(rs & 2);
+                x
             }
             Opcode::LWL => {
                 let out = |i: u32| -> u32 {
