@@ -67,17 +67,21 @@ pub struct CpuCols<T: Copy> {
     /// The branching column is equal to:
     ///
     /// > is_beq & a_eq_b ||
-    /// > is_bne & (a_lt_b | a_gt_b) ||
-    /// > (is_blt | is_bltu) & a_lt_b ||
-    /// > (is_bge | is_bgeu) & (a_eq_b | a_gt_b)
+    /// > is_bne & !a_eq_b ||
+    /// > is_bltz & a_lt_0 ||
+    /// > is_bgtz & a_gt_0 ||
+    /// > is_blez & (a_lt_0  | a_eq_0) ||
+    /// > is_bgez & (a_gt_0  | a_eq_0)
     pub branching: T,
 
     /// The not branching column is equal to:
     ///
     /// > is_beq & !a_eq_b ||
-    /// > is_bne & !(a_lt_b | a_gt_b) ||
-    /// > (is_blt | is_bltu) & !a_lt_b ||
-    /// > (is_bge | is_bgeu) & !(a_eq_b | a_gt_b)
+    /// > is_bne & a_eq_b ||
+    /// > is_bltz & (a_gt_0 | a_eq_0) ||
+    /// > is_bgtz & (a_lt_0 | a_eq_0) ||
+    /// > is_blez & a_gt_0 ||
+    /// > is_bgez & a_lt_0
     pub not_branching: T,
 
     /// Flag for load mem instructions where the value is negative and not writing to x0.

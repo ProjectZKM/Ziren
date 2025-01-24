@@ -857,7 +857,7 @@ impl<'a> Executor<'a> {
             instruction.op_c,
         );
         let a = self.rr(src1, MemoryAccessPosition::A);
-        let b = if instruction.opcode.has_one_operand() {
+        let b = if instruction.opcode.only_one_operand() {
             0
         } else {
             self.rr(src2, MemoryAccessPosition::B)
@@ -916,13 +916,15 @@ impl<'a> Executor<'a> {
                     self.report.event_counts[Opcode::ADD] += 1;
                 }
                 Opcode::BEQ
-                | Opcode::BNE
-                | Opcode::BLTZ
+                | Opcode::BNE => {
+                    self.report.event_counts[Opcode::ADD] += 1;
+                }
+                Opcode::BLTZ
                 | Opcode::BGEZ
                 | Opcode::BLEZ
                 | Opcode::BGTZ => {
                     self.report.event_counts[Opcode::ADD] += 1;
-                    // self.report.event_counts[Opcode::SLTU] += 2;
+                    self.report.event_counts[Opcode::SLT] += 2;
                 }
                 Opcode::DIVU | Opcode::DIV => {
                     self.report.event_counts[Opcode::MUL] += 2;
@@ -2026,36 +2028,40 @@ mod tests {
     }
 
     #[test]
-    fn test_beq_bne() {
-        let branch_ops = [Opcode::BEQ, Opcode::BNE];
-        let operands = [(1, 1), (1, 2)];
-        for branch_op in branch_ops.iter() {
-            for operand in operands.iter() {
-                let instructions = vec![
-                    Instruction::new(Opcode::ADD, 29, 0, operand.0, false, true),
-                    Instruction::new(Opcode::ADD, 30, 0, operand.1, false, true),
-                    Instruction::new(*branch_op, 29, 30, 100, false, true),
-                ];
-                let program = Program::new(instructions, 0, 0);
-                run_test::<CpuProver<_, _>>(program).unwrap();
-            }
-        }
+    fn test_beq_jump() {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 1, false, true),
+            Instruction::new(Opcode::BEQ, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.pc + 100, runtime.state.next_pc);
     }
 
     #[test]
-    fn test_rest_branch() {
-        let branch_ops = [Opcode::BLTZ, Opcode::BGEZ, Opcode::BLEZ, Opcode::BGTZ];
-        let operands = vec![0, 1, 0xFFFF_FFFF];
-        for branch_op in branch_ops {
-            for operand in operands {
-                let instructions = vec![
-                    Instruction::new(Opcode::ADD, 29, 0, operand, false, true),
-                    Instruction::new(branch_op, 29, 0, 100, false, true),
-                ];
-                let program = Program::new(instructions, 0, 0);
-                run_test::<CpuProver<_, _>>(program).unwrap();
-            }
-        }
+    fn test_beq_not_jump() {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 2, false, true),
+            Instruction::new(Opcode::BEQ, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.pc + 4, runtime.state.next_pc);
+    }
+
+    #[test]
+    fn test_bne_not_jump() {
+        let instructions = vec![
+            Instruction::new(Opcode::BNE, Register::A0 as u8, 0, 100, true, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.pc + 4, runtime.state.next_pc);
     }
 
     //

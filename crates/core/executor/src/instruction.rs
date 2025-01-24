@@ -298,7 +298,7 @@ impl Instruction {
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
-                        false,
+                        true,
                         true,
                     ))
                 } else if rt == 0 {
@@ -308,7 +308,7 @@ impl Instruction {
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
-                        false,
+                        true,
                         true,
                     ))
                 } else if rt == 0x11 && rs == 0 {
@@ -334,7 +334,7 @@ impl Instruction {
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
-                false,
+                true,
                 true,
             )), // BLEZ
             // (0x07, _) => Ok(Operation::Branch(BranchCond::GT, rs, 0u8, offset)),         // BGTZ

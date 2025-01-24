@@ -36,7 +36,7 @@ impl CpuChip {
     /// 1. It verifies that the next pc is correct based on the branching column.  That column is a
     ///    boolean that indicates whether the branch condition is true.
     /// 2. It verifies the correct value of branching based on the helper bool columns (a_eq_b,
-    ///    a_gt_b, a_lt_b).
+    ///    a_eq_0, a_gt_0, a_lt_0).
     /// 3. It verifier the correct values of the helper bool columns based on op_a and op_b.
     pub(crate) fn eval_branch_ops<AB: ZKMAirBuilder>(
         &self,
@@ -195,26 +195,31 @@ impl CpuChip {
         //  To prevent this ALU send to be arbitrarily large when is_branch_instruction is false.
         builder.when_not(is_branch_instruction.clone()).assert_zero(local.branching);
 
-        // // Calculate a_lt_0 <==> a < 0 (using appropriate signedness).
-        // builder.send_alu(
-        //     Opcode::SLTU.as_field::<AB::F>(),
-        //     Word::extend_var::<AB>(branch_cols.a_lt_0),
-        //     local.op_a_val(),
-        //     Word::zero::<AB>(),
-        //     local.shard,
-        //     branch_cols.a_lt_0_nonce,
-        //     is_branch_instruction.clone(),
-        // );
+        let check_a = local.selectors.is_bltz
+            + local.selectors.is_bgez
+            + local.selectors.is_blez
+            + local.selectors.is_bgtz;
 
-        // // Calculate a_gt_0 <==> a > 0 (using appropriate signedness).
-        // builder.send_alu(
-        //      Opcode::SLTU.as_field::<AB::F>(),
-        //     Word::extend_var::<AB>(branch_cols.a_gt_0),
-        //     local.op_b_val(),
-        //     Word::zero::<AB>(),
-        //     local.shard,
-        //     branch_cols.a_gt_0_nonce,
-        //     is_branch_instruction.clone(),
-        // );
+        // Calculate a_lt_0 <==> a < 0 (using appropriate signedness).
+        builder.send_alu(
+            Opcode::SLT.as_field::<AB::F>(),
+            Word::extend_var::<AB>(branch_cols.a_lt_0),
+            local.op_a_val(),
+            Word::zero::<AB>(),
+            local.shard,
+            branch_cols.a_lt_0_nonce,
+            check_a.clone(),
+        );
+
+        // Calculate a_gt_0 <==> a > 0 (using appropriate signedness).
+        builder.send_alu(
+             Opcode::SLT.as_field::<AB::F>(),
+            Word::extend_var::<AB>(branch_cols.a_gt_0),
+            Word::zero::<AB>(),
+            local.op_a_val(),
+            local.shard,
+            branch_cols.a_gt_0_nonce,
+            check_a.clone(),
+        );
     }
 }

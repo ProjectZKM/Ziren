@@ -179,7 +179,14 @@ impl Opcode {
         }
     }
 
-    pub fn has_one_operand(&self) -> bool {
+    pub fn only_one_operand(&self) -> bool {
+        match self {
+            Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => true,
+            _ => false,
+        }
+    }
+
+    pub fn signed_compare(&self) -> bool {
         match self {
             Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => true,
             _ => false,

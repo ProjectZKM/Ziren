@@ -413,10 +413,6 @@ impl CpuChip {
             let a_eq_0 = (event.a as i32) == 0;
             let a_lt_0 = (event.a as i32) < 0;
             let a_gt_0 = (event.a as i32) > 0;
-            println!("a_eq_b: {:?}", a_eq_b);
-            println!("a_eq_0: {:?}", a_eq_0);
-            println!("a_lt_0: {:?}", a_lt_0);
-            println!("a_gt_0: {:?}", a_gt_0);
 
             branch_columns.a_lt_0_nonce = F::from_canonical_u32(
                 nonce_lookup.get(event.branch_lt_lookup_id.0 as usize).copied().unwrap_or_default(),
@@ -440,15 +436,12 @@ impl CpuChip {
                 Opcode::BGEZ => a_eq_0 || a_gt_0,
                 _ => panic!("Invalid opcode: {}", instruction.opcode)
             };
-            println!("branching: {:?}", branching);
 
             let target_pc = event.next_pc.wrapping_add(event.c);
             branch_columns.next_pc = Word::from(event.next_pc);
             branch_columns.target_pc = Word::from(target_pc);
             branch_columns.next_pc_range_checker.populate(event.next_pc);
             branch_columns.target_pc_range_checker.populate(target_pc);
-            println!("next_pc: {:?}", event.next_pc);
-            println!("target_pc: {:?}", target_pc);
 
             if branching {
                 cols.branching = F::ONE;
