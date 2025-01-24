@@ -120,11 +120,18 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
         Opcode::LB
             | Opcode::LH
             | Opcode::LW
+            | Opcode::LWR
+            | Opcode::LWL
+            | Opcode::LL
             | Opcode::LBU
             | Opcode::LHU
             | Opcode::SB
             | Opcode::SH
             | Opcode::SW
+            | Opcode::SWR
+            | Opcode::SWL
+            | Opcode::SC
+            | Opcode::SDC1
     ) {
         let memory_addr = event.b.wrapping_add(event.c);
         // Add event to ALU check to check that addr == b + c

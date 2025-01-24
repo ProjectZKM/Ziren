@@ -313,6 +313,8 @@ impl CpuChip {
         ) {
             match instruction.opcode {
                 Opcode::LB | Opcode::LBU => {
+                    let x = mem_value.to_be_bytes();
+                    let xy = x[addr_offset as usize];
                     cols.unsigned_mem_val =
                         (mem_value.to_le_bytes()[addr_offset as usize] as u32).into();
                 }
