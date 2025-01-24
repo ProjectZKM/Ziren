@@ -41,8 +41,7 @@ impl<F: PrimeField> InstructionCols<F> {
         self.op_b = instruction.op_b.into();
         self.op_c = instruction.op_c.into();
 
-        //self.op_a_0 = F::from_bool(instruction.op_a == Register::X0 as u8);
-        self.op_a_0 = F::ZERO; // FIXME stephen
+        self.op_a_0 = F::from_bool(instruction.op_a == Register::ZERO as u8);
     }
 }
 
