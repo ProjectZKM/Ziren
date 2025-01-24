@@ -305,7 +305,7 @@ impl CpuChip {
             .when_transition()
             .when(local.is_real)
             .when(local.is_sequential_instr)
-            .assert_eq(local.next_next_pc + AB::Expr::from_canonical_u8(4), local.next_pc);
+            .assert_eq(local.next_pc + AB::Expr::from_canonical_u8(4), local.next_next_pc);
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> next.pc, local.next_next_pc <==> next.next_pc
