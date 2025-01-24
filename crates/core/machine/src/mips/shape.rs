@@ -120,7 +120,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         record.shape.clone_from(&record.program.preprocessed_shape);
 
         // If cpu is included, try to fix the shape as a core.
-        println!("cpu!!!! {}", record.cpu_events.len());
         if record.contains_cpu() {
             // If cpu is included, try to fix the shape as a core.
 
@@ -169,13 +168,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             return Ok(());
         }
 
-        println!("precompile_allowed_log_heights: {:?}", self.precompile_allowed_log_heights.len());
         // Try to fix the shape as a precompile record.
         for (air, (mem_events_per_row, allowed_log_heights)) in
             self.precompile_allowed_log_heights.iter()
         {
             if let Some((height, mem_events)) = air.get_precompile_heights(record) {
-                println!("mem_events: {:?}", mem_events);
                 for allowed_log_height in allowed_log_heights {
                     if height <= (1 << allowed_log_height) {
                         for shape in self.get_precompile_shapes(
@@ -203,7 +200,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 return Err(CoreShapeError::ShapeError(record.stats()));
             }
         }
-        println!("record: {:?}", record);
         Err(CoreShapeError::PrecompileNotIncluded(record.stats()))
     }
 
