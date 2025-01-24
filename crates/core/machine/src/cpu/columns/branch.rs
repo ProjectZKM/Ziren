@@ -21,17 +21,20 @@ pub struct BranchCols<T> {
     /// Whether a equals b.
     pub a_eq_b: T,
 
-    /// Whether a is greater than b.
-    pub a_gt_b: T,
+    /// Whether a equals 0.
+    pub a_eq_0: T,
 
-    /// Whether a is less than b.
-    pub a_lt_b: T,
+    /// Whether a is greater than 0.
+    pub a_gt_0: T,
 
-    /// The nonce of the operation to compute `a_lt_b`.
-    pub a_lt_b_nonce: T,
+    /// Whether a is less than 0.
+    pub a_lt_0: T,
 
-    /// The nonce of the operation to compute `a_gt_b`.
-    pub a_gt_b_nonce: T,
+    /// The nonce of the operation to compute `a_lt_0`.
+    pub a_lt_0_nonce: T,
+
+    /// The nonce of the operation to compute `a_gt_0`.
+    pub a_gt_0_nonce: T,
 
     /// The nonce of the operation to compute `target_pc`.
     pub target_pc_nonce: T,

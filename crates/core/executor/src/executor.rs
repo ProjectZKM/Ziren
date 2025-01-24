@@ -856,8 +856,12 @@ impl<'a> Executor<'a> {
             (instruction.op_b as u8).into(),
             instruction.op_c,
         );
-        let b = self.rr(src2, MemoryAccessPosition::B);
         let a = self.rr(src1, MemoryAccessPosition::A);
+        let b = if instruction.opcode.only_one_operand() {
+            0
+        } else {
+            self.rr(src2, MemoryAccessPosition::B)
+        };
         (a, b, target)
     }
 
@@ -912,13 +916,15 @@ impl<'a> Executor<'a> {
                     self.report.event_counts[Opcode::ADD] += 1;
                 }
                 Opcode::BEQ
-                | Opcode::BNE
-                | Opcode::BLTZ
+                | Opcode::BNE => {
+                    self.report.event_counts[Opcode::ADD] += 1;
+                }
+                Opcode::BLTZ
                 | Opcode::BGEZ
                 | Opcode::BLEZ
                 | Opcode::BGTZ => {
                     self.report.event_counts[Opcode::ADD] += 1;
-                    self.report.event_counts[Opcode::SLTU] += 2;
+                    self.report.event_counts[Opcode::SLT] += 2;
                 }
                 Opcode::DIVU | Opcode::DIV => {
                     self.report.event_counts[Opcode::MUL] += 2;
@@ -1362,10 +1368,10 @@ impl<'a> Executor<'a> {
         let should_jump = match instruction.opcode {
             Opcode::BEQ => src1 == src2,
             Opcode::BNE => src1 != src2,
-            Opcode::BGEZ => (src1 as i32) >= (src2 as i32),
-            Opcode::BLEZ => (src1 as i32) <= (src2 as i32),
-            Opcode::BGTZ => (src1 as i32) > (src2 as i32),
-            Opcode::BLTZ => (src1 as i32) < (src2 as i32),
+            Opcode::BGEZ => (src1 as i32) >= 0,
+            Opcode::BLEZ => (src1 as i32) <= 0,
+            Opcode::BGTZ => (src1 as i32) > 0,
+            Opcode::BLTZ => (src1 as i32) < 0,
             _ => {
                 unreachable!()
             }
@@ -2021,6 +2027,44 @@ mod tests {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
+
+    #[test]
+    fn test_beq_jump() {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 1, false, true),
+            Instruction::new(Opcode::BEQ, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.pc + 100, runtime.state.next_pc);
+    }
+
+    #[test]
+    fn test_beq_not_jump() {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 1, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 2, false, true),
+            Instruction::new(Opcode::BEQ, 29, 30, 100, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.pc + 4, runtime.state.next_pc);
+    }
+
+    #[test]
+    fn test_bne_not_jump() {
+        let instructions = vec![
+            Instruction::new(Opcode::BNE, Register::A0 as u8, 0, 100, true, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.pc + 4, runtime.state.next_pc);
+    }
+
     //
     #[test]
     fn test_add() {

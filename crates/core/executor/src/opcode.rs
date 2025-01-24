@@ -178,6 +178,20 @@ impl Opcode {
             _ => false,
         }
     }
+
+    pub fn only_one_operand(&self) -> bool {
+        match self {
+            Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => true,
+            _ => false,
+        }
+    }
+
+    pub fn signed_compare(&self) -> bool {
+        match self {
+            Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => true,
+            _ => false,
+        }
+    }
 }
 
 impl Display for Opcode {

@@ -101,7 +101,6 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
             .for_each(|(i, rows)| {
                 rows.chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS).enumerate().for_each(|(j, row)| {
                     let idx = (i * chunk_size + j) * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW;
-
                     let cols: &mut MemoryLocalCols<F> = row.borrow_mut();
                     for k in 0..NUM_LOCAL_MEMORY_ENTRIES_PER_ROW {
                         let cols = &mut cols.memory_local_entries[k];

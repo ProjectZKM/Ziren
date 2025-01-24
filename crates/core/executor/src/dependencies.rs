@@ -192,68 +192,56 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
 
     if instruction.is_branch_instruction() {
         let a_eq_b = event.a == event.b;
-        //FIXME: handle signness
-        let use_signed_comparison = matches!(instruction.opcode, Opcode::BLTZ | Opcode::BGEZ);
-        let a_lt_b = if use_signed_comparison {
-            (event.a as i32) < (event.b as i32)
-        } else {
-            event.a < event.b
-        };
-        let a_gt_b = if use_signed_comparison {
-            (event.a as i32) > (event.b as i32)
-        } else {
-            event.a > event.b
-        };
+        let a_eq_0 = (event.a as i32) == 0;
+        let a_lt_0 = (event.a as i32) < 0;
+        let a_gt_0 = (event.a as i32) > 0;
 
-        let alu_op_code = if use_signed_comparison {
-            Opcode::SLT
-        } else {
-            Opcode::SLTU
-        };
-        // Add the ALU events for the comparisons
-        let lt_comp_event = AluEvent {
-            lookup_id: event.branch_lt_lookup_id,
-            shard,
-            clk: event.clk,
-            opcode: alu_op_code,
-            hi: 0,
-            a: a_lt_b as u32,
-            b: event.a,
-            c: event.b,
-            sub_lookups: executor.record.create_lookup_ids(),
-        };
-        let gt_comp_event = AluEvent {
-            lookup_id: event.branch_gt_lookup_id,
-            shard,
-            clk: event.clk,
-            opcode: alu_op_code,
-            hi: 0,
-            a: a_gt_b as u32,
-            b: event.b,
-            c: event.a,
-            sub_lookups: executor.record.create_lookup_ids(),
-        };
-        executor.record.lt_events.push(lt_comp_event);
-        executor.record.lt_events.push(gt_comp_event);
+        if instruction.opcode.signed_compare() {
+            // Add the ALU events for the comparisons
+            let lt_comp_event = AluEvent {
+                lookup_id: event.branch_lt_lookup_id,
+                shard,
+                clk: event.clk,
+                opcode: Opcode::SLT,
+                hi: 0,
+                a: a_lt_0 as u32,
+                b: event.a,
+                c: 0,
+                sub_lookups: executor.record.create_lookup_ids(),
+            };
+            let gt_comp_event = AluEvent {
+                lookup_id: event.branch_gt_lookup_id,
+                shard,
+                clk: event.clk,
+                opcode: Opcode::SLT,
+                hi: 0,
+                a: a_gt_0 as u32,
+                b: 0,
+                c: event.a,
+                sub_lookups: executor.record.create_lookup_ids(),
+            };
+            executor.record.lt_events.push(lt_comp_event);
+            executor.record.lt_events.push(gt_comp_event);
+        }
+
         let branching = match instruction.opcode {
             Opcode::BEQ => a_eq_b,
             Opcode::BNE => !a_eq_b,
-            Opcode::BLTZ => a_lt_b,
-            Opcode::BLEZ => a_lt_b || a_eq_b,
-            Opcode::BGTZ => a_gt_b,
-            Opcode::BGEZ => a_eq_b || a_gt_b,
+            Opcode::BLTZ => a_lt_0,
+            Opcode::BLEZ => a_lt_0 || a_eq_0,
+            Opcode::BGTZ => a_gt_0,
+            Opcode::BGEZ => a_eq_0 || a_gt_0,
             _ => unreachable!(),
         };
         if branching {
-            let next_pc = event.pc.wrapping_add(event.c);
             let add_event = AluEvent {
                 lookup_id: event.branch_add_lookup_id,
                 shard,
                 clk: event.clk,
                 opcode: Opcode::ADD,
                 hi: 0,
-                a: next_pc,
-                b: event.pc,
+                a: event.next_next_pc,
+                b: event.next_pc,
                 c: event.c,
                 sub_lookups: executor.record.create_lookup_ids(),
             };

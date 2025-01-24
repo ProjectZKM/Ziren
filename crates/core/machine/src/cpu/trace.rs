@@ -416,40 +416,30 @@ impl CpuChip {
             let branch_columns = cols.opcode_specific_columns.branch_mut();
 
             let a_eq_b = event.a == event.b;
+            let a_eq_0 = (event.a as i32) == 0;
+            let a_lt_0 = (event.a as i32) < 0;
+            let a_gt_0 = (event.a as i32) > 0;
 
-            // FIXME: MIPS uses sign extenion
-            let use_signed_comparison = matches!(instruction.opcode, Opcode::BLTZ | Opcode::BGEZ);
-
-            let a_lt_b = if use_signed_comparison {
-                (event.a as i32) < (event.b as i32)
-            } else {
-                event.a < event.b
-            };
-            let a_gt_b = if use_signed_comparison {
-                (event.a as i32) > (event.b as i32)
-            } else {
-                event.a > event.b
-            };
-
-            branch_columns.a_lt_b_nonce = F::from_canonical_u32(
+            branch_columns.a_lt_0_nonce = F::from_canonical_u32(
                 nonce_lookup.get(event.branch_lt_lookup_id.0 as usize).copied().unwrap_or_default(),
             );
 
-            branch_columns.a_gt_b_nonce = F::from_canonical_u32(
+            branch_columns.a_gt_0_nonce = F::from_canonical_u32(
                 nonce_lookup.get(event.branch_gt_lookup_id.0 as usize).copied().unwrap_or_default(),
             );
 
             branch_columns.a_eq_b = F::from_bool(a_eq_b);
-            branch_columns.a_lt_b = F::from_bool(a_lt_b);
-            branch_columns.a_gt_b = F::from_bool(a_gt_b);
+            branch_columns.a_eq_0 = F::from_bool(a_eq_0);
+            branch_columns.a_lt_0 = F::from_bool(a_lt_0);
+            branch_columns.a_gt_0 = F::from_bool(a_gt_0);
 
             let branching = match instruction.opcode {
                 Opcode::BEQ => a_eq_b,
                 Opcode::BNE => !a_eq_b,
-                Opcode::BLTZ => a_lt_b,
-                Opcode::BLEZ => a_lt_b || a_eq_b,
-                Opcode::BGTZ => a_gt_b,
-                Opcode::BGEZ => a_eq_b || a_gt_b,
+                Opcode::BLTZ => a_lt_0,
+                Opcode::BLEZ => a_lt_0 || a_eq_0,
+                Opcode::BGTZ => a_gt_0,
+                Opcode::BGEZ => a_eq_0 || a_gt_0,
                 _ => panic!("Invalid opcode: {}", instruction.opcode)
             };
 
