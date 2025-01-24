@@ -302,7 +302,6 @@ impl CpuChip {
         // instructions. The other case is handled by eval_jump, eval_branch and eval_syscall
         // (for halt).
         builder
-            .when_transition()
             .when(local.is_real)
             .when(local.is_sequential_instr)
             .assert_eq(local.next_pc + AB::Expr::from_canonical_u8(4), local.next_next_pc);
@@ -310,10 +309,12 @@ impl CpuChip {
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> next.pc, local.next_next_pc <==> next.next_pc
         builder
+            .when_transition()
             .when(next.is_real)
             .assert_eq(local.next_pc, next.pc);
 
         builder
+            .when_transition()
             .when(next.is_real)
             .assert_eq(local.next_next_pc, next.next_pc);
     }
