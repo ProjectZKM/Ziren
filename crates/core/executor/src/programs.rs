@@ -97,13 +97,13 @@ pub mod tests {
             // LB
             Instruction::new(Opcode::LB, 23, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LB, 22, 0, 0x27654321, false, true),
-            // // LHU
-            // Instruction::new(Opcode::LHU, 21, 0, 0x27654320, false, true),
-            // Instruction::new(Opcode::LHU, 20, 0, 0x27654322, false, true),
-            // // LU
-            // Instruction::new(Opcode::LH, 19, 0, 0x27654320, false, true),
-            // Instruction::new(Opcode::LH, 18, 0, 0x27654322, false, true),
-            // // SB
+            // LHU
+            Instruction::new(Opcode::LHU, 21, 0, 0x27654320, false, true),
+            Instruction::new(Opcode::LHU, 20, 0, 0x27654322, false, true),
+            // LH
+            Instruction::new(Opcode::LH, 19, 0, 0x27654320, false, true),
+            //Instruction::new(Opcode::LH, 18, 0, 0x27654322, false, true),
+            // SB
             // Instruction::new(Opcode::ADD, 17, 0, 0x38276525, false, true),
             // // Save the value 0x12348765 into address 0x43627530
             // Instruction::new(Opcode::SW, 29, 0, 0x43627530, false, true),

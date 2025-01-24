@@ -1,9 +1,4 @@
-use crate::{
-    events::AluEvent,
-    utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
-    Executor,
-    Opcode,
-};
+use crate::{events::AluEvent, utils::{get_msb, get_quotient_and_remainder, is_signed_operation}, Executor, Opcode, WORD_SIZE};
 
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
@@ -147,13 +142,16 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             sub_lookups: executor.record.create_lookup_ids(),
         };
         executor.record.add_events.push(add_event);
-        let addr_offset = (memory_addr % 4_u32) as u8;
+        let addr_offset = (memory_addr % WORD_SIZE as u32) as u8;
         let mem_value = event.memory_record.unwrap().value();
 
         if matches!(instruction.opcode, Opcode::LB | Opcode::LH) {
             let (unsigned_mem_val, most_sig_mem_value_byte, sign_value) = match instruction.opcode {
                 Opcode::LB => {
-                    let most_sig_mem_value_byte = mem_value.to_le_bytes()[addr_offset as usize];
+                    // TODO: stephen, MIPS is using big-endian for memory values, we may use 3 -
+                    // addr_offset when we calculate add_offset.
+                    let offset = 3 - addr_offset;
+                    let most_sig_mem_value_byte = mem_value.to_le_bytes()[offset as usize];
                     let sign_value = 256;
                     (
                         most_sig_mem_value_byte as u32,
@@ -163,7 +161,8 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
                 }
                 Opcode::LH => {
                     let sign_value = 65536;
-                    let unsigned_mem_val = match (addr_offset >> 1) % 2 {
+                    let offset = 1 - (addr_offset >> 1);
+                    let unsigned_mem_val = match offset % 2 {
                         0 => mem_value & 0x0000FFFF,
                         1 => (mem_value & 0xFFFF0000) >> 16,
                         _ => unreachable!(),
