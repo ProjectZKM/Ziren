@@ -138,6 +138,7 @@ impl CpuChip {
         // Populate basic fields.
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.next_next_pc = F::from_canonical_u32(event.next_next_pc);
         cols.instruction.populate(instruction);
         cols.selectors.populate(instruction);
         if let Some(hi) = event.s1 {

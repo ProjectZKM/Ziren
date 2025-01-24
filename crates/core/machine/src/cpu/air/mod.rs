@@ -156,9 +156,9 @@ impl CpuChip {
         // Verify that the word form of target.pc is correct for both jump instructions.
         builder
             .when_transition()
-            .when(next.is_real)
+            .when(local.is_real)
             .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.target_pc.reduce::<AB>(), next.next_pc);
+            .assert_eq(jump_columns.target_pc.reduce::<AB>(), local.next_next_pc);
 
         // When the last row is real and it's a jump instruction, assert that local.next_pc <==>
         // jump_column.next_pc
@@ -303,15 +303,19 @@ impl CpuChip {
         // (for halt).
         builder
             .when_transition()
-            .when(next.is_real)
+            .when(local.is_real)
             .when(local.is_sequential_instr)
-            .assert_eq(local.next_pc + AB::Expr::from_canonical_u8(4), next.next_pc);
+            .assert_eq(local.next_next_pc + AB::Expr::from_canonical_u8(4), local.next_pc);
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
-        // <==> next.pc
+        // <==> next.pc, local.next_next_pc <==> next.next_pc
         builder
             .when(next.is_real)
             .assert_eq(local.next_pc, next.pc);
+
+        builder
+            .when(next.is_real)
+            .assert_eq(local.next_next_pc, next.next_pc);
     }
 
     /// Constraints related to the public values.
