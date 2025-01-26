@@ -809,6 +809,33 @@ pub mod tests {
     }
 
     #[test]
+    fn test_cloclz_prove() {
+        setup_logger();
+        let clz_clo_ops = [Opcode::CLZ, Opcode::CLO];
+        let operands = [
+            0u32,
+            0x0a0b0c0d,
+            0x1000,
+            0xff7fffff,
+            0x7fffffff,
+            0x80000000,
+            0xffffffff,
+        ];
+
+        for clo_clz_op in clz_clo_ops.iter() {
+            for op in operands.iter() {
+                let instructions = vec![
+                    Instruction::new(Opcode::ADD, 29, 0, *op, false, true),
+                    Instruction::new(*clo_clz_op, 30, 29, 0, false, true),
+                ];
+                let program = Program::new(instructions, 0, 0);
+                run_test::<CpuProver<_, _>>(program).unwrap();
+            }
+        }
+    }
+
+
+    #[test]
     fn test_fibonacci_prove_simple() {
         setup_logger();
         let program = fibonacci_program();

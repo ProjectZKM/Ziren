@@ -189,6 +189,10 @@ impl CostEstimator for ExecutionReport {
         total_area += (lt_events as u64) * costs[&MipsAirDiscriminants::Lt];
         total_chips += 1;
 
+        let cloclz_events = self.opcode_counts[Opcode::CLZ] + self.opcode_counts[Opcode::CLO];
+        total_area += (cloclz_events as u64) * costs[&MipsAirDiscriminants::CloClz];
+        total_chips += 1;
+
         let memory_global_initialize_events = self.touched_memory_addresses;
         total_area += (memory_global_initialize_events as u64)
             * costs[&MipsAirDiscriminants::MemoryGlobalInit];

@@ -256,6 +256,8 @@ where
                         .assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
                     builder.when(local.is_clz).assert_eq(*a, *b);
                 });
+
+            builder.slice_range_check_u8(&local.bb.0, local.is_real);
         }
 
         // ensure result < 33

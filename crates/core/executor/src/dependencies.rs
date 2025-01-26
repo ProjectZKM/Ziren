@@ -1,3 +1,4 @@
+use log::Level::Debug;
 use crate::{events::AluEvent, utils::{get_msb, get_quotient_and_remainder, is_signed_operation}, Executor, Opcode, WORD_SIZE};
 
 /// Emits the dependencies for division and remainder operations.
@@ -101,6 +102,30 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
 
     if event.c != 0 {
         executor.record.lt_events.push(lt_event);
+    }
+}
+
+/// Emits the dependencies for clo and clz operations.
+#[allow(clippy::too_many_lines)]
+pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
+    let shard = executor.shard();
+
+    let b = if event.opcode == Opcode::CLZ { event.b } else { !event.b };
+    if b != 0 {
+        let srl_event = AluEvent {
+            lookup_id: event.sub_lookups[0],
+            shard,
+            opcode: Opcode::SRL,
+            hi: 0,
+            a: b >> (31 - event.a),
+            b,
+            c: 31 - event.a,
+            clk: event.clk,
+            sub_lookups: executor.record.create_lookup_ids(),
+        };
+
+
+        executor.record.shift_right_events.push(srl_event);
     }
 }
 

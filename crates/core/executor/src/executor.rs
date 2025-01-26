@@ -12,7 +12,7 @@ use zkm2_stark::ZKMCoreOpts;
 
 use crate::{
     context::ZKMContext,
-    dependencies::{emit_cpu_dependencies, emit_divrem_dependencies},
+    dependencies::{emit_cpu_dependencies, emit_divrem_dependencies, emit_cloclz_dependencies},
     events::{
         AluEvent, CpuEvent, LookupId, MemoryAccessPosition, MemoryInitializeFinalizeEvent,
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord, SyscallEvent,
@@ -767,6 +767,7 @@ impl<'a> Executor<'a> {
             }
             Opcode::CLZ | Opcode::CLO => {
                 self.record.cloclz_events.push(event);
+                emit_cloclz_dependencies(self, event);
             }
             _ => {}
         }
