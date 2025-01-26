@@ -646,7 +646,12 @@ impl<'a> Executor<'a> {
     /// Write to a register A or AH
     pub fn rw(&mut self, register: Register, value: u32, position: MemoryAccessPosition) {
         // The only time we are writing to a register is when it is in operand A or AH.
-        debug_assert!(vec![MemoryAccessPosition::A, MemoryAccessPosition::S1, MemoryAccessPosition::S2].contains(&position));
+        debug_assert!(vec![
+            MemoryAccessPosition::A,
+            MemoryAccessPosition::S1,
+            MemoryAccessPosition::S2
+        ]
+        .contains(&position));
         // Register 0 should always be 0
         if register == Register::ZERO {
             self.mw_cpu(register as u32, 0, position);
@@ -759,6 +764,9 @@ impl<'a> Executor<'a> {
             Opcode::DIV | Opcode::DIVU => {
                 self.record.divrem_events.push(event);
                 emit_divrem_dependencies(self, event);
+            }
+            Opcode::CLZ | Opcode::CLO => {
+                self.record.cloclz_events.push(event);
             }
             _ => {}
         }
@@ -909,27 +917,32 @@ impl<'a> Executor<'a> {
             self.report.event_counts[instruction.opcode] += 1;
             match instruction.opcode {
                 // todo: check all
-                Opcode::LB | Opcode::LH | Opcode::LW | Opcode::LBU | Opcode::LHU | Opcode::LWL | Opcode::LWR => {
+                Opcode::LB
+                | Opcode::LH
+                | Opcode::LW
+                | Opcode::LBU
+                | Opcode::LHU
+                | Opcode::LWL
+                | Opcode::LWR => {
                     self.report.event_counts[Opcode::ADD] += 2;
                 }
                 Opcode::JumpDirect => {
                     self.report.event_counts[Opcode::ADD] += 1;
                 }
-                Opcode::BEQ
-                | Opcode::BNE => {
+                Opcode::BEQ | Opcode::BNE => {
                     self.report.event_counts[Opcode::ADD] += 1;
                 }
-                Opcode::BLTZ
-                | Opcode::BGEZ
-                | Opcode::BLEZ
-                | Opcode::BGTZ => {
+                Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ => {
                     self.report.event_counts[Opcode::ADD] += 1;
                     self.report.event_counts[Opcode::SLT] += 2;
                 }
                 Opcode::DIVU | Opcode::DIV => {
-                    self.report.event_counts[Opcode::MUL] += 2;
+                    self.report.event_counts[Opcode::MUL] += 1;
                     self.report.event_counts[Opcode::ADD] += 2;
                     self.report.event_counts[Opcode::SLTU] += 1;
+                }
+                Opcode::CLZ | Opcode::CLO => {
+                    self.report.event_counts[Opcode::SRL] += 1;
                 }
                 _ => {}
             };
@@ -1015,9 +1028,6 @@ impl<'a> Executor<'a> {
             Opcode::MEQ | Opcode::MNE => {
                 (a, b, c) = self.execute_condmov(instruction);
             }
-            Opcode::CLO | Opcode::CLZ => {
-                (a, b, c) = self.execute_count(instruction);
-            }
 
             // Arithmetic instructions
             Opcode::ADD
@@ -1035,7 +1045,9 @@ impl<'a> Executor<'a> {
             | Opcode::AND
             | Opcode::OR
             | Opcode::XOR
-            | Opcode::NOR => {
+            | Opcode::NOR
+            | Opcode::CLZ
+            | Opcode::CLO => {
                 (s1, a, b, c) = self.execute_alu(instruction, lookup_id);
             }
 
@@ -1052,12 +1064,23 @@ impl<'a> Executor<'a> {
             }
 
             // Store instructions.
-            Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SDC1 | Opcode::SC => {
+            Opcode::SB
+            | Opcode::SH
+            | Opcode::SW
+            | Opcode::SWL
+            | Opcode::SWR
+            | Opcode::SDC1
+            | Opcode::SC => {
                 (a, b, c) = self.execute_store(instruction)?;
             }
 
             // Branch instructions.
-            Opcode::BEQ | Opcode::BNE | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ => {
+            Opcode::BEQ
+            | Opcode::BNE
+            | Opcode::BGEZ
+            | Opcode::BLEZ
+            | Opcode::BGTZ
+            | Opcode::BLTZ => {
                 (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
             }
 
@@ -1073,13 +1096,14 @@ impl<'a> Executor<'a> {
             }
 
             // Opcode::GetContext | Opcode::SetContext => {}
-
             Opcode::NOP => {}
 
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
-            Opcode::UNIMPL => { log::warn!("Unimplemented code") }
+            Opcode::UNIMPL => {
+                log::warn!("Unimplemented code")
+            }
         }
 
         // Update the program counter.
@@ -1148,21 +1172,6 @@ impl<'a> Executor<'a> {
         (a, b, c)
     }
 
-    fn execute_count(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rs1) = (instruction.op_a.into(), (instruction.op_b as u8).into());
-        let b = self.rr(rs1, MemoryAccessPosition::B);
-        let value = match instruction.opcode {
-            Opcode::CLO => !b,
-            Opcode::CLZ => b,
-            _ => {
-                unreachable!()
-            }
-        };
-        let a = value.leading_zeros();
-        self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
-    }
-
     fn execute_alu(
         &mut self,
         instruction: &Instruction,
@@ -1214,6 +1223,8 @@ impl<'a> Executor<'a> {
             Opcode::OR => (b | c, 0),
             Opcode::XOR => (b ^ c, 0),
             Opcode::NOR => (!(b | c), 0),
+            Opcode::CLZ => (b.leading_zeros(), 0),
+            Opcode::CLO => (b.leading_ones(), 0),
             _ => {
                 unreachable!()
             }
@@ -1384,10 +1395,7 @@ impl<'a> Executor<'a> {
     }
 
     fn execute_jump(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
-        let (link, target) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-        );
+        let (link, target) = (instruction.op_a.into(), (instruction.op_b as u8).into());
         let target_pc = self.rr(target, MemoryAccessPosition::B);
         // maybe rename it
         let next_pc = self.state.pc.wrapping_add(8);
@@ -1447,7 +1455,6 @@ impl<'a> Executor<'a> {
             // If we're close to not fitting, early stop the shard to ensure we don't OOM.
             let mut shape_match_found = true;
             if self.state.global_clk % 16 == 0 {
-                // todo: MFHI/MTHI/MFLO/MTLO/LUI or others?
                 let addsub_count = (self.report.event_counts[Opcode::ADD]
                     + self.report.event_counts[Opcode::SUB])
                     as usize;
@@ -1462,13 +1469,16 @@ impl<'a> Executor<'a> {
                     as usize;
                 let shift_left_count = self.report.event_counts[Opcode::SLL] as usize;
                 let shift_right_count = (self.report.event_counts[Opcode::SRL]
-                    + self.report.event_counts[Opcode::SRA]
-                ) as usize;
+                    + self.report.event_counts[Opcode::SRA])
+                    as usize;
                 let divrem_count = (self.report.event_counts[Opcode::DIV]
                     + self.report.event_counts[Opcode::DIVU])
                     as usize;
                 let lt_count = (self.report.event_counts[Opcode::SLT]
                     + self.report.event_counts[Opcode::SLTU])
+                    as usize;
+                let cloclz_count = (self.report.event_counts[Opcode::CLZ]
+                    + self.report.event_counts[Opcode::CLO])
                     as usize;
 
                 if let Some(maximal_shapes) = &self.maximal_shapes {
@@ -1517,6 +1527,12 @@ impl<'a> Executor<'a> {
                         }
                         let lt_distance = lt_threshold - lt_count;
 
+                        let cloclz_threshold = 1 << shape["CloClz"];
+                        if cloclz_count > cloclz_threshold {
+                            continue;
+                        }
+                        let cloclz_distance = cloclz_threshold - cloclz_count;
+
                         let l_infinity = vec![
                             addsub_distance,
                             mul_distance,
@@ -1525,10 +1541,11 @@ impl<'a> Executor<'a> {
                             shift_right_distance,
                             divrem_distance,
                             lt_distance,
+                            cloclz_distance,
                         ]
-                            .into_iter()
-                            .min()
-                            .unwrap();
+                        .into_iter()
+                        .min()
+                        .unwrap();
 
                         if l_infinity >= 32 {
                             shape_match_found = true;
@@ -1546,7 +1563,8 @@ impl<'a> Executor<'a> {
                             shift_left_count={}, \
                             shift_right_count={}, \
                             divrem_count={}, \
-                            lt_count={}",
+                            lt_count={}, \
+                            cloclz_count={}",
                             self.state.clk / 4,
                             log2_ceil_usize(addsub_count),
                             log2_ceil_usize(mul_count),
@@ -1555,6 +1573,7 @@ impl<'a> Executor<'a> {
                             log2_ceil_usize(shift_right_count),
                             log2_ceil_usize(divrem_count),
                             log2_ceil_usize(lt_count),
+                            log2_ceil_usize(cloclz_count),
                         );
                     }
                 }
@@ -1579,7 +1598,7 @@ impl<'a> Executor<'a> {
         let done = self.state.pc == 0
             || self.state.exited
             || self.state.pc.wrapping_sub(self.program.pc_base)
-            >= (self.program.instructions.len() * 4) as u32;
+                >= (self.program.instructions.len() * 4) as u32;
         if done && self.unconstrained {
             log::error!(
                 "program ended in unconstrained mode at clk {}",
@@ -1853,7 +1872,7 @@ impl<'a> Executor<'a> {
 
         if self.emit_global_memory_events
             && (self.executor_mode == ExecutorMode::Trace
-            || self.executor_mode == ExecutorMode::Checkpoint)
+                || self.executor_mode == ExecutorMode::Checkpoint)
         {
             // SECTION: Set up all MemoryInitializeFinalizeEvents needed for memory argument.
             let memory_finalize_events = &mut self.record.global_memory_finalize_events;
@@ -1933,8 +1952,13 @@ impl<'a> Executor<'a> {
     }
 
     fn show_regs(&self) {
-        let regs = (0..37).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
-        println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
+        let regs = (0..37)
+            .map(|i| self.state.memory.get(i).unwrap().value)
+            .collect::<Vec<_>>();
+        println!(
+            "global_clk: {}, pc: {}, regs {:?}",
+            self.state.global_clk, self.state.pc, regs
+        );
     }
 }
 
@@ -1957,13 +1981,11 @@ fn log2_ceil_usize(n: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use zkm2_stark::ZKMCoreOpts;
     use crate::programs::tests::{
-        fibonacci_program,
-        panic_program, secp256r1_add_program, secp256r1_double_program,
-        simple_program,
-        simple_memory_program, ssz_withdrawals_program, u256xu2048_mul_program,
+        fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program,
+        simple_memory_program, simple_program, ssz_withdrawals_program, u256xu2048_mul_program,
     };
+    use zkm2_stark::ZKMCoreOpts;
 
     use crate::{Instruction, Opcode, Register};
 
@@ -2056,9 +2078,14 @@ mod tests {
 
     #[test]
     fn test_bne_not_jump() {
-        let instructions = vec![
-            Instruction::new(Opcode::BNE, Register::A0 as u8, 0, 100, true, true),
-        ];
+        let instructions = vec![Instruction::new(
+            Opcode::BNE,
+            Register::A0 as u8,
+            0,
+            100,
+            true,
+            true,
+        )];
         let program = Program::new(instructions, 0, 0);
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
@@ -2160,7 +2187,7 @@ mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
-            Instruction::new(Opcode::SLL, 31, 30, 29, false, false)
+            Instruction::new(Opcode::SLL, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
 
@@ -2177,7 +2204,7 @@ mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
-            Instruction::new(Opcode::SRL, 31, 30, 29, false, false)
+            Instruction::new(Opcode::SRL, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
 
@@ -2194,7 +2221,7 @@ mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 5, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
-            Instruction::new(Opcode::SRA, 31, 30, 29, false, false)
+            Instruction::new(Opcode::SRA, 31, 30, 29, false, false),
         ];
         let program = Program::new(instructions, 0, 0);
 

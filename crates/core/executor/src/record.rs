@@ -45,6 +45,8 @@ pub struct ExecutionRecord {
     pub divrem_events: Vec<AluEvent>,
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
     pub lt_events: Vec<AluEvent>,
+    /// A trace of the CLO and CLZ events.
+    pub cloclz_events: Vec<AluEvent>,
     /// A trace of the byte lookups that are needed.
     pub byte_lookups: HashMap<u32, HashMap<ByteLookupEvent, usize>>,
     /// A trace of the precompile events.
@@ -80,6 +82,7 @@ impl Default for ExecutionRecord {
             shift_right_events: Vec::default(),
             divrem_events: Vec::default(),
             lt_events: Vec::default(),
+            cloclz_events: Vec::default(),
             byte_lookups: HashMap::default(),
             precompile_events: PrecompileEvents::default(),
             global_memory_initialize_events: Vec::default(),
@@ -347,6 +350,7 @@ impl MachineRecord for ExecutionRecord {
         );
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
         stats.insert("lt_events".to_string(), self.lt_events.len());
+        stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
 
         for (syscall_code, events) in self.precompile_events.iter() {
             stats.insert(format!("syscall {syscall_code:?}"), events.len());
@@ -389,6 +393,7 @@ impl MachineRecord for ExecutionRecord {
             .append(&mut other.shift_right_events);
         self.divrem_events.append(&mut other.divrem_events);
         self.lt_events.append(&mut other.lt_events);
+        self.cloclz_events.append(&mut other.cloclz_events);
         self.syscall_events.append(&mut other.syscall_events);
 
         self.precompile_events.append(&mut other.precompile_events);
@@ -449,6 +454,10 @@ impl MachineRecord for ExecutionRecord {
             });
 
         self.lt_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
+        });
+
+        self.cloclz_events.iter().enumerate().for_each(|(i, event)| {
             self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
         });
     }

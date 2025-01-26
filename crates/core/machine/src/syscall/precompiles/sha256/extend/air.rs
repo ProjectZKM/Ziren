@@ -116,7 +116,7 @@ where
             *local.w_i_minus_15.value(),
             3,
             local.w_i_minus_15_rs_3,
-            local.is_real,
+            local.is_real.into(),
         );
         // (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18)
         XorOperation::<AB::F>::eval(
@@ -158,7 +158,7 @@ where
             *local.w_i_minus_2.value(),
             10,
             local.w_i_minus_2_rs_10,
-            local.is_real,
+            local.is_real.into(),
         );
         // (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19)
         XorOperation::<AB::F>::eval(

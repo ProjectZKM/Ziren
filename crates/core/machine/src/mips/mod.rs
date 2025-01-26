@@ -31,10 +31,10 @@ use zkm2_stark::{
 pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
 pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 
-/// A module for importing all the different RISC-V chips.
+/// A module for importing all the different MIPS chips.
 pub(crate) mod mips_chips {
     pub use crate::{
-        alu::{AddSubChip, BitwiseChip, DivRemChip, LtChip, MulChip, ShiftLeft, ShiftRightChip},
+        alu::{AddSubChip, BitwiseChip, DivRemChip, LtChip, MulChip, ShiftLeft, ShiftRightChip, CloClzChip},
         bytes::ByteChip,
         cpu::CpuChip,
         memory::MemoryGlobalChip,
@@ -73,21 +73,23 @@ pub(crate) mod mips_chips {
 pub enum MipsAir<F: PrimeField32> {
     /// An AIR that contains a preprocessed program table and a lookup for the instructions.
     Program(ProgramChip),
-    /// An AIR for the RISC-V CPU. Each row represents a cpu cycle.
+    /// An AIR for the MIPS CPU. Each row represents a cpu cycle.
     Cpu(CpuChip),
-    /// An AIR for the RISC-V Add and SUB instruction.
+    /// An AIR for the MIPS Add and SUB instruction.
     Add(AddSubChip),
-    /// An AIR for RISC-V Bitwise instructions.
+    /// An AIR for MIPS Bitwise instructions.
     Bitwise(BitwiseChip),
-    /// An AIR for RISC-V Mul instruction.
+    /// An AIR for MIPS Mul instruction.
     Mul(MulChip),
-    /// An AIR for RISC-V Div and Rem instructions.
+    /// An AIR for MIPS Div and Rem instructions.
     DivRem(DivRemChip),
-    /// An AIR for RISC-V Lt instruction.
+    /// An AIR for MIPS Lt instruction.
     Lt(LtChip),
-    /// An AIR for RISC-V SLL instruction.
+    /// An AIR for MIPS CLO and CLZ instruction.
+    CloClz(CloClzChip),
+    /// An AIR for MIPS SLL instruction.
     ShiftLeft(ShiftLeft),
-    /// An AIR for RISC-V SRL and SRA instruction.
+    /// An AIR for MIPS SRL and SRA instruction.
     ShiftRight(ShiftRightChip),
     /// A lookup table for byte operations.
     ByteLookup(ByteChip<F>),
@@ -160,13 +162,13 @@ impl<F: PrimeField32> MipsAir<F> {
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS, true)
     }
 
-    /// Get all the different RISC-V AIRs.
+    /// Get all the different MIPS AIRs.
     pub fn chips() -> Vec<Chip<F, Self>> {
         let (chips, _) = Self::get_chips_and_costs();
         chips
     }
 
-    /// Get all the costs of the different RISC-V AIRs.
+    /// Get all the costs of the different MIPS AIRs.
     pub fn costs() -> HashMap<MipsAirDiscriminants, u64> {
         let (_, costs) = Self::get_chips_and_costs();
         costs
@@ -180,7 +182,7 @@ impl<F: PrimeField32> MipsAir<F> {
         )
     }
 
-    /// Get all the different RISC-V AIRs.
+    /// Get all the different MIPS AIRs.
     pub fn get_chips_and_costs() -> (Vec<Chip<F, Self>>, HashMap<MipsAirDiscriminants, u64>) {
         let mut costs: HashMap<MipsAirDiscriminants, u64> = HashMap::new();
 
@@ -358,6 +360,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(MipsAirDiscriminants::Lt, lt.cost());
         chips.push(lt);
 
+        let clo_clz = Chip::new(MipsAir::CloClz(CloClzChip::default()));
+        costs.insert(MipsAirDiscriminants::CloClz, clo_clz.cost());
+        chips.push(clo_clz);
+
         let memory_global_init = Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(
             MemoryChipType::Initialize,
         )));
@@ -407,6 +413,7 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAir::ShiftRight(ShiftRightChip::default()), record.shift_right_events.len()),
             (MipsAir::ShiftLeft(ShiftLeft::default()), record.shift_left_events.len()),
             (MipsAir::Lt(LtChip::default()), record.lt_events.len()),
+            (MipsAir::CloClz(CloClzChip::default()), record.cloclz_events.len()),
             (
                 MipsAir::MemoryLocal(MemoryLocalChip::new()),
                 record
@@ -427,6 +434,7 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::Mul(MulChip::default()),
             MipsAir::DivRem(DivRemChip::default()),
             MipsAir::Lt(LtChip::default()),
+            MipsAir::CloClz(CloClzChip::default()),
             MipsAir::ShiftLeft(ShiftLeft::default()),
             MipsAir::ShiftRight(ShiftRightChip::default()),
             MipsAir::MemoryLocal(MemoryLocalChip::new()),
@@ -533,6 +541,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Program(_) => unreachable!("Invalid for core chip"),
             Self::Mul(_) => unreachable!("Invalid for core chip"),
             Self::Lt(_) => unreachable!("Invalid for core chip"),
+            Self::CloClz(_) => unreachable!("Invalid for core chip"),
             Self::ShiftRight(_) => unreachable!("Invalid for core chip"),
             Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
             Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
@@ -589,7 +598,7 @@ pub mod tests {
 
     use zkm2_core_executor::{
         programs::tests::{
-            fibonacci_program, simple_memory_program, simple_program, ssz_withdrawals_program
+            fibonacci_program, simple_memory_program, simple_program, ssz_withdrawals_program,
         },
         Instruction, Opcode, Program, Register,
     };

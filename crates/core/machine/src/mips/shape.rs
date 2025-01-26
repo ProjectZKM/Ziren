@@ -12,10 +12,9 @@ use crate::{
     memory::{MemoryLocalChip, MemoryProgramChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     mips::MemoryChipType::{Finalize, Initialize},
 };
-
 use super::{
     AddSubChip, BitwiseChip, ByteChip, CpuChip, DivRemChip, LtChip, MemoryGlobalChip, MulChip,
-    ProgramChip, ShiftLeft, ShiftRightChip,
+    ProgramChip, ShiftLeft, ShiftRightChip, CloClzChip,
     SyscallChip,
     MipsAir,
 };
@@ -55,6 +54,7 @@ struct CoreShapeSpec {
     shift_right_height: Vec<Option<usize>>,
     shift_left_height: Vec<Option<usize>>,
     lt_height: Vec<Option<usize>>,
+    cloclz_height: Vec<Option<usize>>,
     memory_local_height: Vec<Option<usize>>,
     syscall_core_height: Vec<Option<usize>>,
     is_potentially_maximal: bool,
@@ -236,8 +236,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     }
 
     fn generate_all_shapes_from_allowed_log_heights(
-        allowed_log_heights: impl IntoIterator<Item = (String, Vec<Option<usize>>)>,
-    ) -> impl Iterator<Item = ProofShape> {
+        allowed_log_heights: impl IntoIterator<Item=(String, Vec<Option<usize>>)>,
+    ) -> impl Iterator<Item=ProofShape> {
         // for chip in allowed_heights.
         allowed_log_heights
             .into_iter()
@@ -256,7 +256,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             })
     }
 
-    pub fn generate_all_allowed_shapes(&self) -> impl Iterator<Item = ProofShape> + '_ {
+    pub fn generate_all_allowed_shapes(&self) -> impl Iterator<Item=ProofShape> + '_ {
         let preprocessed_heights = self
             .allowed_preprocessed_log_heights
             .iter()
@@ -354,6 +354,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
             (MipsAir::ByteLookup(ByteChip::default()), vec![Some(16)]),
         ]);
 
+        // todo: Adapt to the actual situation of MIPS.
         let core_shapes = [
             // Small program shapes: 2^14 -> 2^18.
             CoreShapeSpec {
@@ -367,6 +368,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(14)],
                 mul_height: vec![Some(14)],
                 divrem_height: vec![Some(14)],
+                cloclz_height: vec![Some(14)],
                 is_potentially_maximal: false,
             },
             CoreShapeSpec {
@@ -380,6 +382,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(15)],
                 mul_height: vec![Some(15)],
                 divrem_height: vec![Some(15)],
+                cloclz_height: vec![Some(15)],
                 is_potentially_maximal: false,
             },
             CoreShapeSpec {
@@ -393,6 +396,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16)],
                 mul_height: vec![Some(16)],
                 divrem_height: vec![Some(16)],
+                cloclz_height: vec![Some(16)],
                 is_potentially_maximal: false,
             },
             CoreShapeSpec {
@@ -406,6 +410,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(17)],
                 mul_height: vec![Some(17)],
                 divrem_height: vec![Some(17)],
+                cloclz_height: vec![Some(17)],
                 is_potentially_maximal: false,
             },
             CoreShapeSpec {
@@ -419,6 +424,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(18)],
                 mul_height: vec![Some(18)],
                 divrem_height: vec![Some(18)],
+                cloclz_height: vec![Some(18)],
                 is_potentially_maximal: false,
             },
             // Small 2^19 shape variants.
@@ -433,6 +439,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16)],
                 mul_height: vec![Some(16)],
                 divrem_height: vec![Some(16)],
+                cloclz_height: vec![Some(16)],
                 is_potentially_maximal: false,
             },
             CoreShapeSpec {
@@ -446,6 +453,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16)],
                 mul_height: vec![Some(16)],
                 divrem_height: vec![Some(16)],
+                cloclz_height: vec![Some(16)],
                 is_potentially_maximal: false,
             },
             CoreShapeSpec {
@@ -459,6 +467,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(19)],
                 mul_height: vec![Some(19)],
                 divrem_height: vec![Some(19)],
+                cloclz_height: vec![Some(19)],
                 is_potentially_maximal: false,
             },
             // All no-add chips in <= 1<<19.
@@ -475,6 +484,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(18)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             CoreShapeSpec {
@@ -488,6 +498,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(18)],
                 mul_height: vec![None, Some(10), Some(16), Some(18)],
                 divrem_height: vec![None, Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             CoreShapeSpec {
@@ -501,6 +512,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             CoreShapeSpec {
@@ -514,6 +526,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             CoreShapeSpec {
@@ -527,6 +540,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // LT in <= 1<<20
@@ -544,6 +558,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             CoreShapeSpec {
@@ -557,6 +572,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // LT in <= 1<<21
@@ -574,6 +590,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // Bitwise in <= 1<<20
@@ -588,6 +605,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16)],
+                cloclz_height: vec![Some(16)],
                 is_potentially_maximal: true,
             },
             // Bitwise in <= 1<<21
@@ -602,6 +620,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // SLL in <= 1<<20
@@ -616,6 +635,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // SLL in <= 1<<21
@@ -630,6 +650,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // SRL in <= 1<<20
@@ -644,6 +665,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16), Some(18), Some(19)],
                 mul_height: vec![Some(10), Some(16), Some(18)],
                 divrem_height: vec![Some(10), Some(16), Some(17)],
+                cloclz_height: vec![Some(16), Some(17)],
                 is_potentially_maximal: true,
             },
             // Shards with basic arithmetic and branching.
@@ -658,6 +680,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16)],
                 mul_height: vec![Some(19)],
                 divrem_height: vec![Some(6)],
+                cloclz_height: vec![Some(6)],
                 is_potentially_maximal: true,
             },
             // Shards with many mul events.
@@ -672,54 +695,57 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 memory_local_height: vec![Some(16)],
                 mul_height: vec![Some(19), Some(20)],
                 divrem_height: vec![Some(10), Some(16)],
+                cloclz_height: vec![Some(16)],
                 is_potentially_maximal: true,
+
             },
-            ];
+        ];
 
-                let mut allowed_core_log_heights = vec![];
-                let mut maximal_core_log_heights_mask = vec![];
-                for spec in core_shapes {
-                    let short_allowed_log_heights = HashMap::from([
-                        (MipsAir::Cpu(CpuChip::default()), spec.cpu_height),
-                        (MipsAir::Add(AddSubChip::default()), spec.add_sub_height),
-                        (MipsAir::Bitwise(BitwiseChip::default()), spec.bitwise_height),
-                        (MipsAir::DivRem(DivRemChip::default()), spec.divrem_height),
-                        (MipsAir::Mul(MulChip::default()), spec.mul_height),
-                        (MipsAir::ShiftRight(ShiftRightChip::default()), spec.shift_right_height),
-                        (MipsAir::ShiftLeft(ShiftLeft::default()), spec.shift_left_height),
-                        (MipsAir::Lt(LtChip::default()), spec.lt_height),
-                        (MipsAir::MemoryLocal(MemoryLocalChip::new()), spec.memory_local_height),
-                        (MipsAir::SyscallCore(SyscallChip::core()), spec.syscall_core_height),
-                    ]);
-                    allowed_core_log_heights.push(short_allowed_log_heights);
-                    maximal_core_log_heights_mask.push(spec.is_potentially_maximal);
-                }
+        let mut allowed_core_log_heights = vec![];
+        let mut maximal_core_log_heights_mask = vec![];
+        for spec in core_shapes {
+            let short_allowed_log_heights = HashMap::from([
+                (MipsAir::Cpu(CpuChip::default()), spec.cpu_height),
+                (MipsAir::Add(AddSubChip::default()), spec.add_sub_height),
+                (MipsAir::Bitwise(BitwiseChip::default()), spec.bitwise_height),
+                (MipsAir::DivRem(DivRemChip::default()), spec.divrem_height),
+                (MipsAir::Mul(MulChip::default()), spec.mul_height),
+                (MipsAir::ShiftRight(ShiftRightChip::default()), spec.shift_right_height),
+                (MipsAir::ShiftLeft(ShiftLeft::default()), spec.shift_left_height),
+                (MipsAir::Lt(LtChip::default()), spec.lt_height),
+                (MipsAir::CloClz(CloClzChip::default()), spec.cloclz_height),
+                (MipsAir::MemoryLocal(MemoryLocalChip::new()), spec.memory_local_height),
+                (MipsAir::SyscallCore(SyscallChip::core()), spec.syscall_core_height),
+            ]);
+            allowed_core_log_heights.push(short_allowed_log_heights);
+            maximal_core_log_heights_mask.push(spec.is_potentially_maximal);
+        }
 
-                // Set the memory init and finalize heights.
-                let memory_init_heights =
-                    vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)];
-                let memory_finalize_heights =
-                    vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)];
-                let memory_allowed_log_heights = HashMap::from([
-                    (MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)), memory_init_heights),
-                    (MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)), memory_finalize_heights),
-                ]);
+        // Set the memory init and finalize heights.
+        let memory_init_heights =
+            vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)];
+        let memory_finalize_heights =
+            vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)];
+        let memory_allowed_log_heights = HashMap::from([
+            (MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)), memory_init_heights),
+            (MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)), memory_finalize_heights),
+        ]);
 
-                let mut precompile_allowed_log_heights = HashMap::new();
-                let precompile_heights = (3..19).collect::<Vec<_>>();
-                for (air, mem_events_per_row) in MipsAir::<F>::get_all_precompile_airs() {
-                    precompile_allowed_log_heights
-                        .insert(air, (mem_events_per_row, precompile_heights.clone()));
-                    }
+        let mut precompile_allowed_log_heights = HashMap::new();
+        let precompile_heights = (3..19).collect::<Vec<_>>();
+        for (air, mem_events_per_row) in MipsAir::<F>::get_all_precompile_airs() {
+            precompile_allowed_log_heights
+                .insert(air, (mem_events_per_row, precompile_heights.clone()));
+        }
 
-                Self {
-                    included_shapes: vec![],
-                    allowed_preprocessed_log_heights,
-                    allowed_core_log_heights,
-                    maximal_core_log_heights_mask,
-                    memory_allowed_log_heights,
-                    precompile_allowed_log_heights,
-                }
+        Self {
+            included_shapes: vec![],
+            allowed_preprocessed_log_heights,
+            allowed_core_log_heights,
+            maximal_core_log_heights_mask,
+            memory_allowed_log_heights,
+            precompile_allowed_log_heights,
+        }
     }
 }
 
@@ -729,7 +755,6 @@ pub mod tests {
 
     use p3_challenger::{CanObserve, FieldChallenger};
     use zkm2_stark::{air::InteractionScope, Dom, MachineProver, StarkGenericConfig};
-
     use super::*;
 
     pub fn try_generate_dummy_proof<
@@ -812,6 +837,7 @@ pub mod tests {
             (MipsAir::<BabyBear>::ShiftRight(ShiftRightChip::default()), 10),
             (MipsAir::<BabyBear>::ShiftLeft(ShiftLeft::default()), 10),
             (MipsAir::<BabyBear>::Lt(LtChip::default()), 10),
+            (MipsAir::<BabyBear>::CloClz(CloClzChip::default()), 10),
             (MipsAir::<BabyBear>::MemoryLocal(MemoryLocalChip::new()), 10),
             (MipsAir::<BabyBear>::SyscallCore(SyscallChip::core()), 10),
         ];
