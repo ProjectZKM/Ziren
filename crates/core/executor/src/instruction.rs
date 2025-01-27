@@ -501,7 +501,7 @@ impl Instruction {
             // )), // XORI: rt = rs + zext(imm)
             (0b001110, _) => Ok(Self::new(Opcode::XOR, rt as u8, rs, offset, false, true)), // XORI: rt = rs + zext(imm)
             // (0b000000, 0b001100) => Ok(Operation::Syscall), // Syscall
-            (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 0, 0, 0, true, true)), // Syscall
+            (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)), // Syscall
             // (0b110011, _) => Ok(Operation::Nop),            // Pref
             (0b110011, _) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // Pref
             // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq

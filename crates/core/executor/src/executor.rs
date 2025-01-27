@@ -1009,8 +1009,7 @@ impl<'a> Executor<'a> {
                             precompile_rt.exit_code,
                         )
                     } else {
-                        // return Err(ExecutionError::UnsupportedSyscall(syscall_id));
-                        (self.state.next_pc, 5, 0)
+                        return Err(ExecutionError::UnsupportedSyscall(syscall_id));
                     };
 
                 if syscall == SyscallCode::HALT && returned_exit_code == 0 {
@@ -1953,7 +1952,7 @@ impl<'a> Executor<'a> {
     }
 
     fn show_regs(&self) {
-        let regs = (0..37)
+        let regs = (0..34)
             .map(|i| self.state.memory.get(i).unwrap().value)
             .collect::<Vec<_>>();
         println!(
