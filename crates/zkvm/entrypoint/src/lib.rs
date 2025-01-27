@@ -58,7 +58,7 @@ mod zkvm {
     pub static mut PUBLIC_VALUES_HASHER: Option<Sha256> = None;
 
     #[no_mangle]
-    fn main() {
+    fn _main() {
         unsafe {
             PUBLIC_VALUES_HASHER = Some(Sha256::new());
             #[cfg(feature = "verify")]
@@ -77,6 +77,15 @@ mod zkvm {
     core::arch::global_asm!(include_str!("memset.s"));
     core::arch::global_asm!(include_str!("memcpy.s"));
 
+    core::arch::global_asm!(
+        r#"
+    .section .text.main;
+    .globl main;
+    main:
+        li  $sp, 0xfffc000
+        jal _main;
+    "#
+    );
     fn zkvm_getrandom(s: &mut [u8]) -> Result<(), Error> {
         unsafe {
             crate::syscalls::sys_rand(s.as_mut_ptr(), s.len());
