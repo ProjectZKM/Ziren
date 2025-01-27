@@ -36,9 +36,6 @@ pub struct Program {
     /// The shape for the preprocessed tables.
     // todo: check if necessary
     pub preprocessed_shape: Option<CoreShape>,
-
-    /// The initial memory image, useful for global constants.
-    pub memory_image: hashbrown::HashMap<u32, u32>,
 }
 
 impl Program {
@@ -176,7 +173,6 @@ impl Program {
             lo,
             hi,
             preprocessed_shape: None,
-            memory_image: hashbrown::HashMap::new(),
         })
     }
 

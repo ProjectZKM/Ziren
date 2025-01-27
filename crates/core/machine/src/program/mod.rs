@@ -210,7 +210,6 @@ mod tests {
                 instructions,
                 pc_start: 0,
                 pc_base: 0,
-                memory_image: HashMap::<u32, u32>::new(),
                 preprocessed_shape: None,
                 ..Default::default()
             }),

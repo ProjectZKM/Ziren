@@ -76,13 +76,13 @@ impl<F: PrimeField> MachineAir<F> for MemoryProgramChip {
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         // Generate the trace rows for each event.
-        let nb_rows = program.memory_image.len();
+        let nb_rows = program.image.len();
         let size_log2 = program.fixed_log2_rows::<F, _>(self);
         let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_PROGRAM_PREPROCESSED_COLS);
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
-        let memory = program.memory_image.iter().collect::<Vec<_>>();
+        let memory = program.image.iter().collect::<Vec<_>>();
         values
             .chunks_mut(chunk_size * NUM_MEMORY_PROGRAM_PREPROCESSED_COLS)
             .enumerate()
@@ -116,7 +116,7 @@ impl<F: PrimeField> MachineAir<F> for MemoryProgramChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> RowMajorMatrix<F> {
-        let program_memory_addrs = input.program.memory_image.keys().copied().sorted();
+        let program_memory_addrs = input.program.image.keys().copied().sorted();
 
         let mult = if input.public_values.shard == 1 { F::ONE } else { F::ZERO };
 

@@ -394,7 +394,7 @@ impl<F: PrimeField32> MipsAir<F> {
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(Self, usize)> {
         vec![
             (MipsAir::Program(ProgramChip::default()), program.instructions.len()),
-            (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.memory_image.len()),
+            (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.image.len()),
             (MipsAir::ByteLookup(ByteChip::default()), 1 << 16),
         ]
     }
