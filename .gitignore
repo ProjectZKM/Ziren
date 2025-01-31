@@ -1,3 +1,3 @@
 /target
 crates/test-artifacts/programs/target/
-crates/test-artifacts/programs/Cargo.lock
+/crates/test-artifacts/programs/Cargo.lock
