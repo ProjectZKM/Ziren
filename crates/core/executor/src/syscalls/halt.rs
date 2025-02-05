@@ -10,6 +10,7 @@ impl Syscall for HaltSyscall {
         exit_code: u32,
         _: u32,
     ) -> Option<u32> {
+        ctx.set_next_pc(0);
         ctx.set_exit_code(exit_code);
         None
     }

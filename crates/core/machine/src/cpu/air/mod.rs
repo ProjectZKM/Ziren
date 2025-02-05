@@ -290,12 +290,14 @@ impl CpuChip {
     ) {
         // When is_sequential_instr is true, assert that instruction is not branch, jump.
         // Note that the condition `when(local_is_real)` is implied from the previous constraint.
+        let is_halt = self.get_is_halt_syscall::<AB>(builder, local);
         builder.when(local.is_real).assert_eq(
             local.is_sequential_instr,
             AB::Expr::ONE
                 - (is_branch_instruction
                 + local.selectors.is_jump
-                + local.selectors.is_jumpd),
+                + local.selectors.is_jumpd
+                + is_halt),
         );
 
         // Verify that the pc increments by 4 for all instructions except instruction after branch, jump
@@ -316,6 +318,7 @@ impl CpuChip {
         builder
             .when_transition()
             .when(next.is_real)
+            .when(next.is_sequential_instr)
             .assert_eq(local.next_next_pc, next.next_pc);
     }
 

@@ -199,10 +199,10 @@ impl CpuChip {
         self.populate_branch(cols, event, nonce_lookup, instruction);
         self.populate_jump(cols, event, nonce_lookup, instruction);
         //self.populate_auipc(cols, event, nonce_lookup, instruction);
-        let _is_halt = self.populate_syscall(cols, event, nonce_lookup);
+        let is_halt = self.populate_syscall(cols, event, nonce_lookup);
 
         cols.is_sequential_instr = F::from_bool(
-            !instruction.is_branch_instruction() && !instruction.is_jump_instruction(),
+            !instruction.is_branch_instruction() && !instruction.is_jump_instruction() && !is_halt,
         );
 
         // Assert that the instruction is not a no-op.

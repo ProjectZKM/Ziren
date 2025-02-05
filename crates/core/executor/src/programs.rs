@@ -6,7 +6,7 @@ pub mod tests {
     use crate::{Instruction, Opcode, Program};
 
     use test_artifacts::{
-        FIBONACCI_ELF,
+        FIBONACCI_ELF, HELLO_WORLD_ELF,
         KECCAK_PERMUTE_ELF, PANIC_ELF,
         SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, U256XU2048_MUL_ELF,
     };
@@ -29,6 +29,16 @@ pub mod tests {
     #[must_use]
     pub fn fibonacci_program() -> Program {
         Program::from_elf(FIBONACCI_ELF).unwrap()
+    }
+
+    /// Get the hello world program.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the program fails to load.
+    #[must_use]
+    pub fn hello_world_program() -> Program {
+        Program::from_elf(HELLO_WORLD_ELF).unwrap()
     }
 
     /// Get the secp256r1 add program.

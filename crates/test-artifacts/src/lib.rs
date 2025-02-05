@@ -5,6 +5,7 @@ use zkm2_build::include_elf;
 pub const REVME_ELF: &str = include_elf!("revme");
 pub const SHA2_RUST_ELF: &str = include_elf!("sha2-rust");
 pub const FIBONACCI_ELF: &str = include_elf!("fibonacci");
+pub const HELLO_WORLD_ELF: &str = include_elf!("hello-world");
 
 pub const SHA2_ELF: &str = include_elf!("sha2-test");
 pub const SHA_EXTEND_ELF: &str = include_elf!("sha-extend-test");

@@ -28,6 +28,7 @@ members = [
   "ed-decompress",
   "ed25519",
   "fibonacci",
+  "hello-world",
   "hint-io",
   "secp256k1-add",
   "secp256k1-decompress",

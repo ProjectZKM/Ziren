@@ -598,7 +598,7 @@ pub mod tests {
 
     use zkm2_core_executor::{
         programs::tests::{
-            fibonacci_program, simple_memory_program, simple_program, ssz_withdrawals_program,
+            fibonacci_program, hello_world_program, simple_memory_program, simple_program, ssz_withdrawals_program,
         },
         Instruction, Opcode, Program, Register,
     };
@@ -834,6 +834,12 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn test_hello_world_prove_simple() {
+        setup_logger();
+        let program = hello_world_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
 
     #[test]
     fn test_fibonacci_prove_simple() {

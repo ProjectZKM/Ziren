@@ -2,3 +2,5 @@
 crates/test-artifacts/programs/target/
 /crates/test-artifacts/programs/Cargo.lock
 .idea
+*.log
+*.bin

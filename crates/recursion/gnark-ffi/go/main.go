@@ -202,7 +202,7 @@ func TestMain() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("[sp1] gnark verifier constraints:", scs.GetNbConstraints())
+	fmt.Println("[zkm2] gnark verifier constraints:", scs.GetNbConstraints())
 
 	// Run the dummy setup.
 	srs, srsLagrange, err := unsafekzg.NewSRS(scs)
@@ -214,6 +214,7 @@ func TestMain() error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("[zkm2] run the dummy setup done")
 
 	// Generate witness.
 	assignment := sp1.NewCircuit(inputs)
@@ -221,12 +222,14 @@ func TestMain() error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("[zkm2] generate witness done")
 
 	// Generate the proof.
 	_, err = plonk.Prove(scs, pk, witness)
 	if err != nil {
 		return err
 	}
+	fmt.Println("[zkm2] generate the proof done")
 
 	return nil
 }

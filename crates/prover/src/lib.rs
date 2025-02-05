@@ -539,7 +539,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             });
             assert_eq!(reconstruct_challenger.input_buffer.len(), 0);
             assert_eq!(reconstruct_challenger.sponge_state.len(), 16);
-            assert_eq!(reconstruct_challenger.output_buffer.len(), 16);
+            assert_eq!(reconstruct_challenger.output_buffer.len(), 8);
 
             for proof in batch.iter() {
                 reconstruct_challenger.observe(proof.commitment.global_main_commit);
@@ -1476,6 +1476,34 @@ pub mod tests {
         }
 
         Ok(())
+    }
+
+    /// Tests an end-to-end workflow of proving a program across the entire proof generation
+    /// pipeline.
+    ///
+    /// Add `FRI_QUERIES`=1 to your environment for faster execution. Should only take a few minutes
+    /// on a Mac M2. Note: This test always re-builds the plonk bn254 artifacts, so setting ZKM_DEV
+    /// is not needed.
+    #[test]
+    #[serial]
+    fn test_e2e_hello_world() -> Result<()> {
+        let elf = test_artifacts::HELLO_WORLD_ELF;
+        let mut elf_code = Vec::new();
+        File::open(elf).unwrap().read_to_end(&mut elf_code).unwrap();
+
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        // TODO(mattstam): We should Test::Plonk here, but this uses the existing
+        // docker image which has a different API than the current. So we need to wait until the
+        // next release (v1.2.0+), and then switch it back.
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            &elf_code,
+            ZKMStdin::default(),
+            opts,
+            Test::All,
+        )
     }
 
     /*

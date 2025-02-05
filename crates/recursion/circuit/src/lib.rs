@@ -575,8 +575,7 @@ impl BabyBearFriConfig for BabyBearPoseidon2 {
     type RowMajorProverData = <ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>;
 
     fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        //self.pcs().fri_config()
-        panic!("fri config BabyBearPoseidon2")
+        self.pcs().fri_config()
     }
 
     fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape {
@@ -595,8 +594,7 @@ impl BabyBearFriConfig for BabyBearPoseidon2Outer {
         <OuterValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>;
 
     fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        //self.pcs().fri_config()
-        panic!("fri config BabyBearPoseidon2Outer")
+        self.pcs().fri_config()
     }
 
     fn challenger_shape(_challenger: &Self::FriChallenger) -> SpongeChallengerShape {
