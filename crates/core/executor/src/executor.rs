@@ -1260,32 +1260,32 @@ impl<'a> Executor<'a> {
             }
             Opcode::LWL => {
                 let out = |i: u32| -> u32 {
-                    let val = mem << (i * 8);
-                    let mask: u32 = 0xffFFffFFu32 << (i * 8);
+                    let val = mem << (24 - i * 8);
+                    let mask: u32 = 0xffFFffFFu32 << (24 - i * 8);
                     (rt & (!mask)) | val
                 };
                 out(rs & 3)
             }
             Opcode::LW => mem,
             Opcode::LBU => {
-                let out = |i: u32| -> u32 { (mem >> (24 - i * 8)) & 0xff };
+                let out = |i: u32| -> u32 { (mem >> (i * 8)) & 0xff };
                 out(rs & 3)
             }
             Opcode::LHU => {
-                let mem_fc = |i: u32| -> u32 { (mem >> (16 - i * 8)) & 0xffff };
+                let mem_fc = |i: u32| -> u32 { (mem >> (i * 8)) & 0xffff };
                 mem_fc(rs & 2)
             }
             Opcode::LWR => {
                 let out = |i: u32| -> u32 {
-                    let val = mem >> (24 - i * 8);
-                    let mask = 0xffFFffFFu32 >> (24 - i * 8);
+                    let val = mem >> (i * 8);
+                    let mask = 0xffFFffFFu32 >> (i * 8);
                     (rt & (!mask)) | val
                 };
                 out(rs & 3)
             }
             Opcode::LL => mem,
             Opcode::LB => {
-                let out = |i: u32| -> u32 { sign_extend::<8>((mem >> (24 - i * 8)) & 0xff) };
+                let out = |i: u32| -> u32 { sign_extend::<8>((mem >> (i * 8)) & 0xff) };
                 out(rs & 3)
             }
             _ => unreachable!(),
@@ -1320,24 +1320,24 @@ impl<'a> Executor<'a> {
         let val = match instruction.opcode {
             Opcode::SB => {
                 let out = |i: u32| -> u32 {
-                    let val = (rt & 0xff) << (24 - i * 8);
-                    let mask = 0xffFFffFFu32 ^ (0xff << (24 - i * 8));
+                    let val = (rt & 0xff) << (i * 8);
+                    let mask = 0xffFFffFFu32 ^ (0xff << (i * 8));
                     (mem & mask) | val
                 };
                 out(virt_raw & 3)
             }
             Opcode::SH => {
                 let mem_fc = |i: u32| -> u32 {
-                    let val = (rt & 0xffff) << (16 - i * 8);
-                    let mask = 0xffFFffFFu32 ^ (0xffff << (16 - i * 8));
+                    let val = (rt & 0xffff) << (i * 8);
+                    let mask = 0xffFFffFFu32 ^ (0xffff << (i * 8));
                     (mem & mask) | val
                 };
                 mem_fc(virt_raw & 2)
             }
             Opcode::SWL => {
                 let out = |i: u32| -> u32 {
-                    let val = rt >> (i * 8);
-                    let mask = 0xffFFffFFu32 >> (i * 8);
+                    let val = rt >> (24 - i * 8);
+                    let mask = 0xffFFffFFu32 >> (24 - i * 8);
                     (mem & (!mask)) | val
                 };
                 out(virt_raw & 3)
@@ -1345,8 +1345,8 @@ impl<'a> Executor<'a> {
             Opcode::SW => rt,
             Opcode::SWR => {
                 let out = |i: u32| -> u32 {
-                    let val = rt << (24 - (virt_raw & i) * 8);
-                    let mask = 0xffFFffFFu32 << (24 - i * 8);
+                    let val = rt << (i * 8);
+                    let mask = 0xffFFffFFu32 << (i * 8);
                     (mem & (!mask)) | val
                 };
                 out(virt_raw & 3)

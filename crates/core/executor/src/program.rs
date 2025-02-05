@@ -131,8 +131,7 @@ impl Program {
                     for j in 0..len {
                         let offset = (offset + i + j) as usize;
                         let byte = elf_code.get(offset).context("Invalid segment offset")?;
-                        // todo: check it BIG_ENDIAN
-                        word |= (*byte as u32) << (24 - j * 8);
+                        word |= (*byte as u32) << (j * 8);
                     }
                     image.insert(addr, word);
                     // todo: check it
