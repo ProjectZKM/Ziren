@@ -315,16 +315,13 @@ impl CpuChip {
             match instruction.opcode {
                 Opcode::LB | Opcode::LBU => {
                     // LB: mem_value = sign_extend::<8>((mem >> (24 - (rs & 3) * 8)) & 0xff)
-                    // TODO: stephen, MIPS is using big-endian for values
-                    let offset = 3 - addr_offset;
                     cols.unsigned_mem_val =
-                        (mem_value.to_le_bytes()[offset as usize] as u32).into();
+                        (mem_value.to_le_bytes()[addr_offset as usize] as u32).into();
                 }
                 Opcode::LH | Opcode::LHU => {
                     // LH: sign_extend::<16>((mem >> (16 - (rs & 2) * 8)) & 0xffff)
                     // LH: sign_extend::<16>((mem >> (8 * (2 - (rs & 2))) & 0xffff)
-                    let offset = 1 - (addr_offset >> 1);
-                    let value = match offset % 2 {
+                    let value = match (addr_offset >> 1) % 2 {
                         0 => mem_value & 0x0000FFFF,
                         1 => (mem_value & 0xFFFF0000) >> 16,
                         _ => unreachable!(),

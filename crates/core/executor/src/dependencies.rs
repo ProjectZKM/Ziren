@@ -1,4 +1,3 @@
-use log::Level::Debug;
 use crate::{events::AluEvent, utils::{get_msb, get_quotient_and_remainder, is_signed_operation}, Executor, Opcode, WORD_SIZE};
 
 /// Emits the dependencies for division and remainder operations.
@@ -173,10 +172,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
         if matches!(instruction.opcode, Opcode::LB | Opcode::LH) {
             let (unsigned_mem_val, most_sig_mem_value_byte, sign_value) = match instruction.opcode {
                 Opcode::LB => {
-                    // TODO: stephen, MIPS is using big-endian for memory values, so we use 3 - addr_offset when we calculate add_offset from the LE format.
-                    // Need to optimize
-                    let offset = 3 - addr_offset;
-                    let most_sig_mem_value_byte = mem_value.to_le_bytes()[offset as usize];
+                    let most_sig_mem_value_byte = mem_value.to_le_bytes()[addr_offset as usize];
                     let sign_value = 256;
                     (
                         most_sig_mem_value_byte as u32,
@@ -186,8 +182,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
                 }
                 Opcode::LH => {
                     let sign_value = 65536;
-                    let offset = 1 - (addr_offset >> 1);
-                    let unsigned_mem_val = match offset % 2 {
+                    let unsigned_mem_val = match (addr_offset >> 1) % 2 {
                         0 => mem_value & 0x0000FFFF,
                         1 => (mem_value & 0xFFFF0000) >> 16,
                         _ => unreachable!(),

@@ -236,14 +236,14 @@ impl CpuChip {
         let mem_val = *memory_columns.memory_access.value();
         let prev_mem_val = *memory_columns.memory_access.prev_value();
         let sb_expected_stored_value = Word([
-            a_val[0] * memory_columns.offset_is_three
-                + (one.clone() - memory_columns.offset_is_three) * prev_mem_val[0],
-            a_val[0] * memory_columns.offset_is_two
-                + (one.clone() - memory_columns.offset_is_two) * prev_mem_val[1],
-            a_val[0] * memory_columns.offset_is_one
-                + (one.clone() - memory_columns.offset_is_one) * prev_mem_val[2],
             a_val[0] * offset_is_zero.clone()
-                + (one.clone() - offset_is_zero.clone()) * prev_mem_val[3],
+                + (one.clone() - offset_is_zero.clone()) * prev_mem_val[0],
+            a_val[0] * memory_columns.offset_is_one
+                + (one.clone() - memory_columns.offset_is_one) * prev_mem_val[1],
+            a_val[0] * memory_columns.offset_is_two
+                + (one.clone() - memory_columns.offset_is_two) * prev_mem_val[2],
+            a_val[0] * memory_columns.offset_is_three
+                + (one.clone() - memory_columns.offset_is_three) * prev_mem_val[3],
         ]);
 
         builder
@@ -261,14 +261,14 @@ impl CpuChip {
         builder.when(local.selectors.is_sw).assert_one(offset_is_zero.clone());
 
         // Compute the expected stored value for a SH instruction.
-        let a_is_lower_half = memory_columns.offset_is_two;
-        let a_is_upper_half = offset_is_zero;
+        let a_is_lower_half = offset_is_zero;
+        let a_is_upper_half = memory_columns.offset_is_two;
         let sh_expected_stored_value = Word([
             a_val[0] * a_is_lower_half.clone()
                 + (one.clone() - a_is_lower_half.clone()) * prev_mem_val[0],
             a_val[1] * a_is_lower_half.clone() + (one.clone() - a_is_lower_half) * prev_mem_val[1],
-            a_val[0] * a_is_upper_half.clone() + (one.clone() - a_is_upper_half.clone()) * prev_mem_val[2],
-            a_val[1] * a_is_upper_half.clone() + (one.clone() - a_is_upper_half) * prev_mem_val[3],
+            a_val[0] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[2],
+            a_val[1] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[3],
         ]);
         builder
             .when(local.selectors.is_sh)
@@ -299,10 +299,10 @@ impl CpuChip {
             - memory_columns.offset_is_three;
 
         // Compute the byte value.
-        let mem_byte = mem_val[3] * offset_is_zero.clone()
-            + mem_val[2] * memory_columns.offset_is_one
-            + mem_val[1] * memory_columns.offset_is_two
-            + mem_val[0] * memory_columns.offset_is_three;
+        let mem_byte = mem_val[0] * offset_is_zero.clone()
+            + mem_val[1] * memory_columns.offset_is_one
+            + mem_val[2] * memory_columns.offset_is_two
+            + mem_val[3] * memory_columns.offset_is_three;
         let byte_value = Word::extend_expr::<AB>(mem_byte.clone());
 
         // When the instruction is LB or LBU, just use the lower byte.
@@ -330,10 +330,10 @@ impl CpuChip {
         // 2   1   0
         // 3   1   0
         // value=0x12_34_56_78,  addr=0x27654320, addr_offset=0, offset=1, value=0x12_34,
-        let use_lower_half = memory_columns.offset_is_two;
-        let use_upper_half = offset_is_zero;
+        let use_lower_half = offset_is_zero;
+        let use_upper_half = memory_columns.offset_is_two;
         let half_value = Word([
-            use_lower_half.clone() * mem_val[0] + use_upper_half.clone() * mem_val[2],
+            use_lower_half.clone() * mem_val[0] + use_upper_half * mem_val[2],
             use_lower_half * mem_val[1] + use_upper_half * mem_val[3],
             AB::Expr::ZERO,
             AB::Expr::ZERO,

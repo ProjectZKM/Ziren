@@ -110,7 +110,7 @@ pub mod tests {
             // LHU
             Instruction::new(Opcode::LHU, 21, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LHU, 20, 0, 0x27654322, false, true),
-            // LH
+            // LH: FIXME
             Instruction::new(Opcode::LH, 19, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LH, 18, 0, 0x27654322, false, true),
             // SB
