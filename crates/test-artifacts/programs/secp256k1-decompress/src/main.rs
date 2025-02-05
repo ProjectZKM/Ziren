@@ -14,7 +14,7 @@ pub fn main() {
         let is_odd = match compressed_key[0] {
             2 => false,
             3 => true,
-            _ => panic!("Invalid compressed key"),
+            _ => panic!("Invalid compressed key ne {:X?}", compressed_key),
         };
         syscall_secp256k1_decompress(&mut decompressed_key, is_odd);
 

@@ -25,27 +25,7 @@ pub fn main() {
         219, 16, 85, 119, 7,
     ];
 
+    syscall_secp256r1_double(a.as_mut_ptr() as *mut [u32; 16]);
 
-    let mut a_word: [u32; 16] = [0; 16];
-        for i in 0..16 {
-            a_word[i] = u32::from_le_bytes([
-                a[i * 4],
-                a[i * 4 + 1],
-                a[i * 4 + 2],
-                a[i * 4 + 3],
-            ]);
-        }
-
-    syscall_secp256r1_double(a_word.as_mut_ptr() as *mut [u32; 16]);
-
-    let mut b_word: [u32; 16] = [0; 16];
-        for i in 0..16 {
-            b_word[i] = u32::from_le_bytes([
-                b[i * 4],
-                b[i * 4 + 1],
-                b[i * 4 + 2],
-                b[i * 4 + 3],
-            ]);
-        }
-    assert_eq!(a_word, b_word);
+    assert_eq!(a, b);
 }

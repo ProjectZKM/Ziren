@@ -17,17 +17,7 @@ pub fn main() {
             101, 196, 163, 38, 119, 218, 58, 72,
         ];
 
-        let mut a_word: [u32; 16] = [0; 16];
-        for i in 0..16 {
-            a_word[i] = u32::from_le_bytes([
-                a[i * 4],
-                a[i * 4 + 1],
-                a[i * 4 + 2],
-                a[i * 4 + 3],
-            ]);
-        }
-
-        syscall_secp256k1_double(a_word.as_mut_ptr() as *mut [u32; 16]);
+        syscall_secp256k1_double(a.as_mut_ptr() as *mut [u32; 16]);
 
         // 2 * generator.
         // 89565891926547004231252920425935692360644145829622209833684329913297188986597
@@ -39,16 +29,7 @@ pub fn main() {
             163, 57, 195, 61, 166, 254, 104, 225, 26,
         ];
 
-        let mut b_word: [u32; 16] = [0; 16];
-        for i in 0..16 {
-            b_word[i] = u32::from_le_bytes([
-                b[i * 4],
-                b[i * 4 + 1],
-                b[i * 4 + 2],
-                b[i * 4 + 3],
-            ]);
-        }
-        assert_eq!(a_word, b_word);
+        assert_eq!(a, b);
     }
 
     // println!("done");

@@ -19,17 +19,7 @@ pub fn main() {
             179, 8,
         ];
 
-        let mut a1: [u32; 24] = [0; 24];
-        for i in 0..24 {
-            a1[i] = u32::from_le_bytes([
-                a[i * 4],
-                a[i * 4 + 1],
-                a[i * 4 + 2],
-                a[i * 4 + 3],
-            ]);
-        }
-
-        syscall_bls12381_double(a1.as_mut_ptr() as *mut [u32; 24]);
+        syscall_bls12381_double(a.as_mut_ptr() as *mut [u32; 24]);
 
         // 2 * generator.
         // 838589206289216005799424730305866328161735431124665289961769162861615689790485775997575391185127590486775437397838
@@ -43,18 +33,7 @@ pub fn main() {
             22,
         ];
 
-        let mut b1: [u32; 24] = [0; 24];
-        for i in 0..24 {
-            b1[i] = u32::from_le_bytes([
-                b[i * 4],
-                b[i * 4 + 1],
-                b[i * 4 + 2],
-                b[i * 4 + 3],
-            ]);
-        }
-
-
-        assert_eq!(a1, b1);
+        assert_eq!(a, b);
     }
 
     // println!("done");

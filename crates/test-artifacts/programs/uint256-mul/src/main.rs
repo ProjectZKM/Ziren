@@ -9,49 +9,15 @@ use zkm2_zkvm::syscalls::sys_bigint;
 fn uint256_mul(x: &[u8; 32], y: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
     // println!("cycle-tracker-start: uint256_mul");
     let mut result = [0u32; 8];
-    let mut x_word: [u32; 8] = [0; 8];
-        for i in 0..8 {
-            x_word[i] = u32::from_le_bytes([
-                x[i * 4],
-                x[i * 4 + 1],
-                x[i * 4 + 2],
-                x[i * 4 + 3],
-            ]);
-        }
-    
-        let mut y_word: [u32; 8] = [0; 8];
-        for i in 0..8 {
-            y_word[i] = u32::from_le_bytes([
-                y[i * 4],
-                y[i * 4 + 1],
-                y[i * 4 + 2],
-                y[i * 4 + 3],
-            ]);
-        }
-    
-        let mut modulus_word: [u32; 8] = [0; 8];
-        for i in 0..8 {
-            modulus_word[i] = u32::from_le_bytes([
-                modulus[i * 4],
-                modulus[i * 4 + 1],
-                modulus[i * 4 + 2],
-                modulus[i * 4 + 3],
-            ]);
-        }
     sys_bigint(
         result.as_mut_ptr() as *mut [u32; 8],
         0,
-        x_word.as_ptr() as *const [u32; 8],
-        y_word.as_ptr() as *const [u32; 8],
-        modulus_word.as_ptr() as *const [u32; 8],
+        x.as_ptr() as *const [u32; 8],
+        y.as_ptr() as *const [u32; 8],
+        modulus.as_ptr() as *const [u32; 8],
     );
     // println!("cycle-tracker-end: uint256_mul");
-    //bytemuck::cast::<[u32; 8], [u8; 32]>(result)
-    let mut result_b: [u8; 32] = [0; 32];
-    for i in 0..8 {
-        result_b[i*4..i*4+4].copy_from_slice(&result[i].to_le_bytes()[0..]);
-    }
-    result_b
+    bytemuck::cast::<[u32; 8], [u8; 32]>(result)
 }
 
 fn biguint_to_bytes_le(x: BigUint) -> [u8; 32] {
