@@ -1403,6 +1403,7 @@ impl<'a> Executor<'a> {
 
         (next_pc, target_pc, 0, target_pc)
     }
+
     fn execute_jumpi(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
         let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
 
@@ -1415,6 +1416,7 @@ impl<'a> Executor<'a> {
 
         (next_pc, target_pc, 0, target_pc)
     }
+
     fn execute_jump_direct(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
         let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
         //todo: check if necessary
