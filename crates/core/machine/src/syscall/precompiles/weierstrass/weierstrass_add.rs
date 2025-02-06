@@ -476,56 +476,56 @@ mod tests {
     #[test]
     fn test_secp256k1_add_simple() {
         setup_logger();
-        let program = Program::from_elf(SECP256K1_ADD_ELF).unwrap();
+        let program = Program::from(SECP256K1_ADD_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_secp256r1_add_simple() {
         setup_logger();
-        let program = Program::from_elf(SECP256R1_ADD_ELF).unwrap();
+        let program = Program::from(SECP256R1_ADD_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bn254_add_simple() {
         setup_logger();
-        let program = Program::from_elf(BN254_ADD_ELF).unwrap();
+        let program = Program::from(BN254_ADD_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bn254_mul_simple() {
         setup_logger();
-        let program = Program::from_elf(BN254_MUL_ELF).unwrap();
+        let program = Program::from(BN254_MUL_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_secp256k1_mul_simple() {
         setup_logger();
-        let program = Program::from_elf(SECP256K1_MUL_ELF).unwrap();
+        let program = Program::from(SECP256K1_MUL_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bls12381_add_simple() {
         setup_logger();
-        let program = Program::from_elf(BLS12381_ADD_ELF).unwrap();
+        let program = Program::from(BLS12381_ADD_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bls12381_double_simple() {
         setup_logger();
-        let program = Program::from_elf(BLS12381_DOUBLE_ELF).unwrap();
+        let program = Program::from(BLS12381_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bls12381_mul_simple() {
         setup_logger();
-        let program = Program::from_elf(BLS12381_MUL_ELF).unwrap();
+        let program = Program::from(BLS12381_MUL_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

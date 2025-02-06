@@ -21,42 +21,42 @@ mod tests {
     #[test]
     fn test_bls12381_fp_ops() {
         utils::setup_logger();
-        let program = Program::from_elf(BLS12381_FP_ELF).unwrap();
+        let program = Program::from(BLS12381_FP_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bls12381_fp2_addsub() {
         utils::setup_logger();
-        let program = Program::from_elf(BLS12381_FP2_ADDSUB_ELF).unwrap();
+        let program = Program::from(BLS12381_FP2_ADDSUB_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bls12381_fp2_mul() {
         utils::setup_logger();
-        let program = Program::from_elf(BLS12381_FP2_MUL_ELF).unwrap();
+        let program = Program::from(BLS12381_FP2_MUL_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bn254_fp_ops() {
         utils::setup_logger();
-        let program = Program::from_elf(BN254_FP_ELF).unwrap();
+        let program = Program::from(BN254_FP_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bn254_fp2_addsub() {
         utils::setup_logger();
-        let program = Program::from_elf(BN254_FP2_ADDSUB_ELF).unwrap();
+        let program = Program::from(BN254_FP2_ADDSUB_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bn254_fp2_mul() {
         utils::setup_logger();
-        let program = Program::from_elf(BN254_FP2_MUL_ELF).unwrap();
+        let program = Program::from(BN254_FP2_MUL_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

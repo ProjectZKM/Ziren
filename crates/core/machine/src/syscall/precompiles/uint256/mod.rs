@@ -18,7 +18,7 @@ mod tests {
     #[test]
     fn test_uint256_mul() {
         utils::setup_logger();
-        let program = Program::from_elf(UINT256_MUL_ELF).unwrap();
+        let program = Program::from(UINT256_MUL_ELF).unwrap();
         run_test_io::<CpuProver<_, _>>(program, ZKMStdin::new()).unwrap();
     }
 

@@ -171,14 +171,14 @@ mod tests {
     #[test]
     pub fn test_uint256_mul_program_execute() {
         utils::setup_logger();
-        let program = Program::from_elf(U256XU2048_MUL_ELF).unwrap();
+        let program = Program::from(U256XU2048_MUL_ELF).unwrap();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
     #[test]
     fn test_uint256_mul() {
         utils::setup_logger();
-        let program = Program::from_elf(U256XU2048_MUL_ELF).unwrap();
+        let program = Program::from(U256XU2048_MUL_ELF).unwrap();
         run_test_io::<CpuProver<_, _>>(program, ZKMStdin::new()).unwrap();
     }
 

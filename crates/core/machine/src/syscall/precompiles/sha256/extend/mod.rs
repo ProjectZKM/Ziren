@@ -80,14 +80,14 @@ pub mod extend_tests {
     #[test]
     fn test_sha256_program() {
         utils::setup_logger();
-        let program = Program::from_elf(SHA2_ELF).unwrap();
+        let program = Program::from(SHA2_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_sha_extend_program() {
         utils::setup_logger();
-        let program = Program::from_elf(SHA_EXTEND_ELF).unwrap();
+        let program = Program::from(SHA_EXTEND_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

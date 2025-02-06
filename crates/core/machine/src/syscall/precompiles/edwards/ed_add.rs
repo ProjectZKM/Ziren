@@ -349,7 +349,7 @@ mod tests {
     #[test]
     pub fn test_ed_add_program_execute() {
         utils::setup_logger();
-        let program = Program::from_elf(ED_ADD_ELF).unwrap();
+        let program = Program::from(ED_ADD_ELF).unwrap();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
@@ -357,14 +357,14 @@ mod tests {
     #[test]
     fn test_ed_add_simple() {
         utils::setup_logger();
-        let program = Program::from_elf(ED_ADD_ELF).unwrap();
+        let program = Program::from(ED_ADD_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_ed25519_program() {
         utils::setup_logger();
-        let program = Program::from_elf(ED25519_ELF).unwrap();
+        let program = Program::from(ED25519_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

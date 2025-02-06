@@ -48,7 +48,7 @@ pub mod permute_tests {
     #[test]
     pub fn test_keccak_permute_program_execute() {
         utils::setup_logger();
-        let program = Program::from_elf(KECCAK_PERMUTE_ELF).unwrap();
+        let program = Program::from(KECCAK_PERMUTE_ELF).unwrap();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
     }
@@ -64,7 +64,7 @@ pub mod permute_tests {
     #[test]
     fn test_keccak_permute_program_prove() {
         utils::setup_logger();
-        let program = Program::from_elf(KECCAK_PERMUTE_ELF).unwrap();
+        let program = Program::from(KECCAK_PERMUTE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

@@ -107,8 +107,7 @@ impl ZKMCoreProofData {
 
 /// Get the number of cycles for a given program.
 pub fn get_cycles(elf: &[u8], stdin: &ZKMStdin) -> u64 {
-    let max_mem = 0x80000000;
-    let program = Program::from(elf, max_mem, vec![]).unwrap();
+    let program = Program::from(elf).unwrap();
     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
     runtime.write_vecs(&stdin.buffer);
     runtime.run_fast().unwrap();

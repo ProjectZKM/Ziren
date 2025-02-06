@@ -305,7 +305,7 @@ pub mod tests {
     #[test]
     fn test_ed_decompress() {
         utils::setup_logger();
-        let program = Program::from_elf(ED_DECOMPRESS_ELF).unwrap();
+        let program = Program::from(ED_DECOMPRESS_ELF).unwrap();
         utils::run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

@@ -571,7 +571,7 @@ mod tests {
 //
             let stdin = ZKMStdin::from(&compressed);
             let mut public_values = run_test_io::<CpuProver<_, _>>(
-                Program::from_elf(BLS12381_DECOMPRESS_ELF).unwrap(),
+                Program::from(BLS12381_DECOMPRESS_ELF).unwrap(),
                 stdin,
             )
             .unwrap();
@@ -605,7 +605,7 @@ mod tests {
             let inputs = ZKMStdin::from(&compressed);
 //
             let mut public_values = run_test_io::<CpuProver<_, _>>(
-                Program::from_elf(SECP256K1_DECOMPRESS_ELF).unwrap(),
+                Program::from(SECP256K1_DECOMPRESS_ELF).unwrap(),
                 inputs,
             )
             .unwrap();
@@ -634,7 +634,7 @@ mod tests {
             let inputs = ZKMStdin::from(compressed);
 //
             let mut public_values = run_test_io::<CpuProver<_, _>>(
-                Program::from_elf(SECP256R1_DECOMPRESS_ELF).unwrap(),
+                Program::from(SECP256R1_DECOMPRESS_ELF).unwrap(),
                 inputs,
             )
             .unwrap();

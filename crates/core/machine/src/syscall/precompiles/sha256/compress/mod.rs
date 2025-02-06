@@ -73,7 +73,7 @@ pub mod compress_tests {
     #[test]
     fn test_sha_compress_program() {
         setup_logger();
-        let program = Program::from_elf(SHA_COMPRESS_ELF).unwrap();
+        let program = Program::from(SHA_COMPRESS_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

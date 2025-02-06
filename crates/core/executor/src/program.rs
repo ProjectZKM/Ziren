@@ -48,9 +48,11 @@ impl Program {
     }
 
     /// Initialize a MIPS Program from an appropriate ELF file
-    pub fn from(input: &[u8], max_mem: u32, args: Vec<&str>) -> Result<Program> {
+    pub fn from(elf_code: &[u8]) -> Result<Program> {
+        let max_mem = 0x80000000; // todo: confirm it
+
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();
-        let elf = ElfBytes::<BigEndian>::minimal_parse(input)
+        let elf = ElfBytes::<BigEndian>::minimal_parse(elf_code)
             .map_err(|err| anyhow!("Elf parse error: {err}"))?;
         if elf.ehdr.class != Class::ELF32 {
             bail!("Not a 32-bit ELF");
@@ -128,7 +130,7 @@ impl Program {
                     let len = core::cmp::min(file_size - i, WORD_SIZE as u32);
                     for j in 0..len {
                         let offset = (offset + i + j) as usize;
-                        let byte = input.get(offset).context("Invalid segment offset")?;
+                        let byte = elf_code.get(offset).context("Invalid segment offset")?;
                         // todo: check it BIG_ENDIAN
                         word |= (*byte as u32) << (24 - j * 8);
                     }
@@ -155,20 +157,6 @@ impl Program {
             image,
             preprocessed_shape: None,
         })
-    }
-
-    /// Create a new [Program].
-
-    /// Disassemble a RV32IM ELF to a program that be executed by the VM from a file path.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if the file cannot be opened or read.
-    pub fn from_elf(path: &str) -> eyre::Result<Self> {
-        let mut elf_code = Vec::new();
-        std::fs::File::open(path)?.read_to_end(&mut elf_code)?;
-        let max_mem = 0x80000000;
-        Ok(Program::from(&elf_code, max_mem, vec![]).unwrap())
     }
 
     /// Custom logic for padding the trace to a power of two according to the proof shape.

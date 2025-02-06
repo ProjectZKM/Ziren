@@ -258,8 +258,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Get a program with an allowed preprocessed shape.
     pub fn get_program(&self, elf: &[u8]) -> eyre::Result<Program> {
-        let max_mem = 0x80000000;
-        let mut program = Program::from(elf, max_mem, vec![]).unwrap();
+        let mut program = Program::from(elf).unwrap();
         if let Some(core_shape_config) = &self.core_shape_config {
             core_shape_config.fix_preprocessed_shape(&mut program)?;
         }
@@ -1478,6 +1477,124 @@ pub mod tests {
         Ok(())
     }
 
+    pub fn test_e2e_with_deferred_proofs_prover<C: ZKMProverComponents>(
+        opts: ZKMProverOpts,
+    ) -> Result<()> {
+        // Test program which proves the Keccak-256 hash of various inputs.
+        let keccak_elf = test_artifacts::KECCAK256_ELF;
+
+        // Test program which verifies proofs of a vkey and a list of committed inputs.
+        let verify_elf = test_artifacts::VERIFY_PROOF_ELF;
+
+        tracing::info!("initializing prover");
+        let prover = ZKMProver::<C>::new();
+
+        tracing::info!("setup keccak elf");
+        let (keccak_pk, keccak_vk) = prover.setup(keccak_elf);
+
+        tracing::info!("setup verify elf");
+        let (verify_pk, verify_vk) = prover.setup(verify_elf);
+
+        tracing::info!("prove subproof 1");
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&1usize);
+        stdin.write(&vec![0u8, 0, 0]);
+        let deferred_proof_1 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
+        let pv_1 = deferred_proof_1.public_values.as_slice().to_vec().clone();
+
+        // Generate a second proof of keccak of various inputs.
+        tracing::info!("prove subproof 2");
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&3usize);
+        stdin.write(&vec![0u8, 1, 2]);
+        stdin.write(&vec![2, 3, 4]);
+        stdin.write(&vec![5, 6, 7]);
+        let deferred_proof_2 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
+        let pv_2 = deferred_proof_2.public_values.as_slice().to_vec().clone();
+
+        // Generate recursive proof of first subproof.
+        tracing::info!("compress subproof 1");
+        let deferred_reduce_1 = prover.compress(&keccak_vk, deferred_proof_1, vec![], opts)?;
+
+        // Generate recursive proof of second subproof.
+        tracing::info!("compress subproof 2");
+        let deferred_reduce_2 = prover.compress(&keccak_vk, deferred_proof_2, vec![], opts)?;
+
+        // Run verify program with keccak vkey, subproofs, and their committed values.
+        let mut stdin = ZKMStdin::new();
+        let vkey_digest = keccak_vk.hash_babybear();
+        let vkey_digest: [u32; 8] = vkey_digest
+            .iter()
+            .map(|n| n.as_canonical_u32())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        stdin.write(&vkey_digest);
+        stdin.write(&vec![pv_1.clone(), pv_2.clone(), pv_2.clone()]);
+        stdin.write_proof(deferred_reduce_1.clone(), keccak_vk.vk.clone());
+        stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
+        stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
+
+        tracing::info!("proving verify program (core)");
+        let verify_proof = prover.prove_core(&verify_pk, &stdin, opts, Default::default())?;
+        // let public_values = verify_proof.public_values.clone();
+
+        // Generate recursive proof of verify program
+        tracing::info!("compress verify program");
+        let verify_reduce = prover.compress(
+            &verify_vk,
+            verify_proof,
+            vec![deferred_reduce_1, deferred_reduce_2.clone(), deferred_reduce_2],
+            opts,
+        )?;
+        let reduce_pv: &RecursionPublicValues<_> =
+            verify_reduce.proof.public_values.as_slice().borrow();
+        println!("deferred_hash: {:?}", reduce_pv.deferred_proofs_digest);
+        println!("complete: {:?}", reduce_pv.is_complete);
+
+        tracing::info!("verify verify program");
+        prover.verify_compressed(&verify_reduce, &verify_vk)?;
+
+        let shrink_proof = prover.shrink(verify_reduce, opts)?;
+
+        tracing::info!("verify shrink");
+        prover.verify_shrink(&shrink_proof, &verify_vk)?;
+
+        tracing::info!("wrap bn254");
+        let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
+
+        tracing::info!("verify wrap bn254");
+        println!("verify wrap bn254 {:#?}", wrapped_bn254_proof.vk.commit);
+        prover.verify_wrap_bn254(&wrapped_bn254_proof, &verify_vk).unwrap();
+
+        Ok(())
+    }
+
+    /// Tests an end-to-end workflow of proving a program across the entire proof generation
+    /// pipeline.
+    ///
+    /// Add `FRI_QUERIES`=1 to your environment for faster execution. Should only take a few minutes
+    /// on a Mac M2. Note: This test always re-builds the plonk bn254 artifacts, so setting ZKM_DEV
+    /// is not needed.
+    #[test]
+    #[serial]
+    fn test_e2e() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        // TODO(mattstam): We should Test::Plonk here, but this uses the existing
+        // docker image which has a different API than the current. So we need to wait until the
+        // next release (v1.2.0+), and then switch it back.
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::All,
+        )
+    }
+
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
     /// pipeline.
     ///
@@ -1488,8 +1605,6 @@ pub mod tests {
     #[serial]
     fn test_e2e_hello_world() -> Result<()> {
         let elf = test_artifacts::HELLO_WORLD_ELF;
-        let mut elf_code = Vec::new();
-        File::open(elf).unwrap().read_to_end(&mut elf_code).unwrap();
 
         setup_logger();
         let opts = ZKMProverOpts::default();
@@ -1499,139 +1614,19 @@ pub mod tests {
         let prover = ZKMProver::<DefaultProverComponents>::new();
         test_e2e_prover::<DefaultProverComponents>(
             &prover,
-            &elf_code,
+            elf,
             ZKMStdin::default(),
             opts,
             Test::All,
         )
     }
 
-    /*
-        pub fn test_e2e_with_deferred_proofs_prover<C: ZKMProverComponents>(
-            opts: ZKMProverOpts,
-        ) -> Result<()> {
-            // Test program which proves the Keccak-256 hash of various inputs.
-            let keccak_elf = test_artifacts::KECCAK256_ELF;
-
-            // Test program which verifies proofs of a vkey and a list of committed inputs.
-            let verify_elf = test_artifacts::VERIFY_PROOF_ELF;
-
-            tracing::info!("initializing prover");
-            let prover = ZKMProver::<C>::new();
-
-            tracing::info!("setup keccak elf");
-            let (keccak_pk, keccak_vk) = prover.setup(keccak_elf);
-
-            tracing::info!("setup verify elf");
-            let (verify_pk, verify_vk) = prover.setup(verify_elf);
-
-            tracing::info!("prove subproof 1");
-            let mut stdin = ZKMStdin::new();
-            stdin.write(&1usize);
-            stdin.write(&vec![0u8, 0, 0]);
-            let deferred_proof_1 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
-            let pv_1 = deferred_proof_1.public_values.as_slice().to_vec().clone();
-
-            // Generate a second proof of keccak of various inputs.
-            tracing::info!("prove subproof 2");
-            let mut stdin = ZKMStdin::new();
-            stdin.write(&3usize);
-            stdin.write(&vec![0u8, 1, 2]);
-            stdin.write(&vec![2, 3, 4]);
-            stdin.write(&vec![5, 6, 7]);
-            let deferred_proof_2 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
-            let pv_2 = deferred_proof_2.public_values.as_slice().to_vec().clone();
-
-            // Generate recursive proof of first subproof.
-            tracing::info!("compress subproof 1");
-            let deferred_reduce_1 = prover.compress(&keccak_vk, deferred_proof_1, vec![], opts)?;
-
-            // Generate recursive proof of second subproof.
-            tracing::info!("compress subproof 2");
-            let deferred_reduce_2 = prover.compress(&keccak_vk, deferred_proof_2, vec![], opts)?;
-
-            // Run verify program with keccak vkey, subproofs, and their committed values.
-            let mut stdin = ZKMStdin::new();
-            let vkey_digest = keccak_vk.hash_babybear();
-            let vkey_digest: [u32; 8] = vkey_digest
-                .iter()
-                .map(|n| n.as_canonical_u32())
-                .collect::<Vec<_>>()
-                .try_into()
-                .unwrap();
-            stdin.write(&vkey_digest);
-            stdin.write(&vec![pv_1.clone(), pv_2.clone(), pv_2.clone()]);
-            stdin.write_proof(deferred_reduce_1.clone(), keccak_vk.vk.clone());
-            stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
-            stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
-
-            tracing::info!("proving verify program (core)");
-            let verify_proof = prover.prove_core(&verify_pk, &stdin, opts, Default::default())?;
-            // let public_values = verify_proof.public_values.clone();
-
-            // Generate recursive proof of verify program
-            tracing::info!("compress verify program");
-            let verify_reduce = prover.compress(
-                &verify_vk,
-                verify_proof,
-                vec![deferred_reduce_1, deferred_reduce_2.clone(), deferred_reduce_2],
-                opts,
-            )?;
-            let reduce_pv: &RecursionPublicValues<_> =
-                verify_reduce.proof.public_values.as_slice().borrow();
-            println!("deferred_hash: {:?}", reduce_pv.deferred_proofs_digest);
-            println!("complete: {:?}", reduce_pv.is_complete);
-
-            tracing::info!("verify verify program");
-            prover.verify_compressed(&verify_reduce, &verify_vk)?;
-
-            let shrink_proof = prover.shrink(verify_reduce, opts)?;
-
-            tracing::info!("verify shrink");
-            prover.verify_shrink(&shrink_proof, &verify_vk)?;
-
-            tracing::info!("wrap bn254");
-            let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
-
-            tracing::info!("verify wrap bn254");
-            println!("verify wrap bn254 {:#?}", wrapped_bn254_proof.vk.commit);
-            prover.verify_wrap_bn254(&wrapped_bn254_proof, &verify_vk).unwrap();
-
-            Ok(())
-        }
-
-        /// Tests an end-to-end workflow of proving a program across the entire proof generation
-        /// pipeline.
-        ///
-        /// Add `FRI_QUERIES`=1 to your environment for faster execution. Should only take a few minutes
-        /// on a Mac M2. Note: This test always re-builds the plonk bn254 artifacts, so setting ZKM_DEV
-        /// is not needed.
-        #[test]
-        #[serial]
-        fn test_e2e() -> Result<()> {
-            let elf = test_artifacts::FIBONACCI_ELF;
-            setup_logger();
-            let opts = ZKMProverOpts::default();
-            // TODO(mattstam): We should Test::Plonk here, but this uses the existing
-            // docker image which has a different API than the current. So we need to wait until the
-            // next release (v1.2.0+), and then switch it back.
-            let prover = ZKMProver::<DefaultProverComponents>::new();
-            test_e2e_prover::<DefaultProverComponents>(
-                &prover,
-                elf,
-                ZKMStdin::default(),
-                opts,
-                Test::All,
-            )
-        }
-
-        /// Tests an end-to-end workflow of proving a program across the entire proof generation
-        /// pipeline in addition to verifying deferred proofs.
-        #[test]
-        #[serial]
-        fn test_e2e_with_deferred_proofs() -> Result<()> {
-            setup_logger();
-            test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
-        }
-    */
+    /// Tests an end-to-end workflow of proving a program across the entire proof generation
+    /// pipeline in addition to verifying deferred proofs.
+    #[test]
+    #[serial]
+    fn test_e2e_with_deferred_proofs() -> Result<()> {
+        setup_logger();
+        test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
+    }
 }

@@ -503,28 +503,28 @@ pub mod tests {
     #[test]
     fn test_secp256k1_double_simple() {
         setup_logger();
-        let program = Program::from_elf(SECP256K1_DOUBLE_ELF).unwrap();
+        let program = Program::from(SECP256K1_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_secp256r1_double_simple() {
         setup_logger();
-        let program = Program::from_elf(SECP256R1_DOUBLE_ELF).unwrap();
+        let program = Program::from(SECP256R1_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bn254_double_simple() {
         setup_logger();
-        let program = Program::from_elf(BN254_DOUBLE_ELF).unwrap();
+        let program = Program::from(BN254_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
     #[test]
     fn test_bls12381_double_simple() {
         setup_logger();
-        let program = Program::from_elf(BLS12381_DOUBLE_ELF).unwrap();
+        let program = Program::from(BLS12381_DOUBLE_ELF).unwrap();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 }

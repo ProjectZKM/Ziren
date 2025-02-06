@@ -123,6 +123,6 @@ pub fn build_program_with_args(path: &str, args: BuildArgs) {
 #[macro_export]
 macro_rules! include_elf {
     ($arg:tt) => {
-        env!(concat!("ZKM_ELF_", $arg))
+        include_bytes!(env!(concat!("ZKM_ELF_", $arg)))
     };
 }
