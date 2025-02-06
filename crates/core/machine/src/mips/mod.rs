@@ -855,7 +855,7 @@ pub mod tests {
         // The jr instruction jumps to an address stored in a register.
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
+            Instruction::new(Opcode::ADD, 11, 0, 100, false, true),
             Instruction::new(Opcode::Jump, 0, 11, 0, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
@@ -870,7 +870,7 @@ pub mod tests {
         // The jal instruction jumps to an address and stores the return address in $ra.
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 31, 31, 0, false, true),
+            Instruction::new(Opcode::ADD, 31, 0, 0, false, true),
             Instruction::new(Opcode::Jumpi, 31, 100, 0, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
