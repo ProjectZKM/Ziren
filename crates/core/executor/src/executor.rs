@@ -2472,7 +2472,7 @@ mod tests {
         // Similar to jal, but jumps to an address stored in a register.
 
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
+            Instruction::new(Opcode::ADD, 11, 0, 100, false, true),
             Instruction::new(Opcode::Jump, 5, 11, 0, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
