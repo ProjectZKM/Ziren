@@ -885,7 +885,7 @@ pub mod tests {
         // Similar to jal, but jumps to an address stored in a register.
         setup_logger();
         let instructions = vec![
-            Instruction::new(Opcode::ADD, 5, 5, 0, false, true),
+            Instruction::new(Opcode::ADD, 5, 0, 0, false, true),
             Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
             Instruction::new(Opcode::Jump, 5, 11, 0, false, true),
         ];
