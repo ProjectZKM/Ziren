@@ -2415,27 +2415,73 @@ mod tests {
         assert_eq!(runtime.register(Register::RA), 0);
     }
 
-    // #[test]
-    // fn test_jalr() {
-    //     //   addi x11, x11, 100
-    //     //   jalr x5, x11, 8
-    //     //
-    //     // `JALR rd offset(rs)` reads the value at rs, adds offset to it and uses it as the
-    //     // destination address. It then stores the address of the next instruction in rd in case
-    //     // we'd want to come back here.
-    //
-    //     let instructions = vec![
-    //         Instruction::new(Opcode::ADD, 11, 11, 100, 0, false, true),
-    //         Instruction::new(Opcode::JALR, 5, 11, 8, 0, false, true),
-    //     ];
-    //     let program = Program::new(instructions, 0, 0);
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    //     assert_eq!(runtime.registers()[Register::X5 as usize], 8);
-    //     assert_eq!(runtime.registers()[Register::X11 as usize], 100);
-    //     assert_eq!(runtime.state.pc, 108);
-    // }
-    //
+    #[test]
+    fn test_j() {
+        //   j 100
+        //
+        // The j instruction performs an unconditional jump to a specified address.
+
+        let instructions = vec![
+            Instruction::new(Opcode::Jumpi, 0, 100, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.next_pc, 100);
+    }
+
+    #[test]
+    fn test_jr() {
+        //   addi x11, x11, 100
+        //   jr x11
+        //
+        // The jr instruction jumps to an address stored in a register.
+
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
+            Instruction::new(Opcode::Jump, 0, 11, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.next_pc, 100);
+    }
+
+    #[test]
+    fn test_jal() {
+        //   addi x11, x11, 100
+        //   jal x11
+        //
+        // The jal instruction jumps to an address and stores the return address in $ra.
+
+        let instructions = vec![
+            Instruction::new(Opcode::Jumpi, 31, 100, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.next_pc, 100);
+        assert_eq!(runtime.register(31.into()), 8);
+    }
+
+    #[test]
+    fn test_jalr() {
+        //   addi x11, x11, 100
+        //   jalr x11
+        //
+        // Similar to jal, but jumps to an address stored in a register.
+
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
+            Instruction::new(Opcode::Jump, 5, 11, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.state.next_pc, 100);
+        assert_eq!(runtime.register(5.into()), 12);
+    }
+
     // fn simple_op_code_test(opcode: Opcode, expected: u32, a: u32, b: u32) {
     //     let instructions = vec![
     //         Instruction::new(Opcode::ADD, 10, 0, a, 0, false, true),

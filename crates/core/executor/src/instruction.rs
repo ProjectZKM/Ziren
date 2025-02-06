@@ -286,9 +286,9 @@ impl Instruction {
             (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)), // CLZ: rd = count_leading_zeros(rs)
             // (0b011100, 0b100001) => Ok(Operation::Count(true, rs, rd)), // CLO: rd = count_leading_ones(rs)
             (0b011100, 0b100001) => Ok(Self::new(Opcode::CLO, rd, rs, 0, false, true)), // CLO: rd = count_leading_ones(rs)
-            // (0x00, 0x08) => Ok(Operation::Jump(0u8, rs)),                               // JR
+            // (0x00, 0x08) => Ok(Operation::Jump(0u8, rs)), // JR
             (0x00, 0x08) => Ok(Self::new(Opcode::Jump, 0u8, rs, 0, false, true)), // JR
-            // (0x00, 0x09) => Ok(Operation::Jump(rd, rs)),                          // JALR
+            // (0x00, 0x09) => Ok(Operation::Jump(rd, rs)), // JALR
             (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)), // JALR
             (0x01, _) => {
                 if rt == 1 {
@@ -322,7 +322,7 @@ impl Instruction {
             }
             // (0x02, _) => Ok(Operation::Jumpi(0u8, target)), // J
             (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true)), // J
-            // (0x03, _) => Ok(Operation::Jumpi(31u8, target)),                       // JAL
+            // (0x03, _) => Ok(Operation::Jumpi(31u8, target)), // JAL
             (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true)), // JAL
             // (0x04, _) => Ok(Operation::Branch(BranchCond::EQ, rs, rt, offset)),     // BEQ
             (0x04, _) => Ok(Self::new(Opcode::BEQ, rs as u8, rt, offset_ext16.overflowing_shl(2).0, false, true)), // BEQ

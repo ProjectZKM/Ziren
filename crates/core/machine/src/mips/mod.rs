@@ -835,6 +835,65 @@ pub mod tests {
     }
 
     #[test]
+    fn test_j_prove() {
+        //   j 100
+        //
+        // The j instruction performs an unconditional jump to a specified address.
+        setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::Jumpi, 0, 100, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_jr_prove() {
+        //   addi x11, x11, 100
+        //   jr x11
+        //
+        // The jr instruction jumps to an address stored in a register.
+        setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
+            Instruction::new(Opcode::Jump, 0, 11, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_jal_prove() {
+        //   addi x11, x11, 100
+        //   jal x11
+        //
+        // The jal instruction jumps to an address and stores the return address in $ra.
+        setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 31, 31, 0, false, true),
+            Instruction::new(Opcode::Jumpi, 31, 100, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_jalr_prove() {
+        //   addi x11, x11, 100
+        //   jalr x11
+        //
+        // Similar to jal, but jumps to an address stored in a register.
+        setup_logger();
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 5, 5, 0, false, true),
+            Instruction::new(Opcode::ADD, 11, 11, 100, false, true),
+            Instruction::new(Opcode::Jump, 5, 11, 0, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
     fn test_hello_world_prove_simple() {
         setup_logger();
         let program = hello_world_program();
