@@ -841,6 +841,7 @@ pub mod tests {
         // The j instruction performs an unconditional jump to a specified address.
         setup_logger();
         let instructions = vec![
+            Instruction::new(Opcode::ADD, 11, 0, 100, false, true),
             Instruction::new(Opcode::Jumpi, 0, 100, 0, true, true),
         ];
         let program = Program::new(instructions, 0, 0);
