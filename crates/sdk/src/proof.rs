@@ -1,0 +1,173 @@
+use std::{fmt::Debug, fs::File, path::Path};
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use zkm2_core_executor::ZKMReduceProof;
+use zkm2_core_machine::io::ZKMStdin;
+use zkm2_primitives::io::ZKMPublicValues;
+use strum_macros::{EnumDiscriminants, EnumTryAs};
+
+use zkm2_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
+use zkm2_stark::{MachineVerificationError, ShardProof};
+
+/// A proof generated with ZKM of a particular proof mode.
+#[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
+#[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
+#[strum_discriminants(name(ZKMProofKind))]
+pub enum ZKMProof {
+    #[strum_discriminants(default)]
+    Core(Vec<ShardProof<CoreSC>>),
+    Compressed(Box<ZKMReduceProof<InnerSC>>),
+    Plonk(PlonkBn254Proof),
+    Groth16(Groth16Bn254Proof),
+}
+
+/// A proof generated with ZKM, bundled together with stdin, public values, and the ZKM version.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZKMProofWithPublicValues {
+    pub proof: ZKMProof,
+    pub stdin: ZKMStdin,
+    pub public_values: ZKMPublicValues,
+    pub zkm2_version: String,
+}
+
+impl ZKMProofWithPublicValues {
+    /// Saves the proof to a path.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        bincode::serialize_into(File::create(path).expect("failed to open file"), self)
+            .map_err(Into::into)
+    }
+
+    /// Loads a proof from a path.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        bincode::deserialize_from(File::open(path).expect("failed to open file"))
+            .map_err(Into::into)
+    }
+
+    /// Returns the raw proof as a string.
+    pub fn raw(&self) -> String {
+        match &self.proof {
+            ZKMProof::Plonk(plonk) => plonk.raw_proof.clone(),
+            ZKMProof::Groth16(groth16) => groth16.raw_proof.clone(),
+            _ => unimplemented!(),
+        }
+    }
+
+    /// For Plonk or Groth16 proofs, returns the proof in a byte encoding the onchain verifier
+    /// accepts. The bytes consist of the first four bytes of Plonk vkey hash followed by the
+    /// encoded proof, in a form optimized for onchain verification.
+    pub fn bytes(&self) -> Vec<u8> {
+        match &self.proof {
+            ZKMProof::Plonk(plonk_proof) => {
+                if plonk_proof.encoded_proof.is_empty() {
+                    // If the proof is empty, then this is a mock proof. The mock ZKM verifier
+                    // expects an empty byte array for verification, so return an empty byte array.
+                    return Vec::new();
+                }
+
+                let proof_bytes =
+                    hex::decode(&plonk_proof.encoded_proof).expect("Invalid Plonk proof");
+                [plonk_proof.plonk_vkey_hash[..4].to_vec(), proof_bytes].concat()
+            }
+            ZKMProof::Groth16(groth16_proof) => {
+                if groth16_proof.encoded_proof.is_empty() {
+                    // If the proof is empty, then this is a mock proof. The mock ZKM verifier
+                    // expects an empty byte array for verification, so return an empty byte array.
+                    return Vec::new();
+                }
+
+                let proof_bytes =
+                    hex::decode(&groth16_proof.encoded_proof).expect("Invalid Groth16 proof");
+                [groth16_proof.groth16_vkey_hash[..4].to_vec(), proof_bytes].concat()
+            }
+            _ => unimplemented!("only Plonk and Groth16 proofs are verifiable onchain"),
+        }
+    }
+}
+
+pub type ZKMCoreProofVerificationError = MachineVerificationError<CoreSC>;
+
+pub type ZKMCompressedProofVerificationError = MachineVerificationError<InnerSC>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plonk_proof_bytes() {
+        let plonk_proof = ZKMProofWithPublicValues {
+            proof: ZKMProof::Plonk(PlonkBn254Proof {
+                encoded_proof: "ab".to_string(),
+                plonk_vkey_hash: [0; 32],
+                public_inputs: ["".to_string(), "".to_string()],
+                raw_proof: "".to_string(),
+            }),
+            stdin: ZKMStdin::new(),
+            public_values: ZKMPublicValues::new(),
+            zkm2_version: "".to_string(),
+        };
+        let expected_bytes = [vec![0, 0, 0, 0], hex::decode("ab").unwrap()].concat();
+        assert_eq!(plonk_proof.bytes(), expected_bytes);
+    }
+
+    #[test]
+    fn test_groth16_proof_bytes() {
+        let groth16_proof = ZKMProofWithPublicValues {
+            proof: ZKMProof::Groth16(Groth16Bn254Proof {
+                encoded_proof: "ab".to_string(),
+                groth16_vkey_hash: [0; 32],
+                public_inputs: ["".to_string(), "".to_string()],
+                raw_proof: "".to_string(),
+            }),
+            stdin: ZKMStdin::new(),
+            public_values: ZKMPublicValues::new(),
+            zkm2_version: "".to_string(),
+        };
+        let expected_bytes = [vec![0, 0, 0, 0], hex::decode("ab").unwrap()].concat();
+        assert_eq!(groth16_proof.bytes(), expected_bytes);
+    }
+
+    #[test]
+    fn test_mock_plonk_proof_bytes() {
+        let mock_plonk_proof = ZKMProofWithPublicValues {
+            proof: ZKMProof::Plonk(PlonkBn254Proof {
+                encoded_proof: "".to_string(),
+                plonk_vkey_hash: [0; 32],
+                public_inputs: ["".to_string(), "".to_string()],
+                raw_proof: "".to_string(),
+            }),
+            stdin: ZKMStdin::new(),
+            public_values: ZKMPublicValues::new(),
+            zkm2_version: "".to_string(),
+        };
+        assert_eq!(mock_plonk_proof.bytes(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_mock_groth16_proof_bytes() {
+        let mock_groth16_proof = ZKMProofWithPublicValues {
+            proof: ZKMProof::Groth16(Groth16Bn254Proof {
+                encoded_proof: "".to_string(),
+                groth16_vkey_hash: [0; 32],
+                public_inputs: ["".to_string(), "".to_string()],
+                raw_proof: "".to_string(),
+            }),
+            stdin: ZKMStdin::new(),
+            public_values: ZKMPublicValues::new(),
+            zkm2_version: "".to_string(),
+        };
+        assert_eq!(mock_groth16_proof.bytes(), Vec::<u8>::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "only Plonk and Groth16 proofs are verifiable onchain")]
+    fn test_core_proof_bytes_unimplemented() {
+        let core_proof = ZKMProofWithPublicValues {
+            proof: ZKMProof::Core(vec![]),
+            stdin: ZKMStdin::new(),
+            public_values: ZKMPublicValues::new(),
+            zkm2_version: "".to_string(),
+        };
+        core_proof.bytes();
+    }
+}
