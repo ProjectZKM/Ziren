@@ -116,30 +116,27 @@ func (p *Poseidon2BabyBearChip) externalLinearLayer(state *[BABYBEAR_WIDTH]babyb
 }
 
 func (p *Poseidon2BabyBearChip) diffusionPermuteMut(state *[BABYBEAR_WIDTH]babybear.Variable) {
+// V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/4, 1/8, 1/2^27, -1/2^8, -1/16, -1/2^27]
+// V = [2013265919, 1, 2, 1006632961, 3, 4, 1006632960, 2013265918, 2013265917, 2005401601, 1509949441, 1761607681, 2013265906, 7864320, 125829120, 15]
 	matInternalDiagM1 := [BABYBEAR_WIDTH]babybear.Variable{
 		babybear.NewFConst("2013265919"),
 		babybear.NewFConst("1"),
 		babybear.NewFConst("2"),
+		babybear.NewFConst("1006632961"),
+		babybear.NewFConst("3"),
 		babybear.NewFConst("4"),
-		babybear.NewFConst("8"),
-		babybear.NewFConst("16"),
-		babybear.NewFConst("32"),
-		babybear.NewFConst("64"),
-		babybear.NewFConst("128"),
-		babybear.NewFConst("256"),
-		babybear.NewFConst("512"),
-		babybear.NewFConst("1024"),
-		babybear.NewFConst("2048"),
-		babybear.NewFConst("4096"),
-		babybear.NewFConst("8192"),
-		babybear.NewFConst("32768"),
+		babybear.NewFConst("1006632960"),
+		babybear.NewFConst("2013265918"),
+		babybear.NewFConst("2013265917"),
+		babybear.NewFConst("2005401601"),
+		babybear.NewFConst("1509949441"),
+		babybear.NewFConst("1761607681"),
+		babybear.NewFConst("2013265906"),
+		babybear.NewFConst("7864320"),
+		babybear.NewFConst("125829120"),
+		babybear.NewFConst("15"),
 	}
-	montyInverse := babybear.NewFConst("943718400")
 	p.matmulInternal(state, &matInternalDiagM1)
-	for i := 0; i < BABYBEAR_WIDTH; i++ {
-		state[i] = p.fieldApi.MulF(state[i], montyInverse)
-	}
-
 }
 
 func (p *Poseidon2BabyBearChip) matmulInternal(
