@@ -25,6 +25,7 @@ ark-ec = { version = "0.4.0", optional = true }
 
 [dev-dependencies]
 zkm2-sdk = { workspace = true }
+test-artifacts = { workspace = true }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
 

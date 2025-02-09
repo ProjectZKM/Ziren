@@ -1,4 +1,5 @@
-use zkm2_sdk::ZKMProofWithPublicValues;
+use test_artifacts::FIBONACCI_ELF;
+use zkm2_sdk::{HashableKey, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 #[test]
 fn test_verify_groth16() {
@@ -39,11 +40,6 @@ fn test_verify_plonk() {
 #[test]
 #[cfg(feature = "ark")]
 fn test_ark_groth16() {
-    use ark_bn254::Bn254;
-    use ark_groth16::{r1cs_to_qap::LibsnarkReduction, Groth16};
-
-    use crate::{decode_zkm2_vkey_hash, groth16::ark_converter::*, hash_public_inputs};
-
     // Location of the serialized ZKMProofWithPublicValues. See README.md for more information.
     let proof_file = "test_binaries/fibonacci-groth16.bin";
 
@@ -56,14 +52,34 @@ fn test_ark_groth16() {
     // This vkey hash was derived by calling `vk.bytes32()` on the verifying key.
     let vkey_hash = "0x00e60860c07bfc6e4c480286c0ddbb879674eb47f84b4ef041cf858b17aa0ed1";
 
-    let proof = load_ark_proof_from_bytes(&proof[4..]).unwrap();
-    let vkey = load_ark_groth16_verifying_key_from_bytes(&crate::GROTH16_VK_BYTES).unwrap();
+    let valid = crate::Groth16Verifier::ark_verify(&proof, &public_inputs, vkey_hash, &crate::GROTH16_VK_BYTES)
+        .expect("Groth16 proof is invalid");
+    assert!(valid);
+}
 
-    let public_inputs = load_ark_public_inputs_from_bytes(
-        &decode_zkm2_vkey_hash(vkey_hash).unwrap(),
-        &hash_public_inputs(&public_inputs),
-    );
+// RUST_LOG=debug FRI_QUERIES=1 cargo test -r test_e2e_ark_groth16 --features ark
+#[test]
+#[cfg(feature = "ark")]
+fn test_e2e_ark_groth16() {
+    // Set up the pk and vk.
+    let client = ProverClient::cpu();
+    let (pk, vk) = client.setup(FIBONACCI_ELF);
 
-    Groth16::<Bn254, LibsnarkReduction>::verify_proof(&vkey.into(), &proof, &public_inputs)
-        .unwrap();
+    // Generate the Groth16 proof.
+    std::env::set_var("ZKM_DEV", "true");
+    let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
+
+    // Extract the proof and public inputs.
+    let proof = zkm2_proof_with_public_values.bytes();
+    let public_inputs = zkm2_proof_with_public_values.public_values.to_vec();
+
+    // Get the vkey hash.
+    let vkey_hash = vk.bytes32();
+
+    crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &crate::GROTH16_VK_BYTES)
+        .expect("Groth16 proof is invalid");
+
+    let valid = crate::Groth16Verifier::ark_verify(&proof, &public_inputs, &vkey_hash, &crate::GROTH16_VK_BYTES)
+        .expect("Groth16 proof is invalid");
+    assert!(valid);
 }

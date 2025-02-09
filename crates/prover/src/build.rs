@@ -52,7 +52,7 @@ pub fn try_build_groth16_bn254_artifacts_dev(
 pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap()
-        .join(".sp1")
+        .join(".zkm")
         .join("circuits")
         .join("dev")
 }
@@ -61,7 +61,7 @@ pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
 pub fn groth16_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap()
-        .join(".sp1")
+        .join(".zkm")
         .join("circuits")
         .join("dev")
 }

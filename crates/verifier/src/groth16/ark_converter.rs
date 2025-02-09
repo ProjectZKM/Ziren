@@ -23,6 +23,16 @@ pub enum ArkGroth16Error {
     G2CompressionError,
     #[error("Invalid input")]
     InvalidInput,
+    #[error("Invalid data")]
+    InvalidData,
+    #[error("Invalid program vkey hash")]
+    InvalidProgramVkeyHash,
+    #[error("Proof verification failed")]
+    ProofVerificationFailed,
+    #[error("Groth16 vkey hash mismatch")]
+    Groth16VkeyHashMismatch,
+    #[error("General error")]
+    GeneralError(#[from] crate::error::Error),
 }
 
 /// Convert the endianness of a byte array, chunk by chunk.
