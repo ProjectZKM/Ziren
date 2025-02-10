@@ -74,7 +74,7 @@ impl ProverClient {
     pub fn new() -> Self {
         #[allow(unreachable_code)]
         match env::var("ZKM_PROVER").unwrap_or("local".to_string()).to_lowercase().as_str() {
-            // todo
+            // TODO: Anyone can implement it when a mock prover is needed.
             // "mock" => Self { prover: Box::new(MockProver::new()) },
             "local" => {
                 #[cfg(debug_assertions)]
@@ -86,7 +86,7 @@ impl ProverClient {
                     prover: Box::new(CudaProver::new(ZKMProver::new())),
                 }
             }
-            // todo
+            // TODO: Anyone can implement it when a network prover is needed.
             // "network" => {
             //     let private_key = env::var("ZKM_PRIVATE_KEY")
             //         .expect("ZKM_PRIVATE_KEY must be set for remote proving");
