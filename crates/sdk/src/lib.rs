@@ -552,6 +552,20 @@ mod tests {
         }
     }
 
+    // RUST_LOG=debug ZKM_DEV=true FRI_QUERIES=1 cargo test -r test_e2e_prove_groth16
+    #[test]
+    fn test_e2e_prove_groth16() {
+        utils::setup_logger();
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_ELF;
+        let (pk, vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let mut proof = client.prove(&pk, stdin).groth16().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+    }
+
     // #[test]
     // fn test_e2e_prove_plonk_mock() {
     //     utils::setup_logger();

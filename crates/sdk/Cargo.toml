@@ -86,6 +86,7 @@ network-v2 = [
   "dep:backoff",
 ]
 # cuda = ["zkm2-cuda"]
+cuda = []
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = [

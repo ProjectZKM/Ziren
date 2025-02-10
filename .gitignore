@@ -1,6 +1,12 @@
-/target
+target
 crates/test-artifacts/programs/target/
-/crates/test-artifacts/programs/Cargo.lock
+crates/test-artifacts/programs/Cargo.lock
 .idea
 *.log
-*.bin
+
+# Proofs
+**/proof-with-pis.bin
+**/proof-with-io.bin
+**/program.bin
+**/stdin.bin
+

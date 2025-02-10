@@ -28,6 +28,7 @@ members = [
     "crates/sdk",
     "crates/verifier",
 ]
+exclude = ["examples/target"]
 resolver = "2"
 
 

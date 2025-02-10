@@ -43,7 +43,7 @@ pub fn try_build_groth16_bn254_artifacts_dev(
     template_proof: &ShardProof<OuterSC>,
 ) -> PathBuf {
     let build_dir = groth16_bn254_artifacts_dev_dir();
-    println!("[sp1] building groth16 bn254 artifacts in development mode");
+    println!("[zkm2] building groth16 bn254 artifacts in development mode");
     build_groth16_bn254_artifacts(template_vk, template_proof, &build_dir);
     build_dir
 }
@@ -52,7 +52,7 @@ pub fn try_build_groth16_bn254_artifacts_dev(
 pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap()
-        .join(".zkm")
+        .join(".zkm2")
         .join("circuits")
         .join("dev")
 }
@@ -61,7 +61,7 @@ pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
 pub fn groth16_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap()
-        .join(".zkm")
+        .join(".zkm2")
         .join("circuits")
         .join("dev")
 }
