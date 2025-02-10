@@ -1,6 +1,6 @@
 //! # ZKM2 SDK
 //!
-//! A library for interacting with the ZKM2 RISC-V zkVM.
+//! A library for interacting with the ZKM2 MIPS zkVM.
 //!
 //! Visit the [Getting Started](https://succinctlabs.github.io/zkm2/getting-started.html) section
 //! in the official ZKM2 documentation for a quick start guide.
@@ -74,6 +74,7 @@ impl ProverClient {
     pub fn new() -> Self {
         #[allow(unreachable_code)]
         match env::var("ZKM_PROVER").unwrap_or("local".to_string()).to_lowercase().as_str() {
+            // todo
             // "mock" => Self { prover: Box::new(MockProver::new()) },
             "local" => {
                 #[cfg(debug_assertions)]
@@ -85,6 +86,7 @@ impl ProverClient {
                     prover: Box::new(CudaProver::new(ZKMProver::new())),
                 }
             }
+            // todo
             // "network" => {
             //     let private_key = env::var("ZKM_PRIVATE_KEY")
             //         .expect("ZKM_PRIVATE_KEY must be set for remote proving");
