@@ -6308,6 +6308,7 @@ dependencies = [
  "substrate-bn-succinct",
  "test-artifacts",
  "thiserror 2.0.11",
+ "zkm2-prover",
  "zkm2-sdk",
 ]
 

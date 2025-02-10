@@ -564,7 +564,7 @@ mod tests {
         let stdin = ZKMStdin::new();
 
         // Generate proof & verify.
-        let mut proof = client.prove(&pk, stdin).groth16().run().unwrap();
+        let proof = client.prove(&pk, stdin).groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();
     }
 

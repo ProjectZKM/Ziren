@@ -100,7 +100,7 @@ impl Groth16Verifier {
         }
 
         let proof = load_ark_proof_from_bytes(&proof[4..])?;
-        let vkey = load_ark_groth16_verifying_key_from_bytes(&crate::GROTH16_VK_BYTES)?;
+        let vkey = load_ark_groth16_verifying_key_from_bytes(groth16_vk)?;
 
         let zkm2_vkey_hash = decode_zkm2_vkey_hash(zkm2_vkey_hash).map_err(
             |_| ArkGroth16Error::InvalidProgramVkeyHash,
