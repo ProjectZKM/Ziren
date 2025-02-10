@@ -1,4 +1,4 @@
-use zkm2_sdk::{HashableKey, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm2_sdk::ZKMProofWithPublicValues;
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
