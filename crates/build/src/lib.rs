@@ -6,7 +6,7 @@ pub use build::{execute_build_program, generate_elf_paths};
 
 use clap::Parser;
 
-pub const BUILD_TARGET: &str = "mips-zkm-zkvm-elf";
+pub const BUILD_TARGET: &str = "mipsel-zkm-zkvm-elf";
 const DEFAULT_TAG: &str = "latest";
 pub const DEFAULT_OUTPUT_DIR: &str = "elf";
 pub const HELPER_TARGET_SUBDIR: &str = "elf-compilation";
