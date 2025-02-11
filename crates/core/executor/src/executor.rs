@@ -378,7 +378,7 @@ impl<'a> Executor<'a> {
     #[must_use]
     pub fn byte(&mut self, addr: u32) -> u8 {
         let word = self.word(addr - addr % 4);
-        (word >> (24 - (addr % 4) * 8)) as u8
+        (word >> ((addr % 4) * 8)) as u8
     }
 
     /// Get the current timestamp for a given memory access position.
