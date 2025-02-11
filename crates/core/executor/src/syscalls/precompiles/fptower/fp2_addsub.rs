@@ -16,6 +16,19 @@ pub struct Fp2AddSubSyscall<P> {
     _marker: PhantomData<P>,
 }
 
+pub fn biguint_to_fixed_length_u32_array(biguint: &BigUint, length: usize) -> Vec<u32> {
+    let digits = biguint.to_u32_digits();
+
+    let mut array = vec![0u32; length];
+
+    let start_index = length.saturating_sub(digits.len());
+    for (i, &digit) in digits.iter().enumerate() {
+        array[start_index + i] = digit;
+    }
+
+    array
+}
+
 impl<P> Fp2AddSubSyscall<P> {
     pub const fn new(op: FieldOperation) -> Self {
         Self { op, _marker: PhantomData }
@@ -63,10 +76,10 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
             _ => panic!("Invalid operation"),
         };
 
-        let mut result =
-            c0.to_u32_digits().into_iter().chain(c1.to_u32_digits()).collect::<Vec<u32>>();
 
-        result.resize(num_words, 0);
+        let mut result = biguint_to_fixed_length_u32_array(&c0, num_words / 2);
+        result.extend_from_slice(&biguint_to_fixed_length_u32_array(&c1, num_words / 2));
+
         let x_memory_records = rt.mw_slice(x_ptr, &result);
 
         let lookup_id = rt.syscall_lookup_id;
