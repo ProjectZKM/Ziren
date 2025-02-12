@@ -245,25 +245,25 @@ impl Instruction {
             //     rt,
             //     rd,
             // )), // MULT: (hi, lo) = rt * rs
-            (0b000000, 0b011000) => Ok(Self::new(Opcode::MULT, rd, rt, rs, false, false)), // MULT: (hi, lo) = rt * rs
+            (0b000000, 0b011000) => Ok(Self::new(Opcode::MULT, 32, rt, rs, false, false)), // MULT: (hi, lo) = rt * rs
             // (0b000000, 0b011001) => Ok(Operation::BinaryArithmetic(
             //     BinaryOperator::MULTU,
             //     rs,
             //     rt,
             //     rd,
             // )), // MULTU: (hi, lo) = rt * rs
-            (0b000000, 0b011001) => Ok(Self::new(Opcode::MULTU, rd, rt, rs, false, false)), // MULTU: (hi, lo) = rt * rs
+            (0b000000, 0b011001) => Ok(Self::new(Opcode::MULTU, 32, rt, rs, false, false)), // MULTU: (hi, lo) = rt * rs
             // (0b000000, 0b011010) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::DIV, rs, rt, rd))
             // } // DIV: (hi, lo) = rt / rs
-            (0b000000, 0b011010) => Ok(Self::new(Opcode::DIV, rd, rs, rt, false, false)), // DIV: (hi, lo) = rs / rt
+            (0b000000, 0b011010) => Ok(Self::new(Opcode::DIV, 32, rs, rt, false, false)), // DIV: (hi, lo) = rs / rt
             // (0b000000, 0b011011) => Ok(Operation::BinaryArithmetic(
             //     BinaryOperator::DIVU,
             //     rs,
             //     rt,
             //     rd,
             // )), // DIVU: (hi, lo) = rt / rs
-            (0b000000, 0b011011) => Ok(Self::new(Opcode::DIVU, rd, rs, rt, false, false)), // DIVU: (hi, lo) = rs / rt
+            (0b000000, 0b011011) => Ok(Self::new(Opcode::DIVU, 32, rs, rt, false, false)), // DIVU: (hi, lo) = rs / rt
             // (0b000000, 0b010000) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::MFHI, 33, 0, rd))
             // } // MFHI: rd = hi
