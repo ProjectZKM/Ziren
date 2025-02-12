@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKM2ProofWithPublicValues, SP1Stdin};
+use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("fibonacci-program");
@@ -45,7 +45,7 @@ fn main() {
     // Test a round trip of proof serialization and deserialization.
     proof.save("proof-with-pis.bin").expect("saving proof failed");
     let deserialized_proof =
-        ZKM2ProofWithPublicValues::load("proof-with-pis.bin").expect("loading proof failed");
+        ZKMProofWithPublicValues::load("proof-with-pis.bin").expect("loading proof failed");
 
     // Verify the deserialized proof.
     client.verify(&deserialized_proof, &vk).expect("verification failed");

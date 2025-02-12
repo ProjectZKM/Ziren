@@ -295,7 +295,7 @@ impl ProverClient {
         ZKM_CIRCUIT_VERSION.to_string()
     }
 
-    /// Setup a program to be proven and verified by the ZKM RISC-V zkVM by computing the proving
+    /// Setup a program to be proven and verified by the ZKM MIPS zkVM by computing the proving
     /// and verifying keys.
     ///
     /// The proving key and verifying key essentially embed the program, as well as other auxiliary

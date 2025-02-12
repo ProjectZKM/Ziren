@@ -18,7 +18,7 @@ fn main() {
     let (mut public_values, execution_report) = client.execute(ELF, stdin).run().unwrap();
 
     // Print the total number of cycles executed and the full execution report with a breakdown of
-    // the RISC-V opcode and syscall counts.
+    // the MIPS opcode and syscall counts.
     println!(
         "Executed program with {} cycles",
         execution_report.total_instruction_count() + execution_report.total_syscall_count()
