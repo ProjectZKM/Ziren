@@ -938,7 +938,7 @@ impl<'a> Executor<'a> {
                     self.report.event_counts[Opcode::SLT] += 2;
                 }
                 Opcode::DIVU | Opcode::DIV => {
-                    self.report.event_counts[Opcode::MUL] += 1;
+                    self.report.event_counts[Opcode::MUL] += 2;
                     self.report.event_counts[Opcode::ADD] += 2;
                     self.report.event_counts[Opcode::SLTU] += 1;
                 }
@@ -959,6 +959,18 @@ impl<'a> Executor<'a> {
 
                 if self.print_report && !self.unconstrained {
                     self.report.syscall_counts[syscall] += 1;
+                }
+
+                // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
+                // Other syscalls are not allowed because they can lead to non-deterministic
+                // behavior, especially since many syscalls modify memory in place,
+                // which is not permitted in unconstrained mode. This will result in
+                // non-zero memory interactions when generating a proof.
+
+                if self.unconstrained
+                    && (syscall != SyscallCode::EXIT_UNCONSTRAINED && syscall != SyscallCode::WRITE)
+                {
+                    return Err(ExecutionError::InvalidSyscallUsage(syscall_id as u64));
                 }
 
                 // Update the syscall counts.
@@ -1137,17 +1149,17 @@ impl<'a> Executor<'a> {
 
     fn execute_teq(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (rs, rt) = (
+            (instruction.op_a as u8).into(),
             (instruction.op_b as u8).into(),
-            (instruction.op_c as u8).into(),
         );
 
-        let b = self.rr(rs, MemoryAccessPosition::B);
-        let c = self.rr(rt, MemoryAccessPosition::C);
+        let src1 = self.rr(rs, MemoryAccessPosition::A);
+        let src2 = self.rr(rt, MemoryAccessPosition::B);
 
-        if b == c {
+        if src1 == src2 {
             panic!("Trap Error");
         }
-        (0, b, c)
+        (src1, src2, 0)
     }
 
     fn execute_condmov(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
