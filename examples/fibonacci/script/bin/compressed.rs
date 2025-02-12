@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, utils, ProverClient, SP1Stdin};
+use zkm2_sdk::{include_elf, utils, ProverClient, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("fibonacci-program");
@@ -9,7 +9,7 @@ fn main() {
 
     // Create an input stream and write '500' to it.
     let n = 500u32;
-    let mut stdin = SP1Stdin::new();
+    let mut stdin = ZKMStdin::new();
     stdin.write(&n);
 
     // Generate the constant-sized proof for the given program and input.
