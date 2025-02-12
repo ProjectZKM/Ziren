@@ -1,6 +1,5 @@
 use std::fs::File;
 use test_artifacts::HELLO_WORLD_ELF;
-use ark_serialize::Read;
 use zkm2_prover::build::groth16_bn254_artifacts_dev_dir;
 use zkm2_sdk::{HashableKey, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
@@ -49,8 +48,11 @@ fn test_verify_plonk() {
 }
 
 // RUST_LOG=debug cargo test -r test_e2e_verify_groth16 --features ark -- --nocapture
+#[cfg(feature = "ark")]
 #[test]
 fn test_e2e_verify_groth16() {
+    use ark_serialize::Read;
+
     // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
@@ -78,10 +80,7 @@ fn test_e2e_verify_groth16() {
     crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &groth16_vk_bytes)
         .expect("Groth16 proof is invalid");
 
-    #[cfg(feature = "ark")]
-    {
-        let valid = crate::Groth16Verifier::ark_verify(&proof, &public_inputs, &vkey_hash, &groth16_vk_bytes)
-            .expect("Groth16 proof is invalid");
-        assert!(valid);
-    }
+    let valid = crate::Groth16Verifier::ark_verify(&proof, &public_inputs, &vkey_hash, &groth16_vk_bytes)
+        .expect("Groth16 proof is invalid");
+    assert!(valid);
 }
