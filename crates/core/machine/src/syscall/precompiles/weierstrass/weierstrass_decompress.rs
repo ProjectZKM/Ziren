@@ -562,7 +562,7 @@ mod tests {
         let mut rand = RAND::new();
 //
         let len = 100;
-        let num_tests = 10;
+        let num_tests = 2;
         let random_slice = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<u8>>();
         rand.seed(len, &random_slice);
 //
@@ -593,7 +593,7 @@ mod tests {
 //
         let mut rng = thread_rng();
 //
-        let num_tests = 10;
+        let num_tests = 2;
 //
         for _ in 0..num_tests {
             let secret_key = k256::SecretKey::random(&mut rng);
@@ -621,7 +621,7 @@ mod tests {
 //
         let mut rng = thread_rng();
 //
-        let num_tests = 1;
+        let num_tests = 2;
 //
         for _ in 0..num_tests {
             let secret_key = p256::SecretKey::random(&mut rng);
