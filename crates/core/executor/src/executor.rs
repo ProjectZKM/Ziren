@@ -1375,7 +1375,7 @@ impl<'a> Executor<'a> {
         if instruction.opcode == Opcode::SC {
             self.rw(rt_reg, 1, MemoryAccessPosition::A);
 
-            Ok((val, rs, offset_ext))
+            Ok((1, rs, offset_ext))
         } else {
             Ok((rt, rs, offset_ext))
         }
