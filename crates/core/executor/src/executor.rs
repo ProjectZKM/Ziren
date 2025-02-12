@@ -155,6 +155,10 @@ pub enum ExecutionError {
     #[error("unimplemented syscall {0}")]
     UnsupportedSyscall(u32),
 
+    /// The execution failed with an unimplemented instruction.
+    #[error("unimplemented instruction {0}")]
+    UnsupportedInstruction(u32),
+
     /// The execution failed with a breakpoint.
     #[error("breakpoint encountered")]
     Breakpoint(),
@@ -1108,13 +1112,15 @@ impl<'a> Executor<'a> {
             }
 
             // Opcode::GetContext | Opcode::SetContext => {}
-            Opcode::NOP => {}
+            Opcode::NOP => {
+                self.rw(Register::ZERO, 0, MemoryAccessPosition::A);
+            }
 
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
             Opcode::UNIMPL => {
-                log::warn!("Unimplemented code")
+                return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
             }
         }
 

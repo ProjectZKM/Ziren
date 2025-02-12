@@ -205,7 +205,7 @@ impl Instruction {
             // } // SRL: rd = rt >> sa
             (0b000000, 0b000010) => {
                 if rs == 1 {
-                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, 0, true, true, insn))
+                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 } else {
                     Ok(Self::new(Opcode::SRL, rd, rt, sa, false, true)) // SRL: rd = rt >> sa
                 }
@@ -315,9 +315,7 @@ impl Instruction {
                     // Ok(Operation::JumpDirect(31, offset)) // BAL
                     Ok(Self::new(Opcode::JumpDirect, 31, offset_ext16.overflowing_shl(2).0, 0, true, true))
                 } else {
-                    // todo: change to ProgramError later
-                    // panic!("InvalidOpcode")
-                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, 0, true, true, insn))
+                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
             // (0x02, _) => Ok(Operation::Jumpi(0u8, target)), // J
@@ -508,9 +506,7 @@ impl Instruction {
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
             _ => {
                 log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
-                // todo: change to ProgramError later
-                // panic!("InvalidOpcode")
-                Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, 0, true, true, insn))
+                Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
             }
         }
     }
