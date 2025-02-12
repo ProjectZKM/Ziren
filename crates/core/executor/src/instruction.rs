@@ -505,7 +505,7 @@ impl Instruction {
             // (0b110011, _) => Ok(Operation::Nop),            // Pref
             (0b110011, _) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // Pref
             // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq
-            (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs, rt, 0, false, true)), // teq
+            (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
             _ => {
                 log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
                 // todo: change to ProgramError later
