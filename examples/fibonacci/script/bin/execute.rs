@@ -26,10 +26,11 @@ fn main() {
     println!("Full execution report:\n{:?}", execution_report);
 
     // Read and verify the output.
-    let _ = public_values.read::<u32>();
+    let n = public_values.read::<u32>();
     let a = public_values.read::<u32>();
     let b = public_values.read::<u32>();
 
+    println!("n: {}", n);
     println!("a: {}", a);
     println!("b: {}", b);
 }
