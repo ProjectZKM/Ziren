@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::Read;
 use test_artifacts::HELLO_WORLD_ELF;
-use std::io::Read;
 use zkm2_prover::build::groth16_bn254_artifacts_dev_dir;
 use zkm2_sdk::{HashableKey, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
