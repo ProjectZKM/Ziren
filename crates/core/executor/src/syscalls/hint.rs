@@ -59,7 +59,7 @@ impl Syscall for HintReadSyscall {
             let b2 = vec.get(i as usize + 1).copied().unwrap_or(0);
             let b3 = vec.get(i as usize + 2).copied().unwrap_or(0);
             let b4 = vec.get(i as usize + 3).copied().unwrap_or(0);
-            let word = u32::from_be_bytes([b1, b2, b3, b4]);
+            let word = u32::from_le_bytes([b1, b2, b3, b4]);
 
             // Save the data into runtime state so the runtime will use the desired data instead of
             // 0 when first reading/writing from this address.
