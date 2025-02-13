@@ -60,7 +60,9 @@ fn reduce_modulo(arr: &[u32; 12], modulus: &BigUint) -> [u32; 12] {
     for i in 0..12 {
         if i * 4 < bytes.len() {
             let mut slice = [0u8; 4];
-            slice.copy_from_slice(&bytes[i * 4..(i * 4 + 4).min(bytes.len())]);
+            let max = (i * 4 + 4).min(bytes.len());
+            let length = max - i * 4;
+            slice[0..length].copy_from_slice(&bytes[i * 4..max]);
             result[i] = u32::from_le_bytes(slice);
         }
     }
