@@ -278,6 +278,8 @@ impl CpuChip {
 
         // Compute the expected stored value for a LL instruction.
         builder.when(local.selectors.is_ll).assert_word_eq(a_val.map(|x| x.into()), mem_val);
+        // Ensure that the offset is 0.
+        builder.when(local.selectors.is_ll).assert_one(offset_is_zero.clone());
 
         //
         builder.when(local.selectors.is_lwr)
