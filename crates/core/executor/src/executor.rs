@@ -2542,8 +2542,48 @@ mod tests {
             let reg: Register = (i as u8).into();
             println!("reg: {:?} {:?}", i, runtime.register(reg));
         }
-
     }
+
+    #[test]
+    fn test_swl_swr() {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, (1 << 20) + (1 << 15) + (1 << 6) - 1, false, true),
+            Instruction::new(Opcode::ADD, 27, 0, 24, false, true),
+            Instruction::new(Opcode::ADD, 24, 0, (1 << 28) + (1 << 12) + (1 << 18) - 1, false, true),
+            Instruction::new(Opcode::ADD, 22, 0, 22, false, true),
+            Instruction::new(Opcode::SWL, 29, 22, 2, false, true),
+            Instruction::new(Opcode::SWR, 29, 22, 2, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        // assert_eq!(runtime.register(Register::SP), 268701695);
+
+        for i in 0..(Register::HI as usize + 1) {
+            let reg: Register = (i as u8).into();
+            println!("reg: {:?} {:?}", i, runtime.register(reg));
+        }
+    }
+
+    // #[test]
+    // fn test_sc() {
+    //     let instructions = vec![
+    //         Instruction::new(Opcode::ADD, 22, 0, 22, false, true),
+    //         // store value of register 15th in register 24th
+    //         Instruction::new(Opcode::ADD, 15, 0, 25, false, true),
+    //         Instruction::new(Opcode::SC, 15, 22, 2, false, true),
+    //     ];
+    //
+    //     let program = Program::new(instructions, 0, 0);
+    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+    //     runtime.run().unwrap();
+    //     // assert_eq!(runtime.register(Register::SP), 268701695);
+    //
+    //     for i in 0..(Register::HI as usize + 1) {
+    //         let reg: Register = (i as u8).into();
+    //         println!("reg: {:?} {:?}", i, runtime.register(reg));
+    //     }
+    // }
 
     // fn simple_op_code_test(opcode: Opcode, expected: u32, a: u32, b: u32) {
     //     let instructions = vec![

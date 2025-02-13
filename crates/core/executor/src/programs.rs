@@ -141,9 +141,16 @@ pub mod tests {
             Instruction::new(Opcode::ADD, 29, 0, (1 << 20) + (1 << 15) + (1 << 6) - 1, false, true),
             Instruction::new(Opcode::ADD, 27, 0, 25, false, true),
             Instruction::new(Opcode::ADD, 25, 0, (1 << 28) + (1 << 12) + (1 << 18) - 1, false, true),
+            Instruction::new(Opcode::ADD, 22, 0, 22, false, true),
+            Instruction::new(Opcode::ADD, 10, 0, 16, false, true),
             Instruction::new(Opcode::LWR, 29, 27, 1, false, true),
             Instruction::new(Opcode::LWL, 29, 27, 1, false, true),
             Instruction::new(Opcode::LL, 29, 27, 3, false, true),
+
+            Instruction::new(Opcode::ADD, 15, 0, (1 << 20) + (1 << 15) + (1 << 6) - 1, false, true),
+            Instruction::new(Opcode::SWL, 15, 22, 2, false, true),
+            Instruction::new(Opcode::SWR, 15, 22, 2, false, true),
+
         ];
         Program::new(instructions, 0, 0)
     }

@@ -281,7 +281,7 @@ impl CpuChip {
         // Ensure that the offset is 0.
         builder.when(local.selectors.is_ll).assert_one(offset_is_zero.clone());
 
-        //
+        // value stay the same.
         builder.when(local.selectors.is_lwr)
         .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
         builder.when(local.selectors.is_lwl)
@@ -339,7 +339,7 @@ impl CpuChip {
         builder.when(local.selectors.is_sw).assert_one(offset_is_zero.clone());
 
         // Compute the expected stored value for a SH instruction.
-        let a_is_lower_half = offset_is_zero;
+        let a_is_lower_half = offset_is_zero.clone();
         let a_is_upper_half = memory_columns.offset_is_two;
         let sh_expected_stored_value = Word([
             a_val[0] * a_is_lower_half.clone()
@@ -356,6 +356,61 @@ impl CpuChip {
         builder
             .when(local.selectors.is_sw)
             .assert_word_eq(mem_val.map(|x| x.into()), a_val.map(|x| x.into()));
+
+        // When the instruction is SWL: compute the expected stored value
+        let swl_expected_stored_value = Word([
+            a_val[3] * offset_is_zero.clone()
+                + a_val[2] * memory_columns.offset_is_one
+                + a_val[1] * memory_columns.offset_is_two
+                + a_val[0] * memory_columns.offset_is_three,
+            prev_mem_val[1] * offset_is_zero.clone()
+                + a_val[3] * memory_columns.offset_is_one
+                + a_val[2] * memory_columns.offset_is_two
+                + a_val[1] * memory_columns.offset_is_three,
+            prev_mem_val[2] * (offset_is_zero.clone() + memory_columns.offset_is_one)
+                + a_val[3] * memory_columns.offset_is_two
+                + a_val[2] * memory_columns.offset_is_three,
+            prev_mem_val[3] * (one.clone() - memory_columns.offset_is_three)
+                + a_val[3] * memory_columns.offset_is_three
+        ]);
+        builder
+            .when(local.selectors.is_swl)
+            .assert_word_eq(mem_val.map(|x| x.into()), swl_expected_stored_value);
+
+        // When the instruction is SWR: compute the expected stored value
+        let swr_expected_stored_value = Word([
+            a_val[0] * offset_is_zero.clone()
+                + prev_mem_val[0] * (one.clone() - offset_is_zero.clone()),
+            a_val[1] * offset_is_zero.clone()
+                + a_val[0] * memory_columns.offset_is_one
+                + prev_mem_val[1] * memory_columns.offset_is_two
+                + prev_mem_val[0] * memory_columns.offset_is_three,
+            a_val[2] * offset_is_zero.clone()
+                + a_val[1] * memory_columns.offset_is_one
+                + a_val[0] * memory_columns.offset_is_two
+                + prev_mem_val[2] * memory_columns.offset_is_three,
+            a_val[3] * offset_is_zero.clone()
+                + a_val[2] * memory_columns.offset_is_one
+                + a_val[1] * memory_columns.offset_is_two
+                + a_val[0] * memory_columns.offset_is_three,
+        ]);
+        builder
+            .when(local.selectors.is_swr)
+            .assert_word_eq(mem_val.map(|x| x.into()), swr_expected_stored_value);
+
+        // When the instruction is SC: compute the expected stored value
+        // let prev_a_val = local.op_a_access.prev_value();
+
+        // Ensure that the offset is 0.
+        // builder.when(local.selectors.is_sc).assert_one(offset_is_zero.clone());
+
+        // mem_val = prev_a_val
+        // builder.when(local.selectors.is_sc)
+        //     .assert_word_eq(prev_a_val.map(|x| x.into()), mem_val.map(|x| x.into()));
+
+        // a_val = 1
+        // builder.when(local.selectors.is_sc).assert_one(a_val);
+
     }
 
     /// This function is used to evaluate the unsigned memory value for the load memory
