@@ -135,4 +135,22 @@ pub mod tests {
         ];
         Program::new(instructions, 0, 0)
     }
+
+    pub fn other_memory_program() -> Program {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, (1 << 20) + (1 << 15) + (1 << 6) - 1, false, true),
+            Instruction::new(Opcode::ADD, 27, 0, 24, false, true),
+            Instruction::new(Opcode::ADD, 24, 0, (1 << 28) + (1 << 12) + (1 << 18) - 1, false, true),
+            // Instruction::new(Opcode::LWR, 29, 27, 0, false, true),
+            // Instruction::new(Opcode::LWL, 29, 27, 0, false, true),
+            // Instruction::new(Opcode::LWR, 29, 27, 1, false, true),
+            // Instruction::new(Opcode::LWL, 29, 27, 1, false, true),
+            // Instruction::new(Opcode::LWR, 29, 27, 2, false, true),
+            // Instruction::new(Opcode::LWL, 29, 27, 2, false, true),
+            // Instruction::new(Opcode::LWR, 29, 27, 3, false, true),
+            // Instruction::new(Opcode::LWL, 29, 27, 3, false, true),
+            Instruction::new(Opcode::LL, 29, 27, 3, false, true),
+        ];
+        Program::new(instructions, 0, 0)
+    }
 }

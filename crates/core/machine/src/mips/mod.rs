@@ -602,6 +602,7 @@ pub mod tests {
         },
         Instruction, Opcode, Program, Register,
     };
+    use zkm2_core_executor::programs::tests::other_memory_program;
     use zkm2_stark::{
         baby_bear_poseidon2::BabyBearPoseidon2, CpuProver, ZKMCoreOpts, StarkProvingKey,
         StarkVerifyingKey,
@@ -955,6 +956,13 @@ pub mod tests {
     fn test_simple_memory_program_prove() {
         setup_logger();
         let program = simple_memory_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_simple_memory_program_2_prove() {
+        setup_logger();
+        let program = other_memory_program();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 
