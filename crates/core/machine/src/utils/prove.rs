@@ -987,8 +987,7 @@ where
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![]).unwrap();
-    Ok(())
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
 }
 
 use p3_air::Air;
