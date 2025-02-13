@@ -411,6 +411,12 @@ impl CpuChip {
         // a_val = 1
         // builder.when(local.selectors.is_sc).assert_one(a_val);
 
+
+        // When the instruction is SDC1: compute the expected stored value
+        builder.when(local.selectors.is_sdc1).assert_zero(mem_val);
+
+        // address should be doubleword-aligned
+        builder.when(local.selectors.is_sdc1).assert_one(offset_is_zero.clone());
     }
 
     /// This function is used to evaluate the unsigned memory value for the load memory
