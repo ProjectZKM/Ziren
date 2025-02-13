@@ -230,26 +230,24 @@ impl CpuChip {
         let one = AB::Expr::ONE;
         let prev_a_val = local.op_a_access.prev_value();
         let a_val = local.op_a_val();
-        let b_val = local.op_b_val();
-        let c_val = local.op_c_val();
 
         let mem_val = *memory_columns.memory_access.value();
         let prev_mem_val = *memory_columns.memory_access.prev_value();
 
         // Compute the expected stored value for a LWR instruction.
         let lwr_expected_load_value = Word([
-           prev_mem_val[0] * offset_is_zero.clone()
-               + prev_mem_val[1] * memory_columns.offset_is_one
-               + prev_mem_val[2] * memory_columns.offset_is_two
-               + prev_mem_val[3] * memory_columns.offset_is_three,
-           prev_mem_val[1] * offset_is_zero.clone()
-               + prev_mem_val[2] * memory_columns.offset_is_one
-               + prev_mem_val[3] * memory_columns.offset_is_two
+            mem_val[0] * offset_is_zero.clone()
+               + mem_val[1] * memory_columns.offset_is_one
+               + mem_val[2] * memory_columns.offset_is_two
+               + mem_val[3] * memory_columns.offset_is_three,
+            mem_val[1] * offset_is_zero.clone()
+               + mem_val[2] * memory_columns.offset_is_one
+               + mem_val[3] * memory_columns.offset_is_two
                + prev_a_val[1] * memory_columns.offset_is_three,
-           prev_mem_val[2] * offset_is_zero.clone()
-               + prev_mem_val[3] * memory_columns.offset_is_one
+            mem_val[2] * offset_is_zero.clone()
+               + mem_val[3] * memory_columns.offset_is_one
                + prev_a_val[2] * (one.clone() - memory_columns.offset_is_one - offset_is_zero.clone()),
-           prev_mem_val[3] * offset_is_zero.clone()
+            mem_val[3] * offset_is_zero.clone()
                + prev_a_val[3] * (one.clone() - offset_is_zero.clone())
         ]);
         builder
@@ -259,20 +257,20 @@ impl CpuChip {
 
         // Compute the expected stored value for a LWL instruction.
         let lwl_expected_load_value = Word([
-            prev_mem_val[0] * memory_columns.offset_is_three
+            mem_val[0] * memory_columns.offset_is_three
                 + prev_a_val[0] * (one.clone() - memory_columns.offset_is_three),
-            prev_mem_val[1] * memory_columns.offset_is_three
-                + prev_mem_val[0] * memory_columns.offset_is_two
+            mem_val[1] * memory_columns.offset_is_three
+                + mem_val[0] * memory_columns.offset_is_two
                 + prev_a_val[1] * memory_columns.offset_is_one
                 + prev_a_val[1] * offset_is_zero.clone(),
-            prev_mem_val[2] * memory_columns.offset_is_three
-                + prev_mem_val[1] * memory_columns.offset_is_two
-                + prev_mem_val[0] * memory_columns.offset_is_one
+            mem_val[2] * memory_columns.offset_is_three
+                + mem_val[1] * memory_columns.offset_is_two
+                + mem_val[0] * memory_columns.offset_is_one
                 + prev_a_val[2] * offset_is_zero.clone(),
-            prev_mem_val[3] * memory_columns.offset_is_three
-                + prev_mem_val[2] * memory_columns.offset_is_two
-                + prev_mem_val[1] * memory_columns.offset_is_one
-                + prev_mem_val[0] * offset_is_zero.clone(),
+            mem_val[3] * memory_columns.offset_is_three
+                + mem_val[2] * memory_columns.offset_is_two
+                + mem_val[1] * memory_columns.offset_is_one
+                + mem_val[0] * offset_is_zero.clone(),
         ]);
         builder
             .when(local.selectors.is_lwl)
@@ -281,6 +279,7 @@ impl CpuChip {
         // Compute the expected stored value for a LL instruction.
         builder.when(local.selectors.is_ll).assert_word_eq(a_val.map(|x| x.into()), mem_val);
 
+        //
         builder.when(local.selectors.is_lwr)
         .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
         builder.when(local.selectors.is_lwl)
@@ -470,15 +469,9 @@ impl CpuChip {
 
         // When the instruction is LL:
         // unsigned_mem_val = mem_value
-        let ll_unisgned_mem_val = Word([
-            mem_val[0],
-            mem_val[1],
-            mem_val[2],
-            mem_val[3],
-        ]);
         builder
             .when(local.selectors.is_ll)
-            .assert_word_eq(ll_unisgned_mem_val, local.unsigned_mem_val.map(|x| x.into()));
+            .assert_word_eq(mem_val, local.unsigned_mem_val.map(|x| x.into()));
 
     }
 

@@ -310,7 +310,7 @@ impl CpuChip {
         let mem_value = event.memory_record.unwrap().value();
         if matches!(
             instruction.opcode,
-            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR
+            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR | Opcode::LL
         ) {
             match instruction.opcode {
                 Opcode::LB | Opcode::LBU => {
