@@ -256,22 +256,22 @@ func TestPoseidonKoalaBear2() *C.char {
 	}
 
 	expectedOutput := [poseidon2.KOALABEAR_WIDTH]koalabear.Variable{
-		koalabear.NewF("618910652"),
-		koalabear.NewF("1488604963"),
-		koalabear.NewF("659088560"),
-		koalabear.NewF("1999029727"),
-		koalabear.NewF("1121255343"),
-		koalabear.NewF("20724378"),
-		koalabear.NewF("956965955"),
-		koalabear.NewF("1084245564"),
-		koalabear.NewF("751155763"),
-		koalabear.NewF("1075356210"),
-		koalabear.NewF("1159054104"),
-		koalabear.NewF("47710013"),
-		koalabear.NewF("179166241"),
-		koalabear.NewF("42705162"),
-		koalabear.NewF("1517988227"),
-		koalabear.NewF("1481867517"),
+		koalabear.NewF("1246627235"),
+		koalabear.NewF("628715430"),
+		koalabear.NewF("728127883"),
+		koalabear.NewF("1210800983"),
+		koalabear.NewF("1104325841"),
+		koalabear.NewF("123548278"),
+		koalabear.NewF("109211657"),
+		koalabear.NewF("1347389604"),
+		koalabear.NewF("350632487"),
+		koalabear.NewF("1919729472"),
+		koalabear.NewF("1334300527"),
+		koalabear.NewF("1417472912"),
+		koalabear.NewF("1710206249"),
+		koalabear.NewF("1032515169"),
+		koalabear.NewF("431466777"),
+		koalabear.NewF("1825850772"),
 	}
 
 	circuit := sp1.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
