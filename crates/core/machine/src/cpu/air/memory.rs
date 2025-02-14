@@ -383,8 +383,7 @@ impl CpuChip {
                 + prev_mem_val[0] * (one.clone() - offset_is_zero.clone()),
             a_val[1] * offset_is_zero.clone()
                 + a_val[0] * memory_columns.offset_is_one
-                + prev_mem_val[1] * memory_columns.offset_is_two
-                + prev_mem_val[0] * memory_columns.offset_is_three,
+                + prev_mem_val[1] * (memory_columns.offset_is_two + memory_columns.offset_is_three),
             a_val[2] * offset_is_zero.clone()
                 + a_val[1] * memory_columns.offset_is_one
                 + a_val[0] * memory_columns.offset_is_two
@@ -413,7 +412,10 @@ impl CpuChip {
 
 
         // When the instruction is SDC1: compute the expected stored value
-        builder.when(local.selectors.is_sdc1).assert_zero(mem_val);
+        builder.when(local.selectors.is_sdc1).assert_zero(mem_val[0].into());
+        builder.when(local.selectors.is_sdc1).assert_zero(mem_val[1].into());
+        builder.when(local.selectors.is_sdc1).assert_zero(mem_val[2].into());
+        builder.when(local.selectors.is_sdc1).assert_zero(mem_val[3].into());
 
         // address should be doubleword-aligned
         builder.when(local.selectors.is_sdc1).assert_one(offset_is_zero.clone());
