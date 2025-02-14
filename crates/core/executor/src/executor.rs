@@ -1085,7 +1085,7 @@ impl<'a> Executor<'a> {
             | Opcode::SW
             | Opcode::SWL
             | Opcode::SWR
-            | Opcode::SDC1
+            // | Opcode::SDC1
             | Opcode::SC => {
                 (a, b, c) = self.execute_store(instruction)?;
             }
@@ -1370,7 +1370,7 @@ impl<'a> Executor<'a> {
                 out(virt_raw & 3)
             }
             Opcode::SC => rt,
-            Opcode::SDC1 => 0,
+            // Opcode::SDC1 => 0,
             _ => todo!(),
         };
         self.mw_cpu(

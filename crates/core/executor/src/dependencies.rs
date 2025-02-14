@@ -150,7 +150,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             | Opcode::SWR
             | Opcode::SWL
             | Opcode::SC
-            | Opcode::SDC1
+            // | Opcode::SDC1
     ) {
         let memory_addr = event.b.wrapping_add(event.c);
         // Add event to ALU check to check that addr == b + c

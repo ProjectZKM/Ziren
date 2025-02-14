@@ -69,7 +69,7 @@ pub enum Opcode {
     LL = 49,
     SC = 50,
     LB = 51,
-    SDC1 = 52,
+    // SDC1 = 52,
     // count leading zeros
     CLZ = 53,
     // count leading ones
@@ -147,7 +147,7 @@ impl Opcode {
             Opcode::LL => "ll",
             Opcode::SC => "sc",
             Opcode::LB => "lb",
-            Opcode::SDC1 => "sdc1",
+            // Opcode::SDC1 => "sdc1",
             Opcode::CLZ => "clz",
             Opcode::CLO => "clo",
             Opcode::Jump => "jump",

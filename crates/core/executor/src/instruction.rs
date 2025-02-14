@@ -115,7 +115,7 @@ impl Instruction {
                 | Opcode::LL
                 | Opcode::SC
                 | Opcode::LB
-                | Opcode::SDC1
+                // | Opcode::SDC1
         )
     }
 
@@ -374,14 +374,14 @@ impl Instruction {
             // (0b111000, _) => Ok(Operation::MstoreGeneral(MemOp::SC, rs, rt, offset)),
             (0b111000, _) => Ok(Self::new(Opcode::SC, rt as u8, rs, offset_ext16, false, true)),
             // (0b111101, _) => Ok(Operation::MstoreGeneral(MemOp::SDC1, rs, rt, offset)),
-            (0b111101, _) => Ok(Self::new(
-                Opcode::SDC1,
-                rs as u8,
-                rt,
-                offset_ext16,
-                false,
-                true,
-            )),
+            // (0b111101, _) => Ok(Self::new(
+            //    Opcode::SDC1,
+            //    rs as u8,
+            //    rt,
+            //    offset_ext16,
+            //    false,
+            //    true,
+            // )),
             // (0b001000, _) => Ok(Operation::BinaryArithmeticImm(
             //     BinaryOperator::ADDI,
             //     rs,

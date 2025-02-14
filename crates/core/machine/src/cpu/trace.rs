@@ -277,7 +277,7 @@ impl CpuChip {
                 | Opcode::SC
                 | Opcode::SWL
                 | Opcode::SWR
-                | Opcode::SDC1
+                //| Opcode::SDC1
         ) {
             return;
         }

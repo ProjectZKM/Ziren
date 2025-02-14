@@ -33,7 +33,7 @@ impl CpuChip {
             + opcode_selectors.is_swl
             + opcode_selectors.is_swr
             + opcode_selectors.is_sc
-            + opcode_selectors.is_sdc1
+            // + opcode_selectors.is_sdc1
     }
 
     /// Computes whether the opcode is a load instruction.
@@ -62,7 +62,7 @@ impl CpuChip {
             + opcode_selectors.is_swr
             + opcode_selectors.is_swl
             + opcode_selectors.is_sc
-            + opcode_selectors.is_sdc1
+            // + opcode_selectors.is_sdc1
     }
 
     /// Computes whether the opcode is a store instruction.
