@@ -1,5 +1,5 @@
 use itertools::{izip, Itertools};
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_commit::{Mmcs, PolynomialSpace};
 use p3_field::{Field, FieldAlgebra, TwoAdicField};
 use p3_fri::{
@@ -17,13 +17,13 @@ use std::{
 use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
 use zkm2_recursion_core::DIGEST_SIZE;
 use zkm2_stark::{
-    baby_bear_poseidon2::BabyBearPoseidon2, InnerChallenge, InnerChallengeMmcs, InnerFriProof,
+    koala_bear_poseidon2::KoalaBearPoseidon2, InnerChallenge, InnerChallengeMmcs, InnerFriProof,
     InnerInputProof, InnerPcsProof, InnerVal, InnerValMmcs, OpeningProof,
 };
 
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
-    BabyBearFriConfigVariable, CanObserveVariable, CircuitConfig, Ext, FriChallenges,
+    KoalaBearFriConfigVariable, CanObserveVariable, CircuitConfig, Ext, FriChallenges,
     FriCommitPhaseProofStepVariable, FriMmcs, FriProofVariable, FriQueryProofVariable,
     TwoAdicPcsRoundVariable,
 };
@@ -43,8 +43,8 @@ pub struct PolynomialBatchShape {
 }
 
 pub fn verify_shape_and_sample_challenges<
-    C: CircuitConfig<F = BabyBear>,
-    SC: BabyBearFriConfigVariable<C>,
+    C: CircuitConfig<F = KoalaBear>,
+    SC: KoalaBearFriConfigVariable<C>,
 >(
     builder: &mut Builder<C>,
     config: &FriConfig<FriMmcs<SC>>,
@@ -81,7 +81,7 @@ pub fn verify_shape_and_sample_challenges<
     }
 }
 
-pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>>(
+pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
     builder: &mut Builder<C>,
     config: &FriConfig<FriMmcs<SC>>,
     fri_proof: &FriProofVariable<C, SC>,
@@ -231,7 +231,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigV
     );
 }
 
-pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>>(
+pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
     builder: &mut Builder<C>,
     config: &FriConfig<FriMmcs<SC>>,
     proof: FriProofVariable<C, SC>,
@@ -259,7 +259,7 @@ pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVar
     }
 }
 
-pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>>(
+pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
     builder: &mut Builder<C>,
     commit_phase_commits: &[SC::DigestVariable],
     index_bits: &[C::Bit],
@@ -365,7 +365,7 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     folded_eval
 }
 
-pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>>(
+pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
     builder: &mut Builder<C>,
     commit: SC::DigestVariable,
     dimensions: &[usize],
@@ -412,8 +412,8 @@ pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable
     SC::assert_digest_eq(builder, root, commit);
 }
 
-pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
-    [BabyBear::ZERO; DIGEST_SIZE].into()
+pub fn dummy_hash() -> Hash<KoalaBear, KoalaBear, DIGEST_SIZE> {
+    [KoalaBear::ZERO; DIGEST_SIZE].into()
 }
 
 pub fn dummy_query_proof(
@@ -436,7 +436,7 @@ pub fn dummy_query_proof(
                 opened_values: shapes
                     .shapes
                     .iter()
-                    .map(|shape| vec![BabyBear::ZERO; shape.width])
+                    .map(|shape| vec![KoalaBear::ZERO; shape.width])
                     .collect(),
                 opening_proof: vec![dummy_hash().into(); batch_max_height + log_blowup],
             }
@@ -510,7 +510,7 @@ mod tests {
         ir::{Builder, Ext, SymbolicExt},
     };
     use zkm2_stark::{
-        baby_bear_poseidon2::BabyBearPoseidon2, inner_fri_config, inner_perm, InnerChallenge,
+        koala_bear_poseidon2::KoalaBearPoseidon2, inner_fri_config, inner_perm, InnerChallenge,
         InnerChallenger, InnerCompress, InnerDft, InnerFriProof, InnerHash, InnerPcs, InnerVal,
         InnerValMmcs, StarkGenericConfig,
     };
@@ -518,7 +518,7 @@ mod tests {
     use zkm2_recursion_core::DIGEST_SIZE;
 
     type C = InnerConfig;
-    type SC = BabyBearPoseidon2;
+    type SC = KoalaBearPoseidon2;
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
 
@@ -843,7 +843,7 @@ mod tests {
         let commit: [Felt<InnerVal>; DIGEST_SIZE] = commit.map(|x| builder.eval(x));
         challenger.observe_slice(&mut builder, commit);
         let _ = challenger.sample_ext(&mut builder);
-        let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, BabyBearPoseidon2>(
+        let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, KoalaBearPoseidon2>(
             &mut builder,
             &config,
             &fri_proof,
@@ -999,7 +999,7 @@ mod tests {
         let x2 = challenger.sample_ext(&mut builder);
         let x1: Ext<_, _> = builder.constant(x1);
         builder.assert_ext_eq(x1, x2);
-        verify_two_adic_pcs::<_, BabyBearPoseidon2>(
+        verify_two_adic_pcs::<_, KoalaBearPoseidon2>(
             &mut builder,
             &config,
             &proof_variable,

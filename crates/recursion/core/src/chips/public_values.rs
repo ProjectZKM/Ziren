@@ -193,7 +193,7 @@ mod tests {
     use std::{array, borrow::Borrow};
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -202,14 +202,14 @@ mod tests {
         chips::public_values::PublicValuesChip,
         machine::tests::run_recursion_test_machines,
         runtime::{instruction as instr, ExecutionRecord},
-        stark::BabyBearPoseidon2Outer,
+        stark::KoalaBearPoseidon2Outer,
         CommitPublicValuesEvent, MemAccessKind, RecursionProgram, DIGEST_SIZE,
     };
 
     #[test]
-    fn prove_babybear_circuit_public_values() {
+    fn prove_koalabear_circuit_public_values() {
         setup_logger();
-        type SC = BabyBearPoseidon2Outer;
+        type SC = KoalaBearPoseidon2Outer;
         type F = <SC as StarkGenericConfig>::Val;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn generate_public_values_circuit_trace() {
-        type F = BabyBear;
+        type F = KoalaBear;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let random_felts: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =

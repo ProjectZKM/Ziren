@@ -20,7 +20,7 @@ p3-symmetric = { workspace = true }
 p3-challenger = { workspace = true }
 p3-dft = { workspace = true }
 p3-bn254-fr = { workspace = true }
-p3-baby-bear = { workspace = true }
+p3-koala-bear = { workspace = true }
 
 zkm2-core-machine = { workspace = true }
 zkm2-core-executor = { workspace = true }

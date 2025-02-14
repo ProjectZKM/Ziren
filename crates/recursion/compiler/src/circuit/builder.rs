@@ -2,7 +2,7 @@
 
 use std::iter::repeat;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use zkm2_recursion_core::air::RecursionPublicValues;
 
@@ -40,7 +40,7 @@ pub trait CircuitV2Builder<C: Config> {
     fn hint_felts_v2(&mut self, len: usize) -> Vec<Felt<C::F>>;
 }
 
-impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
+impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     fn bits2num_v2_f(
         &mut self,
         bits: impl IntoIterator<Item = Felt<<C as Config>::F>>,
@@ -69,30 +69,30 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
             })
             .sum();
 
-        // Range check the bits to be less than the BabyBear modulus.
+        // Range check the bits to be less than the KoalaBear modulus.
 
         assert!(num_bits <= 31, "num_bits must be less than or equal to 31");
 
         // If there are less than 31 bits, there is nothing to check.
         if num_bits > 30 {
-            // Since BabyBear modulus is 2^31 - 2^27 + 1, if any of the top `4` bits are zero, the
-            // number is less than 2^27, and we can stop the iteration. Othwriwse, if all the top
-            // `4` bits are '1`, we need to check that all the bottom `27` are '0`
+            // Since KoalaBear modulus is 2^31 - 2^24 + 1, if any of the top `7` bits are zero, the
+            // number is less than 2^24, and we can stop the iteration. Otherwise, if all the top
+            // `7` bits are '1`, we need to check that all the bottom `24` are '0`
 
-            // Get a flag that is zero if any of the top `4` bits are zero, and one otherwise. We
+            // Get a flag that is zero if any of the top `7` bits are zero, and one otherwise. We
             // can do this by simply taking their product (which is bitwise AND).
             let are_all_top_bits_one: Felt<_> = self.eval(
                 output
                     .iter()
                     .rev()
-                    .take(4)
+                    .take(7)
                     .copied()
                     .map(SymbolicFelt::from)
                     .product::<SymbolicFelt<_>>(),
             );
 
-            // Assert that if all the top `4` bits are one, then all the bottom `27` bits are zero.
-            for bit in output.iter().take(27).copied() {
+            // Assert that if all the top `7` bits are one, then all the bottom `24` bits are zero.
+            for bit in output.iter().take(24).copied() {
                 self.assert_felt_eq(bit * are_all_top_bits_one, C::F::ZERO);
             }
         }
@@ -131,7 +131,7 @@ impl<C: Config<F = BabyBear>> CircuitV2Builder<C> for Builder<C> {
     /// Applies the Poseidon2 permutation to the given array.
     fn poseidon2_permute_v2(&mut self, array: [Felt<C::F>; WIDTH]) -> [Felt<C::F>; WIDTH] {
         let output: [Felt<C::F>; WIDTH] = core::array::from_fn(|_| self.uninit());
-        self.push_op(DslIr::CircuitV2Poseidon2PermuteBabyBear(Box::new((
+        self.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((
             output, array,
         ))));
         output

@@ -1,13 +1,13 @@
 use std::borrow::Borrow;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
 
 use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm2_recursion_core::air::Block;
 use zkm2_stark::{
-    baby_bear_poseidon2::BabyBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
+    koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
     InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerInputProof, InnerPcsProof, InnerVal,
 };
 
@@ -20,7 +20,7 @@ use super::{WitnessWriter, Witnessable};
 
 pub type WitnessBlock<C> = Block<<C as Config>::F>;
 
-impl<C: CircuitConfig<F = BabyBear, Bit = Felt<BabyBear>>> WitnessWriter<C>
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> WitnessWriter<C>
     for Vec<WitnessBlock<C>>
 {
     fn write_bit(&mut self, value: bool) {
@@ -58,10 +58,10 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
 }
 
 /*
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>> Witnessable<C>
     for InnerPcsProof
 {
-    type WitnessVariable = TwoAdicPcsProofVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = TwoAdicPcsProofVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let fri_proof = self.fri_proof.read(builder);
@@ -81,9 +81,9 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
 
 impl<C> Witnessable<C> for InnerBatchOpening
 where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>,
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>,
 {
-    type WitnessVariable = BatchOpeningVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = BatchOpeningVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let opened_values = self
@@ -105,10 +105,10 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>> Witnessable<C>
     for InnerFriProof
 {
-    type WitnessVariable = FriProofVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = FriProofVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let commit_phase_commits = self
@@ -141,10 +141,10 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>> Witnessable<C>
     for QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>
 {
-    type WitnessVariable = FriQueryProofVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = FriQueryProofVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let input_proof = self.input_proof.read(builder);
@@ -161,10 +161,10 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> 
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<BabyBear>>> Witnessable<C>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>> Witnessable<C>
     for CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>
 {
-    type WitnessVariable = FriCommitPhaseProofStepVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = FriCommitPhaseProofStepVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);

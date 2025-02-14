@@ -208,12 +208,12 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::*;
 
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn generate_trace() {
-        type F = BabyBear;
+        type F = KoalaBear;
 
         let shard = ExecutionRecord {
             base_alu_events: vec![BaseAluIo {
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     pub fn four_ops() {
-        type SC = BabyBearPoseidon2;
+        type SC = KoalaBearPoseidon2;
         type F = <SC as StarkGenericConfig>::Val;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);

@@ -147,7 +147,7 @@ where
 //    use rand::{Rng, SeedableRng};
 //    use zkm2_core_executor::Program;
 //    use zkm2_stark::{
-//        baby_bear_poseidon2::BabyBearPoseidon2, CpuProver, ZKMCoreOpts, StarkGenericConfig,
+//        koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, ZKMCoreOpts, StarkGenericConfig,
 //    };
 //    use test_artifacts::KECCAK256_ELF;
 //    use tiny_keccak::Hasher;
@@ -178,7 +178,7 @@ where
 //            stdin.write(&input);
 //        }
 //
-//        let config = BabyBearPoseidon2::new();
+//        let config = KoalaBearPoseidon2::new();
 //
 //        let program = Program::from(KECCAK256_ELF).unwrap();
 //        let (proof, public_values, _) =
@@ -186,7 +186,7 @@ where
 //                .unwrap();
 //        let mut public_values = ZKMPublicValues::from(&public_values);
 //
-//        let config = BabyBearPoseidon2::new();
+//        let config = KoalaBearPoseidon2::new();
 //        let mut challenger = config.challenger();
 //        let machine = RiscvAir::machine(config);
 //        let (_, vk) = machine.setup(&Program::from(KECCAK256_ELF).unwrap());

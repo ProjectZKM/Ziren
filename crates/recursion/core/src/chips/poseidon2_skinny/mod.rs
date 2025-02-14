@@ -5,7 +5,7 @@ use p3_field::{FieldAlgebra, PrimeField32};
 pub mod air;
 pub mod columns;
 pub mod trace;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_poseidon2::matmul_internal;
 
 /// The width of the permutation.
@@ -59,28 +59,28 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     }
 }
 
-const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
-    BabyBear::ORDER_U32 - 2,
+const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] = KoalaBear::new_array([
+    KoalaBear::ORDER_U32 - 2,
     1,
     2,
-    (BabyBear::ORDER_U32 + 1) >> 1,
+    (KoalaBear::ORDER_U32 + 1) >> 1,
     3,
     4,
-    (BabyBear::ORDER_U32 - 1) >> 1,
-    BabyBear::ORDER_U32 - 3,
-    BabyBear::ORDER_U32 - 4,
-    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
-    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
-    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
-    BabyBear::ORDER_U32 - 15,
-    (BabyBear::ORDER_U32 - 1) >> 8,
-    (BabyBear::ORDER_U32 - 1) >> 4,
+    (KoalaBear::ORDER_U32 - 1) >> 1,
+    KoalaBear::ORDER_U32 - 3,
+    KoalaBear::ORDER_U32 - 4,
+    KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 8),
+    KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 2),
+    KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 3),
+    KoalaBear::ORDER_U32 - 15,
+    (KoalaBear::ORDER_U32 - 1) >> 8,
+    (KoalaBear::ORDER_U32 - 1) >> 4,
     15,
 ]);
 
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
-        POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
+        POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY
             .iter()
             .map(|x| <F as FieldAlgebra>::F::from_wrapped_u32(x.as_canonical_u32()))
             .collect::<Vec<_>>()
@@ -98,36 +98,36 @@ pub(crate) mod tests {
         machine::RecursionAir, runtime::instruction as instr, MemAccessKind, RecursionProgram,
         Runtime,
     };
-    use p3_baby_bear::{BabyBear, Poseidon2InternalLayerBabyBear};
+    use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_field::{FieldAlgebra, PrimeField32};
     use p3_symmetric::Permutation;
 
-    use crate::stark::BabyBearPoseidon2Outer;
+    use crate::stark::KoalaBearPoseidon2Outer;
     use zkhash::ark_ff::UniformRand;
     use zkm2_core_machine::utils::{run_test_machine, setup_logger};
-    use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, inner_perm, StarkGenericConfig};
+    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, inner_perm, StarkGenericConfig};
 
     use super::WIDTH;
 
     #[test]
     fn test_poseidon2() {
         setup_logger();
-        type SC = BabyBearPoseidon2Outer;
+        type SC = KoalaBearPoseidon2Outer;
         type F = <SC as StarkGenericConfig>::Val;
         type EF = <SC as StarkGenericConfig>::Challenge;
         type B = RecursionAir<F, 9>;
 
         let input = [1; WIDTH];
         let output = inner_perm()
-            .permute(input.map(BabyBear::from_canonical_u32))
-            .map(|x| BabyBear::as_canonical_u32(&x));
+            .permute(input.map(KoalaBear::from_canonical_u32))
+            .map(|x| KoalaBear::as_canonical_u32(&x));
 
         let rng = &mut rand::thread_rng();
-        let input_1: [BabyBear; WIDTH] = std::array::from_fn(|_| BabyBear::rand(rng));
+        let input_1: [KoalaBear; WIDTH] = std::array::from_fn(|_| KoalaBear::rand(rng));
         let output_1 = inner_perm()
             .permute(input_1)
-            .map(|x| BabyBear::as_canonical_u32(&x));
-        let input_1 = input_1.map(|x| BabyBear::as_canonical_u32(&x));
+            .map(|x| KoalaBear::as_canonical_u32(&x));
+        let input_1 = input_1.map(|x| KoalaBear::as_canonical_u32(&x));
 
         let instructions =
             (0..WIDTH)
@@ -158,9 +158,9 @@ pub(crate) mod tests {
             instructions,
             ..Default::default()
         });
-        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
-            BabyBearPoseidon2::new().perm,
+            KoalaBearPoseidon2::new().perm,
         );
         runtime.run().unwrap();
 

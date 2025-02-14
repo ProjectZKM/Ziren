@@ -400,7 +400,7 @@ mod tests {
     use zkm2_core_machine::utils::setup_logger;
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -409,15 +409,15 @@ mod tests {
         chips::fri_fold::FriFoldChip,
         machine::tests::run_recursion_test_machines,
         runtime::{instruction as instr, ExecutionRecord},
-        stark::BabyBearPoseidon2Outer,
+        stark::KoalaBearPoseidon2Outer,
         FriFoldBaseIo, FriFoldEvent, FriFoldExtSingleIo, FriFoldExtVecIo, Instruction,
         MemAccessKind, RecursionProgram,
     };
 
     #[test]
-    fn prove_babybear_circuit_fri_fold() {
+    fn prove_koalabear_circuit_fri_fold() {
         setup_logger();
-        type SC = BabyBearPoseidon2Outer;
+        type SC = KoalaBearPoseidon2Outer;
         type F = <SC as StarkGenericConfig>::Val;
         type EF = <SC as StarkGenericConfig>::Challenge;
 
@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn generate_fri_fold_circuit_trace() {
-        type F = BabyBear;
+        type F = KoalaBear;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut rng2 = StdRng::seed_from_u64(0xDEADBEEF);

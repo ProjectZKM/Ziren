@@ -185,12 +185,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
     use zkm2_stark::{
         air::{InteractionScope, MachineAir},
-        baby_bear_poseidon2::BabyBearPoseidon2,
+        koala_bear_poseidon2::KoalaBearPoseidon2,
         debug_interactions_with_all_chips, InteractionKind, ZKMCoreOpts, StarkMachine,
     };
 
@@ -208,7 +208,7 @@ mod tests {
 
         let chip: MemoryLocalChip = MemoryLocalChip::new();
 
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values);
 
@@ -224,15 +224,15 @@ mod tests {
         let program_clone = program.clone();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
-        let machine: StarkMachine<BabyBearPoseidon2, MipsAir<BabyBear>> =
-            MipsAir::machine(BabyBearPoseidon2::new());
+        let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
+            MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
         machine.generate_dependencies(&mut runtime.records, &opts, None);
 
         let shards = runtime.records;
         for shard in shards.clone() {
-            debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+            debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
                 &machine,
                 &pkey,
                 &[shard],
@@ -240,7 +240,7 @@ mod tests {
                 InteractionScope::Local,
             );
         }
-        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+        debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
             &machine,
             &pkey,
             &shards,
@@ -256,14 +256,14 @@ mod tests {
         let program_clone = program.clone();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
-        let machine = MipsAir::machine(BabyBearPoseidon2::new());
+        let machine = MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
         machine.generate_dependencies(&mut runtime.records, &opts, None);
 
         let shards = runtime.records;
         for shard in shards.clone() {
-            debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+            debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
                 &machine,
                 &pkey,
                 &[shard],
@@ -271,7 +271,7 @@ mod tests {
                 InteractionScope::Local,
             );
         }
-        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+        debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
             &machine,
             &pkey,
             &shards,

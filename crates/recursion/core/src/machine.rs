@@ -271,19 +271,19 @@ pub mod tests {
     use std::{iter::once, sync::Arc};
 
     use machine::RecursionAir;
-    use p3_baby_bear::Poseidon2InternalLayerBabyBear;
+    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
         Field, FieldAlgebra, FieldExtensionAlgebra,
     };
     use rand::prelude::*;
     use zkm2_core_machine::utils::run_test_machine;
-    use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     // TODO expand glob import
     use crate::{runtime::instruction as instr, *};
 
-    type SC = BabyBearPoseidon2;
+    type SC = KoalaBearPoseidon2;
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
     type A = RecursionAir<F, 3>;
@@ -292,14 +292,14 @@ pub mod tests {
     /// Runs the given program on machines that use the wide and skinny Poseidon2 chips.
     pub fn run_recursion_test_machines(program: RecursionProgram<F>) {
         let program = Arc::new(program);
-        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             SC::new().perm,
         );
         runtime.run().unwrap();
 
         // Run with the poseidon2 wide chip.
-        let machine = A::machine_wide_with_all_chips(BabyBearPoseidon2::default());
+        let machine = A::machine_wide_with_all_chips(KoalaBearPoseidon2::default());
         let (pk, vk) = machine.setup(&program);
         let result = run_test_machine(vec![runtime.record.clone()], machine, pk, vk);
         if let Err(e) = result {
@@ -308,7 +308,7 @@ pub mod tests {
 
         // Run with the poseidon2 skinny chip.
         let skinny_machine =
-            B::machine_skinny_with_all_chips(BabyBearPoseidon2::ultra_compressed());
+            B::machine_skinny_with_all_chips(KoalaBearPoseidon2::ultra_compressed());
         let (pk, vk) = skinny_machine.setup(&program);
         let result = run_test_machine(vec![runtime.record], skinny_machine, pk, vk);
         if let Err(e) = result {

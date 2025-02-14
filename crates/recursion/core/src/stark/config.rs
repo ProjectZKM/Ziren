@@ -1,4 +1,4 @@
-use p3_baby_bear::{BabyBear, Poseidon2ExternalLayerBabyBear};
+use p3_koala_bear::{KoalaBear, Poseidon2ExternalLayerKoalaBear};
 use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::{ExtensionMmcs, Mmcs};
@@ -23,7 +23,7 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_RATE: usize = 2;
 pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 
 /// A configuration for outer recursion.
-pub type OuterVal = BabyBear;
+pub type OuterVal = KoalaBear;
 pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
 pub type OuterPerm = Poseidon2Bn254<3>;
 pub type OuterHash =
@@ -31,7 +31,7 @@ pub type OuterHash =
 pub type OuterDigestHash = Hash<OuterVal, Bn254Fr, DIGEST_SIZE>;
 pub type OuterDigest = [Bn254Fr; DIGEST_SIZE];
 pub type OuterCompress = TruncatedPermutation<OuterPerm, 2, 1, 3>;
-pub type OuterValMmcs = MerkleTreeMmcs<BabyBear, Bn254Fr, OuterHash, OuterCompress, 1>;
+pub type OuterValMmcs = MerkleTreeMmcs<KoalaBear, Bn254Fr, OuterHash, OuterCompress, 1>;
 pub type OuterChallengeMmcs = ExtensionMmcs<OuterVal, OuterChallenge, OuterValMmcs>;
 pub type OuterDft = Radix2DitParallel<OuterVal>;
 pub type OuterChallenger = MultiField32Challenger<
@@ -115,34 +115,34 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
 }
 
 #[derive(Deserialize)]
-#[serde(from = "std::marker::PhantomData<BabyBearPoseidon2Outer>")]
-pub struct BabyBearPoseidon2Outer {
+#[serde(from = "std::marker::PhantomData<KoalaBearPoseidon2Outer>")]
+pub struct KoalaBearPoseidon2Outer {
     pub perm: OuterPerm,
     pub pcs: OuterPcs,
 }
 
-impl Clone for BabyBearPoseidon2Outer {
+impl Clone for KoalaBearPoseidon2Outer {
     fn clone(&self) -> Self {
         Self::new()
     }
 }
 
-impl Serialize for BabyBearPoseidon2Outer {
+impl Serialize for KoalaBearPoseidon2Outer {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        std::marker::PhantomData::<BabyBearPoseidon2Outer>.serialize(serializer)
+        std::marker::PhantomData::<KoalaBearPoseidon2Outer>.serialize(serializer)
     }
 }
 
-impl From<std::marker::PhantomData<BabyBearPoseidon2Outer>> for BabyBearPoseidon2Outer {
-    fn from(_: std::marker::PhantomData<BabyBearPoseidon2Outer>) -> Self {
+impl From<std::marker::PhantomData<KoalaBearPoseidon2Outer>> for KoalaBearPoseidon2Outer {
+    fn from(_: std::marker::PhantomData<KoalaBearPoseidon2Outer>) -> Self {
         Self::new()
     }
 }
 
-impl BabyBearPoseidon2Outer {
+impl KoalaBearPoseidon2Outer {
     pub fn new() -> Self {
         let perm = outer_perm();
         let hash = OuterHash::new(perm.clone()).unwrap();
@@ -165,13 +165,13 @@ impl BabyBearPoseidon2Outer {
     }
 }
 
-impl Default for BabyBearPoseidon2Outer {
+impl Default for KoalaBearPoseidon2Outer {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StarkGenericConfig for BabyBearPoseidon2Outer {
+impl StarkGenericConfig for KoalaBearPoseidon2Outer {
     type Val = OuterVal;
     type Domain = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Domain;
     type Pcs = OuterPcs;
@@ -187,8 +187,8 @@ impl StarkGenericConfig for BabyBearPoseidon2Outer {
     }
 }
 
-impl ZeroCommitment<BabyBearPoseidon2Outer> for OuterPcs {
-    fn zero_commitment(&self) -> Com<BabyBearPoseidon2Outer> {
+impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
+    fn zero_commitment(&self) -> Com<KoalaBearPoseidon2Outer> {
         OuterDigestHash::from([Bn254Fr::ZERO; DIGEST_SIZE])
     }
 }

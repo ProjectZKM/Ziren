@@ -8,13 +8,13 @@ use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm2_recursion_core::DIGEST_SIZE;
 
 use crate::{
-    challenger::CanObserveVariable, hash::FieldHasherVariable, BabyBearFriConfigVariable,
+    challenger::CanObserveVariable, hash::FieldHasherVariable, KoalaBearFriConfigVariable,
     CircuitConfig,
 };
 
 /// Reference: [zkm2_core::stark::StarkVerifyingKey]
 #[derive(Clone)]
-pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>> {
+pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
     pub commitment: SC::DigestVariable,
     pub pc_start: Felt<C::F>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
@@ -75,7 +75,7 @@ pub struct TwoAdicPcsMatsVariable<C: CircuitConfig> {
     pub values: Vec<Vec<Ext<C::F, C::EF>>>,
 }
 
-impl<C: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<C>> VerifyingKeyVariable<C, SC> {
+impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> VerifyingKeyVariable<C, SC> {
     pub fn observe_into<Challenger>(&self, builder: &mut Builder<C>, challenger: &mut Challenger)
     where
         Challenger: CanObserveVariable<C, Felt<C::F>> + CanObserveVariable<C, SC::DigestVariable>,

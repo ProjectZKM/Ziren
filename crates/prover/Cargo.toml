@@ -22,7 +22,7 @@ zkm2-core-executor = { workspace = true }
 zkm2-primitives = { workspace = true }
 p3-field = { workspace = true }
 p3-challenger = { workspace = true }
-p3-baby-bear = { workspace = true }
+p3-koala-bear = { workspace = true }
 p3-bn254-fr = { workspace = true }
 p3-commit = { workspace = true }
 bincode = "1.3.3"

@@ -1,13 +1,13 @@
 use std::borrow::Borrow;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_challenger::DuplexChallenger;
 use p3_symmetric::Hash;
 
 use p3_field::FieldAlgebra;
 use zkm2_recursion_compiler::ir::Builder;
 use zkm2_stark::{
-    baby_bear_poseidon2::BabyBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal, OpeningProof,
+    koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal, OpeningProof,
     StarkVerifyingKey, Word,
 };
 
@@ -19,7 +19,7 @@ use crate::{
     merkle_tree::MerkleProof,
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    BabyBearFriConfigVariable, CircuitConfig, FriProofVariable, VerifyingKeyVariable,
+    KoalaBearFriConfigVariable, CircuitConfig, FriProofVariable, VerifyingKeyVariable,
 };
 
 use super::{
@@ -82,7 +82,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: BabyBearFriConfigVariable<C>>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
     Witnessable<C> for StarkVerifyingKey<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
@@ -109,11 +109,11 @@ where
     }
 }
 
-impl<C> Witnessable<C> for ZKMRecursionWitnessValues<BabyBearPoseidon2>
+impl<C> Witnessable<C> for ZKMRecursionWitnessValues<KoalaBearPoseidon2>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
 {
-    type WitnessVariable = ZKMRecursionWitnessVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = ZKMRecursionWitnessVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let vk = self.vk.read(builder);
@@ -145,7 +145,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: BabyBearFriConfigVariable<C>>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
     Witnessable<C> for ZKMCompressWitnessValues<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
@@ -169,11 +169,11 @@ where
     }
 }
 
-impl<C> Witnessable<C> for ZKMDeferredWitnessValues<BabyBearPoseidon2>
+impl<C> Witnessable<C> for ZKMDeferredWitnessValues<KoalaBearPoseidon2>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
 {
-    type WitnessVariable = ZKMDeferredWitnessVariable<C, BabyBearPoseidon2>;
+    type WitnessVariable = ZKMDeferredWitnessVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let vks_and_proofs = self.vks_and_proofs.read(builder);
@@ -257,12 +257,12 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = BabyBear>, SC: BabyBearFriConfigVariable<C>> Witnessable<C>
+impl<C: CircuitConfig<F = KoalaBear>, SC: KoalaBearFriConfigVariable<C>> Witnessable<C>
     for ZKMMerkleProofWitnessValues<SC>
 where
     // This trait bound is redundant, but Rust-Analyzer is not able to infer it.
-    SC: FieldHasher<BabyBear>,
-    <SC as FieldHasher<BabyBear>>::Digest: Witnessable<C, WitnessVariable = SC::DigestVariable>,
+    SC: FieldHasher<KoalaBear>,
+    <SC as FieldHasher<KoalaBear>>::Digest: Witnessable<C, WitnessVariable = SC::DigestVariable>,
 {
     type WitnessVariable = ZKMMerkleProofWitnessVariable<C, SC>;
 

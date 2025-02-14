@@ -394,7 +394,7 @@ mod tests {
     use core::borrow::{Borrow, BorrowMut};
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
@@ -403,7 +403,7 @@ mod tests {
         edwards::ed25519::Ed25519BaseField, weierstrass::secp256k1::Secp256k1BaseField,
     };
     use zkm2_derive::AlignedBorrow;
-    use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
+    use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
     use std::mem::size_of;
 
     #[derive(AlignedBorrow, Debug, Clone)]
@@ -513,15 +513,15 @@ mod tests {
             println!("op: {:?}", op);
             let chip: FieldOpChip<Ed25519BaseField> = FieldOpChip::new(*op);
             let shard = ExecutionRecord::default();
-            let _: RowMajorMatrix<BabyBear> =
+            let _: RowMajorMatrix<KoalaBear> =
                 chip.generate_trace(&shard, &mut ExecutionRecord::default());
             // println!("{:?}", trace.values)
         }
     }
 
     #[test]
-    fn prove_babybear() {
-        let config = BabyBearPoseidon2::new();
+    fn prove_koalabear() {
+        let config = KoalaBearPoseidon2::new();
 
         for op in
             [FieldOperation::Add, FieldOperation::Sub, FieldOperation::Mul, FieldOperation::Div]
@@ -533,9 +533,9 @@ mod tests {
 
             let chip: FieldOpChip<Ed25519BaseField> = FieldOpChip::new(*op);
             let shard = ExecutionRecord::default();
-            let trace: RowMajorMatrix<BabyBear> =
+            let trace: RowMajorMatrix<KoalaBear> =
                 chip.generate_trace(&shard, &mut ExecutionRecord::default());
-            let proof = prove::<BabyBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+            let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
             let mut challenger = config.challenger();
             verify(&config, &chip, &mut challenger, &proof).unwrap();

@@ -6,7 +6,7 @@ use std::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
@@ -16,7 +16,7 @@ use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
 
 use zkm2_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS},
-    baby_bear_poseidon2::BabyBearPoseidon2,
+    koala_bear_poseidon2::KoalaBearPoseidon2,
     Dom, ShardProof, StarkMachine, StarkVerifyingKey, Word,
 };
 
@@ -31,7 +31,7 @@ use crate::{
     hash::{FieldHasher, FieldHasherVariable},
     machine::assert_recursion_public_values_valid,
     stark::{dummy_challenger, ShardProofVariable, StarkVerifier},
-    BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
+    KoalaBearFriConfig, KoalaBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
 };
 
 use super::{
@@ -56,7 +56,7 @@ pub struct ZKMDeferredShape {
 #[serde(bound(
     deserialize = "SC::Challenger: Deserialize<'de>, ShardProof<SC>: Deserialize<'de>, Dom<SC>: DeserializeOwned, [SC::Val; DIGEST_SIZE]: Deserialize<'de>, SC::Digest: Deserialize<'de>"
 ))]
-pub struct ZKMDeferredWitnessValues<SC: BabyBearFriConfig + FieldHasher<BabyBear>> {
+pub struct ZKMDeferredWitnessValues<SC: KoalaBearFriConfig + FieldHasher<KoalaBear>> {
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, ShardProof<SC>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; POSEIDON_NUM_WORDS],
@@ -73,8 +73,8 @@ pub struct ZKMDeferredWitnessValues<SC: BabyBearFriConfig + FieldHasher<BabyBear
 }
 
 pub struct ZKMDeferredWitnessVariable<
-    C: CircuitConfig<F = BabyBear>,
-    SC: FieldHasherVariable<C> + BabyBearFriConfigVariable<C>,
+    C: CircuitConfig<F = KoalaBear>,
+    SC: FieldHasherVariable<C> + KoalaBearFriConfigVariable<C>,
 > {
     pub vks_and_proofs: Vec<(VerifyingKeyVariable<C, SC>, ShardProofVariable<C, SC>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -93,13 +93,13 @@ pub struct ZKMDeferredWitnessVariable<
 
 impl<C, SC, A> ZKMDeferredVerifier<C, SC, A>
 where
-    SC: BabyBearFriConfigVariable<
+    SC: KoalaBearFriConfigVariable<
         C,
         FriChallengerVariable = DuplexChallengerVariable<C>,
-        DigestVariable = [Felt<BabyBear>; DIGEST_SIZE],
+        DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
     >,
-    C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<BabyBear>>,
-    <SC::ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>: Clone,
+    C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
+    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
 {
     /// Verify a batch of deferred proofs.
@@ -263,13 +263,13 @@ where
     }
 }
 
-impl ZKMDeferredWitnessValues<BabyBearPoseidon2> {
-    pub fn dummy<A: MachineAir<BabyBear>>(
-        machine: &StarkMachine<BabyBearPoseidon2, A>,
+impl ZKMDeferredWitnessValues<KoalaBearPoseidon2> {
+    pub fn dummy<A: MachineAir<KoalaBear>>(
+        machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMDeferredShape,
     ) -> Self {
         let inner_witness =
-            ZKMCompressWitnessValues::<BabyBearPoseidon2>::dummy(machine, &shape.inner);
+            ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.inner);
         let vks_and_proofs = inner_witness.vks_and_proofs;
 
         let vk_merkle_data = ZKMMerkleProofWitnessValues::dummy(vks_and_proofs.len(), shape.height);
@@ -279,15 +279,15 @@ impl ZKMDeferredWitnessValues<BabyBearPoseidon2> {
             vk_merkle_data,
             leaf_challenger: dummy_challenger(machine.config()),
             is_complete: true,
-            zkm2_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
-            start_reconstruct_deferred_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
+            zkm2_vk_digest: [KoalaBear::ZERO; DIGEST_SIZE],
+            start_reconstruct_deferred_digest: [KoalaBear::ZERO; POSEIDON_NUM_WORDS],
             committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
-            deferred_proofs_digest: [BabyBear::ZERO; POSEIDON_NUM_WORDS],
-            end_pc: BabyBear::ZERO,
-            end_shard: BabyBear::ZERO,
-            end_execution_shard: BabyBear::ZERO,
-            init_addr_bits: [BabyBear::ZERO; 32],
-            finalize_addr_bits: [BabyBear::ZERO; 32],
+            deferred_proofs_digest: [KoalaBear::ZERO; POSEIDON_NUM_WORDS],
+            end_pc: KoalaBear::ZERO,
+            end_shard: KoalaBear::ZERO,
+            end_execution_shard: KoalaBear::ZERO,
+            init_addr_bits: [KoalaBear::ZERO; 32],
+            finalize_addr_bits: [KoalaBear::ZERO; 32],
         }
     }
 }

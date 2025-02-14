@@ -11,7 +11,7 @@ use crate::{
         columns::{CpuCols, OpcodeSelectorCols},
         CpuChip,
     },
-    operations::BabyBearWordRangeChecker,
+    operations::KoalaBearWordRangeChecker,
 };
 
 use zkm2_core_executor::Opcode;
@@ -73,13 +73,13 @@ impl CpuChip {
                 .assert_eq(branch_cols.target_pc.reduce::<AB>(), next.next_pc);
 
             // Range check branch_cols.pc and branch_cols.next_pc.
-            BabyBearWordRangeChecker::<AB::F>::range_check(
+            KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 branch_cols.next_pc,
                 branch_cols.next_pc_range_checker,
                 is_branch_instruction.clone(),
             );
-            BabyBearWordRangeChecker::<AB::F>::range_check(
+            KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 branch_cols.target_pc,
                 branch_cols.target_pc_range_checker,

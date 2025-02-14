@@ -2,7 +2,7 @@ use std::{fs::File, path::Path};
 
 use anyhow::Result;
 use clap::ValueEnum;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32, TwoAdicField};
@@ -20,7 +20,7 @@ use thiserror::Error;
 use zkm2_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
 
 use crate::{
-    utils::{babybears_to_bn254, words_to_bytes_be},
+    utils::{koalabears_to_bn254, words_to_bytes_be},
     CoreSC, InnerSC,
 };
 
@@ -41,14 +41,14 @@ pub struct ZKMVerifyingKey {
 
 /// A trait for keys that can be hashed into a digest.
 pub trait HashableKey {
-    /// Hash the key into a digest of BabyBear elements.
-    fn hash_babybear(&self) -> [BabyBear; DIGEST_SIZE];
+    /// Hash the key into a digest of KoalaBear elements.
+    fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE];
 
     /// Hash the key into a digest of  u32 elements.
     fn hash_u32(&self) -> [u32; DIGEST_SIZE];
 
     fn hash_bn254(&self) -> Bn254Fr {
-        babybears_to_bn254(&self.hash_babybear())
+        koalabears_to_bn254(&self.hash_koalabear())
     }
 
     fn bytes32(&self) -> String {
@@ -66,8 +66,8 @@ pub trait HashableKey {
 }
 
 impl HashableKey for ZKMVerifyingKey {
-    fn hash_babybear(&self) -> [BabyBear; DIGEST_SIZE] {
-        self.vk.hash_babybear()
+    fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
+        self.vk.hash_koalabear()
     }
 
     fn hash_u32(&self) -> [u32; DIGEST_SIZE] {
@@ -75,22 +75,22 @@ impl HashableKey for ZKMVerifyingKey {
     }
 }
 
-impl<SC: StarkGenericConfig<Val = BabyBear, Domain = TwoAdicMultiplicativeCoset<BabyBear>>>
+impl<SC: StarkGenericConfig<Val = KoalaBear, Domain = TwoAdicMultiplicativeCoset<KoalaBear>>>
     HashableKey for StarkVerifyingKey<SC>
 where
-    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[BabyBear; DIGEST_SIZE]>,
+    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[KoalaBear; DIGEST_SIZE]>,
 {
-    fn hash_babybear(&self) -> [BabyBear; DIGEST_SIZE] {
+    fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         let prep_domains = self.chip_information.iter().map(|(_, domain, _)| domain);
         let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
         inputs.push(self.pc_start);
         for domain in prep_domains {
-            inputs.push(BabyBear::from_canonical_usize(domain.log_n));
+            inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
             let size = 1 << domain.log_n;
-            inputs.push(BabyBear::from_canonical_usize(size));
-            let g = BabyBear::two_adic_generator(domain.log_n);
+            inputs.push(KoalaBear::from_canonical_usize(size));
+            let g = KoalaBear::two_adic_generator(domain.log_n);
             inputs.push(domain.shift);
             inputs.push(g);
         }
@@ -99,7 +99,7 @@ where
     }
 
     fn hash_u32(&self) -> [u32; 8] {
-        self.hash_babybear()
+        self.hash_koalabear()
             .into_iter()
             .map(|n| n.as_canonical_u32())
             .collect::<Vec<_>>()

@@ -803,8 +803,8 @@ pub mod tests {
     #[test]
     #[ignore]
     fn test_making_shapes() {
-        use p3_baby_bear::BabyBear;
-        let shape_config = CoreShapeConfig::<BabyBear>::default();
+        use p3_koala_bear::KoalaBear;
+        let shape_config = CoreShapeConfig::<KoalaBear>::default();
         let num_shapes = shape_config.generate_all_allowed_shapes().count();
         println!("There are {} core shapes", num_shapes);
         assert!(num_shapes < 1 << 24);
@@ -813,33 +813,33 @@ pub mod tests {
     #[test]
     fn test_dummy_record() {
         use crate::utils::setup_logger;
-        use p3_baby_bear::BabyBear;
-        use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
+        use p3_koala_bear::KoalaBear;
+        use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
         use zkm2_stark::CpuProver;
 
-        type SC = BabyBearPoseidon2;
-        type A = MipsAir<BabyBear>;
+        type SC = KoalaBearPoseidon2;
+        type A = MipsAir<KoalaBear>;
 
         setup_logger();
 
         let preprocessed_log_heights = [
-            (MipsAir::<BabyBear>::Program(ProgramChip::default()), 10),
-            (MipsAir::<BabyBear>::ProgramMemory(MemoryProgramChip::default()), 10),
-            (MipsAir::<BabyBear>::ByteLookup(ByteChip::default()), 16),
+            (MipsAir::<KoalaBear>::Program(ProgramChip::default()), 10),
+            (MipsAir::<KoalaBear>::ProgramMemory(MemoryProgramChip::default()), 10),
+            (MipsAir::<KoalaBear>::ByteLookup(ByteChip::default()), 16),
         ];
 
         let core_log_heights = [
-            (MipsAir::<BabyBear>::Cpu(CpuChip::default()), 11),
-            (MipsAir::<BabyBear>::DivRem(DivRemChip::default()), 11),
-            (MipsAir::<BabyBear>::Add(AddSubChip::default()), 10),
-            (MipsAir::<BabyBear>::Bitwise(BitwiseChip::default()), 10),
-            (MipsAir::<BabyBear>::Mul(MulChip::default()), 10),
-            (MipsAir::<BabyBear>::ShiftRight(ShiftRightChip::default()), 10),
-            (MipsAir::<BabyBear>::ShiftLeft(ShiftLeft::default()), 10),
-            (MipsAir::<BabyBear>::Lt(LtChip::default()), 10),
-            (MipsAir::<BabyBear>::CloClz(CloClzChip::default()), 10),
-            (MipsAir::<BabyBear>::MemoryLocal(MemoryLocalChip::new()), 10),
-            (MipsAir::<BabyBear>::SyscallCore(SyscallChip::core()), 10),
+            (MipsAir::<KoalaBear>::Cpu(CpuChip::default()), 11),
+            (MipsAir::<KoalaBear>::DivRem(DivRemChip::default()), 11),
+            (MipsAir::<KoalaBear>::Add(AddSubChip::default()), 10),
+            (MipsAir::<KoalaBear>::Bitwise(BitwiseChip::default()), 10),
+            (MipsAir::<KoalaBear>::Mul(MulChip::default()), 10),
+            (MipsAir::<KoalaBear>::ShiftRight(ShiftRightChip::default()), 10),
+            (MipsAir::<KoalaBear>::ShiftLeft(ShiftLeft::default()), 10),
+            (MipsAir::<KoalaBear>::Lt(LtChip::default()), 10),
+            (MipsAir::<KoalaBear>::CloClz(CloClzChip::default()), 10),
+            (MipsAir::<KoalaBear>::MemoryLocal(MemoryLocalChip::new()), 10),
+            (MipsAir::<KoalaBear>::SyscallCore(SyscallChip::core()), 10),
         ];
 
         let height_map = preprocessed_log_heights

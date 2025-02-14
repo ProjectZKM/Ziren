@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, path::PathBuf};
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use zkm2_core_executor::ZKMContext;
 use zkm2_core_machine::io::ZKMStdin;
 use zkm2_recursion_circuit::{
@@ -22,7 +22,7 @@ use zkm2_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
 use zkm2_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
-    utils::{babybear_bytes_to_bn254, babybears_to_bn254, words_to_bytes},
+    utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
     OuterSC, WrapAir, ZKMProver,
 };
 
@@ -139,12 +139,12 @@ pub fn build_constraints_and_witness(
     let constraints =
         tracing::info_span!("wrap circuit").in_scope(|| build_outer_circuit(&template_input));
 
-    let pv: &RecursionPublicValues<BabyBear> = template_proof.public_values.as_slice().borrow();
-    let vkey_hash = babybears_to_bn254(&pv.zkm2_vk_digest);
-    let committed_values_digest_bytes: [BabyBear; 32] = words_to_bytes(&pv.committed_value_digest)
+    let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
+    let vkey_hash = koalabears_to_bn254(&pv.zkm2_vk_digest);
+    let committed_values_digest_bytes: [KoalaBear; 32] = words_to_bytes(&pv.committed_value_digest)
         .try_into()
         .unwrap();
-    let committed_values_digest = babybear_bytes_to_bn254(&committed_values_digest_bytes);
+    let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);
 
     tracing::info!("building template witness");
     let mut witness = OuterWitness::default();

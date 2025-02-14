@@ -10,12 +10,12 @@ pub use config::*;
 mod tests {
     use std::sync::Arc;
 
-    use p3_baby_bear::Poseidon2InternalLayerBabyBear;
+    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_field::FieldAlgebra;
 
     use zkm2_core_machine::utils::run_test_machine;
     use zkm2_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
-    use zkm2_stark::{BabyBearPoseidon2Inner, StarkGenericConfig};
+    use zkm2_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
 
     use crate::{
         circuit::{AsmBuilder, AsmCompiler, CircuitV2Builder},
@@ -24,7 +24,7 @@ mod tests {
 
     const DEGREE: usize = 3;
 
-    type SC = BabyBearPoseidon2Inner;
+    type SC = KoalaBearPoseidon2Inner;
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
     type A = RecursionAir<F, DEGREE>;
@@ -53,7 +53,7 @@ mod tests {
         let operations = builder.into_operations();
         let mut compiler = AsmCompiler::default();
         let program = Arc::new(compiler.compile(operations));
-        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             SC::new().perm,
         );
@@ -93,7 +93,7 @@ mod tests {
         let operations = builder.into_operations();
         let mut compiler = AsmCompiler::default();
         let program = Arc::new(compiler.compile(operations));
-        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             SC::new().perm,
         );

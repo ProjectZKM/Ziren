@@ -10,7 +10,7 @@ use zkm2_recursion_compiler::{
     ir::{Builder, Var},
 };
 use zkm2_recursion_core::stark::{
-    BabyBearPoseidon2Outer, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs, OuterDigest,
+    KoalaBearPoseidon2Outer, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs, OuterDigest,
     OuterFriProof, OuterInputProof, OuterVal,
 };
 
@@ -51,7 +51,7 @@ impl<C: CircuitConfig<N = Bn254Fr>> Witnessable<C> for Bn254Fr {
 }
 
 impl Witnessable<OuterConfig> for OuterBatchOpening {
-    type WitnessVariable = BatchOpeningVariable<OuterConfig, BabyBearPoseidon2Outer>;
+    type WitnessVariable = BatchOpeningVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let opened_values = self
@@ -75,7 +75,7 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
 
 /*
 impl Witnessable<OuterConfig> for OuterPcsProof {
-    type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
+    type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let fri_proof = self.fri_proof.read(builder);
@@ -94,7 +94,7 @@ impl Witnessable<OuterConfig> for OuterPcsProof {
 */
 
 impl Witnessable<OuterConfig> for OuterFriProof {
-    type WitnessVariable = FriProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
+    type WitnessVariable = FriProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let commit_phase_commits = self
@@ -128,7 +128,7 @@ impl Witnessable<OuterConfig> for OuterFriProof {
 }
 
 impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs> {
-    type WitnessVariable = FriCommitPhaseProofStepVariable<OuterConfig, BabyBearPoseidon2Outer>;
+    type WitnessVariable = FriCommitPhaseProofStepVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);
@@ -146,7 +146,7 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
 }
 
 impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof> {
-    type WitnessVariable = FriQueryProofVariable<OuterConfig, BabyBearPoseidon2Outer>;
+    type WitnessVariable = FriQueryProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let input_proof = self.input_proof.read(builder);

@@ -185,7 +185,7 @@ mod tests {
     use std::sync::Arc;
 
     use hashbrown::HashMap;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
 
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{ExecutionRecord, Instruction, Opcode, Program};
@@ -216,7 +216,7 @@ mod tests {
             ..Default::default()
         };
         let chip = ProgramChip::new();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }

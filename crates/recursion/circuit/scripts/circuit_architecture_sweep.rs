@@ -1,19 +1,19 @@
 //! Sweeps end-to-end prover performance across a wide range of parameters for the Plonk circuit builder.
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 
 use zkm2_core::{stark::StarkMachine, utils::log2_strict_usize};
 use zkm2_recursion_circuit::build_wrap_v2::{machine_with_all_chips, test_machine};
 use zkm2_recursion_core::machine::RecursionAir;
-use zkm2_recursion_core::stark::config::BabyBearPoseidon2Outer;
+use zkm2_recursion_core::stark::config::KoalaBearPoseidon2Outer;
 
-type SC = BabyBearPoseidon2Outer;
+type SC = KoalaBearPoseidon2Outer;
 
 fn machine_with_dummy<const DEGREE: usize, const COL_PADDING: usize>(
     log_height: usize,
-) -> StarkMachine<BabyBearPoseidon2Outer, RecursionAir<BabyBear, DEGREE, COL_PADDING>> {
+) -> StarkMachine<KoalaBearPoseidon2Outer, RecursionAir<KoalaBear, DEGREE, COL_PADDING>> {
     let config = SC::new_with_log_blowup(log2_strict_usize(DEGREE - 1));
-    RecursionAir::<BabyBear, DEGREE, COL_PADDING>::dummy_machine(config, log_height)
+    RecursionAir::<KoalaBear, DEGREE, COL_PADDING>::dummy_machine(config, log_height)
 }
 
 fn main() {

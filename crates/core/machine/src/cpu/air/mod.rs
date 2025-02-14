@@ -19,7 +19,7 @@ use crate::{
         columns::{CpuCols, OpcodeSelectorCols, NUM_CPU_COLS},
         CpuChip,
     },
-    operations::BabyBearWordRangeChecker,
+    operations::KoalaBearWordRangeChecker,
 };
 use zkm2_core_executor::Opcode;
 
@@ -168,19 +168,19 @@ impl CpuChip {
             .assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
 
         // Range check op_a, pc, and next_pc.
-        BabyBearWordRangeChecker::<AB::F>::range_check(
+        KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
             local.op_a_val(),
             jump_columns.op_a_range_checker,
             is_jump_instruction.clone(),
         );
-        BabyBearWordRangeChecker::<AB::F>::range_check(
+        KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
             jump_columns.next_pc,
             jump_columns.next_pc_range_checker,
             is_jump_instruction.clone(),
         );
-        BabyBearWordRangeChecker::<AB::F>::range_check(
+        KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
             jump_columns.target_pc,
             jump_columns.target_pc_range_checker,
@@ -208,7 +208,7 @@ impl CpuChip {
     //     builder.when(local.selectors.is_auipc).assert_eq(auipc_columns.pc.reduce::<AB>(), local.pc);
     // 
     //     // Range check the pc.
-    //     BabyBearWordRangeChecker::<AB::F>::range_check(
+    //     KoalaBearWordRangeChecker::<AB::F>::range_check(
     //         builder,
     //         auipc_columns.pc,
     //         auipc_columns.pc_range_checker,

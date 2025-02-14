@@ -1,12 +1,12 @@
 // use std::{borrow::Borrow, path::PathBuf};
 
 // use clap::Parser;
-// use p3_baby_bear::BabyBear;
+// use p3_koala_bear::KoalaBear;
 // use p3_field::PrimeField;
 // use sp1_core_executor::SP1Context;
 // use sp1_core_machine::io::SP1Stdin;
 // use sp1_prover::{
-//     utils::{babybear_bytes_to_bn254, babybears_to_bn254, words_to_bytes},
+//     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
 //     SP1Prover,
 // };
 // use sp1_recursion_circuit::{stark::build_wrap_circuit, witness::Witnessable};
@@ -61,10 +61,10 @@
 
 //     tracing::info!("building template witness");
 //     let pv: &RecursionPublicValues<_> = wrapped_proof.proof.public_values.as_slice().borrow();
-//     let vkey_hash = babybears_to_bn254(&pv.sp1_vk_digest);
-//     let committed_values_digest_bytes: [BabyBear; 32] =
+//     let vkey_hash = koalabears_to_bn254(&pv.sp1_vk_digest);
+//     let committed_values_digest_bytes: [KoalaBear; 32] =
 //         words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
-//     let committed_values_digest = babybear_bytes_to_bn254(&committed_values_digest_bytes);
+//     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);
 
 //     let mut witness = Witness::default();
 //     wrapped_proof.proof.write(&mut witness);

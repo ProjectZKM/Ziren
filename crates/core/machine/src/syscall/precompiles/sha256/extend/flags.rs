@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 use p3_air::AirBuilder;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, Field, PrimeField32, TwoAdicField};
 use p3_matrix::Matrix;
 use zkm2_stark::air::{BaseAirBuilder, ZKMAirBuilder};
@@ -12,7 +12,7 @@ use super::{ShaExtendChip, ShaExtendCols};
 impl<F: Field> ShaExtendCols<F> {
     pub fn populate_flags(&mut self, i: usize) {
         // The generator of the multiplicative subgroup.
-        let g = F::from_canonical_u32(BabyBear::two_adic_generator(4).as_canonical_u32());
+        let g = F::from_canonical_u32(KoalaBear::two_adic_generator(4).as_canonical_u32());
 
         // Populate the columns needed to keep track of cycles of 16 rows.
         self.cycle_16 = g.exp_u64((i + 1) as u64);
@@ -43,8 +43,8 @@ impl ShaExtendChip {
 
         let one = AB::Expr::from(AB::F::ONE);
 
-        // Generator with order 16 within BabyBear.
-        let g = AB::F::from_canonical_u32(BabyBear::two_adic_generator(4).as_canonical_u32());
+        // Generator with order 16 within KoalaBear.
+        let g = AB::F::from_canonical_u32(KoalaBear::two_adic_generator(4).as_canonical_u32());
 
         // First row of the table must have g^1.
         builder.when_first_row().assert_eq(local.cycle_16, g);

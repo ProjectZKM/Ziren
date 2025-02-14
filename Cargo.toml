@@ -53,7 +53,7 @@ p3-matrix = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-maybe-rayon = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-util = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-fri = { git = "https://github.com/zkMIPS/Plonky3" }
-p3-baby-bear = { git = "https://github.com/zkMIPS/Plonky3" }
+p3-koala-bear  = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-circle = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-keccak = { git = "https://github.com/zkMIPS/Plonky3" }
 p3-keccak-air = { git = "https://github.com/zkMIPS/Plonky3" }
@@ -75,7 +75,7 @@ p3-uni-stark = { git = "https://github.com/zkMIPS/Plonky3" }
 #p3-maybe-rayon = { path = "../Plonky3/maybe-rayon" }
 #p3-util = { path = "../Plonky3/util" }
 #p3-fri = { path = "../Plonky3/fri" }
-#p3-baby-bear = { path = "../Plonky3/baby-bear" }
+#p3-koala-bear = { path = "../Plonky3/koala-bear" }
 #p3-circle = { path = "../Plonky3/circle" }
 #p3-keccak = { path = "../Plonky3/keccak" }
 #p3-keccak-air = { path = "../Plonky3/keccak-air" }

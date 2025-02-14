@@ -402,10 +402,10 @@ where
 mod tests {
 
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::ShiftLeft;
 
@@ -414,14 +414,14 @@ mod tests {
         let mut shard = ExecutionRecord::default();
         shard.shift_left_events = vec![AluEvent::new(0, 0, Opcode::SLL, 16, 8, 1)];
         let chip = ShiftLeft::default();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }
 
     #[test]
-    fn prove_babybear() {
-        let config = BabyBearPoseidon2::new();
+    fn prove_koalabear() {
+        let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
         let mut shift_events: Vec<AluEvent> = Vec::new();
@@ -458,9 +458,9 @@ mod tests {
         let mut shard = ExecutionRecord::default();
         shard.shift_left_events = shift_events;
         let chip = ShiftLeft::default();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
-        let proof = prove::<BabyBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+        let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         verify(&config, &chip, &mut challenger, &proof).unwrap();

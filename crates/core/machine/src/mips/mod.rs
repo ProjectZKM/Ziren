@@ -603,7 +603,7 @@ pub mod tests {
         Instruction, Opcode, Program, Register,
     };
     use zkm2_stark::{
-        baby_bear_poseidon2::BabyBearPoseidon2, CpuProver, ZKMCoreOpts, StarkProvingKey,
+        koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, ZKMCoreOpts, StarkProvingKey,
         StarkVerifyingKey,
     };
 
@@ -917,7 +917,7 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 1024;
         opts.shard_batch_size = 2;
-        prove::<_, CpuProver<_, _>>(program, &stdin, BabyBearPoseidon2::new(), opts, None).unwrap();
+        prove::<_, CpuProver<_, _>>(program, &stdin, KoalaBearPoseidon2::new(), opts, None).unwrap();
     }
 
     #[test]
@@ -928,7 +928,7 @@ pub mod tests {
         prove::<_, CpuProver<_, _>>(
             program,
             &stdin,
-            BabyBearPoseidon2::new(),
+            KoalaBearPoseidon2::new(),
             ZKMCoreOpts::default(),
             None,
         )
@@ -952,12 +952,12 @@ pub mod tests {
     #[test]
     fn test_key_serde() {
         let program = ssz_withdrawals_program();
-        let config = BabyBearPoseidon2::new();
+        let config = KoalaBearPoseidon2::new();
         let machine = MipsAir::machine(config);
         let (pk, vk) = machine.setup(&program);
 
         let serialized_pk = bincode::serialize(&pk).unwrap();
-        let deserialized_pk: StarkProvingKey<BabyBearPoseidon2> =
+        let deserialized_pk: StarkProvingKey<KoalaBearPoseidon2> =
             bincode::deserialize(&serialized_pk).unwrap();
         assert_eq!(pk.commit, deserialized_pk.commit);
         assert_eq!(pk.pc_start, deserialized_pk.pc_start);
@@ -967,7 +967,7 @@ pub mod tests {
         assert_eq!(pk.local_only, deserialized_pk.local_only);
 
         let serialized_vk = bincode::serialize(&vk).unwrap();
-        let deserialized_vk: StarkVerifyingKey<BabyBearPoseidon2> =
+        let deserialized_vk: StarkVerifyingKey<KoalaBearPoseidon2> =
             bincode::deserialize(&serialized_vk).unwrap();
         assert_eq!(vk.commit, deserialized_vk.commit);
         assert_eq!(vk.pc_start, deserialized_vk.pc_start);

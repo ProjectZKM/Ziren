@@ -206,13 +206,13 @@ pub fn test_groth16_bn254(witness_json: &str, constraints_json: &str) {
     test(ProofSystem::Groth16, witness_json, constraints_json)
 }
 
-pub fn test_babybear_poseidon2() {
+pub fn test_koalabear_poseidon2() {
     unsafe {
-        let err_ptr = bind::TestPoseidonBabyBear2();
+        let err_ptr = bind::TestPoseidonKoalaBear2();
         if !err_ptr.is_null() {
             // Safety: The error message is returned from the go code and is guaranteed to be valid.
             panic!(
-                "TestPoseidonBabyBear2 failed: {}",
+                "TestPoseidonKoalaBear2 failed: {}",
                 ptr_to_string_freed(err_ptr)
             );
         }
@@ -276,17 +276,17 @@ impl Groth16Bn254Proof {
 
 #[cfg(test)]
 mod tests {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_symmetric::Permutation;
     use zkm2_stark::inner_perm;
 
     #[test]
-    pub fn test_babybear_poseidon2() {
+    pub fn test_koalabear_poseidon2() {
         let perm = inner_perm();
-        let zeros = [BabyBear::ZERO; 16];
+        let zeros = [KoalaBear::ZERO; 16];
         let result = perm.permute(zeros);
         println!("{:?}", result);
-        super::test_babybear_poseidon2();
+        super::test_koalabear_poseidon2();
     }
 }

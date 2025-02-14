@@ -115,7 +115,7 @@ impl<F: Field> ByteChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use std::time::Instant;
 
     use super::*;
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     pub fn test_trace_and_map() {
         let start = Instant::now();
-        ByteChip::<BabyBear>::trace();
+        ByteChip::<KoalaBear>::trace();
         println!("trace and map: {:?}", start.elapsed());
     }
 }
