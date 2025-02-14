@@ -204,7 +204,7 @@ mod tests {
             Instruction::new(Opcode::ADD, 30, 0, 37, false, true),
             Instruction::new(Opcode::ADD, 31, 30, 29, false, false),
         ];
-        // FIXME stephen
+
         let shard = ExecutionRecord {
             program: Arc::new(Program {
                 instructions,

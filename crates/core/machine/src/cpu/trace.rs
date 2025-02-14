@@ -368,7 +368,6 @@ impl CpuChip {
                         F::from_canonical_u8(most_sig_mem_value_byte >> i & 0x01);
                 }
                 if memory_columns.most_sig_byte_decomp[7] == F::ONE {
-                    // FIXME: ZERO is X0, is it correct?
                     cols.mem_value_is_neg_not_x0 = F::from_bool(instruction.op_a != (ZERO as u8));
                     cols.unsigned_mem_val_nonce = F::from_canonical_u32(
                         nonce_lookup

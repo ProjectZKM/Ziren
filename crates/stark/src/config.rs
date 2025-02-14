@@ -34,7 +34,6 @@ pub type OpeningError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenger,
 >>::Error;
 
-// FIXME: dumplicated with Domain
 pub type Dom<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
     <SC as StarkGenericConfig>::Challenger,
