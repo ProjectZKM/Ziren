@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra, PrimeField32, PrimeField64};
 use p3_matrix::Matrix;
 
@@ -47,7 +47,7 @@ pub fn vec_to_string<F: Field>(vec: Vec<F>) -> String {
 /// This presentation is useful when debugging interactions as it makes it clear which interactions
 /// are `send` and which are `receive`.
 fn field_to_int<F: PrimeField32>(x: F) -> i32 {
-    let modulus = BabyBear::ORDER_U64;
+    let modulus = KoalaBear::ORDER_U64;
     let val = x.as_canonical_u64();
     if val > modulus / 2 {
         val as i32 - modulus as i32

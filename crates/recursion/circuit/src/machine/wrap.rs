@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, marker::PhantomData};
 
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
@@ -13,7 +13,7 @@ use crate::{
     constraints::RecursiveVerifierConstraintFolder,
     machine::{assert_root_public_values_valid, RootPublicValues},
     stark::StarkVerifier,
-    BabyBearFriConfigVariable, CircuitConfig,
+    KoalaBearFriConfigVariable, CircuitConfig,
 };
 
 use super::ZKMCompressWitnessVariable;
@@ -26,9 +26,9 @@ pub struct ZKMWrapVerifier<C, SC, A> {
 
 impl<C, SC, A> ZKMWrapVerifier<C, SC, A>
 where
-    SC: BabyBearFriConfigVariable<C>,
+    SC: KoalaBearFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
-    <SC::ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>: Clone,
+    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
 {
     /// Verify a batch of recursive proofs and aggregate their public values.

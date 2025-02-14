@@ -154,7 +154,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -164,19 +164,19 @@ mod tests {
 
     #[test]
     pub fn generate_trace() {
-        let shard = ExecutionRecord::<BabyBear> {
+        let shard = ExecutionRecord::<KoalaBear> {
             mem_var_events: vec![
                 MemEvent {
-                    inner: BabyBear::ONE.into(),
+                    inner: KoalaBear::ONE.into(),
                 },
                 MemEvent {
-                    inner: BabyBear::ONE.into(),
+                    inner: KoalaBear::ONE.into(),
                 },
             ],
             ..Default::default()
         };
         let chip = MemoryChip::default();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }

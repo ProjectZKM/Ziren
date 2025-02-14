@@ -285,7 +285,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
 
 #[cfg(test)]
 mod tests {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn generate_trace() {
-        type F = BabyBear;
+        type F = KoalaBear;
         let input_0 = [F::ONE; WIDTH];
         let permuter = inner_perm();
         let output_0 = permuter.permute(input_0);

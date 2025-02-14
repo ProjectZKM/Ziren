@@ -1,5 +1,5 @@
 use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
@@ -13,7 +13,7 @@ use zkm2_stark::{
 };
 
 use crate::{
-    domain::PolynomialSpaceVariable, stark::StarkVerifier, BabyBearFriConfigVariable, CircuitConfig,
+    domain::PolynomialSpaceVariable, stark::StarkVerifier, KoalaBearFriConfigVariable, CircuitConfig,
 };
 
 pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFolder<
@@ -28,9 +28,9 @@ pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFol
 impl<C, SC, A> StarkVerifier<C, SC, A>
 where
     C::F: TwoAdicField,
-    SC: BabyBearFriConfigVariable<C>,
+    SC: KoalaBearFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val>,
-    <SC::ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>: Clone,
+    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<C::F> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
 {
     #[allow(clippy::too_many_arguments)]

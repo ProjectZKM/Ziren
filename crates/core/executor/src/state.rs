@@ -5,7 +5,7 @@ use std::{
 
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
-use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkVerifyingKey};
+use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
 
 use crate::{
     events::MemoryRecord,
@@ -54,8 +54,8 @@ pub struct ExecutionState {
 
     /// A stream of proofs (reduce vk, proof, verifying key) inputted to the program.
     pub proof_stream: Vec<(
-        ZKMReduceProof<BabyBearPoseidon2>,
-        StarkVerifyingKey<BabyBearPoseidon2>,
+        ZKMReduceProof<KoalaBearPoseidon2>,
+        StarkVerifyingKey<KoalaBearPoseidon2>,
     )>,
 
     /// A ptr to the current position in the proof stream, incremented after verifying a proof.

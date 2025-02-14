@@ -16,7 +16,7 @@ use crate::{
         CpuChip,
     },
     memory::MemoryCols,
-    operations::{BabyBearWordRangeChecker, IsZeroOperation},
+    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
 };
 
 impl CpuChip {
@@ -105,7 +105,7 @@ impl CpuChip {
         );
 
         // Babybear range check the operand_to_check word.
-        BabyBearWordRangeChecker::<AB::F>::range_check::<AB>(
+        KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
             builder,
             syscall_cols.operand_to_check,
             syscall_cols.operand_range_check_cols,

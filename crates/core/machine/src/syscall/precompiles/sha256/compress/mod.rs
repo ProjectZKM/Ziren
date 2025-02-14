@@ -64,7 +64,7 @@ pub mod compress_tests {
     }
 
     #[test]
-    fn prove_babybear() {
+    fn prove_koalabear() {
         setup_logger();
         let program = sha_compress_program();
         run_test::<CpuProver<_, _>>(program).unwrap();

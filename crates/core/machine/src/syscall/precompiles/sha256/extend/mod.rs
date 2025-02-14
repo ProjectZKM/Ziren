@@ -29,7 +29,7 @@ pub fn sha_extend(w: &mut [u32]) {
 
 #[cfg(test)]
 pub mod extend_tests {
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
 
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{
@@ -65,7 +65,7 @@ pub mod extend_tests {
         let mut shard = ExecutionRecord::default();
         shard.add_events = vec![AluEvent::new(0, 0, Opcode::ADD, 14, 8, 6)];
         let chip = ShaExtendChip::new();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }

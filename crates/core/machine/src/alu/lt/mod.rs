@@ -458,10 +458,10 @@ where
 mod tests {
 
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::LtChip;
 
@@ -471,25 +471,25 @@ mod tests {
         shard.lt_events = vec![AluEvent::new(0, 0, Opcode::SLT, 0, 3, 2)];
         let chip = LtChip::default();
         let generate_trace = chip.generate_trace(&shard, &mut ExecutionRecord::default());
-        let trace: RowMajorMatrix<BabyBear> = generate_trace;
+        let trace: RowMajorMatrix<KoalaBear> = generate_trace;
         println!("{:?}", trace.values)
     }
 
-    fn prove_babybear_template(shard: &mut ExecutionRecord) {
-        let config = BabyBearPoseidon2::new();
+    fn prove_koalabear_template(shard: &mut ExecutionRecord) {
+        let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
         let chip = LtChip::default();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(shard, &mut ExecutionRecord::default());
-        let proof = prove::<BabyBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+        let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         verify(&config, &chip, &mut challenger, &proof).unwrap();
     }
 
     #[test]
-    fn prove_babybear_slt() {
+    fn prove_koalabear_slt() {
         let mut shard = ExecutionRecord::default();
 
         const NEG_3: u32 = 0b11111111111111111111111111111101;
@@ -513,11 +513,11 @@ mod tests {
             AluEvent::new(0, 5, Opcode::SLT, 0, NEG_3, NEG_3),
         ];
 
-        prove_babybear_template(&mut shard);
+        prove_koalabear_template(&mut shard);
     }
 
     #[test]
-    fn prove_babybear_sltu() {
+    fn prove_koalabear_sltu() {
         let mut shard = ExecutionRecord::default();
 
         const LARGE: u32 = 0b11111111111111111111111111111101;
@@ -536,6 +536,6 @@ mod tests {
             AluEvent::new(0, 5, Opcode::SLTU, 0, LARGE, LARGE),
         ];
 
-        prove_babybear_template(&mut shard);
+        prove_koalabear_template(&mut shard);
     }
 }

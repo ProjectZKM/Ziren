@@ -18,7 +18,7 @@ use zkm2_stark::{
 };
 
 use crate::{
-    operations::{AssertLtColsBits, BabyBearBitDecomposition, IsZeroOperation},
+    operations::{AssertLtColsBits, KoalaBearBitDecomposition, IsZeroOperation},
     utils::pad_rows_fixed,
 };
 
@@ -164,7 +164,7 @@ pub struct MemoryInitCols<T> {
     pub lt_cols: AssertLtColsBits<T, 32>,
 
     /// A bit decomposition of `addr`.
-    pub addr_bits: BabyBearBitDecomposition<T>,
+    pub addr_bits: KoalaBearBitDecomposition<T>,
 
     /// The value of the memory access.
     pub value: [T; 32],
@@ -232,7 +232,7 @@ where
         }
 
         // Canonically decompose the address into bits so we can do comparisons.
-        BabyBearBitDecomposition::<AB::F>::range_check(
+        KoalaBearBitDecomposition::<AB::F>::range_check(
             builder,
             local.addr,
             local.addr_bits,
@@ -367,10 +367,10 @@ mod tests {
         mips::MipsAir, syscall::precompiles::sha256::extend_tests::sha_extend_program,
         utils::setup_logger,
     };
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use zkm2_core_executor::{programs::tests::simple_program, Executor};
     use zkm2_stark::{
-        baby_bear_poseidon2::BabyBearPoseidon2, debug_interactions_with_all_chips, ZKMCoreOpts,
+        koala_bear_poseidon2::KoalaBearPoseidon2, debug_interactions_with_all_chips, ZKMCoreOpts,
         StarkMachine,
     };
 
@@ -383,12 +383,12 @@ mod tests {
 
         let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Initialize);
 
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values);
 
         let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Finalize);
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values);
 
@@ -404,15 +404,15 @@ mod tests {
         let program_clone = program.clone();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
-        let machine: StarkMachine<BabyBearPoseidon2, MipsAir<BabyBear>> =
-            MipsAir::machine(BabyBearPoseidon2::new());
+        let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
+            MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
         machine.generate_dependencies(&mut runtime.records, &opts, None);
 
         let shards = runtime.records;
         for shard in shards.clone() {
-            debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+            debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
                 &machine,
                 &pkey,
                 &[shard],
@@ -420,7 +420,7 @@ mod tests {
                 InteractionScope::Local,
             );
         }
-        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+        debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
             &machine,
             &pkey,
             &shards,
@@ -436,13 +436,13 @@ mod tests {
         let program_clone = program.clone();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
-        let machine = MipsAir::machine(BabyBearPoseidon2::new());
+        let machine = MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
         machine.generate_dependencies(&mut runtime.records, &opts, None);
 
         let shards = runtime.records;
-        debug_interactions_with_all_chips::<BabyBearPoseidon2, MipsAir<BabyBear>>(
+        debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
             &machine,
             &pkey,
             &shards,

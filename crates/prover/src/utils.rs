@@ -6,7 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_symmetric::CryptographicHasher;
@@ -15,29 +15,29 @@ use zkm2_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
 use zkm2_recursion_circuit::machine::RootPublicValues;
 use zkm2_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
-    stark::BabyBearPoseidon2Outer,
+    stark::KoalaBearPoseidon2Outer,
 };
-use zkm2_stark::{baby_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
+use zkm2_stark::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 
 use crate::{InnerSC, ZKMCoreProofData};
 
-/// Get the ZKM vkey BabyBear Poseidon2 digest this reduce proof is representing.
-pub fn zkm2_vkey_digest_babybear(proof: &ZKMReduceProof<BabyBearPoseidon2Outer>) -> [BabyBear; 8] {
+/// Get the ZKM vkey KoalaBear Poseidon2 digest this reduce proof is representing.
+pub fn zkm2_vkey_digest_koalabear(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> [KoalaBear; 8] {
     let proof = &proof.proof;
-    let pv: &RecursionPublicValues<BabyBear> = proof.public_values.as_slice().borrow();
+    let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
     pv.zkm2_vk_digest
 }
 
 /// Get the ZKM vkey Bn Poseidon2 digest this reduce proof is representing.
-pub fn zkm2_vkey_digest_bn254(proof: &ZKMReduceProof<BabyBearPoseidon2Outer>) -> Bn254Fr {
-    babybears_to_bn254(&zkm2_vkey_digest_babybear(proof))
+pub fn zkm2_vkey_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn254Fr {
+    koalabears_to_bn254(&zkm2_vkey_digest_koalabear(proof))
 }
 
 /// Compute the digest of the public values.
 pub fn recursion_public_values_digest(
     config: &InnerSC,
-    public_values: &RecursionPublicValues<BabyBear>,
-) -> [BabyBear; 8] {
+    public_values: &RecursionPublicValues<KoalaBear>,
+) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
     let pv_array = public_values.as_array();
     hash.hash_slice(&pv_array[0..NUM_PV_ELMS_TO_HASH])
@@ -45,8 +45,8 @@ pub fn recursion_public_values_digest(
 
 pub fn root_public_values_digest(
     config: &InnerSC,
-    public_values: &RootPublicValues<BabyBear>,
-) -> [BabyBear; 8] {
+    public_values: &RootPublicValues<KoalaBear>,
+) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
     let input = (*public_values.zkm2_vk_digest())
         .into_iter()
@@ -61,7 +61,7 @@ pub fn root_public_values_digest(
 
 pub fn assert_root_public_values_valid(
     config: &InnerSC,
-    public_values: &RootPublicValues<BabyBear>,
+    public_values: &RootPublicValues<KoalaBear>,
 ) {
     let expected_digest = root_public_values_digest(config, public_values);
     for (value, expected) in public_values
@@ -77,7 +77,7 @@ pub fn assert_root_public_values_valid(
 /// Assert that the digest of the public values is correct.
 pub fn assert_recursion_public_values_valid(
     config: &InnerSC,
-    public_values: &RecursionPublicValues<BabyBear>,
+    public_values: &RecursionPublicValues<KoalaBear>,
 ) {
     let expected_digest = recursion_public_values_digest(config, public_values);
     for (value, expected) in public_values.digest.iter().copied().zip_eq(expected_digest) {
@@ -87,14 +87,14 @@ pub fn assert_recursion_public_values_valid(
 
 /// Get the committed values Bn Poseidon2 digest this reduce proof is representing.
 pub fn zkm2_committed_values_digest_bn254(
-    proof: &ZKMReduceProof<BabyBearPoseidon2Outer>,
+    proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
 ) -> Bn254Fr {
     let proof = &proof.proof;
-    let pv: &RecursionPublicValues<BabyBear> = proof.public_values.as_slice().borrow();
-    let committed_values_digest_bytes: [BabyBear; 32] = words_to_bytes(&pv.committed_value_digest)
+    let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
+    let committed_values_digest_bytes: [KoalaBear; 32] = words_to_bytes(&pv.committed_value_digest)
         .try_into()
         .unwrap();
-    babybear_bytes_to_bn254(&committed_values_digest_bytes)
+    koalabear_bytes_to_bn254(&committed_values_digest_bytes)
 }
 
 impl ZKMCoreProofData {
@@ -125,12 +125,12 @@ pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
     return words.iter().flat_map(|word| word.0).collect();
 }
 
-/// Convert 8 BabyBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
+/// Convert 8 KoalaBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
 /// word becomes the least significant bits.
-pub fn babybears_to_bn254(digest: &[BabyBear; 8]) -> Bn254Fr {
+pub fn koalabears_to_bn254(digest: &[KoalaBear; 8]) -> Bn254Fr {
     let mut result = Bn254Fr::ZERO;
     for word in digest.iter() {
-        // Since BabyBear prime is less than 2^31, we can shift by 31 bits each time and still be
+        // Since KoalaBear prime is less than 2^31, we can shift by 31 bits each time and still be
         // within the Bn254Fr field, so we don't have to truncate the top 3 bits.
         result *= Bn254Fr::from_canonical_u64(1 << 31);
         result += Bn254Fr::from_canonical_u32(word.as_canonical_u32());
@@ -138,12 +138,12 @@ pub fn babybears_to_bn254(digest: &[BabyBear; 8]) -> Bn254Fr {
     result
 }
 
-/// Convert 32 BabyBear bytes into a Bn254Fr field element. The first byte's most significant 3 bits
+/// Convert 32 KoalaBear bytes into a Bn254Fr field element. The first byte's most significant 3 bits
 /// (which would become the 3 most significant bits) are truncated.
-pub fn babybear_bytes_to_bn254(bytes: &[BabyBear; 32]) -> Bn254Fr {
+pub fn koalabear_bytes_to_bn254(bytes: &[KoalaBear; 32]) -> Bn254Fr {
     let mut result = Bn254Fr::ZERO;
     for (i, byte) in bytes.iter().enumerate() {
-        debug_assert!(byte < &BabyBear::from_canonical_u32(256));
+        debug_assert!(byte < &KoalaBear::from_canonical_u32(256));
         if i == 0 {
             // 32 bytes is more than Bn254 prime, so we need to truncate the top 3 bits.
             result = Bn254Fr::from_canonical_u32(byte.as_canonical_u32() & 0x1f);

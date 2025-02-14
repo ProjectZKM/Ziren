@@ -48,10 +48,10 @@ mod zkvm {
 
     cfg_if! {
         if #[cfg(feature = "verify")] {
-            use p3_baby_bear::BabyBear;
+            use p3_koala_bear::KoalaBear;
             use p3_field::FieldAlgebra;
 
-            pub static mut DEFERRED_PROOFS_DIGEST: Option<[BabyBear; 8]> = None;
+            pub static mut DEFERRED_PROOFS_DIGEST: Option<[KoalaBear; 8]> = None;
         }
     }
 
@@ -63,7 +63,7 @@ mod zkvm {
             PUBLIC_VALUES_HASHER = Some(Sha256::new());
             #[cfg(feature = "verify")]
             {
-                DEFERRED_PROOFS_DIGEST = Some([BabyBear::ZERO; 8]);
+                DEFERRED_PROOFS_DIGEST = Some([KoalaBear::ZERO; 8]);
             }
             extern "C" {
                 fn start();

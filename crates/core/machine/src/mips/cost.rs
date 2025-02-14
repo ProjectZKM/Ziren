@@ -1,4 +1,4 @@
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use zkm2_core_executor::{
     syscalls::SyscallCode,
     ExecutionReport,
@@ -20,7 +20,7 @@ pub trait CostEstimator {
     /// NOTE: This is an approximation and may not be accurate. For example, it does not currently
     /// account for dependencies.
     fn estimate_gas(&self) -> u64 {
-        let costs = MipsAir::<BabyBear>::costs();
+        let costs = MipsAir::<KoalaBear>::costs();
         let cpu_gas = costs[&MipsAirDiscriminants::Cpu];
         let total_gas = self.estimate_area();
         total_gas / cpu_gas
@@ -31,7 +31,7 @@ impl CostEstimator for ExecutionReport {
     fn estimate_area(&self) -> u64 {
         let mut total_area = 0;
         let mut total_chips = 3;
-        let (chips, costs) = MipsAir::<BabyBear>::get_chips_and_costs();
+        let (chips, costs) = MipsAir::<KoalaBear>::get_chips_and_costs();
 
         let cpu_events = self.total_instruction_count();
         total_area += (cpu_events as u64) * costs[&MipsAirDiscriminants::Cpu];

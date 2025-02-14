@@ -37,9 +37,9 @@ fn main() {
                 panic!("Go build failed");
             }
 
-            // Copy go/babybear.h to OUT_DIR/babybear.h
-            let header_src = PathBuf::from("go/babybear.h");
-            let header_dest = dest_path.join("babybear.h");
+            // Copy go/koalabear.h to OUT_DIR/koalabear.h
+            let header_src = PathBuf::from("go/koalabear.h");
+            let header_dest = dest_path.join("koalabear.h");
             std::fs::copy(header_src, header_dest).unwrap();
 
             // Generate bindings using bindgen

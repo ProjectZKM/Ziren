@@ -4,7 +4,7 @@
 
 ### Field
 
-* BabyBear
+* KoalaBear
 * Mersenne31
 
 
@@ -28,7 +28,7 @@ Multiply a 4-element vector x by a 4x4 matrix.
 
 #### Hasher
 
-Poseidon2BabyBear
+Poseidon2KoalaBear
 
 
 ### MMC: Mixed Matric Commitment Scheme
@@ -41,7 +41,7 @@ with the largest height. For matrices with smaller heights, some bits of the row
 removed (from the least-significant side) to get the effective row index. These semantics are
 useful in the FRI protocol.
 
-A MerkleTreeMmmcs is used in our zkVM, which uses BabyBear as a leaf value and a packed value as the node value.
+A MerkleTreeMmmcs is used in our zkVM, which uses KoalaBear as a leaf value and a packed value as the node value.
 
 ### Challenger
 

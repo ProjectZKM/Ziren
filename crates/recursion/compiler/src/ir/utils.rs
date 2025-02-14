@@ -6,7 +6,7 @@ use super::{Array, Builder, Config, DslIr, Ext, Felt, SymbolicExt, Usize, Var, V
 impl<C: Config> Builder<C> {
     /// The generator for the field.
     ///
-    /// Reference: [p3_baby_bear::BabyBear]
+    /// Reference: [p3_koala_bear::KoalaBear]
     pub fn generator(&mut self) -> Felt<C::F> {
         self.eval(C::F::from_canonical_u32(31))
     }

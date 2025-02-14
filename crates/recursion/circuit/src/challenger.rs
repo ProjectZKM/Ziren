@@ -1,4 +1,4 @@
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra};
 use zkm2_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -65,7 +65,7 @@ pub struct DuplexChallengerVariable<C: Config> {
     pub output_buffer: Vec<Felt<C::F>>,
 }
 
-impl<C: Config<F = BabyBear>> DuplexChallengerVariable<C> {
+impl<C: Config<F = KoalaBear>> DuplexChallengerVariable<C> {
     /// Creates a new duplex challenger with the default state.
     pub fn new(builder: &mut Builder<C>) -> Self {
         DuplexChallengerVariable::<C> {
@@ -155,13 +155,13 @@ impl<C: Config<F = BabyBear>> DuplexChallengerVariable<C> {
     }
 }
 
-impl<C: Config<F = BabyBear>> CanCopyChallenger<C> for DuplexChallengerVariable<C> {
+impl<C: Config<F = KoalaBear>> CanCopyChallenger<C> for DuplexChallengerVariable<C> {
     fn copy(&self, builder: &mut Builder<C>) -> Self {
         DuplexChallengerVariable::copy(self, builder)
     }
 }
 
-impl<C: Config<F = BabyBear>> CanObserveVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
+impl<C: Config<F = KoalaBear>> CanObserveVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
     fn observe(&mut self, builder: &mut Builder<C>, value: Felt<C::F>) {
         DuplexChallengerVariable::observe(self, builder, value);
     }
@@ -177,7 +177,7 @@ impl<C: Config<F = BabyBear>> CanObserveVariable<C, Felt<C::F>> for DuplexChalle
     }
 }
 
-impl<C: Config<F = BabyBear>, const N: usize> CanObserveVariable<C, [Felt<C::F>; N]>
+impl<C: Config<F = KoalaBear>, const N: usize> CanObserveVariable<C, [Felt<C::F>; N]>
     for DuplexChallengerVariable<C>
 {
     fn observe(&mut self, builder: &mut Builder<C>, values: [Felt<C::F>; N]) {
@@ -187,19 +187,19 @@ impl<C: Config<F = BabyBear>, const N: usize> CanObserveVariable<C, [Felt<C::F>;
     }
 }
 
-impl<C: Config<F = BabyBear>> CanSampleVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
+impl<C: Config<F = KoalaBear>> CanSampleVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
     fn sample(&mut self, builder: &mut Builder<C>) -> Felt<C::F> {
         DuplexChallengerVariable::sample(self, builder)
     }
 }
 
-impl<C: Config<F = BabyBear>> CanSampleBitsVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
+impl<C: Config<F = KoalaBear>> CanSampleBitsVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
     fn sample_bits(&mut self, builder: &mut Builder<C>, nb_bits: usize) -> Vec<Felt<C::F>> {
         DuplexChallengerVariable::sample_bits(self, builder, nb_bits)
     }
 }
 
-impl<C: Config<F = BabyBear>> FieldChallengerVariable<C, Felt<C::F>>
+impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
     for DuplexChallengerVariable<C>
 {
     fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
@@ -439,7 +439,7 @@ pub(crate) mod tests {
         hash::{FieldHasherVariable, BN254_DIGEST_SIZE},
         utils::tests::run_test_recursion,
     };
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_bn254_fr::Bn254Fr;
     use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger};
     use p3_field::FieldAlgebra;
@@ -451,17 +451,17 @@ pub(crate) mod tests {
         ir::{Builder, Config, Ext, ExtConst, Felt, Var},
     };
     use zkm2_recursion_core::stark::{
-        outer_perm, BabyBearPoseidon2Outer, OuterCompress, OuterHash,
+        outer_perm, KoalaBearPoseidon2Outer, OuterCompress, OuterHash,
     };
     use zkm2_recursion_gnark_ffi::PlonkBn254Prover;
-    use zkm2_stark::{baby_bear_poseidon2::BabyBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         challenger::{DuplexChallengerVariable, FieldChallengerVariable},
         witness::OuterWitness,
     };
 
-    type SC = BabyBearPoseidon2;
+    type SC = KoalaBearPoseidon2;
     type C = OuterConfig;
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
@@ -508,7 +508,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_challenger_outer() {
-        type SC = BabyBearPoseidon2Outer;
+        type SC = KoalaBearPoseidon2Outer;
         type F = <SC as StarkGenericConfig>::Val;
         type EF = <SC as StarkGenericConfig>::Challenge;
         type N = <C as Config>::N;
@@ -581,7 +581,7 @@ pub(crate) mod tests {
         let two: Var<_> = builder.eval(N::TWO);
 
         let to_swap = [[one], [two]];
-        let result = BabyBearPoseidon2Outer::select_chain_digest(&mut builder, one, to_swap);
+        let result = KoalaBearPoseidon2Outer::select_chain_digest(&mut builder, one, to_swap);
 
         builder.assert_var_eq(result[0][0], two);
         builder.assert_var_eq(result[1][0], one);
@@ -597,14 +597,14 @@ pub(crate) mod tests {
         let perm = outer_perm();
         let hasher = OuterHash::new(perm.clone()).unwrap();
 
-        let input: [BabyBear; 7] = [
-            BabyBear::from_canonical_u32(0),
-            BabyBear::from_canonical_u32(1),
-            BabyBear::from_canonical_u32(2),
-            BabyBear::from_canonical_u32(2),
-            BabyBear::from_canonical_u32(2),
-            BabyBear::from_canonical_u32(2),
-            BabyBear::from_canonical_u32(2),
+        let input: [KoalaBear; 7] = [
+            KoalaBear::from_canonical_u32(0),
+            KoalaBear::from_canonical_u32(1),
+            KoalaBear::from_canonical_u32(2),
+            KoalaBear::from_canonical_u32(2),
+            KoalaBear::from_canonical_u32(2),
+            KoalaBear::from_canonical_u32(2),
+            KoalaBear::from_canonical_u32(2),
         ];
         let output = hasher.hash_iter(input);
 
@@ -616,7 +616,7 @@ pub(crate) mod tests {
         let e: Felt<_> = builder.eval(input[4]);
         let f: Felt<_> = builder.eval(input[5]);
         let g: Felt<_> = builder.eval(input[6]);
-        let result = BabyBearPoseidon2Outer::hash(&mut builder, &[a, b, c, d, e, f, g]);
+        let result = KoalaBearPoseidon2Outer::hash(&mut builder, &[a, b, c, d, e, f, g]);
 
         builder.assert_var_eq(result[0], output[0]);
 
@@ -638,7 +638,7 @@ pub(crate) mod tests {
         let mut builder = Builder::<C>::default();
         let a: OuterDigestVariable = [builder.eval(a[0])];
         let b: OuterDigestVariable = [builder.eval(b[0])];
-        let result = BabyBearPoseidon2Outer::compress(&mut builder, [a, b]);
+        let result = KoalaBearPoseidon2Outer::compress(&mut builder, [a, b]);
         builder.assert_var_eq(result[0], gt[0]);
 
         let mut backend = ConstraintCompiler::<C>::default();

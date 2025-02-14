@@ -33,7 +33,7 @@ use std::{
 };
 
 use lru::LruCache;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -66,14 +66,14 @@ use zkm2_recursion_compiler::{
 };
 use zkm2_recursion_core::{
     air::RecursionPublicValues, machine::RecursionAir, runtime::ExecutionRecord,
-    shape::RecursionShapeConfig, stark::BabyBearPoseidon2Outer, RecursionProgram,
+    shape::RecursionShapeConfig, stark::KoalaBearPoseidon2Outer, RecursionProgram,
     Runtime as RecursionRuntime,
 };
 pub use zkm2_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 use zkm2_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover};
 use zkm2_stark::{air::InteractionScope, MachineProvingKey, ProofShape};
 use zkm2_stark::{
-    air::PublicValues, baby_bear_poseidon2::BabyBearPoseidon2, Challenge, Challenger,
+    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, Challenger,
     MachineProver, ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
@@ -86,13 +86,13 @@ use components::{DefaultProverComponents, ZKMProverComponents};
 pub use zkm2_core_machine::ZKM_CIRCUIT_VERSION;
 
 /// The configuration for the core prover.
-pub type CoreSC = BabyBearPoseidon2;
+pub type CoreSC = KoalaBearPoseidon2;
 
 /// The configuration for the inner prover.
-pub type InnerSC = BabyBearPoseidon2;
+pub type InnerSC = KoalaBearPoseidon2;
 
 /// The configuration for the outer prover.
-pub type OuterSC = BabyBearPoseidon2Outer;
+pub type OuterSC = KoalaBearPoseidon2Outer;
 
 const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
@@ -128,26 +128,26 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the wrapping step.
     pub wrap_prover: C::WrapProver,
 
-    pub recursion_programs: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<BabyBear>>>>,
+    pub recursion_programs: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<KoalaBear>>>>,
 
     pub recursion_cache_misses: AtomicUsize,
 
     pub compress_programs:
-        Mutex<LruCache<ZKMCompressWithVkeyShape, Arc<RecursionProgram<BabyBear>>>>,
+        Mutex<LruCache<ZKMCompressWithVkeyShape, Arc<RecursionProgram<KoalaBear>>>>,
 
     pub compress_cache_misses: AtomicUsize,
 
-    pub vk_root: <InnerSC as FieldHasher<BabyBear>>::Digest,
+    pub vk_root: <InnerSC as FieldHasher<KoalaBear>>::Digest,
 
-    pub allowed_vk_map: BTreeMap<<InnerSC as FieldHasher<BabyBear>>::Digest, usize>,
+    pub allowed_vk_map: BTreeMap<<InnerSC as FieldHasher<KoalaBear>>::Digest, usize>,
 
-    pub vk_merkle_tree: MerkleTree<BabyBear, InnerSC>,
+    pub vk_merkle_tree: MerkleTree<KoalaBear, InnerSC>,
 
-    pub core_shape_config: Option<CoreShapeConfig<BabyBear>>,
+    pub core_shape_config: Option<CoreShapeConfig<KoalaBear>>,
 
-    pub recursion_shape_config: Option<RecursionShapeConfig<BabyBear, CompressAir<BabyBear>>>,
+    pub recursion_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
 
-    pub wrap_program: OnceLock<Arc<RecursionProgram<BabyBear>>>,
+    pub wrap_program: OnceLock<Arc<RecursionProgram<KoalaBear>>>,
 
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
 
@@ -210,7 +210,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         tracing::debug!("vk verification: {}", vk_verification);
 
         // Read the shapes from the shapes directory and deserialize them into memory.
-        let allowed_vk_map: BTreeMap<[BabyBear; DIGEST_SIZE], usize> = if vk_verification {
+        let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> = if vk_verification {
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap()
         } else {
             bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap()
@@ -324,7 +324,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn recursion_program(
         &self,
         input: &ZKMRecursionWitnessValues<CoreSC>,
-    ) -> Arc<RecursionProgram<BabyBear>> {
+    ) -> Arc<RecursionProgram<KoalaBear>> {
         let mut cache = self
             .recursion_programs
             .lock()
@@ -359,7 +359,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn compress_program(
         &self,
         input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<BabyBear>> {
+    ) -> Arc<RecursionProgram<KoalaBear>> {
         let mut cache = self
             .compress_programs
             .lock()
@@ -403,7 +403,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn shrink_program(
         &self,
         input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<BabyBear>> {
+    ) -> Arc<RecursionProgram<KoalaBear>> {
         // Get the operations.
         let builder_span = tracing::debug_span!("build shrink program").entered();
         let mut builder = Builder::<InnerConfig>::default();
@@ -423,20 +423,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let compiler_span = tracing::debug_span!("compile shrink program").entered();
         let mut compiler = AsmCompiler::<InnerConfig>::default();
         let mut program = compiler.compile(operations);
-        program.shape = Some(ShrinkAir::<BabyBear>::shrink_shape());
+        program.shape = Some(ShrinkAir::<KoalaBear>::shrink_shape());
         let program = Arc::new(program);
         compiler_span.exit();
         program
     }
 
-    pub fn wrap_program(&self) -> Arc<RecursionProgram<BabyBear>> {
+    pub fn wrap_program(&self) -> Arc<RecursionProgram<KoalaBear>> {
         self.wrap_program
             .get_or_init(|| {
                 // Get the operations.
                 let builder_span = tracing::debug_span!("build compress program").entered();
                 let mut builder = Builder::<WrapConfig>::default();
 
-                let shrink_shape: ProofShape = ShrinkAir::<BabyBear>::shrink_shape().into();
+                let shrink_shape: ProofShape = ShrinkAir::<KoalaBear>::shrink_shape().into();
                 let input_shape = ZKMCompressShape::from(vec![shrink_shape]);
                 let shape = ZKMCompressWithVkeyShape {
                     compress_shape: input_shape,
@@ -477,7 +477,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn deferred_program(
         &self,
         input: &ZKMDeferredWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<BabyBear>> {
+    ) -> Arc<RecursionProgram<KoalaBear>> {
         // Compile the program.
 
         // Get the operations.
@@ -567,7 +567,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &'a self,
         vk: &'a StarkVerifyingKey<CoreSC>,
         leaf_challenger: &'a Challenger<InnerSC>,
-        last_proof_pv: &PublicValues<Word<BabyBear>, BabyBear>,
+        last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
         deferred_proofs: &[ZKMReduceProof<InnerSC>],
         batch_size: usize,
     ) -> Vec<ZKMDeferredWitnessValues<InnerSC>> {
@@ -597,9 +597,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 vk_merkle_data: merkle_val,
                 start_reconstruct_deferred_digest: deferred_digest,
                 is_complete: false,
-                zkm2_vk_digest: vk.hash_babybear(),
+                zkm2_vk_digest: vk.hash_koalabear(),
                 end_pc: Val::<InnerSC>::ZERO,
-                end_shard: last_proof_pv.shard + BabyBear::ONE,
+                end_shard: last_proof_pv.shard + KoalaBear::ONE,
                 end_execution_shard: last_proof_pv.execution_shard,
                 init_addr_bits: last_proof_pv.last_init_addr_bits,
                 finalize_addr_bits: last_proof_pv.last_finalize_addr_bits,
@@ -722,9 +722,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 sync_channel::<(
                     usize,
                     usize,
-                    Arc<RecursionProgram<BabyBear>>,
-                    ExecutionRecord<BabyBear>,
-                    Vec<(String, RowMajorMatrix<BabyBear>)>,
+                    Arc<RecursionProgram<KoalaBear>>,
+                    ExecutionRecord<KoalaBear>,
+                    Vec<(String, RowMajorMatrix<KoalaBear>)>,
                 )>(opts.recursion_opts.records_and_traces_channel_capacity);
             let record_and_trace_tx = Arc::new(Mutex::new(record_and_trace_tx));
             let record_and_trace_rx = Arc::new(Mutex::new(record_and_trace_rx));
@@ -880,8 +880,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                             local_data,
                                             &mut challenger,
                                             &[
-                                                <BabyBearPoseidon2 as StarkGenericConfig>::Challenge::ZERO,
-                                                <BabyBearPoseidon2 as StarkGenericConfig>::Challenge::ZERO,
+                                                <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge::ZERO,
+                                                <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge::ZERO,
                                             ],
                                         )
                                         .unwrap()
@@ -1239,7 +1239,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .vks_and_proofs
                 .iter()
                 .map(|(vk, _)| {
-                    let vk_digest = vk.hash_babybear();
+                    let vk_digest = vk.hash_koalabear();
                     let index = self.allowed_vk_map.get(&vk_digest).expect("vk not allowed");
                     (index, vk_digest)
                 })
@@ -1249,9 +1249,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .vks_and_proofs
                 .iter()
                 .map(|(vk, _)| {
-                    let vk_digest = vk.hash_babybear();
+                    let vk_digest = vk.hash_koalabear();
                     let index = (vk_digest[0].as_canonical_u32() as usize) % num_vks;
-                    (index, [BabyBear::from_canonical_usize(index); 8])
+                    (index, [KoalaBear::from_canonical_usize(index); 8])
                 })
                 .unzip()
         };
@@ -1305,7 +1305,7 @@ pub mod tests {
 
     #[cfg(test)]
     use serial_test::serial;
-    use utils::zkm2_vkey_digest_babybear;
+    use utils::zkm2_vkey_digest_koalabear;
     #[cfg(test)]
     use zkm2_core_machine::utils::setup_logger;
 
@@ -1428,9 +1428,9 @@ pub mod tests {
             return Ok(());
         }
 
-        tracing::info!("checking vkey hash babybear");
-        let vk_digest_babybear = zkm2_vkey_digest_babybear(&wrapped_bn254_proof);
-        assert_eq!(vk_digest_babybear, vk.hash_babybear());
+        tracing::info!("checking vkey hash koalabear");
+        let vk_digest_koalabear = zkm2_vkey_digest_koalabear(&wrapped_bn254_proof);
+        assert_eq!(vk_digest_koalabear, vk.hash_koalabear());
 
         tracing::info!("checking vkey hash bn254");
         let vk_digest_bn254 = zkm2_vkey_digest_bn254(&wrapped_bn254_proof);
@@ -1522,7 +1522,7 @@ pub mod tests {
 
         // Run verify program with keccak vkey, subproofs, and their committed values.
         let mut stdin = ZKMStdin::new();
-        let vkey_digest = keccak_vk.hash_babybear();
+        let vkey_digest = keccak_vk.hash_koalabear();
         let vkey_digest: [u32; 8] = vkey_digest
             .iter()
             .map(|n| n.as_canonical_u32())

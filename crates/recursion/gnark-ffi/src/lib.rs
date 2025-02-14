@@ -1,4 +1,4 @@
-mod babybear;
+mod koalabear;
 
 pub mod ffi;
 pub mod groth16_bn254;

@@ -16,11 +16,11 @@ use size::Size;
 use std::thread::ScopedJoinHandle;
 use thiserror::Error;
 use zkm2_stark::{
-    air::InteractionScope, baby_bear_poseidon2::BabyBearPoseidon2, MachineProvingKey,
+    air::InteractionScope, koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey,
     MachineVerificationError,
 };
 
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::PrimeField32;
 use p3_matrix::Matrix;
 
@@ -746,11 +746,11 @@ where
 }
 
 /// Runs a program and returns the public values stream.
-pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
+pub fn run_test_io<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
     mut program: Program,
     inputs: ZKMStdin,
-) -> Result<ZKMPublicValues, MachineVerificationError<BabyBearPoseidon2>> {
-    let shape_config = CoreShapeConfig::<BabyBear>::default();
+) -> Result<ZKMPublicValues, MachineVerificationError<KoalaBearPoseidon2>> {
+    let shape_config = CoreShapeConfig::<KoalaBear>::default();
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
@@ -771,9 +771,9 @@ pub fn run_test_io<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
     Ok(public_values)
 }
 
-pub fn run_test<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
+pub fn run_test<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
     mut program: Program,
-) -> Result<MachineProof<BabyBearPoseidon2>, MachineVerificationError<BabyBearPoseidon2>> {
+) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
     let shape_config = CoreShapeConfig::default();
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
@@ -792,12 +792,12 @@ pub fn run_test<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
 }
 
 #[allow(unused_variables)]
-pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
+pub fn run_test_core<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
     runtime: Executor,
     inputs: ZKMStdin,
-    shape_config: Option<&CoreShapeConfig<BabyBear>>,
-) -> Result<MachineProof<BabyBearPoseidon2>, MachineVerificationError<BabyBearPoseidon2>> {
-    let config = BabyBearPoseidon2::new();
+    shape_config: Option<&CoreShapeConfig<KoalaBear>>,
+) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
+    let config = KoalaBearPoseidon2::new();
     let machine = MipsAir::machine(config);
     let prover = P::new(machine);
 
@@ -813,7 +813,7 @@ pub fn run_test_core<P: MachineProver<BabyBearPoseidon2, MipsAir<BabyBear>>>(
     )
     .unwrap();
 
-    let config = BabyBearPoseidon2::new();
+    let config = KoalaBearPoseidon2::new();
     let machine = MipsAir::machine(config);
     let (pk, vk) = machine.setup(runtime.program.as_ref());
     let mut challenger = machine.config().challenger();

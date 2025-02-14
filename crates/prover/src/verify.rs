@@ -2,7 +2,7 @@ use std::{borrow::Borrow, path::Path, str::FromStr};
 
 use anyhow::Result;
 use num_bigint::BigUint;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, PrimeField};
 use zkm2_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm2_core_machine::cpu::MAX_CPU_LOG_DEGREE;
@@ -10,13 +10,13 @@ use zkm2_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
 
 use thiserror::Error;
 use zkm2_recursion_circuit::machine::RootPublicValues;
-use zkm2_recursion_core::{air::RecursionPublicValues, stark::BabyBearPoseidon2Outer};
+use zkm2_recursion_core::{air::RecursionPublicValues, stark::KoalaBearPoseidon2Outer};
 use zkm2_recursion_gnark_ffi::{
     Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
 };
 use zkm2_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-    baby_bear_poseidon2::BabyBearPoseidon2,
+    koala_bear_poseidon2::KoalaBearPoseidon2,
     MachineProof, MachineProver, MachineVerificationError, StarkGenericConfig, Word,
 };
 
@@ -88,11 +88,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //
         // Transition:
         // - Shard should increment by one for each shard.
-        let mut current_shard = BabyBear::ZERO;
+        let mut current_shard = KoalaBear::ZERO;
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
-            current_shard += BabyBear::ONE;
+            current_shard += KoalaBear::ONE;
             if public_values.shard != current_shard {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "shard index should be the previous shard index + 1 and start at 1",
@@ -109,12 +109,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // - Execution shard should increment by one for each shard with "CPU".
         // - Execution shard should stay the same for non-CPU shards.
         // - For the other shards, execution shard does not matter.
-        let mut current_execution_shard = BabyBear::ZERO;
+        let mut current_execution_shard = KoalaBear::ZERO;
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
             if shard_proof.contains_cpu() {
-                current_execution_shard += BabyBear::ONE;
+                current_execution_shard += KoalaBear::ONE;
                 if public_values.execution_shard != current_execution_shard {
                     return Err(MachineVerificationError::InvalidPublicValues(
                         "execution shard index should be the previous execution shard index + 1 if cpu exists and start at 1",
@@ -135,7 +135,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //
         // Finalization:
         // - `next_pc` should equal zero.
-        let mut prev_next_pc = BabyBear::ZERO;
+        let mut prev_next_pc = KoalaBear::ZERO;
         for (i, shard_proof) in proof.0.iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
@@ -152,11 +152,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc: start_pc should equal next_pc for non-cpu shards",
                 ));
-            } else if shard_proof.contains_cpu() && public_values.start_pc == BabyBear::ZERO {
+            } else if shard_proof.contains_cpu() && public_values.start_pc == KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc == 0: execution should never start at halted state",
                 ));
-            } else if i == proof.0.len() - 1 && public_values.next_pc != BabyBear::ZERO {
+            } else if i == proof.0.len() - 1 && public_values.next_pc != KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "next_pc != 0: execution should have halted",
                 ));
@@ -170,7 +170,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
-            if public_values.exit_code != BabyBear::ZERO {
+            if public_values.exit_code != KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "exit_code != 0: exit code should be zero for all shards",
                 ));
@@ -192,8 +192,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //   `last_init_addr_bits`.
         // - For shards without "MemoryFinalize", `previous_finalize_addr_bits` should equal
         //   `last_finalize_addr_bits`.
-        let mut last_init_addr_bits_prev = [BabyBear::ZERO; 32];
-        let mut last_finalize_addr_bits_prev = [BabyBear::ZERO; 32];
+        let mut last_init_addr_bits_prev = [KoalaBear::ZERO; 32];
+        let mut last_finalize_addr_bits_prev = [KoalaBear::ZERO; 32];
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
@@ -240,8 +240,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // - If it's not a shard with "CPU", then `deferred_proofs_digest` should not change from
         //   the
         //  previous shard.
-        let zero_committed_value_digest = [Word([BabyBear::ZERO; WORD_SIZE]); PV_DIGEST_NUM_WORDS];
-        let zero_deferred_proofs_digest = [BabyBear::ZERO; POSEIDON_NUM_WORDS];
+        let zero_committed_value_digest = [Word([KoalaBear::ZERO; WORD_SIZE]); PV_DIGEST_NUM_WORDS];
+        let zero_deferred_proofs_digest = [KoalaBear::ZERO; POSEIDON_NUM_WORDS];
         let mut committed_value_digest_prev = zero_committed_value_digest;
         let mut deferred_proofs_digest_prev = zero_deferred_proofs_digest;
         for shard_proof in proof.0.iter() {
@@ -296,7 +296,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a compressed proof.
     pub fn verify_compressed(
         &self,
-        proof: &ZKMReduceProof<BabyBearPoseidon2>,
+        proof: &ZKMReduceProof<KoalaBearPoseidon2>,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         let ZKMReduceProof {
@@ -321,21 +321,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         if self.vk_verification
             && !self
                 .allowed_vk_map
-                .contains_key(&compress_vk.hash_babybear())
+                .contains_key(&compress_vk.hash_koalabear())
         {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
         // `is_complete` should be 1. In the reduce program, this ensures that the proof is fully
         // reduced.
-        if public_values.is_complete != BabyBear::ONE {
+        if public_values.is_complete != KoalaBear::ONE {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "is_complete is not 1",
             ));
         }
 
         // Verify that the proof is for the sp1 vkey we are expecting.
-        let vkey_hash = vk.hash_babybear();
+        let vkey_hash = vk.hash_koalabear();
         if public_values.zkm2_vk_digest != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "sp1 vk hash mismatch",
@@ -348,7 +348,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a shrink proof.
     pub fn verify_shrink(
         &self,
-        proof: &ZKMReduceProof<BabyBearPoseidon2>,
+        proof: &ZKMReduceProof<KoalaBearPoseidon2>,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         let mut challenger = self.shrink_prover.config().challenger();
@@ -367,12 +367,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             public_values,
         );
 
-        if self.vk_verification && !self.allowed_vk_map.contains_key(&proof.vk.hash_babybear()) {
+        if self.vk_verification && !self.allowed_vk_map.contains_key(&proof.vk.hash_koalabear()) {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
         // Verify that the proof is for the sp1 vkey we are expecting.
-        let vkey_hash = vk.hash_babybear();
+        let vkey_hash = vk.hash_koalabear();
         if public_values.zkm2_vk_digest != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "sp1 vk hash mismatch",
@@ -385,7 +385,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Verify a wrap bn254 proof.
     pub fn verify_wrap_bn254(
         &self,
-        proof: &ZKMReduceProof<BabyBearPoseidon2Outer>,
+        proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<OuterSC>> {
         let mut challenger = self.wrap_prover.config().challenger();
@@ -403,7 +403,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         assert_root_public_values_valid(self.shrink_prover.machine().config(), public_values);
 
         // Verify that the proof is for the sp1 vkey we are expecting.
-        let vkey_hash = vk.hash_babybear();
+        let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm2_vk_digest() != vkey_hash {
             return Err(MachineVerificationError::InvalidPublicValues(
                 "sp1 vk hash mismatch",
@@ -505,11 +505,11 @@ pub fn verify_groth16_bn254_public_inputs(
 impl<C: ZKMProverComponents> SubproofVerifier for &ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
-        proof: &zkm2_core_machine::reduce::ZKMReduceProof<BabyBearPoseidon2>,
-        vk: &zkm2_stark::StarkVerifyingKey<BabyBearPoseidon2>,
+        proof: &zkm2_core_machine::reduce::ZKMReduceProof<KoalaBearPoseidon2>,
+        vk: &zkm2_stark::StarkVerifyingKey<KoalaBearPoseidon2>,
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<BabyBearPoseidon2>> {
+    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {
         // Check that the vk hash matches the vk hash from the input.
         if vk.hash_u32() != vk_hash {
             return Err(MachineVerificationError::InvalidPublicValues(

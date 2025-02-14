@@ -15,7 +15,7 @@ impl<C: Config> Builder<C> {
             }
             Array::Dyn(_, len) => self.array::<Felt<C::F>>(*len),
         };
-        self.push_op(DslIr::Poseidon2PermuteBabyBear(Box::new((
+        self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((
             output.clone(),
             array.clone(),
         ))));
@@ -26,7 +26,7 @@ impl<C: Config> Builder<C> {
     ///
     /// Reference: [p3_poseidon2::Poseidon2]
     pub fn poseidon2_permute_mut(&mut self, array: &Array<C, Felt<C::F>>) {
-        self.push_op(DslIr::Poseidon2PermuteBabyBear(Box::new((
+        self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((
             array.clone(),
             array.clone(),
         ))));
@@ -40,7 +40,7 @@ impl<C: Config> Builder<C> {
         p2_hash_and_absorb_num: Var<C::N>,
         input: &Array<C, Felt<C::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2AbsorbBabyBear(
+        self.push_op(DslIr::Poseidon2AbsorbKoalaBear(
             p2_hash_and_absorb_num,
             input.clone(),
         ));
@@ -54,7 +54,7 @@ impl<C: Config> Builder<C> {
         p2_hash_num: Var<C::N>,
         output: &Array<C, Felt<C::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2FinalizeBabyBear(
+        self.push_op(DslIr::Poseidon2FinalizeKoalaBear(
             p2_hash_num,
             output.clone(),
         ));
@@ -88,7 +88,7 @@ impl<C: Config> Builder<C> {
         left: &Array<C, Felt<C::F>>,
         right: &Array<C, Felt<C::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2CompressBabyBear(Box::new((
+        self.push_op(DslIr::Poseidon2CompressKoalaBear(Box::new((
             result.clone(),
             left.clone(),
             right.clone(),

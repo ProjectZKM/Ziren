@@ -9,7 +9,7 @@ use crate::{
         CpuChip,
     },
     memory::MemoryCols,
-    operations::BabyBearWordRangeChecker,
+    operations::KoalaBearWordRangeChecker,
 };
 use zkm2_core_executor::{events::MemoryAccessPosition, Opcode};
 
@@ -104,8 +104,8 @@ impl CpuChip {
             is_memory_instruction.clone(),
         );
 
-        // Range check the addr_word to be a valid babybear word.
-        BabyBearWordRangeChecker::<AB::F>::range_check(
+        // Range check the addr_word to be a valid koalabear word.
+        KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
             memory_columns.addr_word,
             memory_columns.addr_word_range_checker,

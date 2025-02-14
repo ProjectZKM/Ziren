@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Memory addresses must be lower than BabyBear prime.
+// Memory addresses must be lower than KoalaBear prime.
 const MAX_MEMORY: usize = 0xC000000;
 
 #[allow(clippy::missing_safety_doc)]

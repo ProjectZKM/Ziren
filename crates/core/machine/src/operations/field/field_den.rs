@@ -149,7 +149,7 @@ mod tests {
     use zkm2_curves::params::FieldParameters;
     use zkm2_stark::{
         air::{MachineAir, ZKMAirBuilder},
-        baby_bear_poseidon2::BabyBearPoseidon2,
+        koala_bear_poseidon2::KoalaBearPoseidon2,
         StarkGenericConfig,
     };
 
@@ -162,7 +162,7 @@ mod tests {
     };
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
@@ -269,25 +269,25 @@ mod tests {
     fn generate_trace() {
         let shard = ExecutionRecord::default();
         let chip: FieldDenChip<Ed25519BaseField> = FieldDenChip::new(true);
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }
 
     #[test]
     fn prove_field() {
-        let config = BabyBearPoseidon2::new();
+        let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
         let shard = ExecutionRecord::default();
 
         let chip: FieldDenChip<Ed25519BaseField> = FieldDenChip::new(true);
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         // This it to test that the proof DOESN'T work if messed up.
         // let row = trace.row_mut(0);
-        // row[0] = BabyBear::from_canonical_u8(0);
-        let proof = prove::<BabyBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+        // row[0] = KoalaBear::from_canonical_u8(0);
+        let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         verify(&config, &chip, &mut challenger, &proof).unwrap();

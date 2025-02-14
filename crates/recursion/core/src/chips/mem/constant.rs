@@ -167,28 +167,28 @@ mod tests {
     use std::sync::Arc;
 
     use machine::{tests::run_recursion_test_machines, RecursionAir};
-    use p3_baby_bear::{BabyBear, Poseidon2InternalLayerBabyBear};
+    use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
-    use crate::stark::BabyBearPoseidon2Outer;
+    use crate::stark::KoalaBearPoseidon2Outer;
     use zkm2_core_machine::utils::run_test_machine;
-    use zkm2_stark::{BabyBearPoseidon2Inner, StarkGenericConfig};
+    use zkm2_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
 
     use super::*;
 
     use crate::runtime::instruction as instr;
 
-    type SC = BabyBearPoseidon2Outer;
+    type SC = KoalaBearPoseidon2Outer;
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
     type A = RecursionAir<F, 3>;
 
     pub fn prove_program(program: RecursionProgram<F>) {
         let program = Arc::new(program);
-        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerBabyBear<16>>::new(
+        let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
-            BabyBearPoseidon2Inner::new().perm,
+            KoalaBearPoseidon2Inner::new().perm,
         );
         runtime.run().unwrap();
 
@@ -203,19 +203,19 @@ mod tests {
 
     #[test]
     pub fn generate_trace() {
-        let shard = ExecutionRecord::<BabyBear> {
+        let shard = ExecutionRecord::<KoalaBear> {
             mem_var_events: vec![
                 MemEvent {
-                    inner: BabyBear::ONE.into(),
+                    inner: KoalaBear::ONE.into(),
                 },
                 MemEvent {
-                    inner: BabyBear::ONE.into(),
+                    inner: KoalaBear::ONE.into(),
                 },
             ],
             ..Default::default()
         };
         let chip = MemoryChip::default();
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
     }

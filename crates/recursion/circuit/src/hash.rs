@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::iter::{repeat, zip};
 
 use itertools::Itertools;
-use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra};
 
 use p3_bn254_fr::Bn254Fr;
@@ -12,9 +12,9 @@ use zkm2_recursion_compiler::{
     ir::{Builder, Config, DslIr, Felt, Var},
 };
 use zkm2_recursion_core::stark::{outer_perm, OUTER_MULTI_FIELD_CHALLENGER_WIDTH};
-use zkm2_recursion_core::{stark::BabyBearPoseidon2Outer, DIGEST_SIZE};
+use zkm2_recursion_core::{stark::KoalaBearPoseidon2Outer, DIGEST_SIZE};
 use zkm2_recursion_core::{HASH_RATE, PERMUTATION_WIDTH};
-use zkm2_stark::baby_bear_poseidon2::BabyBearPoseidon2;
+use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
 use zkm2_stark::inner_perm;
 
 use crate::{
@@ -28,7 +28,7 @@ pub trait FieldHasher<F: Field> {
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest;
 }
 
-pub trait Posedion2BabyBearHasherVariable<C: CircuitConfig> {
+pub trait Posedion2KoalaBearHasherVariable<C: CircuitConfig> {
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         state: [Felt<C::F>; PERMUTATION_WIDTH],
@@ -69,18 +69,18 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     fn print_digest(builder: &mut Builder<C>, digest: Self::DigestVariable);
 }
 
-impl FieldHasher<BabyBear> for BabyBearPoseidon2 {
-    type Digest = [BabyBear; DIGEST_SIZE];
+impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
+    type Digest = [KoalaBear; DIGEST_SIZE];
 
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
-        let mut pre_iter = input.into_iter().flatten().chain(repeat(BabyBear::ZERO));
+        let mut pre_iter = input.into_iter().flatten().chain(repeat(KoalaBear::ZERO));
         let mut pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
         (inner_perm()).permute_mut(&mut pre);
         pre[..DIGEST_SIZE].try_into().unwrap()
     }
 }
 
-impl<C: CircuitConfig<F = BabyBear>> Posedion2BabyBearHasherVariable<C> for BabyBearPoseidon2 {
+impl<C: CircuitConfig<F = KoalaBear>> Posedion2KoalaBearHasherVariable<C> for KoalaBearPoseidon2 {
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         input: [Felt<<C>::F>; PERMUTATION_WIDTH],
@@ -89,24 +89,24 @@ impl<C: CircuitConfig<F = BabyBear>> Posedion2BabyBearHasherVariable<C> for Baby
     }
 }
 
-impl<C: CircuitConfig> Posedion2BabyBearHasherVariable<C> for BabyBearPoseidon2Outer {
+impl<C: CircuitConfig> Posedion2KoalaBearHasherVariable<C> for KoalaBearPoseidon2Outer {
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         state: [Felt<<C>::F>; PERMUTATION_WIDTH],
     ) -> [Felt<<C>::F>; PERMUTATION_WIDTH] {
         let state: [Felt<_>; PERMUTATION_WIDTH] = state.map(|x| builder.eval(x));
-        builder.push_op(DslIr::CircuitPoseidon2PermuteBabyBear(Box::new(state)));
+        builder.push_op(DslIr::CircuitPoseidon2PermuteKoalaBear(Box::new(state)));
         state
     }
 }
 
-impl<C: CircuitConfig<F = BabyBear, Bit = Felt<BabyBear>>> FieldHasherVariable<C>
-    for BabyBearPoseidon2
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable<C>
+    for KoalaBearPoseidon2
 {
-    type DigestVariable = [Felt<BabyBear>; DIGEST_SIZE];
+    type DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE];
 
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
-        <Self as Posedion2BabyBearHasherVariable<C>>::poseidon2_hash(builder, input)
+        <Self as Posedion2KoalaBearHasherVariable<C>>::poseidon2_hash(builder, input)
     }
 
     fn compress(
@@ -129,8 +129,8 @@ impl<C: CircuitConfig<F = BabyBear, Bit = Felt<BabyBear>>> FieldHasherVariable<C
         should_swap: <C as CircuitConfig>::Bit,
         input: [Self::DigestVariable; 2],
     ) -> [Self::DigestVariable; 2] {
-        let result0: [Felt<BabyBear>; DIGEST_SIZE] = core::array::from_fn(|_| builder.uninit());
-        let result1: [Felt<BabyBear>; DIGEST_SIZE] = core::array::from_fn(|_| builder.uninit());
+        let result0: [Felt<KoalaBear>; DIGEST_SIZE] = core::array::from_fn(|_| builder.uninit());
+        let result1: [Felt<KoalaBear>; DIGEST_SIZE] = core::array::from_fn(|_| builder.uninit());
 
         (0..DIGEST_SIZE).for_each(|i| {
             builder.push_op(DslIr::Select(
@@ -154,7 +154,7 @@ impl<C: CircuitConfig<F = BabyBear, Bit = Felt<BabyBear>>> FieldHasherVariable<C
 
 pub const BN254_DIGEST_SIZE: usize = 1;
 
-impl FieldHasher<BabyBear> for BabyBearPoseidon2Outer {
+impl FieldHasher<KoalaBear> for KoalaBearPoseidon2Outer {
     type Digest = [Bn254Fr; BN254_DIGEST_SIZE];
 
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
@@ -164,14 +164,14 @@ impl FieldHasher<BabyBear> for BabyBearPoseidon2Outer {
     }
 }
 
-impl<C: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHasherVariable<C>
-    for BabyBearPoseidon2Outer
+impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHasherVariable<C>
+    for KoalaBearPoseidon2Outer
 {
     type DigestVariable = [Var<Bn254Fr>; BN254_DIGEST_SIZE];
 
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
         assert!(C::N::bits() == p3_bn254_fr::Bn254Fr::bits());
-        assert!(C::F::bits() == p3_baby_bear::BabyBear::bits());
+        assert!(C::F::bits() == p3_koala_bear::KoalaBear::bits());
         let num_f_elms = C::N::bits() / C::F::bits();
         let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] = [
             builder.eval(C::N::ZERO),
