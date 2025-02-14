@@ -493,22 +493,22 @@ impl CpuChip {
         builder.when(local.selectors.is_lw).assert_word_eq(mem_val, local.unsigned_mem_val);
 
         // When the instruction is LWR:
-        //     val = mem_value >> (24 - addr_offset * 8);
-        //     mask = 0xffFFffFFu32 >> (24 - addr_offset * 8);
-        //     unsigned_mem_val = ((mem_value & (!mask)) | val);
+        // val = mem_value >> (addr_offset * 8);
+        // mask = 0xffFFffFFu32 >> (addr_offset * 8);
+        // unsigned_mem_val = ((mem_value & (!mask)) | val);
         let lwr_unsigned_mem_val = Word([
-            mem_val[0] * memory_columns.offset_is_three
-                + mem_val[1] * memory_columns.offset_is_two
-                + mem_val[2] * memory_columns.offset_is_one
-                + mem_val[3] * offset_is_zero.clone(),
-            mem_val[1] * memory_columns.offset_is_three
+            mem_val[0] * offset_is_zero.clone()
+                + mem_val[1] * memory_columns.offset_is_one
                 + mem_val[2] * memory_columns.offset_is_two
-                + mem_val[3] * memory_columns.offset_is_one
-                + mem_val[1] * offset_is_zero.clone(),
-            mem_val[2] * memory_columns.offset_is_three
-                + mem_val[3] * memory_columns.offset_is_two
+                + mem_val[3] * memory_columns.offset_is_three,
+            mem_val[1] * offset_is_zero.clone()
                 + mem_val[2] * memory_columns.offset_is_one
-                + mem_val[2] * offset_is_zero.clone(),
+                + mem_val[3] * memory_columns.offset_is_two
+                + mem_val[1] * memory_columns.offset_is_three,
+            mem_val[2] * offset_is_zero.clone()
+                + mem_val[3] * memory_columns.offset_is_one
+                + mem_val[2] * memory_columns.offset_is_two
+                + mem_val[2] * memory_columns.offset_is_three,
             mem_val[3].into(),
         ]);
         builder
@@ -517,21 +517,21 @@ impl CpuChip {
 
 
         // When the instruction is LWL:
-        // val = mem_value << (addr_offset * 8);
-        // mask = 0xffFFffFFu32 << (addr_offset * 8);
-        // unsigned_mem_val = (mem_value & (!mask)) | val)
+        // val = mem_value << (24 - addr_offset * 8);
+        // mask = 0xffFFffFFu32 << (24 - addr_offset * 8);
+        // unsigned_mem_val = ((mem_value & (!mask)) | val);
         let lwl_unsigned_mem_val = Word([
             mem_val[0].into(),
-            mem_val[0] * memory_columns.offset_is_one
-                + (one.clone() - memory_columns.offset_is_one) * mem_val[1],
             mem_val[0] * memory_columns.offset_is_two
-                + mem_val[1] * memory_columns.offset_is_one
+                + (one.clone() - memory_columns.offset_is_two) * mem_val[1],
+            mem_val[0] * memory_columns.offset_is_one
+                + mem_val[1] * memory_columns.offset_is_two
                 + (one.clone() - memory_columns.offset_is_two - memory_columns.offset_is_one)
                 * mem_val[2],
-            mem_val[0] * memory_columns.offset_is_three
-                + mem_val[1] * memory_columns.offset_is_two
-                + mem_val[2] * memory_columns.offset_is_one
-                + offset_is_zero.clone() * mem_val[3],
+            mem_val[0] * offset_is_zero.clone()
+                + mem_val[1] * memory_columns.offset_is_one
+                + mem_val[2] * memory_columns.offset_is_two
+                + mem_val[3] * memory_columns.offset_is_three,
         ]);
         builder
             .when(local.selectors.is_lwl)
