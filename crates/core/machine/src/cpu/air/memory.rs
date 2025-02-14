@@ -65,6 +65,18 @@ impl CpuChip {
             + opcode_selectors.is_sdc1
     }
 
+    /// Computes whether the opcode is a store instruction.
+    pub(crate) fn is_store_instruction_except_sc<AB: ZKMAirBuilder>(
+        &self,
+        opcode_selectors: &OpcodeSelectorCols<AB::Var>,
+    ) -> AB::Expr {
+        opcode_selectors.is_sb
+            + opcode_selectors.is_sh
+            + opcode_selectors.is_sw
+            + opcode_selectors.is_swr
+            + opcode_selectors.is_swl
+    }
+
     /// Constrains the addr_aligned, addr_offset, and addr_word memory columns.
     ///
     /// This method will do the following:
