@@ -328,8 +328,6 @@ impl CpuChip {
             .when(local.selectors.is_sb)
             .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
 
-        // FIXME: stephen add constraints for other instructions, LWR, LWL, LL, SWL, SWR, SC, SDC1.
-
         // When the instruction is SH, make sure both offset one and three are off.
         builder
             .when(local.selectors.is_sh)
@@ -383,7 +381,8 @@ impl CpuChip {
                 + prev_mem_val[0] * (one.clone() - offset_is_zero.clone()),
             a_val[1] * offset_is_zero.clone()
                 + a_val[0] * memory_columns.offset_is_one
-                + prev_mem_val[1] * (memory_columns.offset_is_two + memory_columns.offset_is_three),
+                + prev_mem_val[1]
+                * (memory_columns.offset_is_two + memory_columns.offset_is_three),
             a_val[2] * offset_is_zero.clone()
                 + a_val[1] * memory_columns.offset_is_one
                 + a_val[0] * memory_columns.offset_is_two
@@ -405,7 +404,10 @@ impl CpuChip {
 
         // mem_val = prev_a_val
         builder.when(local.selectors.is_sc)
-            .assert_word_eq(prev_a_val.map(|x| x.into()), mem_val.map(|x| x.into()));
+            .assert_word_eq(
+                prev_a_val.map(|x| x.into()),
+                mem_val.map(|x| x.into())
+            );
 
         // a_val = 1
         builder.when(local.selectors.is_sc).assert_one(a_val[0]);
@@ -524,7 +526,8 @@ impl CpuChip {
                 + (one.clone() - memory_columns.offset_is_one) * mem_val[1],
             mem_val[0] * memory_columns.offset_is_two
                 + mem_val[1] * memory_columns.offset_is_one
-                + (one.clone() - memory_columns.offset_is_two - memory_columns.offset_is_one) * mem_val[2],
+                + (one.clone() - memory_columns.offset_is_two - memory_columns.offset_is_one)
+                * mem_val[2],
             mem_val[0] * memory_columns.offset_is_three
                 + mem_val[1] * memory_columns.offset_is_two
                 + mem_val[2] * memory_columns.offset_is_one
