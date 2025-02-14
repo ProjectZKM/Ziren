@@ -398,17 +398,20 @@ impl CpuChip {
             .assert_word_eq(mem_val.map(|x| x.into()), swr_expected_stored_value);
 
         // When the instruction is SC: compute the expected stored value
-        // let prev_a_val = local.op_a_access.prev_value();
+        let prev_a_val = local.op_a_access.prev_value();
 
         // Ensure that the offset is 0.
-        // builder.when(local.selectors.is_sc).assert_one(offset_is_zero.clone());
+        builder.when(local.selectors.is_sc).assert_one(offset_is_zero.clone());
 
         // mem_val = prev_a_val
-        // builder.when(local.selectors.is_sc)
-        //     .assert_word_eq(prev_a_val.map(|x| x.into()), mem_val.map(|x| x.into()));
+        builder.when(local.selectors.is_sc)
+            .assert_word_eq(prev_a_val.map(|x| x.into()), mem_val.map(|x| x.into()));
 
         // a_val = 1
-        // builder.when(local.selectors.is_sc).assert_one(a_val);
+        builder.when(local.selectors.is_sc).assert_one(a_val[0]);
+        builder.when(local.selectors.is_sc).assert_zero(a_val[1]);
+        builder.when(local.selectors.is_sc).assert_zero(a_val[2]);
+        builder.when(local.selectors.is_sc).assert_zero(a_val[3]);
 
 
         // // When the instruction is SDC1: compute the expected stored value
@@ -430,7 +433,6 @@ impl CpuChip {
         local: &CpuCols<AB::Var>,
     ) {
         let mem_val = *memory_columns.memory_access.value();
-        let prev_mem_val = *memory_columns.memory_access.prev_value();
 
         // Compute the offset_is_zero flag.  The other offset flags are already constrained by the
         // method `eval_memory_address_and_access`, which is called in
