@@ -1113,7 +1113,7 @@ impl<'a> Executor<'a> {
         self.state.next_pc = next_next_pc;
 
         // Update the clk to the next cycle.
-        self.state.clk += 7;
+        self.state.clk += 5;
 
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
