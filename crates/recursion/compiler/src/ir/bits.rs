@@ -6,7 +6,7 @@ use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
 impl<C: Config> Builder<C> {
     /// Converts a variable to LE bits.
     pub fn num2bits_v(&mut self, num: Var<C::N>) -> Array<C, Var<C::N>> {
-        // This function is only used when the native field is Babybear.
+        // This function is only used when the native field is Koalabear.
         assert!(C::N::bits() == NUM_BITS);
 
         let output = self.dyn_array::<Var<_>>(NUM_BITS);

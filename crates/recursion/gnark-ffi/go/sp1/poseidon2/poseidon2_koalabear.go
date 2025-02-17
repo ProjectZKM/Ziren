@@ -64,12 +64,10 @@ func (p *Poseidon2KoalaBearChip) sboxP(input koalabear.Variable) koalabear.Varia
 	inputCpy = p.fieldApi.ReduceSlow(inputCpy)
 	inputValue := inputCpy.Value
 	i2 := p.api.Mul(inputValue, inputValue)
-	i4 := p.api.Mul(i2, i2)
-	i6 := p.api.Mul(i4, i2)
-	i7 := p.api.Mul(i6, inputValue)
+	i3 := p.api.Mul(i2, inputValue)
 	i7bb := p.fieldApi.ReduceSlow(koalabear.Variable{
-		Value:      i7,
-		UpperBound: new(big.Int).Exp(new(big.Int).SetUint64(2013265921), new(big.Int).SetUint64(7), new(big.Int).SetUint64(0)),
+		Value:      i3,
+		UpperBound: new(big.Int).Exp(new(big.Int).SetUint64(2130706433), new(big.Int).SetUint64(3), new(big.Int).SetUint64(0)),
 	})
 	return i7bb
 }

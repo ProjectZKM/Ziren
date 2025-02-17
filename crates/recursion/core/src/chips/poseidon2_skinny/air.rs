@@ -109,14 +109,14 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
-        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
+        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         for i in 0..WIDTH {
-            let sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
-            sbox_deg_7[i] = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc[i].clone();
+            sbox_deg_3[i] = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
+            // sbox_deg_7[i] = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc[i].clone();
         }
 
         // Apply the linear layer.
-        let mut state = sbox_deg_7;
+        let mut state = sbox_deg_3;
         external_linear_layer(&mut state);
 
         let next_state = next_row.state_var;
@@ -149,13 +149,13 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             } + round_constants[r];
 
             let sbox_deg_3 = add_rc.clone() * add_rc.clone() * add_rc.clone();
-            // See `populate_internal_rounds` for why we don't have columns for the sbox output
-            // here.
-            let sbox_deg_7 = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc.clone();
+            // // See `populate_internal_rounds` for why we don't have columns for the sbox output
+            // // here.
+            // let sbox_deg_7 = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc.clone();
 
             // Apply the linear layer.
             // See `populate_internal_rounds` for why we don't have columns for the new state here.
-            state[0] = sbox_deg_7.clone();
+            state[0] = sbox_deg_3.clone();
             internal_linear_layer(&mut state);
 
             if r < NUM_INTERNAL_ROUNDS - 1 {
