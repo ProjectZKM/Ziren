@@ -61,7 +61,7 @@ impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra> Mul for BinomialExtens
 
     fn mul(self, rhs: Self) -> Self::Output {
         let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
-        let w = T::from_canonical_u32(11);
+        let w = T::from_canonical_u32(3);
 
         for i in 0..D {
             for j in 0..D {

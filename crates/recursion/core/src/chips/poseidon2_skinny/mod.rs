@@ -70,12 +70,12 @@ const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] = Koala
     KoalaBear::ORDER_U32 - 3,
     KoalaBear::ORDER_U32 - 4,
     KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 8),
-    KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 2),
     KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 3),
-    KoalaBear::ORDER_U32 - 15,
+    KoalaBear::ORDER_U32 - 127,
     (KoalaBear::ORDER_U32 - 1) >> 8,
+    (KoalaBear::ORDER_U32 - 1) >> 3,
     (KoalaBear::ORDER_U32 - 1) >> 4,
-    15,
+    127,
 ]);
 
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {

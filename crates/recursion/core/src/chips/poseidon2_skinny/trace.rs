@@ -233,13 +233,13 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
             // avoid adding columns for the result of the sbox, and instead include the x^3 -> x^7
             // part of the sbox in the constraint for the linear layer
-            let mut sbox_deg_7: [F; 16] = [F::ZERO; WIDTH];
+            let mut sbox_deg_3: [F; 16] = [F::ZERO; WIDTH];
             for i in 0..WIDTH {
-                let sbox_deg_3 = add_rc[i] * add_rc[i] * add_rc[i];
-                sbox_deg_7[i] = sbox_deg_3 * sbox_deg_3 * add_rc[i];
+                sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
+                // sbox_deg_7[i] = sbox_deg_3 * sbox_deg_3 * add_rc[i];
             }
 
-            sbox_deg_7
+            sbox_deg_3
         };
         // Apply the linear layer.
         external_linear_layer(&mut state);
@@ -263,10 +263,10 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
             // avoid adding columns for the result of the sbox, just like for external rounds.
             let sbox_deg_3 = add_rc * add_rc * add_rc;
-            let sbox_deg_7 = sbox_deg_3 * sbox_deg_3 * add_rc;
+            // let sbox_deg_7 = sbox_deg_3 * sbox_deg_3 * add_rc;
 
             // Apply the linear layer.
-            new_state[0] = sbox_deg_7;
+            new_state[0] = sbox_deg_3;
             internal_linear_layer(&mut new_state);
 
             // Optimization: since we're only applying the sbox to the 0th state element, we only
