@@ -268,39 +268,4 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             executor.record.add_events.push(add_event);
         }
     }
-
-    // todo: process jump instructions
-    // if instruction.is_jump_instruction() {
-    //     match instruction.opcode {
-    //         Opcode::JAL => {
-    //             let next_pc = event.pc.wrapping_add(event.b);
-    //             let add_event = AluEvent {
-    //                 lookup_id: event.jump_jal_lookup_id,
-    //                 shard,
-    //                 clk: event.clk,
-    //                 opcode: Opcode::ADD,
-    //                 a: next_pc,
-    //                 b: event.pc,
-    //                 c: event.b,
-    //                 sub_lookups: executor.record.create_lookup_ids(),
-    //             };
-    //             executor.record.add_events.push(add_event);
-    //         }
-    //         Opcode::JALR => {
-    //             let next_pc = event.b.wrapping_add(event.c);
-    //             let add_event = AluEvent {
-    //                 lookup_id: event.jump_jalr_lookup_id,
-    //                 shard,
-    //                 clk: event.clk,
-    //                 opcode: Opcode::ADD,
-    //                 a: next_pc,
-    //                 b: event.b,
-    //                 c: event.c,
-    //                 sub_lookups: executor.record.create_lookup_ids(),
-    //             };
-    //             executor.record.add_events.push(add_event);
-    //         }
-    //         _ => unreachable!(),
-    //     }
-    // }
 }

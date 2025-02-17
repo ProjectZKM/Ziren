@@ -141,7 +141,7 @@ impl CpuChip {
         cols.next_next_pc = F::from_canonical_u32(event.next_next_pc);
         cols.instruction.populate(instruction);
         cols.selectors.populate(instruction);
-        if let Some(hi) = event.s1 {
+        if let Some(hi) = event.hi {
             *cols.op_hi_access.value_mut() = hi.into();
         }
         *cols.op_a_access.value_mut() = event.a.into();
@@ -149,7 +149,7 @@ impl CpuChip {
         *cols.op_c_access.value_mut() = event.c.into();
 
         // Populate memory accesses for hi, a, b, and c.
-        if let Some(record) = event.s1_record {
+        if let Some(record) = event.hi_record {
             cols.op_hi_access.populate(record, blu_events);
         }
         if let Some(record) = event.a_record {

@@ -52,7 +52,6 @@ pub struct Executor<'a> {
     /// In unconstrained mode, any events, clock, register, or memory changes are reset after
     /// leaving the unconstrained block. The only thing preserved is written to the input
     /// stream.
-    /// todo: check
     pub unconstrained: bool,
 
     /// Whether we should write to the report.
@@ -200,7 +199,6 @@ impl<'a> Executor<'a> {
     ///
     /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
     #[must_use]
-    //todo: do
     pub fn with_context(program: Program, opts: ZKMCoreOpts, context: ZKMContext<'a>) -> Self {
         // Create a shared reference to the program.
         let program = Arc::new(program);
@@ -590,8 +588,7 @@ impl<'a> Executor<'a> {
                 MemoryAccessPosition::A => self.memory_accesses.a = Some(record.into()),
                 MemoryAccessPosition::B => self.memory_accesses.b = Some(record.into()),
                 MemoryAccessPosition::C => self.memory_accesses.c = Some(record.into()),
-                MemoryAccessPosition::S1 => self.memory_accesses.s1 = Some(record.into()),
-                MemoryAccessPosition::S2 => self.memory_accesses.s2 = Some(record.into()),
+                MemoryAccessPosition::HI => self.memory_accesses.hi = Some(record.into()),
                 MemoryAccessPosition::Memory => self.memory_accesses.memory = Some(record.into()),
             }
         }
@@ -626,13 +623,9 @@ impl<'a> Executor<'a> {
                     debug_assert!(self.memory_accesses.c.is_none());
                     self.memory_accesses.c = Some(record.into());
                 }
-                MemoryAccessPosition::S1 => {
-                    debug_assert!(self.memory_accesses.s1.is_none());
-                    self.memory_accesses.s1 = Some(record.into());
-                }
-                MemoryAccessPosition::S2 => {
-                    debug_assert!(self.memory_accesses.s2.is_none());
-                    self.memory_accesses.s2 = Some(record.into());
+                MemoryAccessPosition::HI => {
+                    debug_assert!(self.memory_accesses.hi.is_none());
+                    self.memory_accesses.hi = Some(record.into());
                 }
                 MemoryAccessPosition::Memory => {
                     debug_assert!(self.memory_accesses.memory.is_none());
@@ -652,8 +645,7 @@ impl<'a> Executor<'a> {
         // The only time we are writing to a register is when it is in operand A or AH.
         debug_assert!(vec![
             MemoryAccessPosition::A,
-            MemoryAccessPosition::S1,
-            MemoryAccessPosition::S2
+            MemoryAccessPosition::HI,
         ]
             .contains(&position));
         // Register 0 should always be 0
@@ -676,8 +668,7 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        s1: Option<u32>,
-        s2: Option<u32>,
+        hi: Option<u32>,
         record: MemoryAccessRecord,
         exit_code: u32,
         lookup_id: LookupId,
@@ -701,10 +692,8 @@ impl<'a> Executor<'a> {
             b_record: record.b,
             c,
             c_record: record.c,
-            s1,
-            s1_record: record.s1,
-            s2,
-            s2_record: record.s2,
+            hi,
+            hi_record: record.hi,
             memory_record: record.memory,
             exit_code,
             alu_lookup_id: lookup_id,
@@ -848,7 +837,7 @@ impl<'a> Executor<'a> {
     ) -> (Option<u32>, u32, u32, u32) {
         let hi = if op.opcode.is_use_lo_hi_alu() {
             self.rw(Register::LO, a, MemoryAccessPosition::A);
-            self.rw(Register::HI, hi, MemoryAccessPosition::S1);
+            self.rw(Register::HI, hi, MemoryAccessPosition::HI);
             Some(hi)
         } else {
             self.rw(rd.into(), a, MemoryAccessPosition::A);
@@ -894,14 +883,10 @@ impl<'a> Executor<'a> {
         let mut next_pc = self.state.next_pc;
         let mut next_next_pc = self.state.next_pc.wrapping_add(4);
 
-        //todo: uncomment this when all the operations have been implemented
-        // let (a, b, c): (u32, u32, u32);
         let mut a = 0u32;
         let mut b = 0u32;
         let mut c = 0u32;
-        let mut s1 = None;
-        // todo: syscall write
-        let mut s2 = None;
+        let mut hi = None;
 
         if self.executor_mode == ExecutorMode::Trace {
             self.memory_accesses = MemoryAccessRecord::default();
@@ -921,7 +906,6 @@ impl<'a> Executor<'a> {
             self.report.opcode_counts[instruction.opcode] += 1;
             self.report.event_counts[instruction.opcode] += 1;
             match instruction.opcode {
-                // todo: check all
                 Opcode::LB
                 | Opcode::LH
                 | Opcode::LW
@@ -1064,7 +1048,7 @@ impl<'a> Executor<'a> {
             | Opcode::NOR
             | Opcode::CLZ
             | Opcode::CLO => {
-                (s1, a, b, c) = self.execute_alu(instruction, lookup_id);
+                (hi, a, b, c) = self.execute_alu(instruction, lookup_id);
             }
 
             // Load instructions.
@@ -1129,7 +1113,6 @@ impl<'a> Executor<'a> {
         self.state.next_pc = next_next_pc;
 
         // Update the clk to the next cycle.
-        // todo: 5 -> 7 because of adding memory access position
         self.state.clk += 7;
 
         // Emit the CPU event for this cycle.
@@ -1142,8 +1125,7 @@ impl<'a> Executor<'a> {
                 a,
                 b,
                 c,
-                s1,
-                s2,
+                hi,
                 self.memory_accesses,
                 exit_code,
                 lookup_id,
@@ -1323,7 +1305,6 @@ impl<'a> Executor<'a> {
             instruction.op_c,
         );
         let rs = self.rr(rs_reg, MemoryAccessPosition::B);
-        // todo: add constraints in cpu chip
         let rt = if instruction.opcode == Opcode::SC {
             self.register(rt_reg)
         } else {
@@ -1425,8 +1406,6 @@ impl<'a> Executor<'a> {
     fn execute_jumpi(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
         let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
 
-        //todo: check if necessary
-        // self.rw(Register::ZERO, target_pc);
         // maybe rename it
         let pc = self.state.pc;
         let next_pc = pc.wrapping_add(8);
@@ -1437,8 +1416,7 @@ impl<'a> Executor<'a> {
 
     fn execute_jump_direct(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
         let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
-        //todo: check if necessary
-        // self.rw(Register::ZERO, target_pc);
+
         let pc = self.state.pc;
         let target_pc = target_pc.wrapping_add(pc + 4);
         // maybe rename it
@@ -1614,7 +1592,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        // todo: check done
         let done = self.state.pc == 0
             || self.state.exited
             || self.state.pc.wrapping_sub(self.program.pc_base)
@@ -1988,7 +1965,6 @@ impl Default for ExecutorMode {
     }
 }
 
-// TODO: FIX
 /// Aligns an address to the nearest word below or equal to it.
 #[must_use]
 pub const fn align(addr: u32) -> u32 {
@@ -2499,223 +2475,135 @@ mod tests {
         assert_eq!(runtime.register(5.into()), 12);
     }
 
-    // fn simple_op_code_test(opcode: Opcode, expected: u32, a: u32, b: u32) {
-    //     let instructions = vec![
-    //         Instruction::new(Opcode::ADD, 10, 0, a, 0, false, true),
-    //         Instruction::new(Opcode::ADD, 11, 0, b, 0, false, true),
-    //         Instruction::new(opcode::ADD, 12, 10, 11, 0, false, false),
-    //     ];
-    //     let program = Program::new(instructions, 0, 0);
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    //     assert_eq!(runtime.registers()[Register::X12 as usize], expected);
-    // }
-    //
-    // #[test]
-    // #[allow(clippy::unreadable_literal)]
-    // fn multiplication_tests() {
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0x00000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0x00000001, 0x00000001);
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0x00000003, 0x00000007);
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0x00000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0x80000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULHU, 0x7fffc000, 0x80000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MULHU, 0x0001fefe, 0xaaaaaaab, 0x0002fe7d);
-    //     simple_op_code_test(Opcode::MULHU, 0x0001fefe, 0x0002fe7d, 0xaaaaaaab);
-    //     simple_op_code_test(Opcode::MULHU, 0xfe010000, 0xff000000, 0xff000000);
-    //     simple_op_code_test(Opcode::MULHU, 0xfffffffe, 0xffffffff, 0xffffffff);
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0xffffffff, 0x00000001);
-    //     simple_op_code_test(Opcode::MULHU, 0x00000000, 0x00000001, 0xffffffff);
-    //
-    //     simple_op_code_test(Opcode::MULHSU, 0x00000000, 0x00000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULHSU, 0x00000000, 0x00000001, 0x00000001);
-    //     simple_op_code_test(Opcode::MULHSU, 0x00000000, 0x00000003, 0x00000007);
-    //     simple_op_code_test(Opcode::MULHSU, 0x00000000, 0x00000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MULHSU, 0x00000000, 0x80000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULHSU, 0x80004000, 0x80000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MULHSU, 0xffff0081, 0xaaaaaaab, 0x0002fe7d);
-    //     simple_op_code_test(Opcode::MULHSU, 0x0001fefe, 0x0002fe7d, 0xaaaaaaab);
-    //     simple_op_code_test(Opcode::MULHSU, 0xff010000, 0xff000000, 0xff000000);
-    //     simple_op_code_test(Opcode::MULHSU, 0xffffffff, 0xffffffff, 0xffffffff);
-    //     simple_op_code_test(Opcode::MULHSU, 0xffffffff, 0xffffffff, 0x00000001);
-    //     simple_op_code_test(Opcode::MULHSU, 0x00000000, 0x00000001, 0xffffffff);
-    //
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0x00000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0x00000001, 0x00000001);
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0x00000003, 0x00000007);
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0x00000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0x80000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0x80000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MULH, 0xffff0081, 0xaaaaaaab, 0x0002fe7d);
-    //     simple_op_code_test(Opcode::MULH, 0xffff0081, 0x0002fe7d, 0xaaaaaaab);
-    //     simple_op_code_test(Opcode::MULH, 0x00010000, 0xff000000, 0xff000000);
-    //     simple_op_code_test(Opcode::MULH, 0x00000000, 0xffffffff, 0xffffffff);
-    //     simple_op_code_test(Opcode::MULH, 0xffffffff, 0xffffffff, 0x00000001);
-    //     simple_op_code_test(Opcode::MULH, 0xffffffff, 0x00000001, 0xffffffff);
-    //
-    //     simple_op_code_test(Opcode::MUL, 0x00001200, 0x00007e00, 0xb6db6db7);
-    //     simple_op_code_test(Opcode::MUL, 0x00001240, 0x00007fc0, 0xb6db6db7);
-    //     simple_op_code_test(Opcode::MUL, 0x00000000, 0x00000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MUL, 0x00000001, 0x00000001, 0x00000001);
-    //     simple_op_code_test(Opcode::MUL, 0x00000015, 0x00000003, 0x00000007);
-    //     simple_op_code_test(Opcode::MUL, 0x00000000, 0x00000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MUL, 0x00000000, 0x80000000, 0x00000000);
-    //     simple_op_code_test(Opcode::MUL, 0x00000000, 0x80000000, 0xffff8000);
-    //     simple_op_code_test(Opcode::MUL, 0x0000ff7f, 0xaaaaaaab, 0x0002fe7d);
-    //     simple_op_code_test(Opcode::MUL, 0x0000ff7f, 0x0002fe7d, 0xaaaaaaab);
-    //     simple_op_code_test(Opcode::MUL, 0x00000000, 0xff000000, 0xff000000);
-    //     simple_op_code_test(Opcode::MUL, 0x00000001, 0xffffffff, 0xffffffff);
-    //     simple_op_code_test(Opcode::MUL, 0xffffffff, 0xffffffff, 0x00000001);
-    //     simple_op_code_test(Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff);
-    // }
-    //
-    // fn neg(a: u32) -> u32 {
-    //     u32::MAX - a + 1
-    // }
-    //
-    // #[test]
-    // fn division_tests() {
-    //     simple_op_code_test(Opcode::DIVU, 3, 20, 6);
-    //     simple_op_code_test(Opcode::DIVU, 715_827_879, u32::MAX - 20 + 1, 6);
-    //     simple_op_code_test(Opcode::DIVU, 0, 20, u32::MAX - 6 + 1);
-    //     simple_op_code_test(Opcode::DIVU, 0, u32::MAX - 20 + 1, u32::MAX - 6 + 1);
-    //
-    //     simple_op_code_test(Opcode::DIVU, 1 << 31, 1 << 31, 1);
-    //     simple_op_code_test(Opcode::DIVU, 0, 1 << 31, u32::MAX - 1 + 1);
-    //
-    //     simple_op_code_test(Opcode::DIVU, u32::MAX, 1 << 31, 0);
-    //     simple_op_code_test(Opcode::DIVU, u32::MAX, 1, 0);
-    //     simple_op_code_test(Opcode::DIVU, u32::MAX, 0, 0);
-    //
-    //     simple_op_code_test(Opcode::DIV, 3, 18, 6);
-    //     simple_op_code_test(Opcode::DIV, neg(6), neg(24), 4);
-    //     simple_op_code_test(Opcode::DIV, neg(2), 16, neg(8));
-    //     simple_op_code_test(Opcode::DIV, neg(1), 0, 0);
-    //
-    //     // Overflow cases
-    //     simple_op_code_test(Opcode::DIV, 1 << 31, 1 << 31, neg(1));
-    //     simple_op_code_test(Opcode::REM, 0, 1 << 31, neg(1));
-    // }
-    //
-    // #[test]
-    // fn remainder_tests() {
-    //     simple_op_code_test(Opcode::REM, 7, 16, 9);
-    //     simple_op_code_test(Opcode::REM, neg(4), neg(22), 6);
-    //     simple_op_code_test(Opcode::REM, 1, 25, neg(3));
-    //     simple_op_code_test(Opcode::REM, neg(2), neg(22), neg(4));
-    //     simple_op_code_test(Opcode::REM, 0, 873, 1);
-    //     simple_op_code_test(Opcode::REM, 0, 873, neg(1));
-    //     simple_op_code_test(Opcode::REM, 5, 5, 0);
-    //     simple_op_code_test(Opcode::REM, neg(5), neg(5), 0);
-    //     simple_op_code_test(Opcode::REM, 0, 0, 0);
-    //
-    //     simple_op_code_test(Opcode::REMU, 4, 18, 7);
-    //     simple_op_code_test(Opcode::REMU, 6, neg(20), 11);
-    //     simple_op_code_test(Opcode::REMU, 23, 23, neg(6));
-    //     simple_op_code_test(Opcode::REMU, neg(21), neg(21), neg(11));
-    //     simple_op_code_test(Opcode::REMU, 5, 5, 0);
-    //     simple_op_code_test(Opcode::REMU, neg(1), neg(1), 0);
-    //     simple_op_code_test(Opcode::REMU, 0, 0, 0);
-    // }
-    //
-    // #[test]
-    // #[allow(clippy::unreadable_literal)]
-    // fn shift_tests() {
-    //     simple_op_code_test(Opcode::SLL, 0x00000001, 0x00000001, 0);
-    //     simple_op_code_test(Opcode::SLL, 0x00000002, 0x00000001, 1);
-    //     simple_op_code_test(Opcode::SLL, 0x00000080, 0x00000001, 7);
-    //     simple_op_code_test(Opcode::SLL, 0x00004000, 0x00000001, 14);
-    //     simple_op_code_test(Opcode::SLL, 0x80000000, 0x00000001, 31);
-    //     simple_op_code_test(Opcode::SLL, 0xffffffff, 0xffffffff, 0);
-    //     simple_op_code_test(Opcode::SLL, 0xfffffffe, 0xffffffff, 1);
-    //     simple_op_code_test(Opcode::SLL, 0xffffff80, 0xffffffff, 7);
-    //     simple_op_code_test(Opcode::SLL, 0xffffc000, 0xffffffff, 14);
-    //     simple_op_code_test(Opcode::SLL, 0x80000000, 0xffffffff, 31);
-    //     simple_op_code_test(Opcode::SLL, 0x21212121, 0x21212121, 0);
-    //     simple_op_code_test(Opcode::SLL, 0x42424242, 0x21212121, 1);
-    //     simple_op_code_test(Opcode::SLL, 0x90909080, 0x21212121, 7);
-    //     simple_op_code_test(Opcode::SLL, 0x48484000, 0x21212121, 14);
-    //     simple_op_code_test(Opcode::SLL, 0x80000000, 0x21212121, 31);
-    //     simple_op_code_test(Opcode::SLL, 0x21212121, 0x21212121, 0xffffffe0);
-    //     simple_op_code_test(Opcode::SLL, 0x42424242, 0x21212121, 0xffffffe1);
-    //     simple_op_code_test(Opcode::SLL, 0x90909080, 0x21212121, 0xffffffe7);
-    //     simple_op_code_test(Opcode::SLL, 0x48484000, 0x21212121, 0xffffffee);
-    //     simple_op_code_test(Opcode::SLL, 0x00000000, 0x21212120, 0xffffffff);
-    //
-    //     simple_op_code_test(Opcode::SRL, 0xffff8000, 0xffff8000, 0);
-    //     simple_op_code_test(Opcode::SRL, 0x7fffc000, 0xffff8000, 1);
-    //     simple_op_code_test(Opcode::SRL, 0x01ffff00, 0xffff8000, 7);
-    //     simple_op_code_test(Opcode::SRL, 0x0003fffe, 0xffff8000, 14);
-    //     simple_op_code_test(Opcode::SRL, 0x0001ffff, 0xffff8001, 15);
-    //     simple_op_code_test(Opcode::SRL, 0xffffffff, 0xffffffff, 0);
-    //     simple_op_code_test(Opcode::SRL, 0x7fffffff, 0xffffffff, 1);
-    //     simple_op_code_test(Opcode::SRL, 0x01ffffff, 0xffffffff, 7);
-    //     simple_op_code_test(Opcode::SRL, 0x0003ffff, 0xffffffff, 14);
-    //     simple_op_code_test(Opcode::SRL, 0x00000001, 0xffffffff, 31);
-    //     simple_op_code_test(Opcode::SRL, 0x21212121, 0x21212121, 0);
-    //     simple_op_code_test(Opcode::SRL, 0x10909090, 0x21212121, 1);
-    //     simple_op_code_test(Opcode::SRL, 0x00424242, 0x21212121, 7);
-    //     simple_op_code_test(Opcode::SRL, 0x00008484, 0x21212121, 14);
-    //     simple_op_code_test(Opcode::SRL, 0x00000000, 0x21212121, 31);
-    //     simple_op_code_test(Opcode::SRL, 0x21212121, 0x21212121, 0xffffffe0);
-    //     simple_op_code_test(Opcode::SRL, 0x10909090, 0x21212121, 0xffffffe1);
-    //     simple_op_code_test(Opcode::SRL, 0x00424242, 0x21212121, 0xffffffe7);
-    //     simple_op_code_test(Opcode::SRL, 0x00008484, 0x21212121, 0xffffffee);
-    //     simple_op_code_test(Opcode::SRL, 0x00000000, 0x21212121, 0xffffffff);
-    //
-    //     simple_op_code_test(Opcode::SRA, 0x00000000, 0x00000000, 0);
-    //     simple_op_code_test(Opcode::SRA, 0xc0000000, 0x80000000, 1);
-    //     simple_op_code_test(Opcode::SRA, 0xff000000, 0x80000000, 7);
-    //     simple_op_code_test(Opcode::SRA, 0xfffe0000, 0x80000000, 14);
-    //     simple_op_code_test(Opcode::SRA, 0xffffffff, 0x80000001, 31);
-    //     simple_op_code_test(Opcode::SRA, 0x7fffffff, 0x7fffffff, 0);
-    //     simple_op_code_test(Opcode::SRA, 0x3fffffff, 0x7fffffff, 1);
-    //     simple_op_code_test(Opcode::SRA, 0x00ffffff, 0x7fffffff, 7);
-    //     simple_op_code_test(Opcode::SRA, 0x0001ffff, 0x7fffffff, 14);
-    //     simple_op_code_test(Opcode::SRA, 0x00000000, 0x7fffffff, 31);
-    //     simple_op_code_test(Opcode::SRA, 0x81818181, 0x81818181, 0);
-    //     simple_op_code_test(Opcode::SRA, 0xc0c0c0c0, 0x81818181, 1);
-    //     simple_op_code_test(Opcode::SRA, 0xff030303, 0x81818181, 7);
-    //     simple_op_code_test(Opcode::SRA, 0xfffe0606, 0x81818181, 14);
-    //     simple_op_code_test(Opcode::SRA, 0xffffffff, 0x81818181, 31);
-    // }
-    //
-    // #[test]
-    // #[allow(clippy::unreadable_literal)]
-    // fn test_simple_memory_program_run() {
-    //     let program = simple_memory_program();
-    //     let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-    //     runtime.run().unwrap();
-    //
-    //     // Assert SW & LW case
-    //     assert_eq!(runtime.register(Register::X28), 0x12348765);
-    //
-    //     // Assert LBU cases
-    //     assert_eq!(runtime.register(Register::X27), 0x65);
-    //     assert_eq!(runtime.register(Register::X26), 0x87);
-    //     assert_eq!(runtime.register(Register::X25), 0x34);
-    //     assert_eq!(runtime.register(Register::X24), 0x12);
-    //
-    //     // Assert LB cases
-    //     assert_eq!(runtime.register(Register::X23), 0x65);
-    //     assert_eq!(runtime.register(Register::X22), 0xffffff87);
-    //
-    //     // Assert LHU cases
-    //     assert_eq!(runtime.register(Register::X21), 0x8765);
-    //     assert_eq!(runtime.register(Register::X20), 0x1234);
-    //
-    //     // Assert LH cases
-    //     assert_eq!(runtime.register(Register::X19), 0xffff8765);
-    //     assert_eq!(runtime.register(Register::X18), 0x1234);
-    //
-    //     // Assert SB cases
-    //     assert_eq!(runtime.register(Register::X16), 0x12348725);
-    //     assert_eq!(runtime.register(Register::X15), 0x12342525);
-    //     assert_eq!(runtime.register(Register::X14), 0x12252525);
-    //     assert_eq!(runtime.register(Register::X13), 0x25252525);
-    //
-    //     // Assert SH cases
-    //     assert_eq!(runtime.register(Register::X12), 0x12346525);
-    //     assert_eq!(runtime.register(Register::X11), 0x65256525);
-    // }
+    fn simple_op_code_test(opcode: Opcode, expected: u32, a: u32, b: u32) {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 10, 0, a, false, true),
+            Instruction::new(Opcode::ADD, 11, 0, b, false, true),
+            Instruction::new(opcode, 12, 10, 11, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        assert_eq!(runtime.register(12.into()), expected);
+    }
+
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn multiplication_tests() {
+        simple_op_code_test(Opcode::MUL, 0x00001200, 0x00007e00, 0xb6db6db7);
+        simple_op_code_test(Opcode::MUL, 0x00001240, 0x00007fc0, 0xb6db6db7);
+        simple_op_code_test(Opcode::MUL, 0x00000000, 0x00000000, 0x00000000);
+        simple_op_code_test(Opcode::MUL, 0x00000001, 0x00000001, 0x00000001);
+        simple_op_code_test(Opcode::MUL, 0x00000015, 0x00000003, 0x00000007);
+        simple_op_code_test(Opcode::MUL, 0x00000000, 0x00000000, 0xffff8000);
+        simple_op_code_test(Opcode::MUL, 0x00000000, 0x80000000, 0x00000000);
+        simple_op_code_test(Opcode::MUL, 0x00000000, 0x80000000, 0xffff8000);
+        simple_op_code_test(Opcode::MUL, 0x0000ff7f, 0xaaaaaaab, 0x0002fe7d);
+        simple_op_code_test(Opcode::MUL, 0x0000ff7f, 0x0002fe7d, 0xaaaaaaab);
+        simple_op_code_test(Opcode::MUL, 0x00000000, 0xff000000, 0xff000000);
+        simple_op_code_test(Opcode::MUL, 0x00000001, 0xffffffff, 0xffffffff);
+        simple_op_code_test(Opcode::MUL, 0xffffffff, 0xffffffff, 0x00000001);
+        simple_op_code_test(Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff);
+    }
+
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn shift_tests() {
+        simple_op_code_test(Opcode::SLL, 0x00000001, 0x00000001, 0);
+        simple_op_code_test(Opcode::SLL, 0x00000002, 0x00000001, 1);
+        simple_op_code_test(Opcode::SLL, 0x00000080, 0x00000001, 7);
+        simple_op_code_test(Opcode::SLL, 0x00004000, 0x00000001, 14);
+        simple_op_code_test(Opcode::SLL, 0x80000000, 0x00000001, 31);
+        simple_op_code_test(Opcode::SLL, 0xffffffff, 0xffffffff, 0);
+        simple_op_code_test(Opcode::SLL, 0xfffffffe, 0xffffffff, 1);
+        simple_op_code_test(Opcode::SLL, 0xffffff80, 0xffffffff, 7);
+        simple_op_code_test(Opcode::SLL, 0xffffc000, 0xffffffff, 14);
+        simple_op_code_test(Opcode::SLL, 0x80000000, 0xffffffff, 31);
+        simple_op_code_test(Opcode::SLL, 0x21212121, 0x21212121, 0);
+        simple_op_code_test(Opcode::SLL, 0x42424242, 0x21212121, 1);
+        simple_op_code_test(Opcode::SLL, 0x90909080, 0x21212121, 7);
+        simple_op_code_test(Opcode::SLL, 0x48484000, 0x21212121, 14);
+        simple_op_code_test(Opcode::SLL, 0x80000000, 0x21212121, 31);
+        simple_op_code_test(Opcode::SLL, 0x21212121, 0x21212121, 0xffffffe0);
+        simple_op_code_test(Opcode::SLL, 0x42424242, 0x21212121, 0xffffffe1);
+        simple_op_code_test(Opcode::SLL, 0x90909080, 0x21212121, 0xffffffe7);
+        simple_op_code_test(Opcode::SLL, 0x48484000, 0x21212121, 0xffffffee);
+        simple_op_code_test(Opcode::SLL, 0x00000000, 0x21212120, 0xffffffff);
+
+        simple_op_code_test(Opcode::SRL, 0xffff8000, 0xffff8000, 0);
+        simple_op_code_test(Opcode::SRL, 0x7fffc000, 0xffff8000, 1);
+        simple_op_code_test(Opcode::SRL, 0x01ffff00, 0xffff8000, 7);
+        simple_op_code_test(Opcode::SRL, 0x0003fffe, 0xffff8000, 14);
+        simple_op_code_test(Opcode::SRL, 0x0001ffff, 0xffff8001, 15);
+        simple_op_code_test(Opcode::SRL, 0xffffffff, 0xffffffff, 0);
+        simple_op_code_test(Opcode::SRL, 0x7fffffff, 0xffffffff, 1);
+        simple_op_code_test(Opcode::SRL, 0x01ffffff, 0xffffffff, 7);
+        simple_op_code_test(Opcode::SRL, 0x0003ffff, 0xffffffff, 14);
+        simple_op_code_test(Opcode::SRL, 0x00000001, 0xffffffff, 31);
+        simple_op_code_test(Opcode::SRL, 0x21212121, 0x21212121, 0);
+        simple_op_code_test(Opcode::SRL, 0x10909090, 0x21212121, 1);
+        simple_op_code_test(Opcode::SRL, 0x00424242, 0x21212121, 7);
+        simple_op_code_test(Opcode::SRL, 0x00008484, 0x21212121, 14);
+        simple_op_code_test(Opcode::SRL, 0x00000000, 0x21212121, 31);
+        simple_op_code_test(Opcode::SRL, 0x21212121, 0x21212121, 0xffffffe0);
+        simple_op_code_test(Opcode::SRL, 0x10909090, 0x21212121, 0xffffffe1);
+        simple_op_code_test(Opcode::SRL, 0x00424242, 0x21212121, 0xffffffe7);
+        simple_op_code_test(Opcode::SRL, 0x00008484, 0x21212121, 0xffffffee);
+        simple_op_code_test(Opcode::SRL, 0x00000000, 0x21212121, 0xffffffff);
+
+        simple_op_code_test(Opcode::SRA, 0x00000000, 0x00000000, 0);
+        simple_op_code_test(Opcode::SRA, 0xc0000000, 0x80000000, 1);
+        simple_op_code_test(Opcode::SRA, 0xff000000, 0x80000000, 7);
+        simple_op_code_test(Opcode::SRA, 0xfffe0000, 0x80000000, 14);
+        simple_op_code_test(Opcode::SRA, 0xffffffff, 0x80000001, 31);
+        simple_op_code_test(Opcode::SRA, 0x7fffffff, 0x7fffffff, 0);
+        simple_op_code_test(Opcode::SRA, 0x3fffffff, 0x7fffffff, 1);
+        simple_op_code_test(Opcode::SRA, 0x00ffffff, 0x7fffffff, 7);
+        simple_op_code_test(Opcode::SRA, 0x0001ffff, 0x7fffffff, 14);
+        simple_op_code_test(Opcode::SRA, 0x00000000, 0x7fffffff, 31);
+        simple_op_code_test(Opcode::SRA, 0x81818181, 0x81818181, 0);
+        simple_op_code_test(Opcode::SRA, 0xc0c0c0c0, 0x81818181, 1);
+        simple_op_code_test(Opcode::SRA, 0xff030303, 0x81818181, 7);
+        simple_op_code_test(Opcode::SRA, 0xfffe0606, 0x81818181, 14);
+        simple_op_code_test(Opcode::SRA, 0xffffffff, 0x81818181, 31);
+    }
+
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn test_simple_memory_program_run() {
+        let program = simple_memory_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+
+        // Assert SW & LW case
+        assert_eq!(runtime.register(28.into()), 0x12348765);
+
+        // Assert LBU cases
+        assert_eq!(runtime.register(27.into()), 0x65);
+        assert_eq!(runtime.register(26.into()), 0x87);
+        assert_eq!(runtime.register(25.into()), 0x34);
+        assert_eq!(runtime.register(24.into()), 0x12);
+
+        // Assert LB cases
+        assert_eq!(runtime.register(23.into()), 0x65);
+        assert_eq!(runtime.register(22.into()), 0xffffff87);
+
+        // Assert LHU cases
+        assert_eq!(runtime.register(21.into()), 0x8765);
+        assert_eq!(runtime.register(20.into()), 0x1234);
+
+        // Assert LH cases
+        assert_eq!(runtime.register(19.into()), 0xffff8765);
+        assert_eq!(runtime.register(18.into()), 0x1234);
+
+        // Assert SB cases
+        assert_eq!(runtime.register(16.into()), 0x12348725);
+        assert_eq!(runtime.register(15.into()), 0x12342525);
+        assert_eq!(runtime.register(14.into()), 0x12252525);
+        assert_eq!(runtime.register(13.into()), 0x25252525);
+
+        // Assert SH cases
+        assert_eq!(runtime.register(12.into()), 0x12346525);
+        assert_eq!(runtime.register(11.into()), 0x65256525);
+    }
 }

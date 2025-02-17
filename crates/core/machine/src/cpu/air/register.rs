@@ -57,7 +57,7 @@ impl CpuChip {
         // Write the HI register
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::S1 as u32),
+            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
             local.instruction.op_hi[0],
             &local.op_hi_access,
             local.selectors.has_hi,
