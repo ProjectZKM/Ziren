@@ -8,7 +8,7 @@ pub mod tests {
     use test_artifacts::{
         FIBONACCI_ELF, HELLO_WORLD_ELF,
         KECCAK_PERMUTE_ELF, PANIC_ELF,
-        SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, U256XU2048_MUL_ELF,
+        SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF,
     };
 
     #[must_use]
@@ -39,6 +39,16 @@ pub mod tests {
     #[must_use]
     pub fn hello_world_program() -> Program {
         Program::from(HELLO_WORLD_ELF).unwrap()
+    }
+
+    /// Get the sha3-chain program.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the program fails to load.
+    #[must_use]
+    pub fn sha3_chain_program() -> Program {
+        Program::from(SHA3_CHAIN_ELF).unwrap()
     }
 
     /// Get the secp256r1 add program.

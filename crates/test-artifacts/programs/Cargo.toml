@@ -38,6 +38,7 @@ members = [
   "secp256r1-decompress",
   "secp256r1-double",
   "sha-compress",
+  "sha3-chain",
   "u256x2048-mul",
   "uint256-arith",
   "uint256-mul",

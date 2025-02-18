@@ -11,6 +11,7 @@ pub const SHA2_ELF: &[u8] = include_elf!("sha2-test");
 pub const SHA_EXTEND_ELF: &[u8] = include_elf!("sha-extend-test");
 pub const SHA_COMPRESS_ELF: &[u8] = include_elf!("sha-compress-test");
 
+pub const SHA3_CHAIN_ELF: &[u8] = include_elf!("sha3-chain");
 pub const KECCAK256_ELF: &[u8] = include_elf!("keccak256-test");
 pub const KECCAK_PERMUTE_ELF: &[u8] = include_elf!("keccak-permute-test");
 pub const PANIC_ELF: &[u8] = include_elf!("panic-test");

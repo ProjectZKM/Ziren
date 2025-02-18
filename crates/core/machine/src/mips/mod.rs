@@ -598,7 +598,7 @@ pub mod tests {
 
     use zkm2_core_executor::{
         programs::tests::{
-            fibonacci_program, hello_world_program, simple_memory_program, simple_program, ssz_withdrawals_program,
+            fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program, simple_program, ssz_withdrawals_program,
         },
         Instruction, Opcode, Program, Register,
     };
@@ -922,6 +922,13 @@ pub mod tests {
     fn test_fibonacci_prove_simple() {
         setup_logger();
         let program = fibonacci_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_sha3_chain_prove_simple() {
+        setup_logger();
+        let program = sha3_chain_program();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 

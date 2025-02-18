@@ -1,0 +1,8 @@
+[package]
+version = "0.1.0"
+name = "sha3-chain"
+edition = "2021"
+
+[dependencies]
+zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+sha3 = { version = "0.10.8", default-features = false }
