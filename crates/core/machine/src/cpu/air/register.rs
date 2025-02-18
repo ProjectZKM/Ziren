@@ -57,7 +57,7 @@ impl CpuChip {
         // Write the HI register
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::S1 as u32),
+            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
             local.instruction.op_hi[0],
             &local.op_hi_access,
             local.selectors.has_hi,
@@ -69,7 +69,7 @@ impl CpuChip {
 
         // If we are performing a branch or a store, then the value of `a` is the previous value.
         builder
-            .when(is_branch_instruction.clone() + self.is_store_instruction::<AB>(&local.selectors))
+            .when(is_branch_instruction.clone() + self.is_store_instruction_except_sc::<AB>(&local.selectors))
             .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
     }
 }

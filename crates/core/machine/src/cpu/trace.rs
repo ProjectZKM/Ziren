@@ -141,7 +141,7 @@ impl CpuChip {
         cols.next_next_pc = F::from_canonical_u32(event.next_next_pc);
         cols.instruction.populate(instruction);
         cols.selectors.populate(instruction);
-        if let Some(hi) = event.s1 {
+        if let Some(hi) = event.hi {
             *cols.op_hi_access.value_mut() = hi.into();
         }
         *cols.op_a_access.value_mut() = event.a.into();
@@ -149,7 +149,7 @@ impl CpuChip {
         *cols.op_c_access.value_mut() = event.c.into();
 
         // Populate memory accesses for hi, a, b, and c.
-        if let Some(record) = event.s1_record {
+        if let Some(record) = event.hi_record {
             cols.op_hi_access.populate(record, blu_events);
         }
         if let Some(record) = event.a_record {
@@ -277,7 +277,7 @@ impl CpuChip {
                 | Opcode::SC
                 | Opcode::SWL
                 | Opcode::SWR
-                | Opcode::SDC1
+                //| Opcode::SDC1
         ) {
             return;
         }
@@ -310,7 +310,7 @@ impl CpuChip {
         let mem_value = event.memory_record.unwrap().value();
         if matches!(
             instruction.opcode,
-            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR
+            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR | Opcode::LL
         ) {
             match instruction.opcode {
                 Opcode::LB | Opcode::LBU => {
@@ -333,20 +333,20 @@ impl CpuChip {
                 }
                 Opcode::LWL => {
                     // LWL:
-                    //    let val = mem << ((rs & 3) * 8);
-                    //    let mask = 0xffFFffFFu32 << ((rs & 3) * 8);
+                    //    let val = mem << (24 - (rs & 3) * 8);
+                    //    let mask = 0xffFFffFFu32 << (24 - (rs & 3) * 8);
                     //    (rt & (!mask)) | val
-                    let val = mem_value << (addr_offset * 8);
-                    let mask = 0xffFFffFFu32 << (addr_offset * 8);
+                    let val = mem_value << (24 - addr_offset * 8);
+                    let mask = 0xffFFffFFu32 << (24 - addr_offset * 8);
                     cols.unsigned_mem_val = ((mem_value & (!mask)) | val).into();
                 }
                 Opcode::LWR => {
                     // LWR:
-                    //     let val = mem >> (24 - (rs & 3) * 8);
-                    //     let mask = 0xffFFffFFu32 >> (24 - (rs & 3) * 8);
+                    //     let val = mem >> ((rs & 3) * 8);
+                    //     let mask = 0xffFFffFFu32 >> ((rs & 3) * 8);
                     //     (rt & (!mask)) | val
-                    let val = mem_value >> (24 - addr_offset * 8);
-                    let mask = 0xffFFffFFu32 >> (24 - addr_offset * 8);
+                    let val = mem_value >> (addr_offset * 8);
+                    let mask = 0xffFFffFFu32 >> (addr_offset * 8);
                     cols.unsigned_mem_val = ((mem_value & (!mask)) | val).into();
                 }
                 Opcode::LL => {
@@ -368,7 +368,6 @@ impl CpuChip {
                         F::from_canonical_u8(most_sig_mem_value_byte >> i & 0x01);
                 }
                 if memory_columns.most_sig_byte_decomp[7] == F::ONE {
-                    // FIXME: ZERO is X0, is it correct?
                     cols.mem_value_is_neg_not_x0 = F::from_bool(instruction.op_a != (ZERO as u8));
                     cols.unsigned_mem_val_nonce = F::from_canonical_u32(
                         nonce_lookup

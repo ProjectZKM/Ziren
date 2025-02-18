@@ -322,10 +322,7 @@ pub struct MemoryAccessRecord {
     pub c: Option<MemoryRecordEnum>,
     /// The memory access of the `hi` register and other special registers.
     /// read && write
-    pub s1: Option<MemoryRecordEnum>,
-    /// The memory access of the special registers for syscalls.
-    /// read
-    pub s2: Option<MemoryRecordEnum>,
+    pub hi: Option<MemoryRecordEnum>,
     /// The memory access of the `memory` register.
     pub memory: Option<MemoryRecordEnum>,
 }

@@ -2734,6 +2734,7 @@ dependencies = [
  "tracing-subscriber",
  "zkm2-derive",
  "zkm2-primitives",
+ "zkm2-zkvm",
 ]
 
 [[package]]

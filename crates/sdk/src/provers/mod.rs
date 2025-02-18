@@ -72,7 +72,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
 
     fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey);
 
-    /// Prove the execution of a RISCV ELF with the given inputs, according to the given proof mode.
+    /// Prove the execution of a MIPS ELF with the given inputs, according to the given proof mode.
     fn prove<'a>(
         &'a self,
         pk: &ZKMProvingKey,

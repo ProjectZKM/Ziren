@@ -32,6 +32,7 @@ rand = { workspace = true }
 
 zkm2-derive = { workspace = true }
 zkm2-primitives = { workspace = true }
+zkm2-zkvm = { workspace = true }
 
 strum = "0.26.3"
 strum_macros = "0.26.4"

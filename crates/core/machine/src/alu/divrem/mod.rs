@@ -185,10 +185,6 @@ pub struct DivRemCols<T> {
     /// The lower nonce of the operation.
     pub lower_nonce: T,
 
-    /// The upper nonce of the operation.
-    /// todo: remove
-    pub upper_nonce: T,
-
     /// The absolute nonce of the operation.
     pub abs_nonce: T,
 

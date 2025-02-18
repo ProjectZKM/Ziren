@@ -602,6 +602,7 @@ pub mod tests {
         },
         Instruction, Opcode, Program, Register,
     };
+    use zkm2_core_executor::programs::tests::other_memory_program;
     use zkm2_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, ZKMCoreOpts, StarkProvingKey,
         StarkVerifyingKey,
@@ -895,6 +896,22 @@ pub mod tests {
     }
 
     #[test]
+    fn test_sc_prove() {
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 0x12348765, false, true),
+            Instruction::new(Opcode::SW, 29, 0, 0x27654320, false, true),
+            // LL and SC
+            Instruction::new(Opcode::LL, 28, 0, 0x27654320, false, true),
+            Instruction::new(Opcode::ADD, 28, 28, 1, false, true),
+            Instruction::new(Opcode::SC, 28, 0, 0x27654320, false, true),
+            Instruction::new(Opcode::LW, 29, 0, 0x27654320, false, true),
+
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
     fn test_hello_world_prove_simple() {
         setup_logger();
         let program = hello_world_program();
@@ -939,6 +956,13 @@ pub mod tests {
     fn test_simple_memory_program_prove() {
         setup_logger();
         let program = simple_memory_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_simple_memory_program_2_prove() {
+        setup_logger();
+        let program = other_memory_program();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 

@@ -262,10 +262,9 @@ impl CpuChip {
         // We already assert that `local.clk < 2^24`. `num_extra_cycles` is an entry of a word and
         // therefore less than `2^8`, this means that the sum cannot overflow in a 31 bit field.
         let expected_next_clk =
-            local.clk + AB::Expr::from_canonical_u32(4) + num_extra_cycles.clone();
+            local.clk + AB::Expr::from_canonical_u32(5) + num_extra_cycles.clone();
 
-        // FIXME: stephen, clk counter not working
-        // builder.when_transition().when(next.is_real).assert_eq(expected_next_clk.clone(), next.clk);
+        builder.when_transition().when(next.is_real).assert_eq(expected_next_clk.clone(), next.clk);
 
         // Range check that the clk is within 24 bits using it's limb values.
         builder.eval_range_check_24bits(
