@@ -8,7 +8,7 @@ impl<C: Config> Builder<C> {
     ///
     /// Reference: [p3_koala_bear::KoalaBear]
     pub fn generator(&mut self) -> Felt<C::F> {
-        self.eval(C::F::from_canonical_u32(31))
+        self.eval(C::F::from_canonical_u32(3))
     }
 
     /// Select a variable based on a condition.

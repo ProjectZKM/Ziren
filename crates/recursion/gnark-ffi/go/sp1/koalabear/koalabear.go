@@ -255,7 +255,7 @@ func (c *Chip) MulE(a, b ExtensionVariable) ExtensionVariable {
 	for i := 0; i < 4; i++ {
 		for j := 0; j < 4; j++ {
 			if i+j >= 4 {
-				v2[i+j-4] = c.AddF(v2[i+j-4], c.MulFConst(c.MulF(a.Value[i], b.Value[j], false), 11, false), false)
+				v2[i+j-4] = c.AddF(v2[i+j-4], c.MulFConst(c.MulF(a.Value[i], b.Value[j], false), 3, false), false)
 			} else {
 				v2[i+j] = c.AddF(v2[i+j], c.MulF(a.Value[i], b.Value[j], false), false)
 			}
