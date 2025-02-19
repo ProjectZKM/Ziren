@@ -81,17 +81,13 @@ fn prove(system: ProofSystem, data_dir: &str, witness_path: &str) -> ProofResult
     unsafe {
         match system.prove_fn() {
             ProveFunction::Plonk(func) => {
-                let proof = func(
-                    data_dir.as_ptr() as *mut c_char,
-                    witness_path.as_ptr() as *mut c_char,
-                );
+                let proof =
+                    func(data_dir.as_ptr() as *mut c_char, witness_path.as_ptr() as *mut c_char);
                 ProofResult::Plonk(proof)
             }
             ProveFunction::Groth16(func) => {
-                let proof = func(
-                    data_dir.as_ptr() as *mut c_char,
-                    witness_path.as_ptr() as *mut c_char,
-                );
+                let proof =
+                    func(data_dir.as_ptr() as *mut c_char, witness_path.as_ptr() as *mut c_char);
                 ProofResult::Groth16(proof)
             }
         }
@@ -163,13 +159,7 @@ pub fn verify_plonk_bn254(
     vkey_hash: &str,
     committed_values_digest: &str,
 ) -> Result<(), String> {
-    verify(
-        ProofSystem::Plonk,
-        data_dir,
-        proof,
-        vkey_hash,
-        committed_values_digest,
-    )
+    verify(ProofSystem::Plonk, data_dir, proof, vkey_hash, committed_values_digest)
 }
 
 pub fn test_plonk_bn254(witness_json: &str, constraints_json: &str) {
@@ -193,13 +183,7 @@ pub fn verify_groth16_bn254(
     vkey_hash: &str,
     committed_values_digest: &str,
 ) -> Result<(), String> {
-    verify(
-        ProofSystem::Groth16,
-        data_dir,
-        proof,
-        vkey_hash,
-        committed_values_digest,
-    )
+    verify(ProofSystem::Groth16, data_dir, proof, vkey_hash, committed_values_digest)
 }
 
 pub fn test_groth16_bn254(witness_json: &str, constraints_json: &str) {
@@ -211,10 +195,7 @@ pub fn test_koalabear_poseidon2() {
         let err_ptr = bind::TestPoseidonKoalaBear2();
         if !err_ptr.is_null() {
             // Safety: The error message is returned from the go code and is guaranteed to be valid.
-            panic!(
-                "TestPoseidonKoalaBear2 failed: {}",
-                ptr_to_string_freed(err_ptr)
-            );
+            panic!("TestPoseidonKoalaBear2 failed: {}", ptr_to_string_freed(err_ptr));
         }
     }
 }
@@ -225,10 +206,7 @@ pub fn test_koalabear_poseidon2() {
 /// This function does not free the pointer, so the caller must ensure that the pointer is handled
 /// correctly.
 unsafe fn ptr_to_string_cloned(input: *mut c_char) -> String {
-    CStr::from_ptr(input)
-        .to_owned()
-        .into_string()
-        .expect("CStr::into_string failed")
+    CStr::from_ptr(input).to_owned().into_string().expect("CStr::into_string failed")
 }
 
 /// Converts a C string into a Rust String.
@@ -276,8 +254,8 @@ impl Groth16Bn254Proof {
 
 #[cfg(test)]
 mod tests {
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_symmetric::Permutation;
     use zkm2_stark::inner_perm;
 

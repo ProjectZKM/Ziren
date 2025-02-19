@@ -54,17 +54,10 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
     type WitnessVariable = BatchOpeningVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
-        let opened_values = self
-            .opened_values
-            .read(builder)
-            .into_iter()
-            .map(|a| a.into_iter().map(|b| b).collect())
-            .collect();
+        let opened_values =
+            self.opened_values.read(builder).into_iter().map(|a| a.into_iter().collect()).collect();
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable {
-            opened_values,
-            opening_proof,
-        }
+        Self::WitnessVariable { opened_values, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
@@ -108,12 +101,7 @@ impl Witnessable<OuterConfig> for OuterFriProof {
         let query_proofs = self.query_proofs.read(builder);
         let final_poly = self.final_poly.read(builder);
         let pow_witness = self.pow_witness.read(builder);
-        Self::WitnessVariable {
-            commit_phase_commits,
-            query_proofs,
-            final_poly,
-            pow_witness,
-        }
+        Self::WitnessVariable { commit_phase_commits, query_proofs, final_poly, pow_witness }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
@@ -133,10 +121,7 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable {
-            sibling_value,
-            opening_proof,
-        }
+        Self::WitnessVariable { sibling_value, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
@@ -151,10 +136,7 @@ impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs,
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
         let input_proof = self.input_proof.read(builder);
         let commit_phase_openings = self.commit_phase_openings.read(builder);
-        Self::WitnessVariable {
-            input_proof,
-            commit_phase_openings,
-        }
+        Self::WitnessVariable { input_proof, commit_phase_openings }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {

@@ -33,9 +33,9 @@ use std::{
 };
 
 use lru::LruCache;
-use p3_koala_bear::KoalaBear;
 use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
 use zkm2_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
@@ -183,7 +183,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .parse()
                 .unwrap_or(CORE_CACHE_SIZE),
         )
-            .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
+        .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
 
         let compress_cache_size = NonZeroUsize::new(
             env::var("PROVER_COMPRESS_CACHE_SIZE")
@@ -191,7 +191,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .parse()
                 .unwrap_or(COMPRESS_CACHE_SIZE),
         )
-            .expect("PROVER_COMPRESS_CACHE_SIZE must be a non-zero usize");
+        .expect("PROVER_COMPRESS_CACHE_SIZE must be a non-zero usize");
 
         let core_shape_config = env::var("FIX_CORE_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
@@ -203,9 +203,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .unwrap_or(true)
             .then_some(RecursionShapeConfig::default());
 
-        let vk_verification = env::var("VERIFY_VK")
-            .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+        let vk_verification =
+            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
 
         tracing::debug!("vk verification: {}", vk_verification);
 
@@ -282,10 +281,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             runtime.write_proof(proof.clone(), vkey.clone());
         }
         runtime.run_fast()?;
-        Ok((
-            ZKMPublicValues::from(&runtime.state.public_values_stream),
-            runtime.report,
-        ))
+        Ok((ZKMPublicValues::from(&runtime.state.public_values_stream), runtime.report))
     }
 
     /// Generate shard proofs which split up and prove the valid execution of a RISC-V program with
@@ -325,10 +321,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMRecursionWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let mut cache = self
-            .recursion_programs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.recursion_programs.lock().unwrap_or_else(|e| e.into_inner());
         cache
             .get_or_insert(input.shape(), || {
                 let misses = self.recursion_cache_misses.fetch_add(1, Ordering::Relaxed);
@@ -360,10 +353,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let mut cache = self
-            .compress_programs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.compress_programs.lock().unwrap_or_else(|e| e.into_inner());
         let shape = input.shape();
         cache
             .get_or_insert(shape.clone(), || {
@@ -548,18 +538,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         // Check that the leaf challenger is the same as the reconstruct challenger.
-        assert_eq!(
-            reconstruct_challenger.sponge_state,
-            leaf_challenger.sponge_state
-        );
-        assert_eq!(
-            reconstruct_challenger.input_buffer,
-            leaf_challenger.input_buffer
-        );
-        assert_eq!(
-            reconstruct_challenger.output_buffer,
-            leaf_challenger.output_buffer
-        );
+        assert_eq!(reconstruct_challenger.sponge_state, leaf_challenger.sponge_state);
+        assert_eq!(reconstruct_challenger.input_buffer, leaf_challenger.input_buffer);
+        assert_eq!(reconstruct_challenger.output_buffer, leaf_challenger.output_buffer);
         core_inputs
     }
 
@@ -576,21 +557,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut deferred_inputs = Vec::new();
 
         for batch in deferred_proofs.chunks(batch_size) {
-            let vks_and_proofs = batch
-                .iter()
-                .cloned()
-                .map(|proof| (proof.vk, proof.proof))
-                .collect::<Vec<_>>();
+            let vks_and_proofs =
+                batch.iter().cloned().map(|proof| (proof.vk, proof.proof)).collect::<Vec<_>>();
 
-            let input = ZKMCompressWitnessValues {
-                vks_and_proofs,
-                is_complete: true,
-            };
+            let input = ZKMCompressWitnessValues { vks_and_proofs, is_complete: true };
             let input = self.make_merkle_proofs(input);
-            let ZKMCompressWithVKeyWitnessValues {
-                compress_val,
-                merkle_val,
-            } = input;
+            let ZKMCompressWithVKeyWitnessValues { compress_val, merkle_val } = input;
 
             deferred_inputs.push(ZKMDeferredWitnessValues {
                 vks_and_proofs: compress_val.vks_and_proofs,
@@ -631,12 +603,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             batch_size,
             is_complete,
         );
-        let last_proof_pv = shard_proofs
-            .last()
-            .unwrap()
-            .public_values
-            .as_slice()
-            .borrow();
+        let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
         let deferred_inputs = self.get_recursion_deferred_inputs(
             &vk.vk,
             leaf_challenger,
@@ -743,30 +710,30 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             let (program, witness_stream) = tracing::debug_span!(
                                 "get program and witness stream"
                             )
-                                .in_scope(|| match input {
-                                    ZKMCircuitWitness::Core(input) => {
-                                        let mut witness_stream = Vec::new();
-                                        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                        (self.recursion_program(&input), witness_stream)
-                                    }
-                                    ZKMCircuitWitness::Deferred(input) => {
-                                        let mut witness_stream = Vec::new();
-                                        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                        (self.deferred_program(&input), witness_stream)
-                                    }
-                                    ZKMCircuitWitness::Compress(input) => {
-                                        let mut witness_stream = Vec::new();
+                            .in_scope(|| match input {
+                                ZKMCircuitWitness::Core(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (self.recursion_program(&input), witness_stream)
+                                }
+                                ZKMCircuitWitness::Deferred(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (self.deferred_program(&input), witness_stream)
+                                }
+                                ZKMCircuitWitness::Compress(input) => {
+                                    let mut witness_stream = Vec::new();
 
-                                        let input_with_merkle = self.make_merkle_proofs(input);
+                                    let input_with_merkle = self.make_merkle_proofs(input);
 
-                                        Witnessable::<InnerConfig>::write(
-                                            &input_with_merkle,
-                                            &mut witness_stream,
-                                        );
+                                    Witnessable::<InnerConfig>::write(
+                                        &input_with_merkle,
+                                        &mut witness_stream,
+                                    );
 
-                                        (self.compress_program(&input_with_merkle), witness_stream)
-                                    }
-                                });
+                                    (self.compress_program(&input_with_merkle), witness_stream)
+                                }
+                            });
 
                             // Execute the runtime.
                             let record = tracing::debug_span!("execute runtime").in_scope(|| {
@@ -823,12 +790,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             // Spawn workers who generate the compress proofs.
             let proofs_sync = Arc::new(TurnBasedSync::new());
-            let (proofs_tx, proofs_rx) = sync_channel::<(
-                usize,
-                usize,
-                StarkVerifyingKey<InnerSC>,
-                ShardProof<InnerSC>,
-            )>(num_first_layer_inputs * 2);
+            let (proofs_tx, proofs_rx) =
+                sync_channel::<(usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>)>(
+                    num_first_layer_inputs * 2,
+                );
             let proofs_tx = Arc::new(Mutex::new(proofs_tx));
             let proofs_rx = Arc::new(Mutex::new(proofs_rx));
             let mut prover_handles = Vec::new();
@@ -949,11 +914,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
                             // If we're at the last input of a layer, we need to only include the
                             // first input, otherwise we include all inputs.
-                            let inputs = if is_last {
-                                vec![batch[0].clone()]
-                            } else {
-                                batch.clone()
-                            };
+                            let inputs =
+                                if is_last { vec![batch[0].clone()] } else { batch.clone() };
 
                             let next_input_height = inputs[0].1 + 1;
 
@@ -1020,10 +982,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         // Make the compress proof.
-        let ZKMReduceProof {
-            vk: compressed_vk,
-            proof: compressed_proof,
-        } = reduced_proof;
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
         let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
             is_complete: true,
@@ -1044,9 +1003,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         runtime.witness_stream = witness_stream.into();
 
-        runtime
-            .run()
-            .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
 
         runtime.print_stats();
         tracing::debug!("Shrink program executed successfully");
@@ -1058,18 +1015,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut compress_challenger = self.shrink_prover.config().challenger();
         let mut compress_proof = self
             .shrink_prover
-            .prove(
-                &shrink_pk,
-                vec![runtime.record],
-                &mut compress_challenger,
-                opts.recursion_opts,
-            )
+            .prove(&shrink_pk, vec![runtime.record], &mut compress_challenger, opts.recursion_opts)
             .unwrap();
 
-        Ok(ZKMReduceProof {
-            vk: shrink_vk,
-            proof: compress_proof.shard_proofs.pop().unwrap(),
-        })
+        Ok(ZKMReduceProof { vk: shrink_vk, proof: compress_proof.shard_proofs.pop().unwrap() })
     }
 
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
@@ -1079,10 +1028,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         compressed_proof: ZKMReduceProof<InnerSC>,
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
-        let ZKMReduceProof {
-            vk: compressed_vk,
-            proof: compressed_proof,
-        } = compressed_proof;
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
         let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
             is_complete: true,
@@ -1102,9 +1048,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         runtime.witness_stream = witness_stream.into();
 
-        runtime
-            .run()
-            .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
 
         runtime.print_stats();
         tracing::debug!("wrap program executed successfully");
@@ -1122,26 +1066,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let time = std::time::Instant::now();
         let mut wrap_proof = self
             .wrap_prover
-            .prove(
-                &wrap_pk,
-                vec![runtime.record],
-                &mut wrap_challenger,
-                opts.recursion_opts,
-            )
+            .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
             .unwrap();
         let elapsed = time.elapsed();
         tracing::debug!("wrap proving time: {:?}", elapsed);
         let mut wrap_challenger = self.wrap_prover.config().challenger();
-        self.wrap_prover
-            .machine()
-            .verify(&wrap_vk, &wrap_proof, &mut wrap_challenger)
-            .unwrap();
+        self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
         tracing::info!("wrapping successful");
 
-        Ok(ZKMReduceProof {
-            vk: wrap_vk,
-            proof: wrap_proof.shard_proofs.pop().unwrap(),
-        })
+        Ok(ZKMReduceProof { vk: wrap_vk, proof: wrap_proof.shard_proofs.pop().unwrap() })
     }
 
     /// Wrap the STARK proven over a SNARK-friendly field into a PLONK proof.
@@ -1270,10 +1203,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_merkle_proofs: proofs,
         };
 
-        ZKMCompressWithVKeyWitnessValues {
-            compress_val: input,
-            merkle_val,
-        }
+        ZKMCompressWithVKeyWitnessValues { compress_val: input, merkle_val }
     }
 
     fn check_for_high_cycles(cycles: u64) {

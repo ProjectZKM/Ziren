@@ -5,10 +5,10 @@ pub use air::*;
 #[cfg(test)]
 mod tests {
 
+    use test_artifacts::UINT256_MUL_ELF;
     use zkm2_core_executor::Program;
     use zkm2_curves::{params::FieldParameters, uint256::U256Field, utils::biguint_from_limbs};
     use zkm2_stark::CpuProver;
-    use test_artifacts::UINT256_MUL_ELF;
 
     use crate::{
         io::ZKMStdin,

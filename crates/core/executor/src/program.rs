@@ -5,8 +5,6 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::LittleEndian, file::Class, ElfBytes};
-use std::io::Read;
-use num::PrimInt;
 
 use p3_field::Field;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
@@ -38,13 +36,7 @@ pub struct Program {
 impl Program {
     #[must_use]
     pub fn new(instructions: Vec<Instruction>, pc_start: u32, pc_base: u32) -> Self {
-        Self {
-            instructions,
-            pc_start,
-            pc_base,
-            next_pc: pc_start + 4,
-            ..Default::default()
-        }
+        Self { instructions, pc_start, pc_base, next_pc: pc_start + 4, ..Default::default() }
     }
 
     /// Initialize a MIPS Program from an appropriate ELF file
@@ -143,10 +135,8 @@ impl Program {
         }
 
         // decode each instruction
-        let instructions: Vec<_> = instructions
-            .par_iter()
-            .map(|inst| Instruction::decode_from(*inst).unwrap())
-            .collect();
+        let instructions: Vec<_> =
+            instructions.par_iter().map(|inst| Instruction::decode_from(*inst).unwrap()).collect();
 
         Ok(Program {
             instructions,

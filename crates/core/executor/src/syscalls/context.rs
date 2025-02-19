@@ -1,7 +1,10 @@
 use hashbrown::HashMap;
 
 use crate::{
-    events::{LookupId, MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, SyscallEvent, PrecompileEvent},
+    events::{
+        LookupId, MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent,
+        SyscallEvent,
+    },
     record::ExecutionRecord,
     Executor, ExecutorMode, Register,
 };
@@ -70,12 +73,8 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
 
     /// Read a word from memory.
     pub fn mr(&mut self, addr: u32) -> (MemoryReadRecord, u32) {
-        let record = self.rt.mr(
-            addr,
-            self.current_shard,
-            self.clk,
-            Some(&mut self.local_memory_access),
-        );
+        let record =
+            self.rt.mr(addr, self.current_shard, self.clk, Some(&mut self.local_memory_access));
         (record, record.value)
     }
 
@@ -93,13 +92,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
 
     /// Write a word to memory.
     pub fn mw(&mut self, addr: u32, value: u32) -> MemoryWriteRecord {
-        self.rt.mw(
-            addr,
-            value,
-            self.current_shard,
-            self.clk,
-            Some(&mut self.local_memory_access),
-        )
+        self.rt.mw(addr, value, self.current_shard, self.clk, Some(&mut self.local_memory_access))
     }
 
     /// Write a slice of words to memory.
@@ -124,10 +117,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
                 let local_mem_access = self.rt.local_memory_access.remove(&addr);
 
                 if let Some(local_mem_access) = local_mem_access {
-                    self.rt
-                        .record
-                        .cpu_local_memory_access
-                        .push(local_mem_access);
+                    self.rt.record.cpu_local_memory_access.push(local_mem_access);
                 }
 
                 syscall_local_mem_events.push(event);

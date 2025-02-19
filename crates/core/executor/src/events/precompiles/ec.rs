@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use typenum::Unsigned;
 use zkm2_curves::{
     params::{NumLimbs, NumWords},
     weierstrass::{
@@ -9,7 +10,6 @@ use zkm2_curves::{
     AffinePoint, CurveType, EllipticCurve,
 };
 use zkm2_primitives::consts::{bytes_to_words_le_vec, words_to_bytes_le_vec};
-use typenum::Unsigned;
 
 use crate::{
     events::{

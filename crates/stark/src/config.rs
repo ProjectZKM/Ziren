@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field, PrimeField};

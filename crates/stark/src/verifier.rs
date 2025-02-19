@@ -7,12 +7,9 @@ use std::{
 use itertools::Itertools;
 use num_traits::cast::ToPrimitive;
 use p3_air::{Air, BaseAir};
-use p3_challenger::{CanObserve, CanSample, FieldChallenger};
+use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{LagrangeSelectors, Pcs, PolynomialSpace};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
-use p3_matrix::dense::RowMajorMatrixView;
-use p3_matrix::stack::VerticalPair;
-use tracing::instrument;
 
 //use p3_uni_stark::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
 
@@ -60,41 +57,29 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             return Err(VerificationError::ChipOpeningLengthMismatch);
         }
 
-        let chip_scopes = chips
-            .iter()
-            .map(|chip| chip.commit_scope())
-            .collect::<Vec<_>>();
+        let chip_scopes = chips.iter().map(|chip| chip.commit_scope()).collect::<Vec<_>>();
 
         // Assert that the byte multiplicities don't overflow.
         let mut max_byte_lookup_mult = 0u64;
-        chips
-            .iter()
-            .zip(opened_values.chips.iter())
-            .for_each(|(chip, val)| {
-                max_byte_lookup_mult = max_byte_lookup_mult
-                    .checked_add(
-                        (chip.num_sent_byte_lookups() as u64)
-                            .checked_mul(1u64.checked_shl(val.log_degree as u32).unwrap())
-                            .unwrap(),
-                    )
-                    .unwrap();
-            });
+        chips.iter().zip(opened_values.chips.iter()).for_each(|(chip, val)| {
+            max_byte_lookup_mult = max_byte_lookup_mult
+                .checked_add(
+                    (chip.num_sent_byte_lookups() as u64)
+                        .checked_mul(1u64.checked_shl(val.log_degree as u32).unwrap())
+                        .unwrap(),
+                )
+                .unwrap();
+        });
 
         assert!(
             max_byte_lookup_mult <= SC::Val::order().to_u64().unwrap(),
             "Byte multiplicities overflow"
         );
 
-        let log_degrees = opened_values
-            .chips
-            .iter()
-            .map(|val| val.log_degree)
-            .collect::<Vec<_>>();
+        let log_degrees = opened_values.chips.iter().map(|val| val.log_degree).collect::<Vec<_>>();
 
-        let log_quotient_degrees = chips
-            .iter()
-            .map(|chip| chip.log_quotient_degree())
-            .collect::<Vec<_>>();
+        let log_quotient_degrees =
+            chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let trace_domains = log_degrees
             .iter()
@@ -110,9 +95,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
 
         challenger.observe(local_main_commit.clone());
 
-        let local_permutation_challenges = (0..2)
-            .map(|_| challenger.sample_ext_element::<SC::Challenge>())
-            .collect::<Vec<_>>();
+        let local_permutation_challenges =
+            (0..2).map(|_| challenger.sample_ext_element::<SC::Challenge>()).collect::<Vec<_>>();
 
         challenger.observe(permutation_commit.clone());
         // Observe the cumulative sums and constrain any sum without a corresponding scope to be
@@ -161,10 +145,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 if !chips[i].local_only() {
                     (
                         *domain,
-                        vec![
-                            (zeta, values.local),
-                            (domain.next_point(zeta).unwrap(), values.next),
-                        ],
+                        vec![(zeta, values.local), (domain.next_point(zeta).unwrap(), values.next)],
                     )
                 } else {
                     (*domain, vec![(zeta, values.local)])
@@ -199,10 +180,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                     *domain,
                     vec![
                         (zeta, values.permutation.local.clone()),
-                        (
-                            domain.next_point(zeta).unwrap(),
-                            values.permutation.next.clone(),
-                        ),
+                        (domain.next_point(zeta).unwrap(), values.permutation.next.clone()),
                     ],
                 )
             })
@@ -237,10 +215,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // Split the main_domains_points_and_opens to the global and local chips.
         let mut global_trace_points_and_openings = Vec::new();
         let mut local_trace_points_and_openings = Vec::new();
-        for (i, points_and_openings) in main_domains_points_and_opens
-            .clone()
-            .into_iter()
-            .enumerate()
+        for (i, points_and_openings) in
+            main_domains_points_and_opens.clone().into_iter().enumerate()
         {
             let scope = chip_scopes[i];
             if scope == InteractionScope::Global {
@@ -279,12 +255,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             .collect::<Vec<_>>();
 
         // Verify the constrtaint evaluations.
-        for (chip, trace_domain, qc_domains, values) in izip!(
-            chips.iter(),
-            trace_domains,
-            quotient_chunk_domains,
-            opened_values.chips.iter(),
-        ) {
+        for (chip, trace_domain, qc_domains, values) in
+            izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)
+        {
             // Verify the shape of the opening arguments matches the expected values.
             Self::verify_opening_shape(chip, values)
                 .map_err(|e| VerificationError::OpeningShapeError(chip.name(), e))?;
@@ -304,9 +277,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // Verify that the local cumulative sum is zero.
         let local_cumulative_sum = proof.cumulative_sum(InteractionScope::Local);
         if local_cumulative_sum != SC::Challenge::ZERO {
-            return Err(VerificationError::CumulativeSumsError(
-                "local cumulative sum is not zero",
-            ));
+            return Err(VerificationError::CumulativeSumsError("local cumulative sum is not zero"));
         }
 
         Ok(())
@@ -433,11 +404,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         let unflatten = |v: &[SC::Challenge]| {
             v.chunks_exact(SC::Challenge::D)
                 .map(|chunk| {
-                    chunk
-                        .iter()
-                        .enumerate()
-                        .map(|(e_i, &x)| SC::Challenge::monomial(e_i) * x)
-                        .sum()
+                    chunk.iter().enumerate().map(|(e_i, &x)| SC::Challenge::monomial(e_i) * x).sum()
                 })
                 .collect::<Vec<SC::Challenge>>()
         };
@@ -548,39 +515,19 @@ impl Debug for OpeningShapeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             OpeningShapeError::PreprocessedWidthMismatch(expected, actual) => {
-                write!(
-                    f,
-                    "Preprocessed width mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Preprocessed width mismatch: expected {}, got {}", expected, actual)
             }
             OpeningShapeError::MainWidthMismatch(expected, actual) => {
-                write!(
-                    f,
-                    "Main width mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Main width mismatch: expected {}, got {}", expected, actual)
             }
             OpeningShapeError::PermutationWidthMismatch(expected, actual) => {
-                write!(
-                    f,
-                    "Permutation width mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Permutation width mismatch: expected {}, got {}", expected, actual)
             }
             OpeningShapeError::QuotientWidthMismatch(expected, actual) => {
-                write!(
-                    f,
-                    "Quotient width mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Quotient width mismatch: expected {}, got {}", expected, actual)
             }
             OpeningShapeError::QuotientChunkSizeMismatch(expected, actual) => {
-                write!(
-                    f,
-                    "Quotient chunk size mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Quotient chunk size mismatch: expected {}, got {}", expected, actual)
             }
         }
     }

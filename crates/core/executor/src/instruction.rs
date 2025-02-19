@@ -3,8 +3,8 @@
 use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
-use crate::{opcode, sign_extend};
 use crate::opcode::Opcode;
+use crate::sign_extend;
 
 /// MIPS Instruction.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -35,15 +35,7 @@ impl Instruction {
         imm_b: bool,
         imm_c: bool,
     ) -> Self {
-        Self {
-            opcode,
-            op_a,
-            op_b,
-            op_c,
-            imm_b,
-            imm_c,
-            raw: None,
-        }
+        Self { opcode, op_a, op_b, op_c, imm_b, imm_c, raw: None }
     }
 
     pub const fn new_with_raw(
@@ -55,15 +47,7 @@ impl Instruction {
         imm_c: bool,
         raw: u32,
     ) -> Self {
-        Self {
-            opcode,
-            op_a,
-            op_b,
-            op_c,
-            imm_b,
-            imm_c,
-            raw: Some(raw),
-        }
+        Self { opcode, op_a, op_b, op_c, imm_b, imm_c, raw: Some(raw) }
     }
 
     /// Returns if the instruction is an ALU instruction.
@@ -114,8 +98,7 @@ impl Instruction {
                 | Opcode::SWR
                 | Opcode::LL
                 | Opcode::SC
-                | Opcode::LB
-                // | Opcode::SDC1
+                | Opcode::LB // | Opcode::SDC1
         )
     }
 
@@ -131,10 +114,7 @@ impl Instruction {
     /// Returns if the instruction is a jump instruction.
     #[must_use]
     pub const fn is_jump_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::Jump | Opcode::Jumpi | Opcode::JumpDirect
-        )
+        matches!(self.opcode, Opcode::Jump | Opcode::Jumpi | Opcode::JumpDirect)
     }
 
     pub fn decode_from(insn: u32) -> anyhow::Result<Self> {
@@ -148,20 +128,8 @@ impl Instruction {
         let offset_ext16 = sign_extend::<16>(offset);
         let target = insn & 0x3ffffff;
         let target_ext = sign_extend::<26>(target);
-        log::trace!(
-            "op {}, func {}, rt {}, rs {}, rd {}",
-            opcode,
-            func,
-            rt,
-            rs,
-            rd
-        );
-        log::trace!(
-            "decode: insn {:X}, opcode {:X}, func {:X}",
-            insn,
-            opcode,
-            func
-        );
+        log::trace!("op {}, func {}, rt {}, rs {}, rd {}", opcode, func, rt, rs, rd);
+        log::trace!("decode: insn {:X}, opcode {:X}, func {:X}", insn, opcode, func);
 
         match (opcode, func) {
             // (0b000000, 0b001010) => Ok(Operation::CondMov(MovCond::EQ, rs, rt, rd)), // MOVZ: rd = rs if rt == 0
@@ -313,19 +281,44 @@ impl Instruction {
                     ))
                 } else if rt == 0x11 && rs == 0 {
                     // Ok(Operation::JumpDirect(31, offset)) // BAL
-                    Ok(Self::new(Opcode::JumpDirect, 31, offset_ext16.overflowing_shl(2).0, 0, true, true))
+                    Ok(Self::new(
+                        Opcode::JumpDirect,
+                        31,
+                        offset_ext16.overflowing_shl(2).0,
+                        0,
+                        true,
+                        true,
+                    ))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
             // (0x02, _) => Ok(Operation::Jumpi(0u8, target)), // J
-            (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true)), // J
+            (0x02, _) => {
+                Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true))
+            } // J
             // (0x03, _) => Ok(Operation::Jumpi(31u8, target)), // JAL
-            (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true)), // JAL
+            (0x03, _) => {
+                Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true))
+            } // JAL
             // (0x04, _) => Ok(Operation::Branch(BranchCond::EQ, rs, rt, offset)),     // BEQ
-            (0x04, _) => Ok(Self::new(Opcode::BEQ, rs as u8, rt, offset_ext16.overflowing_shl(2).0, false, true)), // BEQ
+            (0x04, _) => Ok(Self::new(
+                Opcode::BEQ,
+                rs as u8,
+                rt,
+                offset_ext16.overflowing_shl(2).0,
+                false,
+                true,
+            )), // BEQ
             // (0x05, _) => Ok(Operation::Branch(BranchCond::NE, rs, rt, offset)),         // BNE
-            (0x05, _) => Ok(Self::new(Opcode::BNE, rs as u8, rt, offset_ext16.overflowing_shl(2).0, false, true)), // BNE
+            (0x05, _) => Ok(Self::new(
+                Opcode::BNE,
+                rs as u8,
+                rt,
+                offset_ext16.overflowing_shl(2).0,
+                false,
+                true,
+            )), // BNE
             // (0x06, _) => Ok(Operation::Branch(BranchCond::LE, rs, 0u8, offset)),        // BLEZ
             (0x06, _) => Ok(Self::new(
                 Opcode::BLEZ,
@@ -388,14 +381,7 @@ impl Instruction {
             //     rt,
             //     offset,
             // )), // ADDI: rt = rs + sext(imm)
-            (0b001000, _) => Ok(Self::new(
-                Opcode::ADD,
-                rt as u8,
-                rs,
-                offset_ext16,
-                false,
-                true,
-            )), // ADDI: rt = rs + sext(imm)
+            (0b001000, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)), // ADDI: rt = rs + sext(imm)
 
             // (0b001001, _) => Ok(Operation::BinaryArithmeticImm(
             //     BinaryOperator::ADDIU,
@@ -403,14 +389,7 @@ impl Instruction {
             //     rt,
             //     offset,
             // )), // ADDIU: rt = rs + sext(imm)
-            (0b001001, _) => Ok(Self::new(
-                Opcode::ADD,
-                rt as u8,
-                rs,
-                offset_ext16,
-                false,
-                true,
-            )), // ADDIU: rt = rs + sext(imm)
+            (0b001001, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)), // ADDIU: rt = rs + sext(imm)
 
             // (0b001010, _) => Ok(Operation::BinaryArithmeticImm(
             //     BinaryOperator::SLTI,
@@ -418,14 +397,7 @@ impl Instruction {
             //     rt,
             //     offset,
             // )), // SLTI: rt = rs < sext(imm)
-            (0b001010, _) => Ok(Self::new(
-                Opcode::SLT,
-                rt as u8,
-                rs,
-                offset_ext16,
-                false,
-                true,
-            )), // SLTI: rt = rs < sext(imm)
+            (0b001010, _) => Ok(Self::new(Opcode::SLT, rt as u8, rs, offset_ext16, false, true)), // SLTI: rt = rs < sext(imm)
 
             // (0b001011, _) => Ok(Operation::BinaryArithmeticImm(
             //     BinaryOperator::SLTIU,
@@ -433,14 +405,7 @@ impl Instruction {
             //     rt,
             //     offset,
             // )), // SLTIU: rt = rs < sext(imm)
-            (0b001011, _) => Ok(Self::new(
-                Opcode::SLTU,
-                rt as u8,
-                rs,
-                offset_ext16,
-                false,
-                true,
-            )), // SLTIU: rt = rs < sext(imm)
+            (0b001011, _) => Ok(Self::new(Opcode::SLTU, rt as u8, rs, offset_ext16, false, true)), // SLTIU: rt = rs < sext(imm)
 
             // (0b000000, 0b101010) => {
             //     Ok(Operation::BinaryArithmetic(BinaryOperator::SLT, rs, rt, rd))
@@ -516,16 +481,10 @@ impl Debug for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mnemonic = self.opcode.mnemonic();
         let op_a_formatted = format!("%x{}", self.op_a);
-        let op_b_formatted = if self.imm_b {
-            format!("{}", self.op_b as i32)
-        } else {
-            format!("%x{}", self.op_b)
-        };
-        let op_c_formatted = if self.imm_c {
-            format!("{}", self.op_c as i32)
-        } else {
-            format!("%x{}", self.op_c)
-        };
+        let op_b_formatted =
+            if self.imm_b { format!("{}", self.op_b as i32) } else { format!("%x{}", self.op_b) };
+        let op_c_formatted =
+            if self.imm_c { format!("{}", self.op_c as i32) } else { format!("%x{}", self.op_c) };
 
         let width = 10;
         write!(

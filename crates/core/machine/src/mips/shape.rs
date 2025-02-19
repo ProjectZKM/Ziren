@@ -8,15 +8,13 @@ use thiserror::Error;
 use zkm2_core_executor::{CoreShape, ExecutionRecord, Program};
 use zkm2_stark::{air::MachineAir, MachineRecord, ProofShape};
 
+use super::{
+    AddSubChip, BitwiseChip, ByteChip, CloClzChip, CpuChip, DivRemChip, LtChip, MemoryGlobalChip,
+    MipsAir, MulChip, ProgramChip, ShiftLeft, ShiftRightChip, SyscallChip,
+};
 use crate::{
     memory::{MemoryLocalChip, MemoryProgramChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     mips::MemoryChipType::{Finalize, Initialize},
-};
-use super::{
-    AddSubChip, BitwiseChip, ByteChip, CpuChip, DivRemChip, LtChip, MemoryGlobalChip, MulChip,
-    ProgramChip, ShiftLeft, ShiftRightChip, CloClzChip,
-    SyscallChip,
-    MipsAir,
 };
 
 #[derive(Debug, Error)]
@@ -86,11 +84,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .map(|(air, height)| {
                 for maybe_allowed_log_height in allowed_log_heights.get(air).into_iter().flatten() {
                     let allowed_log_height = maybe_allowed_log_height.unwrap_or_default();
-                    let allowed_height = if allowed_log_height != 0 {
-                        1 << allowed_log_height
-                    } else {
-                        0
-                    };
+                    let allowed_height =
+                        if allowed_log_height != 0 { 1 << allowed_log_height } else { 0 };
                     if *height <= allowed_height {
                         return Some((air.name(), allowed_log_height));
                     }
@@ -236,16 +231,12 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     }
 
     fn generate_all_shapes_from_allowed_log_heights(
-        allowed_log_heights: impl IntoIterator<Item=(String, Vec<Option<usize>>)>,
-    ) -> impl Iterator<Item=ProofShape> {
+        allowed_log_heights: impl IntoIterator<Item = (String, Vec<Option<usize>>)>,
+    ) -> impl Iterator<Item = ProofShape> {
         // for chip in allowed_heights.
         allowed_log_heights
             .into_iter()
-            .map(|(name, heights)| {
-                heights
-                    .into_iter()
-                    .map(move |height| (name.clone(), height))
-            })
+            .map(|(name, heights)| heights.into_iter().map(move |height| (name.clone(), height)))
             .multi_cartesian_product()
             .map(|iter| {
                 iter.into_iter()
@@ -256,7 +247,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             })
     }
 
-    pub fn generate_all_allowed_shapes(&self) -> impl Iterator<Item=ProofShape> + '_ {
+    pub fn generate_all_allowed_shapes(&self) -> impl Iterator<Item = ProofShape> + '_ {
         let preprocessed_heights = self
             .allowed_preprocessed_log_heights
             .iter()
@@ -269,19 +260,14 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .collect::<HashMap<_, _>>();
         memory_heights.extend(preprocessed_heights.clone());
 
-        let included_shapes = self
-            .included_shapes
-            .iter()
-            .cloned()
-            .map(|map| map.into_iter().collect::<ProofShape>());
+        let included_shapes =
+            self.included_shapes.iter().cloned().map(|map| map.into_iter().collect::<ProofShape>());
 
         let precompile_only_shapes = self.precompile_allowed_log_heights.iter().flat_map(
             move |(air, (mem_events_per_row, allowed_log_heights))| {
-                allowed_log_heights
-                    .iter()
-                    .flat_map(move |allowed_log_height| {
-                        self.get_precompile_shapes(air, *mem_events_per_row, *allowed_log_height)
-                    })
+                allowed_log_heights.iter().flat_map(move |allowed_log_height| {
+                    self.get_precompile_shapes(air, *mem_events_per_row, *allowed_log_height)
+                })
             },
         );
 
@@ -298,23 +284,17 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 });
 
         included_shapes
-            .chain(
-                self.allowed_core_log_heights
-                    .iter()
-                    .flat_map(move |allowed_log_heights| {
-                        Self::generate_all_shapes_from_allowed_log_heights({
-                            let mut log_heights = allowed_log_heights
-                                .iter()
-                                .map(|(air, heights)| (air.name(), heights.clone()))
-                                .collect::<HashMap<_, _>>();
-                            log_heights.extend(preprocessed_heights.clone());
-                            log_heights
-                        })
-                    }),
-            )
-            .chain(Self::generate_all_shapes_from_allowed_log_heights(
-                memory_heights,
-            ))
+            .chain(self.allowed_core_log_heights.iter().flat_map(move |allowed_log_heights| {
+                Self::generate_all_shapes_from_allowed_log_heights({
+                    let mut log_heights = allowed_log_heights
+                        .iter()
+                        .map(|(air, heights)| (air.name(), heights.clone()))
+                        .collect::<HashMap<_, _>>();
+                    log_heights.extend(preprocessed_heights.clone());
+                    log_heights
+                })
+            }))
+            .chain(Self::generate_all_shapes_from_allowed_log_heights(memory_heights))
             .chain(precompile_shapes)
     }
 
@@ -697,7 +677,6 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
                 divrem_height: vec![Some(10), Some(16)],
                 cloclz_height: vec![Some(16)],
                 is_potentially_maximal: true,
-
             },
         ];
 
@@ -753,9 +732,9 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 pub mod tests {
     use std::fmt::Debug;
 
+    use super::*;
     use p3_challenger::{CanObserve, FieldChallenger};
     use zkm2_stark::{air::InteractionScope, Dom, MachineProver, StarkGenericConfig};
-    use super::*;
 
     pub fn try_generate_dummy_proof<
         SC: StarkGenericConfig,

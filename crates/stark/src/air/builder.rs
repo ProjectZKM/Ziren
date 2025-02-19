@@ -189,7 +189,16 @@ pub trait AluAirBuilder: BaseAirBuilder {
         nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.send_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), shard, nonce, multiplicity);
+        self.send_alu_with_hi(
+            opcode,
+            a,
+            b,
+            c,
+            Word([Self::F::ZERO; 4]),
+            shard,
+            nonce,
+            multiplicity,
+        );
     }
 
     /// Sends an ALU operation with HI to be processed.
@@ -233,7 +242,16 @@ pub trait AluAirBuilder: BaseAirBuilder {
         nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.receive_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), shard, nonce, multiplicity);
+        self.receive_alu_with_hi(
+            opcode,
+            a,
+            b,
+            c,
+            Word([Self::F::ZERO; 4]),
+            shard,
+            nonce,
+            multiplicity,
+        );
     }
 
     /// Receives an ALU operation with HI to be processed.
@@ -382,7 +400,7 @@ pub trait MachineAirBuilder:
 /// A trait which contains all helper methods for building ZKM machine AIRs.
 pub trait ZKMAirBuilder: MachineAirBuilder + ByteAirBuilder + AluAirBuilder {}
 
-impl<'a, AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBuilder<'a, AB> {
+impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBuilder<'_, AB> {
     fn send(&mut self, message: M, scope: InteractionScope) {
         self.inner.send(message, scope);
     }
@@ -400,10 +418,10 @@ impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> MachineAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> ZKMAirBuilder for AB {}
 
-impl<'a, SC: StarkGenericConfig> EmptyMessageBuilder for ProverConstraintFolder<'a, SC> {}
-impl<'a, SC: StarkGenericConfig> EmptyMessageBuilder for VerifierConstraintFolder<'a, SC> {}
+impl<SC: StarkGenericConfig> EmptyMessageBuilder for ProverConstraintFolder<'_, SC> {}
+impl<SC: StarkGenericConfig> EmptyMessageBuilder for VerifierConstraintFolder<'_, SC> {}
 impl<F: Field> EmptyMessageBuilder for SymbolicAirBuilder<F> {}
 
 #[cfg(debug_assertions)]
 #[cfg(not(doctest))]
-impl<'a, F: Field> EmptyMessageBuilder for p3_uni_stark::DebugConstraintBuilder<'a, F> {}
+impl<F: Field> EmptyMessageBuilder for p3_uni_stark::DebugConstraintBuilder<'_, F> {}

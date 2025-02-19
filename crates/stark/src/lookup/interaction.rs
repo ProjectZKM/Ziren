@@ -71,12 +71,7 @@ impl<F: Field> Interaction<F> {
         kind: InteractionKind,
         scope: InteractionScope,
     ) -> Self {
-        Self {
-            values,
-            multiplicity,
-            kind,
-            scope,
-        }
+        Self { values, multiplicity, kind, scope }
     }
 
     /// The index of the argument in the lookup table.

@@ -11,8 +11,8 @@ use zkm2_stark::{
 };
 
 use crate::{
-    hash::FieldHasherVariable, stark::ShardProofVariable, KoalaBearFriConfigVariable, CircuitConfig,
-    FriProofVariable,
+    hash::FieldHasherVariable, stark::ShardProofVariable, CircuitConfig, FriProofVariable,
+    KoalaBearFriConfigVariable,
 };
 
 pub trait WitnessWriter<C: CircuitConfig>: Sized {
@@ -46,7 +46,7 @@ impl<C: CircuitConfig> Witnessable<C> for bool {
     }
 }
 
-impl<'a, C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for &'a T {
+impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for &T {
     type WitnessVariable = T::WitnessVariable;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -100,17 +100,12 @@ impl<C: CircuitConfig, T: Witnessable<C>, const N: usize> Witnessable<C> for [T;
     type WitnessVariable = [T::WitnessVariable; N];
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        self.iter()
-            .map(|x| x.read(builder))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap_or_else(|x: Vec<_>| {
+        self.iter().map(|x| x.read(builder)).collect::<Vec<_>>().try_into().unwrap_or_else(
+            |x: Vec<_>| {
                 // Cannot just `.unwrap()` without requiring Debug bounds.
-                panic!(
-                    "could not coerce vec of len {} into array of len {N}",
-                    x.len()
-                )
-            })
+                panic!("could not coerce vec of len {} into array of len {N}", x.len())
+            },
+        )
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

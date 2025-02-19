@@ -24,10 +24,7 @@ pub struct ZKMProverOpts {
 
 impl Default for ZKMProverOpts {
     fn default() -> Self {
-        Self {
-            core_opts: ZKMCoreOpts::default(),
-            recursion_opts: ZKMCoreOpts::recursion(),
-        }
+        Self { core_opts: ZKMCoreOpts::default(), recursion_opts: ZKMCoreOpts::recursion() }
     }
 }
 

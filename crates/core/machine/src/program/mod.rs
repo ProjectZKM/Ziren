@@ -184,7 +184,6 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use hashbrown::HashMap;
     use p3_koala_bear::KoalaBear;
 
     use p3_matrix::dense::RowMajorMatrix;

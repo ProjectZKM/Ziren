@@ -85,10 +85,7 @@ impl<F: Field> IsExtZeroOperation<F> {
 
         // If the result is 1, then the input is 0.
         for x in a {
-            builder
-                .when(is_real.clone())
-                .when(cols.result)
-                .assert_zero(x.clone());
+            builder.when(is_real.clone()).when(cols.result).assert_zero(x.clone());
         }
     }
 }

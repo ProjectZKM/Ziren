@@ -4,9 +4,9 @@ use itertools::{izip, Itertools};
 use num_traits::cast::ToPrimitive;
 
 use p3_air::{Air, BaseAir};
-use p3_koala_bear::KoalaBear;
 use p3_commit::{Mmcs, Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 
 use zkm2_recursion_compiler::{
@@ -25,7 +25,7 @@ use crate::{
     challenger::CanObserveVariable,
     fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
-    KoalaBearFriConfig, CircuitConfig, FriProofVariable, TwoAdicPcsMatsVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriConfig, TwoAdicPcsMatsVariable,
 };
 
 use crate::{
@@ -56,10 +56,7 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &ProofShape,
-) -> (
-    StarkVerifyingKey<KoalaBearPoseidon2>,
-    ShardProof<KoalaBearPoseidon2>,
-) {
+) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
     // Make a dummy commitment.
     let commitment = ShardCommitment {
         global_main_commit: dummy_hash(),
@@ -75,13 +72,8 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         .enumerate()
         .map(|(i, (name, _))| (name.clone(), i))
         .collect::<HashMap<_, _>>();
-    let shard_chips = machine
-        .shard_chips_ordered(&chip_ordering)
-        .collect::<Vec<_>>();
-    let chip_scopes = shard_chips
-        .iter()
-        .map(|chip| chip.commit_scope())
-        .collect::<Vec<_>>();
+    let shard_chips = machine.shard_chips_ordered(&chip_ordering).collect::<Vec<_>>();
+    let chip_scopes = shard_chips.iter().map(|chip| chip.commit_scope()).collect::<Vec<_>>();
     let has_global_main_commit = chip_scopes.contains(&InteractionScope::Global);
     let opened_values = ShardOpenedValues {
         chips: shard_chips
@@ -100,10 +92,8 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     let mut permutation_batch_shape = vec![];
     let mut quotient_batch_shape = vec![];
 
-    for ((chip, chip_opening), scope) in shard_chips
-        .iter()
-        .zip_eq(opened_values.chips.iter())
-        .zip_eq(chip_scopes.iter())
+    for ((chip, chip_opening), scope) in
+        shard_chips.iter().zip_eq(opened_values.chips.iter()).zip_eq(chip_scopes.iter())
     {
         if !chip_opening.preprocessed.local.is_empty() {
             let prep_shape = PolynomialShape {
@@ -141,36 +131,18 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 
     let batch_shapes = if has_global_main_commit {
         vec![
-            PolynomialBatchShape {
-                shapes: preprocessed_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: global_main_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: local_main_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: permutation_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: quotient_batch_shape,
-            },
+            PolynomialBatchShape { shapes: preprocessed_batch_shape },
+            PolynomialBatchShape { shapes: global_main_batch_shape },
+            PolynomialBatchShape { shapes: local_main_batch_shape },
+            PolynomialBatchShape { shapes: permutation_batch_shape },
+            PolynomialBatchShape { shapes: quotient_batch_shape },
         ]
     } else {
         vec![
-            PolynomialBatchShape {
-                shapes: preprocessed_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: local_main_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: permutation_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: quotient_batch_shape,
-            },
+            PolynomialBatchShape { shapes: preprocessed_batch_shape },
+            PolynomialBatchShape { shapes: local_main_batch_shape },
+            PolynomialBatchShape { shapes: permutation_batch_shape },
+            PolynomialBatchShape { shapes: quotient_batch_shape },
         ]
     };
 
@@ -178,9 +150,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     let log_blowup = machine.config().fri_config().log_blowup;
     let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
 
-    let public_values = (0..PROOF_MAX_NUM_PVS)
-        .map(|_| KoalaBear::ZERO)
-        .collect::<Vec<_>>();
+    let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| KoalaBear::ZERO).collect::<Vec<_>>();
 
     // Get the preprocessed chip information.
     let pcs = machine.config().pcs();
@@ -191,14 +161,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
                 <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge,
                 <KoalaBearPoseidon2 as StarkGenericConfig>::Challenger,
             >>::natural_domain_for_degree(pcs, 1 << log_height);
-            (
-                name.to_owned(),
-                domain,
-                Dimensions {
-                    width: *width,
-                    height: 1 << log_height,
-                },
-            )
+            (name.to_owned(), domain, Dimensions { width: *width, height: 1 << log_height })
         })
         .collect();
 
@@ -216,13 +179,8 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         chip_ordering: preprocessed_chip_ordering,
     };
 
-    let shard_proof = ShardProof {
-        commitment,
-        opened_values,
-        opening_proof,
-        chip_ordering,
-        public_values,
-    };
+    let shard_proof =
+        ShardProof { commitment, opened_values, opening_proof, chip_ordering, public_values };
 
     (vk, shard_proof)
 }
@@ -237,10 +195,8 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
         next: vec![EF::ZERO; preprocessed_width],
     };
     let main_width = chip.width();
-    let main = AirOpenedValues {
-        local: vec![EF::ZERO; main_width],
-        next: vec![EF::ZERO; main_width],
-    };
+    let main =
+        AirOpenedValues { local: vec![EF::ZERO; main_width], next: vec![EF::ZERO; main_width] };
 
     let permutation_width = chip.permutation_width();
     let permutation = AirOpenedValues {
@@ -248,9 +204,7 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
         next: vec![EF::ZERO; permutation_width * EF::D],
     };
     let quotient_width = chip.quotient_width();
-    let quotient = (0..quotient_width)
-        .map(|_| vec![EF::ZERO; EF::D])
-        .collect::<Vec<_>>();
+    let quotient = (0..quotient_width).map(|_| vec![EF::ZERO; EF::D]).collect::<Vec<_>>();
 
     ChipOpenedValues {
         preprocessed,
@@ -315,13 +269,8 @@ where
     ) where
         A: for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
     {
-        let chips = machine
-            .shard_chips_ordered(&proof.chip_ordering)
-            .collect::<Vec<_>>();
-        let chip_scopes = chips
-            .iter()
-            .map(|chip| chip.commit_scope())
-            .collect::<Vec<_>>();
+        let chips = machine.shard_chips_ordered(&proof.chip_ordering).collect::<Vec<_>>();
+        let chip_scopes = chips.iter().map(|chip| chip.commit_scope()).collect::<Vec<_>>();
 
         let has_global_main_commit = chip_scopes.contains(&InteractionScope::Global);
 
@@ -335,34 +284,25 @@ where
 
         // Assert that the byte multiplicities don't overflow.
         let mut max_byte_lookup_mult = 0u64;
-        chips
-            .iter()
-            .zip(opened_values.chips.iter())
-            .for_each(|(chip, val)| {
-                max_byte_lookup_mult = max_byte_lookup_mult
-                    .checked_add(
-                        (chip.num_sent_byte_lookups() as u64)
-                            .checked_mul(1u64.checked_shl(val.log_degree as u32).unwrap())
-                            .unwrap(),
-                    )
-                    .unwrap();
-            });
+        chips.iter().zip(opened_values.chips.iter()).for_each(|(chip, val)| {
+            max_byte_lookup_mult = max_byte_lookup_mult
+                .checked_add(
+                    (chip.num_sent_byte_lookups() as u64)
+                        .checked_mul(1u64.checked_shl(val.log_degree as u32).unwrap())
+                        .unwrap(),
+                )
+                .unwrap();
+        });
 
         assert!(
             max_byte_lookup_mult <= SC::Val::order().to_u64().unwrap(),
             "Byte multiplicities overflow"
         );
 
-        let log_degrees = opened_values
-            .chips
-            .iter()
-            .map(|val| val.log_degree)
-            .collect::<Vec<_>>();
+        let log_degrees = opened_values.chips.iter().map(|val| val.log_degree).collect::<Vec<_>>();
 
-        let log_quotient_degrees = chips
-            .iter()
-            .map(|chip| chip.log_quotient_degree())
-            .collect::<Vec<_>>();
+        let log_quotient_degrees =
+            chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let trace_domains = log_degrees
             .iter()
@@ -378,9 +318,8 @@ where
 
         challenger.observe(builder, local_main_commit);
 
-        let local_permutation_challenges = (0..2)
-            .map(|_| challenger.sample_ext(builder))
-            .collect::<Vec<_>>();
+        let local_permutation_challenges =
+            (0..2).map(|_| challenger.sample_ext(builder)).collect::<Vec<_>>();
 
         challenger.observe(builder, permutation_commit);
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
@@ -462,10 +401,7 @@ where
             .map(|(domain, values)| TwoAdicPcsMatsVariable::<C> {
                 domain: *domain,
                 points: vec![zeta, domain.next_point_variable(builder, zeta)],
-                values: vec![
-                    values.permutation.local.clone(),
-                    values.permutation.next.clone(),
-                ],
+                values: vec![values.permutation.local.clone(), values.permutation.next.clone()],
             })
             .collect::<Vec<_>>();
 
@@ -487,25 +423,21 @@ where
             .iter()
             .zip_eq(quotient_chunk_domains.iter())
             .flat_map(|(values, qc_domains)| {
-                values
-                    .quotient
-                    .iter()
-                    .zip_eq(qc_domains)
-                    .map(move |(values, q_domain)| TwoAdicPcsMatsVariable::<C> {
+                values.quotient.iter().zip_eq(qc_domains).map(move |(values, q_domain)| {
+                    TwoAdicPcsMatsVariable::<C> {
                         domain: *q_domain,
                         points: vec![zeta],
                         values: vec![values.clone()],
-                    })
+                    }
+                })
             })
             .collect::<Vec<_>>();
 
         // Split the main_domains_points_and_opens to the global and local chips.
         let mut global_trace_points_and_openings = Vec::new();
         let mut local_trace_points_and_openings = Vec::new();
-        for (i, points_and_openings) in main_domains_points_and_opens
-            .clone()
-            .into_iter()
-            .enumerate()
+        for (i, points_and_openings) in
+            main_domains_points_and_opens.clone().into_iter().enumerate()
         {
             let scope = chip_scopes[i];
             if scope == InteractionScope::Global {
@@ -539,13 +471,7 @@ where
         };
 
         let rounds = if has_global_main_commit {
-            vec![
-                prep_round,
-                global_main_round,
-                local_main_round,
-                perm_round,
-                quotient_round,
-            ]
+            vec![prep_round, global_main_round, local_main_round, perm_round, quotient_round]
         } else {
             vec![prep_round, local_main_round, perm_round, quotient_round]
         };
@@ -564,12 +490,9 @@ where
             .copied()
             .collect::<Vec<_>>();
 
-        for (chip, trace_domain, qc_domains, values) in izip!(
-            chips.iter(),
-            trace_domains,
-            quotient_chunk_domains,
-            opened_values.chips.iter(),
-        ) {
+        for (chip, trace_domain, qc_domains, values) in
+            izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)
+        {
             // Verify the shape of the opening arguments matches the expected values.
             Self::verify_opening_shape(chip, values).unwrap();
             // Verify the constraint evaluation.
@@ -591,9 +514,7 @@ where
             .chips
             .iter()
             .map(|val| val.local_cumulative_sum)
-            .fold(builder.constant(C::EF::ZERO), |acc, x| {
-                builder.eval(acc + x)
-            });
+            .fold(builder.constant(C::EF::ZERO), |acc, x| builder.eval(acc + x));
         let zero_ext: Ext<_, _> = builder.constant(C::EF::ZERO);
         builder.assert_ext_eq(local_cumulative_sum, zero_ext);
 
@@ -643,12 +564,12 @@ pub mod tests {
         ir::{Builder, DslIr, TracedVec},
     };
 
+    use test_artifacts::FIBONACCI_ELF;
     use zkm2_recursion_core::{air::Block, machine::RecursionAir, stark::KoalaBearPoseidon2Outer};
     use zkm2_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerVal, MachineProver, ShardProof,
         ZKMCoreOpts,
     };
-    use test_artifacts::FIBONACCI_ELF;
 
     use super::*;
     use crate::witness::*;

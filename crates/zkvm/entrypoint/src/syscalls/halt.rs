@@ -7,7 +7,6 @@ cfg_if::cfg_if! {
     }
 }
 
-
 cfg_if::cfg_if! {
     if #[cfg(all(target_os = "zkvm", feature = "verify"))] {
         use p3_field::PrimeField32;
@@ -37,7 +36,7 @@ pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
             let word = u32::from_le_bytes(pv_digest_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
             asm!("syscall", in("$2") crate::syscalls::COMMIT, in("$4") i, in("$5") word);
         }
-    
+
         cfg_if::cfg_if! {
             if #[cfg(feature = "verify")] {
                 let deferred_proofs_digest = zkvm::DEFERRED_PROOFS_DIGEST.as_mut().unwrap();

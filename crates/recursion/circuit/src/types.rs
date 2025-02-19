@@ -8,8 +8,8 @@ use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm2_recursion_core::DIGEST_SIZE;
 
 use crate::{
-    challenger::CanObserveVariable, hash::FieldHasherVariable, KoalaBearFriConfigVariable,
-    CircuitConfig,
+    challenger::CanObserveVariable, hash::FieldHasherVariable, CircuitConfig,
+    KoalaBearFriConfigVariable,
 };
 
 /// Reference: [zkm2_core::stark::StarkVerifyingKey]

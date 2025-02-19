@@ -59,25 +59,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .instructions
             .iter()
             .filter_map(|instruction| match instruction {
-                Instruction::Mem(MemInstr {
-                    addrs,
-                    vals,
-                    mult,
-                    kind,
-                }) => {
+                Instruction::Mem(MemInstr { addrs, vals, mult, kind }) => {
                     let mult = mult.to_owned();
                     let mult = match kind {
                         MemAccessKind::Read => -mult,
                         MemAccessKind::Write => mult,
                     };
 
-                    Some((
-                        vals.inner,
-                        MemoryAccessCols {
-                            addr: addrs.inner,
-                            mult,
-                        },
-                    ))
+                    Some((vals.inner, MemoryAccessCols { addr: addrs.inner, mult }))
                 }
                 _ => None,
             })
@@ -120,22 +109,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .checked_sub(1)
             .map(|x| x / NUM_CONST_MEM_ENTRIES_PER_ROW + 1)
             .unwrap_or_default();
-        let mut rows = std::iter::repeat([F::ZERO; NUM_MEM_INIT_COLS])
-            .take(num_rows)
-            .collect::<Vec<_>>();
+        let mut rows =
+            std::iter::repeat([F::ZERO; NUM_MEM_INIT_COLS]).take(num_rows).collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_MEM_INIT_COLS],
-            input.fixed_log2_rows(self),
-        );
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_MEM_INIT_COLS,
-        )
+        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS)
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -167,8 +148,8 @@ mod tests {
     use std::sync::Arc;
 
     use machine::{tests::run_recursion_test_machines, RecursionAir};
-    use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::stark::KoalaBearPoseidon2Outer;
@@ -205,12 +186,8 @@ mod tests {
     pub fn generate_trace() {
         let shard = ExecutionRecord::<KoalaBear> {
             mem_var_events: vec![
-                MemEvent {
-                    inner: KoalaBear::ONE.into(),
-                },
-                MemEvent {
-                    inner: KoalaBear::ONE.into(),
-                },
+                MemEvent { inner: KoalaBear::ONE.into() },
+                MemEvent { inner: KoalaBear::ONE.into() },
             ],
             ..Default::default()
         };

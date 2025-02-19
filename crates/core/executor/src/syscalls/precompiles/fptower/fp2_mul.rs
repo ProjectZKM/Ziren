@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
 use num::BigUint;
+use typenum::Unsigned;
 use zkm2_curves::{
     params::NumWords,
     weierstrass::{FieldType, FpOpField},
 };
-use typenum::Unsigned;
 
 use crate::{
     events::{Fp2MulEvent, PrecompileEvent},

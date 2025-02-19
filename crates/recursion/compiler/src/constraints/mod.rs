@@ -38,10 +38,7 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
         let tmp_id = self.alloc_id();
         constraints.push(Constraint {
             opcode: ConstraintOpcode::ImmV,
-            args: vec![
-                vec![tmp_id.clone()],
-                vec![value.as_canonical_biguint().to_string()],
-            ],
+            args: vec![vec![tmp_id.clone()], vec![value.as_canonical_biguint().to_string()]],
         });
         tmp_id
     }
@@ -51,10 +48,7 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
         let tmp_id = self.alloc_id();
         constraints.push(Constraint {
             opcode: ConstraintOpcode::ImmF,
-            args: vec![
-                vec![tmp_id.clone()],
-                vec![value.as_canonical_biguint().to_string()],
-            ],
+            args: vec![vec![tmp_id.clone()], vec![value.as_canonical_biguint().to_string()]],
         });
         tmp_id
     }

@@ -7,17 +7,13 @@ use p3_circle::CirclePcs;
 use p3_commit::ExtensionMmcs;
 use p3_field::extension::BinomialExtensionField;
 use p3_field::{Field, FieldAlgebra, PrimeField64};
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::FriConfig;
 use p3_keccak::Keccak256Hash;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_mersenne_31::Mersenne31;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher32};
-use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use rand::thread_rng;
-
-use crate::{air::InteractionScope, MachineProvingKey, MachineVerificationError};
 
 use tracing_forest::util::LevelFilter;
 use tracing_forest::ForestLayer;
@@ -125,10 +121,7 @@ fn test_public_value_impl(n: usize, x: u64) {
         .try_from_env()
         .unwrap_or_default();
 
-    let _ = Registry::default()
-        .with(env_filter)
-        .with(ForestLayer::default())
-        .try_init();
+    let _ = Registry::default().with(env_filter).with(ForestLayer::default()).try_init();
 
     let byte_hash = ByteHash {};
     let field_hash = FieldHash::new(byte_hash);
@@ -136,17 +129,9 @@ fn test_public_value_impl(n: usize, x: u64) {
     let val_mmcs = ValMmcs::new(field_hash, compress);
     let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
     let trace = generate_trace_rows::<Val>(0, 1, n);
-    let fri_config = FriConfig {
-        log_blowup: 1,
-        num_queries: 8,
-        proof_of_work_bits: 8,
-        mmcs: challenge_mmcs,
-    };
-    let pcs = Pcs {
-        mmcs: val_mmcs,
-        fri_config,
-        _phantom: PhantomData,
-    };
+    let fri_config =
+        FriConfig { log_blowup: 1, num_queries: 8, proof_of_work_bits: 8, mmcs: challenge_mmcs };
+    let pcs = Pcs { mmcs: val_mmcs, fri_config, _phantom: PhantomData };
     let config = p3_uni_stark::StarkConfig::new(pcs);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let pis = vec![
@@ -179,19 +164,11 @@ fn test_incorrect_public_value() {
     let compress = MyCompress::new(byte_hash);
     let val_mmcs = ValMmcs::new(field_hash, compress);
     let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-    let fri_config = FriConfig {
-        log_blowup: 2,
-        num_queries: 28,
-        proof_of_work_bits: 8,
-        mmcs: challenge_mmcs,
-    };
+    let fri_config =
+        FriConfig { log_blowup: 2, num_queries: 28, proof_of_work_bits: 8, mmcs: challenge_mmcs };
     let trace = generate_trace_rows::<Val>(0, 1, 1 << 3);
 
-    let pcs = Pcs {
-        mmcs: val_mmcs,
-        fri_config,
-        _phantom: PhantomData,
-    };
+    let pcs = Pcs { mmcs: val_mmcs, fri_config, _phantom: PhantomData };
     let config = p3_uni_stark::StarkConfig::new(pcs);
     let mut challenger = Challenger::from_hasher(vec![], byte_hash);
     let pis = vec![

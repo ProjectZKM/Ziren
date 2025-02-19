@@ -18,7 +18,7 @@ use zkm2_stark::{
 };
 
 use crate::{
-    operations::{AssertLtColsBits, KoalaBearBitDecomposition, IsZeroOperation},
+    operations::{AssertLtColsBits, IsZeroOperation, KoalaBearBitDecomposition},
     utils::pad_rows_fixed,
 };
 
@@ -370,8 +370,8 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use zkm2_core_executor::{programs::tests::simple_program, Executor};
     use zkm2_stark::{
-        koala_bear_poseidon2::KoalaBearPoseidon2, debug_interactions_with_all_chips, ZKMCoreOpts,
-        StarkMachine,
+        debug_interactions_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, StarkMachine,
+        ZKMCoreOpts,
     };
 
     #[test]

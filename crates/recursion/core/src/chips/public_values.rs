@@ -90,10 +90,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
                 let mut row = [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
                 let cols: &mut PublicValuesPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
                 cols.pv_idx[i] = F::ONE;
-                cols.pv_mem = MemoryAccessCols {
-                    addr: *addr,
-                    mult: F::NEG_ONE,
-                };
+                cols.pv_mem = MemoryAccessCols { addr: *addr, mult: F::NEG_ONE };
                 rows.push(row);
             }
         }
@@ -169,18 +166,12 @@ where
         let public_values: &RecursionPublicValues<AB::Expr> = pv_elms.as_slice().borrow();
 
         // Constrain mem read for the public value element.
-        builder.send_single(
-            local_prepr.pv_mem.addr,
-            local.pv_element,
-            local_prepr.pv_mem.mult,
-        );
+        builder.send_single(local_prepr.pv_mem.addr, local.pv_element, local_prepr.pv_mem.mult);
 
         for (i, pv_elm) in public_values.digest.iter().enumerate() {
             // Ensure that the public value element is the same for all rows within a fri fold
             // invocation.
-            builder
-                .when(local_prepr.pv_idx[i])
-                .assert_eq(pv_elm.clone(), local.pv_element);
+            builder.when(local_prepr.pv_idx[i]).assert_eq(pv_elm.clone(), local.pv_element);
         }
     }
 }
@@ -193,8 +184,8 @@ mod tests {
     use std::{array, borrow::Borrow};
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::{
@@ -234,10 +225,7 @@ mod tests {
         let public_values_a: &RecursionPublicValues<u32> = public_values_a.as_slice().borrow();
         instructions.push(instr::commit_public_values(public_values_a));
 
-        let program = RecursionProgram {
-            instructions,
-            ..Default::default()
-        };
+        let program = RecursionProgram { instructions, ..Default::default() };
 
         run_recursion_test_machines(program);
     }

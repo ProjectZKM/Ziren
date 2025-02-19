@@ -11,6 +11,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
+use typenum::Unsigned;
 use zkm2_core_executor::{
     events::{
         ByteLookupEvent, ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent,
@@ -26,7 +27,6 @@ use zkm2_curves::{
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{InteractionScope, MachineAir, ZKMAirBuilder};
-use typenum::Unsigned;
 
 use crate::{
     memory::{MemoryCols, MemoryReadCols, MemoryWriteCols},
@@ -464,12 +464,12 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
 #[cfg(test)]
 mod tests {
 
-    use zkm2_core_executor::Program;
-    use zkm2_stark::CpuProver;
     use test_artifacts::{
         BLS12381_ADD_ELF, BLS12381_DOUBLE_ELF, BLS12381_MUL_ELF, BN254_ADD_ELF, BN254_MUL_ELF,
         SECP256K1_ADD_ELF, SECP256K1_MUL_ELF, SECP256R1_ADD_ELF,
     };
+    use zkm2_core_executor::Program;
+    use zkm2_stark::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

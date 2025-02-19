@@ -28,13 +28,7 @@ impl<F: TwoAdicField> ZerofierOnCoset<F> {
             .map(|x| s_pow_n * x - F::ONE)
             .collect::<Vec<_>>();
         let inverses = batch_multiplicative_inverse(&evals);
-        Self {
-            log_n,
-            rate_bits,
-            coset_shift,
-            evals,
-            inverses,
-        }
+        Self { log_n, rate_bits, coset_shift, evals, inverses }
     }
 
     /// Returns `Z_H(g * w^i)`.
@@ -73,11 +67,6 @@ impl<F: TwoAdicField> ZerofierOnCoset<F> {
             .collect_vec();
         let inverses = batch_multiplicative_inverse(&denominators);
 
-        self.evals
-            .iter()
-            .cycle()
-            .zip(inverses)
-            .map(|(&z_h, inv)| z_h * inv)
-            .collect()
+        self.evals.iter().cycle().zip(inverses).map(|(&z_h, inv)| z_h * inv).collect()
     }
 }

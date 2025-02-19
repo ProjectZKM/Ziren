@@ -4,10 +4,7 @@ pub use cost::*;
 use itertools::Itertools;
 pub use shape::*;
 use zkm2_core_executor::{
-    events::PrecompileLocalMemory,
-    syscalls::SyscallCode,
-    ExecutionRecord,
-    Program,
+    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, Program,
 };
 
 use crate::{
@@ -20,9 +17,9 @@ use crate::{
 use hashbrown::{HashMap, HashSet};
 pub use mips_chips::*;
 use p3_field::PrimeField32;
-use zkm2_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use strum_macros::{EnumDiscriminants, EnumIter};
 use tracing::instrument;
+use zkm2_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use zkm2_stark::{
     air::{InteractionScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
     Chip, InteractionKind, StarkGenericConfig, StarkMachine,
@@ -34,7 +31,10 @@ pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 /// A module for importing all the different MIPS chips.
 pub(crate) mod mips_chips {
     pub use crate::{
-        alu::{AddSubChip, BitwiseChip, DivRemChip, LtChip, MulChip, ShiftLeft, ShiftRightChip, CloClzChip},
+        alu::{
+            AddSubChip, BitwiseChip, CloClzChip, DivRemChip, LtChip, MulChip, ShiftLeft,
+            ShiftRightChip,
+        },
         bytes::ByteChip,
         cpu::CpuChip,
         memory::MemoryGlobalChip,
@@ -157,7 +157,7 @@ pub enum MipsAir<F: PrimeField32> {
 
 impl<F: PrimeField32> MipsAir<F> {
     #[instrument("construct MipsAir machine", level = "debug", skip_all)]
-    pub fn machine<SC: StarkGenericConfig<Val=F>>(config: SC) -> StarkMachine<SC, Self> {
+    pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS, true)
     }
@@ -176,10 +176,7 @@ impl<F: PrimeField32> MipsAir<F> {
 
     pub fn get_airs_and_costs() -> (Vec<Self>, HashMap<MipsAirDiscriminants, u64>) {
         let (chips, costs) = Self::get_chips_and_costs();
-        (
-            chips.into_iter().map(|chip| chip.into_inner()).collect(),
-            costs,
-        )
+        (chips.into_iter().map(|chip| chip.into_inner()).collect(), costs)
     }
 
     /// Get all the different MIPS AIRs.
@@ -209,9 +206,8 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(MipsAirDiscriminants::Ed25519Add, ed_add_assign.cost());
         chips.push(ed_add_assign);
 
-        let ed_decompress = Chip::new(MipsAir::Ed25519Decompress(EdDecompressChip::<
-            Ed25519Parameters,
-        >::default()));
+        let ed_decompress =
+            Chip::new(MipsAir::Ed25519Decompress(EdDecompressChip::<Ed25519Parameters>::default()));
         costs.insert(MipsAirDiscriminants::Ed25519Decompress, ed_decompress.cost());
         chips.push(ed_decompress);
 
@@ -364,9 +360,8 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(MipsAirDiscriminants::CloClz, clo_clz.cost());
         chips.push(clo_clz);
 
-        let memory_global_init = Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(
-            MemoryChipType::Initialize,
-        )));
+        let memory_global_init =
+            Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)));
         costs.insert(MipsAirDiscriminants::MemoryGlobalInit, memory_global_init.cost());
         chips.push(memory_global_init);
 
@@ -596,16 +591,17 @@ pub mod tests {
         utils::{prove, run_test, setup_logger},
     };
 
+    use zkm2_core_executor::programs::tests::other_memory_program;
     use zkm2_core_executor::{
         programs::tests::{
-            fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program, simple_program, ssz_withdrawals_program,
+            fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
+            simple_program, ssz_withdrawals_program,
         },
-        Instruction, Opcode, Program, Register,
+        Instruction, Opcode, Program,
     };
-    use zkm2_core_executor::programs::tests::other_memory_program;
     use zkm2_stark::{
-        koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, ZKMCoreOpts, StarkProvingKey,
-        StarkVerifyingKey,
+        koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkProvingKey, StarkVerifyingKey,
+        ZKMCoreOpts,
     };
 
     #[test]
@@ -667,7 +663,7 @@ pub mod tests {
     fn test_rest_branch_prove() {
         utils::setup_logger();
         let branch_ops = [Opcode::BLTZ, Opcode::BGEZ, Opcode::BLEZ, Opcode::BGTZ];
-        let operands = vec![0, 1, 0xFFFF_FFFF];
+        let operands = [0, 1, 0xFFFF_FFFF];
         for branch_op in branch_ops.iter() {
             for operand in operands.iter() {
                 let instructions = vec![
@@ -813,15 +809,7 @@ pub mod tests {
     fn test_cloclz_prove() {
         setup_logger();
         let clz_clo_ops = [Opcode::CLZ, Opcode::CLO];
-        let operands = [
-            0u32,
-            0x0a0b0c0d,
-            0x1000,
-            0xff7fffff,
-            0x7fffffff,
-            0x80000000,
-            0xffffffff,
-        ];
+        let operands = [0u32, 0x0a0b0c0d, 0x1000, 0xff7fffff, 0x7fffffff, 0x80000000, 0xffffffff];
 
         for clo_clz_op in clz_clo_ops.iter() {
             for op in operands.iter() {
@@ -905,7 +893,6 @@ pub mod tests {
             Instruction::new(Opcode::ADD, 28, 28, 1, false, true),
             Instruction::new(Opcode::SC, 28, 0, 0x27654320, false, true),
             Instruction::new(Opcode::LW, 29, 0, 0x27654320, false, true),
-
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
@@ -941,7 +928,8 @@ pub mod tests {
         let mut opts = ZKMCoreOpts::default();
         opts.shard_size = 1024;
         opts.shard_batch_size = 2;
-        prove::<_, CpuProver<_, _>>(program, &stdin, KoalaBearPoseidon2::new(), opts, None).unwrap();
+        prove::<_, CpuProver<_, _>>(program, &stdin, KoalaBearPoseidon2::new(), opts, None)
+            .unwrap();
     }
 
     #[test]
@@ -956,7 +944,7 @@ pub mod tests {
             ZKMCoreOpts::default(),
             None,
         )
-            .unwrap();
+        .unwrap();
     }
 
     #[test]

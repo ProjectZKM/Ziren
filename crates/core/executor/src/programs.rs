@@ -6,9 +6,8 @@ pub mod tests {
     use crate::{Instruction, Opcode, Program};
 
     use test_artifacts::{
-        FIBONACCI_ELF, HELLO_WORLD_ELF,
-        KECCAK_PERMUTE_ELF, PANIC_ELF,
-        SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF,
+        FIBONACCI_ELF, HELLO_WORLD_ELF, KECCAK_PERMUTE_ELF, PANIC_ELF, SECP256R1_ADD_ELF,
+        SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF,
     };
 
     #[must_use]
@@ -150,25 +149,28 @@ pub mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, (1 << 20) + (1 << 15) + (1 << 6) - 1, false, true),
             Instruction::new(Opcode::ADD, 27, 0, 25, false, true),
-            Instruction::new(Opcode::ADD, 25, 0, (1 << 28) + (1 << 12) + (1 << 18) - 1, false, true),
+            Instruction::new(
+                Opcode::ADD,
+                25,
+                0,
+                (1 << 28) + (1 << 12) + (1 << 18) - 1,
+                false,
+                true,
+            ),
             Instruction::new(Opcode::ADD, 17, 0, 0x43627530, false, true),
             Instruction::new(Opcode::ADD, 22, 0, 22, false, true),
             Instruction::new(Opcode::ADD, 10, 0, 15, false, true),
             Instruction::new(Opcode::LWR, 29, 27, 1, false, true),
             Instruction::new(Opcode::LWL, 29, 27, 1, false, true),
             Instruction::new(Opcode::LL, 29, 27, 3, false, true),
-
             Instruction::new(Opcode::ADD, 15, 0, (1 << 20) + (1 << 15) + (1 << 6) - 1, false, true),
             Instruction::new(Opcode::SWL, 15, 22, 2, false, true),
             Instruction::new(Opcode::SWR, 15, 22, 2, false, true),
             Instruction::new(Opcode::SWL, 26, 10, 2, false, true),
             Instruction::new(Opcode::SWR, 26, 10, 2, false, true),
-
             Instruction::new(Opcode::LWR, 29, 27, 0, false, true),
             Instruction::new(Opcode::LWL, 29, 27, 0, false, true),
-
         ];
         Program::new(instructions, 0, 0)
     }
-
 }

@@ -235,7 +235,9 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    };
 
     use crate::utils::{uni_stark_prove, uni_stark_verify};
 
@@ -248,7 +250,7 @@ mod tests {
             AluEvent::new(0, 0, Opcode::XOR, 25, 10, 19),
             AluEvent::new(0, 0, Opcode::OR, 27, 10, 19),
             AluEvent::new(0, 0, Opcode::AND, 2, 10, 19),
-            AluEvent::new(0, 0, Opcode::NOR, 228, 10, 19)
+            AluEvent::new(0, 0, Opcode::NOR, 228, 10, 19),
         ];
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -266,13 +268,14 @@ mod tests {
             AluEvent::new(0, 0, Opcode::XOR, 25, 10, 19),
             AluEvent::new(0, 0, Opcode::OR, 27, 10, 19),
             AluEvent::new(0, 0, Opcode::AND, 2, 10, 19),
-            AluEvent::new(0, 0, Opcode::NOR, 228, 10, 19)
+            AluEvent::new(0, 0, Opcode::NOR, 228, 10, 19),
         ]
-            .repeat(1000);
+        .repeat(1000);
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
-        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+        let proof =
+            uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();

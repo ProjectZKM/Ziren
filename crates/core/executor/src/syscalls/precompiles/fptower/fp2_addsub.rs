@@ -1,10 +1,10 @@
 use num::BigUint;
+use std::marker::PhantomData;
+use typenum::Unsigned;
 use zkm2_curves::{
     params::NumWords,
     weierstrass::{FieldType, FpOpField},
 };
-use std::marker::PhantomData;
-use typenum::Unsigned;
 
 use crate::{
     events::{FieldOperation, Fp2AddSubEvent, PrecompileEvent},
@@ -62,7 +62,6 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
             }
             _ => panic!("Invalid operation"),
         };
-
 
         let mut result = c0.to_u32_digits();
         result.resize(num_words / 2, 0);

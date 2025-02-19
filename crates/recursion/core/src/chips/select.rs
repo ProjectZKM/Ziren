@@ -72,15 +72,9 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
-        values[..populate_len]
-            .par_chunks_mut(SELECT_PREPROCESSED_COLS)
-            .zip_eq(instrs)
-            .for_each(|(row, instr)| {
-                let SelectInstr {
-                    addrs,
-                    mult1,
-                    mult2,
-                } = instr;
+        values[..populate_len].par_chunks_mut(SELECT_PREPROCESSED_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let SelectInstr { addrs, mult1, mult2 } = instr;
                 let access: &mut SelectPreprocessedCols<_> = row.borrow_mut();
                 *access = SelectPreprocessedCols {
                     is_real: F::ONE,
@@ -88,7 +82,8 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
                     mult1: mult1.to_owned(),
                     mult2: mult2.to_owned(),
                 };
-            });
+            },
+        );
 
         // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, SELECT_PREPROCESSED_COLS))
@@ -110,13 +105,12 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * SELECT_COLS;
-        values[..populate_len]
-            .par_chunks_mut(SELECT_COLS)
-            .zip_eq(events)
-            .for_each(|(row, &vals)| {
+        values[..populate_len].par_chunks_mut(SELECT_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
                 let cols: &mut SelectCols<_> = row.borrow_mut();
                 *cols = SelectCols { vals };
-            });
+            },
+        );
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, SELECT_COLS)
@@ -162,8 +156,8 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -216,11 +210,7 @@ mod tests {
                 let bit = F::from_bool(rng.gen_bool(0.5));
                 assert_eq!(bit * (bit - F::ONE), F::ZERO);
 
-                let (out1, out2) = if bit == F::ONE {
-                    (in2, in1)
-                } else {
-                    (in1, in2)
-                };
+                let (out1, out2) = if bit == F::ONE { (in2, in1) } else { (in1, in2) };
                 let alloc_size = 5;
                 let a = (0..alloc_size).map(|x| x + addr).collect::<Vec<_>>();
                 addr += alloc_size;
@@ -235,10 +225,7 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram {
-            instructions,
-            ..Default::default()
-        };
+        let program = RecursionProgram { instructions, ..Default::default() };
 
         run_recursion_test_machines(program);
     }

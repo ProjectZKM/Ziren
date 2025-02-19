@@ -10,11 +10,11 @@ pub use fp2_mul::*;
 mod tests {
     use zkm2_stark::CpuProver;
 
-    use zkm2_core_executor::Program;
     use test_artifacts::{
         BLS12381_FP2_ADDSUB_ELF, BLS12381_FP2_MUL_ELF, BLS12381_FP_ELF, BN254_FP2_ADDSUB_ELF,
         BN254_FP2_MUL_ELF, BN254_FP_ELF,
     };
+    use zkm2_core_executor::Program;
 
     use crate::utils;
 

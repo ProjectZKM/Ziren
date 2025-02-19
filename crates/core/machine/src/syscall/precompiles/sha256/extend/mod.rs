@@ -32,11 +32,11 @@ pub mod extend_tests {
     use p3_koala_bear::KoalaBear;
 
     use p3_matrix::dense::RowMajorMatrix;
+    use test_artifacts::{SHA2_ELF, SHA_EXTEND_ELF};
     use zkm2_core_executor::{
         events::AluEvent, syscalls::SyscallCode, ExecutionRecord, Instruction, Opcode, Program,
     };
     use zkm2_stark::{air::MachineAir, CpuProver};
-    use test_artifacts::{SHA2_ELF, SHA_EXTEND_ELF};
 
     use crate::utils::{self, run_test};
 

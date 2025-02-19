@@ -12,9 +12,7 @@ pub struct ZKMPublicValues {
 impl ZKMPublicValues {
     /// Create a new `ZKMPublicValues`.
     pub const fn new() -> Self {
-        Self {
-            buffer: Buffer::new(),
-        }
+        Self { buffer: Buffer::new() }
     }
 
     pub fn raw(&self) -> String {
@@ -23,9 +21,7 @@ impl ZKMPublicValues {
 
     /// Create a `ZKMPublicValues` from a slice of bytes.
     pub fn from(data: &[u8]) -> Self {
-        Self {
-            buffer: Buffer::from(data),
-        }
+        Self { buffer: Buffer::from(data) }
     }
 
     pub fn as_slice(&self) -> &[u8] {

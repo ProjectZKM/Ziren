@@ -34,10 +34,7 @@ pub struct FriFoldChip<const DEGREE: usize> {
 
 impl<const DEGREE: usize> Default for FriFoldChip<DEGREE> {
     fn default() -> Self {
-        Self {
-            fixed_log2_rows: None,
-            pad: true,
-        }
+        Self { fixed_log2_rows: None, pad: true }
     }
 }
 
@@ -132,14 +129,10 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
 
                     // Only need to read z, x, and alpha on the first iteration, hence the
                     // multiplicities are i==0.
-                    row.z_mem = MemoryAccessCols {
-                        addr: ext_single_addrs.z,
-                        mult: -F::from_bool(i == 0),
-                    };
-                    row.x_mem = MemoryAccessCols {
-                        addr: base_single_addrs.x,
-                        mult: -F::from_bool(i == 0),
-                    };
+                    row.z_mem =
+                        MemoryAccessCols { addr: ext_single_addrs.z, mult: -F::from_bool(i == 0) };
+                    row.x_mem =
+                        MemoryAccessCols { addr: base_single_addrs.x, mult: -F::from_bool(i == 0) };
                     row.alpha_mem = MemoryAccessCols {
                         addr: ext_single_addrs.alpha,
                         mult: -F::from_bool(i == 0),
@@ -150,28 +143,20 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
                         addr: ext_vec_addrs.alpha_pow_input[i],
                         mult: F::NEG_ONE,
                     };
-                    row.ro_input_mem = MemoryAccessCols {
-                        addr: ext_vec_addrs.ro_input[i],
-                        mult: F::NEG_ONE,
-                    };
-                    row.p_at_z_mem = MemoryAccessCols {
-                        addr: ext_vec_addrs.ps_at_z[i],
-                        mult: F::NEG_ONE,
-                    };
-                    row.p_at_x_mem = MemoryAccessCols {
-                        addr: ext_vec_addrs.mat_opening[i],
-                        mult: F::NEG_ONE,
-                    };
+                    row.ro_input_mem =
+                        MemoryAccessCols { addr: ext_vec_addrs.ro_input[i], mult: F::NEG_ONE };
+                    row.p_at_z_mem =
+                        MemoryAccessCols { addr: ext_vec_addrs.ps_at_z[i], mult: F::NEG_ONE };
+                    row.p_at_x_mem =
+                        MemoryAccessCols { addr: ext_vec_addrs.mat_opening[i], mult: F::NEG_ONE };
 
                     // Write the memory for the output vectors.
                     row.alpha_pow_output_mem = MemoryAccessCols {
                         addr: ext_vec_addrs.alpha_pow_output[i],
                         mult: alpha_pow_mults[i],
                     };
-                    row.ro_output_mem = MemoryAccessCols {
-                        addr: ext_vec_addrs.ro_output[i],
-                        mult: ro_mults[i],
-                    };
+                    row.ro_output_mem =
+                        MemoryAccessCols { addr: ext_vec_addrs.ro_output[i], mult: ro_mults[i] };
 
                     row.is_real = F::ONE;
                 });
@@ -226,22 +211,14 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
 
         // Pad the trace to a power of two.
         if self.pad {
-            pad_rows_fixed(
-                &mut rows,
-                || [F::ZERO; NUM_FRI_FOLD_COLS],
-                self.fixed_log2_rows,
-            );
+            pad_rows_fixed(&mut rows, || [F::ZERO; NUM_FRI_FOLD_COLS], self.fixed_log2_rows);
         }
 
         // Convert the trace to a row major matrix.
         let trace = RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_FRI_FOLD_COLS);
 
         #[cfg(debug_assertions)]
-        println!(
-            "fri fold trace dims is width: {:?}, height: {:?}",
-            trace.width(),
-            trace.height()
-        );
+        println!("fri fold trace dims is width: {:?}, height: {:?}", trace.width(), trace.height());
 
         trace
     }
@@ -281,21 +258,14 @@ impl<const DEGREE: usize> FriFoldChip<DEGREE> {
             .assert_ext_eq(local.z.as_extension::<AB>(), next.z.as_extension::<AB>());
 
         // Constrain mem read for alpha.  Read at the first fri fold row.
-        builder.send_block(
-            local_prepr.alpha_mem.addr,
-            local.alpha,
-            local_prepr.alpha_mem.mult,
-        );
+        builder.send_block(local_prepr.alpha_mem.addr, local.alpha, local_prepr.alpha_mem.mult);
 
         // Ensure that the alpha value is the same for all rows within a fri fold invocation.
         builder
             .when_transition()
             .when(next_prepr.is_real)
             .when_not(next_prepr.is_first)
-            .assert_ext_eq(
-                local.alpha.as_extension::<AB>(),
-                next.alpha.as_extension::<AB>(),
-            );
+            .assert_ext_eq(local.alpha.as_extension::<AB>(), next.alpha.as_extension::<AB>());
 
         // Constrain read for alpha_pow_input.
         builder.send_block(
@@ -312,18 +282,10 @@ impl<const DEGREE: usize> FriFoldChip<DEGREE> {
         );
 
         // Constrain read for p_at_z.
-        builder.send_block(
-            local_prepr.p_at_z_mem.addr,
-            local.p_at_z,
-            local_prepr.p_at_z_mem.mult,
-        );
+        builder.send_block(local_prepr.p_at_z_mem.addr, local.p_at_z, local_prepr.p_at_z_mem.mult);
 
         // Constrain read for p_at_x.
-        builder.send_block(
-            local_prepr.p_at_x_mem.addr,
-            local.p_at_x,
-            local_prepr.p_at_x_mem.mult,
-        );
+        builder.send_block(local_prepr.p_at_x_mem.addr, local.p_at_x, local_prepr.p_at_x_mem.mult);
 
         // Constrain write for alpha_pow_output.
         builder.send_block(
@@ -380,12 +342,8 @@ where
         let prepr_next: &FriFoldPreprocessedCols<AB::Var> = (*prepr_next).borrow();
 
         // Dummy constraints to normalize to DEGREE.
-        let lhs = (0..DEGREE)
-            .map(|_| prepr_local.is_real.into())
-            .product::<AB::Expr>();
-        let rhs = (0..DEGREE)
-            .map(|_| prepr_local.is_real.into())
-            .product::<AB::Expr>();
+        let lhs = (0..DEGREE).map(|_| prepr_local.is_real.into()).product::<AB::Expr>();
+        let rhs = (0..DEGREE).map(|_| prepr_local.is_real.into()).product::<AB::Expr>();
         builder.assert_eq(lhs, rhs);
 
         self.eval_fri_fold::<AB>(builder, local, next, prepr_local, prepr_next);
@@ -400,8 +358,8 @@ mod tests {
     use zkm2_core_machine::utils::setup_logger;
     use zkm2_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::{
@@ -550,10 +508,7 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram {
-            instructions,
-            ..Default::default()
-        };
+        let program = RecursionProgram { instructions, ..Default::default() };
 
         run_recursion_test_machines(program);
     }
@@ -573,10 +528,7 @@ mod tests {
                     base_single: FriFoldBaseIo {
                         x: F::from_canonical_u32(rng2.gen_range(0..1 << 16)),
                     },
-                    ext_single: FriFoldExtSingleIo {
-                        z: random_block(),
-                        alpha: random_block(),
-                    },
+                    ext_single: FriFoldExtSingleIo { z: random_block(), alpha: random_block() },
                     ext_vec: crate::FriFoldExtVecIo {
                         mat_opening: random_block(),
                         ps_at_z: random_block(),

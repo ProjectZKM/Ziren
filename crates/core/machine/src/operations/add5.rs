@@ -1,5 +1,5 @@
 use p3_air::AirBuilder;
-use p3_field::{FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra};
 use zkm2_derive::AlignedBorrow;
 
 use zkm2_core_executor::events::ByteRecord;

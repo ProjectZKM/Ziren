@@ -190,8 +190,9 @@ mod tests {
     use zkm2_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
     use zkm2_stark::{
         air::{InteractionScope, MachineAir},
+        debug_interactions_with_all_chips,
         koala_bear_poseidon2::KoalaBearPoseidon2,
-        debug_interactions_with_all_chips, InteractionKind, ZKMCoreOpts, StarkMachine,
+        InteractionKind, StarkMachine, ZKMCoreOpts,
     };
 
     use crate::{

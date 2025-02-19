@@ -1,5 +1,6 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
+use std::{array, borrow::BorrowMut};
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     syscalls::SyscallCode,
@@ -9,7 +10,6 @@ use zkm2_core_executor::{
 };
 use zkm2_primitives::consts::WORD_SIZE;
 use zkm2_stark::{air::MachineAir, Word};
-use std::{array, borrow::BorrowMut};
 
 use p3_field::{PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -276,8 +276,7 @@ impl CpuChip {
                 | Opcode::SW
                 | Opcode::SC
                 | Opcode::SWL
-                | Opcode::SWR
-                //| Opcode::SDC1
+                | Opcode::SWR //| Opcode::SDC1
         ) {
             return;
         }
@@ -310,7 +309,14 @@ impl CpuChip {
         let mem_value = event.memory_record.unwrap().value();
         if matches!(
             instruction.opcode,
-            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR | Opcode::LL
+            Opcode::LB
+                | Opcode::LBU
+                | Opcode::LH
+                | Opcode::LHU
+                | Opcode::LW
+                | Opcode::LWL
+                | Opcode::LWR
+                | Opcode::LL
         ) {
             match instruction.opcode {
                 Opcode::LB | Opcode::LBU => {
@@ -437,7 +443,7 @@ impl CpuChip {
                 Opcode::BLEZ => a_lt_0 || a_eq_0,
                 Opcode::BGTZ => a_gt_0,
                 Opcode::BGEZ => a_eq_0 || a_gt_0,
-                _ => panic!("Invalid opcode: {}", instruction.opcode)
+                _ => panic!("Invalid opcode: {}", instruction.opcode),
             };
 
             let target_pc = event.next_pc.wrapping_add(event.c);
@@ -469,24 +475,24 @@ impl CpuChip {
         instruction: &Instruction,
     ) {
         if instruction.is_jump_instruction() {
-             let jump_columns = cols.opcode_specific_columns.jump_mut();
+            let jump_columns = cols.opcode_specific_columns.jump_mut();
 
-             match instruction.opcode {
-                 Opcode::Jump | Opcode::Jumpi => {
-                     let target_pc = event.b;
-                     jump_columns.op_a_range_checker.populate(event.a);
-                     jump_columns.target_pc = Word::from(target_pc);
-                     jump_columns.next_pc = Word::from(event.next_pc);
-                     jump_columns.next_pc_range_checker.populate(event.next_pc);
-                     jump_columns.target_pc_range_checker.populate(target_pc);
-                     jump_columns.jump_nonce = F::from_canonical_u32(
-                         nonce_lookup
-                             .get(event.jump_jump_lookup_id.0 as usize)
-                             .copied()
-                             .unwrap_or_default(),
-                     );
-                 }
-                 Opcode::JumpDirect => {
+            match instruction.opcode {
+                Opcode::Jump | Opcode::Jumpi => {
+                    let target_pc = event.b;
+                    jump_columns.op_a_range_checker.populate(event.a);
+                    jump_columns.target_pc = Word::from(target_pc);
+                    jump_columns.next_pc = Word::from(event.next_pc);
+                    jump_columns.next_pc_range_checker.populate(event.next_pc);
+                    jump_columns.target_pc_range_checker.populate(target_pc);
+                    jump_columns.jump_nonce = F::from_canonical_u32(
+                        nonce_lookup
+                            .get(event.jump_jump_lookup_id.0 as usize)
+                            .copied()
+                            .unwrap_or_default(),
+                    );
+                }
+                Opcode::JumpDirect => {
                     let target_pc = event.next_pc.wrapping_add(event.b);
                     jump_columns.op_a_range_checker.populate(event.a);
                     jump_columns.next_pc = Word::from(event.next_pc);
@@ -500,9 +506,9 @@ impl CpuChip {
                             .unwrap_or_default(),
                     );
                 }
-                 _ => unreachable!(),
-             }
-         }
+                _ => unreachable!(),
+            }
+        }
     }
 
     // /// Populate columns related to AUIPC.
@@ -539,7 +545,8 @@ impl CpuChip {
             // explanation.
             let syscall_cols = cols.opcode_specific_columns.syscall_mut();
 
-            cols.syscall_mul_send_to_table = cols.selectors.is_syscall * cols.op_a_access.prev_value[1];
+            cols.syscall_mul_send_to_table =
+                cols.selectors.is_syscall * cols.op_a_access.prev_value[1];
 
             let syscall_id = cols.op_a_access.prev_value[0];
             // let send_to_table = cols.op_a_access.prev_value[1];
@@ -575,7 +582,7 @@ impl CpuChip {
             // digest word.
             if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT.syscall_id())
                 || syscall_id
-                == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
+                    == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
             {
                 let digest_idx = cols.op_b_access.value().to_u32() as usize;
                 syscall_cols.index_bitmap[digest_idx] = F::ONE;

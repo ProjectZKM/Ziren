@@ -222,7 +222,9 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{thread_rng, Rng};
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    };
 
     use super::AddSubChip;
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};

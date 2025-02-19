@@ -67,20 +67,12 @@ impl Add for ExecutionReport {
 
 impl Display for ExecutionReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        writeln!(
-            f,
-            "opcode counts ({} total instructions):",
-            self.total_instruction_count()
-        )?;
+        writeln!(f, "opcode counts ({} total instructions):", self.total_instruction_count())?;
         for line in generate_execution_report(self.opcode_counts.as_ref()) {
             writeln!(f, "  {line}")?;
         }
 
-        writeln!(
-            f,
-            "syscall counts ({} total syscall instructions):",
-            self.total_syscall_count()
-        )?;
+        writeln!(f, "syscall counts ({} total syscall instructions):", self.total_syscall_count())?;
         for line in generate_execution_report(self.syscall_counts.as_ref()) {
             writeln!(f, "  {line}")?;
         }

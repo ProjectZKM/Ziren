@@ -1,10 +1,10 @@
 use num::BigUint;
+use std::marker::PhantomData;
+use typenum::Unsigned;
 use zkm2_curves::{
     params::NumWords,
     weierstrass::{FieldType, FpOpField},
 };
-use std::marker::PhantomData;
-use typenum::Unsigned;
 
 use crate::{
     events::{FieldOperation, FpOpEvent, PrecompileEvent},

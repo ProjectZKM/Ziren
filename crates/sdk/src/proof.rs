@@ -2,10 +2,10 @@ use std::{fmt::Debug, fs::File, path::Path};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use strum_macros::{EnumDiscriminants, EnumTryAs};
 use zkm2_core_executor::ZKMReduceProof;
 use zkm2_core_machine::io::ZKMStdin;
 use zkm2_primitives::io::ZKMPublicValues;
-use strum_macros::{EnumDiscriminants, EnumTryAs};
 
 use zkm2_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
 use zkm2_stark::{MachineVerificationError, ShardProof};

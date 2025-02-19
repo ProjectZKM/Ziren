@@ -6,9 +6,9 @@ use std::{
 };
 
 use itertools::Itertools;
-use p3_koala_bear::KoalaBear;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -40,7 +40,7 @@ use crate::{
     challenger::{CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable},
     machine::recursion_public_values_digest,
     stark::{dummy_challenger, dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
-    KoalaBearFriConfig, KoalaBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
 };
 
 pub struct ZKMRecursionWitnessVariable<
@@ -264,9 +264,8 @@ where
                 let first_challenger_public_values = first_shard_challenger.public_values(builder);
                 let initial_challenger_public_values =
                     initial_reconstruct_challenger.public_values(builder);
-                for (first, initial) in first_challenger_public_values
-                    .into_iter()
-                    .zip(initial_challenger_public_values)
+                for (first, initial) in
+                    first_challenger_public_values.into_iter().zip(initial_challenger_public_values)
                 {
                     builder.assert_felt_eq(is_first_shard * (first - initial), C::F::ZERO);
                 }
@@ -290,9 +289,8 @@ where
             // between all shards.
             let mut challenger = leaf_challenger.copy(builder);
 
-            let global_permutation_challenges = (0..2)
-                .map(|_| challenger.sample_ext(builder))
-                .collect::<Vec<_>>();
+            let global_permutation_challenges =
+                (0..2).map(|_| challenger.sample_ext(builder)).collect::<Vec<_>>();
 
             StarkVerifier::verify_shard(
                 builder,
@@ -409,9 +407,8 @@ where
                 }
 
                 // Update the MemoryInitialize address bits.
-                for (bit, pub_bit) in current_init_addr_bits
-                    .iter_mut()
-                    .zip(public_values.last_init_addr_bits.iter())
+                for (bit, pub_bit) in
+                    current_init_addr_bits.iter_mut().zip(public_values.last_init_addr_bits.iter())
                 {
                     *bit = *pub_bit;
                 }
@@ -442,9 +439,8 @@ where
 
                 // Using the flags, we can constrain the equality.
                 for is_non_zero in is_non_zero_flags {
-                    for (word_current, word_public) in committed_value_digest
-                        .into_iter()
-                        .zip(public_values.committed_value_digest)
+                    for (word_current, word_public) in
+                        committed_value_digest.into_iter().zip(public_values.committed_value_digest)
                     {
                         for (byte_current, byte_public) in word_current.into_iter().zip(word_public)
                         {
@@ -600,16 +596,9 @@ where
 
 impl<SC: KoalaBearFriConfig> ZKMRecursionWitnessValues<SC> {
     pub fn shape(&self) -> ZKMRecursionShape {
-        let proof_shapes = self
-            .shard_proofs
-            .iter()
-            .map(|proof| proof.shape())
-            .collect();
+        let proof_shapes = self.shard_proofs.iter().map(|proof| proof.shape()).collect();
 
-        ZKMRecursionShape {
-            proof_shapes,
-            is_complete: self.is_complete,
-        }
+        ZKMRecursionShape { proof_shapes, is_complete: self.is_complete }
     }
 }
 
@@ -618,11 +607,8 @@ impl ZKMRecursionWitnessValues<KoalaBearPoseidon2> {
         machine: &StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
         shape: &ZKMRecursionShape,
     ) -> Self {
-        let (mut vks, shard_proofs): (Vec<_>, Vec<_>) = shape
-            .proof_shapes
-            .iter()
-            .map(|shape| dummy_vk_and_shard_proof(machine, shape))
-            .unzip();
+        let (mut vks, shard_proofs): (Vec<_>, Vec<_>) =
+            shape.proof_shapes.iter().map(|shape| dummy_vk_and_shard_proof(machine, shape)).unzip();
         let vk = vks.pop().unwrap();
         Self {
             vk,
@@ -638,9 +624,6 @@ impl ZKMRecursionWitnessValues<KoalaBearPoseidon2> {
 
 impl From<ProofShape> for ZKMRecursionShape {
     fn from(proof_shape: ProofShape) -> Self {
-        Self {
-            proof_shapes: vec![proof_shape],
-            is_complete: false,
-        }
+        Self { proof_shapes: vec![proof_shape], is_complete: false }
     }
 }

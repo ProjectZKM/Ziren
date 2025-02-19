@@ -1,9 +1,9 @@
 use std::{borrow::Borrow, marker::PhantomData};
 
 use p3_air::Air;
-use p3_koala_bear::KoalaBear;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm2_stark::{air::MachineAir, StarkMachine};
@@ -13,7 +13,7 @@ use crate::{
     constraints::RecursiveVerifierConstraintFolder,
     machine::{assert_root_public_values_valid, RootPublicValues},
     stark::StarkVerifier,
-    KoalaBearFriConfigVariable, CircuitConfig,
+    CircuitConfig, KoalaBearFriConfigVariable,
 };
 
 use super::ZKMCompressWitnessVariable;
@@ -68,12 +68,8 @@ where
         }
 
         // Observe the main commitment and public values.
-        challenger.observe_slice(
-            builder,
-            proof.public_values[0..machine.num_pv_elts()]
-                .iter()
-                .copied(),
-        );
+        challenger
+            .observe_slice(builder, proof.public_values[0..machine.num_pv_elts()].iter().copied());
 
         let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
         StarkVerifier::verify_shard(

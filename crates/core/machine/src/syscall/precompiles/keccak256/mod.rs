@@ -21,9 +21,9 @@ impl KeccakPermuteChip {
 
 #[cfg(test)]
 pub mod permute_tests {
+    use test_artifacts::KECCAK_PERMUTE_ELF;
     use zkm2_core_executor::{syscalls::SyscallCode, Executor, Instruction, Opcode, Program};
     use zkm2_stark::{CpuProver, ZKMCoreOpts};
-    use test_artifacts::KECCAK_PERMUTE_ELF;
 
     use crate::utils::{self, run_test};
 

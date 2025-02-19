@@ -34,6 +34,9 @@ use precompiles::{
     },
 };
 
+use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
+use verify::VerifySyscall;
+use write::WriteSyscall;
 use zkm2_curves::{
     edwards::ed25519::{Ed25519, Ed25519Parameters},
     weierstrass::{
@@ -43,9 +46,6 @@ use zkm2_curves::{
         secp256r1::Secp256r1,
     },
 };
-use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
-use verify::VerifySyscall;
-use write::WriteSyscall;
 
 use crate::events::FieldOperation;
 
@@ -80,7 +80,6 @@ pub trait Syscall: Send + Sync {
 #[allow(clippy::too_many_lines)]
 pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     let mut syscall_map = HashMap::<SyscallCode, Arc<dyn Syscall>>::default();
-
 
     syscall_map.insert(SyscallCode::SHA_EXTEND, Arc::new(Sha256ExtendSyscall));
 

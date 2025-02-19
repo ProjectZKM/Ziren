@@ -24,13 +24,7 @@ impl Syscall for HintLenSyscall {
 pub(crate) struct HintReadSyscall;
 
 impl Syscall for HintReadSyscall {
-    fn execute(
-        &self,
-        ctx: &mut SyscallContext,
-        _: SyscallCode,
-        ptr: u32,
-        len: u32,
-    ) -> Option<u32> {
+    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, ptr: u32, len: u32) -> Option<u32> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
@@ -40,15 +34,8 @@ impl Syscall for HintReadSyscall {
         }
         let vec = &ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr];
         ctx.rt.state.input_stream_ptr += 1;
-        assert!(
-            !ctx.rt.unconstrained,
-            "hint read should not be used in a unconstrained block"
-        );
-        assert_eq!(
-            vec.len() as u32,
-            len,
-            "hint input stream read length mismatch"
-        );
+        assert!(!ctx.rt.unconstrained, "hint read should not be used in a unconstrained block");
+        assert_eq!(vec.len() as u32, len, "hint input stream read length mismatch");
         assert_eq!(ptr % 4, 0, "hint read address not aligned to 4 bytes");
         // Iterate through the vec in 4-byte chunks
         for i in (0..len).step_by(4) {
@@ -63,10 +50,7 @@ impl Syscall for HintReadSyscall {
 
             // Save the data into runtime state so the runtime will use the desired data instead of
             // 0 when first reading/writing from this address.
-            ctx.rt
-                .uninitialized_memory_checkpoint
-                .entry(ptr + i)
-                .or_insert_with(|| false);
+            ctx.rt.uninitialized_memory_checkpoint.entry(ptr + i).or_insert_with(|| false);
             ctx.rt
                 .state
                 .uninitialized_memory

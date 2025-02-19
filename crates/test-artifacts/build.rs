@@ -6,10 +6,8 @@ use std::{
 use zkm2_build::build_program_with_args;
 
 fn main() -> Result<()> {
-    let tests_path = [env!("CARGO_MANIFEST_DIR"), "programs"]
-        .iter()
-        .collect::<PathBuf>()
-        .canonicalize()?;
+    let tests_path =
+        [env!("CARGO_MANIFEST_DIR"), "programs"].iter().collect::<PathBuf>().canonicalize()?;
 
     build_program_with_args(
         tests_path

@@ -81,13 +81,7 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         debug_assert_eq!(digest_layers.len(), 2 * new_len - 2);
 
         let root = HV::constant_compress([last_layer[0], last_layer[1]]);
-        (
-            root,
-            Self {
-                height,
-                digest_layers,
-            },
-        )
+        (root, Self { height, digest_layers })
     }
 
     pub fn open(&self, index: usize) -> (HV::Digest, MerkleProof<F, HV>) {
@@ -126,11 +120,7 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
 
         for sibling in path {
             // If the index is odd, swap the order of [value, sibling].
-            let new_pair = if index % 2 == 0 {
-                [value, sibling]
-            } else {
-                [sibling, value]
-            };
+            let new_pair = if index % 2 == 0 { [value, sibling] } else { [sibling, value] };
             value = HV::constant_compress(new_pair);
             index >>= 1;
         }
@@ -162,8 +152,8 @@ pub fn verify<C: CircuitConfig, HV: FieldHasherVariable<C>>(
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_util::log2_ceil_usize;
     use rand::rngs::OsRng;
     use zkhash::ark_ff::UniformRand;
@@ -192,9 +182,8 @@ mod tests {
         for _ in 0..5 {
             // Test with different number of leaves.
             for j in 2..20 {
-                let leaves: Vec<[F; DIGEST_SIZE]> = (0..j)
-                    .map(|_| std::array::from_fn(|_| F::rand(&mut rng)))
-                    .collect();
+                let leaves: Vec<[F; DIGEST_SIZE]> =
+                    (0..j).map(|_| std::array::from_fn(|_| F::rand(&mut rng))).collect();
                 let (root, tree) = MerkleTree::<KoalaBear, HV>::commit(leaves.to_vec());
                 for (i, leaf) in leaves.iter().enumerate() {
                     let (_, proof) = MerkleTree::<KoalaBear, HV>::open(&tree, i);
@@ -210,12 +199,8 @@ mod tests {
 
                     let index_var = builder.constant(KoalaBear::from_canonical_usize(i));
                     let index_bits = C::num2bits(&mut builder, index_var, log2_ceil_usize(j));
-                    let root_variable: [Felt<_>; 8] = root
-                        .iter()
-                        .map(|x| builder.constant(*x))
-                        .collect_vec()
-                        .try_into()
-                        .unwrap();
+                    let root_variable: [Felt<_>; 8] =
+                        root.iter().map(|x| builder.constant(*x)).collect_vec().try_into().unwrap();
 
                     let proof_variable = MerkleProofVariable::<InnerConfig, KoalaBearPoseidon2> {
                         index: index_bits,

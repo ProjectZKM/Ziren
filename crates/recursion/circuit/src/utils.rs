@@ -1,8 +1,8 @@
 use std::mem::MaybeUninit;
 
-use p3_koala_bear::KoalaBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
 
 use zkm2_recursion_compiler::ir::{Builder, Config, Felt, Var};
 use zkm2_recursion_core::{air::ChallengerPublicValues, DIGEST_SIZE};
@@ -106,7 +106,8 @@ pub(crate) mod tests {
     use zkm2_recursion_compiler::ir::TracedVec;
     use zkm2_recursion_core::{machine::RecursionAir, Runtime};
     use zkm2_stark::{
-        koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerChallenge, InnerVal, MachineProver,
+        koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerChallenge, InnerVal,
+        MachineProver,
     };
 
     use crate::witness::WitnessBlock;

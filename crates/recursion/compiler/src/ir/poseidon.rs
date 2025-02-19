@@ -15,10 +15,7 @@ impl<C: Config> Builder<C> {
             }
             Array::Dyn(_, len) => self.array::<Felt<C::F>>(*len),
         };
-        self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((
-            output.clone(),
-            array.clone(),
-        ))));
+        self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((output.clone(), array.clone()))));
         output
     }
 
@@ -26,10 +23,7 @@ impl<C: Config> Builder<C> {
     ///
     /// Reference: [p3_poseidon2::Poseidon2]
     pub fn poseidon2_permute_mut(&mut self, array: &Array<C, Felt<C::F>>) {
-        self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((
-            array.clone(),
-            array.clone(),
-        ))));
+        self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((array.clone(), array.clone()))));
     }
 
     /// Applies the Poseidon2 absorb function to the given array.
@@ -40,10 +34,7 @@ impl<C: Config> Builder<C> {
         p2_hash_and_absorb_num: Var<C::N>,
         input: &Array<C, Felt<C::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2AbsorbKoalaBear(
-            p2_hash_and_absorb_num,
-            input.clone(),
-        ));
+        self.push_op(DslIr::Poseidon2AbsorbKoalaBear(p2_hash_and_absorb_num, input.clone()));
     }
 
     /// Applies the Poseidon2 finalize to the given hash number.
@@ -54,10 +45,7 @@ impl<C: Config> Builder<C> {
         p2_hash_num: Var<C::N>,
         output: &Array<C, Felt<C::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2FinalizeKoalaBear(
-            p2_hash_num,
-            output.clone(),
-        ));
+        self.push_op(DslIr::Poseidon2FinalizeKoalaBear(p2_hash_num, output.clone()));
     }
 
     /// Applies the Poseidon2 compression function to the given array.
@@ -103,25 +91,23 @@ impl<C: Config> Builder<C> {
 
         let break_flag: Var<_> = self.eval(C::N::ZERO);
         let last_index: Usize<_> = self.eval(array.len() - 1);
-        self.range(0, array.len())
-            .step_by(HASH_RATE)
-            .for_each(|i, builder| {
-                builder.if_eq(break_flag, C::N::ONE).then(|builder| {
+        self.range(0, array.len()).step_by(HASH_RATE).for_each(|i, builder| {
+            builder.if_eq(break_flag, C::N::ONE).then(|builder| {
+                builder.break_loop();
+            });
+            // Insert elements of the chunk.
+            builder.range(0, HASH_RATE).for_each(|j, builder| {
+                let index: Var<_> = builder.eval(i + j);
+                let element = builder.get(array, index);
+                builder.set_value(&mut state, j, element);
+                builder.if_eq(index, last_index).then(|builder| {
+                    builder.assign(break_flag, C::N::ONE);
                     builder.break_loop();
                 });
-                // Insert elements of the chunk.
-                builder.range(0, HASH_RATE).for_each(|j, builder| {
-                    let index: Var<_> = builder.eval(i + j);
-                    let element = builder.get(array, index);
-                    builder.set_value(&mut state, j, element);
-                    builder.if_eq(index, last_index).then(|builder| {
-                        builder.assign(break_flag, C::N::ONE);
-                        builder.break_loop();
-                    });
-                });
-
-                builder.poseidon2_permute_mut(&state);
             });
+
+            builder.poseidon2_permute_mut(&state);
+        });
 
         state.truncate(self, Usize::Const(DIGEST_SIZE));
         state
@@ -169,12 +155,10 @@ impl<C: Config> Builder<C> {
                     let felt = builder.get(&felts, i);
                     builder.set_value(&mut state, idx, felt);
                     builder.assign(idx, idx + C::N::ONE);
-                    builder
-                        .if_eq(idx, C::N::from_canonical_usize(HASH_RATE))
-                        .then(|builder| {
-                            builder.poseidon2_permute_mut(&state);
-                            builder.assign(idx, C::N::ZERO);
-                        });
+                    builder.if_eq(idx, C::N::from_canonical_usize(HASH_RATE)).then(|builder| {
+                        builder.poseidon2_permute_mut(&state);
+                        builder.assign(idx, C::N::ZERO);
+                    });
                 }
             });
         });

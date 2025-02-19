@@ -343,8 +343,8 @@ where
                     b[i] = local.b[i].into();
                     c[i] = local.c[i].into();
                 } else {
-                    b[i] = b_sign_extend.clone() * byte_mask;
-                    c[i] = c_sign_extend.clone() * byte_mask;
+                    b[i] = b_sign_extend * byte_mask;
+                    c[i] = c_sign_extend * byte_mask;
                 }
             }
             (b, c)
@@ -380,9 +380,7 @@ where
             let has_hi = local.is_mult + local.is_multu;
             for i in 0..WORD_SIZE {
                 builder.assert_eq(product[i], local.a[i]);
-                builder
-                    .when(has_hi.clone())
-                    .assert_eq(product[i + WORD_SIZE], local.hi[i]);
+                builder.when(has_hi.clone()).assert_eq(product[i + WORD_SIZE], local.hi[i]);
             }
         }
 
@@ -410,9 +408,7 @@ where
         // Calculate the opcode.
         let opcode = {
             // Exactly one of the op codes must be on.
-            builder
-               .when(local.is_real)
-               .assert_one(local.is_mul + local.is_mult + local.is_multu);
+            builder.when(local.is_real).assert_one(local.is_mul + local.is_mult + local.is_multu);
 
             let mul: AB::Expr = AB::F::from_canonical_u32(Opcode::MUL as u32).into();
             let mult: AB::Expr = AB::F::from_canonical_u32(Opcode::MULT as u32).into();
@@ -451,30 +447,25 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    };
 
     use super::MulChip;
 
     #[test]
     fn generate_trace_mul() {
-       let mut shard = ExecutionRecord::default();
+        let mut shard = ExecutionRecord::default();
 
-       // Fill mul_events with 10 MUL events.
-       let mut mul_events: Vec<AluEvent> = Vec::new();
-       for _ in 0..10 {
-           mul_events.push(AluEvent::new(
-               0,
-               0,
-               Opcode::MUL,
-               0x80004000,
-               0x80000000,
-               0xffff8000,
-           ));
-       }
-       shard.mul_events = mul_events;
-       let chip = MulChip::default();
-       let _trace: RowMajorMatrix<KoalaBear> =
-           chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        // Fill mul_events with 10 MUL events.
+        let mut mul_events: Vec<AluEvent> = Vec::new();
+        for _ in 0..10 {
+            mul_events.push(AluEvent::new(0, 0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000));
+        }
+        shard.mul_events = mul_events;
+        let chip = MulChip::default();
+        let _trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default());
     }
 
     #[test]

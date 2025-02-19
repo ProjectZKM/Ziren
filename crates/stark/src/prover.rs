@@ -264,11 +264,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             }
         }
 
-        let chip_ordering = merged_chips
-            .iter()
-            .enumerate()
-            .map(|(i, name)| (name.clone(), i))
-            .collect();
+        let chip_ordering =
+            merged_chips.iter().enumerate().map(|(i, name)| (name.clone(), i)).collect();
 
         (chip_ordering, chip_scopes, merged_prover_data)
     }
@@ -356,16 +353,10 @@ where
         let (main_commit, main_data) = pcs.commit(domains_and_traces);
 
         // Get the chip ordering.
-        let chip_ordering = named_traces
-            .iter()
-            .enumerate()
-            .map(|(i, (name, _))| (name.to_owned(), i))
-            .collect();
+        let chip_ordering =
+            named_traces.iter().enumerate().map(|(i, (name, _))| (name.to_owned(), i)).collect();
 
-        let traces = named_traces
-            .into_iter()
-            .map(|(_, trace)| trace)
-            .collect::<Vec<_>>();
+        let traces = named_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
 
         ShardMainData {
             traces,
@@ -397,19 +388,9 @@ where
                     chip_ordering: global_chip_ordering,
                     public_values: _,
                 } = global_data;
-                (
-                    global_traces,
-                    global_main_commit,
-                    Some(global_main_data),
-                    global_chip_ordering,
-                )
+                (global_traces, global_main_commit, Some(global_main_data), global_chip_ordering)
             } else {
-                (
-                    vec![],
-                    self.config().pcs().zero_commitment(),
-                    None,
-                    HashMap::new(),
-                )
+                (vec![], self.config().pcs().zero_commitment(), None, HashMap::new())
             };
 
         let ShardMainData {
@@ -428,35 +409,24 @@ where
             &local_chip_ordering,
         );
 
-        let chips = self
-            .machine()
-            .shard_chips_ordered(&all_chips_ordering)
-            .collect::<Vec<_>>();
+        let chips = self.machine().shard_chips_ordered(&all_chips_ordering).collect::<Vec<_>>();
 
         assert!(chips.len() == all_shard_data.len());
 
         let config = self.machine().config();
 
-        let degrees = all_shard_data
-            .iter()
-            .map(|shard_data| shard_data.trace.height())
-            .collect::<Vec<_>>();
+        let degrees =
+            all_shard_data.iter().map(|shard_data| shard_data.trace.height()).collect::<Vec<_>>();
 
-        let log_degrees = degrees
-            .iter()
-            .map(|degree| log2_strict_usize(*degree))
-            .collect::<Vec<_>>();
+        let log_degrees =
+            degrees.iter().map(|degree| log2_strict_usize(*degree)).collect::<Vec<_>>();
 
-        let log_quotient_degrees = chips
-            .iter()
-            .map(|chip| chip.log_quotient_degree())
-            .collect::<Vec<_>>();
+        let log_quotient_degrees =
+            chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let pcs = config.pcs();
-        let trace_domains = degrees
-            .iter()
-            .map(|degree| pcs.natural_domain_for_degree(*degree))
-            .collect::<Vec<_>>();
+        let trace_domains =
+            degrees.iter().map(|degree| pcs.natural_domain_for_degree(*degree)).collect::<Vec<_>>();
 
         // Observe the main commitment.
         challenger.observe(local_main_commit.clone());
@@ -486,10 +456,8 @@ where
                     .par_iter()
                     .zip(all_shard_data.par_iter())
                     .map(|(chip, shard_data)| {
-                        let preprocessed_trace = pk
-                            .chip_ordering
-                            .get(&chip.name())
-                            .map(|&index| &pk.traces[index]);
+                        let preprocessed_trace =
+                            pk.chip_ordering.get(&chip.name()).map(|&index| &pk.traces[index]);
                         let (perm_trace, global_sum, local_sum) = chip.generate_permutation_trace(
                             preprocessed_trace,
                             shard_data.trace,
@@ -607,25 +575,19 @@ where
             .into_iter()
             .zip_eq(quotient_values)
             .zip_eq(log_quotient_degrees.iter())
-            .flat_map(
-                |((quotient_domain, quotient_values), log_quotient_degree)| {
-                    let quotient_degree = 1 << *log_quotient_degree;
-                    let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
-                    let quotient_chunks =
-                        quotient_domain.split_evals(quotient_degree, quotient_flat);
-                    let qc_domains = quotient_domain.split_domains(quotient_degree);
-                    qc_domains.into_iter().zip_eq(quotient_chunks)
-                },
-            )
+            .flat_map(|((quotient_domain, quotient_values), log_quotient_degree)| {
+                let quotient_degree = 1 << *log_quotient_degree;
+                let quotient_flat = RowMajorMatrix::new_col(quotient_values).flatten_to_base();
+                let quotient_chunks = quotient_domain.split_evals(quotient_degree, quotient_flat);
+                let qc_domains = quotient_domain.split_domains(quotient_degree);
+                qc_domains.into_iter().zip_eq(quotient_chunks)
+            })
             .collect::<Vec<_>>();
 
         let num_quotient_chunks = quotient_domains_and_chunks.len();
         assert_eq!(
             num_quotient_chunks,
-            chips
-                .iter()
-                .map(|c| 1 << c.log_quotient_degree())
-                .sum::<usize>()
+            chips.iter().map(|c| 1 << c.log_quotient_degree()).sum::<usize>()
         );
 
         let (quotient_commit, quotient_data) = tracing::debug_span!("commit to quotient traces")
@@ -675,9 +637,8 @@ where
             });
 
         // Compute quotient opening points, open every chunk at zeta.
-        let quotient_opening_points = (0..num_quotient_chunks)
-            .map(|_| vec![zeta])
-            .collect::<Vec<_>>();
+        let quotient_opening_points =
+            (0..num_quotient_chunks).map(|_| vec![zeta]).collect::<Vec<_>>();
 
         // Split the trace_opening_points to the global and local chips.
         let mut global_trace_opening_points = Vec::with_capacity(global_chip_ordering.len());
@@ -731,13 +692,7 @@ where
         } else {
             let [preprocessed_values, local_main_values, permutation_values, quotient_values] =
                 openings.try_into().unwrap();
-            (
-                preprocessed_values,
-                None,
-                local_main_values,
-                permutation_values,
-                quotient_values,
-            )
+            (preprocessed_values, None, local_main_values, permutation_values, quotient_values)
         };
 
         let preprocessed_opened_values = preprocessed_values
@@ -750,10 +705,7 @@ where
                 } else {
                     let [local] = op.try_into().unwrap();
                     let width = local.len();
-                    AirOpenedValues {
-                        local,
-                        next: vec![SC::Challenge::ZERO; width],
-                    }
+                    AirOpenedValues { local, next: vec![SC::Challenge::ZERO; width] }
                 }
             })
             .collect::<Vec<_>>();
@@ -766,9 +718,8 @@ where
             let local_order = local_chip_ordering.get(&chip.name());
             match (global_order, local_order) {
                 (Some(&global_order), None) => {
-                    let global_main_values = global_main_values
-                        .as_ref()
-                        .expect("Global main values should be Some");
+                    let global_main_values =
+                        global_main_values.as_ref().expect("Global main values should be Some");
                     main_values.push((global_main_values[global_order].clone(), chip.local_only()));
                 }
                 (None, Some(&local_order)) => {
@@ -788,10 +739,7 @@ where
                 } else {
                     let [local] = op.try_into().unwrap();
                     let width = local.len();
-                    AirOpenedValues {
-                        local,
-                        next: vec![SC::Challenge::ZERO; width],
-                    }
+                    AirOpenedValues { local, next: vec![SC::Challenge::ZERO; width] }
                 }
             })
             .collect::<Vec<_>>();
@@ -817,27 +765,22 @@ where
             .zip_eq(cumulative_sums)
             .zip_eq(log_degrees.iter())
             .enumerate()
-            .map(
-                |(i, ((((main, permutation), quotient), cumulative_sums), log_degree))| {
-                    let preprocessed = pk
-                        .chip_ordering
-                        .get(&chips[i].name())
-                        .map(|&index| preprocessed_opened_values[index].clone())
-                        .unwrap_or(AirOpenedValues {
-                            local: vec![],
-                            next: vec![],
-                        });
-                    ChipOpenedValues {
-                        preprocessed,
-                        main,
-                        permutation,
-                        quotient,
-                        global_cumulative_sum: cumulative_sums[0],
-                        local_cumulative_sum: cumulative_sums[1],
-                        log_degree: *log_degree,
-                    }
-                },
-            )
+            .map(|(i, ((((main, permutation), quotient), cumulative_sums), log_degree))| {
+                let preprocessed = pk
+                    .chip_ordering
+                    .get(&chips[i].name())
+                    .map(|&index| preprocessed_opened_values[index].clone())
+                    .unwrap_or(AirOpenedValues { local: vec![], next: vec![] });
+                ChipOpenedValues {
+                    preprocessed,
+                    main,
+                    permutation,
+                    quotient,
+                    global_cumulative_sum: cumulative_sums[0],
+                    local_cumulative_sum: cumulative_sums[1],
+                    log_degree: *log_degree,
+                }
+            })
             .collect::<Vec<_>>();
 
         Ok(ShardProof::<SC> {
@@ -847,9 +790,7 @@ where
                 permutation_commit,
                 quotient_commit,
             },
-            opened_values: ShardOpenedValues {
-                chips: opened_values,
-            },
+            opened_values: ShardOpenedValues { chips: opened_values },
             opening_proof,
             chip_ordering: all_chips_ordering,
             public_values: local_public_values,
@@ -878,8 +819,7 @@ where
 
         if contains_global_bus {
             // Generate dependencies.
-            self.machine()
-                .generate_dependencies(&mut records, &opts, None);
+            self.machine().generate_dependencies(&mut records, &opts, None);
         }
 
         // Generate and commit the global traces for each shard.
@@ -898,22 +838,18 @@ where
 
         // Observe the challenges for each segment.
         tracing::debug_span!("observing all challenges").in_scope(|| {
-            global_data
-                .iter()
-                .zip_eq(records.iter())
-                .for_each(|(global_data, record)| {
-                    if contains_global_bus {
-                        challenger.observe(
-                            global_data
-                                .as_ref()
-                                .expect("must have a global commitment")
-                                .main_commit
-                                .clone(),
-                        );
-                    }
-                    challenger
-                        .observe_slice(&record.public_values::<SC::Val>()[0..self.num_pv_elts()]);
-                });
+            global_data.iter().zip_eq(records.iter()).for_each(|(global_data, record)| {
+                if contains_global_bus {
+                    challenger.observe(
+                        global_data
+                            .as_ref()
+                            .expect("must have a global commitment")
+                            .main_commit
+                            .clone(),
+                    );
+                }
+                challenger.observe_slice(&record.public_values::<SC::Val>()[0..self.num_pv_elts()]);
+            });
         });
 
         // Obtain the challenges used for the global permutation argument.

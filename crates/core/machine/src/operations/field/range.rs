@@ -1,10 +1,10 @@
 use itertools::izip;
+use std::fmt::Debug;
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
 use zkm2_stark::air::{BaseAirBuilder, Polynomial, ZKMAirBuilder};
-use std::fmt::Debug;
 
 use num::BigUint;
 

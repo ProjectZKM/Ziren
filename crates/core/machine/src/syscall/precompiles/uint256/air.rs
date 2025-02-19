@@ -17,6 +17,11 @@ use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
+use typenum::Unsigned;
 use zkm2_core_executor::{
     events::{ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
@@ -31,11 +36,6 @@ use zkm2_stark::{
     air::{BaseAirBuilder, InteractionScope, MachineAir, Polynomial, ZKMAirBuilder},
     MachineRecord,
 };
-use std::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
-use typenum::Unsigned;
 
 /// The number of columns in the Uint256MulCols.
 const NUM_COLS: usize = size_of::<Uint256MulCols<u8>>();
@@ -260,8 +260,7 @@ where
         // If the modulus is zero, then we don't perform the modulus operation.
         // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
         // not overflow because we are summing 32 bytes.
-        let modulus_byte_sum =
-            modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
+        let modulus_byte_sum = modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
         IsZeroOperation::<AB::F>::eval(
             builder,
             modulus_byte_sum,

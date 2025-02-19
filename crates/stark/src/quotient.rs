@@ -34,9 +34,8 @@ where
     Mat: Matrix<Val<SC>> + Sync,
 {
     let quotient_size = quotient_domain.size();
-    let prep_width = preprocessed_trace_on_quotient_domain
-        .as_ref()
-        .map_or(1, p3_matrix::Matrix::width);
+    let prep_width =
+        preprocessed_trace_on_quotient_domain.as_ref().map_or(1, p3_matrix::Matrix::width);
     let main_width = main_trace_on_quotient_domain.width();
     let perm_width = permutation_trace_on_quotient_domain.width();
     let sels = trace_domain.selectors_on_coset(quotient_domain);

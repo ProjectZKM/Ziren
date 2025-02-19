@@ -3,12 +3,8 @@
 use std::{borrow::Borrow, ops::Deref};
 
 //use p3_koala_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY};
-use p3_koala_bear::KoalaBear;
-use p3_koala_bear::KoalaBearParameters;
-use p3_field::Field;
 use p3_field::{FieldAlgebra, PrimeField32};
-use p3_monty_31::InternalLayerBaseParameters;
-use p3_monty_31::MontyField31;
+use p3_koala_bear::KoalaBear;
 
 pub mod air;
 pub mod columns;
@@ -69,12 +65,8 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     for j in (0..WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
     }
-    let sums: [AF; 4] = core::array::from_fn(|k| {
-        (0..WIDTH)
-            .step_by(4)
-            .map(|j| state[j + k].clone())
-            .sum::<AF>()
-    });
+    let sums: [AF; 4] =
+        core::array::from_fn(|k| (0..WIDTH).step_by(4).map(|j| state[j + k].clone()).sum::<AF>());
 
     for j in 0..WIDTH {
         state[j] = state[j].clone() + sums[j % 4].clone();
@@ -128,13 +120,13 @@ pub(crate) mod tests {
         machine::RecursionAir, runtime::instruction as instr, stark::KoalaBearPoseidon2Outer,
         MemAccessKind, RecursionProgram, Runtime,
     };
-    use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_field::{FieldAlgebra, PrimeField32};
+    use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_symmetric::Permutation;
 
     use zkhash::ark_ff::UniformRand;
     use zkm2_core_machine::utils::{run_test_machine, setup_logger};
-    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, inner_perm, StarkGenericConfig};
+    use zkm2_stark::{inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::WIDTH;
 
@@ -154,9 +146,7 @@ pub(crate) mod tests {
 
         let rng = &mut rand::thread_rng();
         let input_1: [KoalaBear; WIDTH] = std::array::from_fn(|_| KoalaBear::rand(rng));
-        let output_1 = inner_perm()
-            .permute(input_1)
-            .map(|x| KoalaBear::as_canonical_u32(&x));
+        let output_1 = inner_perm().permute(input_1).map(|x| KoalaBear::as_canonical_u32(&x));
         let input_1 = input_1.map(|x| KoalaBear::as_canonical_u32(&x));
 
         let instructions =
@@ -184,10 +174,7 @@ pub(crate) mod tests {
                 }))
                 .collect::<Vec<_>>();
 
-        let program = Arc::new(RecursionProgram {
-            instructions,
-            ..Default::default()
-        });
+        let program = Arc::new(RecursionProgram { instructions, ..Default::default() });
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             KoalaBearPoseidon2::new().perm,

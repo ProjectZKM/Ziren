@@ -221,9 +221,7 @@ impl<F: PrimeField> MachineAir<F> for DivRemChip {
         let mut rows: Vec<[F; NUM_DIVREM_COLS]> = vec![];
         let divrem_events = input.divrem_events.clone();
         for event in divrem_events.iter() {
-            assert!(
-                event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV
-            );
+            assert!(event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV);
             let mut row = [F::ZERO; NUM_DIVREM_COLS];
             let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
 
@@ -766,10 +764,7 @@ where
         // Receive the arguments.
         {
             // Exactly one of the opcode flags must be on.
-            builder.assert_eq(
-                one.clone(),
-                local.is_divu + local.is_div,
-            );
+            builder.assert_eq(one.clone(), local.is_divu + local.is_div);
 
             let opcode = {
                 let divu: AB::Expr = AB::F::from_canonical_u32(Opcode::DIVU as u32).into();
@@ -798,7 +793,9 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    };
 
     use super::DivRemChip;
 
@@ -853,7 +850,8 @@ mod tests {
         let chip = DivRemChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
-        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+        let proof =
+            uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();

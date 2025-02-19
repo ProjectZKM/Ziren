@@ -17,11 +17,7 @@ impl<M: Matrix<T>, T: Send + Sync> SubMatrixRowSlices<M, T> {
     /// Creates a new [`SubMatrixRowSlices`].
     #[must_use]
     pub const fn new(inner: M, column_range: Range<usize>) -> Self {
-        Self {
-            inner,
-            column_range,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { inner, column_range, _phantom: std::marker::PhantomData }
     }
 }
 
@@ -34,10 +30,7 @@ impl<M: Matrix<T>, T: Send + Sync> Matrix<T> for SubMatrixRowSlices<M, T> {
 
     #[inline]
     fn row(&self, r: usize) -> Self::Row<'_> {
-        self.inner
-            .row(r)
-            .take(self.column_range.end)
-            .skip(self.column_range.start)
+        self.inner.row(r).take(self.column_range.end).skip(self.column_range.start)
     }
 
     #[inline]
@@ -69,16 +62,12 @@ impl<'a, AB: AirBuilder, SubAir: BaseAir<T>, T> SubAirBuilder<'a, AB, SubAir, T>
     /// Creates a new [`SubAirBuilder`].
     #[must_use]
     pub fn new(inner: &'a mut AB, column_range: Range<usize>) -> Self {
-        Self {
-            inner,
-            column_range,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { inner, column_range, _phantom: std::marker::PhantomData }
     }
 }
 
 /// Implement `AirBuilder` for `SubAirBuilder`.
-impl<'a, AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'a, AB, SubAir, F> {
+impl<AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'_, AB, SubAir, F> {
     type F = AB::F;
     type Expr = AB::Expr;
     type Var = AB::Var;

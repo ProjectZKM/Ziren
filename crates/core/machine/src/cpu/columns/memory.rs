@@ -1,6 +1,6 @@
+use std::mem::size_of;
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::Word;
-use std::mem::size_of;
 
 use crate::{memory::MemoryReadWriteCols, operations::KoalaBearWordRangeChecker};
 

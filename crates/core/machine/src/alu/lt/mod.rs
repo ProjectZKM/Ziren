@@ -6,7 +6,7 @@ use core::{
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use zkm2_core_executor::{
@@ -461,7 +461,9 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    };
 
     use super::LtChip;
 

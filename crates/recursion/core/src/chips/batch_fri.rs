@@ -85,12 +85,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
                 }
             })
             .for_each(|instruction| {
-                let BatchFRIInstr {
-                    base_vec_addrs,
-                    ext_single_addrs,
-                    ext_vec_addrs,
-                    acc_mult,
-                } = instruction.as_ref();
+                let BatchFRIInstr { base_vec_addrs, ext_single_addrs, ext_vec_addrs, acc_mult } =
+                    instruction.as_ref();
                 let len = ext_vec_addrs.p_at_z.len();
                 let mut row_add = vec![[F::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS]; len];
                 debug_assert_eq!(*acc_mult, F::ONE);
@@ -142,11 +138,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             .collect_vec();
 
         // Pad the trace to a power of two.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_BATCH_FRI_COLS],
-            input.fixed_log2_rows(self),
-        );
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_BATCH_FRI_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
         let trace = RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_BATCH_FRI_COLS);
@@ -176,11 +168,7 @@ impl<const DEGREE: usize> BatchFRIChip<DEGREE> {
         _next_prepr: &BatchFRIPreprocessedCols<AB::Var>,
     ) {
         // Constrain memory read for alpha_pow, p_at_z, and p_at_x.
-        builder.receive_block(
-            local_prepr.alpha_pow_addr,
-            local.alpha_pow,
-            local_prepr.is_real,
-        );
+        builder.receive_block(local_prepr.alpha_pow_addr, local.alpha_pow, local_prepr.is_real);
         builder.receive_block(local_prepr.p_at_z_addr, local.p_at_z, local_prepr.is_real);
         builder.receive_single(local_prepr.p_at_x_addr, local.p_at_x, local_prepr.is_real);
 
@@ -197,27 +185,21 @@ impl<const DEGREE: usize> BatchFRIChip<DEGREE> {
         );
 
         // Constrain the accumulator of the next row when the current row is the end of loop.
-        builder
-            .when_transition()
-            .when(local_prepr.is_end)
-            .assert_ext_eq(
-                next.acc.as_extension::<AB>(),
-                next.alpha_pow.as_extension::<AB>()
-                    * (next.p_at_z.as_extension::<AB>()
-                        - BinomialExtension::from_base(next.p_at_x.into())),
-            );
+        builder.when_transition().when(local_prepr.is_end).assert_ext_eq(
+            next.acc.as_extension::<AB>(),
+            next.alpha_pow.as_extension::<AB>()
+                * (next.p_at_z.as_extension::<AB>()
+                    - BinomialExtension::from_base(next.p_at_x.into())),
+        );
 
         // Constrain the accumulator of the next row when the current row is not the end of loop.
-        builder
-            .when_transition()
-            .when_not(local_prepr.is_end)
-            .assert_ext_eq(
-                next.acc.as_extension::<AB>(),
-                local.acc.as_extension::<AB>()
-                    + next.alpha_pow.as_extension::<AB>()
-                        * (next.p_at_z.as_extension::<AB>()
-                            - BinomialExtension::from_base(next.p_at_x.into())),
-            );
+        builder.when_transition().when_not(local_prepr.is_end).assert_ext_eq(
+            next.acc.as_extension::<AB>(),
+            local.acc.as_extension::<AB>()
+                + next.alpha_pow.as_extension::<AB>()
+                    * (next.p_at_z.as_extension::<AB>()
+                        - BinomialExtension::from_base(next.p_at_x.into())),
+        );
     }
 
     pub const fn do_memory_access<T: Copy>(local: &BatchFRIPreprocessedCols<T>) -> T {
@@ -240,12 +222,8 @@ where
         let prepr_next: &BatchFRIPreprocessedCols<AB::Var> = (*prepr_next).borrow();
 
         // Dummy constraints to normalize to DEGREE.
-        let lhs = (0..DEGREE)
-            .map(|_| prepr_local.is_real.into())
-            .product::<AB::Expr>();
-        let rhs = (0..DEGREE)
-            .map(|_| prepr_local.is_real.into())
-            .product::<AB::Expr>();
+        let lhs = (0..DEGREE).map(|_| prepr_local.is_real.into()).product::<AB::Expr>();
+        let rhs = (0..DEGREE).map(|_| prepr_local.is_real.into()).product::<AB::Expr>();
         builder.assert_eq(lhs, rhs);
 
         self.eval_batch_fri::<AB>(builder, local, next, prepr_local, prepr_next);

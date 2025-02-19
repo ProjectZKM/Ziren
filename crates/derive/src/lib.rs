@@ -281,9 +281,7 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
             // Attach an extra generic AB : crate::air::ZKMAirBuilder to the generics of the enum
             let generics = &ast.generics;
             let mut new_generics = generics.clone();
-            new_generics
-                .params
-                .push(syn::parse_quote! { AB: p3_air::PairBuilder + #builder_path });
+            new_generics.params.push(syn::parse_quote! { AB: p3_air::PairBuilder + #builder_path });
 
             let (air_impl_generics, _, _) = new_generics.split_for_impl();
 

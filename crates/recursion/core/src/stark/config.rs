@@ -1,13 +1,10 @@
-use p3_koala_bear::{KoalaBear, Poseidon2ExternalLayerKoalaBear};
 use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
-use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
-use p3_fri::{
-    BatchOpening, CommitPhaseProofStep, FriConfig, FriGenericConfig, FriProof, QueryProof,
-    TwoAdicFriGenericConfig, TwoAdicFriPcs,
-};
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
@@ -58,10 +55,8 @@ pub fn outer_perm() -> OuterPerm {
     let mut round_constants = bn254_poseidon2_rc3();
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
-    let internal_round_constants = round_constants
-        .drain(internal_start..internal_end)
-        .map(|vec| vec[0])
-        .collect::<Vec<_>>();
+    let internal_round_constants =
+        round_constants.drain(internal_start..internal_end).map(|vec| vec[0]).collect::<Vec<_>>();
     let external_round_constants = ExternalLayerConstants::new(
         round_constants[..(ROUNDS_F / 2)].to_vec(),
         round_constants[(ROUNDS_F / 2)..].to_vec(),
@@ -84,12 +79,7 @@ pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
             Err(_) => 25,
         }
     };
-    FriConfig {
-        log_blowup: 4,
-        num_queries,
-        proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
+    FriConfig { log_blowup: 4, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 /// The FRI config for outer recursion.
@@ -106,12 +96,7 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
             Err(_) => 100 / log_blowup,
         }
     };
-    FriConfig {
-        log_blowup,
-        num_queries,
-        proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
+    FriConfig { log_blowup, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 #[derive(Deserialize)]
@@ -199,10 +184,5 @@ pub fn test_fri_config() -> FriConfig<OuterChallengeMmcs> {
     let hash = OuterHash::new(perm.clone()).unwrap();
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress));
-    FriConfig {
-        log_blowup: 1,
-        num_queries: 1,
-        proof_of_work_bits: 1,
-        mmcs: challenge_mmcs,
-    }
+    FriConfig { log_blowup: 1, num_queries: 1, proof_of_work_bits: 1, mmcs: challenge_mmcs }
 }

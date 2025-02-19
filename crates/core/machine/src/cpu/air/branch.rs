@@ -127,9 +127,7 @@ impl CpuChip {
                 .assert_zero(branch_cols.a_eq_b);
 
             // When the opcode is BNE and we are branching, assert that a_eq_b is false.
-            builder
-                .when(local.selectors.is_bne * local.branching)
-                .assert_zero(branch_cols.a_eq_b);
+            builder.when(local.selectors.is_bne * local.branching).assert_zero(branch_cols.a_eq_b);
 
             // When the opcode is BNE and we are not branching, assert that a_eq_b is true.
             builder
@@ -138,9 +136,7 @@ impl CpuChip {
                 .assert_one(branch_cols.a_eq_b);
 
             // When the opcode is BLTZ and we are branching, assert that either a_lt_0 is true.
-            builder
-                .when(local.selectors.is_bltz * local.branching)
-                .assert_one(branch_cols.a_lt_0);
+            builder.when(local.selectors.is_bltz * local.branching).assert_one(branch_cols.a_lt_0);
 
             // When the opcode is BLTZ and we are not branching, assert that either a_eq_0 or a_gt_0 is true.
             builder
@@ -171,9 +167,7 @@ impl CpuChip {
                 .assert_one(branch_cols.a_gt_0);
 
             // When the opcode is BGTZ and we are branching, assert that a_gt_0 is true.
-            builder
-                .when(local.selectors.is_bgtz * local.branching)
-                .assert_one(branch_cols.a_gt_0);
+            builder.when(local.selectors.is_bgtz * local.branching).assert_one(branch_cols.a_gt_0);
 
             // When the opcode is BGTZ and we are not branching, assert that a_eq_0 or a_lt_0 is true.
             builder
@@ -213,7 +207,7 @@ impl CpuChip {
 
         // Calculate a_gt_0 <==> a > 0 (using appropriate signedness).
         builder.send_alu(
-             Opcode::SLT.as_field::<AB::F>(),
+            Opcode::SLT.as_field::<AB::F>(),
             Word::extend_var::<AB>(branch_cols.a_gt_0),
             Word::zero::<AB>(),
             local.op_a_val(),

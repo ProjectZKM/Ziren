@@ -136,12 +136,8 @@ mod tests {
 
     #[test]
     fn defaults() {
-        let ZKMContext {
-            hook_registry,
-            subproof_verifier,
-            max_cycles: cycle_limit,
-            ..
-        } = ZKMContext::builder().build();
+        let ZKMContext { hook_registry, subproof_verifier, max_cycles: cycle_limit, .. } =
+            ZKMContext::builder().build();
         assert!(hook_registry.is_none());
         assert!(subproof_verifier.is_none());
         assert!(cycle_limit.is_none());
@@ -163,21 +159,14 @@ mod tests {
 
     #[test]
     fn without_default_hooks_with_custom_hook() {
-        let ZKMContext { hook_registry, .. } = ZKMContext::builder()
-            .without_default_hooks()
-            .hook(30, |_, _| vec![])
-            .build();
-        assert_eq!(
-            &hook_registry.unwrap().table.into_keys().collect::<Vec<_>>(),
-            &[30]
-        );
+        let ZKMContext { hook_registry, .. } =
+            ZKMContext::builder().without_default_hooks().hook(30, |_, _| vec![]).build();
+        assert_eq!(&hook_registry.unwrap().table.into_keys().collect::<Vec<_>>(), &[30]);
     }
 
     #[test]
     fn subproof_verifier() {
-        let ZKMContext {
-            subproof_verifier, ..
-        } = ZKMContext::builder()
+        let ZKMContext { subproof_verifier, .. } = ZKMContext::builder()
             .subproof_verifier(Arc::new(DefaultSubproofVerifier::new()))
             .build();
         assert!(subproof_verifier.is_some());

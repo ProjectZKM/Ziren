@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use p3_air::Air;
-use p3_koala_bear::KoalaBear;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     challenger::DuplexChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
-    KoalaBearFriConfigVariable, CircuitConfig,
+    CircuitConfig, KoalaBearFriConfigVariable,
 };
 use zkm2_recursion_compiler::ir::{Builder, Felt};
 use zkm2_recursion_core::DIGEST_SIZE;

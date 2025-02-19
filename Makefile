@@ -18,6 +18,9 @@ clippy: ## Run clippy checks over all workspace members and formatted correctly
 fix: ## Automatically apply lint suggestions. This flag implies `--no-deps` and `--all-targets`
 	@cargo clippy --fix
 
+fmt:
+	@cargo fmt
+
 test: ## Run tests for all the workspace members
 	@cargo test --release --all
 

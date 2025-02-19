@@ -1,7 +1,7 @@
 pub mod branch;
-pub mod syscall;
 pub mod memory;
 pub mod register;
+pub mod syscall;
 
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
@@ -151,7 +151,9 @@ impl CpuChip {
             .assert_eq(local.op_a_val().reduce::<AB>(), local.pc + AB::F::from_canonical_u8(8));
 
         // Verify that the word form of local.pc is correct for JAL instructions.
-        builder.when(is_jump_instruction.clone()).assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
+        builder
+            .when(is_jump_instruction.clone())
+            .assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
 
         // Verify that the word form of target.pc is correct for both jump instructions.
         builder
@@ -203,10 +205,10 @@ impl CpuChip {
     // pub(crate) fn eval_auipc<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
     //    // Get the auipc specific columns.
     //     let auipc_columns = local.opcode_specific_columns.auipc();
-    // 
+    //
     //     // Verify that the word form of local.pc is correct.
     //     builder.when(local.selectors.is_auipc).assert_eq(auipc_columns.pc.reduce::<AB>(), local.pc);
-    // 
+    //
     //     // Range check the pc.
     //     KoalaBearWordRangeChecker::<AB::F>::range_check(
     //         builder,
@@ -214,7 +216,7 @@ impl CpuChip {
     //         auipc_columns.pc_range_checker,
     //         local.selectors.is_auipc.into(),
     //     );
-    // 
+    //
     //     // Verify that op_a == pc + op_b.
     //     builder.send_alu(
     //         AB::Expr::from_canonical_u32(Opcode::ADD as u32),
@@ -294,9 +296,9 @@ impl CpuChip {
             local.is_sequential_instr,
             AB::Expr::ONE
                 - (is_branch_instruction
-                + local.selectors.is_jump
-                + local.selectors.is_jumpd
-                + is_halt),
+                    + local.selectors.is_jump
+                    + local.selectors.is_jumpd
+                    + is_halt),
         );
 
         // Verify that the pc increments by 4 for all instructions except instruction after branch, jump
@@ -309,10 +311,7 @@ impl CpuChip {
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> next.pc, local.next_next_pc <==> next.next_pc
-        builder
-            .when_transition()
-            .when(next.is_real)
-            .assert_eq(local.next_pc, next.pc);
+        builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
 
         builder
             .when_transition()

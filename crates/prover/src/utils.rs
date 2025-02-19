@@ -6,9 +6,9 @@ use std::{
 };
 
 use itertools::Itertools;
-use p3_koala_bear::KoalaBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_symmetric::CryptographicHasher;
 use zkm2_core_executor::{Executor, Program};
 use zkm2_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
@@ -22,7 +22,9 @@ use zkm2_stark::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 use crate::{InnerSC, ZKMCoreProofData};
 
 /// Get the ZKM vkey KoalaBear Poseidon2 digest this reduce proof is representing.
-pub fn zkm2_vkey_digest_koalabear(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> [KoalaBear; 8] {
+pub fn zkm2_vkey_digest_koalabear(
+    proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
+) -> [KoalaBear; 8] {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
     pv.zkm2_vk_digest
@@ -64,12 +66,7 @@ pub fn assert_root_public_values_valid(
     public_values: &RootPublicValues<KoalaBear>,
 ) {
     let expected_digest = root_public_values_digest(config, public_values);
-    for (value, expected) in public_values
-        .digest()
-        .iter()
-        .copied()
-        .zip_eq(expected_digest)
-    {
+    for (value, expected) in public_values.digest().iter().copied().zip_eq(expected_digest) {
         assert_eq!(value, expected);
     }
 }
@@ -91,9 +88,8 @@ pub fn zkm2_committed_values_digest_bn254(
 ) -> Bn254Fr {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
-    let committed_values_digest_bytes: [KoalaBear; 32] = words_to_bytes(&pv.committed_value_digest)
-        .try_into()
-        .unwrap();
+    let committed_values_digest_bytes: [KoalaBear; 32] =
+        words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
     koalabear_bytes_to_bn254(&committed_values_digest_bytes)
 }
 
@@ -122,7 +118,7 @@ pub fn load_elf(path: &str) -> Result<Vec<u8>, std::io::Error> {
 }
 
 pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
-    return words.iter().flat_map(|word| word.0).collect();
+    words.iter().flat_map(|word| word.0).collect()
 }
 
 /// Convert 8 KoalaBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
@@ -165,7 +161,7 @@ pub fn words_to_bytes_be(words: &[u32; 8]) -> [u8; 32] {
     bytes
 }
 
-pub trait MaybeTakeIterator<I: Iterator>: Iterator<Item=I::Item> {
+pub trait MaybeTakeIterator<I: Iterator>: Iterator<Item = I::Item> {
     fn maybe_skip(self, bound: Option<usize>) -> RangedIterator<Self>
     where
         Self: Sized,

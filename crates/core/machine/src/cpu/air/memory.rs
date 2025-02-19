@@ -3,7 +3,7 @@ use p3_field::FieldAlgebra;
 use zkm2_stark::{air::ZKMAirBuilder, Word};
 
 use crate::{
-    air::{ZKMCoreAirBuilder, WordAirBuilder},
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
     cpu::{
         columns::{CpuCols, MemoryColumns, OpcodeSelectorCols},
         CpuChip,
@@ -33,7 +33,7 @@ impl CpuChip {
             + opcode_selectors.is_swl
             + opcode_selectors.is_swr
             + opcode_selectors.is_sc
-            // + opcode_selectors.is_sdc1
+        // + opcode_selectors.is_sdc1
     }
 
     /// Computes whether the opcode is a load instruction.
@@ -62,7 +62,7 @@ impl CpuChip {
             + opcode_selectors.is_swr
             + opcode_selectors.is_swl
             + opcode_selectors.is_sc
-            // + opcode_selectors.is_sdc1
+        // + opcode_selectors.is_sdc1
     }
 
     /// Computes whether the opcode is a store instruction.
@@ -130,11 +130,11 @@ impl CpuChip {
             memory_columns.offset_is_two,
             memory_columns.offset_is_three,
         ]
-            .iter()
-            .enumerate()
-            .fold(AB::Expr::ZERO, |acc, (index, &value)| {
-                acc + AB::Expr::from_canonical_usize(index + 1) * value
-            });
+        .iter()
+        .enumerate()
+        .fold(AB::Expr::ZERO, |acc, (index, &value)| {
+            acc + AB::Expr::from_canonical_usize(index + 1) * value
+        });
         let mut recomposed_byte = AB::Expr::ZERO;
         memory_columns.aa_least_sig_byte_decomp.iter().enumerate().for_each(|(i, value)| {
             builder.when(is_memory_instruction.clone()).assert_bool(*value);
@@ -237,23 +237,23 @@ impl CpuChip {
         // Compute the expected stored value for a LWR instruction.
         let lwr_expected_load_value = Word([
             mem_val[0] * offset_is_zero.clone()
-               + mem_val[1] * memory_columns.offset_is_one
-               + mem_val[2] * memory_columns.offset_is_two
-               + mem_val[3] * memory_columns.offset_is_three,
+                + mem_val[1] * memory_columns.offset_is_one
+                + mem_val[2] * memory_columns.offset_is_two
+                + mem_val[3] * memory_columns.offset_is_three,
             mem_val[1] * offset_is_zero.clone()
-               + mem_val[2] * memory_columns.offset_is_one
-               + mem_val[3] * memory_columns.offset_is_two
-               + prev_a_val[1] * memory_columns.offset_is_three,
+                + mem_val[2] * memory_columns.offset_is_one
+                + mem_val[3] * memory_columns.offset_is_two
+                + prev_a_val[1] * memory_columns.offset_is_three,
             mem_val[2] * offset_is_zero.clone()
-               + mem_val[3] * memory_columns.offset_is_one
-               + prev_a_val[2] * (one.clone() - memory_columns.offset_is_one - offset_is_zero.clone()),
+                + mem_val[3] * memory_columns.offset_is_one
+                + prev_a_val[2]
+                    * (one.clone() - memory_columns.offset_is_one - offset_is_zero.clone()),
             mem_val[3] * offset_is_zero.clone()
-               + prev_a_val[3] * (one.clone() - offset_is_zero.clone())
+                + prev_a_val[3] * (one.clone() - offset_is_zero.clone()),
         ]);
         builder
             .when(local.selectors.is_lwr)
             .assert_word_eq(a_val.map(|x| x.into()), lwr_expected_load_value);
-
 
         // Compute the expected stored value for a LWL instruction.
         let lwl_expected_load_value = Word([
@@ -282,12 +282,13 @@ impl CpuChip {
         builder.when(local.selectors.is_ll).assert_one(offset_is_zero.clone());
 
         // value stay the same.
-        builder.when(local.selectors.is_lwr)
-        .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
-        builder.when(local.selectors.is_lwl)
+        builder
+            .when(local.selectors.is_lwr)
             .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
-        builder.when(local.selectors.is_ll)
+        builder
+            .when(local.selectors.is_lwl)
             .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
+        builder.when(local.selectors.is_ll).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
     }
 
     /// Evaluates constraints related to storing to memory.
@@ -369,7 +370,7 @@ impl CpuChip {
                 + a_val[3] * memory_columns.offset_is_two
                 + a_val[2] * memory_columns.offset_is_three,
             prev_mem_val[3] * (one.clone() - memory_columns.offset_is_three)
-                + a_val[3] * memory_columns.offset_is_three
+                + a_val[3] * memory_columns.offset_is_three,
         ]);
         builder
             .when(local.selectors.is_swl)
@@ -381,8 +382,7 @@ impl CpuChip {
                 + prev_mem_val[0] * (one.clone() - offset_is_zero.clone()),
             a_val[1] * offset_is_zero.clone()
                 + a_val[0] * memory_columns.offset_is_one
-                + prev_mem_val[1]
-                * (memory_columns.offset_is_two + memory_columns.offset_is_three),
+                + prev_mem_val[1] * (memory_columns.offset_is_two + memory_columns.offset_is_three),
             a_val[2] * offset_is_zero.clone()
                 + a_val[1] * memory_columns.offset_is_one
                 + a_val[0] * memory_columns.offset_is_two
@@ -403,18 +403,15 @@ impl CpuChip {
         builder.when(local.selectors.is_sc).assert_one(offset_is_zero.clone());
 
         // mem_val = prev_a_val
-        builder.when(local.selectors.is_sc)
-            .assert_word_eq(
-                prev_a_val.map(|x| x.into()),
-                mem_val.map(|x| x.into())
-            );
+        builder
+            .when(local.selectors.is_sc)
+            .assert_word_eq(prev_a_val.map(|x| x.into()), mem_val.map(|x| x.into()));
 
         // a_val = 1
         builder.when(local.selectors.is_sc).assert_one(a_val[0]);
         builder.when(local.selectors.is_sc).assert_zero(a_val[1]);
         builder.when(local.selectors.is_sc).assert_zero(a_val[2]);
         builder.when(local.selectors.is_sc).assert_zero(a_val[3]);
-
 
         // // When the instruction is SDC1: compute the expected stored value
         // builder.when(local.selectors.is_sdc1).assert_zero(mem_val[0].into());
@@ -515,7 +512,6 @@ impl CpuChip {
             .when(local.selectors.is_lwr)
             .assert_word_eq(lwr_unsigned_mem_val, local.unsigned_mem_val.map(|x| x.into()));
 
-
         // When the instruction is LWL:
         // val = mem_value << (24 - addr_offset * 8);
         // mask = 0xffFFffFFu32 << (24 - addr_offset * 8);
@@ -527,7 +523,7 @@ impl CpuChip {
             mem_val[0] * memory_columns.offset_is_one
                 + mem_val[1] * memory_columns.offset_is_two
                 + (one.clone() - memory_columns.offset_is_two - memory_columns.offset_is_one)
-                * mem_val[2],
+                    * mem_val[2],
             mem_val[0] * offset_is_zero.clone()
                 + mem_val[1] * memory_columns.offset_is_one
                 + mem_val[2] * memory_columns.offset_is_two
@@ -542,7 +538,6 @@ impl CpuChip {
         builder
             .when(local.selectors.is_ll)
             .assert_word_eq(mem_val, local.unsigned_mem_val.map(|x| x.into()));
-
     }
 
     /// Evaluates the decomposition of the most significant byte of the memory value.

@@ -54,10 +54,7 @@ impl<V: Copy> PagedMemory<V> {
 
     /// Create a `PagedMemory` with capacity `MAX_PAGE_COUNT`.
     pub fn new_preallocated() -> Self {
-        Self {
-            page_table: Vec::new(),
-            index: vec![NO_PAGE; MAX_PAGE_COUNT],
-        }
+        Self { page_table: Vec::new(), index: vec![NO_PAGE; MAX_PAGE_COUNT] }
     }
 
     /// Get a reference to the memory value at the given address, if it exists.
@@ -113,9 +110,7 @@ impl<V: Copy> PagedMemory<V> {
             let index = self.page_table.len();
             self.index[upper] = index as u16;
             self.page_table.push(NewPage::new());
-            Entry::Vacant(VacantEntry {
-                entry: &mut self.page_table[index].0[lower],
-            })
+            Entry::Vacant(VacantEntry { entry: &mut self.page_table[index].0[lower] })
         } else {
             let option = &mut self.page_table[index as usize].0[lower];
             match option {
@@ -126,19 +121,15 @@ impl<V: Copy> PagedMemory<V> {
     }
 
     /// Returns an iterator over the occupied addresses.
-    pub fn keys(&self) -> impl Iterator<Item=u32> + '_ {
-        self.index
-            .iter()
-            .enumerate()
-            .filter(|(_, &i)| i != NO_PAGE)
-            .flat_map(|(i, index)| {
-                let upper = i << LOG_PAGE_LEN;
-                self.page_table[*index as usize]
-                    .0
-                    .iter()
-                    .enumerate()
-                    .filter_map(move |(lower, v)| v.map(|_| Self::decompress_addr(upper + lower)))
-            })
+    pub fn keys(&self) -> impl Iterator<Item = u32> + '_ {
+        self.index.iter().enumerate().filter(|(_, &i)| i != NO_PAGE).flat_map(|(i, index)| {
+            let upper = i << LOG_PAGE_LEN;
+            self.page_table[*index as usize]
+                .0
+                .iter()
+                .enumerate()
+                .filter_map(move |(lower, v)| v.map(|_| Self::decompress_addr(upper + lower)))
+        })
     }
 
     /// Clears the page table. Drops all `Page`s, but retains the memory used by the table itself.
@@ -178,10 +169,7 @@ impl<V: Copy> PagedMemory<V> {
 
 impl<V: Copy> Default for PagedMemory<V> {
     fn default() -> Self {
-        Self {
-            page_table: Vec::new(),
-            index: vec![NO_PAGE; MAX_PAGE_COUNT],
-        }
+        Self { page_table: Vec::new(), index: vec![NO_PAGE; MAX_PAGE_COUNT] }
     }
 }
 
@@ -267,7 +255,7 @@ impl<'a, V: Copy> OccupiedEntry<'a, V> {
 }
 
 impl<V: Copy> FromIterator<(u32, V)> for PagedMemory<V> {
-    fn from_iter<T: IntoIterator<Item=(u32, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (u32, V)>>(iter: T) -> Self {
         let mut mmu = Self::default();
         for (k, v) in iter {
             mmu.insert(k, v);
@@ -279,25 +267,21 @@ impl<V: Copy> FromIterator<(u32, V)> for PagedMemory<V> {
 impl<V: Copy + 'static> IntoIterator for PagedMemory<V> {
     type Item = (u32, V);
 
-    type IntoIter = Box<dyn Iterator<Item=Self::Item>>;
+    type IntoIter = Box<dyn Iterator<Item = Self::Item>>;
 
     fn into_iter(mut self) -> Self::IntoIter {
-        Box::new(
-            self.index
-                .into_iter()
-                .enumerate()
-                .filter(|(_, i)| *i != NO_PAGE)
-                .flat_map(move |(i, index)| {
-                    let upper = i << LOG_PAGE_LEN;
-                    let replacement = NewPage::new();
-                    std::mem::replace(&mut self.page_table[index as usize], replacement)
-                        .0
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(move |(lower, v)| {
-                            v.map(|v| (Self::decompress_addr(upper + lower), v))
-                        })
-                }),
-        )
+        Box::new(self.index.into_iter().enumerate().filter(|(_, i)| *i != NO_PAGE).flat_map(
+            move |(i, index)| {
+                let upper = i << LOG_PAGE_LEN;
+                let replacement = NewPage::new();
+                std::mem::replace(&mut self.page_table[index as usize], replacement)
+                    .0
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(move |(lower, v)| {
+                        v.map(|v| (Self::decompress_addr(upper + lower), v))
+                    })
+            },
+        ))
     }
 }

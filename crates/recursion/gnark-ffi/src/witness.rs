@@ -21,11 +21,7 @@ impl GnarkWitness {
         witness.felts.push(C::F::from_canonical_usize(999));
         witness.exts.push(C::EF::from_canonical_usize(999));
         GnarkWitness {
-            vars: witness
-                .vars
-                .into_iter()
-                .map(|w| w.as_canonical_biguint().to_string())
-                .collect(),
+            vars: witness.vars.into_iter().map(|w| w.as_canonical_biguint().to_string()).collect(),
             felts: witness
                 .felts
                 .into_iter()
@@ -35,10 +31,7 @@ impl GnarkWitness {
                 .exts
                 .into_iter()
                 .map(|w| {
-                    w.as_base_slice()
-                        .iter()
-                        .map(|x| x.as_canonical_biguint().to_string())
-                        .collect()
+                    w.as_base_slice().iter().map(|x| x.as_canonical_biguint().to_string()).collect()
                 })
                 .collect(),
             vkey_hash: witness.vkey_hash.as_canonical_biguint().to_string(),

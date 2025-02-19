@@ -51,13 +51,7 @@ pub(crate) fn assert_root_public_values_valid<C, H>(
     H: Posedion2KoalaBearHasherVariable<C>,
 {
     let expected_digest = root_public_values_digest::<C, H>(builder, &public_values.inner);
-    for (value, expected) in public_values
-        .inner
-        .digest
-        .iter()
-        .copied()
-        .zip_eq(expected_digest)
-    {
+    for (value, expected) in public_values.inner.digest.iter().copied().zip_eq(expected_digest) {
         builder.assert_felt_eq(value, expected);
     }
 }
@@ -74,12 +68,7 @@ where
     let input = public_values
         .zkm2_vk_digest
         .into_iter()
-        .chain(
-            public_values
-                .committed_value_digest
-                .into_iter()
-                .flat_map(|word| word.0.into_iter()),
-        )
+        .chain(public_values.committed_value_digest.into_iter().flat_map(|word| word.0.into_iter()))
         .collect::<Vec<_>>();
     H::poseidon2_hash(builder, &input)
 }

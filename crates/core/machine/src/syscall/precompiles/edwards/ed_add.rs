@@ -340,11 +340,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use zkm2_core_executor::Program;
-    use zkm2_stark::{CpuProver, ZKMCoreOpts};
+    use crate::utils;
     use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
     use zkm2_core_executor::Executor;
-    use crate::utils;
+    use zkm2_core_executor::Program;
+    use zkm2_stark::{CpuProver, ZKMCoreOpts};
 
     #[test]
     pub fn test_ed_add_program_execute() {

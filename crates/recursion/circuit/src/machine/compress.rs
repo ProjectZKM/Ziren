@@ -38,7 +38,7 @@ use crate::{
     },
     stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
     utils::uninit_challenger_pv,
-    KoalaBearFriConfig, KoalaBearFriConfigVariable, CircuitConfig, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
 };
 
 /// A program to verify a batch of recursive proofs and aggregate their public values.
@@ -103,10 +103,7 @@ where
         kind: PublicValuesOutputDigest,
     ) {
         // Read input.
-        let ZKMCompressWitnessVariable {
-            vks_and_proofs,
-            is_complete,
-        } = input;
+        let ZKMCompressWitnessVariable { vks_and_proofs, is_complete } = input;
 
         // Initialize the values for the aggregated public output.
 
@@ -138,9 +135,7 @@ where
             unsafe { uninit_challenger_pv(builder) };
         let mut committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
             array::from_fn(|_| {
-                Word(array::from_fn(|_| unsafe {
-                    MaybeUninit::zeroed().assume_init()
-                }))
+                Word(array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() }))
             });
         let mut deferred_proofs_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
             array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
@@ -175,9 +170,7 @@ where
             // Observe the main commitment and public values.
             challenger.observe_slice(
                 builder,
-                shard_proof.public_values[0..machine.num_pv_elts()]
-                    .iter()
-                    .copied(),
+                shard_proof.public_values[0..machine.num_pv_elts()].iter().copied(),
             );
 
             let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
@@ -209,21 +202,16 @@ where
                 // Initialize the start of deferred digests.
                 for (digest, current_digest, global_digest) in izip!(
                     reconstruct_deferred_digest.iter_mut(),
-                    current_public_values
-                        .start_reconstruct_deferred_digest
-                        .iter(),
-                    compress_public_values
-                        .start_reconstruct_deferred_digest
-                        .iter_mut()
+                    current_public_values.start_reconstruct_deferred_digest.iter(),
+                    compress_public_values.start_reconstruct_deferred_digest.iter_mut()
                 ) {
                     *digest = *current_digest;
                     *global_digest = *current_digest;
                 }
 
                 // Initialize the zkm2_vk digest
-                for (digest, first_digest) in zkm2_vk_digest
-                    .iter_mut()
-                    .zip(current_public_values.zkm2_vk_digest)
+                for (digest, first_digest) in
+                    zkm2_vk_digest.iter_mut().zip(current_public_values.zkm2_vk_digest)
                 {
                     *digest = first_digest;
                 }
@@ -292,20 +280,17 @@ where
             // Assert that the current values match the accumulated values.
 
             // Assert that the start deferred digest is equal to the current deferred digest.
-            for (digest, current_digest) in reconstruct_deferred_digest.iter().zip_eq(
-                current_public_values
-                    .start_reconstruct_deferred_digest
-                    .iter(),
-            ) {
+            for (digest, current_digest) in reconstruct_deferred_digest
+                .iter()
+                .zip_eq(current_public_values.start_reconstruct_deferred_digest.iter())
+            {
                 builder.assert_felt_eq(*digest, *current_digest);
             }
 
             // // Consistency checks for all accumulated values.
 
             // Assert that the zkm2_vk digest is always the same.
-            for (digest, current) in zkm2_vk_digest
-                .iter()
-                .zip(current_public_values.zkm2_vk_digest)
+            for (digest, current) in zkm2_vk_digest.iter().zip(current_public_values.zkm2_vk_digest)
             {
                 builder.assert_felt_eq(*digest, current);
             }
@@ -356,9 +341,8 @@ where
             }
 
             // Assert that the MemoryInitialize address bits are the same.
-            for (bit, current_bit) in init_addr_bits
-                .iter()
-                .zip(current_public_values.previous_init_addr_bits.iter())
+            for (bit, current_bit) in
+                init_addr_bits.iter().zip(current_public_values.previous_init_addr_bits.iter())
             {
                 builder.assert_felt_eq(*bit, *current_bit);
             }
@@ -372,9 +356,8 @@ where
             }
 
             // Assert that the leaf challenger is always the same.
-            for (current, expected) in leaf_challenger_values
-                .into_iter()
-                .zip(current_public_values.leaf_challenger)
+            for (current, expected) in
+                leaf_challenger_values.into_iter().zip(current_public_values.leaf_challenger)
             {
                 builder.assert_felt_eq(current, expected);
             }
@@ -493,9 +476,8 @@ where
             shard = current_public_values.next_shard;
 
             // Update the MemoryInitialize address bits.
-            for (bit, next_bit) in init_addr_bits
-                .iter_mut()
-                .zip(current_public_values.last_init_addr_bits.iter())
+            for (bit, next_bit) in
+                init_addr_bits.iter_mut().zip(current_public_values.last_init_addr_bits.iter())
             {
                 *bit = *next_bit;
             }
@@ -512,9 +494,8 @@ where
             reconstruct_challenger_values = current_public_values.end_reconstruct_challenger;
 
             // Update the cumulative sum.
-            for (sum_element, current_sum_element) in global_cumulative_sum
-                .iter_mut()
-                .zip_eq(current_public_values.cumulative_sum.iter())
+            for (sum_element, current_sum_element) in
+                global_cumulative_sum.iter_mut().zip_eq(current_public_values.cumulative_sum.iter())
             {
                 *sum_element = builder.eval(*sum_element + *current_sum_element);
             }
@@ -574,11 +555,7 @@ where
 
 impl<SC: KoalaBearFriConfig> ZKMCompressWitnessValues<SC> {
     pub fn shape(&self) -> ZKMCompressShape {
-        let proof_shapes = self
-            .vks_and_proofs
-            .iter()
-            .map(|(_, proof)| proof.shape())
-            .collect();
+        let proof_shapes = self.vks_and_proofs.iter().map(|(_, proof)| proof.shape()).collect();
         ZKMCompressShape { proof_shapes }
     }
 }
@@ -597,10 +574,7 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
             })
             .collect();
 
-        Self {
-            vks_and_proofs,
-            is_complete: false,
-        }
+        Self { vks_and_proofs, is_complete: false }
     }
 }
 

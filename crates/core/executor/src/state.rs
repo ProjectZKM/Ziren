@@ -53,10 +53,8 @@ pub struct ExecutionState {
     pub input_stream_ptr: usize,
 
     /// A stream of proofs (reduce vk, proof, verifying key) inputted to the program.
-    pub proof_stream: Vec<(
-        ZKMReduceProof<KoalaBearPoseidon2>,
-        StarkVerifyingKey<KoalaBearPoseidon2>,
-    )>,
+    pub proof_stream:
+        Vec<(ZKMReduceProof<KoalaBearPoseidon2>, StarkVerifyingKey<KoalaBearPoseidon2>)>,
 
     /// A ptr to the current position in the proof stream, incremented after verifying a proof.
     pub proof_stream_ptr: usize,

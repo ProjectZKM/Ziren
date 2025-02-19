@@ -1,4 +1,4 @@
-use p3_field::{FieldAlgebra, Field};
+use p3_field::{Field, FieldAlgebra};
 use zkm2_core_executor::{events::ByteRecord, ByteOpcode, ExecutionRecord};
 use zkm2_derive::AlignedBorrow;
 use zkm2_primitives::consts::WORD_SIZE;

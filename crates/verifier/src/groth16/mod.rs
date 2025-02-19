@@ -81,9 +81,9 @@ impl Groth16Verifier {
         zkm2_vkey_hash: &str,
         groth16_vk: &[u8],
     ) -> Result<bool, ArkGroth16Error> {
+        use crate::{decode_zkm2_vkey_hash, groth16::ark_converter::*, hash_public_inputs};
         use ark_bn254::Bn254;
         use ark_groth16::{r1cs_to_qap::LibsnarkReduction, Groth16};
-        use crate::{decode_zkm2_vkey_hash, groth16::ark_converter::*, hash_public_inputs};
 
         // Hash the vk and get the first 4 bytes.
         let groth16_vk_hash: [u8; 4] = Sha256::digest(groth16_vk)[..4]
@@ -102,19 +102,14 @@ impl Groth16Verifier {
         let proof = load_ark_proof_from_bytes(&proof[4..])?;
         let vkey = load_ark_groth16_verifying_key_from_bytes(groth16_vk)?;
 
-        let zkm2_vkey_hash = decode_zkm2_vkey_hash(zkm2_vkey_hash).map_err(
-            |_| ArkGroth16Error::InvalidProgramVkeyHash,
-        )?;
+        let zkm2_vkey_hash = decode_zkm2_vkey_hash(zkm2_vkey_hash)
+            .map_err(|_| ArkGroth16Error::InvalidProgramVkeyHash)?;
         let zkm2_public_inputs = hash_public_inputs(&zkm2_public_inputs);
 
-        let public_inputs = load_ark_public_inputs_from_bytes(
-            &zkm2_vkey_hash,
-            &zkm2_public_inputs,
-        );
+        let public_inputs = load_ark_public_inputs_from_bytes(&zkm2_vkey_hash, &zkm2_public_inputs);
 
-        Groth16::<Bn254, LibsnarkReduction>::verify_proof(&vkey.into(), &proof, &public_inputs).map_err(
-            |_| ArkGroth16Error::ProofVerificationFailed,
-        )
+        Groth16::<Bn254, LibsnarkReduction>::verify_proof(&vkey.into(), &proof, &public_inputs)
+            .map_err(|_| ArkGroth16Error::ProofVerificationFailed)
     }
 
     /// Verifies a Gnark Groth16 proof using raw byte inputs.

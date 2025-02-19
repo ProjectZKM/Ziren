@@ -50,20 +50,12 @@ pub fn try_build_groth16_bn254_artifacts_dev(
 
 /// Gets the directory where the PLONK artifacts are installed in development mode.
 pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap()
-        .join(".zkm2")
-        .join("circuits")
-        .join("dev")
+    dirs::home_dir().unwrap().join(".zkm2").join("circuits").join("dev")
 }
 
 /// Gets the directory where the groth16 artifacts are installed in development mode.
 pub fn groth16_bn254_artifacts_dev_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap()
-        .join(".zkm2")
-        .join("circuits")
-        .join("dev")
+    dirs::home_dir().unwrap().join(".zkm2").join("circuits").join("dev")
 }
 
 /// Build the plonk bn254 artifacts to the given directory for the given verification key and
@@ -141,9 +133,8 @@ pub fn build_constraints_and_witness(
 
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
     let vkey_hash = koalabears_to_bn254(&pv.zkm2_vk_digest);
-    let committed_values_digest_bytes: [KoalaBear; 32] = words_to_bytes(&pv.committed_value_digest)
-        .try_into()
-        .unwrap();
+    let committed_values_digest_bytes: [KoalaBear; 32] =
+        words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);
 
     tracing::info!("building template witness");

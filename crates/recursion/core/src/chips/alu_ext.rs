@@ -91,15 +91,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instrs.len() * NUM_EXT_ALU_ACCESS_COLS;
-        values[..populate_len]
-            .par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS)
-            .zip_eq(instrs)
-            .for_each(|(row, instr)| {
-                let ExtAluInstr {
-                    opcode,
-                    mult,
-                    addrs,
-                } = instr;
+        values[..populate_len].par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let ExtAluInstr { opcode, mult, addrs } = instr;
                 let access: &mut ExtAluAccessCols<_> = row.borrow_mut();
                 *access = ExtAluAccessCols {
                     addrs: addrs.to_owned(),
@@ -116,7 +110,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
                     ExtAluOpcode::DivE => &mut access.is_div,
                 };
                 *target_flag = F::from_bool(true);
-            });
+            },
+        );
 
         // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, NUM_EXT_ALU_PREPROCESSED_COLS))
@@ -138,13 +133,12 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
-        values[..populate_len]
-            .par_chunks_mut(NUM_EXT_ALU_VALUE_COLS)
-            .zip_eq(events)
-            .for_each(|(row, &vals)| {
+        values[..populate_len].par_chunks_mut(NUM_EXT_ALU_VALUE_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
                 let cols: &mut ExtAluValueCols<_> = row.borrow_mut();
                 *cols = ExtAluValueCols { vals };
-            });
+            },
+        );
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_EXT_ALU_COLS)
@@ -173,14 +167,7 @@ where
 
         for (
             ExtAluValueCols { vals },
-            ExtAluAccessCols {
-                addrs,
-                is_add,
-                is_sub,
-                is_mul,
-                is_div,
-                mult,
-            },
+            ExtAluAccessCols { addrs, is_add, is_sub, is_mul, is_div, mult },
         ) in zip(local.values, prep_local.accesses)
         {
             let in1 = vals.in1.as_extension::<AB>();
@@ -191,15 +178,9 @@ where
             let is_real = is_add + is_sub + is_mul + is_div;
             builder.assert_bool(is_real.clone());
 
-            builder
-                .when(is_add)
-                .assert_ext_eq(in1.clone() + in2.clone(), out.clone());
-            builder
-                .when(is_sub)
-                .assert_ext_eq(in1.clone(), in2.clone() + out.clone());
-            builder
-                .when(is_mul)
-                .assert_ext_eq(in1.clone() * in2.clone(), out.clone());
+            builder.when(is_add).assert_ext_eq(in1.clone() + in2.clone(), out.clone());
+            builder.when(is_sub).assert_ext_eq(in1.clone(), in2.clone() + out.clone());
+            builder.when(is_mul).assert_ext_eq(in1.clone() * in2.clone(), out.clone());
             builder.when(is_div).assert_ext_eq(in1, in2 * out);
 
             // Read the inputs from memory.
@@ -216,8 +197,8 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_koala_bear::KoalaBear;
     use p3_field::{extension::BinomialExtensionField, FieldAlgebra, FieldExtensionAlgebra};
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -280,10 +261,7 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram {
-            instructions,
-            ..Default::default()
-        };
+        let program = RecursionProgram { instructions, ..Default::default() };
 
         run_recursion_test_machines(program);
     }

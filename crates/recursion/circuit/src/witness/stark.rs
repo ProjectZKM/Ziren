@@ -1,14 +1,14 @@
 use std::borrow::Borrow;
 
-use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
+use p3_koala_bear::KoalaBear;
 
 use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm2_recursion_core::air::Block;
 use zkm2_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
-    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerInputProof, InnerPcsProof, InnerVal,
+    InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerInputProof, InnerVal,
 };
 
 use crate::{
@@ -86,17 +86,10 @@ where
     type WitnessVariable = BatchOpeningVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let opened_values = self
-            .opened_values
-            .read(builder)
-            .into_iter()
-            .map(|a| a.into_iter().map(|b| b).collect())
-            .collect();
+        let opened_values =
+            self.opened_values.read(builder).into_iter().map(|a| a.into_iter().collect()).collect();
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable {
-            opened_values,
-            opening_proof,
-        }
+        Self::WitnessVariable { opened_values, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -122,12 +115,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
         let query_proofs = self.query_proofs.read(builder);
         let final_poly = self.final_poly.read(builder);
         let pow_witness = self.pow_witness.read(builder);
-        Self::WitnessVariable {
-            commit_phase_commits,
-            query_proofs,
-            final_poly,
-            pow_witness,
-        }
+        Self::WitnessVariable { commit_phase_commits, query_proofs, final_poly, pow_witness }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -149,10 +137,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let input_proof = self.input_proof.read(builder);
         let commit_phase_openings = self.commit_phase_openings.read(builder);
-        Self::WitnessVariable {
-            input_proof,
-            commit_phase_openings,
-        }
+        Self::WitnessVariable { input_proof, commit_phase_openings }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -169,10 +154,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable {
-            sibling_value,
-            opening_proof,
-        }
+        Self::WitnessVariable { sibling_value, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

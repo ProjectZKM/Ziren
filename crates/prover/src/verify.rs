@@ -2,8 +2,8 @@ use std::{borrow::Borrow, path::Path, str::FromStr};
 
 use anyhow::Result;
 use num_bigint::BigUint;
-use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, PrimeField};
+use p3_koala_bear::KoalaBear;
 use zkm2_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm2_core_machine::cpu::MAX_CPU_LOG_DEGREE;
 use zkm2_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
@@ -74,9 +74,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             if shard_proof.contains_cpu() {
                 let log_degree_cpu = shard_proof.log_degree_cpu();
                 if log_degree_cpu > MAX_CPU_LOG_DEGREE {
-                    return Err(MachineVerificationError::CpuLogDegreeTooLarge(
-                        log_degree_cpu,
-                    ));
+                    return Err(MachineVerificationError::CpuLogDegreeTooLarge(log_degree_cpu));
                 }
             }
         }
@@ -283,12 +281,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         // Verify the shard proof.
         let mut challenger = self.core_prover.config().challenger();
-        let machine_proof = MachineProof {
-            shard_proofs: proof.0.to_vec(),
-        };
-        self.core_prover
-            .machine()
-            .verify(&vk.vk, &machine_proof, &mut challenger)?;
+        let machine_proof = MachineProof { shard_proofs: proof.0.to_vec() };
+        self.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger)?;
 
         Ok(())
     }
@@ -299,17 +293,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: &ZKMReduceProof<KoalaBearPoseidon2>,
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
-        let ZKMReduceProof {
-            vk: compress_vk,
-            proof,
-        } = proof;
+        let ZKMReduceProof { vk: compress_vk, proof } = proof;
         let mut challenger = self.compress_prover.config().challenger();
-        let machine_proof = MachineProof {
-            shard_proofs: vec![proof.clone()],
-        };
-        self.compress_prover
-            .machine()
-            .verify(compress_vk, &machine_proof, &mut challenger)?;
+        let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
+        self.compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
         // Validate public values
         let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
@@ -318,10 +305,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             public_values,
         );
 
-        if self.vk_verification
-            && !self
-                .allowed_vk_map
-                .contains_key(&compress_vk.hash_koalabear())
+        if self.vk_verification && !self.allowed_vk_map.contains_key(&compress_vk.hash_koalabear())
         {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
@@ -329,17 +313,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // `is_complete` should be 1. In the reduce program, this ensures that the proof is fully
         // reduced.
         if public_values.is_complete != KoalaBear::ONE {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "is_complete is not 1",
-            ));
+            return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
         // Verify that the proof is for the sp1 vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm2_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "sp1 vk hash mismatch",
-            ));
+            return Err(MachineVerificationError::InvalidPublicValues("sp1 vk hash mismatch"));
         }
 
         Ok(())
@@ -352,12 +332,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<CoreSC>> {
         let mut challenger = self.shrink_prover.config().challenger();
-        let machine_proof = MachineProof {
-            shard_proofs: vec![proof.proof.clone()],
-        };
-        self.shrink_prover
-            .machine()
-            .verify(&proof.vk, &machine_proof, &mut challenger)?;
+        let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
+        self.shrink_prover.machine().verify(&proof.vk, &machine_proof, &mut challenger)?;
 
         // Validate public values
         let public_values: &RecursionPublicValues<_> =
@@ -374,9 +350,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // Verify that the proof is for the sp1 vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm2_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "sp1 vk hash mismatch",
-            ));
+            return Err(MachineVerificationError::InvalidPublicValues("sp1 vk hash mismatch"));
         }
 
         Ok(())
@@ -389,14 +363,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vk: &ZKMVerifyingKey,
     ) -> Result<(), MachineVerificationError<OuterSC>> {
         let mut challenger = self.wrap_prover.config().challenger();
-        let machine_proof = MachineProof {
-            shard_proofs: vec![proof.proof.clone()],
-        };
+        let machine_proof = MachineProof { shard_proofs: vec![proof.proof.clone()] };
 
         let wrap_vk = self.wrap_vk.get().expect("Wrap verifier key not set");
-        self.wrap_prover
-            .machine()
-            .verify(wrap_vk, &machine_proof, &mut challenger)?;
+        self.wrap_prover.machine().verify(wrap_vk, &machine_proof, &mut challenger)?;
 
         // Validate public values
         let public_values: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
@@ -405,9 +375,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // Verify that the proof is for the sp1 vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm2_vk_digest() != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues(
-                "sp1 vk hash mismatch",
-            ));
+            return Err(MachineVerificationError::InvalidPublicValues("sp1 vk hash mismatch"));
         }
 
         Ok(())
@@ -518,10 +486,7 @@ impl<C: ZKMProverComponents> SubproofVerifier for &ZKMProver<C> {
         }
         // Check that proof is valid.
         self.verify_compressed(
-            &ZKMReduceProof {
-                vk: proof.vk.clone(),
-                proof: proof.proof.clone(),
-            },
+            &ZKMReduceProof { vk: proof.vk.clone(), proof: proof.proof.clone() },
             &ZKMVerifyingKey { vk: vk.clone() },
         )?;
         // Check that the committed value digest matches the one from syscall

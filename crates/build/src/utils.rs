@@ -20,19 +20,13 @@ pub(crate) fn cargo_rerun_if_changed(metadata: &Metadata, program_dir: &Path) {
     ];
     for dir in dirs {
         if dir.exists() {
-            println!(
-                "cargo::rerun-if-changed={}",
-                dir.canonicalize().unwrap().display()
-            );
+            println!("cargo::rerun-if-changed={}", dir.canonicalize().unwrap().display());
         }
     }
 
     // Re-run the build script if the workspace root's Cargo.lock changes. If the program is its own
     // workspace, this will be the program's Cargo.lock.
-    println!(
-        "cargo:rerun-if-changed={}",
-        metadata.workspace_root.join("Cargo.lock").as_str()
-    );
+    println!("cargo:rerun-if-changed={}", metadata.workspace_root.join("Cargo.lock").as_str());
 
     // Re-run if any local dependency changes.
     for package in &metadata.packages {

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra, PrimeField32, PrimeField64};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 
 use super::InteractionKind;
@@ -65,32 +65,19 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
     record: &A::Record,
     interaction_kinds: Vec<InteractionKind>,
     scope: InteractionScope,
-) -> (
-    BTreeMap<String, Vec<InteractionData<Val<SC>>>>,
-    BTreeMap<String, Val<SC>>,
-) {
+) -> (BTreeMap<String, Vec<InteractionData<Val<SC>>>>, BTreeMap<String, Val<SC>>) {
     let mut key_to_vec_data = BTreeMap::new();
     let mut key_to_count = BTreeMap::new();
 
     let trace = chip.generate_trace(record, &mut A::Record::default());
     let mut pre_traces = pkey.traces.clone();
-    let mut preprocessed_trace = pkey
-        .chip_ordering
-        .get(&chip.name())
-        .map(|&index| pre_traces.get_mut(index).unwrap());
+    let mut preprocessed_trace =
+        pkey.chip_ordering.get(&chip.name()).map(|&index| pre_traces.get_mut(index).unwrap());
     let mut main = trace.clone();
     let height = trace.clone().height();
 
-    let sends = chip
-        .sends()
-        .iter()
-        .filter(|s| s.scope == scope)
-        .collect::<Vec<_>>();
-    let receives = chip
-        .receives()
-        .iter()
-        .filter(|r| r.scope == scope)
-        .collect::<Vec<_>>();
+    let sends = chip.sends().iter().filter(|s| s.scope == scope).collect::<Vec<_>>();
+    let receives = chip.receives().iter().filter(|r| r.scope == scope).collect::<Vec<_>>();
 
     let nb_send_interactions = sends.len();
     for row in 0..height {
@@ -105,9 +92,8 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
                 .or_else(|| Some(&mut empty))
                 .unwrap();
             let is_send = m < nb_send_interactions;
-            let multiplicity_eval: Val<SC> = interaction
-                .multiplicity
-                .apply(preprocessed_row, main.row_mut(row));
+            let multiplicity_eval: Val<SC> =
+                interaction.multiplicity.apply(preprocessed_row, main.row_mut(row));
 
             if !multiplicity_eval.is_zero() {
                 let mut values = vec![];
@@ -121,17 +107,14 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
                     &interaction.kind.to_string(),
                     vec_to_string(values)
                 );
-                key_to_vec_data
-                    .entry(key.clone())
-                    .or_insert_with(Vec::new)
-                    .push(InteractionData {
-                        chip_name: chip.name(),
-                        kind: interaction.kind,
-                        row,
-                        interaction_number: m,
-                        is_send,
-                        multiplicity: multiplicity_eval,
-                    });
+                key_to_vec_data.entry(key.clone()).or_insert_with(Vec::new).push(InteractionData {
+                    chip_name: chip.name(),
+                    kind: interaction.kind,
+                    row,
+                    interaction_number: m,
+                    is_send,
+                    multiplicity: multiplicity_eval,
+                });
                 let current = key_to_count.entry(key.clone()).or_insert(Val::<SC>::ZERO);
                 if is_send {
                     *current += multiplicity_eval;
@@ -178,9 +161,8 @@ where
                 debug_interactions::<SC, A>(chip, pkey, shard, interaction_kinds.clone(), scope);
             total_events += count.len();
             for (key, value) in count.iter() {
-                let entry = final_map
-                    .entry(key.clone())
-                    .or_insert((SC::Val::ZERO, BTreeMap::new()));
+                let entry =
+                    final_map.entry(key.clone()).or_insert((SC::Val::ZERO, BTreeMap::new()));
                 entry.0 += *value;
                 total += *value;
                 *entry.1.entry(chip.name()).or_insert(SC::Val::ZERO) += *value;

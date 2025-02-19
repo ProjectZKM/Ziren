@@ -16,7 +16,7 @@ use crate::{
         CpuChip,
     },
     memory::MemoryCols,
-    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
+    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
 };
 
 impl CpuChip {
@@ -33,7 +33,11 @@ impl CpuChip {
     /// This method will do the following:
     /// 1. Send the syscall to the precompile table, if needed.
     /// 2. Check for valid op_a values.
-    pub(crate) fn eval_syscall<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
+    pub(crate) fn eval_syscall<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &CpuCols<AB::Var>,
+    ) {
         let syscall_cols = local.opcode_specific_columns.syscall();
         let is_syscall_instruction = self.is_syscall_instruction::<AB>(&local.selectors);
 
@@ -48,8 +52,10 @@ impl CpuChip {
         // Handle cases:
         // - is_syscall_instruction = 1 => syscall_mul_send_to_table == send_to_table
         // - is_syscall_instruction = 0 => syscall_mul_send_to_table == 0
-        builder
-            .assert_eq(local.syscall_mul_send_to_table, send_to_table * is_syscall_instruction.clone());
+        builder.assert_eq(
+            local.syscall_mul_send_to_table,
+            send_to_table * is_syscall_instruction.clone(),
+        );
 
         builder.send_syscall(
             local.shard,
@@ -137,7 +143,8 @@ impl CpuChip {
         // When the syscall is COMMIT or COMMIT_DEFERRED_PROOFS, there should be one set bit.
         builder
             .when(
-                local.selectors.is_syscall * (is_commit.clone() + is_commit_deferred_proofs.clone()),
+                local.selectors.is_syscall
+                    * (is_commit.clone() + is_commit_deferred_proofs.clone()),
             )
             .assert_one(bitmap_sum.clone());
         // When it's some other syscall, there should be no set bits.

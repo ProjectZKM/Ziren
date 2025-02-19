@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use crate::air::WordAirBuilder;
-use num::{BigUint, Zero};
+use num::BigUint;
 
 use p3_air::AirBuilder;
 use p3_field::PrimeField32;
@@ -394,17 +394,17 @@ mod tests {
     use core::borrow::{Borrow, BorrowMut};
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
+    use std::mem::size_of;
     use zkm2_core_executor::events::ByteRecord;
     use zkm2_curves::{
         edwards::ed25519::Ed25519BaseField, weierstrass::secp256k1::Secp256k1BaseField,
     };
     use zkm2_derive::AlignedBorrow;
     use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
-    use std::mem::size_of;
 
     #[derive(AlignedBorrow, Debug, Clone)]
     pub struct TestCols<T, P: FieldParameters> {

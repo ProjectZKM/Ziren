@@ -1,10 +1,10 @@
 use p3_field::PrimeField;
-use zkm2_core_executor::{Instruction, Opcode};
-use zkm2_derive::AlignedBorrow;
 use std::{
     mem::{size_of, transmute},
     vec::IntoIter,
 };
+use zkm2_core_executor::{Instruction, Opcode};
+use zkm2_derive::AlignedBorrow;
 
 use crate::utils::indices_arr;
 
@@ -54,7 +54,6 @@ pub struct OpcodeSelectorCols<T> {
     pub is_swr: T,
     pub is_sc: T,
     // pub is_sdc1: T,
-
     /// Branch Instructions.
     pub is_beq: T,
     pub is_bne: T,
@@ -110,12 +109,11 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
                 Opcode::BGEZ => self.is_bgez = F::ONE,
                 _ => unreachable!(),
             }
-        }
-        else if instruction.opcode == Opcode::Jump || instruction.opcode == Opcode::Jumpi{
-             self.is_jump = F::ONE;
+        } else if instruction.opcode == Opcode::Jump || instruction.opcode == Opcode::Jumpi {
+            self.is_jump = F::ONE;
         } else if instruction.opcode == Opcode::JumpDirect {
             self.is_jumpd = F::ONE;
-       }
+        }
     }
 }
 

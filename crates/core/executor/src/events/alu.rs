@@ -50,7 +50,15 @@ impl AluEvent {
     /// Used for opcode with LO and HI registers
     /// DIV DIVU MULT MULLTU
     #[must_use]
-    pub fn new_with_hi(shard: u32, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32, hi: u32) -> Self {
+    pub fn new_with_hi(
+        shard: u32,
+        clk: u32,
+        opcode: Opcode,
+        a: u32,
+        b: u32,
+        c: u32,
+        hi: u32,
+    ) -> Self {
         Self {
             lookup_id: LookupId::default(),
             shard,

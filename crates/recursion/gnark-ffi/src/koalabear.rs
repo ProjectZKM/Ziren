@@ -1,7 +1,7 @@
-use p3_koala_bear::KoalaBear;
 use p3_field::{
     extension::BinomialExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32,
 };
+use p3_koala_bear::KoalaBear;
 
 #[no_mangle]
 pub extern "C" fn koalabearextinv(a: u32, b: u32, c: u32, d: u32, i: u32) -> u32 {

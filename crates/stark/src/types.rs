@@ -33,13 +33,7 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
         chip_ordering: HashMap<String, usize>,
         public_values: Vec<Val<SC>>,
     ) -> Self {
-        Self {
-            traces,
-            main_commit,
-            main_data,
-            chip_ordering,
-            public_values,
-        }
+        Self { traces, main_commit, main_data, chip_ordering, public_values }
     }
 }
 
@@ -166,9 +160,7 @@ pub struct MachineProof<SC: StarkGenericConfig> {
 
 impl<SC: StarkGenericConfig> Debug for MachineProof<SC> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Proof")
-            .field("shard_proofs", &self.shard_proofs.len())
-            .finish()
+        f.debug_struct("Proof").field("shard_proofs", &self.shard_proofs.len()).finish()
     }
 }
 

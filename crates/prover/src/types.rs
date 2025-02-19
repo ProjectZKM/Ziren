@@ -2,10 +2,10 @@ use std::{fs::File, path::Path};
 
 use anyhow::Result;
 use clap::ValueEnum;
-use p3_koala_bear::KoalaBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm2_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
 use zkm2_primitives::{io::ZKMPublicValues, poseidon2_hash};
@@ -53,10 +53,7 @@ pub trait HashableKey {
 
     fn bytes32(&self) -> String {
         let vkey_digest_bn254 = self.hash_bn254();
-        format!(
-            "0x{:0>64}",
-            vkey_digest_bn254.as_canonical_biguint().to_str_radix(16)
-        )
+        format!("0x{:0>64}", vkey_digest_bn254.as_canonical_biguint().to_str_radix(16))
     }
 
     /// Hash the key into a digest of bytes elements.
@@ -133,9 +130,7 @@ impl<P: Serialize + DeserializeOwned + Clone> ZKMProofWithMetadata<P> {
 
 impl<P: std::fmt::Debug + Clone> std::fmt::Debug for ZKMProofWithMetadata<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ZKMProofWithMetadata")
-            .field("proof", &self.proof)
-            .finish()
+        f.debug_struct("ZKMProofWithMetadata").field("proof", &self.proof).finish()
     }
 }
 

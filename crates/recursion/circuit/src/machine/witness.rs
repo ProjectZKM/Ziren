@@ -1,14 +1,14 @@
 use std::borrow::Borrow;
 
-use p3_koala_bear::KoalaBear;
 use p3_challenger::DuplexChallenger;
+use p3_koala_bear::KoalaBear;
 use p3_symmetric::Hash;
 
 use p3_field::FieldAlgebra;
 use zkm2_recursion_compiler::ir::Builder;
 use zkm2_stark::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal, OpeningProof,
-    StarkVerifyingKey, Word,
+    koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
+    OpeningProof, StarkVerifyingKey, Word,
 };
 
 use zkm2_recursion_compiler::ir::Felt;
@@ -19,7 +19,7 @@ use crate::{
     merkle_tree::MerkleProof,
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    KoalaBearFriConfigVariable, CircuitConfig, FriProofVariable, VerifyingKeyVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriConfigVariable, VerifyingKeyVariable,
 };
 
 use super::{
@@ -50,11 +50,7 @@ where
         let sponge_state = self.sponge_state.read(builder);
         let input_buffer = self.input_buffer.read(builder);
         let output_buffer = self.output_buffer.read(builder);
-        DuplexChallengerVariable {
-            sponge_state,
-            input_buffer,
-            output_buffer,
-        }
+        DuplexChallengerVariable { sponge_state, input_buffer, output_buffer }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -95,12 +91,7 @@ where
         let pc_start = self.pc_start.read(builder);
         let chip_information = self.chip_information.clone();
         let chip_ordering = self.chip_ordering.clone();
-        VerifyingKeyVariable {
-            commitment,
-            pc_start,
-            chip_information,
-            chip_ordering,
-        }
+        VerifyingKeyVariable { commitment, pc_start, chip_information, chip_ordering }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -157,10 +148,7 @@ where
         let vks_and_proofs = self.vks_and_proofs.read(builder);
         let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
 
-        ZKMCompressWitnessVariable {
-            vks_and_proofs,
-            is_complete,
-        }
+        ZKMCompressWitnessVariable { vks_and_proofs, is_complete }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -241,10 +229,7 @@ where
         let index_bits = bits.read(builder);
         let path = self.path.read(builder);
 
-        MerkleProofVariable {
-            index: index_bits,
-            path,
-        }
+        MerkleProofVariable { index: index_bits, path }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

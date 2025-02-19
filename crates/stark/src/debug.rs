@@ -121,10 +121,7 @@ fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::th
 ///
 /// Note that this does not actually verify the proof.
 pub fn debug_cumulative_sums<F: Field, EF: ExtensionField<F>>(perms: &[RowMajorMatrix<EF>]) {
-    let sum: EF = perms
-        .iter()
-        .map(|perm| *perm.row_slice(perm.height() - 1).last().unwrap())
-        .sum();
+    let sum: EF = perms.iter().map(|perm| *perm.row_slice(perm.height() - 1).last().unwrap()).sum();
     assert_eq!(sum, EF::ZERO);
 }
 
@@ -141,7 +138,7 @@ pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) public_values: &'a [F],
 }
 
-impl<'a, F, EF> ExtensionBuilder for DebugConstraintBuilder<'a, F, EF>
+impl<F, EF> ExtensionBuilder for DebugConstraintBuilder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -176,7 +173,7 @@ where
     }
 }
 
-impl<'a, F, EF> PairBuilder for DebugConstraintBuilder<'a, F, EF>
+impl<F, EF> PairBuilder for DebugConstraintBuilder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -186,7 +183,7 @@ where
     }
 }
 
-impl<'a, F, EF> DebugConstraintBuilder<'a, F, EF>
+impl<F, EF> DebugConstraintBuilder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -267,13 +264,10 @@ where
     }
 }
 
-impl<'a, F: Field, EF: ExtensionField<F>> EmptyMessageBuilder
-    for DebugConstraintBuilder<'a, F, EF>
-{
-}
+impl<F: Field, EF: ExtensionField<F>> EmptyMessageBuilder for DebugConstraintBuilder<'_, F, EF> {}
 
-impl<'a, F: Field, EF: ExtensionField<F>> AirBuilderWithPublicValues
-    for DebugConstraintBuilder<'a, F, EF>
+impl<F: Field, EF: ExtensionField<F>> AirBuilderWithPublicValues
+    for DebugConstraintBuilder<'_, F, EF>
 {
     type PublicVar = F;
 

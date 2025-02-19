@@ -7,9 +7,14 @@ use crate::{
 
 use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::PrimeField32;
 use p3_field::FieldAlgebra;
+use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
+use typenum::Unsigned;
 use zkm2_core_executor::{
     events::{ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
@@ -24,11 +29,6 @@ use zkm2_stark::{
     air::{BaseAirBuilder, InteractionScope, MachineAir, Polynomial, ZKMAirBuilder},
     MachineRecord,
 };
-use std::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
-use typenum::Unsigned;
 
 /// The number of columns in the U256x2048MulCols.
 const NUM_COLS: usize = size_of::<U256x2048MulCols<u8>>();

@@ -3,13 +3,13 @@ use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
+use std::borrow::BorrowMut;
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaExtendEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
 use zkm2_stark::air::MachineAir;
-use std::borrow::BorrowMut;
 
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
 

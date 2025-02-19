@@ -10,8 +10,8 @@ pub use config::*;
 mod tests {
     use std::sync::Arc;
 
-    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
 
     use zkm2_core_machine::utils::run_test_machine;
     use zkm2_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
@@ -97,9 +97,8 @@ mod tests {
             program.clone(),
             SC::new().perm,
         );
-        runtime.witness_stream = [vec![F::ONE.into(), F::ONE.into(), F::TWO.into()]]
-            .concat()
-            .into();
+        runtime.witness_stream =
+            [vec![F::ONE.into(), F::ONE.into(), F::TWO.into()]].concat().into();
 
         match runtime.run() {
             Err(RuntimeError::EmptyWitnessStream) => (),

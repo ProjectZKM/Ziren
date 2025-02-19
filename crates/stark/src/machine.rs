@@ -7,17 +7,10 @@ use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_maybe_rayon::prelude::*;
 
-use serde::de::{self, DeserializeOwned, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde::ser::{SerializeStruct, Serializer};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use std::{
-    array,
-    cmp::Reverse,
-    env,
-    fmt::{Debug, Display},
-    time::Instant,
-};
+use std::{array, cmp::Reverse, env, fmt::Debug, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
@@ -57,12 +50,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
         num_pv_elts: usize,
         contains_global_bus: bool,
     ) -> Self {
-        Self {
-            config,
-            chips,
-            num_pv_elts,
-            contains_global_bus,
-        }
+        Self { config, chips, num_pv_elts, contains_global_bus }
     }
 }
 
@@ -181,10 +169,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
     /// Returns the indices of the chips in the machine that are included in the given shard.
     pub fn chips_sorted_indices(&self, proof: &ShardProof<SC>) -> Vec<Option<usize>> {
-        self.chips()
-            .iter()
-            .map(|chip| proof.chip_ordering.get(&chip.name()).copied())
-            .collect()
+        self.chips().iter().map(|chip| proof.chip_ordering.get(&chip.name()).copied()).collect()
     }
 
     /// The setup preprocessing phase.
@@ -230,10 +215,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             .iter()
             .map(|(name, _, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                (
-                    (name.to_owned(), domain, trace.dimensions()),
-                    (domain, trace.to_owned()),
-                )
+                ((name.to_owned(), domain, trace.dimensions()), (domain, trace.to_owned()))
             })
             .unzip();
 
@@ -254,10 +236,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             .collect::<Vec<_>>();
 
         // Get the preprocessed traces
-        let traces = named_preprocessed_traces
-            .into_iter()
-            .map(|(_, _, trace)| trace)
-            .collect::<Vec<_>>();
+        let traces =
+            named_preprocessed_traces.into_iter().map(|(_, _, trace)| trace).collect::<Vec<_>>();
 
         let pc_start = program.pc_start();
 
@@ -270,12 +250,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 chip_ordering: chip_ordering.clone(),
                 local_only,
             },
-            StarkVerifyingKey {
-                commit,
-                pc_start,
-                chip_information,
-                chip_ordering,
-            },
+            StarkVerifyingKey { commit, pc_start, chip_information, chip_ordering },
         )
     }
 
@@ -359,9 +334,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         tracing::debug_span!("verify shard proofs").in_scope(|| {
             for (i, shard_proof) in proof.shard_proofs.iter().enumerate() {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
-                    let chips = self
-                        .shard_chips_ordered(&shard_proof.chip_ordering)
-                        .collect::<Vec<_>>();
+                    let chips =
+                        self.shard_chips_ordered(&shard_proof.chip_ordering).collect::<Vec<_>>();
                     Verifier::verify_shard(
                         &self.config,
                         vk,
@@ -428,11 +402,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             // Generate the main trace for each chip.
             let pre_traces = chips
                 .iter()
-                .map(|chip| {
-                    pk.chip_ordering
-                        .get(&chip.name())
-                        .map(|index| &pk.traces[*index])
-                })
+                .map(|chip| pk.chip_ordering.get(&chip.name()).map(|index| &pk.traces[*index]))
                 .collect::<Vec<_>>();
             let mut traces = chips
                 .par_iter()
@@ -458,15 +428,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                     .unzip_into_vecs(&mut permutation_traces, &mut cumulative_sums);
             });
 
-            global_cumulative_sum += cumulative_sums
-                .iter()
-                .map(|sum| sum[0])
-                .sum::<SC::Challenge>();
+            global_cumulative_sum +=
+                cumulative_sums.iter().map(|sum| sum[0]).sum::<SC::Challenge>();
 
-            let local_cumulative_sum = cumulative_sums
-                .iter()
-                .map(|sum| sum[1])
-                .sum::<SC::Challenge>();
+            let local_cumulative_sum =
+                cumulative_sums.iter().map(|sum| sum[1]).sum::<SC::Challenge>();
             if !local_cumulative_sum.is_zero() {
                 tracing::warn!("Local cumulative sum is not zero");
                 tracing::debug_span!("debug local interactions").in_scope(|| {
@@ -502,10 +468,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             if env::var("SKIP_CONSTRAINTS").is_err() {
                 tracing::info_span!("debug constraints").in_scope(|| {
                     for i in 0..chips.len() {
-                        let preprocessed_trace = pk
-                            .chip_ordering
-                            .get(&chips[i].name())
-                            .map(|index| &pk.traces[*index]);
+                        let preprocessed_trace =
+                            pk.chip_ordering.get(&chips[i].name()).map(|index| &pk.traces[*index]);
                         debug_constraints::<SC, A>(
                             chips[i],
                             preprocessed_trace,
@@ -578,11 +542,7 @@ impl<SC: StarkGenericConfig> Debug for MachineVerificationError<SC> {
                 write!(f, "Invalid global proof: {:?}", e)
             }
             MachineVerificationError::NonZeroCumulativeSum(scope, shard) => {
-                write!(
-                    f,
-                    "Non-zero cumulative sum.  Scope: {}, Shard: {}",
-                    scope, shard
-                )
+                write!(f, "Non-zero cumulative sum.  Scope: {}, Shard: {}", scope, shard)
             }
             MachineVerificationError::InvalidPublicValuesDigest => {
                 write!(f, "Invalid public values digest")

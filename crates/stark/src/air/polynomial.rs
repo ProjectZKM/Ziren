@@ -25,9 +25,7 @@ impl<T> Polynomial<T> {
     where
         T: Clone,
     {
-        Self {
-            coefficients: coefficients.to_vec(),
-        }
+        Self { coefficients: coefficients.to_vec() }
     }
 
     /// Gets the coefficients of the polynomial.
@@ -55,11 +53,7 @@ impl<T> Polynomial<T> {
         T: FieldAlgebra,
     {
         let powers = x.powers();
-        self.coefficients
-            .iter()
-            .zip(powers)
-            .map(|(c, x)| x * c.clone())
-            .sum()
+        self.coefficients.iter().zip(powers).map(|(c, x)| x * c.clone()).sum()
     }
 
     /// Computes the root quotient of the polynomial.
@@ -77,17 +71,13 @@ impl<T> Polynomial<T> {
             let element = result[i - 1] - self.coefficients[i];
             result.push(element * r_inv);
         }
-        Self {
-            coefficients: result,
-        }
+        Self { coefficients: result }
     }
 }
 
 impl<T> FromIterator<T> for Polynomial<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self {
-            coefficients: iter.into_iter().collect(),
-        }
+        Self { coefficients: iter.into_iter().collect() }
     }
 }
 
@@ -235,12 +225,7 @@ impl<T: FieldAlgebra> Mul<T> for Polynomial<T> {
     type Output = Self;
 
     fn mul(self, other: T) -> Self {
-        Self::new(
-            self.coefficients
-                .into_iter()
-                .map(|x| x * other.clone())
-                .collect(),
-        )
+        Self::new(self.coefficients.into_iter().map(|x| x * other.clone()).collect())
     }
 }
 
@@ -248,13 +233,7 @@ impl<T: FieldAlgebra> Mul<T> for &Polynomial<T> {
     type Output = Polynomial<T>;
 
     fn mul(self, other: T) -> Polynomial<T> {
-        Polynomial::new(
-            self.coefficients
-                .iter()
-                .cloned()
-                .map(|x| x * other.clone())
-                .collect(),
-        )
+        Polynomial::new(self.coefficients.iter().cloned().map(|x| x * other.clone()).collect())
     }
 }
 
@@ -285,11 +264,7 @@ impl Polynomial<u8> {
     #[must_use]
     pub fn as_field<F: Field>(self) -> Polynomial<F> {
         Polynomial {
-            coefficients: self
-                .coefficients
-                .iter()
-                .map(|x| F::from_canonical_u8(*x))
-                .collect(),
+            coefficients: self.coefficients.iter().map(|x| F::from_canonical_u8(*x)).collect(),
         }
     }
 }

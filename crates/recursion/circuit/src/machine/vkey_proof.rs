@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use p3_air::Air;
-use p3_koala_bear::KoalaBear;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 use zkm2_recursion_compiler::ir::{Builder, Felt};
@@ -20,7 +20,7 @@ use crate::{
     merkle_tree::{verify, MerkleProof},
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    KoalaBearFriConfig, KoalaBearFriConfigVariable, CircuitConfig, FriProofVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriConfig, KoalaBearFriConfigVariable,
 };
 
 use super::{
@@ -77,11 +77,7 @@ where
         input: ZKMMerkleProofWitnessVariable<C, SC>,
         value_assertions: bool,
     ) {
-        let ZKMMerkleProofWitnessVariable {
-            vk_merkle_proofs,
-            values,
-            root,
-        } = input;
+        let ZKMMerkleProofWitnessVariable { vk_merkle_proofs, values, root } = input;
         for ((proof, value), expected_value) in
             vk_merkle_proofs.into_iter().zip(values).zip(digests)
         {
@@ -149,30 +145,18 @@ where
 impl<SC: KoalaBearFriConfig + FieldHasher<KoalaBear>> ZKMCompressWithVKeyWitnessValues<SC> {
     pub fn shape(&self) -> ZKMCompressWithVkeyShape {
         let merkle_tree_height = self.merkle_val.vk_merkle_proofs.first().unwrap().path.len();
-        ZKMCompressWithVkeyShape {
-            compress_shape: self.compress_val.shape(),
-            merkle_tree_height,
-        }
+        ZKMCompressWithVkeyShape { compress_shape: self.compress_val.shape(), merkle_tree_height }
     }
 }
 
 impl ZKMMerkleProofWitnessValues<KoalaBearPoseidon2> {
     pub fn dummy(num_proofs: usize, height: usize) -> Self {
         let dummy_digest = [KoalaBear::ZERO; DIGEST_SIZE];
-        let vk_merkle_proofs = vec![
-            MerkleProof {
-                index: 0,
-                path: vec![dummy_digest; height]
-            };
-            num_proofs
-        ];
+        let vk_merkle_proofs =
+            vec![MerkleProof { index: 0, path: vec![dummy_digest; height] }; num_proofs];
         let values = vec![dummy_digest; num_proofs];
 
-        Self {
-            vk_merkle_proofs,
-            values,
-            root: dummy_digest,
-        }
+        Self { vk_merkle_proofs, values, root: dummy_digest }
     }
 }
 
@@ -188,10 +172,7 @@ impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
             num_proofs,
             shape.merkle_tree_height,
         );
-        Self {
-            compress_val,
-            merkle_val,
-        }
+        Self { compress_val, merkle_val }
     }
 }
 

@@ -173,16 +173,12 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         let heights = program
             .instructions
             .iter()
-            .fold(RecursionAirEventCount::default(), |heights, instruction| {
-                heights + instruction
-            });
+            .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
 
         [
             (
                 Self::MemoryConst(MemoryConstChip::default()),
-                heights
-                    .mem_const_events
-                    .div_ceil(NUM_CONST_MEM_ENTRIES_PER_ROW),
+                heights.mem_const_events.div_ceil(NUM_CONST_MEM_ENTRIES_PER_ROW),
             ),
             (
                 Self::MemoryVar(MemoryVarChip::default()),
@@ -190,22 +186,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             ),
             (
                 Self::BaseAlu(BaseAluChip),
-                heights
-                    .base_alu_events
-                    .div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW),
+                heights.base_alu_events.div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW),
             ),
             (
                 Self::ExtAlu(ExtAluChip),
                 heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW),
             ),
-            (
-                Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-                heights.poseidon2_wide_events,
-            ),
-            (
-                Self::BatchFRI(BatchFRIChip::<DEGREE>),
-                heights.batch_fri_events,
-            ),
+            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
+            (Self::BatchFRI(BatchFRIChip::<DEGREE>), heights.batch_fri_events),
             (Self::Select(SelectChip), heights.select_events),
             (
                 Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
@@ -271,11 +259,11 @@ pub mod tests {
     use std::{iter::once, sync::Arc};
 
     use machine::RecursionAir;
-    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
         Field, FieldAlgebra, FieldExtensionAlgebra,
     };
+    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
     use zkm2_core_machine::utils::run_test_machine;
     use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
@@ -317,10 +305,7 @@ pub mod tests {
     }
 
     fn test_instructions(instructions: Vec<Instruction<F>>) {
-        let program = RecursionProgram {
-            instructions,
-            ..Default::default()
-        };
+        let program = RecursionProgram { instructions, ..Default::default() };
         run_recursion_test_machines(program);
     }
 
@@ -383,13 +368,7 @@ pub mod tests {
             instructions.push(instr::mem_ext(MemAccessKind::Write, 1, addr, acc));
             for conj in gal {
                 instructions.push(instr::mem_ext(MemAccessKind::Write, 1, addr + 1, conj));
-                instructions.push(instr::ext_alu(
-                    ExtAluOpcode::MulE,
-                    1,
-                    addr + 2,
-                    addr,
-                    addr + 1,
-                ));
+                instructions.push(instr::ext_alu(ExtAluOpcode::MulE, 1, addr + 2, addr, addr + 1));
 
                 addr += 2;
                 acc *= conj;

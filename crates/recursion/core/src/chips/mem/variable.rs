@@ -111,17 +111,10 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_MEM_INIT_COLS],
-            input.fixed_log2_rows(self),
-        );
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_MEM_INIT_COLS,
-        )
+        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS)
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -154,8 +147,8 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
@@ -166,12 +159,8 @@ mod tests {
     pub fn generate_trace() {
         let shard = ExecutionRecord::<KoalaBear> {
             mem_var_events: vec![
-                MemEvent {
-                    inner: KoalaBear::ONE.into(),
-                },
-                MemEvent {
-                    inner: KoalaBear::ONE.into(),
-                },
+                MemEvent { inner: KoalaBear::ONE.into() },
+                MemEvent { inner: KoalaBear::ONE.into() },
             ],
             ..Default::default()
         };

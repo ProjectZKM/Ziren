@@ -25,12 +25,12 @@ pub mod p256 {
 }
 
 use params::{FieldParameters, NumWords};
-use zkm2_primitives::consts::WORD_SIZE;
 use std::{
     fmt::{Debug, Display, Formatter, Result},
     ops::{Add, Neg},
 };
 use typenum::Unsigned;
+use zkm2_primitives::consts::WORD_SIZE;
 
 use num::BigUint;
 use serde::{de::DeserializeOwned, Serialize};

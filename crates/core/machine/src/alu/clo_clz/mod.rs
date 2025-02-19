@@ -14,25 +14,18 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelSlice};
-use zkm2_core_executor::events::AluEvent;
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm2_derive::AlignedBorrow;
-use zkm2_primitives::consts::WORD_SIZE;
 use zkm2_stark::{air::MachineAir, Word};
 
-use crate::operations::{
-    AssertLtColsBytes, FixedShiftRightOperation, IsEqualWordOperation, IsZeroOperation,
-};
-use crate::utils::{next_power_of_two, zeroed_f_vec};
+use crate::operations::{FixedShiftRightOperation, IsEqualWordOperation, IsZeroOperation};
 use crate::{air::ZKMCoreAirBuilder, operations::IsZeroWordOperation, utils::pad_rows_fixed};
 
 /// The number of main trace columns for `CloClzChip`.
@@ -126,11 +119,7 @@ impl<F: PrimeField> MachineAir<F> for CloClzChip {
             cols.is_clo = F::from_bool(event.opcode == Opcode::CLO);
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
 
-            let bb = if event.opcode == Opcode::CLZ {
-                event.b
-            } else {
-                0xffffffff - event.b
-            };
+            let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
 
             // if bb == 0, then result is 32.
@@ -176,10 +165,8 @@ impl<F: PrimeField> MachineAir<F> for CloClzChip {
         );
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_CLOCLZ_COLS,
-        );
+        let mut trace =
+            RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_CLOCLZ_COLS);
 
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.
@@ -239,23 +226,14 @@ where
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
+        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // if clz, bb == b, else bb = !b
         {
-            local
-                .b
-                .0
-                .iter()
-                .zip_eq(local.bb.0.iter())
-                .for_each(|(a, b)| {
-                    builder
-                        .when(local.is_clo)
-                        .assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
-                    builder.when(local.is_clz).assert_eq(*a, *b);
-                });
+            local.b.0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
+                builder.when(local.is_clo).assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
+                builder.when(local.is_clz).assert_eq(*a, *b);
+            });
 
             builder.slice_range_check_u8(&local.bb.0, local.is_real);
         }
@@ -287,9 +265,7 @@ where
                 local.is_real.into(),
             );
 
-            builder
-                .when(is_bb_zero.clone())
-                .assert_one(local.is_result_32.result);
+            builder.when(is_bb_zero.clone()).assert_one(local.is_result_32.result);
         }
 
         {
@@ -320,9 +296,7 @@ where
 
         // if bb!=0, check sr == 0 and sr1 == 1
         {
-            builder
-                .when_not(is_bb_zero.clone())
-                .assert_one(local.sr1[0]);
+            builder.when_not(is_bb_zero.clone()).assert_one(local.sr1[0]);
             local
                 .sr0
                 .value
@@ -343,7 +317,9 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm2_stark::{
+        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    };
 
     use super::CloClzChip;
 
@@ -393,7 +369,8 @@ mod tests {
         let chip = CloClzChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
-        let proof = uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
+        let proof =
+            uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
         uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();

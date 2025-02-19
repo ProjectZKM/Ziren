@@ -9,29 +9,18 @@ pub struct ZKMStdin {
     /// a vec of bytes at a time.
     pub buffer: Vec<Vec<u8>>,
     pub ptr: usize,
-    pub proofs: Vec<(
-        ZKMReduceProof<KoalaBearPoseidon2>,
-        StarkVerifyingKey<KoalaBearPoseidon2>,
-    )>,
+    pub proofs: Vec<(ZKMReduceProof<KoalaBearPoseidon2>, StarkVerifyingKey<KoalaBearPoseidon2>)>,
 }
 
 impl ZKMStdin {
     /// Create a new `ZKMStdin`.
     pub const fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            ptr: 0,
-            proofs: Vec::new(),
-        }
+        Self { buffer: Vec::new(), ptr: 0, proofs: Vec::new() }
     }
 
     /// Create a `ZKMStdin` from a slice of bytes.
     pub fn from(data: &[u8]) -> Self {
-        Self {
-            buffer: vec![data.to_vec()],
-            ptr: 0,
-            proofs: Vec::new(),
-        }
+        Self { buffer: vec![data.to_vec()], ptr: 0, proofs: Vec::new() }
     }
 
     /// Read a value from the buffer.

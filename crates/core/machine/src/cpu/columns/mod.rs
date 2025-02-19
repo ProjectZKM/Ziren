@@ -1,23 +1,23 @@
 mod branch;
-mod syscall;
 mod instruction;
 mod jump;
 mod memory;
 mod opcode;
 mod opcode_specific;
+mod syscall;
 
 pub use branch::*;
-pub use syscall::*;
 pub use instruction::*;
 pub use jump::*;
 pub use memory::*;
 pub use opcode::*;
 pub use opcode_specific::*;
+pub use syscall::*;
 
 use p3_util::indices_arr;
+use std::mem::{size_of, transmute};
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::Word;
-use std::mem::{size_of, transmute};
 
 use crate::memory::{MemoryCols, MemoryReadCols, MemoryReadWriteCols};
 

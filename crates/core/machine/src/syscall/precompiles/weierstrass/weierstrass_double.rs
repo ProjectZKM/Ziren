@@ -492,11 +492,11 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use zkm2_core_executor::Program;
-    use zkm2_stark::CpuProver;
     use test_artifacts::{
         BLS12381_DOUBLE_ELF, BN254_DOUBLE_ELF, SECP256K1_DOUBLE_ELF, SECP256R1_DOUBLE_ELF,
     };
+    use zkm2_core_executor::Program;
+    use zkm2_stark::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

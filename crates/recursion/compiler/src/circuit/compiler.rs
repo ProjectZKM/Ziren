@@ -92,11 +92,7 @@ where
                 *entry.insert(addr)
             }
             Entry::Occupied(entry) => {
-                panic!(
-                    "unexpected entry: virtual_to_physical[{:?}] = {:?}",
-                    vaddr,
-                    entry.get()
-                )
+                panic!("unexpected entry: virtual_to_physical[{:?}] = {:?}", vaddr, entry.get())
             }
         }
     }
@@ -138,11 +134,7 @@ where
         match self.addr_to_mult.entry(addr.as_usize()) {
             Entry::Vacant(entry) => entry.insert(C::F::ZERO),
             Entry::Occupied(entry) => {
-                panic!(
-                    "unexpected entry: addr_to_mult[{:?}] = {:?}",
-                    addr.as_usize(),
-                    entry.get()
-                )
+                panic!("unexpected entry: addr_to_mult[{:?}] = {:?}", addr.as_usize(), entry.get())
             }
         }
     }
@@ -162,20 +154,13 @@ where
     ///
     /// Does not increment the mult. Creates an entry if it does not yet exist.
     pub fn read_ghost_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
-        self.consts
-            .entry(imm)
-            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ZERO))
-            .0
+        self.consts.entry(imm).or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ZERO)).0
     }
 
     fn mem_write_const(&mut self, dst: impl Reg<C>, src: Imm<C::F, C::EF>) -> Instruction<C::F> {
         Instruction::Mem(MemInstr {
-            addrs: MemIo {
-                inner: dst.write(self),
-            },
-            vals: MemIo {
-                inner: src.as_block(),
-            },
+            addrs: MemIo { inner: dst.write(self) },
+            vals: MemIo { inner: src.as_block() },
             mult: C::F::ZERO,
             kind: MemAccessKind::Write,
         })
@@ -191,11 +176,7 @@ where
         Instruction::BaseAlu(BaseAluInstr {
             opcode,
             mult: C::F::ZERO,
-            addrs: BaseAluIo {
-                out: dst.write(self),
-                in1: lhs.read(self),
-                in2: rhs.read(self),
-            },
+            addrs: BaseAluIo { out: dst.write(self), in1: lhs.read(self), in2: rhs.read(self) },
         })
     }
 
@@ -209,11 +190,7 @@ where
         Instruction::ExtAlu(ExtAluInstr {
             opcode,
             mult: C::F::ZERO,
-            addrs: ExtAluIo {
-                out: dst.write(self),
-                in1: lhs.read(self),
-                in2: rhs.read(self),
-            },
+            addrs: ExtAluIo { out: dst.write(self), in1: lhs.read(self), in2: rhs.read(self) },
         })
     }
 
@@ -325,20 +302,14 @@ where
         output: impl IntoIterator<Item = impl Reg<C>>,
     ) -> Instruction<C::F> {
         Instruction::HintBits(HintBitsInstr {
-            output_addrs_mults: output
-                .into_iter()
-                .map(|r| (r.write(self), C::F::ZERO))
-                .collect(),
+            output_addrs_mults: output.into_iter().map(|r| (r.write(self), C::F::ZERO)).collect(),
             input_addr: value.read_ghost(self),
         })
     }
 
     fn fri_fold(
         &mut self,
-        CircuitV2FriFoldOutput {
-            alpha_pow_output,
-            ro_output,
-        }: CircuitV2FriFoldOutput<C>,
+        CircuitV2FriFoldOutput { alpha_pow_output, ro_output }: CircuitV2FriFoldOutput<C>,
         CircuitV2FriFoldInput {
             z,
             alpha,
@@ -355,19 +326,13 @@ where
             ro_mults: vec![C::F::ZERO; ro_output.len()],
 
             base_single_addrs: FriFoldBaseIo { x: x.read(self) },
-            ext_single_addrs: FriFoldExtSingleIo {
-                z: z.read(self),
-                alpha: alpha.read(self),
-            },
+            ext_single_addrs: FriFoldExtSingleIo { z: z.read(self), alpha: alpha.read(self) },
             ext_vec_addrs: FriFoldExtVecIo {
                 mat_opening: mat_opening.into_iter().map(|e| e.read(self)).collect(),
                 ps_at_z: ps_at_z.into_iter().map(|e| e.read(self)).collect(),
                 alpha_pow_input: alpha_pow_input.into_iter().map(|e| e.read(self)).collect(),
                 ro_input: ro_input.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow_output: alpha_pow_output
-                    .into_iter()
-                    .map(|e| e.write(self))
-                    .collect(),
+                alpha_pow_output: alpha_pow_output.into_iter().map(|e| e.write(self)).collect(),
                 ro_output: ro_output.into_iter().map(|e| e.write(self)).collect(),
             },
         }))
@@ -384,9 +349,7 @@ where
             base_vec_addrs: BatchFRIBaseVecIo {
                 p_at_x: p_at_xs.into_iter().map(|e| e.read(self)).collect(),
             },
-            ext_single_addrs: BatchFRIExtSingleIo {
-                acc: acc.write(self),
-            },
+            ext_single_addrs: BatchFRIExtSingleIo { acc: acc.write(self) },
             ext_vec_addrs: BatchFRIExtVecIo {
                 p_at_z: p_at_zs.into_iter().map(|e| e.read(self)).collect(),
                 alpha_pow: alpha_pows.into_iter().map(|e| e.read(self)).collect(),
@@ -643,21 +606,13 @@ where
                     }) => backfill((mult, addr)),
                     Instruction::Poseidon2(instr) => {
                         let Poseidon2SkinnyInstr {
-                            addrs:
-                                Poseidon2Io {
-                                    output: ref addrs, ..
-                                },
+                            addrs: Poseidon2Io { output: ref addrs, .. },
                             mults,
                         } = instr.as_mut();
                         mults.iter_mut().zip(addrs).for_each(&mut backfill);
                     }
                     Instruction::Select(SelectInstr {
-                        addrs:
-                            SelectIo {
-                                out1: ref addr1,
-                                out2: ref addr2,
-                                ..
-                            },
+                        addrs: SelectIo { out1: ref addr1, out2: ref addr2, .. },
                         mult1,
                         mult2,
                     }) => {
@@ -665,18 +620,11 @@ where
                         backfill((mult2, addr2));
                     }
                     Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
-                        addrs:
-                            ExpReverseBitsIo {
-                                result: ref addr, ..
-                            },
+                        addrs: ExpReverseBitsIo { result: ref addr, .. },
                         mult,
                     }) => backfill((mult, addr)),
-                    Instruction::HintBits(HintBitsInstr {
-                        output_addrs_mults, ..
-                    })
-                    | Instruction::Hint(HintInstr {
-                        output_addrs_mults, ..
-                    }) => {
+                    Instruction::HintBits(HintBitsInstr { output_addrs_mults, .. })
+                    | Instruction::Hint(HintInstr { output_addrs_mults, .. }) => {
                         output_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
@@ -684,20 +632,13 @@ where
                     Instruction::FriFold(instr) => {
                         let FriFoldInstr {
                             ext_vec_addrs:
-                                FriFoldExtVecIo {
-                                    ref alpha_pow_output,
-                                    ref ro_output,
-                                    ..
-                                },
+                                FriFoldExtVecIo { ref alpha_pow_output, ref ro_output, .. },
                             alpha_pow_mults,
                             ro_mults,
                             ..
                         } = instr.as_mut();
                         // Using `.chain` seems to be less performant.
-                        alpha_pow_mults
-                            .iter_mut()
-                            .zip(alpha_pow_output)
-                            .for_each(&mut backfill);
+                        alpha_pow_mults.iter_mut().zip(alpha_pow_output).for_each(&mut backfill);
                         ro_mults.iter_mut().zip(ro_output).for_each(&mut backfill);
                     }
                     Instruction::BatchFRI(instr) => {
@@ -716,10 +657,7 @@ where
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
                     // Instructions that do not write to memory.
-                    Instruction::Mem(MemInstr {
-                        kind: MemAccessKind::Read,
-                        ..
-                    })
+                    Instruction::Mem(MemInstr { kind: MemAccessKind::Read, .. })
                     | Instruction::CommitPublicValues(_)
                     | Instruction::Print(_) => (),
                 }
@@ -729,19 +667,14 @@ where
         // Initialize constants.
         let total_consts = self.consts.len();
         let instrs_consts =
-            self.consts
-                .drain()
-                .sorted_by_key(|x| x.1 .0 .0)
-                .map(|(imm, (addr, mult))| {
-                    Instruction::Mem(MemInstr {
-                        addrs: MemIo { inner: addr },
-                        vals: MemIo {
-                            inner: imm.as_block(),
-                        },
-                        mult,
-                        kind: MemAccessKind::Write,
-                    })
-                });
+            self.consts.drain().sorted_by_key(|x| x.1 .0 .0).map(|(imm, (addr, mult))| {
+                Instruction::Mem(MemInstr {
+                    addrs: MemIo { inner: addr },
+                    vals: MemIo { inner: imm.as_block() },
+                    mult,
+                    kind: MemAccessKind::Write,
+                })
+            });
         tracing::debug!("number of consts to initialize: {}", instrs_consts.len());
         // Reset the other fields.
         self.next_addr = Default::default();
@@ -756,12 +689,7 @@ where
                 (instrs_consts.chain(instrs).collect(), traces)
             }
         });
-        RecursionProgram {
-            instructions,
-            total_memory,
-            traces,
-            shape: None,
-        }
+        RecursionProgram { instructions, total_memory, traces, shape: None }
     }
 }
 
@@ -912,15 +840,15 @@ impl<C: Config<F: PrimeField64>> Reg<C> for Address<C::F> {
 mod tests {
     use std::{collections::VecDeque, io::BufRead, iter::zip, sync::Arc};
 
-    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_field::{Field, PrimeField32};
+    use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_symmetric::{CryptographicHasher, Permutation};
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
     use zkm2_core_machine::utils::{run_test_machine, setup_logger};
     use zkm2_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
     use zkm2_stark::{
-        koala_bear_poseidon2::KoalaBearPoseidon2, inner_perm, KoalaBearPoseidon2Inner, InnerHash,
+        inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash, KoalaBearPoseidon2Inner,
         StarkGenericConfig,
     };
 
@@ -1097,9 +1025,7 @@ mod tests {
             let mat_opening = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
 
             // Compute the outputs from the inputs.
-            let alpha_pow_output = (0..i)
-                .map(|i| alpha_pow_input[i] * alpha)
-                .collect::<Vec<EF>>();
+            let alpha_pow_output = (0..i).map(|i| alpha_pow_input[i] * alpha).collect::<Vec<EF>>();
             let ro_output = (0..i)
                 .map(|i| {
                     ro_input[i] + alpha_pow_input[i] * (-ps_at_z[i] + mat_opening[i]) / (-z + x)
@@ -1113,10 +1039,7 @@ mod tests {
                 x: builder.eval(x),
                 mat_opening: mat_opening.iter().map(|e| builder.eval(e.cons())).collect(),
                 ps_at_z: ps_at_z.iter().map(|e| builder.eval(e.cons())).collect(),
-                alpha_pow_input: alpha_pow_input
-                    .iter()
-                    .map(|e| builder.eval(e.cons()))
-                    .collect(),
+                alpha_pow_input: alpha_pow_input.iter().map(|e| builder.eval(e.cons())).collect(),
                 ro_input: ro_input.iter().map(|e| builder.eval(e.cons())).collect(),
             };
 
@@ -1146,10 +1069,8 @@ mod tests {
 
             let input_felt = builder.eval(input_f);
             let output_felts = builder.num2bits_v2_f(input_felt, NUM_BITS);
-            let expected: Vec<Felt<_>> = output
-                .into_iter()
-                .map(|x| builder.eval(F::from_canonical_u32(x)))
-                .collect();
+            let expected: Vec<Felt<_>> =
+                output.into_iter().map(|x| builder.eval(F::from_canonical_u32(x))).collect();
             for (lhs, rhs) in output_felts.into_iter().zip(expected) {
                 builder.assert_felt_eq(lhs, rhs);
             }

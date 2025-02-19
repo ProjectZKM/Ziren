@@ -14,15 +14,15 @@ use std::borrow::Borrow;
 use std::time::Duration;
 
 use anyhow::Result;
+use strum_macros::EnumString;
+use thiserror::Error;
 use zkm2_core_executor::ZKMContext;
 use zkm2_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
 use zkm2_prover::{
     components::ZKMProverComponents, CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey,
     ZKMVerifyingKey,
 };
-use zkm2_stark::{air::PublicValues, MachineVerificationError, ZKMProverOpts, Word};
-use strum_macros::EnumString;
-use thiserror::Error;
+use zkm2_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 

@@ -1,9 +1,5 @@
 use p3_koala_bear::KoalaBear;
-use zkm2_core_executor::{
-    syscalls::SyscallCode,
-    ExecutionReport,
-    Opcode
-};
+use zkm2_core_executor::{syscalls::SyscallCode, ExecutionReport, Opcode};
 
 use crate::mips::MipsAirDiscriminants;
 
@@ -158,8 +154,7 @@ impl CostEstimator for ExecutionReport {
             (syscall_precompile_events as u64) * costs[&MipsAirDiscriminants::SyscallPrecompile];
         total_chips += 1;
 
-        let divrem_events = self.opcode_counts[Opcode::DIV]
-            + self.opcode_counts[Opcode::DIVU];
+        let divrem_events = self.opcode_counts[Opcode::DIV] + self.opcode_counts[Opcode::DIVU];
         total_area += (divrem_events as u64) * costs[&MipsAirDiscriminants::DivRem];
         total_chips += 1;
 

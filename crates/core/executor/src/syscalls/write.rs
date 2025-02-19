@@ -25,9 +25,7 @@ impl Syscall for WriteSyscall {
         let write_buf = arg2;
         let nbytes = rt.register(a2);
         // Read nbytes from memory starting at write_buf.
-        let bytes = (0..nbytes)
-            .map(|i| rt.byte(write_buf + i))
-            .collect::<Vec<u8>>();
+        let bytes = (0..nbytes).map(|i| rt.byte(write_buf + i)).collect::<Vec<u8>>();
         let slice = bytes.as_slice();
         if fd == FD_STDOUT {
             let s = core::str::from_utf8(slice).unwrap();
@@ -37,9 +35,7 @@ impl Syscall for WriteSyscall {
                     // If the string does not match any known command, print it to stdout.
                     let flush_s = update_io_buf(ctx, fd, s);
                     if !flush_s.is_empty() {
-                        flush_s
-                            .into_iter()
-                            .for_each(|line| println!("stdout: {}", line));
+                        flush_s.into_iter().for_each(|line| println!("stdout: {}", line));
                     }
                 }
             }
@@ -47,15 +43,13 @@ impl Syscall for WriteSyscall {
             let s = core::str::from_utf8(slice).unwrap();
             let flush_s = update_io_buf(ctx, fd, s);
             if !flush_s.is_empty() {
-                flush_s
-                    .into_iter()
-                    .for_each(|line| println!("stderr: {}", line));
+                flush_s.into_iter().for_each(|line| println!("stderr: {}", line));
             }
         } else if fd == FD_PUBLIC_VALUE {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == FD_READ_HINT {
             rt.state.input_stream.push(slice.to_vec());
-        }  else if let Some(mut hook) = rt.hook_registry.get(fd) {
+        } else if let Some(mut hook) = rt.hook_registry.get(fd) {
             let res = hook.invoke_hook(rt.hook_env(), slice);
             // Add result vectors to the beginning of the stream.
             let ptr = rt.state.input_stream_ptr;
@@ -117,8 +111,7 @@ fn handle_cycle_tracker_command(rt: &mut Executor, command: CycleTrackerCommand)
 /// Start tracking cycles for the given name at the specific depth and print out the log.
 fn start_cycle_tracker(rt: &mut Executor, name: &str) {
     let depth = rt.cycle_tracker.len() as u32;
-    rt.cycle_tracker
-        .insert(name.to_string(), (rt.state.global_clk, depth));
+    rt.cycle_tracker.insert(name.to_string(), (rt.state.global_clk, depth));
     let padding = "│ ".repeat(depth as usize);
     log::info!("{}┌╴{}", padding, name);
 }
@@ -129,11 +122,7 @@ fn end_cycle_tracker(rt: &mut Executor, name: &str) -> Option<u64> {
     if let Some((start, depth)) = rt.cycle_tracker.remove(name) {
         let padding = "│ ".repeat(depth as usize);
         let total_cycles = rt.state.global_clk - start;
-        log::info!(
-            "{}└╴{} cycles",
-            padding,
-            num_to_comma_separated(total_cycles)
-        );
+        log::info!("{}└╴{} cycles", padding, num_to_comma_separated(total_cycles));
         return Some(total_cycles);
     }
     None
@@ -151,10 +140,7 @@ fn update_io_buf(ctx: &mut SyscallContext, fd: u32, s: &str) -> Vec<String> {
         let mut lines = prev_buf.split('\n').collect::<Vec<&str>>();
         let last = lines.pop().unwrap_or("");
         *entry = last.to_string();
-        lines
-            .into_iter()
-            .map(std::string::ToString::to_string)
-            .collect::<Vec<String>>()
+        lines.into_iter().map(std::string::ToString::to_string).collect::<Vec<String>>()
     } else {
         vec![]
     }

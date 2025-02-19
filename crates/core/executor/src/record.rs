@@ -6,14 +6,14 @@ use zkm2_stark::{
     MachineRecord, SplitOpts, ZKMCoreOpts,
 };
 
-use std::{mem::take, sync::Arc};
 use serde::{Deserialize, Serialize};
+use std::{mem::take, sync::Arc};
 
 use crate::{
     events::{
         add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent, LookupId,
-        MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum, SyscallEvent,
-        PrecompileEvents, PrecompileEvent,
+        MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum, PrecompileEvent,
+        PrecompileEvents, SyscallEvent,
     },
     syscalls::SyscallCode,
     CoreShape, Opcode, Program,
@@ -103,10 +103,7 @@ impl ExecutionRecord {
     /// Create a new [`ExecutionRecord`].
     #[must_use]
     pub fn new(program: Arc<Program>) -> Self {
-        let mut res = Self {
-            program,
-            ..Default::default()
-        };
+        let mut res = Self { program, ..Default::default() };
         res.nonce_lookup.insert(0, 0);
         res
     }
@@ -304,7 +301,7 @@ impl ExecutionRecord {
 
     /// Get all the local memory events.
     #[inline]
-    pub fn get_local_mem_events(&self) -> impl Iterator<Item=&MemoryLocalEvent> {
+    pub fn get_local_mem_events(&self) -> impl Iterator<Item = &MemoryLocalEvent> {
         let precompile_local_mem_events = self.precompile_events.get_local_mem_events();
         precompile_local_mem_events.chain(self.cpu_local_memory_access.iter())
     }
@@ -337,14 +334,8 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("mul_events".to_string(), self.mul_events.len());
         stats.insert("sub_events".to_string(), self.sub_events.len());
         stats.insert("bitwise_events".to_string(), self.bitwise_events.len());
-        stats.insert(
-            "shift_left_events".to_string(),
-            self.shift_left_events.len(),
-        );
-        stats.insert(
-            "shift_right_events".to_string(),
-            self.shift_right_events.len(),
-        );
+        stats.insert("shift_left_events".to_string(), self.shift_left_events.len());
+        stats.insert("shift_right_events".to_string(), self.shift_right_events.len());
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
         stats.insert("lt_events".to_string(), self.lt_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
@@ -361,17 +352,12 @@ impl MachineRecord for ExecutionRecord {
             "global_memory_finalize_events".to_string(),
             self.global_memory_finalize_events.len(),
         );
-        stats.insert(
-            "local_memory_access_events".to_string(),
-            self.cpu_local_memory_access.len(),
-        );
+        stats.insert("local_memory_access_events".to_string(), self.cpu_local_memory_access.len());
         if !self.cpu_events.is_empty() {
             let shard = self.public_values.shard;
             stats.insert(
                 "byte_lookups".to_string(),
-                self.byte_lookups
-                    .get(&shard)
-                    .map_or(0, hashbrown::HashMap::len),
+                self.byte_lookups.get(&shard).map_or(0, hashbrown::HashMap::len),
             );
         }
         // Filter out the empty events.
@@ -386,8 +372,7 @@ impl MachineRecord for ExecutionRecord {
         self.mul_events.append(&mut other.mul_events);
         self.bitwise_events.append(&mut other.bitwise_events);
         self.shift_left_events.append(&mut other.shift_left_events);
-        self.shift_right_events
-            .append(&mut other.shift_right_events);
+        self.shift_right_events.append(&mut other.shift_right_events);
         self.divrem_events.append(&mut other.divrem_events);
         self.lt_events.append(&mut other.lt_events);
         self.cloclz_events.append(&mut other.cloclz_events);
@@ -401,12 +386,9 @@ impl MachineRecord for ExecutionRecord {
             self.add_sharded_byte_lookup_events(vec![&other.byte_lookups]);
         }
 
-        self.global_memory_initialize_events
-            .append(&mut other.global_memory_initialize_events);
-        self.global_memory_finalize_events
-            .append(&mut other.global_memory_finalize_events);
-        self.cpu_local_memory_access
-            .append(&mut other.cpu_local_memory_access);
+        self.global_memory_initialize_events.append(&mut other.global_memory_initialize_events);
+        self.global_memory_finalize_events.append(&mut other.global_memory_finalize_events);
+        self.cpu_local_memory_access.append(&mut other.cpu_local_memory_access);
     }
 
     fn register_nonces(&mut self, _opts: &Self::Config) {
@@ -422,33 +404,21 @@ impl MachineRecord for ExecutionRecord {
             self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
         });
 
-        self.bitwise_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
-            });
+        self.bitwise_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
+        });
 
-        self.shift_left_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
-            });
+        self.shift_left_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
+        });
 
-        self.shift_right_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
-            });
+        self.shift_right_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
+        });
 
-        self.divrem_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
-            });
+        self.divrem_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
+        });
 
         self.lt_events.iter().enumerate().for_each(|(i, event)| {
             self.nonce_lookup[event.lookup_id.0 as usize] = i as u32;
@@ -467,12 +437,7 @@ impl MachineRecord for ExecutionRecord {
 
 impl ByteRecord for ExecutionRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
-        *self
-            .byte_lookups
-            .entry(blu_event.shard)
-            .or_default()
-            .entry(blu_event)
-            .or_insert(0) += 1;
+        *self.byte_lookups.entry(blu_event.shard).or_default().entry(blu_event).or_insert(0) += 1;
     }
 
     #[inline]

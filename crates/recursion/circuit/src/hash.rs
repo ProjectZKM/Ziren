@@ -2,8 +2,8 @@ use std::fmt::Debug;
 use std::iter::{repeat, zip};
 
 use itertools::Itertools;
-use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra};
+use p3_koala_bear::KoalaBear;
 
 use p3_bn254_fr::Bn254Fr;
 use p3_symmetric::Permutation;
@@ -14,8 +14,8 @@ use zkm2_recursion_compiler::{
 use zkm2_recursion_core::stark::{outer_perm, OUTER_MULTI_FIELD_CHALLENGER_WIDTH};
 use zkm2_recursion_core::{stark::KoalaBearPoseidon2Outer, DIGEST_SIZE};
 use zkm2_recursion_core::{HASH_RATE, PERMUTATION_WIDTH};
-use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
 use zkm2_stark::inner_perm;
+use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
 
 use crate::{
     challenger::{reduce_32, POSEIDON_2_BB_RATE},
@@ -173,11 +173,8 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHash
         assert!(C::N::bits() == p3_bn254_fr::Bn254Fr::bits());
         assert!(C::F::bits() == p3_koala_bear::KoalaBear::bits());
         let num_f_elms = C::N::bits() / C::F::bits();
-        let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] = [
-            builder.eval(C::N::ZERO),
-            builder.eval(C::N::ZERO),
-            builder.eval(C::N::ZERO),
-        ];
+        let mut state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
+            [builder.eval(C::N::ZERO), builder.eval(C::N::ZERO), builder.eval(C::N::ZERO)];
         for block_chunk in &input.iter().chunks(POSEIDON_2_BB_RATE) {
             for (chunk_id, chunk) in (&block_chunk.chunks(num_f_elms)).into_iter().enumerate() {
                 let chunk = chunk.copied().collect::<Vec<_>>();
@@ -193,11 +190,8 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHash
         builder: &mut Builder<C>,
         input: [Self::DigestVariable; 2],
     ) -> Self::DigestVariable {
-        let state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] = [
-            builder.eval(input[0][0]),
-            builder.eval(input[1][0]),
-            builder.eval(C::N::ZERO),
-        ];
+        let state: [Var<C::N>; OUTER_MULTI_FIELD_CHALLENGER_WIDTH] =
+            [builder.eval(input[0][0]), builder.eval(input[1][0]), builder.eval(C::N::ZERO)];
         builder.push_op(DslIr::CircuitPoseidon2Permute(state));
         [state[0]; BN254_DIGEST_SIZE]
     }
@@ -217,22 +211,12 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHash
     ) -> [Self::DigestVariable; 2] {
         let result0: [Var<_>; BN254_DIGEST_SIZE] = core::array::from_fn(|j| {
             let result = builder.uninit();
-            builder.push_op(DslIr::CircuitSelectV(
-                should_swap,
-                input[1][j],
-                input[0][j],
-                result,
-            ));
+            builder.push_op(DslIr::CircuitSelectV(should_swap, input[1][j], input[0][j], result));
             result
         });
         let result1: [Var<_>; BN254_DIGEST_SIZE] = core::array::from_fn(|j| {
             let result = builder.uninit();
-            builder.push_op(DslIr::CircuitSelectV(
-                should_swap,
-                input[0][j],
-                input[1][j],
-                result,
-            ));
+            builder.push_op(DslIr::CircuitSelectV(should_swap, input[0][j], input[1][j], result));
             result
         });
 

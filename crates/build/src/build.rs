@@ -29,16 +29,13 @@ pub fn execute_build_program(
     // If the program directory is not specified, use the current directory.
     let program_dir = program_dir
         .unwrap_or_else(|| std::env::current_dir().expect("Failed to get current directory."));
-    let program_dir: Utf8PathBuf = program_dir
-        .try_into()
-        .expect("Failed to convert PathBuf to Utf8PathBuf");
+    let program_dir: Utf8PathBuf =
+        program_dir.try_into().expect("Failed to convert PathBuf to Utf8PathBuf");
 
     // Get the program metadata.
     let program_metadata_file = program_dir.join("Cargo.toml");
     let mut program_metadata_cmd = cargo_metadata::MetadataCommand::new();
-    let program_metadata = program_metadata_cmd
-        .manifest_path(program_metadata_file)
-        .exec()?;
+    let program_metadata = program_metadata_cmd.manifest_path(program_metadata_file).exec()?;
 
     // Get the command
     let cmd = create_local_command(args, &program_dir, &program_metadata);
@@ -60,10 +57,7 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
     let mut metadata_cmd = cargo_metadata::MetadataCommand::new();
     let metadata = metadata_cmd.manifest_path(metadata_file).exec().unwrap();
     let root_package = metadata.root_package();
-    let root_package_name = root_package
-        .as_ref()
-        .map(|p| p.name.as_str())
-        .unwrap_or("Program");
+    let root_package_name = root_package.as_ref().map(|p| p.name.as_str()).unwrap_or("Program");
 
     // Skip the program build if the ZKM_SKIP_PROGRAM_BUILD environment variable is set to true.
     let skip_program_build = std::env::var("ZKM_SKIP_PROGRAM_BUILD")
@@ -114,11 +108,7 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
         panic!("Failed to build ZKM program: {}.", err);
     }
 
-    println!(
-        "cargo:warning={} built at {}",
-        root_package_name,
-        current_datetime()
-    );
+    println!("cargo:warning={} built at {}", root_package_name, current_datetime());
 }
 
 /// Collects the list of targets that would be built and their output ELF file paths.
@@ -167,10 +157,7 @@ pub fn generate_elf_paths(
             }
 
             let elf_path = metadata.target_directory.join(HELPER_TARGET_SUBDIR);
-            let elf_path = elf_path
-                .join(BUILD_TARGET)
-                .join("release")
-                .join(&bin_target.name);
+            let elf_path = elf_path.join(BUILD_TARGET).join("release").join(&bin_target.name);
 
             target_elf_paths.push((bin_target.name.to_owned(), elf_path));
         }

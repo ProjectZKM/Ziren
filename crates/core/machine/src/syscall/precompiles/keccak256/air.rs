@@ -5,7 +5,7 @@ use p3_field::FieldAlgebra;
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
 use zkm2_core_executor::syscalls::SyscallCode;
-use zkm2_stark::air::{InteractionScope, ZKMAirBuilder, SubAirBuilder};
+use zkm2_stark::air::{InteractionScope, SubAirBuilder, ZKMAirBuilder};
 
 use super::{
     columns::{KeccakMemCols, NUM_KECCAK_MEM_COLS},

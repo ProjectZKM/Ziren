@@ -10,6 +10,7 @@ use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use typenum::U32;
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord, EdDecompressEvent, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
@@ -24,7 +25,6 @@ use zkm2_curves::{
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{BaseAirBuilder, InteractionScope, MachineAir, ZKMAirBuilder};
-use typenum::U32;
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -296,9 +296,9 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use test_artifacts::ED_DECOMPRESS_ELF;
     use zkm2_core_executor::Program;
     use zkm2_stark::CpuProver;
-    use test_artifacts::ED_DECOMPRESS_ELF;
 
     use crate::utils;
 

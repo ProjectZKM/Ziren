@@ -59,12 +59,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
         join(
             || {
-                values_pop
-                    .par_chunks_mut(num_columns)
-                    .zip_eq(&input.poseidon2_events)
-                    .for_each(|(row, &event)| {
+                values_pop.par_chunks_mut(num_columns).zip_eq(&input.poseidon2_events).for_each(
+                    |(row, &event)| {
                         self.populate_perm(event.input, Some(event.output), row);
-                    });
+                    },
+                );
             },
             || {
                 let mut dummy_row = vec![F::ZERO; num_columns];
@@ -204,11 +203,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
             // columns for it, and instead include it in the constraint for the x^3 part of the
             // sbox.
-            let round = if r < NUM_EXTERNAL_ROUNDS / 2 {
-                r
-            } else {
-                r + NUM_INTERNAL_ROUNDS
-            };
+            let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
             let mut add_rc = *round_state;
             for i in 0..WIDTH {
                 add_rc[i] += F::from_wrapped_u32(RC_16_30_U32[round][i]);
@@ -285,8 +280,8 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 
 #[cfg(test)]
 mod tests {
-    use p3_koala_bear::KoalaBear;
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
     use zkhash::ark_ff::UniformRand;
@@ -310,14 +305,8 @@ mod tests {
 
         let shard = ExecutionRecord {
             poseidon2_events: vec![
-                Poseidon2Event {
-                    input: input_0,
-                    output: output_0,
-                },
-                Poseidon2Event {
-                    input: input_1,
-                    output: output_1,
-                },
+                Poseidon2Event { input: input_0, output: output_0 },
+                Poseidon2Event { input: input_1, output: output_1 },
             ],
             ..Default::default()
         };
@@ -338,14 +327,8 @@ mod tests {
 
         let shard = ExecutionRecord {
             poseidon2_events: vec![
-                Poseidon2Event {
-                    input: input_0,
-                    output: output_0,
-                },
-                Poseidon2Event {
-                    input: input_1,
-                    output: output_1,
-                },
+                Poseidon2Event { input: input_0, output: output_0 },
+                Poseidon2Event { input: input_1, output: output_1 },
             ],
             ..Default::default()
         };

@@ -155,13 +155,7 @@ impl MemoryReadRecord {
         debug_assert!(
             shard > prev_shard || ((shard == prev_shard) && (timestamp > prev_timestamp))
         );
-        Self {
-            value,
-            shard,
-            timestamp,
-            prev_shard,
-            prev_timestamp,
-        }
+        Self { value, shard, timestamp, prev_shard, prev_timestamp }
     }
 }
 
@@ -179,14 +173,7 @@ impl MemoryWriteRecord {
         debug_assert!(
             shard > prev_shard || ((shard == prev_shard) && (timestamp > prev_timestamp)),
         );
-        Self {
-            value,
-            shard,
-            timestamp,
-            prev_value,
-            prev_shard,
-            prev_timestamp,
-        }
+        Self { value, shard, timestamp, prev_value, prev_shard, prev_timestamp }
     }
 }
 
@@ -205,13 +192,7 @@ impl MemoryInitializeFinalizeEvent {
     /// Creates a new [``MemoryInitializeFinalizeEvent``] for an initialization.
     #[must_use]
     pub const fn initialize(addr: u32, value: u32, used: bool) -> Self {
-        Self {
-            addr,
-            value,
-            shard: 1,
-            timestamp: 1,
-            used: if used { 1 } else { 0 },
-        }
+        Self { addr, value, shard: 1, timestamp: 1, used: if used { 1 } else { 0 } }
     }
 
     /// Creates a new [``MemoryInitializeFinalizeEvent``] for a finalization.

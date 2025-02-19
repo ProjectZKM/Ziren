@@ -33,9 +33,7 @@ impl DefaultSubproofVerifier {
     /// Creates a new [`DefaultSubproofVerifier`].
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            printed: AtomicBool::new(false),
-        }
+        Self { printed: AtomicBool::new(false) }
     }
 }
 
@@ -49,8 +47,7 @@ impl SubproofVerifier for DefaultSubproofVerifier {
     ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {
         if !self.printed.load(std::sync::atomic::Ordering::SeqCst) {
             tracing::info!("Not verifying sub proof during runtime");
-            self.printed
-                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.printed.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(())
     }

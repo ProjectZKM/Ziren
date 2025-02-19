@@ -1,8 +1,8 @@
 use p3_field::PrimeField;
+use std::{iter::once, mem::size_of, vec::IntoIter};
 use zkm2_core_executor::{Instruction, Register};
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::Word;
-use std::{iter::once, mem::size_of, vec::IntoIter};
 
 pub const NUM_INSTRUCTION_COLS: usize = size_of::<InstructionCols<u8>>();
 

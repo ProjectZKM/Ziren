@@ -24,8 +24,13 @@ fn test_verify_groth16() {
 
     #[cfg(feature = "ark")]
     {
-        let valid = crate::Groth16Verifier::ark_verify(&proof, &public_inputs, vkey_hash, &crate::GROTH16_VK_BYTES)
-            .expect("Groth16 proof is invalid");
+        let valid = crate::Groth16Verifier::ark_verify(
+            &proof,
+            &public_inputs,
+            vkey_hash,
+            &crate::GROTH16_VK_BYTES,
+        )
+        .expect("Groth16 proof is invalid");
         assert!(valid);
     }
 }
@@ -72,7 +77,8 @@ fn test_e2e_verify_groth16() {
     println!("vk hash: {:?}", vkey_hash);
 
     let mut groth16_vk_bytes = Vec::new();
-    let groth16_vk_path = format!("{}/groth16_vk.bin", groth16_bn254_artifacts_dev_dir().to_str().unwrap());
+    let groth16_vk_path =
+        format!("{}/groth16_vk.bin", groth16_bn254_artifacts_dev_dir().to_str().unwrap());
     File::open(groth16_vk_path).unwrap().read_to_end(&mut groth16_vk_bytes).unwrap();
 
     crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &groth16_vk_bytes)
@@ -80,8 +86,13 @@ fn test_e2e_verify_groth16() {
 
     #[cfg(feature = "ark")]
     {
-        let valid = crate::Groth16Verifier::ark_verify(&proof, &public_inputs, &vkey_hash, &groth16_vk_bytes)
-            .expect("Groth16 proof is invalid");
+        let valid = crate::Groth16Verifier::ark_verify(
+            &proof,
+            &public_inputs,
+            &vkey_hash,
+            &groth16_vk_bytes,
+        )
+        .expect("Groth16 proof is invalid");
         assert!(valid);
     }
 }

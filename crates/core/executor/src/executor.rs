@@ -12,7 +12,7 @@ use zkm2_stark::ZKMCoreOpts;
 
 use crate::{
     context::ZKMContext,
-    dependencies::{emit_cpu_dependencies, emit_divrem_dependencies, emit_cloclz_dependencies},
+    dependencies::{emit_cloclz_dependencies, emit_cpu_dependencies, emit_divrem_dependencies},
     events::{
         AluEvent, CpuEvent, LookupId, MemoryAccessPosition, MemoryInitializeFinalizeEvent,
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord, SyscallEvent,
@@ -208,11 +208,8 @@ impl<'a> Executor<'a> {
 
         // Determine the maximum number of cycles for any syscall.
         let syscall_map = default_syscall_map();
-        let max_syscall_cycles = syscall_map
-            .values()
-            .map(|syscall| syscall.num_extra_cycles())
-            .max()
-            .unwrap_or(0);
+        let max_syscall_cycles =
+            syscall_map.values().map(|syscall| syscall.num_extra_cycles()).max().unwrap_or(0);
 
         // If `TRACE_FILE`` is set, initialize the trace buffer.
         let trace_buf = if let Ok(trace_file) = std::env::var("TRACE_FILE") {
@@ -222,9 +219,8 @@ impl<'a> Executor<'a> {
             None
         };
 
-        let subproof_verifier = context
-            .subproof_verifier
-            .unwrap_or_else(|| Arc::new(DefaultSubproofVerifier::new()));
+        let subproof_verifier =
+            context.subproof_verifier.unwrap_or_else(|| Arc::new(DefaultSubproofVerifier::new()));
         let hook_registry = context.hook_registry.unwrap_or_default();
 
         Self {
@@ -335,9 +331,7 @@ impl<'a> Executor<'a> {
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match record {
                 Some(record) => {
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
+                    self.memory_checkpoint.entry(addr).or_insert_with(|| Some(*record));
                 }
                 None => {
                     self.memory_checkpoint.entry(addr).or_insert(None);
@@ -360,9 +354,7 @@ impl<'a> Executor<'a> {
         if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
             match record {
                 Some(record) => {
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
+                    self.memory_checkpoint.entry(addr).or_insert_with(|| Some(*record));
                 }
                 None => {
                     self.memory_checkpoint.entry(addr).or_insert(None);
@@ -410,9 +402,7 @@ impl<'a> Executor<'a> {
             match entry {
                 Entry::Occupied(ref entry) => {
                     let record = entry.get();
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
+                    self.memory_checkpoint.entry(addr).or_insert_with(|| Some(*record));
                 }
                 Entry::Vacant(_) => {
                     self.memory_checkpoint.entry(addr).or_insert(None);
@@ -427,10 +417,7 @@ impl<'a> Executor<'a> {
                 Entry::Occupied(ref entry) => Some(entry.get()),
                 Entry::Vacant(_) => None,
             };
-            self.unconstrained_state
-                .memory_diff
-                .entry(addr)
-                .or_insert(record.copied());
+            self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
         // If it's the first time accessing this address, initialize previous values.
@@ -439,14 +426,8 @@ impl<'a> Executor<'a> {
             Entry::Vacant(entry) => {
                 // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                self.uninitialized_memory_checkpoint
-                    .entry(addr)
-                    .or_insert_with(|| *value != 0);
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    shard: 0,
-                    timestamp: 0,
-                })
+                self.uninitialized_memory_checkpoint.entry(addr).or_insert_with(|| *value != 0);
+                entry.insert(MemoryRecord { value: *value, shard: 0, timestamp: 0 })
             }
         };
 
@@ -498,9 +479,7 @@ impl<'a> Executor<'a> {
             match entry {
                 Entry::Occupied(ref entry) => {
                     let record = entry.get();
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
+                    self.memory_checkpoint.entry(addr).or_insert_with(|| Some(*record));
                 }
                 Entry::Vacant(_) => {
                     self.memory_checkpoint.entry(addr).or_insert(None);
@@ -515,10 +494,7 @@ impl<'a> Executor<'a> {
                 Entry::Occupied(ref entry) => Some(entry.get()),
                 Entry::Vacant(_) => None,
             };
-            self.unconstrained_state
-                .memory_diff
-                .entry(addr)
-                .or_insert(record.copied());
+            self.unconstrained_state.memory_diff.entry(addr).or_insert(record.copied());
         }
 
         // If it's the first time accessing this address, initialize previous values.
@@ -527,15 +503,9 @@ impl<'a> Executor<'a> {
             Entry::Vacant(entry) => {
                 // If addr has a specific value to be initialized with, use that, otherwise 0.
                 let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                self.uninitialized_memory_checkpoint
-                    .entry(addr)
-                    .or_insert_with(|| *value != 0);
+                self.uninitialized_memory_checkpoint.entry(addr).or_insert_with(|| *value != 0);
 
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    shard: 0,
-                    timestamp: 0,
-                })
+                entry.insert(MemoryRecord { value: *value, shard: 0, timestamp: 0 })
             }
         };
 
@@ -643,11 +613,7 @@ impl<'a> Executor<'a> {
     /// Write to a register A or AH
     pub fn rw(&mut self, register: Register, value: u32, position: MemoryAccessPosition) {
         // The only time we are writing to a register is when it is in operand A or AH.
-        debug_assert!(vec![
-            MemoryAccessPosition::A,
-            MemoryAccessPosition::HI,
-        ]
-            .contains(&position));
+        debug_assert!([MemoryAccessPosition::A, MemoryAccessPosition::HI].contains(&position));
         // Register 0 should always be 0
         if register == Register::ZERO {
             self.mw_cpu(register as u32, 0, position);
@@ -810,11 +776,8 @@ impl<'a> Executor<'a> {
             let b = self.rr(rs1, MemoryAccessPosition::B);
             (rd, b, c)
         } else if !instruction.imm_b && instruction.imm_c {
-            let (rd, rs1, imm) = (
-                instruction.op_a.into(),
-                (instruction.op_b as u8).into(),
-                instruction.op_c,
-            );
+            let (rd, rs1, imm) =
+                (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
             let (rd, b, c) = (rd, self.rr(rs1, MemoryAccessPosition::B), imm);
             (rd, b, c)
         } else {
@@ -840,7 +803,7 @@ impl<'a> Executor<'a> {
             self.rw(Register::HI, hi, MemoryAccessPosition::HI);
             Some(hi)
         } else {
-            self.rw(rd.into(), a, MemoryAccessPosition::A);
+            self.rw(rd, a, MemoryAccessPosition::A);
             None
         };
 
@@ -853,11 +816,8 @@ impl<'a> Executor<'a> {
 
     /// Fetch the input operand values for a branch instruction.
     fn branch_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (src1, src2, target) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c,
-        );
+        let (src1, src2, target) =
+            (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let a = self.rr(src1, MemoryAccessPosition::A);
         let b = if instruction.opcode.only_one_operand() {
             0
@@ -1136,10 +1096,7 @@ impl<'a> Executor<'a> {
     }
 
     fn execute_teq(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rs, rt) = (
-            (instruction.op_a as u8).into(),
-            (instruction.op_b as u8).into(),
-        );
+        let (rs, rt) = (instruction.op_a.into(), (instruction.op_b as u8).into());
 
         let src1 = self.rr(rs, MemoryAccessPosition::A);
         let src2 = self.rr(rt, MemoryAccessPosition::B);
@@ -1230,18 +1187,15 @@ impl<'a> Executor<'a> {
             }
         };
 
-        self.alu_rw(&instruction, rd, hi, a, b, c, lookup_id)
+        self.alu_rw(instruction, rd, hi, a, b, c, lookup_id)
     }
 
     fn execute_load(
         &mut self,
         instruction: &Instruction,
     ) -> Result<(u32, u32, u32), ExecutionError> {
-        let (rt_reg, rs_reg, offset_ext) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c,
-        );
+        let (rt_reg, rs_reg, offset_ext) =
+            (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs_raw = self.rr(rs_reg, MemoryAccessPosition::B);
         // We needn't the memory access record here, because we will write to rt_reg,
         // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
@@ -1299,11 +1253,8 @@ impl<'a> Executor<'a> {
         &mut self,
         instruction: &Instruction,
     ) -> Result<(u32, u32, u32), ExecutionError> {
-        let (rt_reg, rs_reg, offset_ext) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c,
-        );
+        let (rt_reg, rs_reg, offset_ext) =
+            (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs = self.rr(rs_reg, MemoryAccessPosition::B);
         let rt = if instruction.opcode == Opcode::SC {
             self.register(rt_reg)
@@ -1541,9 +1492,9 @@ impl<'a> Executor<'a> {
                             lt_distance,
                             cloclz_distance,
                         ]
-                            .into_iter()
-                            .min()
-                            .unwrap();
+                        .into_iter()
+                        .min()
+                        .unwrap();
 
                         if l_infinity >= 32 {
                             shape_match_found = true;
@@ -1595,12 +1546,9 @@ impl<'a> Executor<'a> {
         let done = self.state.pc == 0
             || self.state.exited
             || self.state.pc.wrapping_sub(self.program.pc_base)
-            >= (self.program.instructions.len() * 4) as u32;
+                >= (self.program.instructions.len() * 4) as u32;
         if done && self.unconstrained {
-            log::error!(
-                "program ended in unconstrained mode at clk {}",
-                self.state.global_clk
-            );
+            log::error!("program ended in unconstrained mode at clk {}", self.state.global_clk);
             return Err(ExecutionError::EndInUnconstrained());
         }
 
@@ -1713,14 +1661,7 @@ impl<'a> Executor<'a> {
 
         tracing::debug!("loading memory image");
         for (&addr, value) in &self.program.image {
-            self.state.memory.insert(
-                addr,
-                MemoryRecord {
-                    value: *value,
-                    shard: 0,
-                    timestamp: 0,
-                },
-            );
+            self.state.memory.insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
         }
     }
 
@@ -1869,7 +1810,7 @@ impl<'a> Executor<'a> {
 
         if self.emit_global_memory_events
             && (self.executor_mode == ExecutorMode::Trace
-            || self.executor_mode == ExecutorMode::Checkpoint)
+                || self.executor_mode == ExecutorMode::Checkpoint)
         {
             // SECTION: Set up all MemoryInitializeFinalizeEvents needed for memory argument.
             let memory_finalize_events = &mut self.record.global_memory_finalize_events;
@@ -1880,16 +1821,10 @@ impl<'a> Executor<'a> {
 
             let addr_0_final_record = match addr_0_record {
                 Some(record) => record,
-                None => &MemoryRecord {
-                    value: 0,
-                    shard: 0,
-                    timestamp: 1,
-                },
+                None => &MemoryRecord { value: 0, shard: 0, timestamp: 1 },
             };
-            memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
-                0,
-                addr_0_final_record,
-            ));
+            memory_finalize_events
+                .push(MemoryInitializeFinalizeEvent::finalize_from_record(0, addr_0_final_record));
 
             let memory_initialize_events = &mut self.record.global_memory_initialize_events;
             let addr_0_initialize_event =
@@ -1918,9 +1853,8 @@ impl<'a> Executor<'a> {
                 }
 
                 let record = *self.state.memory.get(addr).unwrap();
-                memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
-                    addr, &record,
-                ));
+                memory_finalize_events
+                    .push(MemoryInitializeFinalizeEvent::finalize_from_record(addr, &record));
             }
         }
     }
@@ -1940,22 +1874,13 @@ impl<'a> Executor<'a> {
         }
 
         if !self.unconstrained && self.state.global_clk % 10_000_000 == 0 {
-            log::info!(
-                "clk = {} pc = 0x{:x?}",
-                self.state.global_clk,
-                self.state.pc
-            );
+            log::info!("clk = {} pc = 0x{:x?}", self.state.global_clk, self.state.pc);
         }
     }
 
     fn show_regs(&self) {
-        let regs = (0..34)
-            .map(|i| self.state.memory.get(i).unwrap().value)
-            .collect::<Vec<_>>();
-        println!(
-            "global_clk: {}, pc: {}, regs {:?}",
-            self.state.global_clk, self.state.pc, regs
-        );
+        let regs = (0..34).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
+        println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
     }
 }
 
@@ -1977,7 +1902,10 @@ fn log2_ceil_usize(n: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::programs::tests::{fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program, simple_memory_program, simple_program, ssz_withdrawals_program, u256xu2048_mul_program};
+    use crate::programs::tests::{
+        fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program,
+        simple_memory_program, simple_program, ssz_withdrawals_program, u256xu2048_mul_program,
+    };
     use zkm2_stark::ZKMCoreOpts;
 
     use crate::{Instruction, Opcode, Register};
@@ -2071,14 +1999,8 @@ mod tests {
 
     #[test]
     fn test_bne_not_jump() {
-        let instructions = vec![Instruction::new(
-            Opcode::BNE,
-            Register::A0 as u8,
-            0,
-            100,
-            true,
-            true,
-        )];
+        let instructions =
+            vec![Instruction::new(Opcode::BNE, Register::A0 as u8, 0, 100, true, true)];
         let program = Program::new(instructions, 0, 0);
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
@@ -2414,9 +2336,7 @@ mod tests {
         //
         // The j instruction performs an unconditional jump to a specified address.
 
-        let instructions = vec![
-            Instruction::new(Opcode::Jumpi, 0, 100, 0, false, true),
-        ];
+        let instructions = vec![Instruction::new(Opcode::Jumpi, 0, 100, 0, false, true)];
         let program = Program::new(instructions, 0, 0);
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
@@ -2447,9 +2367,7 @@ mod tests {
         //
         // The jal instruction jumps to an address and stores the return address in $ra.
 
-        let instructions = vec![
-            Instruction::new(Opcode::Jumpi, 31, 100, 0, false, true),
-        ];
+        let instructions = vec![Instruction::new(Opcode::Jumpi, 31, 100, 0, false, true)];
         let program = Program::new(instructions, 0, 0);
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();

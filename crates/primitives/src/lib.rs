@@ -2,11 +2,9 @@
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;
-use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_field::FieldAlgebra;
-use p3_poseidon2::{
-    ExternalLayerConstants, ExternalLayerConstructor, InternalLayerConstructor, Poseidon2,
-};
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
+use p3_poseidon2::{ExternalLayerConstants, Poseidon2};
 //use p3_monty_31::{Poseidon2InternalLayerMonty31, Poseidon2ExternalLayerMonty31};
 
 pub mod consts;
@@ -1112,10 +1110,8 @@ pub fn poseidon2_init() -> Poseidon2KoalaBear<16> {
     let mut round_constants = RC_16_30.to_vec();
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
-    let internal_round_constants = round_constants
-        .drain(internal_start..internal_end)
-        .map(|vec| vec[0])
-        .collect::<Vec<_>>();
+    let internal_round_constants =
+        round_constants.drain(internal_start..internal_end).map(|vec| vec[0]).collect::<Vec<_>>();
 
     let external_round_constants = ExternalLayerConstants::new(
         round_constants[..ROUNDS_F / 2].to_vec(),

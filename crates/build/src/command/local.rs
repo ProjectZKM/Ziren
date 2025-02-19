@@ -12,9 +12,8 @@ pub(crate) fn create_local_command(
     program_metadata: &cargo_metadata::Metadata,
 ) -> Command {
     let mut command = Command::new("cargo");
-    let canonicalized_program_dir = program_dir
-        .canonicalize()
-        .expect("Failed to canonicalize program directory");
+    let canonicalized_program_dir =
+        program_dir.canonicalize().expect("Failed to canonicalize program directory");
 
     // When executing the local command:
     // 1. Set the target directory to a subdirectory of the program's target directory to avoid
@@ -28,10 +27,7 @@ pub(crate) fn create_local_command(
     command
         .current_dir(canonicalized_program_dir)
         .env("CARGO_ENCODED_RUSTFLAGS", get_rust_compiler_flags())
-        .env(
-            "CARGO_TARGET_DIR",
-            program_metadata.target_directory.join(HELPER_TARGET_SUBDIR),
-        )
+        .env("CARGO_TARGET_DIR", program_metadata.target_directory.join(HELPER_TARGET_SUBDIR))
         .args(get_program_build_args(args));
     command
 }

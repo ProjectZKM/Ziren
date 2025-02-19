@@ -19,18 +19,7 @@ use strum_macros::EnumIter;
 ///   memory accesses is bounded.
 /// - Byte 3: Currently unused.
 #[derive(
-    Debug,
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    EnumIter,
-    Ord,
-    PartialOrd,
-    Serialize,
-    Deserialize,
-    Enum,
+    Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, Ord, PartialOrd, Serialize, Deserialize, Enum,
 )]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
@@ -200,7 +189,7 @@ impl SyscallCode {
             0x00_00_01_2D => SyscallCode::SECP256R1_DOUBLE,
             0x00_00_01_2E => SyscallCode::SECP256R1_DECOMPRESS,
             // _ => panic!("invalid syscall number: {value}"),
-            _ => SyscallCode::UNIMPLEMENTED
+            _ => SyscallCode::UNIMPLEMENTED,
         }
     }
 

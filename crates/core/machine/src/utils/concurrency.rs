@@ -9,10 +9,7 @@ pub struct TurnBasedSync {
 impl TurnBasedSync {
     /// Creates a new [TurnBasedSync].
     pub fn new() -> Self {
-        TurnBasedSync {
-            current_turn: Mutex::new(0),
-            cv: Condvar::new(),
-        }
+        TurnBasedSync { current_turn: Mutex::new(0), cv: Condvar::new() }
     }
 
     /// Waits for the current turn to be equal to the given turn.

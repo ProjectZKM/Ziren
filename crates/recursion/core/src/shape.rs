@@ -237,9 +237,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         ]
         .map(HashMap::from)
         .to_vec();
-        Self {
-            allowed_shapes,
-            _marker: PhantomData,
-        }
+        Self { allowed_shapes, _marker: PhantomData }
     }
 }

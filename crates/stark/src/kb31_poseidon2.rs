@@ -1,15 +1,12 @@
 #![allow(missing_docs)]
 
 use crate::{Com, StarkGenericConfig, ZeroCommitment};
-use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_challenger::DuplexChallenger;
-use p3_commit::{ExtensionMmcs, Mmcs};
+use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
-use p3_fri::{
-    BatchOpening, CommitPhaseProofStep, FriConfig, FriGenericConfig, FriProof, QueryProof,
-    TwoAdicFriGenericConfig, TwoAdicFriGenericConfigForMmcs, TwoAdicFriPcs,
-};
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
@@ -63,12 +60,7 @@ pub fn zkm2_fri_config() -> FriConfig<InnerChallengeMmcs> {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 100,
     };
-    FriConfig {
-        log_blowup: 1,
-        num_queries,
-        proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
+    FriConfig { log_blowup: 1, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 /// The FRI config for inner recursion.
@@ -82,12 +74,7 @@ pub fn inner_fri_config() -> FriConfig<InnerChallengeMmcs> {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 100,
     };
-    FriConfig {
-        log_blowup: 1,
-        num_queries,
-        proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
+    FriConfig { log_blowup: 1, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 /// The recursion config used for recursive reduce circuit.
@@ -164,14 +151,14 @@ impl ZeroCommitment<KoalaBearPoseidon2Inner> for InnerPcs {
 
 pub mod koala_bear_poseidon2 {
 
-    use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
     use p3_challenger::DuplexChallenger;
     use p3_commit::ExtensionMmcs;
     use p3_dft::Radix2DitParallel;
     use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
     use p3_fri::{FriConfig, TwoAdicFriPcs};
+    use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
     use p3_merkle_tree::MerkleTreeMmcs;
-    use p3_poseidon2::{ExternalLayerConstants, Poseidon2};
+    use p3_poseidon2::ExternalLayerConstants;
     use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
     use serde::{Deserialize, Serialize};
     use zkm2_primitives::RC_16_30;
@@ -220,12 +207,7 @@ pub mod koala_bear_poseidon2 {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 100,
         };
-        FriConfig {
-            log_blowup: 1,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        }
+        FriConfig { log_blowup: 1, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
     }
 
     #[must_use]
@@ -238,12 +220,7 @@ pub mod koala_bear_poseidon2 {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 50,
         };
-        FriConfig {
-            log_blowup: 2,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        }
+        FriConfig { log_blowup: 2, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
     }
 
     #[must_use]
@@ -256,12 +233,7 @@ pub mod koala_bear_poseidon2 {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 33,
         };
-        FriConfig {
-            log_blowup: 3,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        }
+        FriConfig { log_blowup: 3, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
     }
 
     enum KoalaBearPoseidon2Type {
@@ -287,11 +259,7 @@ pub mod koala_bear_poseidon2 {
             let dft = Dft::default();
             let fri_config = default_fri_config();
             let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            Self {
-                pcs,
-                perm,
-                config_type: KoalaBearPoseidon2Type::Default,
-            }
+            Self { pcs, perm, config_type: KoalaBearPoseidon2Type::Default }
         }
 
         #[must_use]
@@ -303,11 +271,7 @@ pub mod koala_bear_poseidon2 {
             let dft = Dft::default();
             let fri_config = compressed_fri_config();
             let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            Self {
-                pcs,
-                perm,
-                config_type: KoalaBearPoseidon2Type::Compressed,
-            }
+            Self { pcs, perm, config_type: KoalaBearPoseidon2Type::Compressed }
         }
 
         #[must_use]
@@ -319,11 +283,7 @@ pub mod koala_bear_poseidon2 {
             let dft = Dft::default();
             let fri_config = ultra_compressed_fri_config();
             let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            Self {
-                pcs,
-                perm,
-                config_type: KoalaBearPoseidon2Type::Compressed,
-            }
+            Self { pcs, perm, config_type: KoalaBearPoseidon2Type::Compressed }
         }
     }
 

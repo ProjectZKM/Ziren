@@ -11,6 +11,7 @@ use num::{BigUint, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use typenum::Unsigned;
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
@@ -22,7 +23,6 @@ use zkm2_curves::{
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{BaseAirBuilder, InteractionScope, MachineAir, Polynomial, ZKMAirBuilder};
-use typenum::Unsigned;
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},

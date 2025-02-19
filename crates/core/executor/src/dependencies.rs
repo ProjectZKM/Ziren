@@ -1,4 +1,8 @@
-use crate::{events::AluEvent, utils::{get_msb, get_quotient_and_remainder, is_signed_operation}, Executor, Opcode, WORD_SIZE};
+use crate::{
+    events::AluEvent,
+    utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
+    Executor, Opcode, WORD_SIZE,
+};
 
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
@@ -123,7 +127,6 @@ pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
             sub_lookups: executor.record.create_lookup_ids(),
         };
 
-
         executor.record.shift_right_events.push(srl_event);
     }
 }
@@ -149,8 +152,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
             | Opcode::SW
             | Opcode::SWR
             | Opcode::SWL
-            | Opcode::SC
-            // | Opcode::SDC1
+            | Opcode::SC // | Opcode::SDC1
     ) {
         let memory_addr = event.b.wrapping_add(event.c);
         // Add event to ALU check to check that addr == b + c
@@ -174,11 +176,7 @@ pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
                 Opcode::LB => {
                     let most_sig_mem_value_byte = mem_value.to_le_bytes()[addr_offset as usize];
                     let sign_value = 256;
-                    (
-                        most_sig_mem_value_byte as u32,
-                        most_sig_mem_value_byte,
-                        sign_value,
-                    )
+                    (most_sig_mem_value_byte as u32, most_sig_mem_value_byte, sign_value)
                 }
                 Opcode::LH => {
                     let sign_value = 65536;

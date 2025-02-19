@@ -4,8 +4,8 @@ use zkm2_primitives::io::ZKMPublicValues;
 use zkm2_prover::{components::DefaultProverComponents, ZKMProvingKey};
 
 use anyhow::{Ok, Result};
-use zkm2_stark::{ZKMCoreOpts, ZKMProverOpts};
 use std::time::Duration;
+use zkm2_stark::{ZKMCoreOpts, ZKMProverOpts};
 
 use crate::{provers::ProofOpts, Prover, ZKMProofKind, ZKMProofWithPublicValues};
 

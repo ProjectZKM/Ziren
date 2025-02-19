@@ -41,10 +41,8 @@ impl<F: Field> MachineAir<F> for ByteChip<F> {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> RowMajorMatrix<F> {
-        let mut trace = RowMajorMatrix::new(
-            zeroed_f_vec(NUM_BYTE_MULT_COLS * NUM_ROWS),
-            NUM_BYTE_MULT_COLS,
-        );
+        let mut trace =
+            RowMajorMatrix::new(zeroed_f_vec(NUM_BYTE_MULT_COLS * NUM_ROWS), NUM_BYTE_MULT_COLS);
 
         for (_, blu) in input.byte_lookups.iter() {
             for (lookup, mult) in blu.iter() {

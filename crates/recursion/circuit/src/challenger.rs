@@ -1,5 +1,5 @@
-use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra};
+use p3_koala_bear::KoalaBear;
 use zkm2_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{DslIr, Var},
@@ -77,11 +77,7 @@ impl<C: Config<F = KoalaBear>> DuplexChallengerVariable<C> {
 
     /// Creates a new challenger with the same state as an existing challenger.
     pub fn copy(&self, builder: &mut Builder<C>) -> Self {
-        let DuplexChallengerVariable {
-            sponge_state,
-            input_buffer,
-            output_buffer,
-        } = self;
+        let DuplexChallengerVariable { sponge_state, input_buffer, output_buffer } = self;
         let sponge_state = sponge_state.map(|x| builder.eval(x));
         let mut copy_vec = |v: &Vec<Felt<C::F>>| v.iter().map(|x| builder.eval(*x)).collect();
         DuplexChallengerVariable::<C> {
@@ -106,9 +102,7 @@ impl<C: Config<F = KoalaBear>> DuplexChallengerVariable<C> {
             self.duplexing(builder);
         }
 
-        self.output_buffer
-            .pop()
-            .expect("output buffer should be non-empty")
+        self.output_buffer.pop().expect("output buffer should be non-empty")
     }
 
     fn sample_bits(&mut self, builder: &mut Builder<C>, nb_bits: usize) -> Vec<Felt<C::F>> {
@@ -193,7 +187,9 @@ impl<C: Config<F = KoalaBear>> CanSampleVariable<C, Felt<C::F>> for DuplexChalle
     }
 }
 
-impl<C: Config<F = KoalaBear>> CanSampleBitsVariable<C, Felt<C::F>> for DuplexChallengerVariable<C> {
+impl<C: Config<F = KoalaBear>> CanSampleBitsVariable<C, Felt<C::F>>
+    for DuplexChallengerVariable<C>
+{
     fn sample_bits(&mut self, builder: &mut Builder<C>, nb_bits: usize) -> Vec<Felt<C::F>> {
         DuplexChallengerVariable::sample_bits(self, builder, nb_bits)
     }
@@ -232,8 +228,7 @@ impl<C: Config<F = KoalaBear>> FieldChallengerVariable<C, Felt<C::F>>
         self.sponge_state = builder.poseidon2_permute_v2(self.sponge_state);
 
         self.output_buffer.clear();
-        self.output_buffer
-            .extend_from_slice(&self.sponge_state[..HASH_RATE]);
+        self.output_buffer.extend_from_slice(&self.sponge_state[..HASH_RATE]);
     }
 }
 
@@ -306,9 +301,7 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
             self.duplexing(builder);
         }
 
-        self.output_buffer
-            .pop()
-            .expect("output buffer should be non-empty")
+        self.output_buffer.pop().expect("output buffer should be non-empty")
     }
 
     pub fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
@@ -439,10 +432,10 @@ pub(crate) mod tests {
         hash::{FieldHasherVariable, BN254_DIGEST_SIZE},
         utils::tests::run_test_recursion,
     };
-    use p3_koala_bear::KoalaBear;
     use p3_bn254_fr::Bn254Fr;
     use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger};
     use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
     use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
     use zkm2_recursion_compiler::{
         circuit::{AsmBuilder, AsmConfig},
