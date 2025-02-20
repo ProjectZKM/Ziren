@@ -66,6 +66,7 @@ pub fn outer_perm() -> OuterPerm {
 }
 
 /// The FRI config for outer recursion.
+/// This targets by default 100 bits of security.
 pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
     let perm = outer_perm();
     let hash = OuterHash::new(perm.clone()).unwrap();
@@ -76,13 +77,14 @@ pub fn outer_fri_config() -> FriConfig<OuterChallengeMmcs> {
     } else {
         match std::env::var("FRI_QUERIES") {
             Ok(value) => value.parse().unwrap(),
-            Err(_) => 25,
+            Err(_) => 21,
         }
     };
     FriConfig { log_blowup: 4, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 /// The FRI config for outer recursion.
+/// This targets by default 100 bits of security.
 pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallengeMmcs> {
     let perm = outer_perm();
     let hash = OuterHash::new(perm.clone()).unwrap();
@@ -93,7 +95,7 @@ pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriConfig<OuterChallen
     } else {
         match std::env::var("FRI_QUERIES") {
             Ok(value) => value.parse().unwrap(),
-            Err(_) => 100 / log_blowup,
+            Err(_) => 84 / log_blowup,
         }
     };
     FriConfig { log_blowup, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
