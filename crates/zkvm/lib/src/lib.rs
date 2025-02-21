@@ -6,14 +6,15 @@
 pub mod bls12381;
 pub mod bn254;
 pub mod ed25519;
+pub mod hasher;
 pub mod io;
+pub mod keccak;
 pub mod secp256k1;
 pub mod secp256r1;
 pub mod unconstrained;
 pub mod utils;
 #[cfg(feature = "verify")]
 pub mod verify;
-
 extern "C" {
     /// Halts the program with the given exit code.
     pub fn syscall_halt(exit_code: u8) -> !;

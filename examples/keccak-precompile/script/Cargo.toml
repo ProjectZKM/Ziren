@@ -1,0 +1,21 @@
+[package]
+name = "keccak-script"
+version = { workspace = true }
+edition = { workspace = true }
+default-run = "keccak-script"
+publish = false
+
+[dependencies]
+hex = "0.4.3"
+zkm2-sdk = { workspace = true }
+alloy-primitives = { version = "0.8.21", default-features = false, features = [
+    "rlp",
+] }
+log = "0.4.22"
+
+[build-dependencies]
+zkm2-build = { workspace = true }
+
+[[bin]]
+name = "keccak-script"
+path = "src/main.rs"
