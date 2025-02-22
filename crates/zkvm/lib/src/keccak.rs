@@ -1,3 +1,6 @@
+//! This code is adapted from tiny-keccak:
+//! https://github.com/debris/tiny-keccak
+
 use crate::hasher::{Hasher, Mode};
 use crate::syscall_keccak_permute;
 
@@ -62,17 +65,12 @@ impl KeccakBuffer {
     }
 }
 
-pub trait KeccakPermutation {
-    fn execute(a: &mut KeccakBuffer);
-}
-
 pub(crate) struct KeccakState {
     buffer: KeccakBuffer,
     offset: usize,
     rate: usize,
     delim: u8,
     mode: Mode,
-    // permutation: core::marker::PhantomData<P>,
 }
 
 impl Clone for KeccakState {
@@ -83,7 +81,6 @@ impl Clone for KeccakState {
             rate: self.rate,
             delim: self.delim,
             mode: self.mode,
-            // permutation: core::marker::PhantomData,
         }
     }
 }
