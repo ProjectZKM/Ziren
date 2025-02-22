@@ -18,6 +18,8 @@ mod proof;
 mod prover;
 mod quotient;
 mod record;
+pub mod septic_curve;
+pub mod septic_extension;
 mod stark_testing;
 mod types;
 mod verifier;

@@ -13,7 +13,7 @@ use p3_matrix::{
 use serde::{Deserialize, Serialize};
 
 use super::{Challenge, Com, OpeningProof, StarkGenericConfig, Val};
-use crate::air::InteractionScope;
+use crate::{air::InteractionScope, septic_extension::SepticExtension};
 
 pub type QuotientOpenedValues<T> = Vec<T>;
 
@@ -128,7 +128,7 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
             .chips
             .iter()
             .map(|c| match scope {
-                InteractionScope::Global => c.global_cumulative_sum,
+                InteractionScope::Global => c.local_cumulative_sum,
                 InteractionScope::Local => c.local_cumulative_sum,
             })
             .sum()

@@ -1223,7 +1223,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> ExtensionOperand<F, EF> for E {
                 let value_ref = unsafe { mem::transmute::<&E, &ExtOperand<F, EF>>(&self) };
                 value_ref.clone()
             }
-            _ => unimplemented!("unsupported type"),
+            _ => unimplemented!("unsupported type {:?}", self.type_id()),
         }
     }
 }

@@ -323,9 +323,9 @@ where
 
         challenger.observe(builder, permutation_commit);
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
-            let global_sum = C::ext2felt(builder, opening.global_cumulative_sum);
+            // let global_sum = C::ext2felt(builder, opening.global_cumulative_sum);
             let local_sum = C::ext2felt(builder, opening.local_cumulative_sum);
-            challenger.observe_slice(builder, global_sum);
+            // challenger.observe_slice(builder, global_sum);
             challenger.observe_slice(builder, local_sum);
 
             let has_global_interactions = chip
@@ -333,9 +333,9 @@ where
                 .iter()
                 .chain(chip.receives())
                 .any(|i| i.scope == InteractionScope::Global);
-            if !has_global_interactions {
-                builder.assert_ext_eq(opening.global_cumulative_sum, C::EF::ZERO.cons());
-            }
+            // if !has_global_interactions {
+            //     builder.assert_ext_eq(opening.global_cumulative_sum, C::EF::ZERO.cons());
+            // }
             let has_local_interactions = chip
                 .sends()
                 .iter()
@@ -484,11 +484,7 @@ where
 
         // Verify the constrtaint evaluations.
         builder.cycle_tracker_v2_enter("stage-e-verify-constraints".to_string());
-        let permutation_challenges = global_permutation_challenges
-            .iter()
-            .chain(local_permutation_challenges.iter())
-            .copied()
-            .collect::<Vec<_>>();
+        let permutation_challenges = local_permutation_challenges;
 
         for (chip, trace_domain, qc_domains, values) in
             izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)

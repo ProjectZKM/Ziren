@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
 use super::{interaction::AirInteraction, BinomialExtension};
-use crate::{lookup::InteractionKind, Word};
+use crate::{lookup::InteractionKind, septic_extension::SepticExtension, Word};
 
 /// The scope of an interaction.
 #[derive(
@@ -343,6 +343,20 @@ pub trait AluAirBuilder: BaseAirBuilder {
     }
 }
 
+/// A builder that can operation on septic extension elements.
+pub trait SepticExtensionAirBuilder: BaseAirBuilder {
+    /// Asserts that the two field extensions are equal.
+    fn assert_septic_ext_eq<I: Into<Self::Expr>>(
+        &mut self,
+        left: SepticExtension<I>,
+        right: SepticExtension<I>,
+    ) {
+        for (left, right) in left.0.into_iter().zip(right.0) {
+            self.assert_eq(left, right);
+        }
+    }
+}
+
 /// A builder that can operation on extension elements.
 pub trait ExtensionAirBuilder: BaseAirBuilder {
     /// Asserts that the two field extensions are equal.
@@ -393,7 +407,7 @@ pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
 /// A trait that contains the common helper methods for building `ZKM recursion` and ZKM machine
 /// AIRs.
 pub trait MachineAirBuilder:
-    BaseAirBuilder + ExtensionAirBuilder + AirBuilderWithPublicValues
+    BaseAirBuilder + ExtensionAirBuilder + SepticExtensionAirBuilder + AirBuilderWithPublicValues
 {
 }
 
@@ -415,6 +429,7 @@ impl<AB: BaseAirBuilder> ByteAirBuilder for AB {}
 impl<AB: BaseAirBuilder> AluAirBuilder for AB {}
 
 impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
+impl<AB: BaseAirBuilder> SepticExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> MachineAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> ZKMAirBuilder for AB {}
 

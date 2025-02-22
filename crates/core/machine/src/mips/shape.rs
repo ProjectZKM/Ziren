@@ -764,9 +764,6 @@ pub mod tests {
         challenger.observe(global_data.main_commit.clone());
         challenger.observe(local_data.main_commit.clone());
 
-        let global_permutation_challenges: [<SC as StarkGenericConfig>::Challenge; 2] =
-            [challenger.sample_ext_element(), challenger.sample_ext_element()];
-
         // Try to "open".
         prover
             .open(
@@ -774,7 +771,6 @@ pub mod tests {
                 Some(global_data),
                 local_data,
                 &mut challenger,
-                &global_permutation_challenges,
             )
             .unwrap();
     }

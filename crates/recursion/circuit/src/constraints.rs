@@ -102,7 +102,7 @@ where
             main: opening.main.view(),
             perm: perm_opening.view(),
             perm_challenges: permutation_challenges,
-            cumulative_sums: &[opening.global_cumulative_sum, opening.local_cumulative_sum],
+            cumulative_sums: &[opening.local_cumulative_sum, opening.local_cumulative_sum],
             public_values,
             is_first_row: selectors.is_first_row,
             is_last_row: selectors.is_last_row,
@@ -223,17 +223,13 @@ where
         }
 
         // Verify that the permutation width matches the expected value for the chip.
-        if opening.permutation.local.len()
-            != chip.permutation_width() * <SC::Challenge as FieldExtensionAlgebra<C::F>>::D
-        {
+        if opening.permutation.local.len() != chip.permutation_width() {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
                 opening.permutation.local.len(),
             ));
         }
-        if opening.permutation.next.len()
-            != chip.permutation_width() * <SC::Challenge as FieldExtensionAlgebra<C::F>>::D
-        {
+        if opening.permutation.next.len() != chip.permutation_width() {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
                 opening.permutation.next.len(),

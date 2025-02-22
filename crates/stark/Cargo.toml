@@ -38,6 +38,7 @@ strum = "0.26.3"
 strum_macros = "0.26.4"
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 arrayref = "0.3.8"
+num-bigint = { version = "0.4.3", default-features = false }
 rayon-scan = "0.1.1"
 
 num-traits = "0.2.19"

@@ -530,11 +530,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             assert_eq!(reconstruct_challenger.sponge_state.len(), 16);
             assert_eq!(reconstruct_challenger.output_buffer.len(), 8);
 
-            for proof in batch.iter() {
-                reconstruct_challenger.observe(proof.commitment.global_main_commit);
-                reconstruct_challenger
-                    .observe_slice(&proof.public_values[0..self.core_prover.num_pv_elts()]);
-            }
+            // for proof in batch.iter() {
+            //     reconstruct_challenger.observe(proof.commitment.global_main_commit);
+            //     reconstruct_challenger
+            //         .observe_slice(&proof.public_values[0..self.core_prover.num_pv_elts()]);
+            // }
         }
 
         // Check that the leaf challenger is the same as the reconstruct challenger.
@@ -637,10 +637,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // Get the leaf challenger.
         let mut leaf_challenger = self.core_prover.config().challenger();
         vk.vk.observe_into(&mut leaf_challenger);
-        shard_proofs.iter().for_each(|proof| {
-            leaf_challenger.observe(proof.commitment.global_main_commit);
-            leaf_challenger.observe_slice(&proof.public_values[0..self.core_prover.num_pv_elts()]);
-        });
+        // shard_proofs.iter().for_each(|proof| {
+        //     leaf_challenger.observe(proof.commitment.global_main_commit);
+        //     leaf_challenger.observe_slice(&proof.public_values[0..self.core_prover.num_pv_elts()]);
+        // });
 
         // Generate the first layer inputs.
         let first_layer_inputs = self.get_first_layer_inputs(
@@ -830,11 +830,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .in_scope(|| self.compress_prover.commit(&record, traces));
 
                                 // Observe the commitment.
-                                tracing::debug_span!("observe public values").in_scope(|| {
-                                    challenger.observe_slice(
-                                        &local_data.public_values[0..self.compress_prover.num_pv_elts()],
-                                    );
-                                });
+                                // tracing::debug_span!("observe public values").in_scope(|| {
+                                //     challenger.observe_slice(
+                                //         &local_data.public_values[0..self.compress_prover.num_pv_elts()],
+                                //     );
+                                // });
 
                                 // Generate the proof.
                                 let proof = tracing::debug_span!("open").in_scope(|| {
@@ -844,10 +844,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                             None,
                                             local_data,
                                             &mut challenger,
-                                            &[
-                                                <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge::ZERO,
-                                                <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge::ZERO,
-                                            ],
                                         )
                                         .unwrap()
                                 });

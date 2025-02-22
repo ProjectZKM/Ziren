@@ -104,11 +104,8 @@ where
             let perm_local: Vec<_> = (0..perm_width)
                 .step_by(ext_degree)
                 .map(|col| {
-                    PackedChallenge::<SC>::from_base_fn(|i| {
-                        PackedVal::<SC>::from_fn(|offset| {
-                            permutation_trace_on_quotient_domain
-                                .get(wrap(i_start + offset), col + i)
-                        })
+                    PackedVal::<SC>::from_fn(|offset| {
+                        permutation_trace_on_quotient_domain.get(wrap(i_start + offset), col)
                     })
                 })
                 .collect();
@@ -116,11 +113,9 @@ where
             let perm_next: Vec<_> = (0..perm_width)
                 .step_by(ext_degree)
                 .map(|col| {
-                    PackedChallenge::<SC>::from_base_fn(|i| {
-                        PackedVal::<SC>::from_fn(|offset| {
-                            permutation_trace_on_quotient_domain
-                                .get(wrap(i_start + next_step + offset), col + i)
-                        })
+                    PackedVal::<SC>::from_fn(|offset| {
+                        permutation_trace_on_quotient_domain
+                            .get(wrap(i_start + next_step + offset), col)
                     })
                 })
                 .collect();

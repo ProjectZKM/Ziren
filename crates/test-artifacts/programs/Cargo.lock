@@ -2752,6 +2752,7 @@ dependencies = [
  "arrayref",
  "hashbrown 0.14.5",
  "itertools",
+ "num-bigint",
  "num-traits",
  "p3-air",
  "p3-challenger",

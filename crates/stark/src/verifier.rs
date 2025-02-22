@@ -35,7 +35,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         chips: &[&MachineChip<SC, A>],
         challenger: &mut SC::Challenger,
         proof: &ShardProof<SC>,
-        global_permutation_challenges: &[SC::Challenge],
     ) -> Result<(), VerificationError<SC>>
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
@@ -104,7 +103,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
             let global_sum = opening.global_cumulative_sum;
             let local_sum = opening.local_cumulative_sum;
-            challenger.observe_slice(global_sum.as_base_slice());
+            // challenger.observe_slice(global_sum.as_base_slice());
             challenger.observe_slice(local_sum.as_base_slice());
 
             let has_global_interactions = chip
@@ -112,11 +111,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 .iter()
                 .chain(chip.receives())
                 .any(|i| i.scope == InteractionScope::Global);
-            if !has_global_interactions && !global_sum.is_zero() {
-                return Err(VerificationError::CumulativeSumsError(
-                    "global cumulative sum is non-zero, but no global interactions",
-                ));
-            }
+            // if !has_global_interactions && !global_sum.is_zero() {
+            //     return Err(VerificationError::CumulativeSumsError(
+            //         "global cumulative sum is non-zero, but no global interactions",
+            //     ));
+            // }
             let has_local_interactions = chip
                 .sends()
                 .iter()
@@ -248,11 +247,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             .verify(rounds, opening_proof, challenger)
             .map_err(|e| VerificationError::InvalidopeningArgument(e))?;
 
-        let permutation_challenges = global_permutation_challenges
-            .iter()
-            .chain(local_permutation_challenges.iter())
-            .copied()
-            .collect::<Vec<_>>();
+        let permutation_challenges = local_permutation_challenges;
 
         // Verify the constrtaint evaluations.
         for (chip, trace_domain, qc_domains, values) in
@@ -316,13 +311,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         }
 
         // Verify that the permutation width matches the expected value for the chip.
-        if opening.permutation.local.len() != chip.permutation_width() * SC::Challenge::D {
+        if opening.permutation.local.len() != chip.permutation_width() {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
                 opening.permutation.local.len(),
             ));
         }
-        if opening.permutation.next.len() != chip.permutation_width() * SC::Challenge::D {
+        if opening.permutation.next.len() != chip.permutation_width() {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
                 opening.permutation.next.len(),
@@ -414,7 +409,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             next: unflatten(&opening.permutation.next),
         };
 
-        let cumulative_sums = [opening.global_cumulative_sum, opening.local_cumulative_sum];
+        let cumulative_sums = [opening.local_cumulative_sum, opening.local_cumulative_sum]; // TODO: FIX
         let cumulative_sums = cumulative_sums.as_slice();
         let mut folder = VerifierConstraintFolder::<SC> {
             preprocessed: opening.preprocessed.view(),
