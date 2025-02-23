@@ -1,0 +1,16 @@
+[package]
+name = "revme-script"
+version.workspace = true
+edition.workspace = true
+default-run = "revme-script"
+publish = false
+
+[dependencies]
+zkm2-sdk = { workspace = true }
+
+[build-dependencies]
+zkm2-build = { workspace = true }
+
+[[bin]]
+name = "revme-script"
+path = "src/main.rs"
