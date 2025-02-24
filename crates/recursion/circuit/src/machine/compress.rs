@@ -6,22 +6,15 @@ use std::{
 };
 
 use itertools::{izip, Itertools};
-
 use p3_air::Air;
 use p3_koala_bear::KoalaBear;
-
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
-
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm2_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicFelt};
 
-use zkm2_recursion_core::{
-    air::{ChallengerPublicValues, RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
-    D,
-};
-
+use zkm2_recursion_compiler::ir::{Builder, CircuitV2Builder, Felt, SymbolicFelt};
+use zkm2_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 use zkm2_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
@@ -127,22 +120,15 @@ where
         let mut exit_code: Felt<_> = builder.uninit();
 
         let mut execution_shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
-        let mut initial_reconstruct_challenger_values: ChallengerPublicValues<Felt<C::F>> =
-            unsafe { uninit_challenger_pv(builder) };
-        let mut reconstruct_challenger_values: ChallengerPublicValues<Felt<C::F>> =
-            unsafe { uninit_challenger_pv(builder) };
-        let mut leaf_challenger_values: ChallengerPublicValues<Felt<C::F>> =
-            unsafe { uninit_challenger_pv(builder) };
         let mut committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
             array::from_fn(|_| {
                 Word(array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() }))
             });
         let mut deferred_proofs_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
             array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
-        let mut reconstruct_deferred_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
+        let mut reconstruct_deferred_digest:// Observe the [Felt<_>; POSEIDON_NUM_WORDS] =
             core::array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
-        let mut global_cumulative_sum: [Felt<_>; D] =
-            core::array::from_fn(|_| builder.eval(C::F::ZERO));
+        let mut global_cumulative_sums = Vec::new();
         let mut init_addr_bits: [Felt<_>; 32] =
             core::array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
         let mut finalize_addr_bits: [Felt<_>; 32] =
@@ -162,26 +148,18 @@ where
             // Observe the vk and start pc.
             challenger.observe(builder, vk.commitment);
             challenger.observe(builder, vk.pc_start);
+            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
+            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
+            // Observe the padding.
             let zero: Felt<_> = builder.eval(C::F::ZERO);
-            for _ in 0..7 {
-                challenger.observe(builder, zero);
-            }
+            challenger.observe(builder, zero);
 
-            // Observe the main commitment and public values.
             challenger.observe_slice(
                 builder,
                 shard_proof.public_values[0..machine.num_pv_elts()].iter().copied(),
             );
 
-            let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
-            StarkVerifier::verify_shard(
-                builder,
-                &vk,
-                machine,
-                &mut challenger,
-                &shard_proof,
-                &[zero_ext, zero_ext],
-            );
+            StarkVerifier::verify_shard(builder, &vk, machine, &mut challenger, &shard_proof);
 
             // Get the current public values.
             let current_public_values: &RecursionPublicValues<Felt<C::F>> =
@@ -250,14 +228,6 @@ where
                     *bit = *current_bit;
                     *first_bit = *current_bit;
                 }
-
-                // Initialize the leaf challenger public values.
-                leaf_challenger_values = current_public_values.leaf_challenger;
-
-                // Initialize the initial reconstruct challenger public values.
-                initial_reconstruct_challenger_values =
-                    current_public_values.start_reconstruct_challenger;
-                reconstruct_challenger_values = current_public_values.start_reconstruct_challenger;
 
                 // Assign the committed values and deferred proof digests.
                 for (word, current_word) in committed_value_digest
@@ -353,21 +323,6 @@ where
                 .zip(current_public_values.previous_finalize_addr_bits.iter())
             {
                 builder.assert_felt_eq(*bit, *current_bit);
-            }
-
-            // Assert that the leaf challenger is always the same.
-            for (current, expected) in
-                leaf_challenger_values.into_iter().zip(current_public_values.leaf_challenger)
-            {
-                builder.assert_felt_eq(current, expected);
-            }
-
-            // Assert that the current challenger matches the start reconstruct challenger.
-            for (current, expected) in reconstruct_challenger_values
-                .into_iter()
-                .zip(current_public_values.start_reconstruct_challenger)
-            {
-                builder.assert_felt_eq(current, expected);
             }
 
             // Digest constraints.
@@ -490,16 +445,10 @@ where
                 *bit = *next_bit;
             }
 
-            // Update the reconstruct challenger.
-            reconstruct_challenger_values = current_public_values.end_reconstruct_challenger;
-
-            // Update the cumulative sum.
-            for (sum_element, current_sum_element) in
-                global_cumulative_sum.iter_mut().zip_eq(current_public_values.cumulative_sum.iter())
-            {
-                *sum_element = builder.eval(*sum_element + *current_sum_element);
-            }
+            global_cumulative_sums.push(current_public_values.global_cumulative_sum);
         }
+
+        let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
 
         // Update the global values from the last accumulated values.
         // Set zkm2_vk digest to the one from the proof values.
@@ -514,12 +463,6 @@ where
         compress_public_values.last_init_addr_bits = init_addr_bits;
         // Set the MemoryFinalize address bits to be the last MemoryFinalize address bits.
         compress_public_values.last_finalize_addr_bits = finalize_addr_bits;
-        // Set the leaf challenger to it's value.
-        compress_public_values.leaf_challenger = leaf_challenger_values;
-        // Set the start reconstruct challenger to be the initial reconstruct challenger.
-        compress_public_values.start_reconstruct_challenger = initial_reconstruct_challenger_values;
-        // Set the end reconstruct challenger to be the last reconstruct challenger.
-        compress_public_values.end_reconstruct_challenger = reconstruct_challenger_values;
         // Set the start reconstruct deferred digest to be the last reconstruct deferred digest.
         compress_public_values.end_reconstruct_deferred_digest = reconstruct_deferred_digest;
         // Assign the deferred proof digests.
@@ -527,7 +470,7 @@ where
         // Assign the committed value digests.
         compress_public_values.committed_value_digest = committed_value_digest;
         // Assign the cumulative sum.
-        compress_public_values.cumulative_sum = global_cumulative_sum;
+        compress_public_values.global_cumulative_sum = global_cumulative_sum;
         // Assign the `is_complete` flag.
         compress_public_values.is_complete = is_complete;
         // Set the contains an execution shard flag.

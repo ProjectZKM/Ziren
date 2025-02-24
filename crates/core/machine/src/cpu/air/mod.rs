@@ -67,7 +67,6 @@ where
             local.op_c_val(),
             local.op_hi_val(),
             local.shard,
-            local.nonce,
             is_alu_instruction,
         );
 
@@ -134,7 +133,7 @@ impl CpuChip {
         &self,
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
-        next: &CpuCols<AB::Var>,
+        _next: &CpuCols<AB::Var>,
     ) {
         // Get the jump specific columns
         let jump_columns = local.opcode_specific_columns.jump();
@@ -196,38 +195,9 @@ impl CpuChip {
             jump_columns.next_pc,
             local.op_b_val(),
             local.shard,
-            jump_columns.jumpd_nonce,
             local.selectors.is_jumpd,
         );
     }
-
-    // /// Constraints related to the AUIPC opcode.
-    // pub(crate) fn eval_auipc<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
-    //    // Get the auipc specific columns.
-    //     let auipc_columns = local.opcode_specific_columns.auipc();
-    //
-    //     // Verify that the word form of local.pc is correct.
-    //     builder.when(local.selectors.is_auipc).assert_eq(auipc_columns.pc.reduce::<AB>(), local.pc);
-    //
-    //     // Range check the pc.
-    //     KoalaBearWordRangeChecker::<AB::F>::range_check(
-    //         builder,
-    //         auipc_columns.pc,
-    //         auipc_columns.pc_range_checker,
-    //         local.selectors.is_auipc.into(),
-    //     );
-    //
-    //     // Verify that op_a == pc + op_b.
-    //     builder.send_alu(
-    //         AB::Expr::from_canonical_u32(Opcode::ADD as u32),
-    //         local.op_a_val(),
-    //         auipc_columns.pc,
-    //         local.op_b_val(),
-    //         local.shard,
-    //         auipc_columns.auipc_nonce,
-    //         local.selectors.is_auipc,
-    //     );
-    // }
 
     /// Constraints related to the shard and clk.
     ///

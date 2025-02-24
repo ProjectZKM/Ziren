@@ -45,9 +45,6 @@ pub struct CloClzCols<T> {
     /// The shard number, used for byte lookup table.
     pub shard: T,
 
-    /// The nonce of the operation.
-    pub nonce: T,
-
     /// The result
     pub a: T,
 
@@ -82,9 +79,6 @@ pub struct CloClzCols<T> {
 
     /// Flag to indicate whether the opcode is CLO.
     pub is_clo: T,
-
-    /// The nonce of the operation.
-    pub sr_nonce: T,
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
@@ -135,14 +129,6 @@ impl<F: PrimeField> MachineAir<F> for CloClzChip {
                 cols.is_sr1_one.populate(sr1_val, 1);
             }
 
-            cols.sr_nonce = F::from_canonical_u32(
-                input
-                    .nonce_lookup
-                    .get(event.sub_lookups[0].0 as usize)
-                    .copied()
-                    .unwrap_or_default(),
-            );
-
             // Range check.
             output.add_u8_range_checks(event.shard, &bb.to_le_bytes());
             output.add_byte_lookup_event(ByteLookupEvent {
@@ -186,14 +172,11 @@ impl<F: PrimeField> MachineAir<F> for CloClzChip {
             trace.values[i] = padded_row_template[i % NUM_CLOCLZ_COLS];
         }
 
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut CloClzCols<F> =
-                trace.values[i * NUM_CLOCLZ_COLS..(i + 1) * NUM_CLOCLZ_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
         trace
+    }
+    
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -219,14 +202,8 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &CloClzCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &CloClzCols<AB::Var> = (*next).borrow();
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // if clz, bb == b, else bb = !b
         {
@@ -281,7 +258,6 @@ where
                     zero.clone(),
                 ]),
                 local.shard,
-                local.sr_nonce,
                 one.clone() - is_bb_zero.clone(),
             );
 

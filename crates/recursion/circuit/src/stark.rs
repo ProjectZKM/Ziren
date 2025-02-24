@@ -33,12 +33,14 @@ use crate::{
     domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs, KoalaBearFriConfigVariable,
     TwoAdicPcsRoundVariable, VerifyingKeyVariable,
 };
+use zkm2_stark::septic_digest::SepticDigest;
 
 /// Reference: [zkm2_core::stark::ShardProof]
+#[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
     pub commitment: ShardCommitment<SC::DigestVariable>,
-    pub opened_values: ShardOpenedValues<Ext<C::F, C::EF>>,
+    pub opened_values: ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
     pub opening_proof: FriProofVariable<C, SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Felt<C::F>>,
@@ -59,8 +61,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
     // Make a dummy commitment.
     let commitment = ShardCommitment {
-        global_main_commit: dummy_hash(),
-        local_main_commit: dummy_hash(),
+        main_commit: dummy_hash(),
         permutation_commit: dummy_hash(),
         quotient_commit: dummy_hash(),
     };
@@ -73,8 +74,6 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         .map(|(i, (name, _))| (name.clone(), i))
         .collect::<HashMap<_, _>>();
     let shard_chips = machine.shard_chips_ordered(&chip_ordering).collect::<Vec<_>>();
-    let chip_scopes = shard_chips.iter().map(|chip| chip.commit_scope()).collect::<Vec<_>>();
-    let has_global_main_commit = chip_scopes.contains(&InteractionScope::Global);
     let opened_values = ShardOpenedValues {
         chips: shard_chips
             .iter()
@@ -87,14 +86,11 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 
     let mut preprocessed_names_and_dimensions = vec![];
     let mut preprocessed_batch_shape = vec![];
-    let mut global_main_batch_shape = vec![];
-    let mut local_main_batch_shape = vec![];
+    let mut main_batch_shape = vec![];
     let mut permutation_batch_shape = vec![];
     let mut quotient_batch_shape = vec![];
 
-    for ((chip, chip_opening), scope) in
-        shard_chips.iter().zip_eq(opened_values.chips.iter()).zip_eq(chip_scopes.iter())
-    {
+    for (chip, chip_opening) in shard_chips.iter().zip_eq(opened_values.chips.iter()) {
         if !chip_opening.preprocessed.local.is_empty() {
             let prep_shape = PolynomialShape {
                 width: chip_opening.preprocessed.local.len(),
@@ -111,10 +107,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
             width: chip_opening.main.local.len(),
             log_degree: chip_opening.log_degree,
         };
-        match scope {
-            InteractionScope::Global => global_main_batch_shape.push(main_shape),
-            InteractionScope::Local => local_main_batch_shape.push(main_shape),
-        }
+        main_batch_shape.push(main_shape);
         let permutation_shape = PolynomialShape {
             width: chip_opening.permutation.local.len(),
             log_degree: chip_opening.log_degree,
@@ -129,22 +122,12 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         }
     }
 
-    let batch_shapes = if has_global_main_commit {
-        vec![
-            PolynomialBatchShape { shapes: preprocessed_batch_shape },
-            PolynomialBatchShape { shapes: global_main_batch_shape },
-            PolynomialBatchShape { shapes: local_main_batch_shape },
-            PolynomialBatchShape { shapes: permutation_batch_shape },
-            PolynomialBatchShape { shapes: quotient_batch_shape },
-        ]
-    } else {
-        vec![
-            PolynomialBatchShape { shapes: preprocessed_batch_shape },
-            PolynomialBatchShape { shapes: local_main_batch_shape },
-            PolynomialBatchShape { shapes: permutation_batch_shape },
-            PolynomialBatchShape { shapes: quotient_batch_shape },
-        ]
-    };
+    let batch_shapes = vec![
+        PolynomialBatchShape { shapes: preprocessed_batch_shape },
+        PolynomialBatchShape { shapes: main_batch_shape },
+        PolynomialBatchShape { shapes: permutation_batch_shape },
+        PolynomialBatchShape { shapes: quotient_batch_shape },
+    ];
 
     let fri_queries = machine.config().fri_config().num_queries;
     let log_blowup = machine.config().fri_config().log_blowup;
@@ -175,6 +158,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     let vk = StarkVerifyingKey {
         commit: dummy_hash(),
         pc_start: KoalaBear::ZERO,
+        initial_global_cumulative_sum: SepticDigest::<BabyBear>::zero(),
         chip_information: preprocessed_chip_information,
         chip_ordering: preprocessed_chip_ordering,
     };
@@ -188,7 +172,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
     chip: &Chip<F, A>,
     log_degree: usize,
-) -> ChipOpenedValues<EF> {
+) -> ChipOpenedValues<F, EF> {
     let preprocessed_width = chip.preprocessed_width();
     let preprocessed = AirOpenedValues {
         local: vec![EF::ZERO; preprocessed_width],
@@ -211,7 +195,7 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
         main,
         permutation,
         quotient,
-        global_cumulative_sum: EF::ZERO,
+        global_cumulative_sum: SepticDigest::<F>::zero(),
         local_cumulative_sum: EF::ZERO,
         log_degree,
     }
@@ -265,14 +249,10 @@ where
         machine: &StarkMachine<SC, A>,
         challenger: &mut SC::FriChallengerVariable,
         proof: &ShardProofVariable<C, SC>,
-        global_permutation_challenges: &[Ext<C::F, C::EF>],
     ) where
         A: for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
     {
         let chips = machine.shard_chips_ordered(&proof.chip_ordering).collect::<Vec<_>>();
-        let chip_scopes = chips.iter().map(|chip| chip.commit_scope()).collect::<Vec<_>>();
-
-        let has_global_main_commit = chip_scopes.contains(&InteractionScope::Global);
 
         let ShardProofVariable {
             commitment,
@@ -309,33 +289,28 @@ where
             .map(|log_degree| Self::natural_domain_for_degree(machine.config(), 1 << log_degree))
             .collect::<Vec<_>>();
 
-        let ShardCommitment {
-            global_main_commit,
-            local_main_commit,
-            permutation_commit,
-            quotient_commit,
-        } = *commitment;
+        let ShardCommitment { main_commit, permutation_commit, quotient_commit } = *commitment;
 
-        challenger.observe(builder, local_main_commit);
+        challenger.observe(builder, main_commit);
 
         let local_permutation_challenges =
             (0..2).map(|_| challenger.sample_ext(builder)).collect::<Vec<_>>();
 
         challenger.observe(builder, permutation_commit);
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
-            // let global_sum = C::ext2felt(builder, opening.global_cumulative_sum);
             let local_sum = C::ext2felt(builder, opening.local_cumulative_sum);
-            // challenger.observe_slice(builder, global_sum);
-            challenger.observe_slice(builder, local_sum);
+            let global_sum = opening.global_cumulative_sum;
 
-            let has_global_interactions = chip
-                .sends()
-                .iter()
-                .chain(chip.receives())
-                .any(|i| i.scope == InteractionScope::Global);
-            // if !has_global_interactions {
-            //     builder.assert_ext_eq(opening.global_cumulative_sum, C::EF::ZERO.cons());
-            // }
+            challenger.observe_slice(builder, local_sum);
+            challenger.observe_slice(builder, global_sum.0.x.0);
+            challenger.observe_slice(builder, global_sum.0.y.0);
+
+            if chip.commit_scope() == InteractionScope::Local {
+                let is_real: Felt<C::F> = builder.uninit();
+                builder.push_op(DslIr::ImmF(is_real, C::F::one()));
+                builder.assert_digest_zero_v2(is_real, global_sum);
+            }
+
             let has_local_interactions = chip
                 .sends()
                 .iter()
@@ -433,33 +408,15 @@ where
             })
             .collect::<Vec<_>>();
 
-        // Split the main_domains_points_and_opens to the global and local chips.
-        let mut global_trace_points_and_openings = Vec::new();
-        let mut local_trace_points_and_openings = Vec::new();
-        for (i, points_and_openings) in
-            main_domains_points_and_opens.clone().into_iter().enumerate()
-        {
-            let scope = chip_scopes[i];
-            if scope == InteractionScope::Global {
-                global_trace_points_and_openings.push(points_and_openings);
-            } else {
-                local_trace_points_and_openings.push(points_and_openings);
-            }
-        }
-
         // Create the pcs rounds.
         let prep_commit = vk.commitment;
         let prep_round = TwoAdicPcsRoundVariable {
             batch_commit: prep_commit,
             domains_points_and_opens: preprocessed_domains_points_and_opens,
         };
-        let global_main_round = TwoAdicPcsRoundVariable {
-            batch_commit: global_main_commit,
-            domains_points_and_opens: global_trace_points_and_openings,
-        };
-        let local_main_round = TwoAdicPcsRoundVariable {
-            batch_commit: local_main_commit,
-            domains_points_and_opens: local_trace_points_and_openings,
+        let main_round = TwoAdicPcsRoundVariable {
+            batch_commit: main_commit,
+            domains_points_and_opens: main_domains_points_and_opens,
         };
         let perm_round = TwoAdicPcsRoundVariable {
             batch_commit: permutation_commit,
@@ -470,11 +427,7 @@ where
             domains_points_and_opens: quotient_domains_points_and_opens,
         };
 
-        let rounds = if has_global_main_commit {
-            vec![prep_round, global_main_round, local_main_round, perm_round, quotient_round]
-        } else {
-            vec![prep_round, local_main_round, perm_round, quotient_round]
-        };
+        let rounds = vec![prep_round, main_round, perm_round, quotient_round];
 
         // Verify the pcs proof
         builder.cycle_tracker_v2_enter("stage-d-verify-pcs".to_string());
@@ -598,7 +551,6 @@ pub mod tests {
         let mut challenger = machine.config().challenger();
         machine.verify(&vk, &proof, &mut challenger).unwrap();
 
-        // Observe all the commitments.
         let mut builder = Builder::<C>::default();
 
         let mut witness_stream = Vec::<WitnessBlock<C>>::new();
@@ -620,29 +572,14 @@ pub mod tests {
                 dummy_proof.read(&mut builder)
             })
             .collect::<Vec<_>>();
-        // Observe all the commitments, and put the proofs into the witness stream.
-        for proof in proofs.iter() {
-            let ShardCommitment { global_main_commit, .. } = proof.commitment;
-            challenger.observe(&mut builder, global_main_commit);
-            let pv_slice = &proof.public_values[..machine.num_pv_elts()];
-            challenger.observe_slice(&mut builder, pv_slice.iter().cloned());
-        }
-
-        let global_permutation_challenges =
-            (0..2).map(|_| challenger.sample_ext(&mut builder)).collect::<Vec<_>>();
 
         // Verify the first proof.
         let num_shards = num_shards_in_batch.unwrap_or(proofs.len());
         for proof in proofs.into_iter().take(num_shards) {
             let mut challenger = challenger.copy(&mut builder);
-            StarkVerifier::verify_shard(
-                &mut builder,
-                &vk,
-                &machine,
-                &mut challenger,
-                &proof,
-                &global_permutation_challenges,
-            );
+            let pv_slice = &proof.public_values[..machine.num_pv_elts()];
+            challenger.observe_slice(&mut builder, pv_slice.iter().cloned());
+            StarkVerifier::verify_shard(&mut builder, &vk, &machine, &mut challenger, &proof);
         }
         (builder.into_operations(), witness_stream)
     }

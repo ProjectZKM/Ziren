@@ -6,7 +6,7 @@ use p3_challenger::{HashChallenger, SerializingChallenger32};
 use p3_circle::CirclePcs;
 use p3_commit::ExtensionMmcs;
 use p3_field::extension::BinomialExtensionField;
-use p3_field::{Field, FieldAlgebra, PrimeField64};
+use p3_field::{FieldAlgebra, PrimeField64};
 use p3_fri::FriConfig;
 use p3_keccak::Keccak256Hash;
 use p3_matrix::dense::RowMajorMatrix;

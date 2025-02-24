@@ -93,7 +93,6 @@ impl CpuChip {
                 branch_cols.next_pc,
                 local.op_c_val(),
                 local.shard,
-                branch_cols.target_pc_nonce,
                 local.branching,
             );
 
@@ -201,7 +200,6 @@ impl CpuChip {
             local.op_a_val(),
             Word::zero::<AB>(),
             local.shard,
-            branch_cols.a_lt_0_nonce,
             check_a.clone(),
         );
 
@@ -212,7 +210,6 @@ impl CpuChip {
             Word::zero::<AB>(),
             local.op_a_val(),
             local.shard,
-            branch_cols.a_gt_0_nonce,
             check_a.clone(),
         );
     }

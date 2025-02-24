@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
 use super::{interaction::AirInteraction, BinomialExtension};
-use crate::{lookup::InteractionKind, septic_extension::SepticExtension, Word};
+use crate::{lookup::InteractionKind, septic_digest::SepticDigest, septic_extension::SepticExtension, Word};
 
 /// The scope of an interaction.
 #[derive(
@@ -186,7 +186,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
         shard: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.send_alu_with_hi(
@@ -196,7 +195,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
             c,
             Word([Self::F::ZERO; 4]),
             shard,
-            nonce,
             multiplicity,
         );
     }
@@ -212,7 +210,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
         // HI register is MULT MULTU DIV DIVU
         hi: Word<impl Into<Self::Expr>>,
         shard: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
@@ -221,7 +218,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
             .chain(c.0.into_iter().map(Into::into))
             .chain(hi.0.into_iter().map(Into::into))
             .chain(once(shard.into()))
-            .chain(once(nonce.into()))
             .collect();
 
         self.send(
@@ -239,7 +235,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
         shard: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.receive_alu_with_hi(
@@ -249,7 +244,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
             c,
             Word([Self::F::ZERO; 4]),
             shard,
-            nonce,
             multiplicity,
         );
     }
@@ -264,7 +258,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
         c: Word<impl Into<Self::Expr>>,
         hi: Word<impl Into<Self::Expr>>,
         shard: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
@@ -273,7 +266,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
             .chain(c.0.into_iter().map(Into::into))
             .chain(hi.0.into_iter().map(Into::into))
             .chain(once(shard.into()))
-            .chain(once(nonce.into()))
             .collect();
 
         self.receive(
@@ -288,7 +280,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
         &mut self,
         shard: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
-        nonce: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
@@ -300,7 +291,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
                 vec![
                     shard.clone().into(),
                     clk.clone().into(),
-                    nonce.clone().into(),
                     syscall_id.clone().into(),
                     arg1.clone().into(),
                     arg2.clone().into(),
@@ -318,7 +308,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
         &mut self,
         shard: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
-        nonce: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
@@ -330,7 +319,6 @@ pub trait AluAirBuilder: BaseAirBuilder {
                 vec![
                     shard.clone().into(),
                     clk.clone().into(),
-                    nonce.clone().into(),
                     syscall_id.clone().into(),
                     arg1.clone().into(),
                     arg2.clone().into(),
@@ -397,11 +385,17 @@ pub trait ExtensionAirBuilder: BaseAirBuilder {
 
 /// A builder that implements a permutation argument.
 pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
-    /// The type of the cumulative sum.
-    type Sum: Into<Self::ExprEF> + Copy;
+    /// The type of the local cumulative sum.
+    type LocalSum: Into<Self::ExprEF> + Copy;
 
-    /// Returns the cumulative sum of the permutation.
-    fn cumulative_sums(&self) -> &'a [Self::Sum];
+    /// The type of the global cumulative sum;
+    type GlobalSum: Into<Self::Expr> + Copy;
+
+    /// Returns the local cumulative sum of the permutation.
+    fn local_cumulative_sum(&self) -> &'a Self::LocalSum;
+
+    /// Returns the global cumulative sum of the permutation.
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum>;
 }
 
 /// A trait that contains the common helper methods for building `ZKM recursion` and ZKM machine

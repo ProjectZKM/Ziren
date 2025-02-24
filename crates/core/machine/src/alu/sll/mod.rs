@@ -68,9 +68,6 @@ pub struct ShiftLeftCols<T> {
     /// The shard number, used for byte lookup table.
     pub shard: T,
 
-    /// The nonce of the operation.
-    pub nonce: T,
-
     /// The output operand.
     pub a: Word<T>,
 
@@ -154,12 +151,6 @@ impl<F: PrimeField> MachineAir<F> for ShiftLeft {
             trace.values[i] = padded_row_template[i % NUM_SHIFT_LEFT_COLS];
         }
 
-        for i in 0..trace.height() {
-            let cols: &mut ShiftLeftCols<F> =
-                trace.values[i * NUM_SHIFT_LEFT_COLS..(i + 1) * NUM_SHIFT_LEFT_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
         trace
     }
 
@@ -181,6 +172,10 @@ impl<F: PrimeField> MachineAir<F> for ShiftLeft {
             .collect::<Vec<_>>();
 
         output.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -270,16 +265,10 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &ShiftLeftCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &ShiftLeftCols<AB::Var> = (*next).borrow();
 
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
         let base: AB::Expr = AB::F::from_canonical_u32(1 << BYTE_SIZE).into();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // We first "bit shift" and next we "byte shift". Then we compare the results with a.
         // Finally, we perform some misc checks.
@@ -392,7 +381,6 @@ where
             local.b,
             local.c,
             local.shard,
-            local.nonce,
             local.is_real,
         );
     }

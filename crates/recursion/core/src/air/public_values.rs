@@ -12,7 +12,7 @@ use std::{
 };
 use zkm2_core_machine::utils::indices_arr;
 use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{air::POSEIDON_NUM_WORDS, Word, PROOF_MAX_NUM_PVS};
+use zkm2_stark::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
@@ -113,12 +113,6 @@ pub struct RecursionPublicValues<T> {
     /// Last MemoryFinalize address bits.
     pub last_finalize_addr_bits: [T; 32],
 
-    /// Start state of reconstruct_challenger.
-    pub start_reconstruct_challenger: ChallengerPublicValues<T>,
-
-    /// End state of reconstruct_challenger.
-    pub end_reconstruct_challenger: ChallengerPublicValues<T>,
-
     /// Start state of reconstruct_deferred_digest.
     pub start_reconstruct_deferred_digest: [T; POSEIDON_NUM_WORDS],
 
@@ -131,12 +125,9 @@ pub struct RecursionPublicValues<T> {
     /// The root of the vk merkle tree.
     pub vk_root: [T; DIGEST_SIZE],
 
-    /// The leaf challenger containing the entropy from the main trace commitment.
-    pub leaf_challenger: ChallengerPublicValues<T>,
-
-    /// Current cumulative sum of lookup bus.  Note that for recursive proofs for core proofs, this
-    /// contains the global cumulative sum.  For all other proofs, it's the local cumulative sum.
-    pub cumulative_sum: [T; 4],
+    /// Current cumulative sum of lookup bus. Note that for recursive proofs for core proofs, this
+    /// contains the global cumulative sum.  
+    pub global_cumulative_sum: SepticDigest<T>,
 
     /// Whether the proof completely proves the program execution.
     pub is_complete: T,

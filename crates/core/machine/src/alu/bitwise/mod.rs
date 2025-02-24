@@ -5,8 +5,8 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_air::{Air, BaseAir};
+use p3_field::PrimeField;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use zkm2_core_executor::{
@@ -34,9 +34,6 @@ pub struct BitwiseChip;
 pub struct BitwiseCols<T> {
     /// The shard number, used for byte lookup table.
     pub shard: T,
-
-    /// The nonce of the operation.
-    pub nonce: T,
 
     /// The output operand.
     pub a: Word<T>,
@@ -94,16 +91,7 @@ impl<F: PrimeField> MachineAir<F> for BitwiseChip {
         );
 
         // Convert the trace to a row major matrix.
-        let mut trace =
-            RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_BITWISE_COLS);
-
-        for i in 0..trace.height() {
-            let cols: &mut BitwiseCols<F> =
-                trace.values[i * NUM_BITWISE_COLS..(i + 1) * NUM_BITWISE_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
-        trace
+        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_BITWISE_COLS)
     }
 
     fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
@@ -124,6 +112,10 @@ impl<F: PrimeField> MachineAir<F> for BitwiseChip {
             .collect::<Vec<_>>();
 
         output.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -185,12 +177,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &BitwiseCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &BitwiseCols<AB::Var> = (*next).borrow();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-        builder.when_transition().assert_eq(local.nonce + AB::Expr::ONE, next.nonce);
 
         // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<AB::F>()
@@ -217,7 +203,6 @@ where
             local.b,
             local.c,
             local.shard,
-            local.nonce,
             local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
 

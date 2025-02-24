@@ -12,14 +12,17 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use zkm2_primitives::consts::WORD_SIZE;
-use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
-
+use zkm2_recursion_compiler::ir::{Builder, Felt};
+use zkm2_stark::septic_curve::SepticCurve;
+use zkm2_stark::septic_digest::{
+    SepticDigest, CURVE_CUMULATIVE_SUM_START_X, CURVE_CUMULATIVE_SUM_START_Y,
+};
+use zkm2_stark::septic_extension::SepticExtension;
 use zkm2_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
     Dom, ShardProof, StarkMachine, StarkVerifyingKey, Word,
 };
-
 use zkm2_recursion_core::{
     air::{RecursionPublicValues, PV_DIGEST_NUM_WORDS, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
@@ -61,7 +64,6 @@ pub struct ZKMDeferredWitnessValues<SC: KoalaBearFriConfig + FieldHasher<KoalaBe
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; POSEIDON_NUM_WORDS],
     pub zkm2_vk_digest: [SC::Val; DIGEST_SIZE],
-    pub leaf_challenger: SC::Challenger,
     pub committed_value_digest: [Word<SC::Val>; PV_DIGEST_NUM_WORDS],
     pub deferred_proofs_digest: [SC::Val; POSEIDON_NUM_WORDS],
     pub end_pc: SC::Val,
@@ -80,7 +82,6 @@ pub struct ZKMDeferredWitnessVariable<
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm2_vk_digest: [Felt<C::F>; DIGEST_SIZE],
-    pub leaf_challenger: SC::FriChallengerVariable,
     pub committed_value_digest: [Word<Felt<C::F>>; PV_DIGEST_NUM_WORDS],
     pub deferred_proofs_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub end_pc: Felt<C::F>,
@@ -122,7 +123,6 @@ where
             vk_merkle_data,
             start_reconstruct_deferred_digest,
             zkm2_vk_digest,
-            leaf_challenger,
             committed_value_digest,
             deferred_proofs_digest,
             end_pc,
@@ -157,10 +157,11 @@ where
             // Observe the vk and start pc.
             challenger.observe(builder, vk.commitment);
             challenger.observe(builder, vk.pc_start);
+            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
+            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
+            // Observe the padding.
             let zero: Felt<_> = builder.eval(C::F::ZERO);
-            for _ in 0..7 {
-                challenger.observe(builder, zero);
-            }
+            challenger.observe(builder, zero);
 
             // Observe the and public values.
             challenger.observe_slice(
@@ -168,15 +169,7 @@ where
                 shard_proof.public_values[0..machine.num_pv_elts()].iter().copied(),
             );
 
-            let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
-            StarkVerifier::verify_shard(
-                builder,
-                &vk,
-                machine,
-                &mut challenger,
-                &shard_proof,
-                &[zero_ext, zero_ext],
-            );
+            StarkVerifier::verify_shard(builder, &vk, machine, &mut challenger, &shard_proof);
 
             // Get the current public values.
             let current_public_values: &RecursionPublicValues<Felt<C::F>> =
@@ -232,11 +225,6 @@ where
         // Set the deferred proof digest to be the hitned value.
         deferred_public_values.deferred_proofs_digest = deferred_proofs_digest;
 
-        // Set the initial, end, and leaf challenger to be the hitned values.
-        let values = leaf_challenger.public_values(builder);
-        deferred_public_values.leaf_challenger = values;
-        deferred_public_values.start_reconstruct_challenger = values;
-        deferred_public_values.end_reconstruct_challenger = values;
         // Set the exit code to be zero for now.
         deferred_public_values.exit_code = builder.eval(C::F::ZERO);
         // Assign the deferred proof digests.
@@ -246,7 +234,10 @@ where
         // Set the `contains_execution_shard` flag.
         deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
         // Set the cumulative sum to zero.
-        deferred_public_values.cumulative_sum = array::from_fn(|_| builder.eval(C::F::ZERO));
+        deferred_public_values.global_cumulative_sum =
+            SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
+                builder.eval(value)
+            }));
         // Set the vk root from the witness.
         deferred_public_values.vk_root = vk_root;
         // Set the digest according to the previous values.
@@ -271,7 +262,6 @@ impl ZKMDeferredWitnessValues<KoalaBearPoseidon2> {
         Self {
             vks_and_proofs,
             vk_merkle_data,
-            leaf_challenger: dummy_challenger(machine.config()),
             is_complete: true,
             zkm2_vk_digest: [KoalaBear::ZERO; DIGEST_SIZE],
             start_reconstruct_deferred_digest: [KoalaBear::ZERO; POSEIDON_NUM_WORDS],

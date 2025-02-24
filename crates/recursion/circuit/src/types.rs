@@ -4,8 +4,8 @@ use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_matrix::Dimensions;
 
 use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
-
 use zkm2_recursion_core::DIGEST_SIZE;
+use zkm2_stark::septic_digest::SepticDigest;
 
 use crate::{
     challenger::CanObserveVariable, hash::FieldHasherVariable, CircuitConfig,
@@ -17,6 +17,7 @@ use crate::{
 pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
     pub commitment: SC::DigestVariable,
     pub pc_start: Felt<C::F>,
+    pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
     pub chip_ordering: HashMap<String, usize>,
 }
@@ -84,11 +85,12 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> Verifying
         challenger.observe(builder, self.commitment);
         // Observe the pc_start.
         challenger.observe(builder, self.pc_start);
+        // Observe the initial global cumulative sum.
+        challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.x.0);
+        challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.y.0);
         // Observe the padding.
         let zero: Felt<_> = builder.eval(C::F::ZERO);
-        for _ in 0..7 {
-            challenger.observe(builder, zero);
-        }
+        challenger.observe(builder, zero);
     }
 
     /// Hash the verifying key + prep domains into a single digest.

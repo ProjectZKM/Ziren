@@ -5,7 +5,6 @@ use std::{
 };
 
 use hashbrown::HashMap;
-use num::{traits::ops::overflowing::OverflowingAdd, PrimInt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zkm2_stark::ZKMCoreOpts;
@@ -1878,6 +1877,7 @@ impl<'a> Executor<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn show_regs(&self) {
         let regs = (0..34).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);

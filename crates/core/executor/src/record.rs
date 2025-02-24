@@ -13,7 +13,7 @@ use crate::{
     events::{
         add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent, LookupId,
         MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum, PrecompileEvent,
-        PrecompileEvents, SyscallEvent,
+        PrecompileEvents, SyscallEvent, GlobalInteractionEvent,
     },
     syscalls::SyscallCode,
     CoreShape, Opcode, Program,
@@ -59,6 +59,8 @@ pub struct ExecutionRecord {
     pub cpu_local_memory_access: Vec<MemoryLocalEvent>,
     // /// A trace of all the syscall events.
     pub syscall_events: Vec<SyscallEvent>,
+    /// A trace of all the global interaction events.
+    pub global_interaction_events: Vec<GlobalInteractionEvent>,
     // /// The public values.
     pub public_values: PublicValues<u32, u32>,
     /// The nonce lookup.
@@ -89,6 +91,7 @@ impl Default for ExecutionRecord {
             global_memory_finalize_events: Vec::default(),
             cpu_local_memory_access: Vec::default(),
             syscall_events: Vec::default(),
+            global_interaction_events: Vec::default(),
             public_values: PublicValues::default(),
             nonce_lookup: Vec::default(),
             next_nonce: 0,
@@ -389,6 +392,7 @@ impl MachineRecord for ExecutionRecord {
         self.global_memory_initialize_events.append(&mut other.global_memory_initialize_events);
         self.global_memory_finalize_events.append(&mut other.global_memory_finalize_events);
         self.cpu_local_memory_access.append(&mut other.cpu_local_memory_access);
+        self.global_interaction_events.append(&mut other.global_interaction_events);
     }
 
     fn register_nonces(&mut self, _opts: &Self::Config) {

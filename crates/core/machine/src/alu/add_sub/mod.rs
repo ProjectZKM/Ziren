@@ -5,8 +5,8 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_air::{Air, BaseAir};
+use p3_field::PrimeField;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm2_core_executor::{
@@ -42,9 +42,6 @@ pub struct AddSubChip;
 pub struct AddSubCols<T> {
     /// The shard number, used for byte lookup table.
     pub shard: T,
-
-    /// The nonce of the operation.
-    pub nonce: T,
 
     /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
@@ -98,7 +95,6 @@ impl<F: PrimeField> MachineAir<F> for AddSubChip {
                         let event = &merged_events[idx];
                         self.event_to_row(event, cols, &mut byte_lookup_events);
                     }
-                    cols.nonce = F::from_canonical_usize(idx);
                 });
             },
         );
@@ -128,6 +124,10 @@ impl<F: PrimeField> MachineAir<F> for AddSubChip {
             .collect::<Vec<_>>();
 
         output.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -194,7 +194,6 @@ where
             local.operand_1,
             local.operand_2,
             local.shard,
-            local.nonce,
             local.is_add,
         );
 
@@ -205,7 +204,6 @@ where
             local.add_operation.value,
             local.operand_2,
             local.shard,
-            local.nonce,
             local.is_sub,
         );
 
@@ -219,7 +217,10 @@ where
 #[cfg(test)]
 mod tests {
     use p3_koala_bear::KoalaBear;
+    use p3_field::AbstractField;
     use p3_matrix::dense::RowMajorMatrix;
+    use p3_matrix::Matrix;
+    use p3_maybe_rayon::prelude::ParallelSlice;
     use rand::{thread_rng, Rng};
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
     use zkm2_stark::{

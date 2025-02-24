@@ -2,14 +2,14 @@
 use num_bigint::BigUint;
 use num_traits::One;
 use p3_field::PrimeField32;
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, Packable};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra, ExtensionField, Field, Packable};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::fmt::Display;
 use std::iter::{Product, Sum};
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use crate::air::{SP1AirBuilder, SepticExtensionAirBuilder};
+use crate::air::{ZKMAirBuilder, SepticExtensionAirBuilder};
 
 /// A septic extension with an irreducible polynomial `z^7 - 2z - 5`.
 ///
@@ -18,56 +18,48 @@ use crate::air::{SP1AirBuilder, SepticExtensionAirBuilder};
 #[repr(C)]
 pub struct SepticExtension<F>(pub [F; 7]);
 
-impl<F: AbstractField> AbstractField for SepticExtension<F> {
+impl<F: FieldAlgebra> FieldAlgebra for SepticExtension<F> {
     type F = SepticExtension<F::F>;
 
-    fn zero() -> Self {
-        SepticExtension([
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-        ])
-    }
+    const ZERO: Self = SepticExtension([
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+    ]);
 
-    fn one() -> Self {
-        SepticExtension([
-            F::one(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-        ])
-    }
+    const ONE: Self = SepticExtension([
+        F::ONE,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+    ]);
 
-    fn two() -> Self {
-        SepticExtension([
-            F::two(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-        ])
-    }
+    const TWO: Self = SepticExtension([
+        F::TWO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+    ]);
 
-    fn neg_one() -> Self {
-        SepticExtension([
-            F::neg_one(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-        ])
-    }
+    const NEG_ONE: Self = SepticExtension([
+        F::NEG_ONE,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+    ]);
 
     fn from_f(f: Self::F) -> Self {
         SepticExtension([
@@ -84,106 +76,105 @@ impl<F: AbstractField> AbstractField for SepticExtension<F> {
     fn from_bool(b: bool) -> Self {
         SepticExtension([
             F::from_bool(b),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_canonical_u8(n: u8) -> Self {
         SepticExtension([
             F::from_canonical_u8(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_canonical_u16(n: u16) -> Self {
         SepticExtension([
             F::from_canonical_u16(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_canonical_u32(n: u32) -> Self {
         SepticExtension([
             F::from_canonical_u32(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_canonical_u64(n: u64) -> Self {
         SepticExtension([
             F::from_canonical_u64(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_canonical_usize(n: usize) -> Self {
         SepticExtension([
             F::from_canonical_usize(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_wrapped_u32(n: u32) -> Self {
         SepticExtension([
             F::from_wrapped_u32(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
     }
 
     fn from_wrapped_u64(n: u64) -> Self {
         SepticExtension([
             F::from_wrapped_u64(n),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
         ])
-    }
-
-    fn generator() -> Self {
-        SepticExtension([F::two(), F::one(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
     }
 }
 
 impl<F: Field> Field for SepticExtension<F> {
     type Packing = Self;
+
+    const GENERATOR: Self =
+        SepticExtension([F::TWO, F::ONE, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
 
     fn try_inverse(&self) -> Option<Self> {
         if self.is_zero() {
@@ -197,11 +188,11 @@ impl<F: Field> Field for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> AbstractExtensionField<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> FieldExtensionAlgebra<F> for SepticExtension<F> {
     const D: usize = 7;
 
     fn from_base(b: F) -> Self {
-        SepticExtension([b, F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+        SepticExtension([b, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO])
     }
 
     fn from_base_slice(bs: &[F]) -> Self {
@@ -223,6 +214,14 @@ impl<F: AbstractField> AbstractExtensionField<F> for SepticExtension<F> {
     fn as_base_slice(&self) -> &[F] {
         self.0.as_slice()
     }
+
+    fn from_base_iter<I: Iterator<Item = F>>(mut iter: I) -> Self {
+        let mut arr = [F::ZERO; 7];
+        for i in 0..7 {
+            arr[i] = iter.next().unwrap();
+        }
+        Self(arr)
+    }
 }
 
 impl<F: Field> ExtensionField<F> for SepticExtension<F> {
@@ -231,7 +230,7 @@ impl<F: Field> ExtensionField<F> for SepticExtension<F> {
 
 impl<F: Field> Packable for SepticExtension<F> {}
 
-impl<F: AbstractField> Add for SepticExtension<F> {
+impl<F: FieldAlgebra> Add for SepticExtension<F> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -243,7 +242,7 @@ impl<F: AbstractField> Add for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> AddAssign for SepticExtension<F> {
+impl<F: FieldAlgebra> AddAssign for SepticExtension<F> {
     fn add_assign(&mut self, rhs: Self) {
         self.0[0] += rhs.0[0].clone();
         self.0[1] += rhs.0[1].clone();
@@ -255,7 +254,7 @@ impl<F: AbstractField> AddAssign for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> Sub for SepticExtension<F> {
+impl<F: FieldAlgebra> Sub for SepticExtension<F> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -267,13 +266,13 @@ impl<F: AbstractField> Sub for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> SubAssign for SepticExtension<F> {
+impl<F: FieldAlgebra> SubAssign for SepticExtension<F> {
     fn sub_assign(&mut self, rhs: Self) {
         self.0[0] -= rhs.0[0].clone();
     }
 }
 
-impl<F: AbstractField> Neg for SepticExtension<F> {
+impl<F: FieldAlgebra> Neg for SepticExtension<F> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -285,11 +284,11 @@ impl<F: AbstractField> Neg for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> Mul for SepticExtension<F> {
+impl<F: FieldAlgebra> Mul for SepticExtension<F> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut res: [F; 13] = core::array::from_fn(|_| F::zero());
+        let mut res: [F; 13] = core::array::from_fn(|_| F::ZERO);
         for i in 0..7 {
             for j in 0..7 {
                 res[i + j] = res[i + j].clone() + self.0[i].clone() * rhs.0[j].clone();
@@ -304,34 +303,34 @@ impl<F: AbstractField> Mul for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> MulAssign for SepticExtension<F> {
+impl<F: FieldAlgebra> MulAssign for SepticExtension<F> {
     fn mul_assign(&mut self, rhs: Self) {
         let res = self.clone() * rhs;
         *self = res;
     }
 }
 
-impl<F: AbstractField> Product for SepticExtension<F> {
+impl<F: FieldAlgebra> Product for SepticExtension<F> {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
-        let one = Self::one();
+        let one = Self::ONE;
         iter.fold(one, |acc, x| acc * x)
     }
 }
 
-impl<F: AbstractField> Sum for SepticExtension<F> {
+impl<F: FieldAlgebra> Sum for SepticExtension<F> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        let zero = Self::zero();
+        let zero = Self::ZERO;
         iter.fold(zero, |acc, x| acc + x)
     }
 }
 
-impl<F: AbstractField> From<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> From<F> for SepticExtension<F> {
     fn from(f: F) -> Self {
-        SepticExtension([f, F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+        SepticExtension([f, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO])
     }
 }
 
-impl<F: AbstractField> Add<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> Add<F> for SepticExtension<F> {
     type Output = Self;
 
     fn add(self, rhs: F) -> Self::Output {
@@ -347,13 +346,13 @@ impl<F: AbstractField> Add<F> for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> AddAssign<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> AddAssign<F> for SepticExtension<F> {
     fn add_assign(&mut self, rhs: F) {
         self.0[0] += rhs;
     }
 }
 
-impl<F: AbstractField> Sub<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> Sub<F> for SepticExtension<F> {
     type Output = Self;
 
     fn sub(self, rhs: F) -> Self::Output {
@@ -361,13 +360,13 @@ impl<F: AbstractField> Sub<F> for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> SubAssign<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> SubAssign<F> for SepticExtension<F> {
     fn sub_assign(&mut self, rhs: F) {
         self.0[0] -= rhs;
     }
 }
 
-impl<F: AbstractField> Mul<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> Mul<F> for SepticExtension<F> {
     type Output = Self;
 
     fn mul(self, rhs: F) -> Self::Output {
@@ -383,7 +382,7 @@ impl<F: AbstractField> Mul<F> for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> MulAssign<F> for SepticExtension<F> {
+impl<F: FieldAlgebra> MulAssign<F> for SepticExtension<F> {
     fn mul_assign(&mut self, rhs: F) {
         for i in 0..7 {
             self.0[i] *= rhs.clone();
@@ -400,19 +399,18 @@ impl<F: Field> Div for SepticExtension<F> {
     }
 }
 
-impl<F: AbstractField> Display for SepticExtension<F> {
+impl<F: FieldAlgebra> Display for SepticExtension<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
     }
 }
 
 impl<F: Field> SepticExtension<F> {
-    /// Returns the value of z^{index * p} in the [`SepticExtension`] field.
     fn z_pow_p(index: u32) -> Self {
-        // The constants written below are specifically for the BabyBear field.
+        // The constants written below are specifically for the KoalaBear field.
         debug_assert_eq!(F::order(), BigUint::from(2013265921u32));
         if index == 0 {
-            return Self::one();
+            return Self::ONE;
         }
         if index == 1 {
             return SepticExtension([
@@ -483,12 +481,11 @@ impl<F: Field> SepticExtension<F> {
         unreachable!();
     }
 
-    /// Returns the value of z^{index * p^2} in the [`SepticExtension`] field.
     fn z_pow_p2(index: u32) -> Self {
-        // The constants written below are specifically for the BabyBear field.
+        // The constants written below are specifically for the KoalaBear field.
         debug_assert_eq!(F::order(), BigUint::from(2013265921u32));
         if index == 0 {
-            return Self::one();
+            return Self::ONE;
         }
         if index == 1 {
             return SepticExtension([
@@ -561,7 +558,7 @@ impl<F: Field> SepticExtension<F> {
 
     #[must_use]
     fn frobenius(&self) -> Self {
-        let mut result = Self::zero();
+        let mut result = Self::ZERO;
         result += self.0[0];
         result += Self::z_pow_p(1) * self.0[1];
         result += Self::z_pow_p(2) * self.0[2];
@@ -574,7 +571,7 @@ impl<F: Field> SepticExtension<F> {
 
     #[must_use]
     fn double_frobenius(&self) -> Self {
-        let mut result = Self::zero();
+        let mut result = Self::ZERO;
         result += self.0[0];
         result += Self::z_pow_p2(1) * self.0[1];
         result += Self::z_pow_p2(2) * self.0[2];
@@ -606,7 +603,7 @@ impl<F: Field> SepticExtension<F> {
         let exp = (F::order() - BigUint::one()) / BigUint::from(2u8);
         let exp = exp.to_u64_digits()[0];
 
-        (pow_r.0[0], pow_r.0[0].exp_u64(exp) == F::one())
+        (pow_r.0[0], pow_r.0[0].exp_u64(exp) == F::ONE)
     }
 
     /// Computes the square root of the septic field extension element.
@@ -614,7 +611,7 @@ impl<F: Field> SepticExtension<F> {
     pub fn sqrt(&self) -> Option<Self> {
         let n = *self;
 
-        if n == Self::zero() || n == Self::one() {
+        if n == Self::ZERO || n == Self::ONE {
             return Some(n);
         }
 
@@ -643,19 +640,19 @@ impl<F: Field> SepticExtension<F> {
         denominator *= n;
 
         let base = numerator.inverse();
-        let g = F::generator();
-        let mut a = F::one();
-        let mut nonresidue = F::one() - base;
+        let g = F::GENERATOR;
+        let mut a = F::ONE;
+        let mut nonresidue = F::ONE - base;
         let legendre_exp = (F::order() - BigUint::one()) / BigUint::from(2u8);
 
-        while nonresidue.exp_u64(legendre_exp.to_u64_digits()[0]) == F::one() {
+        while nonresidue.exp_u64(legendre_exp.to_u64_digits()[0]) == F::ONE {
             a *= g;
             nonresidue = a.square() - base;
         }
 
         let order = F::order();
         let cipolla_pow = (&order + BigUint::one()) / BigUint::from(2u8);
-        let mut x = CipollaExtension::new(a, F::one());
+        let mut x = CipollaExtension::new(a, F::ONE);
         x = x.pow(&cipolla_pow, nonresidue);
 
         Some(denominator * x.real)
@@ -693,7 +690,7 @@ impl<F: Field> CipollaExtension<F> {
     }
 
     fn one() -> Self {
-        Self::new(F::one(), F::zero())
+        Self::new(F::ONE, F::ZERO)
     }
 
     fn mul_ext(&self, other: Self, nonresidue: F) -> Self {
@@ -743,16 +740,16 @@ impl<T: Clone> SepticBlock<T> {
     pub fn as_extension<AB: SepticExtensionAirBuilder<Var = T>>(
         &self,
     ) -> SepticExtension<AB::Expr> {
-        let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::zero() + x);
+        let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::ZERO + x);
         SepticExtension(arr)
     }
 
     /// Takes a single expression into a `SepticExtension` of expressions.
-    pub fn as_extension_from_base<AB: SP1AirBuilder<Var = T>>(
+    pub fn as_extension_from_base<AB: ZKMAirBuilder<Var = T>>(
         &self,
         base: AB::Expr,
     ) -> SepticExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 7] = self.0.clone().map(|_| AB::Expr::zero());
+        let mut arr: [AB::Expr; 7] = self.0.clone().map(|_| AB::Expr::ZERO);
         arr[0] = base;
 
         SepticExtension(arr)
@@ -765,9 +762,9 @@ impl<T> From<[T; 7]> for SepticBlock<T> {
     }
 }
 
-impl<T: AbstractField> From<T> for SepticBlock<T> {
+impl<T: FieldAlgebra> From<T> for SepticBlock<T> {
     fn from(value: T) -> Self {
-        Self([value, T::zero(), T::zero(), T::zero(), T::zero(), T::zero(), T::zero()])
+        Self([value, T::ZERO, T::ZERO, T::ZERO, T::ZERO, T::ZERO, T::ZERO])
     }
 }
 
@@ -811,16 +808,14 @@ impl<T> IntoIterator for SepticBlock<T> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::print_stdout)]
-
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
 
     use super::*;
 
     #[test]
     fn test_mul() {
-        let a: SepticExtension<BabyBear> = SepticExtension::from_canonical_u32(1);
-        let b: SepticExtension<BabyBear> = SepticExtension::from_canonical_u32(2);
+        let a: SepticExtension<KoalaBear> = SepticExtension::from_canonical_u32(1);
+        let b: SepticExtension<KoalaBear> = SepticExtension::from_canonical_u32(2);
         let c = a * b;
         println!("{c}");
     }
@@ -828,24 +823,24 @@ mod tests {
     #[test]
     fn test_inv() {
         for i in 0..256 {
-            let a: SepticExtension<BabyBear> = SepticExtension([
-                BabyBear::from_canonical_u32(i + 3),
-                BabyBear::from_canonical_u32(2 * i + 6),
-                BabyBear::from_canonical_u32(5 * i + 17),
-                BabyBear::from_canonical_u32(6 * i + 91),
-                BabyBear::from_canonical_u32(8 * i + 37),
-                BabyBear::from_canonical_u32(11 * i + 35),
-                BabyBear::from_canonical_u32(14 * i + 33),
+            let a: SepticExtension<KoalaBear> = SepticExtension([
+                KoalaBear::from_canonical_u32(i + 3),
+                KoalaBear::from_canonical_u32(2 * i + 6),
+                KoalaBear::from_canonical_u32(5 * i + 17),
+                KoalaBear::from_canonical_u32(6 * i + 91),
+                KoalaBear::from_canonical_u32(8 * i + 37),
+                KoalaBear::from_canonical_u32(11 * i + 35),
+                KoalaBear::from_canonical_u32(14 * i + 33),
             ]);
             let b = a.inv();
-            assert_eq!(a * b, SepticExtension::<BabyBear>::one());
+            assert_eq!(a * b, SepticExtension::<KoalaBear>::ONE);
         }
     }
 
     #[test]
     fn test_legendre() {
-        let a: SepticExtension<BabyBear> = SepticExtension::generator();
-        let mut b = SepticExtension::<BabyBear>::one();
+        let a: SepticExtension<KoalaBear> = SepticExtension::GENERATOR;
+        let mut b = SepticExtension::<KoalaBear>::ONE;
         for i in 1..256 {
             b *= a;
             let (_, c) = b.is_square();
@@ -856,22 +851,22 @@ mod tests {
     #[test]
     fn test_sqrt() {
         for i in 0..256 {
-            let a: SepticExtension<BabyBear> = SepticExtension([
-                BabyBear::from_canonical_u32(i + 3),
-                BabyBear::from_canonical_u32(2 * i + 6),
-                BabyBear::from_canonical_u32(5 * i + 17),
-                BabyBear::from_canonical_u32(6 * i + 91),
-                BabyBear::from_canonical_u32(8 * i + 37),
-                BabyBear::from_canonical_u32(11 * i + 35),
-                BabyBear::from_canonical_u32(14 * i + 33),
+            let a: SepticExtension<KoalaBear> = SepticExtension([
+                KoalaBear::from_canonical_u32(i + 3),
+                KoalaBear::from_canonical_u32(2 * i + 6),
+                KoalaBear::from_canonical_u32(5 * i + 17),
+                KoalaBear::from_canonical_u32(6 * i + 91),
+                KoalaBear::from_canonical_u32(8 * i + 37),
+                KoalaBear::from_canonical_u32(11 * i + 35),
+                KoalaBear::from_canonical_u32(14 * i + 33),
             ]);
             let b = a * a;
             let recovered_a = b.sqrt().unwrap();
             assert_eq!(recovered_a * recovered_a, b);
         }
-        let mut b = SepticExtension::<BabyBear>::one();
+        let mut b = SepticExtension::<KoalaBear>::ONE;
         for i in 1..256 {
-            let a: SepticExtension<BabyBear> = SepticExtension::generator();
+            let a: SepticExtension<KoalaBear> = SepticExtension::GENERATOR;
             b *= a;
             let c = b.sqrt();
             if i % 2 == 1 {

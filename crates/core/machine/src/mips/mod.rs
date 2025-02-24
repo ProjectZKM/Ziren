@@ -8,9 +8,8 @@ use zkm2_core_executor::{
 };
 
 use crate::{
-    memory::{
-        MemoryChipType, MemoryLocalChip, MemoryProgramChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW,
-    },
+    global::GlobalChip,
+    memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     mips::MemoryChipType::{Finalize, Initialize},
     syscall::precompiles::fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
 };
@@ -100,11 +99,13 @@ pub enum MipsAir<F: PrimeField32> {
     /// A table for the local memory state.
     MemoryLocal(MemoryLocalChip),
     /// A table for initializing the program memory.
-    ProgramMemory(MemoryProgramChip),
+    // ProgramMemory(MemoryProgramChip),
     /// A table for all the syscall invocations.
     SyscallCore(SyscallChip),
     /// A table for all the precompile invocations.
     SyscallPrecompile(SyscallChip),
+    /// A table for all the global interactions.
+    Global(GlobalChip),
     /// A precompile for sha256 extend.
     Sha256Extend(ShaExtendChip),
     /// A precompile for sha256 compress.
@@ -374,9 +375,9 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(MipsAirDiscriminants::MemoryLocal, memory_local.cost());
         chips.push(memory_local);
 
-        let memory_program = Chip::new(MipsAir::ProgramMemory(MemoryProgramChip::default()));
-        costs.insert(MipsAirDiscriminants::ProgramMemory, memory_program.cost());
-        chips.push(memory_program);
+        let global = Chip::new(MipsAir::Global(GlobalChip));
+        costs.insert(MipsAirDiscriminants::Global, global.cost());
+        chips.push(global);
 
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(MipsAirDiscriminants::ByteLookup, byte.cost());
@@ -389,7 +390,7 @@ impl<F: PrimeField32> MipsAir<F> {
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(Self, usize)> {
         vec![
             (MipsAir::Program(ProgramChip::default()), program.instructions.len()),
-            (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.image.len()),
+            // (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.image.len()),
             (MipsAir::ByteLookup(ByteChip::default()), 1 << 16),
         ]
     }
@@ -417,6 +418,7 @@ impl<F: PrimeField32> MipsAir<F> {
                     .into_iter()
                     .count(),
             ),
+            (MipsAir::Global(GlobalChip), record.get_local_mem_events().count()),
             (MipsAir::SyscallCore(SyscallChip::core()), record.syscall_events.len()),
         ]
     }
@@ -433,6 +435,7 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::ShiftLeft(ShiftLeft::default()),
             MipsAir::ShiftRight(ShiftRightChip::default()),
             MipsAir::MemoryLocal(MemoryLocalChip::new()),
+            MipsAir::Global(GlobalChip),
             MipsAir::SyscallCore(SyscallChip::core()),
         ]
     }
@@ -441,6 +444,7 @@ impl<F: PrimeField32> MipsAir<F> {
         vec![
             MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)),
             MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(MemoryChipType::Finalize)),
+            MipsAir::Global(GlobalChip),
         ]
     }
 
@@ -453,6 +457,11 @@ impl<F: PrimeField32> MipsAir<F> {
             (
                 MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)),
                 record.global_memory_finalize_events.len(),
+            ),
+            (
+                MipsAir::Global(GlobalChip),
+                record.global_memory_finalize_events.len()
+                    + record.global_memory_initialize_events.len(),
             ),
         ]
     }
@@ -469,7 +478,8 @@ impl<F: PrimeField32> MipsAir<F> {
 
         // Remove the preprocessed chips.
         airs.remove(&Self::Program(ProgramChip::default()));
-        airs.remove(&Self::ProgramMemory(MemoryProgramChip::default()));
+        // TODO: why is this removed
+        // airs.remove(&Self::ProgramMemory(MemoryProgramChip::default()));
         airs.remove(&Self::ByteLookup(ByteChip::default()));
 
         airs.into_iter()
@@ -532,7 +542,8 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),
-            Self::ProgramMemory(_) => unreachable!("Invalid for memory program"),
+            Self::Global(_) => unreachable!("Invalid for global chip"),
+            // Self::ProgramMemory(_) => unreachable!("Invalid for memory program"),
             Self::Program(_) => unreachable!("Invalid for core chip"),
             Self::Mul(_) => unreachable!("Invalid for core chip"),
             Self::Lt(_) => unreachable!("Invalid for core chip"),

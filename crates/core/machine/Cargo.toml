@@ -22,12 +22,16 @@ p3-field = { workspace = true }
 p3-keccak-air = { workspace = true }
 p3-matrix = { workspace = true }
 p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-poseidon2 = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-util = { workspace = true }
 zkm2-derive = { workspace = true }
 zkm2-primitives = { workspace = true }
 zkm2-core-executor = { workspace = true, default-features = true }
 zkm2-curves = { workspace = true }
+
+rayon = "1.10.0"
+rayon-scan = "0.1.1"
 
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = [
     "bls381",
@@ -64,6 +68,7 @@ rand = "0.8.5"
 test-artifacts = { workspace = true }
 
 [features]
+default = []
 debug = []
 bigint-rug = ["zkm2-curves/bigint-rug"]
 

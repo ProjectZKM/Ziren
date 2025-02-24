@@ -6,10 +6,16 @@ use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::LittleEndian, file::Class, ElfBytes};
 
+use p3_field::FieldExtensionAlgebra;
 use p3_field::Field;
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use p3_field::PrimeField32;
+use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize};
 use zkm2_stark::air::{MachineAir, MachineProgram};
+use zkm2_stark::septic_curve::{SepticCurve, SepticCurveComplete};
+use zkm2_stark::septic_digest::SepticDigest;
+use zkm2_stark::septic_extension::SepticExtension;
+use zkm2_stark::InteractionKind;
 
 use crate::{CoreShape, Instruction};
 
@@ -169,8 +175,35 @@ impl Program {
     }
 }
 
-impl<F: Field> MachineProgram<F> for Program {
+impl<F: PrimeField32> MachineProgram<F> for Program {
     fn pc_start(&self) -> F {
         F::from_canonical_u32(self.pc_start)
+    }
+
+    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
+        let mut digests: Vec<SepticCurveComplete<F>> = self
+            .image
+            .iter()
+            .par_bridge()
+            .map(|(&addr, &word)| {
+                let values = [
+                    (InteractionKind::Global as u32) << 24,
+                    0,
+                    addr,
+                    word & 255,
+                    (word >> 8) & 255,
+                    (word >> 16) & 255,
+                    (word >> 24) & 255,
+                ];
+                let x_start =
+                    SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values[i]));
+                let (point, _, _, _) = SepticCurve::<F>::lift_x(x_start);
+                SepticCurveComplete::Affine(point.neg())
+            })
+            .collect();
+        digests.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
+        SepticDigest(
+            digests.into_par_iter().reduce(|| SepticCurveComplete::Infinity, |a, b| a + b).point(),
+        )
     }
 }

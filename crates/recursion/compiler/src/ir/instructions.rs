@@ -1,9 +1,13 @@
+#![deny(clippy::large_enum_variant)]
+
 use zkm2_recursion_core::air::RecursionPublicValues;
 
 use super::{
     Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Config, Ext, Felt, FriFoldInput,
     MemIndex, Ptr, TracedVec, Usize, Var,
 };
+
+use crate::config::InnerConfig;
 
 /// An intermeddiate instruction set for implementing programs.
 ///
@@ -273,6 +277,11 @@ pub enum DslIr<C: Config> {
     /// Asserts that the inputted var is equal the circuit's committed values digest public input.
     /// Should only be used when target is a gnark circuit.
     CircuitCommitCommittedValuesDigest(Var<C::N>),
+
+    /// Adds two elliptic curve points. (sum, point_1, point_2).
+    CircuitV2HintAddCurve(
+        Box<(SepticCurve<Felt<C::F>>, SepticCurve<Felt<C::F>>, SepticCurve<Felt<C::F>>)>,
+    ),
 
     // FRI specific instructions.
     /// Executes a FRI fold operation. 1st field is the size of the fri fold input array.  2nd

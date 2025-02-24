@@ -60,7 +60,6 @@ impl CpuChip {
         builder.send_syscall(
             local.shard,
             local.clk,
-            syscall_cols.syscall_nonce,
             syscall_id,
             local.op_b_val().reduce::<AB>(),
             local.op_c_val().reduce::<AB>(),

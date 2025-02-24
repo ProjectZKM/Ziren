@@ -14,6 +14,7 @@ pub enum Instruction<F> {
     Select(SelectInstr<F>),
     ExpReverseBitsLen(ExpReverseBitsInstr<F>),
     HintBits(HintBitsInstr<F>),
+    HintAddCurve(HintAddCurveInstr<F>),
     FriFold(Box<FriFoldInstr<F>>),
     BatchFRI(Box<BatchFRIInstr<F>>),
     Print(PrintInstr<F>),
@@ -34,6 +35,16 @@ pub struct HintBitsInstr<F> {
 pub struct PrintInstr<F> {
     pub field_elt_type: FieldEltType,
     pub addr: Address<F>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HintAddCurveInstr<F> {
+    pub output_x_addrs_mults: Vec<(Address<F>, F)>,
+    pub output_y_addrs_mults: Vec<(Address<F>, F)>,
+    pub input1_x_addrs: Vec<Address<F>>,
+    pub input1_y_addrs: Vec<Address<F>>,
+    pub input2_x_addrs: Vec<Address<F>>,
+    pub input2_y_addrs: Vec<Address<F>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

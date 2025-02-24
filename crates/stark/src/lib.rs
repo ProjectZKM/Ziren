@@ -19,7 +19,9 @@ mod prover;
 mod quotient;
 mod record;
 pub mod septic_curve;
+pub mod septic_digest;
 pub mod septic_extension;
+#[cfg(test)]
 mod stark_testing;
 mod types;
 mod verifier;

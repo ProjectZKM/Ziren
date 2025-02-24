@@ -4,12 +4,20 @@ use std::{
     mem::size_of,
 };
 
+use itertools::Itertools;
 use p3_air::{Air, BaseAir};
-use p3_field::PrimeField32;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_maybe_rayon::prelude::IntoParallelRefIterator;
+use p3_maybe_rayon::prelude::ParallelBridge;
+use p3_maybe_rayon::prelude::ParallelIterator;
+
+use zkm2_core_executor::events::GlobalInteractionEvent;
 use zkm2_core_executor::{events::SyscallEvent, ExecutionRecord, Program};
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::air::{InteractionScope, MachineAir, ZKMAirBuilder};
+use zkm2_stark::air::AirInteraction;
+use zkm2_stark::InteractionKind;
 
 use crate::utils::pad_rows_fixed;
 
@@ -39,6 +47,10 @@ impl SyscallChip {
     pub const fn precompile() -> Self {
         Self::new(SyscallShardKind::Precompile)
     }
+
+    pub fn shard_kind(&self) -> SyscallShardKind {
+        self.shard_kind
+    }
 }
 
 /// The column layout for the chip.
@@ -48,10 +60,11 @@ pub struct SyscallCols<T> {
     /// The shard number of the syscall.
     pub shard: T,
 
-    /// The clk of the syscall.
-    pub clk: T,
+    /// The bottom 16 bits of clk of the syscall.
+    pub clk_16: T,
 
-    pub nonce: T,
+    /// The top 8 bits of clk of the syscall.
+    pub clk_8: T,
 
     /// The syscall_id of the syscall.
     pub syscall_id: T,
@@ -74,8 +87,37 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         format!("Syscall{}", self.shard_kind).to_string()
     }
 
-    fn generate_dependencies(&self, _input: &ExecutionRecord, _output: &mut ExecutionRecord) {
-        // Do nothing since this chip has no dependencies.
+    fn generate_dependencies(&self, input: &ExecutionRecord, output: &mut ExecutionRecord) {
+        let events = match self.shard_kind {
+            SyscallShardKind::Core => &input.syscall_events,
+            SyscallShardKind::Precompile => &input
+                .precompile_events
+                .all_events()
+                .map(|(event, _)| event.to_owned())
+                .collect::<Vec<_>>(),
+        };
+        
+        let events = events
+            .iter()
+            .map(|event| {
+                let clk_16 = ((event.clk & 65535) as u16) as u32;
+                let clk_8 = ((event.clk >> 16) as u8) as u32;
+
+                GlobalInteractionEvent {
+                    message: [
+                        event.shard,
+                        clk_16,
+                        clk_8,
+                        event.syscall_id,
+                        event.arg1,
+                        event.arg2,
+                        0,
+                    ],
+                    is_receive: self.shard_kind == SyscallShardKind::Precompile,
+                }
+            })
+            .collect_vec();
+        output.global_interaction_events.extend(events);
     }
 
     fn generate_trace(
@@ -83,35 +125,38 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> RowMajorMatrix<F> {
-        let mut rows = Vec::new();
-
-        let row_fn = |syscall_event: &SyscallEvent| {
+        let row_fn = |syscall_event: &SyscallEvent, _: bool| {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
+            debug_assert!(syscall_event.clk < (1 << 24));
+            let clk_16 = (syscall_event.clk & 65535) as u16;
+            let clk_8 = (syscall_event.clk >> 16) as u8;
+
             cols.shard = F::from_canonical_u32(syscall_event.shard);
-            cols.clk = F::from_canonical_u32(syscall_event.clk);
+            cols.clk_16 = F::from_canonical_u16(clk_16);
+            cols.clk_8 = F::from_canonical_u8(clk_8);
             cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
-            cols.nonce = F::from_canonical_u32(syscall_event.nonce);
             cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
             cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
             cols.is_real = F::ONE;
+
             row
         };
 
-        match self.shard_kind {
-            SyscallShardKind::Core => {
-                for event in input.syscall_events.iter() {
-                    let row = row_fn(event);
-                    rows.push(row);
-                }
-            }
-            SyscallShardKind::Precompile => {
-                for event in input.precompile_events.all_events().map(|(event, _)| event) {
-                    let row = row_fn(event);
-                    rows.push(row);
-                }
-            }
+        let mut rows = match self.shard_kind {
+            SyscallShardKind::Core => input
+                .syscall_events
+                .par_iter()
+                .map(|event| row_fn(event, false))
+                .collect::<Vec<_>>(),
+            SyscallShardKind::Precompile => input
+                .precompile_events
+                .all_events()
+                .map(|(event, _)| event)
+                .par_bridge()
+                .map(|event| row_fn(event, true))
+                .collect::<Vec<_>>(),
         };
 
         // Pad the trace to a power of two depending on the proof shape in `input`.
@@ -141,7 +186,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
     }
 
     fn commit_scope(&self) -> InteractionScope {
-        InteractionScope::Global
+        InteractionScope::Local
     }
 }
 
@@ -163,8 +208,7 @@ where
             SyscallShardKind::Core => {
                 builder.receive_syscall(
                     local.shard,
-                    local.clk,
-                    local.nonce,
+                    local.clk_16 + local.clk_8 * AB::Expr::from_canonical_u32(1 << 16),
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
@@ -172,23 +216,30 @@ where
                     InteractionScope::Local,
                 );
 
-                // Send the call to the global bus to/from the precompile chips.
-                builder.send_syscall(
-                    local.shard,
-                    local.clk,
-                    local.nonce,
-                    local.syscall_id,
-                    local.arg1,
-                    local.arg2,
-                    local.is_real,
-                    InteractionScope::Global,
+                // Send the interaction to the global table.
+                builder.send(
+                    AirInteraction::new(
+                        vec![
+                            local.shard.into(),
+                            local.clk_16.into(),
+                            local.clk_8.into(),
+                            local.syscall_id.into(),
+                            local.arg1.into(),
+                            local.arg2.into(),
+                            AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
+                            local.is_real.into() * AB::Expr::ZERO,
+                        ],
+                        local.is_real.into(),
+                        InteractionKind::Global,
+                    ),
+                    InteractionScope::Local,
                 );
             }
             SyscallShardKind::Precompile => {
                 builder.send_syscall(
                     local.shard,
-                    local.clk,
-                    local.nonce,
+                    local.clk_16 + local.clk_8 * AB::Expr::from_canonical_u32(1 << 16),
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
@@ -196,16 +247,24 @@ where
                     InteractionScope::Local,
                 );
 
-                // Send the call to the global bus to/from the precompile chips.
-                builder.receive_syscall(
-                    local.shard,
-                    local.clk,
-                    local.nonce,
-                    local.syscall_id,
-                    local.arg1,
-                    local.arg2,
-                    local.is_real,
-                    InteractionScope::Global,
+                // Send the interaction to the global table.
+                builder.send(
+                    AirInteraction::new(
+                        vec![
+                            local.shard.into(),
+                            local.clk_16.into(),
+                            local.clk_8.into(),
+                            local.syscall_id.into(),
+                            local.arg1.into(),
+                            local.arg2.into(),
+                            AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
+                        ],
+                        local.is_real.into(),
+                        InteractionKind::Global,
+                    ),
+                    InteractionScope::Local,
                 );
             }
         }

@@ -62,24 +62,17 @@ where
         // Observe the vk and start pc.
         challenger.observe(builder, vk.commitment);
         challenger.observe(builder, vk.pc_start);
+        challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
+        challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
+        // Observe the padding.
         let zero: Felt<_> = builder.eval(C::F::ZERO);
-        for _ in 0..7 {
-            challenger.observe(builder, zero);
-        }
+        challenger.observe(builder, zero);
 
         // Observe the main commitment and public values.
         challenger
             .observe_slice(builder, proof.public_values[0..machine.num_pv_elts()].iter().copied());
 
-        let zero_ext: Ext<C::F, C::EF> = builder.eval(C::F::ZERO);
-        StarkVerifier::verify_shard(
-            builder,
-            &vk,
-            machine,
-            &mut challenger,
-            &proof,
-            &[zero_ext, zero_ext],
-        );
+        StarkVerifier::verify_shard(builder, &vk, machine, &mut challenger, &proof);
 
         // Get the public values, and assert that they are valid.
         let public_values: &RootPublicValues<Felt<C::F>> = proof.public_values.as_slice().borrow();

@@ -19,7 +19,4 @@ pub struct JumpCols<T> {
 
     // A range checker for `op_a` which may contain `pc + 8`.
     pub op_a_range_checker: KoalaBearWordRangeChecker<T>,
-
-    pub jump_nonce: T,
-    pub jumpd_nonce: T,
 }

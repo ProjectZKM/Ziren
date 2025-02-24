@@ -3,6 +3,7 @@ use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use shape::RecursionShape;
 use zkm2_stark::air::{MachineAir, MachineProgram};
+use zkm2_stark::septic_digest::SepticDigest;
 
 use crate::*;
 
@@ -18,6 +19,10 @@ pub struct RecursionProgram<F> {
 impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
     fn pc_start(&self) -> F {
         F::ZERO
+    }
+
+    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
+        SepticDigest::<F>::zero()
     }
 }
 

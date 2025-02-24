@@ -5,15 +5,8 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 
 use zkm2_recursion_compiler::ir::{Builder, Config, Felt, Var};
-use zkm2_recursion_core::{air::ChallengerPublicValues, DIGEST_SIZE};
-
+use zkm2_recursion_core::DIGEST_SIZE;
 use zkm2_stark::Word;
-
-pub(crate) unsafe fn uninit_challenger_pv<C: Config>(
-    _builder: &mut Builder<C>,
-) -> ChallengerPublicValues<Felt<C::F>> {
-    unsafe { MaybeUninit::zeroed().assume_init() }
-}
 
 /// Convert 8 KoalaBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
 /// word becomes the least significant bits.

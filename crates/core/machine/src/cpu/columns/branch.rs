@@ -29,13 +29,4 @@ pub struct BranchCols<T> {
 
     /// Whether a is less than 0.
     pub a_lt_0: T,
-
-    /// The nonce of the operation to compute `a_lt_0`.
-    pub a_lt_0_nonce: T,
-
-    /// The nonce of the operation to compute `a_gt_0`.
-    pub a_gt_0_nonce: T,
-
-    /// The nonce of the operation to compute `target_pc`.
-    pub target_pc_nonce: T,
 }
