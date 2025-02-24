@@ -16,7 +16,7 @@ use core::{
 };
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
@@ -84,7 +84,7 @@ pub struct CloClzCols<T> {
     pub is_real: T,
 }
 
-impl<F: PrimeField> MachineAir<F> for CloClzChip {
+impl<F: PrimeField32> MachineAir<F> for CloClzChip {
     type Record = ExecutionRecord;
 
     type Program = Program;

@@ -162,7 +162,7 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         };
 
         // Constrain that the first `initial_digest` is the zero digest.
-        let zero_digest = SepticDigest::<AB::Expr>::ZERO.0;
+        let zero_digest = SepticDigest::<AB::Expr>::zero().0;
         builder.when_first_row().assert_septic_ext_eq(initial_digest.x.clone(), zero_digest.x);
         builder.when_first_row().assert_septic_ext_eq(initial_digest.y.clone(), zero_digest.y);
 
