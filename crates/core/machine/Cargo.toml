@@ -17,7 +17,6 @@ log = "0.4.22"
 num = { version = "0.4.3" }
 p3-air = { workspace = true }
 p3-koala-bear = { workspace = true }
-p3-monty-31 = { workspace = true }
 p3-challenger = { workspace = true }
 p3-field = { workspace = true }
 p3-keccak-air = { workspace = true }
