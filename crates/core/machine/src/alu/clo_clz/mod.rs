@@ -32,6 +32,7 @@ use crate::{air::ZKMCoreAirBuilder, operations::IsZeroWordOperation, utils::pad_
 pub const NUM_CLOCLZ_COLS: usize = size_of::<CloClzCols<u8>>();
 
 /// The size of a byte in bits.
+#[allow(dead_code)]
 const BYTE_SIZE: usize = 8;
 
 /// A chip that implements addition for the opcodes CLO/CLZ.

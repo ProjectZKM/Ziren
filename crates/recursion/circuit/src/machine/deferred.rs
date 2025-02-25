@@ -14,10 +14,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use zkm2_primitives::consts::WORD_SIZE;
 use zkm2_recursion_compiler::ir::{Builder, Felt};
 use zkm2_stark::septic_curve::SepticCurve;
-use zkm2_stark::septic_digest::{
-    SepticDigest, CURVE_CUMULATIVE_SUM_START_X, CURVE_CUMULATIVE_SUM_START_Y,
-};
-use zkm2_stark::septic_extension::SepticExtension;
+use zkm2_stark::septic_digest::SepticDigest;
 use zkm2_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
@@ -33,7 +30,7 @@ use crate::{
     constraints::RecursiveVerifierConstraintFolder,
     hash::{FieldHasher, FieldHasherVariable},
     machine::assert_recursion_public_values_valid,
-    stark::{dummy_challenger, ShardProofVariable, StarkVerifier},
+    stark::{ShardProofVariable, StarkVerifier},
     CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
 };
 

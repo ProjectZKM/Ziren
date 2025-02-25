@@ -28,17 +28,14 @@ use std::{
     sync::Arc,
 };
 
-use hashbrown::HashMap;
-use itertools::Itertools;
-use p3_field::AbstractExtensionField;
-use p3_field::{AbstractField, ExtensionField, PrimeField32};
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
+use p3_field::{Field, FieldExtensionAlgebra};
+use p3_field::{FieldAlgebra, ExtensionField, PrimeField32};
+use p3_koala_bear::Poseidon2ExternalLayerKoalaBear;
+use p3_poseidon2::Poseidon2;
 use p3_symmetric::{CryptographicPermutation, Permutation};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
 
-use zkm2_stark::septic_curve::SepticCurve;
-use zkm2_stark::septic_extension::SepticExtension;
 use zkm2_stark::septic_curve::SepticCurve;
 use zkm2_stark::septic_extension::SepticExtension;
 
@@ -433,16 +430,16 @@ where
                     input2_y_addrs,
                 }) => {
                     let input1_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input1_x_addrs[i], F::zero()).val[0]
+                        self.memory.mr_mult(input1_x_addrs[i], F::ZERO).val[0]
                     });
                     let input1_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input1_y_addrs[i], F::zero()).val[0]
+                        self.memory.mr_mult(input1_y_addrs[i], F::ZERO).val[0]
                     });
                     let input2_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input2_x_addrs[i], F::zero()).val[0]
+                        self.memory.mr_mult(input2_x_addrs[i], F::ZERO).val[0]
                     });
                     let input2_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input2_y_addrs[i], F::zero()).val[0]
+                        self.memory.mr_mult(input2_y_addrs[i], F::ZERO).val[0]
                     });
                     let point1 = SepticCurve { x: input1_x, y: input1_y };
                     let point2 = SepticCurve { x: input2_x, y: input2_y };

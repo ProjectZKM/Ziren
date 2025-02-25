@@ -258,19 +258,19 @@ mod tests {
     use super::*;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use sp1_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
-    use sp1_stark::{air::MachineAir, SP1CoreOpts};
+    use zkm2_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
+    use zkm2_stark::{air::MachineAir, ZKMCoreOpts};
 
     #[test]
     fn test_global_generate_trace() {
         let program = simple_program();
-        let mut runtime = Executor::new(program, SP1CoreOpts::default());
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run().unwrap();
         let shard = runtime.records[0].clone();
 
         let chip: GlobalChip = GlobalChip;
 
-        let trace: RowMajorMatrix<BabyBear> =
+        let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values);
 

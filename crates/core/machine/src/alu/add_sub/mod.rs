@@ -217,10 +217,7 @@ where
 #[cfg(test)]
 mod tests {
     use p3_koala_bear::KoalaBear;
-    use p3_field::AbstractField;
     use p3_matrix::dense::RowMajorMatrix;
-    use p3_matrix::Matrix;
-    use p3_maybe_rayon::prelude::ParallelSlice;
     use rand::{thread_rng, Rng};
     use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
     use zkm2_stark::{

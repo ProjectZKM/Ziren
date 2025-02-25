@@ -1,7 +1,7 @@
 use std::array;
 
 use p3_air::PairBuilder;
-use p3_koala_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
+use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_poseidon2::matmul_internal;
 use zkm2_primitives::RC_16_30_U32;
@@ -43,16 +43,32 @@ pub fn external_linear_layer<AF: FieldAlgebra + Copy>(state: &[AF; WIDTH]) -> [A
 }
 
 pub fn internal_linear_layer_mut<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
+    const INTERNAL_DIAG_MONTY_16: [KoalaBear; 16] = KoalaBear::new_array([
+        KoalaBear::ORDER_U32 - 2,
+        1,
+        2,
+        (KoalaBear::ORDER_U32 + 1) >> 1,
+        3,
+        4,
+        (KoalaBear::ORDER_U32 - 1) >> 1,
+        KoalaBear::ORDER_U32 - 3,
+        KoalaBear::ORDER_U32 - 4,
+        KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 8),
+        KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 3),
+        KoalaBear::ORDER_U32 - 127,
+        (KoalaBear::ORDER_U32 - 1) >> 8,
+        (KoalaBear::ORDER_U32 - 1) >> 3,
+        (KoalaBear::ORDER_U32 - 1) >> 4,
+        127,
+    ]);
     let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
-        POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
+        INTERNAL_DIAG_MONTY_16
             .iter()
             .map(|x| <F as FieldAlgebra>::F::from_wrapped_u32(x.as_canonical_u32()))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
     matmul_internal(state, matmul_constants);
-    let monty_inverse = F::from_wrapped_u32(MONTY_INVERSE.as_canonical_u32());
-    state.iter_mut().for_each(|i| *i = i.clone() * monty_inverse.clone());
 }
 
 /// Eval the constraints for the external rounds.

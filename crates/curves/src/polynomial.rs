@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use core::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 use itertools::Itertools;
-use p3_field::{AbstractExtensionField, AbstractField, Field};
+use p3_field::{FieldExtensionAlgebra, AbstractField, Field};
 
 /// A polynomial represented as a vector of coefficients.
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ impl<T> Polynomial<T> {
     }
 
     /// Evaluates the polynomial at a given point.
-    pub fn eval<S: AbstractExtensionField<T>>(&self, x: S) -> S
+    pub fn eval<S: FieldExtensionAlgebra<T>>(&self, x: S) -> S
     where
         T: AbstractField,
     {

@@ -3,7 +3,7 @@
 use std::iter::repeat;
 
 use itertools::Itertools;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_koala_bear::KoalaBear;
 
 use zkm2_recursion_core::air::RecursionPublicValues;
@@ -235,11 +235,11 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         );
 
         for limb in sum_checker_x.0 {
-            self.assert_felt_eq(limb, C::F::zero());
+            self.assert_felt_eq(limb, C::F::ZERO);
         }
 
         for limb in sum_checker_y.0 {
-            self.assert_felt_eq(limb, C::F::zero());
+            self.assert_felt_eq(limb, C::F::ZERO);
         }
 
         point
@@ -265,7 +265,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         vk_digest: SepticDigest<Felt<C::F>>,
     ) -> SepticDigest<Felt<C::F>> {
         let zero = SepticDigest::<SymbolicFelt<C::F>>::zero();
-        let one: Felt<C::F> = self.constant(C::F::one());
+        let one: Felt<C::F> = self.constant(C::F::ONE);
         let x = SepticExtension(core::array::from_fn(|i| {
             self.eval(is_first_shard * vk_digest.0.x.0[i] + (one - is_first_shard) * zero.0.x.0[i])
         }));

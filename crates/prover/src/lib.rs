@@ -33,7 +33,6 @@ use std::{
 };
 
 use lru::LruCache;
-use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
@@ -71,9 +70,9 @@ use zkm2_recursion_core::{
 };
 pub use zkm2_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 use zkm2_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover};
-use zkm2_stark::{air::InteractionScope, MachineProvingKey, ProofShape};
+use zkm2_stark::{MachineProvingKey, ProofShape};
 use zkm2_stark::{
-    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, Challenger,
+    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge,
     MachineProver, ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
@@ -788,7 +787,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     self.compress_prover
                                         .open(
                                             &pk,
-                                            None,
                                             data,
                                             &mut challenger,
                                         )

@@ -1,13 +1,12 @@
 #![deny(clippy::large_enum_variant)]
 
 use zkm2_recursion_core::air::RecursionPublicValues;
+use zkm2_stark::septic_curve::SepticCurve;
 
 use super::{
     Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Config, Ext, Felt, FriFoldInput,
     MemIndex, Ptr, TracedVec, Usize, Var,
 };
-
-use crate::config::InnerConfig;
 
 /// An intermeddiate instruction set for implementing programs.
 ///

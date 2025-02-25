@@ -29,7 +29,6 @@ pub mod utils {
     pub use zkm2_core_machine::utils::setup_logger;
 }
 
-use cfg_if::cfg_if;
 pub use proof::*;
 pub use provers::ZKMVerificationError;
 use zkm2_prover::components::DefaultProverComponents;

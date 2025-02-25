@@ -11,7 +11,7 @@ use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 
 use zkm2_recursion_compiler::{
     circuit::CircuitV2Builder,
-    ir::{Builder, Config, Ext, ExtConst},
+    ir::{Builder, Config, DslIr, Ext, ExtConst},
     prelude::Felt,
 };
 use zkm2_stark::{
@@ -158,7 +158,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     let vk = StarkVerifyingKey {
         commit: dummy_hash(),
         pc_start: KoalaBear::ZERO,
-        initial_global_cumulative_sum: SepticDigest::<BabyBear>::zero(),
+        initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
         chip_information: preprocessed_chip_information,
         chip_ordering: preprocessed_chip_ordering,
     };
@@ -307,7 +307,7 @@ where
 
             if chip.commit_scope() == InteractionScope::Local {
                 let is_real: Felt<C::F> = builder.uninit();
-                builder.push_op(DslIr::ImmF(is_real, C::F::one()));
+                builder.push_op(DslIr::ImmF(is_real, C::F::ONE));
                 builder.assert_digest_zero_v2(is_real, global_sum);
             }
 

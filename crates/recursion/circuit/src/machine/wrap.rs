@@ -5,7 +5,7 @@ use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
+use zkm2_recursion_compiler::ir::{Builder, Felt};
 use zkm2_stark::{air::MachineAir, StarkMachine};
 
 use crate::{

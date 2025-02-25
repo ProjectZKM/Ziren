@@ -13,7 +13,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use zkm2_core_machine::{
-    //    cpu::MAX_CPU_LOG_DEGREE,
+    cpu::MAX_CPU_LOG_DEGREE,
     mips::{MipsAir, MAX_LOG_NUMBER_OF_SHARDS},
 };
 use zkm2_recursion_core::air::PV_DIGEST_NUM_WORDS;
@@ -271,7 +271,7 @@ where
             challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
             challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
             // Observe the padding.
-            let zero: Felt<_> = builder.eval(C::F::zero());
+            let zero: Felt<_> = builder.eval(C::F::ZERO);
             challenger.observe(builder, zero);
            
             challenger.observe_slice(
@@ -291,7 +291,7 @@ where
             // CPU log degree bound check constraints (this assertion is made in compile time).
             if shard_proof.contains_cpu() {
                 let log_degree_cpu = shard_proof.log_degree_cpu();
-                //assert!(log_degree_cpu <= MAX_CPU_LOG_DEGREE);
+                assert!(log_degree_cpu <= MAX_CPU_LOG_DEGREE);
             }
 
             // Shard constraints.

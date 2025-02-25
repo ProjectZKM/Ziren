@@ -212,7 +212,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
 }
 
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
-    for ChipOpenedValues<InnerChallenge>
+    for ChipOpenedValues<InnerVal, InnerChallenge>
 {
     type WitnessVariable = ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
 

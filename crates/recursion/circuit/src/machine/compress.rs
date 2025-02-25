@@ -13,7 +13,8 @@ use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use zkm2_recursion_compiler::ir::{Builder, CircuitV2Builder, Felt, SymbolicFelt};
+use zkm2_recursion_compiler::circuit::CircuitV2Builder;
+use zkm2_recursion_compiler::ir::{Builder, Felt, SymbolicFelt};
 use zkm2_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 use zkm2_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
@@ -30,7 +31,6 @@ use crate::{
         root_public_values_digest,
     },
     stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
-    utils::uninit_challenger_pv,
     CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
 };
 
@@ -126,7 +126,7 @@ where
             });
         let mut deferred_proofs_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
             array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
-        let mut reconstruct_deferred_digest:// Observe the [Felt<_>; POSEIDON_NUM_WORDS] =
+        let mut reconstruct_deferred_digest: [Felt<_>; POSEIDON_NUM_WORDS] = // Observe the [Felt<_>; POSEIDON_NUM_WORDS] =
             core::array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
         let mut global_cumulative_sums = Vec::new();
         let mut init_addr_bits: [Felt<_>; 32] =

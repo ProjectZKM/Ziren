@@ -2,7 +2,6 @@ use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
 use p3_field::FieldAlgebra;
-use zkm2_core_machine::utils::zkm2_debug_mode;
 use zkm2_primitives::types::RecursionProgramType;
 
 use super::{
