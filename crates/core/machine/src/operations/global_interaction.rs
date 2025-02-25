@@ -75,10 +75,10 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
             self.range_check_witness = top_4_bits.inverse();
             self.permutation = populate_perm_deg3(m_trial, Some(m_hash));
 
-            // assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
+            assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         } else {
             self.populate_dummy();
-            // assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
+            assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         }
     }
 

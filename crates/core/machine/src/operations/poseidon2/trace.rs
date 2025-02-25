@@ -62,7 +62,7 @@ pub fn populate_perm<F: PrimeField32, const DEGREE: usize>(
                 for i in 0..WIDTH {
                     output_state[i] = next_state[i];
                     if let Some(expected_output) = expected_output {
-                        // assert_eq!(expected_output[i], next_state[i]);
+                        assert_eq!(expected_output[i], next_state[i]);
                     }
                 }
             } else {
