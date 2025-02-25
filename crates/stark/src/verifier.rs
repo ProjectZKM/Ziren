@@ -11,8 +11,6 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{LagrangeSelectors, Pcs, PolynomialSpace};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 
-//use p3_uni_stark::symbolic_builder::{get_log_quotient_degree, SymbolicAirBuilder};
-
 use super::{
     folder::VerifierConstraintFolder,
     types::{AirOpenedValues, ChipOpenedValues, ShardCommitment, ShardProof},

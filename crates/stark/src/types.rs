@@ -6,8 +6,9 @@ use std::{cmp::Reverse, collections::BTreeSet, fmt::Debug};
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_matrix::{
-    dense::RowMajorMatrixView,
+    dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
+    Matrix,
 };
 use serde::{Deserialize, Serialize};
 
@@ -89,19 +90,27 @@ pub struct ProofShape {
     pub chip_information: Vec<(String, usize)>,
 }
 
-// impl ProofShape {
-//     #[must_use]
-//     pub fn from_traces<V: Clone + Send + Sync>(traces: &[(String, RowMajorMatrix<V>)]) -> Self {
-//         traces
-//             .iter()
-//             .into_iter()
-//             .flatten()
-//             .chain(local_traces.iter())
-//             .map(|(name, trace)| (name.clone(), trace.height().ilog2() as usize))
-//             .sorted_by_key(|(_, height)| *height)
-//             .collect()
-//     }
-// }
+impl ProofShape {
+    #[must_use]
+    pub fn from_traces<V: Clone + Send + Sync>(
+        traces: &[(String, RowMajorMatrix<V>)],
+    ) -> Self {
+        traces
+            .iter()
+            .map(|(name, trace)| (name.clone(), trace.height().ilog2() as usize))
+            .sorted_by_key(|(_, height)| *height)
+            .collect()
+    }
+
+    #[must_use]
+    pub fn from_log2_heights(traces: &[(String, usize)]) -> Self {
+        traces
+            .iter()
+            .map(|(name, height)| (name.clone(), *height))
+            .sorted_by_key(|(_, height)| *height)
+            .collect()
+    }
+}
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

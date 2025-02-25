@@ -101,6 +101,7 @@ pub fn scoped_interactions<F: Field>(
 }
 
 /// Generates the permutation trace for the given chip and main trace based on a variant of `LogUp`.
+#[allow(clippy::too_many_lines)]
 pub fn generate_permutation_trace<F: PrimeField, EF: ExtensionField<F>>(
     sends: &[Interaction<F>],
     receives: &[Interaction<F>],

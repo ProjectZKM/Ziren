@@ -120,7 +120,15 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             // If cpu is included, try to fix the shape as a core.
 
             // Get the heights of the core airs in the record.
-            let heights = MipsAir::<F>::core_heights(record);
+            let mut heights = MipsAir::<F>::core_heights(record);
+
+            // If the record has global memory init/finalize events, replace the candidates with
+            // shapes that include the memory initialize/finalize chip.
+            if !record.global_memory_finalize_events.is_empty()
+                || !record.global_memory_initialize_events.is_empty()
+            {
+                heights.extend(MipsAir::<F>::get_memory_init_final_heights(record));
+            }
 
             // Try to find a shape within the included shapes.
             for (i, allowed_log_heights) in self.allowed_core_log_heights.iter().enumerate() {
@@ -336,11 +344,9 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
     fn default() -> Self {
         // Preprocessed chip heights.
         let program_heights = vec![Some(19), Some(20), Some(21), Some(22)];
-        // let program_memory_heights = vec![Some(19), Some(20), Some(21), Some(22)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
             (MipsAir::Program(ProgramChip::default()), program_heights),
-            // (MipsAir::ProgramMemory(MemoryProgramChip::default()), program_memory_heights),
             (MipsAir::ByteLookup(ByteChip::default()), vec![Some(16)]),
         ]);
 
@@ -803,7 +809,6 @@ pub mod tests {
 
         let preprocessed_log_heights = [
             (MipsAir::<KoalaBear>::Program(ProgramChip::default()), 10),
-            // (MipsAir::<KoalaBear>::ProgramMemory(MemoryProgramChip::default()), 10),
             (MipsAir::<KoalaBear>::ByteLookup(ByteChip::default()), 16),
         ];
 

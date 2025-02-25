@@ -530,7 +530,7 @@ where
             })
             .collect::<Vec<_>>();
 
-            let main_opened_values = main_values
+        let main_opened_values = main_values
             .into_iter()
             .zip(chips.iter())
             .map(|(op, chip)| {
