@@ -178,9 +178,9 @@ impl<F: Field> GlobalInteractionOperation<F> {
         let x3_2x_26z5 = SepticCurve::<AB::Expr>::curve_formula(x);
         builder.assert_septic_ext_eq(y2, x3_2x_26z5);
 
-        // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^26`.
-        // Decompose `y6_value` into 30 bits, and then constrain that the top 4 bits cannot be all 1.
-        // To do this, check that the sum of the top 4 bits is not equal to 4, which can be done by providing an inverse.
+        // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^24`.
+        // Decompose `y6_value` into 30 bits, and then constrain that the top 7 bits cannot be all 1.
+        // To do this, check that the sum of the top 7 bits is not equal to 7, which can be done by providing an inverse.
         let mut y6_value = AB::Expr::ZERO;
         let mut top_7_bits = AB::Expr::ZERO;
         for i in 0..30 {
@@ -190,7 +190,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
                 top_7_bits = top_7_bits.clone() + cols.y6_bit_decomp[i];
             }
         }
-        // If `is_real` is true, check that `top_4_bits - 4` is non-zero, by checking `range_check_witness` is an inverse of it.
+        // If `is_real` is true, check that `top_7_bits - 7` is non-zero, by checking `range_check_witness` is an inverse of it.
         builder.when(is_real).assert_eq(
             cols.range_check_witness * (top_7_bits - AB::Expr::from_canonical_u8(7)),
             AB::Expr::ONE,
@@ -202,7 +202,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
         builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value.clone());
         builder.when(is_send).assert_eq(
             y.0[6].clone(),
-            AB::Expr::from_canonical_u32((1 << 30) - (1 << 26) + 1) + y6_value.clone(),
+            AB::Expr::from_canonical_u32((1 << 30) - (1 << 23) + 1) + y6_value.clone(),
         );
     }
 }
