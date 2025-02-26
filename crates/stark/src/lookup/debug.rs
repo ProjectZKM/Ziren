@@ -64,7 +64,6 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
 ) -> (BTreeMap<String, Vec<InteractionData<Val<SC>>>>, BTreeMap<String, Val<SC>>) {
     let mut key_to_vec_data = BTreeMap::new();
     let mut key_to_count = BTreeMap::new();
-
     let trace = chip.generate_trace(record, &mut A::Record::default());
     let mut pre_traces = pkey.traces.clone();
     let mut preprocessed_trace =
@@ -153,6 +152,7 @@ where
             if !chip.included(shard) {
                 continue;
             }
+            println!("{}", chip.name());
             let (_, count) =
                 debug_interactions::<SC, A>(chip, pkey, shard, interaction_kinds.clone(), scope);
             total_events += count.len();
