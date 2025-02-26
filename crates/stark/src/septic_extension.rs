@@ -406,151 +406,153 @@ impl<F: FieldAlgebra> Display for SepticExtension<F> {
 }
 
 impl<F: Field> SepticExtension<F> {
+    /// Returns the value of z^{index * p} in the [`SepticExtension`] field.
     fn z_pow_p(index: u32) -> Self {
         // The constants written below are specifically for the KoalaBear field.
-        debug_assert_eq!(F::order(), BigUint::from(2013265921u32));
+        debug_assert_eq!(F::order(), BigUint::from(2130706433u32));
         if index == 0 {
             return Self::ONE;
         }
         if index == 1 {
             return SepticExtension([
-                F::from_canonical_u32(954599710),
-                F::from_canonical_u32(1359279693),
-                F::from_canonical_u32(566669999),
-                F::from_canonical_u32(1982781815),
-                F::from_canonical_u32(1735718361),
-                F::from_canonical_u32(1174868538),
-                F::from_canonical_u32(1120871770),
+                F::from_canonical_u32(781706328),
+                F::from_canonical_u32(1342230710),
+                F::from_canonical_u32(1535377836),
+                F::from_canonical_u32(880058427),
+                F::from_canonical_u32(438559105),
+                F::from_canonical_u32(413617228),
+                F::from_canonical_u32(1879328694),
             ]);
         }
         if index == 2 {
             return SepticExtension([
-                F::from_canonical_u32(862825265),
-                F::from_canonical_u32(597046311),
-                F::from_canonical_u32(978840770),
-                F::from_canonical_u32(1790138282),
-                F::from_canonical_u32(1044777201),
-                F::from_canonical_u32(835869808),
-                F::from_canonical_u32(1342179023),
+                F::from_canonical_u32(182895624),
+                F::from_canonical_u32(42931421),
+                F::from_canonical_u32(27270317),
+                F::from_canonical_u32(610877800),
+                F::from_canonical_u32(86114419),
+                F::from_canonical_u32(1744635846),
+                F::from_canonical_u32(1975788407),
             ]);
         }
         if index == 3 {
             return SepticExtension([
-                F::from_canonical_u32(596273169),
-                F::from_canonical_u32(658837454),
-                F::from_canonical_u32(1515468261),
-                F::from_canonical_u32(367059247),
-                F::from_canonical_u32(781278880),
-                F::from_canonical_u32(1544222616),
-                F::from_canonical_u32(155490465),
+                F::from_canonical_u32(1542122499),
+                F::from_canonical_u32(1398633406),
+                F::from_canonical_u32(242753179),
+                F::from_canonical_u32(250816309),
+                F::from_canonical_u32(1781911570),
+                F::from_canonical_u32(1494738991),
+                F::from_canonical_u32(204856434),
             ]);
         }
         if index == 4 {
             return SepticExtension([
-                F::from_canonical_u32(557608863),
-                F::from_canonical_u32(1173670028),
-                F::from_canonical_u32(1749546888),
-                F::from_canonical_u32(1086464137),
-                F::from_canonical_u32(803900099),
-                F::from_canonical_u32(1288818584),
-                F::from_canonical_u32(1184677604),
+                F::from_canonical_u32(1531246417),
+                F::from_canonical_u32(244845361),
+                F::from_canonical_u32(418875171),
+                F::from_canonical_u32(442922526),
+                F::from_canonical_u32(725630276),
+                F::from_canonical_u32(1139227418),
+                F::from_canonical_u32(1335578579),
             ]);
         }
         if index == 5 {
             return SepticExtension([
-                F::from_canonical_u32(763416381),
-                F::from_canonical_u32(1252567168),
-                F::from_canonical_u32(628856225),
-                F::from_canonical_u32(1771903394),
-                F::from_canonical_u32(650712211),
-                F::from_canonical_u32(19417363),
-                F::from_canonical_u32(57990258),
+                F::from_canonical_u32(563544992),
+                F::from_canonical_u32(1791695145),
+                F::from_canonical_u32(515433545),
+                F::from_canonical_u32(583358283),
+                F::from_canonical_u32(1118090894),
+                F::from_canonical_u32(1514342085),
+                F::from_canonical_u32(19957516),
             ]);
         }
         if index == 6 {
             return SepticExtension([
-                F::from_canonical_u32(1734711039),
-                F::from_canonical_u32(1749813853),
-                F::from_canonical_u32(1227235221),
-                F::from_canonical_u32(1707730636),
-                F::from_canonical_u32(424560395),
-                F::from_canonical_u32(1007029514),
-                F::from_canonical_u32(498034669),
+                F::from_canonical_u32(1755995392),
+                F::from_canonical_u32(1524787777),
+                F::from_canonical_u32(2001495049),
+                F::from_canonical_u32(606410507),
+                F::from_canonical_u32(254663133),
+                F::from_canonical_u32(141664755),
+                F::from_canonical_u32(996384431),
             ]);
         }
         unreachable!();
     }
 
+    /// Returns the value of z^{index * p^2} in the [`SepticExtension`] field.
     fn z_pow_p2(index: u32) -> Self {
         // The constants written below are specifically for the KoalaBear field.
-        debug_assert_eq!(F::order(), BigUint::from(2013265921u32));
+        debug_assert_eq!(F::order(), BigUint::from(2130706433u32));
         if index == 0 {
             return Self::ONE;
         }
         if index == 1 {
             return SepticExtension([
-                F::from_canonical_u32(1013489358),
-                F::from_canonical_u32(1619071628),
-                F::from_canonical_u32(304593143),
-                F::from_canonical_u32(1949397349),
-                F::from_canonical_u32(1564307636),
-                F::from_canonical_u32(327761151),
-                F::from_canonical_u32(415430835),
+                F::from_canonical_u32(1912341163),
+                F::from_canonical_u32(1823679614),
+                F::from_canonical_u32(1628157501),
+                F::from_canonical_u32(299546706),
+                F::from_canonical_u32(1258584182),
+                F::from_canonical_u32(1682638628),
+                F::from_canonical_u32(1407930704),
             ]);
         }
         if index == 2 {
             return SepticExtension([
-                F::from_canonical_u32(209824426),
-                F::from_canonical_u32(1313900768),
-                F::from_canonical_u32(38410482),
-                F::from_canonical_u32(256593180),
-                F::from_canonical_u32(1708830551),
-                F::from_canonical_u32(1244995038),
-                F::from_canonical_u32(1555324019),
+                F::from_canonical_u32(561351290),
+                F::from_canonical_u32(334450909),
+                F::from_canonical_u32(1242144837),
+                F::from_canonical_u32(1223623279),
+                F::from_canonical_u32(707679962),
+                F::from_canonical_u32(1628992216),
+                F::from_canonical_u32(338609778),
             ]);
         }
         if index == 3 {
             return SepticExtension([
-                F::from_canonical_u32(1475628651),
-                F::from_canonical_u32(777565847),
-                F::from_canonical_u32(704492386),
-                F::from_canonical_u32(1218528120),
-                F::from_canonical_u32(1245363405),
-                F::from_canonical_u32(475884575),
-                F::from_canonical_u32(649166061),
+                F::from_canonical_u32(1545654260),
+                F::from_canonical_u32(1275295914),
+                F::from_canonical_u32(851762614),
+                F::from_canonical_u32(753640340),
+                F::from_canonical_u32(195030007),
+                F::from_canonical_u32(1864617754),
+                F::from_canonical_u32(510940582),
             ]);
         }
         if index == 4 {
             return SepticExtension([
-                F::from_canonical_u32(550038364),
-                F::from_canonical_u32(948935655),
-                F::from_canonical_u32(68722023),
-                F::from_canonical_u32(1251345762),
-                F::from_canonical_u32(1692456177),
-                F::from_canonical_u32(1177958698),
-                F::from_canonical_u32(350232928),
+                F::from_canonical_u32(351094761),
+                F::from_canonical_u32(119830452),
+                F::from_canonical_u32(1253187431),
+                F::from_canonical_u32(1656093073),
+                F::from_canonical_u32(145440466),
+                F::from_canonical_u32(1698204022),
+                F::from_canonical_u32(1897616408),
             ]);
         }
         if index == 5 {
             return SepticExtension([
-                F::from_canonical_u32(882720258),
-                F::from_canonical_u32(821925756),
-                F::from_canonical_u32(199955840),
-                F::from_canonical_u32(812002876),
-                F::from_canonical_u32(1484951277),
-                F::from_canonical_u32(1063138035),
-                F::from_canonical_u32(491712810),
+                F::from_canonical_u32(960198083),
+                F::from_canonical_u32(2005580992),
+                F::from_canonical_u32(156264107),
+                F::from_canonical_u32(967799074),
+                F::from_canonical_u32(167304015),
+                F::from_canonical_u32(1037039528),
+                F::from_canonical_u32(708474758),
             ]);
         }
         if index == 6 {
             return SepticExtension([
-                F::from_canonical_u32(738287111),
-                F::from_canonical_u32(1955364991),
-                F::from_canonical_u32(552724293),
-                F::from_canonical_u32(1175775744),
-                F::from_canonical_u32(341623997),
-                F::from_canonical_u32(1454022463),
-                F::from_canonical_u32(408193320),
+                F::from_canonical_u32(1508252129),
+                F::from_canonical_u32(728686202),
+                F::from_canonical_u32(660638548),
+                F::from_canonical_u32(386910858),
+                F::from_canonical_u32(495805864),
+                F::from_canonical_u32(1457164930),
+                F::from_canonical_u32(400410603),
             ]);
         }
         unreachable!();

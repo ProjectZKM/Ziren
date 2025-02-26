@@ -5,7 +5,7 @@ use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::Pcs;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_maybe_rayon::prelude::*;
 
@@ -442,7 +442,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             let local_cumulative_sum =
                 chip_cumulative_sums.iter().map(|sums| sums.1).sum::<SC::Challenge>();
 
-            if local_cumulative_sum != SC::Challenge::ZERO {
+            if !local_cumulative_sum.is_zero() {
                 tracing::warn!("Local cumulative sum is not zero");
                 tracing::debug_span!("debug local interactions").in_scope(|| {
                     debug_interactions_with_all_chips::<SC, A>(
