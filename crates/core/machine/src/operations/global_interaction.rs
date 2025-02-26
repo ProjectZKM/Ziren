@@ -109,7 +109,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
         is_receive: AB::Expr,
         is_send: AB::Expr,
         is_real: AB::Var,
-        kind: AB::Var,
+        kind: AB::Expr,
     ) {
         // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);

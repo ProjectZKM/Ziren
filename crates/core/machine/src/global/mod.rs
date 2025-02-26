@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, mem::transmute};
 
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::PrimeField32;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge,
@@ -40,7 +40,7 @@ const GLOBAL_COL_MAP: GlobalCols<usize> = make_col_map();
 
 pub const GLOBAL_INITIAL_DIGEST_POS: usize = GLOBAL_COL_MAP.accumulation.initial_digest[0].0[0];
 
-pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 377;
+pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 376;
 
 #[repr(C)]
 pub struct Ghost {
@@ -54,7 +54,6 @@ pub struct GlobalChip;
 #[repr(C)]
 pub struct GlobalCols<T: Copy> {
     pub message: [T; 7],
-    pub kind: T,
     pub interaction: GlobalInteractionOperation<T>,
     pub is_receive: T,
     pub is_send: T,
@@ -202,14 +201,7 @@ where
         let next = main.row_slice(1);
         let next: &GlobalCols<AB::Var> = (*next).borrow();
 
-        // Receive the arguments, which consists of 7 message columns, `is_send`, `is_receive`, and `kind`.
-        // In MemoryGlobal, MemoryLocal, Syscall chips, `is_send`, `is_receive`, `kind` are sent with correct constant values.
-        // For a global send interaction, `is_send = 1` and `is_receive = 0` are used.
-        // For a global receive interaction, `is_send = 0` and `is_receive = 1` are used.
-        // For a memory global interaction, `kind = InteractionKind::Memory` is used.
-        // For a syscall global interaction, `kind = InteractionKind::Syscall` is used.
-        // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is also known to be a `u8` value.
-        // Note that `local.is_real` is constrained to be boolean in `eval_single_digest`.
+        // Receive the arguments.
         builder.receive(
             AirInteraction::new(
                 vec![
@@ -222,7 +214,6 @@ where
                     local.message[6].into(),
                     local.is_send.into(),
                     local.is_receive.into(),
-                    local.kind.into(),
                 ],
                 local.is_real.into(),
                 InteractionKind::Global,
@@ -238,7 +229,7 @@ where
             local.is_receive.into(),
             local.is_send.into(),
             local.is_real,
-            local.kind,
+            AB::Expr::from_canonical_u32(InteractionKind::Global as u32),
         );
 
         // Evaluate the accumulation.
