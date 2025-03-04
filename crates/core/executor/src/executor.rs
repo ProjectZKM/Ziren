@@ -872,7 +872,8 @@ impl<'a> Executor<'a> {
                 | Opcode::LBU
                 | Opcode::LHU
                 | Opcode::LWL
-                | Opcode::LWR => {
+                | Opcode::LWR
+                | Opcode::LL => {
                     self.report.event_counts[Opcode::ADD] += 2;
                 }
                 Opcode::JumpDirect => {
@@ -1029,7 +1030,6 @@ impl<'a> Executor<'a> {
             | Opcode::SW
             | Opcode::SWL
             | Opcode::SWR
-            // | Opcode::SDC1
             | Opcode::SC => {
                 (a, b, c) = self.execute_store(instruction)?;
             }
