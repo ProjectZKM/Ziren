@@ -71,34 +71,51 @@ The support instructions are as follows:
 | SYSCALL     | 000000     | code        | code        | code        | code         | 001100      | syscall                                                      |
 | XOR         | 000000     | rs          | rt          | rd          | 00000        | 100110      | rd = rs ^ rt                                                 |
 | XORI        | 001110     | rs          | rt          | imm         | imm          | imm         | rd = rs ^ zext(imm)                                          |
-| bal         | 000001     | 00000       | 10001       | offset      | offset       | offset      | target_offset = sign_extend(offset \|\| 0 2 ) GPR[31] = PC + 8 PC = PC + target_offset |
-| ext         | 011111     | rs          | rt          | msbd        | lsb          | 000000      | rt =  rs[msbd+lsb..lsb]                                      |
-| pref        | 110011     | base        | hint        | offset      | offset       | offset      | prefetch(nop)                                                |
-| rdhwr       | 011111     | rs          | rt          | rd          | 00sel        | 111011      | rt = hwr[rd]                                                 |
-| sdc1        | 111101     | base        | ft          | offset      |              |             | mem_word(base + offset) = 0                                  |
-| seh         | 011111     | 00000       | rt          | rd          | 11000        | 100000      | rd = signExtend(rt[15..0])                                   |
-| seb         | 011111     | 00000       | rt          | rd          | 10000        | 100000      | rd = signExtend(rt[7..0])                                    |
-| wsbh        | 011111     | 00000       | rt          | rd          | 00010        | 100000      |                                                              |
+| BAL         | 000001     | 00000       | 10001       | offset      | offset       | offset      | target_offset = sign_extend(offset \|\| 0 2 ) GPR[31] = PC + 8 PC = PC + target_offset |
+| PREF        | 110011     | base        | hint        | offset      | offset       | offset      | prefetch(nop)                                                |
 | TEQ         | 000000     | rs          | rt          | code        | code         | 110100      | trap，if rs == rt                                            |
-| ins         | 011111     | rs          | rt          | msb         | lsb          | 000100      | rt = rt[32:msb+1] \|\| rs[msb+1-lsb : 0] \|\| rt[lsb-1:0]    |
-| maddu       | 011100     | rs          | rt          | 00000       | 00000        | 000001      | (hi, lo) = rs * rt + (hi,lo)                                 |
-| rotr        | 000000     | 00001       | rt          | rd          | sa           | 000010      | rd = rotate_right(rt, sa）                                   |
-
-
 
 ## Supported syscalls
 
-| syscall number          | function                                                     |
-| ----------------------- | ------------------------------------------------------------ |
-| sysGetpid = 4020        | read preimage data from 0x31000000 （used for minigeth only） |
-| sysMmap = 4090          | alloc memory，update heap address                            |
-| sysBrk = 4045           | set v0 to 0x40000000                                         |
-| sysClone = 4120         | set v0 to 1                                                  |
-| sysExitGroup = 4246     | exit                                                         |
-| sysRead = 4003          | read file data                                               |
-| sysWrite = 4004         | write data to file                                           |
-| sysFcntl = 4055         | file control                                                 |
-| SysSetThreadArea = 4283 | Set address of thread area to local_user                     |
-| SysHintRead = 241       | read current input data                                      |
-| SysHintLen = 240        | return length of current input data                          |
-| sysVerify = 242         | verify the pre-compile program                               |
+| syscall number                           | function                                           |
+| ---------------------------------------- | -------------------------------------------------- |
+|  SYSHINTLEN = 0x00_00_00_F0,             |  Return length of current input data.              |
+|  SYSHINTREAD = 0x00_00_00_F1,            |  Read current input data.                          |
+|  SYSVERIFY = 0x00_00_00_F2,              |  Verify pre-compile program.                       |
+|  HALT = 0x00_00_00_00,                   |  Halts the program.                                |
+|  WRITE = 0x00_00_00_02,                  |  Write to the output buffer.                       |
+|  ENTER_UNCONSTRAINED = 0x00_00_00_03,    |  Enter unconstrained block.                        |
+|  EXIT_UNCONSTRAINED = 0x00_00_00_04,     |  Exit unconstrained block.                         |
+|  SHA_EXTEND = 0x00_30_01_05,             |  Executes the `SHA_EXTEND` precompile.             |
+|  SHA_COMPRESS = 0x00_01_01_06,           |  Executes the `SHA_COMPRESS` precompile.           |
+|  ED_ADD = 0x00_01_01_07,                 |  Executes the `ED_ADD` precompile.                 |
+|  ED_DECOMPRESS = 0x00_00_01_08,          |  Executes the `ED_DECOMPRESS` precompile.          |
+|  KECCAK_PERMUTE = 0x00_01_01_09,         |  Executes the `KECCAK_PERMUTE` precompile.         |
+|  SECP256K1_ADD = 0x00_01_01_0A,          |  Executes the `SECP256K1_ADD` precompile.          |
+|  SECP256K1_DOUBLE = 0x00_00_01_0B,       |  Executes the `SECP256K1_DOUBLE` precompile.       |
+|  SECP256K1_DECOMPRESS = 0x00_00_01_0C,   |  Executes the `SECP256K1_DECOMPRESS` precompile.   |
+|  BN254_ADD = 0x00_01_01_0E,              |  Executes the `BN254_ADD` precompile.              |
+|  BN254_DOUBLE = 0x00_00_01_0F,           |  Executes the `BN254_DOUBLE` precompile.           |
+|  COMMIT = 0x00_00_00_10,                 |  Executes the `COMMIT` precompile.                 |
+|  COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A, |  Executes the `COMMIT_DEFERRED_PROOFS` precompile. |
+|  VERIFY_ZKM_PROOF = 0x00_00_00_1B,       |  Executes the `VERIFY_ZKM_PROOF` precompile.       |
+|  BLS12381_DECOMPRESS = 0x00_00_01_1C,    |  Executes the `BLS12381_DECOMPRESS` precompile.    |
+|  UINT256_MUL = 0x00_01_01_1D,            |  Executes the `UINT256_MUL` precompile.            |
+|  U256XU2048_MUL = 0x00_01_01_2F,         |  Executes the `U256XU2048_MUL` precompile.         |
+|  BLS12381_ADD = 0x00_01_01_1E,           |  Executes the `BLS12381_ADD` precompile.           |
+|  BLS12381_DOUBLE = 0x00_00_01_1F,        |  Executes the `BLS12381_DOUBLE` precompile.        |
+|  BLS12381_FP_ADD = 0x00_01_01_20,        |  Executes the `BLS12381_FP_ADD` precompile.        |
+|  BLS12381_FP_SUB = 0x00_01_01_21,        |  Executes the `BLS12381_FP_SUB` precompile.        |
+|  BLS12381_FP_MUL = 0x00_01_01_22,        |  Executes the `BLS12381_FP_MUL` precompile.        |
+|  BLS12381_FP2_ADD = 0x00_01_01_23,       |  Executes the `BLS12381_FP2_ADD` precompile.       |
+|  BLS12381_FP2_SUB = 0x00_01_01_24,       |  Executes the `BLS12381_FP2_SUB` precompile.       |
+|  BLS12381_FP2_MUL = 0x00_01_01_25,       |  Executes the `BLS12381_FP2_MUL` precompile.       |
+|  BN254_FP_ADD = 0x00_01_01_26,           |  Executes the `BN254_FP_ADD` precompile.           |
+|  BN254_FP_SUB = 0x00_01_01_27,           |  Executes the `BN254_FP_SUB` precompile.           |
+|  BN254_FP_MUL = 0x00_01_01_28,           |  Executes the `BN254_FP_MUL` precompile.           |
+|  BN254_FP2_ADD = 0x00_01_01_29,          |  Executes the `BN254_FP2_ADD` precompile.          |
+|  BN254_FP2_SUB = 0x00_01_01_2A,          |  Executes the `BN254_FP2_SUB` precompile.          |
+|  BN254_FP2_MUL = 0x00_01_01_2B,          |  Executes the `BN254_FP2_MUL` precompile.          |
+|  SECP256R1_ADD = 0x00_01_01_2C,          |  Executes the `SECP256R1_ADD` precompile.          |
+|  SECP256R1_DOUBLE = 0x00_00_01_2D,       |  Executes the `SECP256R1_DOUBLE` precompile.       |
+|  SECP256R1_DECOMPRESS = 0x00_00_01_2E,   |  Executes the `SECP256R1_DECOMPRESS` precompile.   |               
