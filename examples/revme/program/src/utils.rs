@@ -9,14 +9,6 @@ pub fn recover_address(private_key: &[u8]) -> Option<Address> {
     Some(Address::from_raw_public_key(&public_key.as_bytes()[1..]))
 }
 
-pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> [u8; 32] {
-    let mut output = [0u8; 32];
-    let mut hasher = zkm2_zkvm::lib::keccak::Keccak::v256();
-    hasher.update(bytes.as_ref());
-    hasher.finalize(&mut output);
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

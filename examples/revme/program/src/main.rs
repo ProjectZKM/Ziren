@@ -4,7 +4,7 @@
 use revm::{
     db::CacheState,
     interpreter::CreateScheme,
-    primitives::{calc_excess_blob_gas, Bytecode, Env, SpecId, TransactTo, B256, U256},
+    primitives::{calc_excess_blob_gas, Bytecode, Env, SpecId, TransactTo, B256, U256, keccak256},
     Evm,
 };
 
@@ -16,7 +16,6 @@ mod utils;
 use utils::recover_address;
 
 extern crate alloc;
-use crate::utils::keccak256;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
@@ -49,7 +48,7 @@ fn execute_test_suite(suite: TestSuite) -> Result<(), String> {
         for (address, info) in unit.pre {
             let acc_info = revm::primitives::AccountInfo {
                 balance: info.balance,
-                code_hash: B256::from(keccak256(&info.code)),
+                code_hash: keccak256(&info.code),
                 code: Some(Bytecode::new_raw(info.code)),
                 nonce: info.nonce,
             };

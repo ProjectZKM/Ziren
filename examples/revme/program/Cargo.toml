@@ -6,8 +6,8 @@ publish = false
 
 [dependencies]
 zkm2-zkvm = { path = "../../../crates/zkvm/entrypoint" }
-revm = {path = "../../../../revm/crates/revm", default-features = false, features = ["serde"]}
-models = {path = "../../../../powdr-revme/models"}
+revm = { git = "https://github.com/zkMIPS/revm", branch = "zkm2-zkvm", default-features = false, features = [ "serde" ] }
+models = { git = "https://github.com/zkMIPS/powdr-revme", branch = "zkm2-zkvm", package = "models" }
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 k256 = { version = "0.13.3", features = ["ecdsa"], default-features = false }
