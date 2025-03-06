@@ -194,7 +194,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let core_shape_config = env::var("FIX_CORE_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
+            .unwrap_or(true)
             .then_some(CoreShapeConfig::default());
 
         let recursion_shape_config = env::var("FIX_RECURSION_SHAPES")
