@@ -4,7 +4,7 @@
 use revm::{
     db::CacheState,
     interpreter::CreateScheme,
-    primitives::{calc_excess_blob_gas, Bytecode, Env, SpecId, TransactTo, B256, U256, keccak256},
+    primitives::{calc_excess_blob_gas, Bytecode, Env, SpecId, TransactTo, U256, keccak256},
     Evm,
 };
 
