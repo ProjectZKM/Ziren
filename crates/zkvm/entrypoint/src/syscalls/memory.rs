@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Memory addresses must be lower than KoalaBear prime.
-const MAX_MEMORY: usize = 0xC000000;
+pub const MAX_MEMORY: usize = 0x78000000;
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
