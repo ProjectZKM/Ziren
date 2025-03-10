@@ -13,15 +13,15 @@ use super::{
 
 /// A trait which contains all helper methods for building ZKM recursion machine AIRs.
 pub trait ZKMRecursionAirBuilder:
-    MachineAirBuilder + RecursionMemoryAirBuilder + RecursionInteractionAirBuilder
+    MachineAirBuilder + RecursionMemoryAirBuilder + RecursionLookupAirBuilder
 {
 }
 
 impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionMemoryAirBuilder for AB {}
-impl<AB: BaseAirBuilder> RecursionInteractionAirBuilder for AB {}
+impl<AB: BaseAirBuilder> RecursionLookupAirBuilder for AB {}
 
-pub trait RecursionMemoryAirBuilder: RecursionInteractionAirBuilder {
+pub trait RecursionMemoryAirBuilder: RecursionLookupAirBuilder {
     fn recursion_eval_memory_access<E: Into<Self::Expr> + Clone>(
         &mut self,
         timestamp: impl Into<Self::Expr>,
@@ -152,8 +152,8 @@ pub trait RecursionMemoryAirBuilder: RecursionInteractionAirBuilder {
     }
 }
 
-/// Builder trait containing helper functions to send/receive interactions.
-pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
+/// Builder trait containing helper functions to send/receive lookups.
+pub trait RecursionLookupAirBuilder: BaseAirBuilder {
     /// Sends a range check operation to be processed.
     fn send_range_check(
         &mut self,
@@ -195,12 +195,12 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
         selectors: OpcodeSelectorCols<E>,
         is_real: impl Into<Self::Expr>,
     ) {
-        let program_interaction_vals = once(pc.into())
+        let program_lookup_vals = once(pc.into())
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.send(
-            AirLookup::new(program_interaction_vals, is_real.into(), LookupKind::Program),
+            AirLookup::new(program_lookup_vals, is_real.into(), LookupKind::Program),
             LookupScope::Global,
         );
     }
@@ -212,12 +212,12 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
         selectors: OpcodeSelectorCols<E>,
         is_real: impl Into<Self::Expr>,
     ) {
-        let program_interaction_vals = once(pc.into())
+        let program_lookup_vals = once(pc.into())
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect::<Vec<_>>();
         self.receive(
-            AirLookup::new(program_interaction_vals, is_real.into(), LookupKind::Program),
+            AirLookup::new(program_lookup_vals, is_real.into(), LookupKind::Program),
             LookupScope::Global,
         );
     }
@@ -228,8 +228,8 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
         table: &[E],
         is_real: impl Into<Self::Expr>,
     ) {
-        let table_interaction_vals = table.iter().map(|x| x.clone().into());
-        let values = once(opcode.into()).chain(table_interaction_vals).collect();
+        let table_lookup_vals = table.iter().map(|x| x.clone().into());
+        let values = once(opcode.into()).chain(table_lookup_vals).collect();
         self.send(
             AirLookup::new(values, is_real.into(), LookupKind::Syscall),
             LookupScope::Local,
@@ -242,8 +242,8 @@ pub trait RecursionInteractionAirBuilder: BaseAirBuilder {
         table: &[E],
         is_real: impl Into<Self::Expr>,
     ) {
-        let table_interaction_vals = table.iter().map(|x| x.clone().into());
-        let values = once(opcode.into()).chain(table_interaction_vals).collect();
+        let table_lookup_vals = table.iter().map(|x| x.clone().into());
+        let values = once(opcode.into()).chain(table_lookup_vals).collect();
         self.receive(
             AirLookup::new(values, is_real.into(), LookupKind::Syscall),
             LookupScope::Local,

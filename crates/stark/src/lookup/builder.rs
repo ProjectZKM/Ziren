@@ -8,19 +8,19 @@ use crate::{
     PROOF_MAX_NUM_PVS,
 };
 
-use super::Interaction;
+use super::Lookup;
 
-/// A builder for the lookup table interactions.
-pub struct InteractionBuilder<F: Field> {
+/// A builder for the lookup table.
+pub struct LookupBuilder<F: Field> {
     preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
     main: RowMajorMatrix<SymbolicVariable<F>>,
-    sends: Vec<Interaction<F>>,
-    receives: Vec<Interaction<F>>,
+    sends: Vec<Lookup<F>>,
+    receives: Vec<Lookup<F>>,
     public_values: Vec<F>,
 }
 
-impl<F: Field> InteractionBuilder<F> {
-    /// Creates a new [`InteractionBuilder`] with the given width.
+impl<F: Field> LookupBuilder<F> {
+    /// Creates a new [`LookupBuilder`] with the given width.
     #[must_use]
     pub fn new(preprocessed_width: usize, main_width: usize) -> Self {
         let preprocessed_width = preprocessed_width.max(1);
@@ -52,12 +52,12 @@ impl<F: Field> InteractionBuilder<F> {
 
     /// Returns the sends and receives.
     #[must_use]
-    pub fn interactions(self) -> (Vec<Interaction<F>>, Vec<Interaction<F>>) {
+    pub fn lookups(self) -> (Vec<Lookup<F>>, Vec<Lookup<F>>) {
         (self.sends, self.receives)
     }
 }
 
-impl<F: Field> AirBuilder for InteractionBuilder<F> {
+impl<F: Field> AirBuilder for LookupBuilder<F> {
     type F = F;
     type Expr = SymbolicExpression<F>;
     type Var = SymbolicVariable<F>;
@@ -86,20 +86,20 @@ impl<F: Field> AirBuilder for InteractionBuilder<F> {
     fn assert_zero<I: Into<Self::Expr>>(&mut self, _x: I) {}
 }
 
-impl<F: Field> PairBuilder for InteractionBuilder<F> {
+impl<F: Field> PairBuilder for LookupBuilder<F> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
 }
 
-impl<F: Field> MessageBuilder<AirLookup<SymbolicExpression<F>>> for InteractionBuilder<F> {
+impl<F: Field> MessageBuilder<AirLookup<SymbolicExpression<F>>> for LookupBuilder<F> {
     fn send(&mut self, message: AirLookup<SymbolicExpression<F>>, scope: LookupScope) {
         let values =
             message.values.into_iter().map(|v| symbolic_to_virtual_pair(&v)).collect::<Vec<_>>();
 
         let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
 
-        self.sends.push(Interaction::new(values, multiplicity, message.kind, scope));
+        self.sends.push(Lookup::new(values, multiplicity, message.kind, scope));
     }
 
     fn receive(&mut self, message: AirLookup<SymbolicExpression<F>>, scope: LookupScope) {
@@ -108,11 +108,11 @@ impl<F: Field> MessageBuilder<AirLookup<SymbolicExpression<F>>> for InteractionB
 
         let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
 
-        self.receives.push(Interaction::new(values, multiplicity, message.kind, scope));
+        self.receives.push(Lookup::new(values, multiplicity, message.kind, scope));
     }
 }
 
-impl<F: Field> AirBuilderWithPublicValues for InteractionBuilder<F> {
+impl<F: Field> AirBuilderWithPublicValues for LookupBuilder<F> {
     type PublicVar = F;
 
     fn public_values(&self) -> &[Self::PublicVar] {
@@ -265,19 +265,19 @@ mod tests {
     }
 
     #[test]
-    fn test_lookup_interactions() {
+    fn test_lookup_lookups() {
         let air = LookupTestAir {};
 
-        let mut builder = InteractionBuilder::<KoalaBear>::new(0, NUM_COLS);
+        let mut builder = LookupBuilder::<KoalaBear>::new(0, NUM_COLS);
 
         air.eval(&mut builder);
 
         let mut main = builder.main();
-        let (sends, receives) = builder.interactions();
+        let (sends, receives) = builder.lookups();
 
-        for interaction in receives {
+        for lookup in receives {
             print!("Receive values: ");
-            for value in interaction.values {
+            for value in lookup.values {
                 let expr = value
                     .apply::<SymbolicExpression<KoalaBear>, SymbolicVariable<KoalaBear>>(
                         &[],
@@ -286,7 +286,7 @@ mod tests {
                 print!("{expr:?}, ");
             }
 
-            let multiplicity = interaction
+            let multiplicity = lookup
                 .multiplicity
                 .apply::<SymbolicExpression<KoalaBear>, SymbolicVariable<KoalaBear>>(
                     &[],
@@ -296,9 +296,9 @@ mod tests {
             println!(", multiplicity: {multiplicity:?}");
         }
 
-        for interaction in sends {
+        for lookup in sends {
             print!("Send values: ");
-            for value in interaction.values {
+            for value in lookup.values {
                 let expr = value
                     .apply::<SymbolicExpression<KoalaBear>, SymbolicVariable<KoalaBear>>(
                         &[],
@@ -307,7 +307,7 @@ mod tests {
                 print!("{expr:?}, ");
             }
 
-            let multiplicity = interaction
+            let multiplicity = lookup
                 .multiplicity
                 .apply::<SymbolicExpression<KoalaBear>, SymbolicVariable<KoalaBear>>(
                     &[],

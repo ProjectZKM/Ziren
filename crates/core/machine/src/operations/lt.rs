@@ -118,7 +118,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         builder.when(is_real.clone()).assert_eq(self.a_comparison_byte, first_lt_byte);
         builder.when(is_real.clone()).assert_eq(self.b_comparison_byte, b_comparison_byte);
 
-        // Send the comparison interaction.
+        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,

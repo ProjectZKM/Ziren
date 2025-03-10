@@ -70,12 +70,12 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         memory_events.sort_by_key(|event| event.addr);
 
         let events = memory_events.into_iter().map(|event| {
-            let interaction_shard = if is_receive { event.shard } else { 0 };
-            let interaction_clk = if is_receive { event.timestamp } else { 0 };
+            let lookup_shard = if is_receive { event.shard } else { 0 };
+            let lookup_clk = if is_receive { event.timestamp } else { 0 };
             GlobalLookupEvent {
                 message: [
-                    interaction_shard,
-                    interaction_clk,
+                    lookup_shard,
+                    lookup_clk,
                     event.addr,
                     (event.value & 255) as u32,
                     ((event.value >> 8) & 255) as u32,
@@ -254,7 +254,7 @@ where
             let mut values = vec![AB::Expr::ZERO, AB::Expr::ZERO, local.addr.into()];
             values.extend(value.clone().map(Into::into));
 
-            // Send the interaction to the global table.
+            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -278,7 +278,7 @@ where
             let mut values = vec![local.shard.into(), local.timestamp.into(), local.addr.into()];
             values.extend(value.clone());
 
-            // Send the interaction to the global table.
+            // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
@@ -439,7 +439,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use zkm2_core_executor::{programs::tests::simple_program, Executor};
     use zkm2_stark::{
-        debug_interactions_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, StarkMachine,
+        debug_lookups_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, StarkMachine,
         ZKMCoreOpts,
     };
 
@@ -467,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_lookup_interactions() {
+    fn test_memory_lookups() {
         setup_logger();
         let program = sha_extend_program();
         let program_clone = program.clone();
@@ -481,7 +481,7 @@ mod tests {
 
         let shards = runtime.records;
         for shard in shards.clone() {
-            debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
+            debug_lookups_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
                 &machine,
                 &pkey,
                 &[shard],
@@ -489,7 +489,7 @@ mod tests {
                 LookupScope::Local,
             );
         }
-        debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
+        debug_lookups_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
             &machine,
             &pkey,
             &shards,
@@ -499,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn test_byte_lookup_interactions() {
+    fn test_byte_lookups() {
         setup_logger();
         let program = sha_extend_program();
         let program_clone = program.clone();
@@ -511,7 +511,7 @@ mod tests {
         machine.generate_dependencies(&mut runtime.records, &opts, None);
 
         let shards = runtime.records;
-        debug_interactions_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
+        debug_lookups_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(
             &machine,
             &pkey,
             &shards,

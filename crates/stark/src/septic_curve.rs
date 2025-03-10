@@ -16,12 +16,12 @@ pub struct SepticCurve<F> {
     pub y: SepticExtension<F>,
 }
 
-/// The x-coordinate for a curve point used as a witness for padding interactions, derived from `e`.
+/// The x-coordinate for a curve point used as a witness for padding lookups, derived from `e`.
 pub const CURVE_WITNESS_DUMMY_POINT_X: [u32; 7] =
     // [0x65B0D64E, 0x4E8C0BFD, 0x8D4B5E6, 0x19A5AE9, 0x6932D4A4, 0x61F6B89C, 0x78D8D5D8];=
     [1706420302, 1319108093, 148224806, 26874985, 1766171812, 1645633948, 2028659224];
 
-/// The y-coordinate for a curve point used as a witness for padding interactions, derived from `e`.
+/// The y-coordinate for a curve point used as a witness for padding lookups, derived from `e`.
 pub const CURVE_WITNESS_DUMMY_POINT_Y: [u32; 7] =
     [942390502, 1239997438, 458866455, 1843332012, 1309764648, 572807436, 74267719];
 

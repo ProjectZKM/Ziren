@@ -64,15 +64,15 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr {
                     output_addrs_mults,
-                    input_addr: _, // No receive interaction for the hint operation
+                    input_addr: _, // No receive lookup for the hint operation
                 }) => output_addrs_mults.iter().collect(),
                 Instruction::HintExt2Felts(HintExt2FeltsInstr {
                     output_addrs_mults,
-                    input_addr: _, // No receive interaction for the hint operation
+                    input_addr: _, // No receive lookup for the hint operation
                 }) => output_addrs_mults.iter().collect(),
                 Instruction::HintAddCurve(HintAddCurveInstr {
                     output_x_addrs_mults,
-                    output_y_addrs_mults, .. // No receive interaction for the hint operation
+                    output_y_addrs_mults, .. // No receive lookup for the hint operation
                 }) => output_x_addrs_mults.iter().chain(output_y_addrs_mults.iter()).collect(),
                 _ => vec![],
             })

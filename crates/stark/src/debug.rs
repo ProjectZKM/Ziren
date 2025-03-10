@@ -122,7 +122,7 @@ fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::th
     result
 }
 
-/// Checks that all the interactions between the chips has been satisfied.
+/// Checks that all the lookups between the chips has been satisfied.
 ///
 /// Note that this does not actually verify the proof.
 pub fn debug_cumulative_sums<F: Field, EF: ExtensionField<F>>(perms: &[RowMajorMatrix<EF>]) {

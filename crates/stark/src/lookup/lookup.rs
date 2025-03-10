@@ -5,20 +5,20 @@ use p3_field::Field;
 
 use crate::air::LookupScope;
 
-/// An Lookup for a lookup or a permutation argument.
+/// A lookup or a permutation argument.
 #[derive(Clone)]
 pub struct Lookup<F: Field> {
-    /// The values of the Lookup.
+    /// The values of the lookup.
     pub values: Vec<VirtualPairCol<F>>,
-    /// The multiplicity of the Lookup.
+    /// The multiplicity of the lookup.
     pub multiplicity: VirtualPairCol<F>,
-    /// The kind of Lookup.
+    /// The kind of lookup.
     pub kind: LookupKind,
-    /// The scope of the Lookup.
+    /// The scope of the lookup.
     pub scope: LookupScope,
 }
 
-/// The type of Lookup for a lookup argument.
+/// The type of a lookup argument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LookupKind {
     /// Lookup with the memory table, such as read and write.
@@ -50,7 +50,7 @@ pub enum LookupKind {
 }
 
 impl LookupKind {
-    /// Returns all kinds of Lookups.
+    /// Returns all kinds of lookups.
     #[must_use]
     pub fn all_kinds() -> Vec<LookupKind> {
         vec![
@@ -68,7 +68,7 @@ impl LookupKind {
 }
 
 impl<F: Field> Lookup<F> {
-    /// Create a new Lookup.
+    /// Create a new lookup.
     pub const fn new(
         values: Vec<VirtualPairCol<F>>,
         multiplicity: VirtualPairCol<F>,

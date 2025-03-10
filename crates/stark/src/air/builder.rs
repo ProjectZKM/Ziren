@@ -14,7 +14,7 @@ use crate::{
     lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension, Word,
 };
 
-/// The scope of an interaction.
+/// The scope of an lookup.
 #[derive(
     Debug,
     Clone,
@@ -36,7 +36,7 @@ pub enum LookupScope {
     Local,
 }
 
-/// A builder that can send and receive messages (or interactions) with other AIRs.
+/// A builder that can send and receive messages (or lookups) with other AIRs.
 pub trait MessageBuilder<M> {
     /// Sends a message.
     fn send(&mut self, message: M, scope: LookupScope);
@@ -106,7 +106,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
     }
 }
 
-/// A trait which contains methods for byte interactions in an AIR.
+/// A trait which contains methods for byte lookups in an AIR.
 pub trait ByteAirBuilder: BaseAirBuilder {
     /// Sends a byte operation to be processed.
     #[allow(clippy::too_many_arguments)]
@@ -177,7 +177,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
     }
 }
 
-/// A trait which contains methods related to ALU interactions in an AIR.
+/// A trait which contains methods related to ALU lookups in an AIR.
 pub trait AluAirBuilder: BaseAirBuilder {
     /// Sends an ALU operation to be processed.
     #[allow(clippy::too_many_arguments)]

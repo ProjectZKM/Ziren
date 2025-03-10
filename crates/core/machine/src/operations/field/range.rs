@@ -135,7 +135,7 @@ impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
         builder.when(is_real.clone()).assert_eq(self.lhs_comparison_byte, lhs_comparison_byte);
         builder.when(is_real.clone()).assert_eq(self.rhs_comparison_byte, rhs_comparison_byte);
 
-        // Send the comparison interaction.
+        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,

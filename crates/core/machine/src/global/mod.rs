@@ -55,7 +55,7 @@ pub struct GlobalChip;
 pub struct GlobalCols<T: Copy> {
     pub message: [T; 7],
     pub kind: T,
-    pub interaction: GlobalLookupOperation<T>,
+    pub lookup: GlobalLookupOperation<T>,
     pub is_receive: T,
     pub is_send: T,
     pub is_real: T,
@@ -122,7 +122,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     let event: &GlobalLookupEvent = &events[idx];
                     cols.message = event.message.map(F::from_canonical_u32);
                     cols.kind = F::from_canonical_u8(event.kind);
-                    cols.interaction.populate(
+                    cols.lookup.populate(
                         SepticBlock(event.message),
                         event.is_receive,
                         true,
@@ -135,8 +135,8 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                         cols.is_send = F::ONE;
                     }
                     point_chunks.push(SepticCurveComplete::Affine(SepticCurve {
-                        x: SepticExtension(cols.interaction.x_coordinate.0),
-                        y: SepticExtension(cols.interaction.y_coordinate.0),
+                        x: SepticExtension(cols.lookup.x_coordinate.0),
+                        y: SepticExtension(cols.lookup.y_coordinate.0),
                     }));
                 });
                 point_chunks
@@ -170,7 +170,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                             final_sum_checker,
                         );
                     } else {
-                        cols.interaction.populate_dummy();
+                        cols.lookup.populate_dummy();
                         cols.accumulation.populate_dummy(final_digest, final_sum_checker);
                     }
                 });
@@ -208,10 +208,10 @@ where
 
         // Receive the arguments, which consists of 7 message columns, `is_send`, `is_receive`, and `kind`.
         // In MemoryGlobal, MemoryLocal, Syscall chips, `is_send`, `is_receive`, `kind` are sent with correct constant values.
-        // For a global send interaction, `is_send = 1` and `is_receive = 0` are used.
-        // For a global receive interaction, `is_send = 0` and `is_receive = 1` are used.
-        // For a memory global interaction, `kind = LookupKind::Memory` is used.
-        // For a syscall global interaction, `kind = LookupKind::Syscall` is used.
+        // For a global send lookup, `is_send = 1` and `is_receive = 0` are used.
+        // For a global receive lookup, `is_send = 0` and `is_receive = 1` are used.
+        // For a memory global lookup, `kind = LookupKind::Memory` is used.
+        // For a syscall global lookup, `kind = LookupKind::Syscall` is used.
         // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is also known to be a `u8` value.
         // Note that `local.is_real` is constrained to be boolean in `eval_single_digest`.
         builder.receive(
@@ -234,11 +234,11 @@ where
             LookupScope::Local,
         );
 
-        // Evaluate the interaction.
+        // Evaluate the lookup.
         GlobalLookupOperation::<AB::F>::eval_single_digest(
             builder,
             local.message.map(Into::into),
-            local.interaction,
+            local.lookup,
             local.is_receive.into(),
             local.is_send.into(),
             local.is_real,
@@ -248,7 +248,7 @@ where
         // Evaluate the accumulation.
         GlobalAccumulationOperation::<AB::F, 1>::eval_accumulation(
             builder,
-            [local.interaction],
+            [local.lookup],
             [local.is_real],
             [next.is_real],
             local.accumulation,

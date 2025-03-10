@@ -9,32 +9,32 @@ use p3_util::log2_ceil_usize;
 use crate::{
     air::{LookupScope, MachineAir, MultiTableAirBuilder, ZKMAirBuilder},
     local_permutation_trace_width,
-    lookup::{Interaction, InteractionBuilder, LookupKind},
-    scoped_interactions,
+    lookup::{Lookup, LookupBuilder, LookupKind},
+    scoped_lookups,
 };
 
 use super::{eval_permutation_constraints, generate_permutation_trace, PROOF_MAX_NUM_PVS};
 
-/// An Air that encodes lookups based on interactions.
+/// An Air that encodes lookups based on lookups.
 pub struct Chip<F: Field, A> {
     /// The underlying AIR of the chip for constraint evaluation.
     air: A,
-    /// The interactions that the chip sends.
-    sends: Vec<Interaction<F>>,
-    /// The interactions that the chip receives.
-    receives: Vec<Interaction<F>>,
+    /// The lookups that the chip sends.
+    sends: Vec<Lookup<F>>,
+    /// The lookups that the chip receives.
+    receives: Vec<Lookup<F>>,
     /// The relative log degree of the quotient polynomial, i.e. `log2(max_constraint_degree - 1)`.
     log_quotient_degree: usize,
 }
 
 impl<F: Field, A> Chip<F, A> {
-    /// The send interactions of the chip.
-    pub fn sends(&self) -> &[Interaction<F>] {
+    /// The send lookups of the chip.
+    pub fn sends(&self) -> &[Lookup<F>] {
         &self.sends
     }
 
-    /// The receive interactions of the chip.
-    pub fn receives(&self) -> &[Interaction<F>] {
+    /// The receive lookups of the chip.
+    pub fn receives(&self) -> &[Lookup<F>] {
         &self.receives
     }
 
@@ -61,19 +61,19 @@ where
     F: Field,
     A: BaseAir<F>,
 {
-    /// Records the interactions and constraint degree from the air and crates a new chip.
+    /// Records the lookups and constraint degree from the air and crates a new chip.
     pub fn new(air: A) -> Self
     where
-        A: MachineAir<F> + Air<InteractionBuilder<F>> + Air<SymbolicAirBuilder<F>>,
+        A: MachineAir<F> + Air<LookupBuilder<F>> + Air<SymbolicAirBuilder<F>>,
     {
-        let mut builder = InteractionBuilder::new(air.preprocessed_width(), air.width());
+        let mut builder = LookupBuilder::new(air.preprocessed_width(), air.width());
         air.eval(&mut builder);
-        let (sends, receives) = builder.interactions();
+        let (sends, receives) = builder.lookups();
 
         let nb_byte_sends = sends.iter().filter(|s| s.kind == LookupKind::Byte).count();
         let nb_byte_receives = receives.iter().filter(|r| r.kind == LookupKind::Byte).count();
         tracing::debug!(
-            "chip {} has {} byte interactions",
+            "chip {} has {} byte lookups",
             air.name(),
             nb_byte_sends + nb_byte_receives
         );
@@ -89,9 +89,9 @@ where
         Self { air, sends, receives, log_quotient_degree }
     }
 
-    /// Returns the number of interactions in the chip.
+    /// Returns the number of lookups in the chip.
     #[inline]
-    pub fn num_interactions(&self) -> usize {
+    pub fn num_lookups(&self) -> usize {
         self.sends.len() + self.receives.len()
     }
 
@@ -138,7 +138,7 @@ where
     /// Returns the width of the permutation trace.
     #[inline]
     pub fn permutation_width(&self) -> usize {
-        let (scoped_sends, scoped_receives) = scoped_interactions(self.sends(), self.receives());
+        let (scoped_sends, scoped_receives) = scoped_lookups(self.sends(), self.receives());
         let empty = Vec::new();
         let local_sends = scoped_sends.get(&LookupScope::Local).unwrap_or(&empty);
         let local_receives = scoped_receives.get(&LookupScope::Local).unwrap_or(&empty);

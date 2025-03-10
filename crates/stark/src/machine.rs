@@ -16,7 +16,7 @@ use tracing::instrument;
 use super::{debug_constraints, Dom};
 use crate::{
     air::{LookupScope, MachineAir, MachineProgram},
-    lookup::{debug_interactions_with_all_chips, LookupKind},
+    lookup::{debug_lookups_with_all_chips, LookupKind},
     record::MachineRecord,
     septic_curve::SepticCurve,
     septic_digest::SepticDigest,
@@ -450,8 +450,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
             if !local_cumulative_sum.is_zero() {
                 tracing::warn!("Local cumulative sum is not zero");
-                tracing::debug_span!("debug local interactions").in_scope(|| {
-                    debug_interactions_with_all_chips::<SC, A>(
+                tracing::debug_span!("debug local lookups").in_scope(|| {
+                    debug_lookups_with_all_chips::<SC, A>(
                         self,
                         pk,
                         &[shard.clone()],
@@ -505,11 +505,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         let global_cumulative_sum: SepticDigest<Val<SC>> =
             global_cumulative_sums.iter().copied().sum();
 
-        // If the global cumulative sum is not zero, debug the interactions.
+        // If the global cumulative sum is not zero, debug the lookups.
         if !global_cumulative_sum.is_zero() {
             tracing::warn!("Global cumulative sum is not zero");
-            tracing::debug_span!("debug global interactions").in_scope(|| {
-                debug_interactions_with_all_chips::<SC, A>(
+            tracing::debug_span!("debug global lookups").in_scope(|| {
+                debug_lookups_with_all_chips::<SC, A>(
                     self,
                     pk,
                     &records,
@@ -537,8 +537,8 @@ pub enum MachineVerificationError<SC: StarkGenericConfig> {
     NonZeroCumulativeSum(LookupScope, usize),
     /// The public values digest is invalid.
     InvalidPublicValuesDigest,
-    /// The debug interactions failed.
-    DebugInteractionsFailed,
+    /// The debug lookups failed.
+    DebugLookupsFailed,
     /// The proof is empty.
     EmptyProof,
     /// The public values are invalid.
@@ -574,8 +574,8 @@ impl<SC: StarkGenericConfig> Debug for MachineVerificationError<SC> {
             MachineVerificationError::EmptyProof => {
                 write!(f, "Empty proof")
             }
-            MachineVerificationError::DebugInteractionsFailed => {
-                write!(f, "Debug interactions failed")
+            MachineVerificationError::DebugLookupsFailed => {
+                write!(f, "Debug lookups failed")
             }
             MachineVerificationError::InvalidPublicValues(s) => {
                 write!(f, "Invalid public values: {}", s)

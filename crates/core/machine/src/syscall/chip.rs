@@ -206,7 +206,7 @@ where
                     LookupScope::Local,
                 );
 
-                // Send the interaction to the global table.
+                // Send the lookup to the global table.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -238,7 +238,7 @@ where
                     LookupScope::Local,
                 );
 
-                // Send the interaction to the global table.
+                // Send the lookup to the global table.
                 builder.send(
                     AirLookup::new(
                         vec![

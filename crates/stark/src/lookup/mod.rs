@@ -1,7 +1,7 @@
 mod builder;
 mod debug;
-mod interaction;
+mod lookup;
 
-pub use builder::InteractionBuilder;
+pub use builder::LookupBuilder;
 pub use debug::*;
-pub use interaction::*;
+pub use lookup::*;

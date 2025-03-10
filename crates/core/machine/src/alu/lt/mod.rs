@@ -186,7 +186,7 @@ impl LtChip {
         cols.b_masked = F::from_canonical_u8(masked_b);
         cols.c_masked = F::from_canonical_u8(masked_c);
 
-        // Send the masked interaction.
+        // Send the masked lookup.
         blu.add_byte_lookup_event(ByteLookupEvent {
             shard: event.shard,
             opcode: ByteOpcode::AND,

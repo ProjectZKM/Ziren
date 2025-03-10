@@ -15,7 +15,7 @@ use zkm2_stark::{
     septic_extension::{SepticBlock, SepticExtension},
 };
 
-/// A set of columns needed to compute the global interaction elliptic curve digest.
+/// A set of columns needed to compute the global lookup elliptic curve digest.
 /// It is critical that this struct is at the end of the main trace, as the permutation constraints will be dependent on this fact.
 /// It is also critical the the cumulative sum is at the end of this struct, for the same reason.
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
@@ -42,7 +42,7 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
     pub fn populate(
         &mut self,
         initial_digest: &mut SepticCurve<F>,
-        global_interaction_cols: [GlobalLookupOperation<F>; N],
+        global_lookup_cols: [GlobalLookupOperation<F>; N],
         is_real: [F; N],
     ) {
         self.initial_digest[0] = SepticBlock::from(initial_digest.x.0);
@@ -50,8 +50,8 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
 
         for i in 0..N {
             let point_cur = SepticCurve {
-                x: SepticExtension(global_interaction_cols[i].x_coordinate.0),
-                y: SepticExtension(global_interaction_cols[i].y_coordinate.0),
+                x: SepticExtension(global_lookup_cols[i].x_coordinate.0),
+                y: SepticExtension(global_lookup_cols[i].y_coordinate.0),
             };
             assert!(is_real[i] == F::ONE || is_real[i] == F::ZERO);
             let sum_point = if is_real[i] == F::ONE {
@@ -112,7 +112,7 @@ impl<F: PrimeField32, const N: usize> GlobalAccumulationOperation<F, N> {
 impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
     pub fn eval_accumulation<AB: ZKMAirBuilder>(
         builder: &mut AB,
-        global_interaction_cols: [GlobalLookupOperation<AB::Var>; N],
+        global_lookup_cols: [GlobalLookupOperation<AB::Var>; N],
         local_is_real: [AB::Var; N],
         next_is_real: [AB::Var; N],
         local_accumulation: GlobalAccumulationOperation<AB::Var, N>,
@@ -154,10 +154,10 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
 
         let ith_point_to_add = |idx: usize| SepticCurve::<AB::Expr> {
             x: SepticExtension::<AB::Expr>::from_base_fn(|i| {
-                global_interaction_cols[idx].x_coordinate.0[i].into()
+                global_lookup_cols[idx].x_coordinate.0[i].into()
             }),
             y: SepticExtension::<AB::Expr>::from_base_fn(|i| {
-                global_interaction_cols[idx].y_coordinate.0[i].into()
+                global_lookup_cols[idx].y_coordinate.0[i].into()
             }),
         };
 

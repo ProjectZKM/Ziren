@@ -213,7 +213,7 @@ where
         }
 
         // ensure result < 33
-        // Send the comparison interaction.
+        // Send the comparison lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,

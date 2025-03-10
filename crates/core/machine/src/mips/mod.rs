@@ -104,7 +104,7 @@ pub enum MipsAir<F: PrimeField32> {
     SyscallCore(SyscallChip),
     /// A table for all the precompile invocations.
     SyscallPrecompile(SyscallChip),
-    /// A table for all the global interactions.
+    /// A table for all the global lookups.
     Global(GlobalChip),
     /// A precompile for sha256 extend.
     Sha256Extend(ShaExtendChip),
@@ -492,9 +492,9 @@ impl<F: PrimeField32> MipsAir<F> {
                     .sends()
                     .iter()
                     .chain(chip.receives())
-                    .filter(|interaction| {
-                        interaction.kind == LookupKind::Memory
-                            && interaction.scope == LookupScope::Local
+                    .filter(|lookup| {
+                        lookup.kind == LookupKind::Memory
+                            && lookup.scope == LookupScope::Local
                     })
                     .count();
 

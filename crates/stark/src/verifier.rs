@@ -105,14 +105,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 ));
             }
 
-            let has_local_interactions = chip
+            let has_local_lookups = chip
                 .sends()
                 .iter()
                 .chain(chip.receives())
                 .any(|i| i.scope == LookupScope::Local);
-            if !has_local_interactions && !local_sum.is_zero() {
+            if !has_local_lookups && !local_sum.is_zero() {
                 return Err(VerificationError::CumulativeSumsError(
-                    "local cumulative sum is non-zero, but no local interactions",
+                    "local cumulative sum is non-zero, but no local lookups",
                 ));
             }
         }

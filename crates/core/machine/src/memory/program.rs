@@ -224,7 +224,7 @@ where
         let mut values = vec![AB::Expr::ZERO, AB::Expr::ZERO, prep_local.addr.into()];
         values.extend(prep_local.value.map(Into::into));
 
-        // Send the interaction to the global table.
+        // Send the lookup to the global table.
         builder.send(
             AirLookup::new(
                 vec![

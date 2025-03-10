@@ -36,7 +36,7 @@ use zkm2_primitives::io::ZKMPublicValues;
 
 use zkm2_stark::{
     air::{MachineAir, PublicValues},
-    Com, CpuProver, DebugConstraintBuilder, InteractionBuilder, MachineProof, MachineProver,
+    Com, CpuProver, DebugConstraintBuilder, LookupBuilder, MachineProof, MachineProver,
     MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,
     StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val, VerifierConstraintFolder,
     ZKMCoreOpts,
@@ -539,7 +539,7 @@ pub fn run_test_machine_with_prover<SC, A, P: MachineProver<SC, A>>(
 ) -> Result<MachineProof<SC>, MachineVerificationError<SC>>
 where
     A: MachineAir<SC::Val>
-        + Air<InteractionBuilder<Val<SC>>>
+        + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
@@ -580,7 +580,7 @@ pub fn run_test_machine<SC, A>(
 where
     A: MachineAir<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + Air<InteractionBuilder<Val<SC>>>
+        + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,

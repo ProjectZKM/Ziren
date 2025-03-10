@@ -106,7 +106,7 @@ where
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
 
-        // Check that when `is_real=0` that all flags that send interactions are zero.
+        // Check that when `is_real=0` that all flags that send lookups are zero.
         local.selectors.into_iter().enumerate().for_each(|(i, selector)| {
             if i == OPCODE_SELECTORS_COL_MAP.imm_b {
                 builder.when(AB::Expr::ONE - local.is_real).assert_one(local.selectors.imm_b);

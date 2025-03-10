@@ -310,12 +310,12 @@ where
                 builder.assert_digest_zero_v2(is_real, global_sum);
             }
 
-            let has_local_interactions = chip
+            let has_local_lookups = chip
                 .sends()
                 .iter()
                 .chain(chip.receives())
                 .any(|i| i.scope == LookupScope::Local);
-            if !has_local_interactions {
+            if !has_local_lookups {
                 builder.assert_ext_eq(opening.local_cumulative_sum, C::EF::ZERO.cons());
             }
         }

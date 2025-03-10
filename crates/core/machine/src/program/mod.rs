@@ -169,7 +169,7 @@ where
         let mult_local = main.row_slice(0);
         let mult_local: &ProgramMultiplicityCols<AB::Var> = (*mult_local).borrow();
 
-        // Constrain the interaction with CPU table
+        // Constrain the lookup with CPU table
         builder.receive_program(
             prep_local.pc,
             prep_local.instruction,

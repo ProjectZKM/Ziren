@@ -10,20 +10,20 @@ use crate::{
     MachineChip, StarkGenericConfig, StarkMachine, StarkProvingKey, Val,
 };
 
-/// The data for an interaction.
+/// The data for a lookup.
 #[derive(Debug)]
-pub struct InteractionData<F: Field> {
+pub struct LookupData<F: Field> {
     /// The chip name.
     pub chip_name: String,
-    /// The kind of interaction.
+    /// The kind of lookup.
     pub kind: LookupKind,
-    /// The row of the interaction.
+    /// The row of the lookup.
     pub row: usize,
-    /// The interaction number.
-    pub interaction_number: usize,
-    /// Whether the interaction is a send.
+    /// The lookup number.
+    pub lookup_number: usize,
+    /// Whether the lookup is a send.
     pub is_send: bool,
-    /// The multiplicity of the interaction.
+    /// The multiplicity of the lookup.
     pub multiplicity: F,
 }
 
@@ -44,7 +44,7 @@ pub fn vec_to_string<F: Field>(vec: Vec<F>) -> String {
 
 /// Display field elements as signed integers on the range `[-modulus/2, modulus/2]`.
 ///
-/// This presentation is useful when debugging interactions as it makes it clear which interactions
+/// This presentation is useful when debugging lookups as it makes it clear which lookups
 /// are `send` and which are `receive`.
 fn field_to_int<F: PrimeField32>(x: F) -> i32 {
     let modulus = KoalaBear::ORDER_U64;
@@ -56,16 +56,16 @@ fn field_to_int<F: PrimeField32>(x: F) -> i32 {
     }
 }
 
-/// Debugs the interactions of a chip.
+/// Debugs the lookups of a chip.
 #[allow(clippy::type_complexity)]
 #[allow(clippy::needless_pass_by_value)]
-pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
+pub fn debug_lookups<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
     chip: &MachineChip<SC, A>,
     pkey: &StarkProvingKey<SC>,
     record: &A::Record,
-    interaction_kinds: Vec<LookupKind>,
+    lookup_kinds: Vec<LookupKind>,
     scope: LookupScope,
-) -> (BTreeMap<String, Vec<InteractionData<Val<SC>>>>, BTreeMap<String, Val<SC>>) {
+) -> (BTreeMap<String, Vec<LookupData<Val<SC>>>>, BTreeMap<String, Val<SC>>) {
     let mut key_to_vec_data = BTreeMap::new();
     let mut key_to_count = BTreeMap::new();
 
@@ -79,10 +79,10 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
     let sends = chip.sends().iter().filter(|s| s.scope == scope).collect::<Vec<_>>();
     let receives = chip.receives().iter().filter(|r| r.scope == scope).collect::<Vec<_>>();
 
-    let nb_send_interactions = sends.len();
+    let nb_send_lookups = sends.len();
     for row in 0..height {
-        for (m, interaction) in sends.iter().chain(receives.iter()).enumerate() {
-            if !interaction_kinds.contains(&interaction.kind) {
+        for (m, lookup) in sends.iter().chain(receives.iter()).enumerate() {
+            if !lookup_kinds.contains(&lookup.kind) {
                 continue;
             }
             let mut empty = vec![];
@@ -91,27 +91,27 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
                 .map(|t| t.row_mut(row))
                 .or_else(|| Some(&mut empty))
                 .unwrap();
-            let is_send = m < nb_send_interactions;
+            let is_send = m < nb_send_lookups;
             let multiplicity_eval: Val<SC> =
-                interaction.multiplicity.apply(preprocessed_row, main.row_mut(row));
+                lookup.multiplicity.apply(preprocessed_row, main.row_mut(row));
 
             if !multiplicity_eval.is_zero() {
                 let mut values = vec![];
-                for value in &interaction.values {
+                for value in &lookup.values {
                     let expr: Val<SC> = value.apply(preprocessed_row, main.row_mut(row));
                     values.push(expr);
                 }
                 let key = format!(
                     "{} {} {}",
-                    &interaction.scope.to_string(),
-                    &interaction.kind.to_string(),
+                    &lookup.scope.to_string(),
+                    &lookup.kind.to_string(),
                     vec_to_string(values)
                 );
-                key_to_vec_data.entry(key.clone()).or_insert_with(Vec::new).push(InteractionData {
+                key_to_vec_data.entry(key.clone()).or_insert_with(Vec::new).push(LookupData {
                     chip_name: chip.name(),
-                    kind: interaction.kind,
+                    kind: lookup.kind,
                     row,
-                    interaction_number: m,
+                    lookup_number: m,
                     is_send,
                     multiplicity: multiplicity_eval,
                 });
@@ -128,14 +128,14 @@ pub fn debug_interactions<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
     (key_to_vec_data, key_to_count)
 }
 
-/// Calculate the number of times we send and receive each event of the given interaction type,
+/// Calculate the number of times we send and receive each event of the given lookup type,
 /// and print out the ones for which the set of sends and receives don't match.
 #[allow(clippy::needless_pass_by_value)]
-pub fn debug_interactions_with_all_chips<SC, A>(
+pub fn debug_lookups_with_all_chips<SC, A>(
     machine: &StarkMachine<SC, A>,
     pkey: &StarkProvingKey<SC>,
     shards: &[A::Record],
-    interaction_kinds: Vec<LookupKind>,
+    lookup_kinds: Vec<LookupKind>,
     scope: LookupScope,
 ) -> bool
 where
@@ -158,7 +158,7 @@ where
                 continue;
             }
             let (_, count) =
-                debug_interactions::<SC, A>(chip, pkey, shard, interaction_kinds.clone(), scope);
+                debug_lookups::<SC, A>(chip, pkey, shard, lookup_kinds.clone(), scope);
             total_events += count.len();
             for (key, value) in count.iter() {
                 let entry =
@@ -178,7 +178,7 @@ where
     for (key, (value, chip_values)) in final_map.clone() {
         if !Val::<SC>::is_zero(&value) {
             tracing::info!(
-                "Interaction key: {} Send-Receive Discrepancy: {}",
+                "Lookup key: {} Send-Receive Discrepancy: {}",
                 key,
                 field_to_int(value)
             );

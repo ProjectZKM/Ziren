@@ -8,7 +8,7 @@ use zkm2_stark::{
 
 use crate::cpu::columns::{InstructionCols, OpcodeSelectorCols};
 
-/// A trait which contains methods related to program interactions in an AIR.
+/// A trait which contains methods related to program lookups in an AIR.
 pub trait ProgramAirBuilder: BaseAirBuilder {
     /// Sends an instruction.
     fn send_program(

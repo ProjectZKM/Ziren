@@ -1,6 +1,6 @@
 use crate::{
     air::{LookupScope, MultiTableAirBuilder},
-    lookup::Interaction,
+    lookup::Lookup,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -15,11 +15,11 @@ use std::borrow::Borrow;
 
 /// Computes the width of the local permutation trace in terms of extension field elements.
 #[must_use]
-pub const fn local_permutation_trace_width(nb_interactions: usize, batch_size: usize) -> usize {
-    if nb_interactions == 0 {
+pub const fn local_permutation_trace_width(nb_lookups: usize, batch_size: usize) -> usize {
+    if nb_lookups == 0 {
         return 0;
     }
-    nb_interactions.div_ceil(batch_size) + 1
+    nb_lookups.div_ceil(batch_size) + 1
 }
 
 /// Populates a local permutation row.
@@ -30,33 +30,33 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
     row: &mut [EF],
     preprocessed_row: &[F],
     main_row: &[F],
-    sends: &[Interaction<F>],
-    receives: &[Interaction<F>],
+    sends: &[Lookup<F>],
+    receives: &[Lookup<F>],
     random_elements: &[EF],
     batch_size: usize,
 ) {
     let alpha = random_elements[0];
     let betas = random_elements[1].powers(); // TODO: optimize
 
-    let interaction_chunks = &sends
+    let lookup_chunks = &sends
         .iter()
         .map(|int| (int, true))
         .chain(receives.iter().map(|int| (int, false)))
         .chunks(batch_size);
 
     // Compute the denominators \prod_{i\in B} row_fingerprint(alpha, beta).
-    for (value, chunk) in row.iter_mut().zip(interaction_chunks) {
+    for (value, chunk) in row.iter_mut().zip(lookup_chunks) {
         *value = chunk
             .into_iter()
-            .map(|(interaction, is_send)| {
+            .map(|(lookup, is_send)| {
                 let mut denominator = alpha;
                 let mut betas = betas.clone();
                 denominator +=
-                    betas.next().unwrap() * EF::from_canonical_usize(interaction.argument_index());
-                for (columns, beta) in interaction.values.iter().zip(betas) {
+                    betas.next().unwrap() * EF::from_canonical_usize(lookup.argument_index());
+                for (columns, beta) in lookup.values.iter().zip(betas) {
                     denominator += beta * columns.apply::<F, F>(preprocessed_row, main_row);
                 }
-                let mut mult = interaction.multiplicity.apply::<F, F>(preprocessed_row, main_row);
+                let mut mult = lookup.multiplicity.apply::<F, F>(preprocessed_row, main_row);
 
                 if !is_send {
                     mult = -mult;
@@ -70,12 +70,12 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
 
 /// Returns the sends, receives, and permutation trace width grouped by scope.
 #[allow(clippy::type_complexity)]
-pub fn scoped_interactions<F: Field>(
-    sends: &[Interaction<F>],
-    receives: &[Interaction<F>],
-) -> (HashMap<LookupScope, Vec<Interaction<F>>>, HashMap<LookupScope, Vec<Interaction<F>>>)
+pub fn scoped_lookups<F: Field>(
+    sends: &[Lookup<F>],
+    receives: &[Lookup<F>],
+) -> (HashMap<LookupScope, Vec<Lookup<F>>>, HashMap<LookupScope, Vec<Lookup<F>>>)
 {
-    // Create a hashmap of scope -> vec<send interactions>.
+    // Create a hashmap of scope -> vec<send lookups>.
     let mut sends = sends.to_vec();
     sends.sort_by_key(|k| k.scope);
     let grouped_sends: HashMap<_, _> = sends
@@ -85,7 +85,7 @@ pub fn scoped_interactions<F: Field>(
         .map(|(k, values)| (k, values.cloned().collect_vec()))
         .collect();
 
-    // Create a hashmap of scope -> vec<receive interactions>.
+    // Create a hashmap of scope -> vec<receive lookups>.
     let mut receives = receives.to_vec();
     receives.sort_by_key(|k| k.scope);
     let grouped_receives: HashMap<_, _> = receives
@@ -101,15 +101,15 @@ pub fn scoped_interactions<F: Field>(
 /// Generates the permutation trace for the given chip and main trace based on a variant of `LogUp`.
 #[allow(clippy::too_many_lines)]
 pub fn generate_permutation_trace<F: PrimeField, EF: ExtensionField<F>>(
-    sends: &[Interaction<F>],
-    receives: &[Interaction<F>],
+    sends: &[Lookup<F>],
+    receives: &[Lookup<F>],
     preprocessed: Option<&RowMajorMatrix<F>>,
     main: &RowMajorMatrix<F>,
     random_elements: &[EF],
     batch_size: usize,
 ) -> (RowMajorMatrix<EF>, EF) {
     let empty = vec![];
-    let (scoped_sends, scoped_receives) = scoped_interactions(sends, receives);
+    let (scoped_sends, scoped_receives) = scoped_lookups(sends, receives);
     let local_sends = scoped_sends.get(&LookupScope::Local).unwrap_or(&empty);
     let local_receives = scoped_receives.get(&LookupScope::Local).unwrap_or(&empty);
 
@@ -200,12 +200,12 @@ pub fn generate_permutation_trace<F: PrimeField, EF: ExtensionField<F>>(
 ///
 /// In particular, the constraints checked here are:
 ///     - The running sum column starts at zero.
-///     - That the RLC per interaction is computed correctly.
+///     - That the RLC per lookup is computed correctly.
 ///     - The running sum column ends at the (currently) given cumulative sum.
 #[allow(clippy::too_many_lines)]
 pub fn eval_permutation_constraints<'a, F, AB>(
-    sends: &[Interaction<F>],
-    receives: &[Interaction<F>],
+    sends: &[Lookup<F>],
+    receives: &[Lookup<F>],
     batch_size: usize,
     commit_scope: LookupScope,
     builder: &mut AB,
@@ -216,7 +216,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     AB: 'a,
 {
     let empty = vec![];
-    let (scoped_sends, scoped_receives) = scoped_interactions(sends, receives);
+    let (scoped_sends, scoped_receives) = scoped_lookups(sends, receives);
     let local_sends = scoped_sends.get(&LookupScope::Local).unwrap_or(&empty);
     let local_receives = scoped_receives.get(&LookupScope::Local).unwrap_or(&empty);
 
@@ -256,7 +256,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     let (alpha, beta) = (&random_elements[0], &random_elements[1]);
     if !local_sends.is_empty() || !local_receives.is_empty() {
         // Ensure that each batch sum m_i/f_i is computed correctly.
-        let interaction_chunks = &local_sends
+        let lookup_chunks = &local_sends
             .iter()
             .map(|int| (int, true))
             .chain(local_receives.iter().map(|int| (int, false)))
@@ -265,19 +265,19 @@ pub fn eval_permutation_constraints<'a, F, AB>(
         // Assert that the i-eth entry is equal to the sum_i m_i/rlc_i by constraints:
         // entry * \prod_i rlc_i = \sum_i m_i * \prod_{j!=i} rlc_j over all columns of the permutation
         // trace except the last column.
-        for (entry, chunk) in perm_local[0..perm_local.len() - 1].iter().zip(interaction_chunks) {
+        for (entry, chunk) in perm_local[0..perm_local.len() - 1].iter().zip(lookup_chunks) {
             // First, we calculate the random linear combinations and multiplicities with the correct
-            // sign depending on wetther the interaction is a send or a receive.
+            // sign depending on wetther the lookup is a send or a receive.
             let mut rlcs: Vec<AB::ExprEF> = Vec::with_capacity(batch_size);
             let mut multiplicities: Vec<AB::Expr> = Vec::with_capacity(batch_size);
-            for (interaction, is_send) in chunk {
+            for (lookup, is_send) in chunk {
                 let mut rlc = alpha.clone();
                 let mut betas = beta.powers();
 
                 rlc = rlc.clone()
                     + betas.next().unwrap()
-                        * AB::ExprEF::from_canonical_usize(interaction.argument_index());
-                for (field, beta) in interaction.values.iter().zip(betas.clone()) {
+                        * AB::ExprEF::from_canonical_usize(lookup.argument_index());
+                for (field, beta) in lookup.values.iter().zip(betas.clone()) {
                     let elem = field.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local);
                     rlc = rlc.clone() + beta * elem;
                 }
@@ -285,7 +285,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
 
                 let send_factor = if is_send { AB::F::ONE } else { -AB::F::ONE };
                 multiplicities.push(
-                    interaction
+                    lookup
                         .multiplicity
                         .apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local)
                         * send_factor,

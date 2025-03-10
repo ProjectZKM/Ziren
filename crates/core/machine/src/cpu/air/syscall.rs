@@ -172,9 +172,9 @@ impl CpuChip {
         }
 
         // Retrieve the expected public values digest word to check against the one passed into the
-        // commit syscall. Note that for the interaction builder, it will not have any digest words,
+        // commit syscall. Note that for the lookup builder, it will not have any digest words,
         // since it's used during AIR compilation time to parse for all send/receives. Since
-        // that interaction builder will ignore the other constraints of the air, it is safe
+        // that lookup builder will ignore the other constraints of the air, it is safe
         // to not include the verification check of the expected public values digest word.
         let expected_pv_digest_word =
             builder.index_word_array(&commit_digest, &syscall_columns.index_bitmap);
