@@ -50,6 +50,7 @@ fn execute_test_suite(suite: TestSuite) -> Result<(), String> {
                 balance: info.balance,
                 code_hash: keccak256(&info.code),
                 code: Some(Bytecode::new_raw(info.code)),
+                nonce: info.nonce,
             };
             cache_state.insert_account_with_storage(address, acc_info, info.storage);
         }
