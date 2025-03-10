@@ -156,7 +156,7 @@ pub enum MipsAir<F: PrimeField32> {
 impl<F: PrimeField32> MipsAir<F> {
     pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
-        StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS, true)
+        StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
     }
 
     /// Get all the different MIPS AIRs.

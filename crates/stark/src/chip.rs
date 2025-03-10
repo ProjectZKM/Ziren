@@ -18,13 +18,13 @@ use super::{eval_permutation_constraints, generate_permutation_trace, PROOF_MAX_
 /// An Air that encodes lookups based on lookups.
 pub struct Chip<F: Field, A> {
     /// The underlying AIR of the chip for constraint evaluation.
-    air: A,
+    pub air: A,
     /// The lookups that the chip sends.
-    sends: Vec<Lookup<F>>,
+    pub sends: Vec<Lookup<F>>,
     /// The lookups that the chip receives.
-    receives: Vec<Lookup<F>>,
+    pub receives: Vec<Lookup<F>>,
     /// The relative log degree of the quotient polynomial, i.e. `log2(max_constraint_degree - 1)`.
-    log_quotient_degree: usize,
+    pub log_quotient_degree: usize,
 }
 
 impl<F: Field, A> Chip<F, A> {

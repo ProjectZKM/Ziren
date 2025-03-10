@@ -348,3 +348,45 @@ pub fn eval_permutation_constraints<'a, F, AB>(
         }
     }
 }
+
+/// Counts the number of permutation constraints for the given chip.
+///
+/// IMPORTANT: This function must be manually updated if any changes are made to
+/// `eval_permutation_constraints`. The current count includes:
+/// - For local lookups: `local_permutation_trace_width(sends.len() + receives.len(), batch_size)` + 3 local cumulative sum constraints.
+/// - For global scope: 14 additional constraints for the global cumulative sum.
+pub fn count_permutation_constraints<F: Field>(
+    sends: &[Lookup<F>],
+    receives: &[Lookup<F>],
+    batch_size: usize,
+    commit_scope: LookupScope,
+) -> usize {
+    let mut count = 0;
+
+    let empty = vec![];
+    let (scoped_sends, scoped_receives) = scoped_lookups(sends, receives);
+    let local_sends = scoped_sends.get(&LookupScope::Local).unwrap_or(&empty);
+    let local_receives = scoped_receives.get(&LookupScope::Local).unwrap_or(&empty);
+
+    let num_local_lookups = local_sends.len() + local_receives.len();
+
+    if num_local_lookups > 0 {
+        let local_permutation_width =
+            local_permutation_trace_width(num_local_lookups, batch_size);
+        // We loop over (local_permutation_width - 1) lookups with one assert per iteration.
+        count += local_permutation_width - 1;
+
+        // One assert that cumulative sum is initialized to `phi_local` on the first row.
+        // Two asserts that the cumulative sum is constrained to `phi_next - phi_local` on the transition
+        // rows.
+        count += 3;
+    }
+
+    // If the chip's scope is `LookupScope::Global`, 14 asserts that
+    // the last row's final 14 columns is equal to the global cumulative sum.
+    if commit_scope == LookupScope::Global {
+        count += 14;
+    }
+
+    count
+}

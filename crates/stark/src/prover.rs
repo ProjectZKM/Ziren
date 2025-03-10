@@ -13,6 +13,7 @@ use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
+use p3_uni_stark::SymbolicAirBuilder;
 use p3_util::log2_strict_usize;
 
 use super::{
@@ -187,7 +188,8 @@ where
     A: MachineAir<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + Air<LookupBuilder<Val<SC>>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
+        + for<'a> Air<SymbolicAirBuilder<Val<SC>>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC::Val: PrimeField32,
     Com<SC>: Send + Sync,
@@ -408,6 +410,17 @@ where
                             let permutation_trace_on_quotient_domains = pcs
                                 .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
                                 .to_row_major_matrix();
+
+                            let chip_num_constraints = pk.constraints_map.get(&chips[i].name()).unwrap();
+
+                            // Calculate powers of alpha for constraint evaluation:
+                            // 1. Generate sequence [α⁰, α¹, ..., α^(n-1)] where n = chip_num_constraints.
+                            // 2. Reverse to [α^(n-1), ..., α¹, α⁰] to align with Horner's method in the verifier.
+                            let powers_of_alpha =
+                                alpha.powers().take(*chip_num_constraints).collect::<Vec<_>>();
+                            let mut powers_of_alpha_rev = powers_of_alpha.clone();
+                            powers_of_alpha_rev.reverse();
+
                             quotient_values(
                                 chips[i],
                                 &local_cumulative_sums[i],
@@ -418,7 +431,7 @@ where
                                 main_trace_on_quotient_domains,
                                 permutation_trace_on_quotient_domains,
                                 &packed_perm_challenges,
-                                alpha,
+                                &powers_of_alpha_rev,
                                 &data.public_values,
                             )
                         })

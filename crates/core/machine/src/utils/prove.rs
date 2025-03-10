@@ -9,6 +9,7 @@ use web_time::Instant;
 
 use crate::mips::MipsAir;
 use p3_maybe_rayon::prelude::*;
+use p3_uni_stark::SymbolicAirBuilder;
 use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
 use std::thread::ScopedJoinHandle;
@@ -545,7 +546,8 @@ where
     A: MachineAir<SC::Val>
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
+        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
+        + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig,
     SC::Val: p3_field::PrimeField32,
@@ -586,7 +588,8 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
+        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
+        + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig,
     SC::Val: p3_field::PrimeField32,
