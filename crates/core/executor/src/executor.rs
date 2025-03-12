@@ -967,6 +967,10 @@ impl<'a> Executor<'a> {
                 (hi, a, b, c) = self.execute_alu(instruction);
             }
 
+            Opcode::MADDU => {
+                (hi, a, b, c) = self.execute_maddu(instruction);
+            }
+
             // Load instructions.
             Opcode::LB
             | Opcode::LH
@@ -1059,6 +1063,26 @@ impl<'a> Executor<'a> {
             );
         };
         Ok(())
+    }
+
+    fn execute_maddu(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
+        let (lo, rt, rs) = (
+            instruction.op_a.into(),
+            (instruction.op_b as u8).into(),
+            (instruction.op_c as u8).into()
+        );
+        let b = self.rr(rt, MemoryAccessPosition::B);
+        let c = self.rr(rs, MemoryAccessPosition::B);
+        let multiply = b as u64 * c as u64;
+        let lo_val = self.register(32.into());
+        let hi_val = self.register(33.into());
+        let addend = ((hi_val as u64) << 32) + lo_val as u64;
+        let out = multiply + addend;
+        let out_lo = out as u32;
+        let out_hi = (out >> 32) as u32;
+        self.rw(lo, out_lo, MemoryAccessPosition::A);
+        self.rw(Register::HI, out_hi , MemoryAccessPosition::HI);
+        (Some(out_hi), out_lo, b, c)
     }
 
     fn execute_sext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {

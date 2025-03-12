@@ -395,12 +395,12 @@ where
         // Byte shift the sign-extended b.
         {
             // The leading bytes of b should be 0xff if b's MSB is 1 & opcode = SRA, 0 otherwise.
-            let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_canonical_u8(0xff);
             let mut sign_extended_b: Vec<AB::Expr> = vec![];
             for i in 0..WORD_SIZE {
                 sign_extended_b.push(local.b[i].into());
             }
-            for _ in 0..WORD_SIZE {
+            for i in 0..WORD_SIZE {
+                let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_canonical_u8(0xff) + local.is_ror * local.b[i].into();
                 sign_extended_b.push(leading_byte.clone());
             }
 

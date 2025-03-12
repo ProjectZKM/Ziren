@@ -65,6 +65,7 @@ impl Instruction {
                 | Opcode::SLL
                 | Opcode::SRL
                 | Opcode::SRA
+                | Opcode::ROR
                 | Opcode::SLT
                 | Opcode::SLTU
                 | Opcode::AND
@@ -482,6 +483,8 @@ impl Instruction {
             }
             // (0b011111, 0b000000, _) => Ok(Operation::Ext(rt, rs, rd, sa)), // ext
             (0b011111, 0b000000) => Ok(Self::new(Opcode::EXT, rt as u8, rs, (rd as u32) << 5 | sa, false, true)),
+            // (0b011100, 0b000001, _) => Ok(Operation::Maddu(rt, rs)),
+            (0b011100, 0b000001) => Ok(Self::new(Opcode::MADDU, 32, rt, rs, false, false)),
             _ => {
                 log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
                 Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
