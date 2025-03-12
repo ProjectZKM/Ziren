@@ -483,6 +483,8 @@ impl Instruction {
             }
             // (0b011111, 0b000000, _) => Ok(Operation::Ext(rt, rs, rd, sa)), // ext
             (0b011111, 0b000000) => Ok(Self::new(Opcode::EXT, rt as u8, rs, (rd as u32) << 5 | sa, false, true)),
+            // (0b011111, 0b000100, _) => Ok(Operation::Ins(rt, rs, rd, sa)), // ins
+            (0b011111, 0b000100) => Ok(Self::new(Opcode::INS, rt as u8, rs, (rd as u32) << 5 | sa, false, true)),
             // (0b011100, 0b000001, _) => Ok(Operation::Maddu(rt, rs)),
             (0b011100, 0b000001) => Ok(Self::new(Opcode::MADDU, 32, rt, rs, false, false)),
             (0b011100, 0b000101) => Ok(Self::new(Opcode::MSUBU, 32, rt, rs, false, false)),

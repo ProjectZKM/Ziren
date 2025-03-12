@@ -1,20 +1,9 @@
 use p3_air::AirBuilder;
-use zkm2_stark::{
-    air::{
-        BaseAirBuilder, LookupScope, ZKMAirBuilder,
-        PV_DIGEST_NUM_WORDS,
-    },
-    Word,
-};
+use zkm2_stark::air::ZKMAirBuilder;
 
-use crate::{
-    air::WordAirBuilder,
-    cpu::{
-        columns::{CpuCols, OpcodeSelectorCols},
-        CpuChip,
-    },
-    memory::MemoryCols,
-    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
+use crate::cpu::{
+    columns::{CpuCols, OpcodeSelectorCols},
+    CpuChip,
 };
 
 impl CpuChip {

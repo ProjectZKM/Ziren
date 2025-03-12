@@ -69,6 +69,7 @@ pub enum Opcode {
     ROR = 49,
     MADDU = 50,
     MSUBU = 51,
+    INS = 52,
     UNIMPL = 0xff,
 }
 
@@ -126,6 +127,7 @@ impl Opcode {
             Opcode::SEXT => "seb",
             Opcode::WSBH => "wsbh",
             Opcode::EXT => "ext",
+            Opcode::INS => "ins",
             Opcode::ROR => "ror",
             Opcode::MADDU => "maddu",
             Opcode::MSUBU => "msubu",

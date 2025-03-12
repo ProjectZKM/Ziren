@@ -1039,6 +1039,10 @@ impl<'a> Executor<'a> {
                 (a, b, c) = self.execute_ext(instruction);
             }
 
+            Opcode::INS => {
+                (a, b, c) = self.execute_ins(instruction);
+            }
+
             Opcode::UNIMPL => {
                 return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
             }
@@ -1145,6 +1149,23 @@ impl<'a> Executor<'a> {
         let lsb = c & 0x1f;
         let mask_msb = (1 << (msbd + lsb + 1)) - 1;
         let a = (b & mask_msb) >> lsb;
+        self.rw(rd, a, MemoryAccessPosition::A);
+        (a, b, c)
+    }
+
+    fn execute_ins(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+        let (rd, rt, c) = (
+            instruction.op_a.into(),
+            (instruction.op_b as u8).into(),
+            instruction.op_c
+        );
+        let b = self.rr(rt, MemoryAccessPosition::B);
+        let a = self.register(rd);
+        let msb =  c >> 5;
+        let lsb = c & 0x1f;
+        let mask = (1 << (msb - lsb + 1)) - 1;
+        let mask_field = mask << lsb;
+        let a = (a & !mask_field) | ((b << lsb) & mask_field);
         self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, c)
     }
