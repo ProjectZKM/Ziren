@@ -1076,7 +1076,7 @@ impl<'a> Executor<'a> {
             (instruction.op_c as u8).into()
         );
         let b = self.rr(rt, MemoryAccessPosition::B);
-        let c = self.rr(rs, MemoryAccessPosition::B);
+        let c = self.rr(rs, MemoryAccessPosition::C);
         let multiply = b as u64 * c as u64;
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
@@ -1096,7 +1096,7 @@ impl<'a> Executor<'a> {
             (instruction.op_c as u8).into()
         );
         let b = self.rr(rt, MemoryAccessPosition::B);
-        let c = self.rr(rs, MemoryAccessPosition::B);
+        let c = self.rr(rs, MemoryAccessPosition::C);
         let multiply = b as u64 * c as u64;
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
