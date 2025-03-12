@@ -141,7 +141,7 @@ impl Opcode {
     
     pub fn is_use_lo_hi_alu(&self) -> bool {
         match self {
-            Opcode::DIV | Opcode::DIVU | Opcode::MULT | Opcode::MULTU => true,
+            Opcode::DIV | Opcode::DIVU | Opcode::MULT | Opcode::MULTU | Opcode::MADDU | Opcode::MSUBU => true,
             _ => false,
         }
     }
