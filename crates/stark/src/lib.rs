@@ -21,6 +21,7 @@ mod record;
 pub mod septic_curve;
 pub mod septic_digest;
 pub mod septic_extension;
+pub mod shape;
 #[cfg(test)]
 mod stark_testing;
 mod types;

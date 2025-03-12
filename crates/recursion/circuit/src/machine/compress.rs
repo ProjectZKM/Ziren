@@ -21,8 +21,8 @@ use zkm2_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELT
 
 use zkm2_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-    koala_bear_poseidon2::KoalaBearPoseidon2,
-    Dom, ProofShape, ShardProof, StarkGenericConfig, StarkMachine, StarkVerifyingKey, Word,
+    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
+    Dom, ShardProof, StarkGenericConfig, StarkMachine, StarkVerifyingKey, Word,
     DIGEST_SIZE,
 };
 
@@ -69,7 +69,7 @@ pub struct ZKMCompressWitnessValues<SC: StarkGenericConfig> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZKMCompressShape {
-    proof_shapes: Vec<ProofShape>,
+    proof_shapes: Vec<OrderedShape>,
 }
 
 impl<C, SC, A> ZKMCompressVerifier<C, SC, A>
@@ -525,8 +525,8 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
     }
 }
 
-impl From<Vec<ProofShape>> for ZKMCompressShape {
-    fn from(proof_shapes: Vec<ProofShape>) -> Self {
+impl From<Vec<OrderedShape>> for ZKMCompressShape {
+    fn from(proof_shapes: Vec<OrderedShape>) -> Self {
         Self { proof_shapes }
     }
 }

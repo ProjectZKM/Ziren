@@ -7,7 +7,7 @@ use std::{
 };
 use web_time::Instant;
 
-use crate::mips::{CoreShapeConfig, MipsAir};
+use crate::mips::MipsAir;
 use p3_maybe_rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
@@ -23,9 +23,9 @@ use p3_koala_bear::KoalaBear;
 
 use crate::{
     io::ZKMStdin,
-    mips::cost::CostEstimator,
     utils::{chunk_vec, concurrency::TurnBasedSync},
 };
+use crate::shape::CoreShapeConfig;
 use zkm2_core_executor::{
     events::{format_table_line, sorted_table_lines},
     subproof::NoOpSubproofVerifier,
@@ -140,8 +140,9 @@ where
 {
     // Setup the runtime.
     let mut runtime = Executor::with_context(program.clone(), opts, context);
-    runtime.maximal_shapes = shape_config
-        .map(|config| config.maximal_core_shapes().into_iter().map(|s| s.inner).collect());
+    runtime.maximal_shapes = shape_config.map(|config| {
+        config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
+    });
     runtime.write_vecs(&stdin.buffer);
     for proof in stdin.proofs.iter() {
         let (proof, vk) = proof.clone();
@@ -382,7 +383,11 @@ where
                                         if let Some(shape) = record.shape {
                                             assert_eq!(
                                                 proof.shape(),
-                                                shape.clone().into_iter().collect(),
+                                                shape
+                                                    .clone()
+                                                    .into_iter()
+                                                    .map(|(k, v)| (k.to_string(), v as usize))
+                                                    .collect(),
                                             );
                                         }
                                     }
@@ -443,9 +448,8 @@ where
         // Print the summary.
         let proving_time = proving_start.elapsed().as_secs_f64();
         tracing::info!(
-            "summary: cycles={}, gas={}, e2e={}s, khz={:.2}, proofSize={}",
+            "summary: cycles={}, e2e={}s, khz={:.2}, proofSize={}",
             cycles,
-            report_aggregate.estimate_gas(),
             proving_time,
             (cycles as f64 / (proving_time * 1000.0) as f64),
             bincode::serialize(&proof).unwrap().len(),
@@ -472,8 +476,6 @@ pub fn run_test_io<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.maximal_shapes =
-            Some(shape_config.maximal_core_shapes().into_iter().map(|s| s.inner).collect());
         runtime.write_vecs(&inputs.buffer);
         runtime.run().unwrap();
         runtime
@@ -491,8 +493,6 @@ pub fn run_test<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
     shape_config.fix_preprocessed_shape(&mut program).unwrap();
     let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.maximal_shapes =
-            Some(shape_config.maximal_core_shapes().into_iter().map(|s| s.inner).collect());
         runtime.run().unwrap();
         runtime
     });
@@ -608,8 +608,9 @@ where
     let state: ExecutionState =
         bincode::deserialize_from(&mut reader).expect("failed to deserialize state");
     let mut runtime = Executor::recover(program, state, opts);
-    runtime.maximal_shapes = shape_config
-        .map(|config| config.maximal_core_shapes().into_iter().map(|s| s.inner).collect());
+    runtime.maximal_shapes = shape_config.map(|config| {
+        config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()
+    });
 
     // We already passed the deferred proof verifier when creating checkpoints, so the proofs were
     // already verified. So here we use a noop verifier to not print any warnings.

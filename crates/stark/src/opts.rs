@@ -102,12 +102,6 @@ impl Default for ZKMCoreOpts {
         let cpu_ram_gb = System::new_all().total_memory() / (1024 * 1024 * 1024);
         let (default_log2_shard_size, default_shard_batch_size, default_log2_divisor) =
             ZKMProverOpts::get_memory_opts(cpu_ram_gb as usize);
-        tracing::info!(
-            "shard_size: {:?}, shard_batch_size: {:?}, default_log2_divisor: {:?}",
-            1 << default_log2_shard_size,
-            default_shard_batch_size,
-            default_log2_divisor,
-        );
 
         let mut opts = Self {
             shard_size: env::var("SHARD_SIZE").map_or_else(
@@ -134,6 +128,11 @@ impl Default for ZKMCoreOpts {
                 ),
             reconstruct_commitments: true,
         };
+
+        tracing::info!(
+            "shard_size: {:?}, shard_batch_size: {:?}", 
+            opts.shard_size, opts.shard_batch_size,
+        );
 
         let divisor = 1 << default_log2_divisor;
         opts.split_opts.deferred /= divisor;

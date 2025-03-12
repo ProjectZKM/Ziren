@@ -22,8 +22,8 @@ use zkm2_stark::air::LookupScope;
 use zkm2_stark::air::MachineAir;
 use zkm2_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
-    koala_bear_poseidon2::KoalaBearPoseidon2,
-    Dom, ProofShape, StarkMachine, Word,
+    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
+    Dom, StarkMachine, Word,
 };
 
 use zkm2_stark::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
@@ -69,7 +69,7 @@ pub struct ZKMRecursionWitnessValues<SC: StarkGenericConfig> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZKMRecursionShape {
-    pub proof_shapes: Vec<ProofShape>,
+    pub proof_shapes: Vec<OrderedShape>,
     pub is_complete: bool,
 }
 
@@ -594,8 +594,8 @@ impl ZKMRecursionWitnessValues<KoalaBearPoseidon2> {
     }
 }
 
-impl From<ProofShape> for ZKMRecursionShape {
-    fn from(proof_shape: ProofShape) -> Self {
+impl From<OrderedShape> for ZKMRecursionShape {
+    fn from(proof_shape: OrderedShape) -> Self {
         Self { proof_shapes: vec![proof_shape], is_complete: false }
     }
 }

@@ -17,7 +17,8 @@ use zkm2_recursion_compiler::{
 use zkm2_stark::septic_digest::SepticDigest;
 use zkm2_stark::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, Challenger,
-    Chip, ChipOpenedValues, InnerChallenge, ProofShape, ShardCommitment, ShardOpenedValues,
+    shape::OrderedShape,
+    Chip, ChipOpenedValues, InnerChallenge, ShardCommitment, ShardOpenedValues,
     ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
 use zkm2_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
@@ -56,7 +57,7 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 /// Make a dummy shard proof for a given proof shape.
 pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    shape: &ProofShape,
+    shape: &OrderedShape,
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
     // Make a dummy commitment.
     let commitment = ShardCommitment {
@@ -67,7 +68,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 
     // Get dummy opened values by reading the chip ordering from the shape.
     let chip_ordering = shape
-        .chip_information
+        .inner
         .iter()
         .enumerate()
         .map(|(i, (name, _))| (name.clone(), i))
@@ -76,7 +77,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     let opened_values = ShardOpenedValues {
         chips: shard_chips
             .iter()
-            .zip_eq(shape.chip_information.iter())
+            .zip_eq(shape.inner.iter())
             .map(|(chip, (_, log_degree))| {
                 dummy_opened_values::<_, InnerChallenge, _>(chip, *log_degree)
             })
@@ -472,11 +473,11 @@ where
 
 impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> ShardProofVariable<C, SC> {
     pub fn contains_cpu(&self) -> bool {
-        self.chip_ordering.contains_key("CPU")
+        self.chip_ordering.contains_key("Cpu")
     }
 
     pub fn log_degree_cpu(&self) -> usize {
-        let idx = self.chip_ordering.get("CPU").expect("CPU chip not found");
+        let idx = self.chip_ordering.get("Cpu").expect("Cpu chip not found");
         self.opened_values.chips[*idx].log_degree
     }
 

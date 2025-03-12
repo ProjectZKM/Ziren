@@ -1,31 +1,24 @@
-pub mod cost;
-mod shape;
-pub use cost::*;
+use core::fmt;
 use itertools::Itertools;
-pub use shape::*;
 use zkm2_core_executor::{
-    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, Program,
+    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord,
+    Program, MipsAirId,
 };
 
 use crate::{
     global::GlobalChip,
     memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
-    mips::MemoryChipType::{Finalize, Initialize},
     syscall::precompiles::fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
 };
 use hashbrown::{HashMap, HashSet};
 pub use mips_chips::*;
 use p3_field::PrimeField32;
 use strum_macros::{EnumDiscriminants, EnumIter};
-use tracing::instrument;
 use zkm2_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use zkm2_stark::{
     air::{LookupScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
     Chip, LookupKind, StarkGenericConfig, StarkMachine,
 };
-
-pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
-pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 
 /// A module for importing all the different MIPS chips.
 pub(crate) mod mips_chips {
@@ -61,6 +54,12 @@ pub(crate) mod mips_chips {
         },
     };
 }
+
+/// The maximum log number of shards in core.
+pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
+
+/// The maximum number of shards in core.
+pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 
 /// An AIR for encoding MIPS execution.
 ///
@@ -98,8 +97,6 @@ pub enum MipsAir<F: PrimeField32> {
     MemoryGlobalFinal(MemoryGlobalChip),
     /// A table for the local memory state.
     MemoryLocal(MemoryLocalChip),
-    /// A table for initializing the program memory.
-    // ProgramMemory(MemoryProgramChip),
     /// A table for all the syscall invocations.
     SyscallCore(SyscallChip),
     /// A table for all the precompile invocations.
@@ -157,7 +154,6 @@ pub enum MipsAir<F: PrimeField32> {
 }
 
 impl<F: PrimeField32> MipsAir<F> {
-    #[instrument("construct MipsAir machine", level = "debug", skip_all)]
     pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
         StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS, true)
@@ -170,260 +166,286 @@ impl<F: PrimeField32> MipsAir<F> {
     }
 
     /// Get all the costs of the different MIPS AIRs.
-    pub fn costs() -> HashMap<MipsAirDiscriminants, u64> {
+    pub fn costs() -> HashMap<String, u64> {
         let (_, costs) = Self::get_chips_and_costs();
         costs
     }
 
-    pub fn get_airs_and_costs() -> (Vec<Self>, HashMap<MipsAirDiscriminants, u64>) {
+    /// Get all the different MIPS AIRs and their costs.
+    pub fn get_airs_and_costs() -> (Vec<Self>, HashMap<String, u64>) {
         let (chips, costs) = Self::get_chips_and_costs();
         (chips.into_iter().map(|chip| chip.into_inner()).collect(), costs)
     }
 
-    /// Get all the different MIPS AIRs.
-    pub fn get_chips_and_costs() -> (Vec<Chip<F, Self>>, HashMap<MipsAirDiscriminants, u64>) {
-        let mut costs: HashMap<MipsAirDiscriminants, u64> = HashMap::new();
+    /// Get all the different MIPS chips and their costs.
+    pub fn get_chips_and_costs() -> (Vec<Chip<F, Self>>, HashMap<String, u64>) {
+        let mut costs: HashMap<String, u64> = HashMap::new();
 
         // The order of the chips is used to determine the order of trace generation.
         let mut chips = vec![];
         let cpu = Chip::new(MipsAir::Cpu(CpuChip::default()));
-        costs.insert(MipsAirDiscriminants::Cpu, cpu.cost());
+        costs.insert(cpu.name(), cpu.cost());
         chips.push(cpu);
 
         let program = Chip::new(MipsAir::Program(ProgramChip::default()));
+        costs.insert(program.name(), program.cost());
         chips.push(program);
 
         let sha_extend = Chip::new(MipsAir::Sha256Extend(ShaExtendChip::default()));
-        costs.insert(MipsAirDiscriminants::Sha256Extend, 48 * sha_extend.cost());
+        costs.insert(sha_extend.name(), 48 * sha_extend.cost());
         chips.push(sha_extend);
 
         let sha_compress = Chip::new(MipsAir::Sha256Compress(ShaCompressChip::default()));
-        costs.insert(MipsAirDiscriminants::Sha256Compress, 80 * sha_compress.cost());
+        costs.insert(sha_compress.name(), 80 * sha_compress.cost());
         chips.push(sha_compress);
 
         let ed_add_assign = Chip::new(MipsAir::Ed25519Add(EdAddAssignChip::<
             EdwardsCurve<Ed25519Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Ed25519Add, ed_add_assign.cost());
+        costs.insert(ed_add_assign.name(), ed_add_assign.cost());
         chips.push(ed_add_assign);
 
         let ed_decompress =
             Chip::new(MipsAir::Ed25519Decompress(EdDecompressChip::<Ed25519Parameters>::default()));
-        costs.insert(MipsAirDiscriminants::Ed25519Decompress, ed_decompress.cost());
+        costs.insert(ed_decompress.name(), ed_decompress.cost());
         chips.push(ed_decompress);
 
         let k256_decompress = Chip::new(MipsAir::K256Decompress(WeierstrassDecompressChip::<
             SwCurve<Secp256k1Parameters>,
         >::with_lsb_rule()));
-        costs.insert(MipsAirDiscriminants::K256Decompress, k256_decompress.cost());
+        costs.insert(k256_decompress.name(), k256_decompress.cost());
         chips.push(k256_decompress);
 
         let secp256k1_add_assign = Chip::new(MipsAir::Secp256k1Add(WeierstrassAddAssignChip::<
             SwCurve<Secp256k1Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Secp256k1Add, secp256k1_add_assign.cost());
+        costs.insert(secp256k1_add_assign.name(), secp256k1_add_assign.cost());
         chips.push(secp256k1_add_assign);
 
         let secp256k1_double_assign =
             Chip::new(MipsAir::Secp256k1Double(WeierstrassDoubleAssignChip::<
                 SwCurve<Secp256k1Parameters>,
             >::new()));
-        costs.insert(MipsAirDiscriminants::Secp256k1Double, secp256k1_double_assign.cost());
+        costs.insert(secp256k1_double_assign.name(), secp256k1_double_assign.cost());
         chips.push(secp256k1_double_assign);
 
         let p256_decompress = Chip::new(MipsAir::P256Decompress(WeierstrassDecompressChip::<
             SwCurve<Secp256r1Parameters>,
         >::with_lsb_rule()));
-        costs.insert(MipsAirDiscriminants::P256Decompress, p256_decompress.cost());
+        costs.insert(p256_decompress.name(), p256_decompress.cost());
         chips.push(p256_decompress);
 
         let secp256r1_add_assign = Chip::new(MipsAir::Secp256r1Add(WeierstrassAddAssignChip::<
             SwCurve<Secp256r1Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Secp256r1Add, secp256r1_add_assign.cost());
+        costs.insert(secp256r1_add_assign.name(), secp256r1_add_assign.cost());
         chips.push(secp256r1_add_assign);
 
         let secp256r1_double_assign =
             Chip::new(MipsAir::Secp256r1Double(WeierstrassDoubleAssignChip::<
                 SwCurve<Secp256r1Parameters>,
             >::new()));
-        costs.insert(MipsAirDiscriminants::Secp256r1Double, secp256r1_double_assign.cost());
+        costs.insert(secp256r1_double_assign.name(), secp256r1_double_assign.cost());
         chips.push(secp256r1_double_assign);
 
         let keccak_permute = Chip::new(MipsAir::KeccakP(KeccakPermuteChip::new()));
-        costs.insert(MipsAirDiscriminants::KeccakP, 24 * keccak_permute.cost());
+        costs.insert(keccak_permute.name(), 24 * keccak_permute.cost());
         chips.push(keccak_permute);
 
         let bn254_add_assign = Chip::new(MipsAir::Bn254Add(WeierstrassAddAssignChip::<
             SwCurve<Bn254Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Bn254Add, bn254_add_assign.cost());
+        costs.insert(bn254_add_assign.name(), bn254_add_assign.cost());
         chips.push(bn254_add_assign);
 
         let bn254_double_assign = Chip::new(MipsAir::Bn254Double(WeierstrassDoubleAssignChip::<
             SwCurve<Bn254Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Bn254Double, bn254_double_assign.cost());
+        costs.insert(bn254_double_assign.name(), bn254_double_assign.cost());
         chips.push(bn254_double_assign);
 
         let bls12381_add = Chip::new(MipsAir::Bls12381Add(WeierstrassAddAssignChip::<
             SwCurve<Bls12381Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Bls12381Add, bls12381_add.cost());
+        costs.insert(bls12381_add.name(), bls12381_add.cost());
         chips.push(bls12381_add);
 
         let bls12381_double = Chip::new(MipsAir::Bls12381Double(WeierstrassDoubleAssignChip::<
             SwCurve<Bls12381Parameters>,
         >::new()));
-        costs.insert(MipsAirDiscriminants::Bls12381Double, bls12381_double.cost());
+        costs.insert(bls12381_double.name(), bls12381_double.cost());
         chips.push(bls12381_double);
 
         let uint256_mul = Chip::new(MipsAir::Uint256Mul(Uint256MulChip::default()));
-        costs.insert(MipsAirDiscriminants::Uint256Mul, uint256_mul.cost());
+        costs.insert(uint256_mul.name(), uint256_mul.cost());
         chips.push(uint256_mul);
 
         let u256x2048_mul = Chip::new(MipsAir::U256x2048Mul(U256x2048MulChip::default()));
-        costs.insert(MipsAirDiscriminants::U256x2048Mul, u256x2048_mul.cost());
+        costs.insert(u256x2048_mul.name(), u256x2048_mul.cost());
         chips.push(u256x2048_mul);
 
         let bls12381_fp = Chip::new(MipsAir::Bls12381Fp(FpOpChip::<Bls12381BaseField>::new()));
-        costs.insert(MipsAirDiscriminants::Bls12381Fp, bls12381_fp.cost());
+        costs.insert(bls12381_fp.name(), bls12381_fp.cost());
         chips.push(bls12381_fp);
 
         let bls12381_fp2_addsub =
             Chip::new(MipsAir::Bls12381Fp2AddSub(Fp2AddSubAssignChip::<Bls12381BaseField>::new()));
-        costs.insert(MipsAirDiscriminants::Bls12381Fp2AddSub, bls12381_fp2_addsub.cost());
+        costs.insert(bls12381_fp2_addsub.name(), bls12381_fp2_addsub.cost());
         chips.push(bls12381_fp2_addsub);
 
         let bls12381_fp2_mul =
             Chip::new(MipsAir::Bls12381Fp2Mul(Fp2MulAssignChip::<Bls12381BaseField>::new()));
-        costs.insert(MipsAirDiscriminants::Bls12381Fp2Mul, bls12381_fp2_mul.cost());
+        costs.insert(bls12381_fp2_mul.name(), bls12381_fp2_mul.cost());
         chips.push(bls12381_fp2_mul);
 
         let bn254_fp = Chip::new(MipsAir::Bn254Fp(FpOpChip::<Bn254BaseField>::new()));
-        costs.insert(MipsAirDiscriminants::Bn254Fp, bn254_fp.cost());
+        costs.insert(bn254_fp.name(), bn254_fp.cost());
         chips.push(bn254_fp);
 
         let bn254_fp2_addsub =
             Chip::new(MipsAir::Bn254Fp2AddSub(Fp2AddSubAssignChip::<Bn254BaseField>::new()));
-        costs.insert(MipsAirDiscriminants::Bn254Fp2AddSub, bn254_fp2_addsub.cost());
+        costs.insert(bn254_fp2_addsub.name(), bn254_fp2_addsub.cost());
         chips.push(bn254_fp2_addsub);
 
         let bn254_fp2_mul =
             Chip::new(MipsAir::Bn254Fp2Mul(Fp2MulAssignChip::<Bn254BaseField>::new()));
-        costs.insert(MipsAirDiscriminants::Bn254Fp2Mul, bn254_fp2_mul.cost());
+        costs.insert(bn254_fp2_mul.name(), bn254_fp2_mul.cost());
         chips.push(bn254_fp2_mul);
 
         let bls12381_decompress =
             Chip::new(MipsAir::Bls12381Decompress(WeierstrassDecompressChip::<
                 SwCurve<Bls12381Parameters>,
             >::with_lexicographic_rule()));
-        costs.insert(MipsAirDiscriminants::Bls12381Decompress, bls12381_decompress.cost());
+        costs.insert(bls12381_decompress.name(), bls12381_decompress.cost());
         chips.push(bls12381_decompress);
 
         let syscall_core = Chip::new(MipsAir::SyscallCore(SyscallChip::core()));
-        costs.insert(MipsAirDiscriminants::SyscallCore, syscall_core.cost());
+        costs.insert(syscall_core.name(), syscall_core.cost());
         chips.push(syscall_core);
 
         let syscall_precompile = Chip::new(MipsAir::SyscallPrecompile(SyscallChip::precompile()));
-        costs.insert(MipsAirDiscriminants::SyscallPrecompile, syscall_precompile.cost());
+        costs.insert(syscall_precompile.name(), syscall_precompile.cost());
         chips.push(syscall_precompile);
 
         let div_rem = Chip::new(MipsAir::DivRem(DivRemChip::default()));
-        costs.insert(MipsAirDiscriminants::DivRem, div_rem.cost());
+        costs.insert(div_rem.name(), div_rem.cost());
         chips.push(div_rem);
 
         let add_sub = Chip::new(MipsAir::Add(AddSubChip::default()));
-        costs.insert(MipsAirDiscriminants::Add, add_sub.cost());
+        costs.insert(add_sub.name(), add_sub.cost());
         chips.push(add_sub);
 
         let bitwise = Chip::new(MipsAir::Bitwise(BitwiseChip::default()));
-        costs.insert(MipsAirDiscriminants::Bitwise, bitwise.cost());
+        costs.insert(bitwise.name(), bitwise.cost());
         chips.push(bitwise);
 
         let mul = Chip::new(MipsAir::Mul(MulChip::default()));
-        costs.insert(MipsAirDiscriminants::Mul, mul.cost());
+        costs.insert(mul.name(), mul.cost());
         chips.push(mul);
 
         let shift_right = Chip::new(MipsAir::ShiftRight(ShiftRightChip::default()));
-        costs.insert(MipsAirDiscriminants::ShiftRight, shift_right.cost());
+        costs.insert(shift_right.name(), shift_right.cost());
         chips.push(shift_right);
 
         let shift_left = Chip::new(MipsAir::ShiftLeft(ShiftLeft::default()));
-        costs.insert(MipsAirDiscriminants::ShiftLeft, shift_left.cost());
+        costs.insert(shift_left.name(), shift_left.cost());
         chips.push(shift_left);
 
         let lt = Chip::new(MipsAir::Lt(LtChip::default()));
-        costs.insert(MipsAirDiscriminants::Lt, lt.cost());
+        costs.insert(lt.name(), lt.cost());
         chips.push(lt);
 
         let clo_clz = Chip::new(MipsAir::CloClz(CloClzChip::default()));
-        costs.insert(MipsAirDiscriminants::CloClz, clo_clz.cost());
+        costs.insert(clo_clz.name(), clo_clz.cost());
         chips.push(clo_clz);
 
         let memory_global_init =
             Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)));
-        costs.insert(MipsAirDiscriminants::MemoryGlobalInit, memory_global_init.cost());
+        costs.insert(memory_global_init.name(), memory_global_init.cost());
         chips.push(memory_global_init);
 
         let memory_global_finalize =
             Chip::new(MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(MemoryChipType::Finalize)));
-        costs.insert(MipsAirDiscriminants::MemoryGlobalFinal, memory_global_finalize.cost());
+        costs.insert(memory_global_finalize.name(), memory_global_finalize.cost());
         chips.push(memory_global_finalize);
 
         let memory_local = Chip::new(MipsAir::MemoryLocal(MemoryLocalChip::new()));
-        costs.insert(MipsAirDiscriminants::MemoryLocal, memory_local.cost());
+        costs.insert(memory_local.name(), memory_local.cost());
         chips.push(memory_local);
 
         let global = Chip::new(MipsAir::Global(GlobalChip));
-        costs.insert(MipsAirDiscriminants::Global, global.cost());
+        costs.insert(global.name(), global.cost());
         chips.push(global);
 
-        // let memory_program = Chip::new(MipsAir::ProgramMemory(MemoryProgramChip::default()));
-        // costs.insert(MipsAirDiscriminants::ProgramMemory, memory_program.cost());
-        // chips.push(memory_program);
-
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
-        costs.insert(MipsAirDiscriminants::ByteLookup, byte.cost());
+        costs.insert(byte.name(), byte.cost());
         chips.push(byte);
 
         (chips, costs)
     }
 
     /// Get the heights of the preprocessed chips for a given program.
-    pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(Self, usize)> {
+    pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(MipsAirId, usize)> {
         vec![
-            (MipsAir::Program(ProgramChip::default()), program.instructions.len()),
-            // (MipsAir::ProgramMemory(MemoryProgramChip::default()), program.image.len()),
-            (MipsAir::ByteLookup(ByteChip::default()), 1 << 16),
+            (MipsAirId::Program, program.instructions.len()),
+            (MipsAirId::Byte, 1 << 16),
         ]
     }
 
     /// Get the heights of the chips for a given execution record.
-    pub(crate) fn core_heights(record: &ExecutionRecord) -> Vec<(Self, usize)> {
+    pub fn core_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
         vec![
-            (MipsAir::Cpu(CpuChip::default()), record.cpu_events.len()),
-            (MipsAir::DivRem(DivRemChip::default()), record.divrem_events.len()),
+            (MipsAirId::Cpu, record.cpu_events.len()),
+            (MipsAirId::DivRem, record.divrem_events.len()),
+            (MipsAirId::AddSub, record.add_events.len() + record.sub_events.len()),
+            (MipsAirId::Bitwise, record.bitwise_events.len()),
+            (MipsAirId::Mul, record.mul_events.len()),
+            (MipsAirId::ShiftRight, record.shift_right_events.len()),
+            (MipsAirId::ShiftLeft, record.shift_left_events.len()),
+            (MipsAirId::Lt, record.lt_events.len()),
             (
-                MipsAir::Add(AddSubChip::default()),
-                record.add_events.len() + record.sub_events.len(),
-            ),
-            (MipsAir::Bitwise(BitwiseChip::default()), record.bitwise_events.len()),
-            (MipsAir::Mul(MulChip::default()), record.mul_events.len()),
-            (MipsAir::ShiftRight(ShiftRightChip::default()), record.shift_right_events.len()),
-            (MipsAir::ShiftLeft(ShiftLeft::default()), record.shift_left_events.len()),
-            (MipsAir::Lt(LtChip::default()), record.lt_events.len()),
-            (MipsAir::CloClz(CloClzChip::default()), record.cloclz_events.len()),
-            (
-                MipsAir::MemoryLocal(MemoryLocalChip::new()),
+                MipsAirId::MemoryLocal,
                 record
                     .get_local_mem_events()
                     .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
                     .into_iter()
                     .count(),
             ),
-            (MipsAir::Global(GlobalChip), record.get_local_mem_events().into_iter().count()),
-            (MipsAir::SyscallCore(SyscallChip::core()), record.syscall_events.len()),
+            (MipsAirId::CloClz, record.cloclz_events.len()),
+            (
+                MipsAirId::Global,
+                2 * record.get_local_mem_events().count() + record.syscall_events.len(),
+            ),
+            (MipsAirId::SyscallCore, record.syscall_events.len()),
+        ]
+    }
+
+    pub(crate) fn precompile_heights(
+        &self,
+        record: &ExecutionRecord,
+    ) -> Option<(usize, usize, usize)> {
+        record
+            .precompile_events
+            .get_events(self.syscall_code())
+            .filter(|events| !events.is_empty())
+            .map(|events| {
+                (
+                    events.len() * self.rows_per_event(),
+                    events.get_local_mem_events().into_iter().count(),
+                    record.global_lookup_events.len(),
+                )
+            })
+    }
+
+    pub(crate) fn memory_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
+        vec![
+            (MipsAirId::MemoryGlobalInit, record.global_memory_initialize_events.len()),
+            (MipsAirId::MemoryGlobalFinalize, record.global_memory_finalize_events.len()),
+            (
+                MipsAirId::Global,
+                record.global_memory_finalize_events.len()
+                    + record.global_memory_initialize_events.len(),
+            ),
         ]
     }
 
@@ -452,37 +474,21 @@ impl<F: PrimeField32> MipsAir<F> {
         ]
     }
 
-    pub(crate) fn get_memory_init_final_heights(record: &ExecutionRecord) -> Vec<(Self, usize)> {
-        vec![
-            (
-                MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(Initialize)),
-                record.global_memory_initialize_events.len(),
-            ),
-            (
-                MipsAir::MemoryGlobalFinal(MemoryGlobalChip::new(Finalize)),
-                record.global_memory_finalize_events.len(),
-            ),
-            (
-                MipsAir::Global(GlobalChip),
-                record.global_memory_finalize_events.len()
-                    + record.global_memory_initialize_events.len(),
-            ),
-        ]
-    }
-
-    pub(crate) fn get_all_precompile_airs() -> Vec<(Self, usize)> {
+    pub(crate) fn precompile_airs_with_memory_events_per_row() -> Vec<(Self, usize)> {
         let mut airs: HashSet<_> = Self::get_airs_and_costs().0.into_iter().collect();
+
         for core_air in Self::get_all_core_airs() {
             airs.remove(&core_air);
         }
+
         for memory_air in Self::memory_init_final_airs() {
             airs.remove(&memory_air);
         }
+
         airs.remove(&Self::SyscallPrecompile(SyscallChip::precompile()));
 
         // Remove the preprocessed chips.
         airs.remove(&Self::Program(ProgramChip::default()));
-        // airs.remove(&Self::ProgramMemory(MemoryProgramChip::default()));
         airs.remove(&Self::ByteLookup(ByteChip::default()));
 
         airs.into_iter()
@@ -558,26 +564,11 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),
         }
     }
+}
 
-    /// Get the height of the corresponding precompile chip.
-    ///
-    /// If the precompile is not included in the record, returns `None`. Otherwise, returns
-    /// `Some(num_rows, num_local_mem_events)`, where `num_rows` is the number of rows of the
-    /// corresponding chip and `num_local_mem_events` is the number of local memory events.
-    pub(crate) fn get_precompile_heights(
-        &self,
-        record: &ExecutionRecord,
-    ) -> Option<(usize, usize)> {
-        record
-            .precompile_events
-            .get_events(self.syscall_code())
-            .filter(|events| !events.is_empty())
-            .map(|events| {
-                (
-                    events.len() * self.rows_per_event(),
-                    events.get_local_mem_events().into_iter().count(),
-                )
-            })
+impl<F: PrimeField32> fmt::Debug for MipsAir<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 
@@ -605,18 +596,56 @@ pub mod tests {
         utils::{prove, run_test, setup_logger},
     };
 
+    use hashbrown::HashMap;
+    use itertools::Itertools;
+    use p3_koala_bear::KoalaBear;
+    use strum::IntoEnumIterator;
+
     use zkm2_core_executor::programs::tests::other_memory_program;
     use zkm2_core_executor::{
         programs::tests::{
             fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
             simple_program, ssz_withdrawals_program,
         },
-        Instruction, Opcode, Program,
+        MipsAirId, Instruction, Opcode, Program,
     };
+    use zkm2_stark::air::MachineAir;
     use zkm2_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkProvingKey, StarkVerifyingKey,
         ZKMCoreOpts,
     };
+
+    #[test]
+    fn test_primitives_and_machine_air_names_match() {
+        let chips = MipsAir::<KoalaBear>::chips();
+        for (a, b) in chips.iter().zip_eq(MipsAirId::iter()) {
+            assert_eq!(a.name(), b.to_string());
+        }
+    }
+
+    #[test]
+    fn core_air_cost_consistency() {
+        let file = std::fs::File::open("../executor/src/artifacts/mips_costs.json").unwrap();
+        let costs: HashMap<String, u64> = serde_json::from_reader(file).unwrap();
+        // Compare with costs computed by machine
+        let machine_costs = MipsAir::<KoalaBear>::costs();
+        assert_eq!(costs, machine_costs);
+    }
+
+    #[test]
+    #[ignore]
+    fn write_core_air_costs() {
+        let costs = MipsAir::<KoalaBear>::costs();
+        println!("{:?}", costs);
+        // write to file
+        // Create directory if it doesn't exist
+        let dir = std::path::Path::new("../executor");
+        if !dir.exists() {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let file = std::fs::File::create(dir.join("mips_costs.json")).unwrap();
+        serde_json::to_writer_pretty(file, &costs).unwrap();
+    }
 
     #[test]
     fn test_simple_prove() {

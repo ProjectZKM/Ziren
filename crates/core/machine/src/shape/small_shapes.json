@@ -1,0 +1,92 @@
+[
+    {
+        "inner": {
+            "Mul": 7,
+            "Cpu": 14,
+            "ShiftRight": 10,
+            "Bitwise": 12,
+            "Lt": 13,
+            "ShiftLeft": 11,
+            "MemoryLocal": 8,
+            "CloClz": 7,
+            "SyscallCore": 5,
+            "Global": 15,
+            "AddSub": 14,
+            "MemoryGlobalInit": 8,
+            "MemoryGlobalFinalize": 15,
+            "DivRem": 4
+        }
+    },
+    {
+        "inner": {
+            "Mul": 11,
+            "Cpu": 15,
+            "ShiftRight": 12,
+            "Bitwise": 11,
+            "Lt": 13,
+            "ShiftLeft": 10,
+            "MemoryLocal": 6,
+            "CloClz": 5,
+            "SyscallCore": 5,
+            "Global": 9,
+            "AddSub": 15,
+            "MemoryGlobalInit": 16,
+            "MemoryGlobalFinalize": 16,
+            "DivRem": 10
+        }
+    },
+    {
+        "inner": {
+            "Mul": 15,
+            "Cpu": 18,
+            "ShiftRight": 15,
+            "Bitwise": 11,
+            "Lt": 16,
+            "ShiftLeft": 10,
+            "MemoryLocal": 7,
+            "CloClz": 6,
+            "SyscallCore": 5,
+            "Global": 15,
+            "AddSub": 18,
+            "MemoryGlobalInit": 16,
+            "MemoryGlobalFinalize": 16,
+            "DivRem": 10
+        }
+    },
+    {
+        "inner": {
+            "Cpu": 21,
+            "SyscallCore": 5,
+            "AddSub": 21,
+            "Bitwise": 11,
+            "Mul": 19,
+            "ShiftRight": 19,
+            "ShiftLeft": 11,
+            "Lt": 21,
+            "CloClz": 6,
+            "MemoryLocal": 7,
+            "Global": 16,
+            "MemoryGlobalInit": 16,
+            "MemoryGlobalFinalize": 16,
+            "DivRem": 10
+        }
+    },
+    {
+        "inner": {
+            "Cpu": 21,
+            "SyscallCore": 17,
+            "AddSub": 21,
+            "Bitwise": 19,
+            "Mul": 19,
+            "ShiftRight": 19,
+            "ShiftLeft": 19,
+            "Lt": 21,
+            "CloClz": 19,
+            "MemoryLocal": 19,
+            "Global": 17,
+            "MemoryGlobalInit": 17,
+            "MemoryGlobalFinalize": 17,
+            "DivRem": 17
+        }
+    }
+]

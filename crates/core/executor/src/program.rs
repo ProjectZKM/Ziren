@@ -1,7 +1,8 @@
 //! Programs that can be executed by the ZKM.
 
 extern crate alloc;
-// use crate::poseidon_sponge::poseidon_sponge_stark::poseidon;
+
+use std::str::FromStr;
 use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::LittleEndian, file::Class, ElfBytes};
@@ -18,8 +19,9 @@ use zkm2_stark::septic_curve::{SepticCurve, SepticCurveComplete};
 use zkm2_stark::septic_digest::SepticDigest;
 use zkm2_stark::septic_extension::SepticExtension;
 use zkm2_stark::LookupKind;
+use zkm2_stark::shape::Shape;
 
-use crate::{CoreShape, Instruction};
+use crate::{Instruction, MipsAirId};
 
 pub const PAGE_SIZE: u32 = 4096;
 pub const MAX_MEMORY: usize = 0x10000000;
@@ -27,7 +29,7 @@ pub const INIT_SP: u32 = MAX_MEMORY as u32 - 0x4000;
 pub const WORD_SIZE: usize = core::mem::size_of::<u32>();
 
 /// A program that can be executed by the ZKM.
-#[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Program {
     pub instructions: Vec<Instruction>,
     /// The entrypoint of the program, PC
@@ -37,8 +39,7 @@ pub struct Program {
     /// The initial memory image
     pub image: BTreeMap<u32, u32>,
     /// The shape for the preprocessed tables.
-    // todo: check if necessary
-    pub preprocessed_shape: Option<CoreShape>,
+    pub preprocessed_shape: Option<Shape<MipsAirId>>,
 }
 
 impl Program {
@@ -158,15 +159,12 @@ impl Program {
 
     /// Custom logic for padding the trace to a power of two according to the proof shape.
     pub fn fixed_log2_rows<F: Field, A: MachineAir<F>>(&self, air: &A) -> Option<usize> {
-        self.preprocessed_shape
-            .as_ref()
-            .map(|shape| {
-                shape
-                    .inner
-                    .get(&air.name())
-                    .unwrap_or_else(|| panic!("Chip {} not found in specified shape", air.name()))
-            })
-            .copied()
+        let id = MipsAirId::from_str(&air.name()).unwrap();
+        self.preprocessed_shape.as_ref().map(|shape| {
+            shape
+                .log2_height(&id)
+                .unwrap_or_else(|| panic!("Chip {} not found in specified shape", air.name()))
+        })
     }
 
     #[must_use]

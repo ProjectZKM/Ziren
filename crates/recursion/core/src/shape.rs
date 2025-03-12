@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use serde::{Deserialize, Serialize};
-use zkm2_stark::{air::MachineAir, ProofShape};
+use zkm2_stark::{air::MachineAir, shape::OrderedShape};
 
 use crate::{
     chips::{
@@ -25,6 +25,18 @@ use crate::{
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionShape {
     pub(crate) inner: HashMap<String, usize>,
+}
+
+impl RecursionShape {
+    pub fn clone_into_hash_map(&self) -> HashMap<String, usize> {
+        self.inner.clone()
+    }
+}
+
+impl From<HashMap<String, usize>> for RecursionShape {
+    fn from(value: HashMap<String, usize>) -> Self {
+        Self { inner: value }
+    }
 }
 
 pub struct RecursionShapeConfig<F, A> {
@@ -71,15 +83,23 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     pub fn get_all_shape_combinations(
         &self,
         batch_size: usize,
-    ) -> impl Iterator<Item = Vec<ProofShape>> + '_ {
+    ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
         (0..batch_size)
             .map(|_| {
                 self.allowed_shapes
                     .iter()
                     .cloned()
-                    .map(|map| map.into_iter().collect::<ProofShape>())
+                    .map(|map| map.into_iter().collect::<OrderedShape>())
             })
             .multi_cartesian_product()
+    }
+
+    pub fn from_hash_map(hash_map: &HashMap<String, usize>) -> Self {
+        Self { allowed_shapes: vec![hash_map.clone()], _marker: PhantomData }
+    }
+
+    pub fn first(&self) -> Option<&HashMap<String, usize>> {
+        self.allowed_shapes.first()
     }
 }
 
@@ -103,135 +123,25 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         // Specify allowed shapes.
         let allowed_shapes = [
             [
-                (base_alu.clone(), 20),
-                (mem_var.clone(), 18),
-                (ext_alu.clone(), 18),
-                (exp_reverse_bits_len.clone(), 17),
-                (mem_const.clone(), 17),
-                (poseidon2_wide.clone(), 16),
-                (batch_fri.clone(), 18),
-                (select.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 20),
-                (mem_var.clone(), 18),
-                (ext_alu.clone(), 18),
-                (exp_reverse_bits_len.clone(), 17),
-                (mem_const.clone(), 16),
-                (poseidon2_wide.clone(), 16),
-                (batch_fri.clone(), 18),
-                (select.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (ext_alu.clone(), 20),
-                (base_alu.clone(), 19),
                 (mem_var.clone(), 19),
-                (poseidon2_wide.clone(), 17),
-                (mem_const.clone(), 16),
-                (exp_reverse_bits_len.clone(), 16),
-                (batch_fri.clone(), 20),
-                (select.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 19),
-                (mem_var.clone(), 18),
-                (ext_alu.clone(), 18),
-                (exp_reverse_bits_len.clone(), 17),
-                (mem_const.clone(), 16),
-                (poseidon2_wide.clone(), 16),
-                (batch_fri.clone(), 18),
-                (select.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 19),
-                (mem_var.clone(), 18),
-                (ext_alu.clone(), 18),
-                (exp_reverse_bits_len.clone(), 16),
-                (mem_const.clone(), 16),
-                (poseidon2_wide.clone(), 16),
-                (batch_fri.clone(), 18),
-                (select.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 20),
-                (mem_var.clone(), 19),
-                (ext_alu.clone(), 19),
-                (exp_reverse_bits_len.clone(), 17),
-                (mem_const.clone(), 17),
-                (poseidon2_wide.clone(), 17),
-                (batch_fri.clone(), 19),
-                (select.clone(), 19),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 21),
-                (mem_var.clone(), 19),
-                (ext_alu.clone(), 19),
-                (exp_reverse_bits_len.clone(), 18),
+                (select.clone(), 20),
                 (mem_const.clone(), 18),
-                (poseidon2_wide.clone(), 17),
-                (batch_fri.clone(), 19),
-                (select.clone(), 19),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 21),
-                (mem_var.clone(), 19),
-                (ext_alu.clone(), 19),
+                (batch_fri.clone(), 18),
+                (base_alu.clone(), 16),
+                (ext_alu.clone(), 16),
                 (exp_reverse_bits_len.clone(), 18),
-                (mem_const.clone(), 17),
                 (poseidon2_wide.clone(), 17),
-                (batch_fri.clone(), 19),
-                (select.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             [
-                (ext_alu.clone(), 21),
-                (base_alu.clone(), 20),
-                (mem_var.clone(), 20),
-                (poseidon2_wide.clone(), 18),
-                (mem_const.clone(), 17),
-                (exp_reverse_bits_len.clone(), 17),
-                (batch_fri.clone(), 21),
-                (select.clone(), 19),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 20),
                 (mem_var.clone(), 19),
-                (ext_alu.clone(), 19),
-                (exp_reverse_bits_len.clone(), 18),
+                (select.clone(), 19),
                 (mem_const.clone(), 17),
-                (poseidon2_wide.clone(), 17),
                 (batch_fri.clone(), 19),
-                (select.clone(), 19),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 20),
-                (mem_var.clone(), 19),
-                (ext_alu.clone(), 19),
-                (exp_reverse_bits_len.clone(), 17),
-                (mem_const.clone(), 17),
-                (poseidon2_wide.clone(), 17),
-                (batch_fri.clone(), 19),
-                (select.clone(), 19),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (base_alu.clone(), 21),
-                (mem_var.clone(), 20),
-                (ext_alu.clone(), 20),
+                (base_alu.clone(), 16),
+                (ext_alu.clone(), 16),
                 (exp_reverse_bits_len.clone(), 18),
-                (mem_const.clone(), 18),
-                (poseidon2_wide.clone(), 18),
-                (batch_fri.clone(), 20),
-                (select.clone(), 19),
+                (poseidon2_wide.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
         ]

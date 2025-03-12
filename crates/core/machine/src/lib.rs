@@ -24,6 +24,7 @@ pub mod memory;
 pub mod mips;
 pub mod operations;
 pub mod program;
+pub mod shape;
 pub mod syscall;
 pub mod utils;
 pub use cpu::*;

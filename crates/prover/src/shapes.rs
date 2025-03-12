@@ -13,22 +13,22 @@ use thiserror::Error;
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm2_core_machine::mips::CoreShapeConfig;
+use zkm2_core_machine::shape::CoreShapeConfig;
 use zkm2_recursion_circuit::machine::{
     ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape, ZKMDeferredShape,
     ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
 };
-use zkm2_recursion_core::{shape::RecursionShapeConfig, RecursionProgram};
-use zkm2_stark::{MachineProver, ProofShape, DIGEST_SIZE};
+use zkm2_recursion_core::{shape::{RecursionShape, RecursionShapeConfig}, RecursionProgram};
+use zkm2_stark::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
-use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
+use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver, ShrinkAir};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
-    Recursion(ProofShape),
-    Compress(Vec<ProofShape>),
-    Deferred(ProofShape),
-    Shrink(ProofShape),
+    Recursion(OrderedShape),
+    Compress(Vec<OrderedShape>),
+    Deferred(OrderedShape),
+    Shrink(OrderedShape),
 }
 
 #[derive(Debug, Clone, Hash)]
@@ -111,7 +111,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                     while let Ok((i, shape)) = shape_rx.lock().unwrap().recv() {
                         println!("shape {} is {:?}", i, shape);
                         let program = catch_unwind(AssertUnwindSafe(|| {
-                            prover.program_from_shape(shape.clone())
+                            prover.program_from_shape(shape.clone(), None)
                         }));
                         let is_shrink = matches!(shape, ZKMCompressProgramShape::Shrink(_));
                         match program {
@@ -224,7 +224,7 @@ impl ZKMProofShape {
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
         core_shape_config
-            .generate_all_allowed_shapes()
+            .all_shapes()
             .map(Self::Recursion)
             .chain((1..=reduce_batch_size).flat_map(|batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
@@ -244,10 +244,8 @@ impl ZKMProofShape {
     pub fn generate_compress_shapes(
         recursion_shape_config: &'_ RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
-    ) -> impl Iterator<Item = Self> + '_ {
-        (1..=reduce_batch_size).flat_map(|batch_size| {
-            recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
-        })
+    ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
+        recursion_shape_config.get_all_shape_combinations(reduce_batch_size)
     }
 
     pub fn dummy_vk_map<'a>(
@@ -285,6 +283,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn program_from_shape(
         &self,
         shape: ZKMCompressProgramShape,
+        shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
@@ -303,7 +302,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             ZKMCompressProgramShape::Shrink(shape) => {
                 let input =
                     ZKMCompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.shrink_program(&input)
+                self.shrink_program(
+                    shrink_shape.unwrap_or_else(ShrinkAir::<KoalaBear>::shrink_shape),
+                    &input,
+                )
             }
         }
     }

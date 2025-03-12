@@ -36,11 +36,13 @@ use lru::LruCache;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use shapes::ZKMProofShape;
 use tracing::instrument;
 use zkm2_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
 use zkm2_core_machine::{
     io::ZKMStdin,
-    mips::{CoreShapeConfig, MipsAir},
+    mips::MipsAir,
+    shape::CoreShapeConfig,
     reduce::ZKMReduceProof,
     utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
 };
@@ -65,7 +67,7 @@ use zkm2_recursion_compiler::{
 };
 use zkm2_recursion_core::{
     air::RecursionPublicValues, machine::RecursionAir, runtime::ExecutionRecord,
-    shape::RecursionShapeConfig, stark::KoalaBearPoseidon2Outer, RecursionProgram,
+    shape::{RecursionShape, RecursionShapeConfig}, stark::KoalaBearPoseidon2Outer, RecursionProgram,
     Runtime as RecursionRuntime,
 };
 pub use zkm2_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
@@ -75,7 +77,7 @@ use zkm2_stark::{
     MachineProver, ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
-use zkm2_stark::{MachineProvingKey, ProofShape};
+use zkm2_stark::{shape::OrderedShape, MachineProvingKey};
 
 pub use types::*;
 use utils::{words_to_bytes, zkm2_committed_values_digest_bn254, zkm2_vkey_digest_bn254};
@@ -98,7 +100,6 @@ const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
 
 const CORE_CACHE_SIZE: usize = 5;
-const COMPRESS_CACHE_SIZE: usize = 3;
 pub const REDUCE_BATCH_SIZE: usize = 2;
 
 // TODO: FIX
@@ -127,29 +128,40 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the wrapping step.
     pub wrap_prover: C::WrapProver,
 
+    /// The cache of compiled recursion programs.
     pub recursion_programs: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<KoalaBear>>>>,
 
+    /// The number of cache misses for recursion programs.
     pub recursion_cache_misses: AtomicUsize,
 
-    pub compress_programs:
-        Mutex<LruCache<ZKMCompressWithVkeyShape, Arc<RecursionProgram<KoalaBear>>>>,
+    /// The cache of compiled compression programs.
+    pub compress_program_map: BTreeMap<ZKMCompressWithVkeyShape, Arc<RecursionProgram<KoalaBear>>>,
 
+    /// The number of cache misses for compression programs.
     pub compress_cache_misses: AtomicUsize,
 
+    /// The root of the allowed recursion verification keys.
     pub vk_root: <InnerSC as FieldHasher<KoalaBear>>::Digest,
 
+    /// The allowed VKs and their corresponding indices.
     pub allowed_vk_map: BTreeMap<<InnerSC as FieldHasher<KoalaBear>>::Digest, usize>,
 
+    /// The Merkle tree for the allowed VKs.
     pub vk_merkle_tree: MerkleTree<KoalaBear, InnerSC>,
 
+    /// The core shape configuration.
     pub core_shape_config: Option<CoreShapeConfig<KoalaBear>>,
 
+    /// The recursion shape configuration.
     pub recursion_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
 
+    /// The program for wrapping.
     pub wrap_program: OnceLock<Arc<RecursionProgram<KoalaBear>>>,
 
+    /// The verifying key for wrapping.
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
 
+    /// Whether to verify verification keys.
     pub vk_verification: bool,
 }
 
@@ -184,17 +196,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
         .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
 
-        let compress_cache_size = NonZeroUsize::new(
-            env::var("PROVER_COMPRESS_CACHE_SIZE")
-                .unwrap_or_else(|_| CORE_CACHE_SIZE.to_string())
-                .parse()
-                .unwrap_or(COMPRESS_CACHE_SIZE),
-        )
-        .expect("PROVER_COMPRESS_CACHE_SIZE must be a non-zero usize");
-
         let core_shape_config = env::var("FIX_CORE_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
+            .unwrap_or(true)
             .then_some(CoreShapeConfig::default());
 
         let recursion_shape_config = env::var("FIX_RECURSION_SHAPES")
@@ -216,6 +220,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let (root, merkle_tree) = MerkleTree::commit(allowed_vk_map.keys().copied().collect());
 
+        let mut compress_programs = BTreeMap::new();
+        if let Some(config) = &recursion_shape_config {
+            ZKMProofShape::generate_compress_shapes(config, REDUCE_BATCH_SIZE).for_each(|shape| {
+                let compress_shape = ZKMCompressWithVkeyShape {
+                    compress_shape: shape.into(),
+                    merkle_tree_height: merkle_tree.height,
+                };
+                let input = ZKMCompressWithVKeyWitnessValues::dummy(
+                    compress_prover.machine(),
+                    &compress_shape,
+                );
+                let program = compress_program_from_input::<C>(
+                    recursion_shape_config.as_ref(),
+                    &compress_prover,
+                    vk_verification,
+                    &input,
+                );
+                let program = Arc::new(program);
+                compress_programs.insert(compress_shape, program);
+            });
+        }
+
         Self {
             core_prover,
             compress_prover,
@@ -223,7 +249,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             wrap_prover,
             recursion_programs: Mutex::new(LruCache::new(core_cache_size)),
             recursion_cache_misses: AtomicUsize::new(0),
-            compress_programs: Mutex::new(LruCache::new(compress_cache_size)),
+            compress_program_map: compress_programs,
             compress_cache_misses: AtomicUsize::new(0),
             vk_root: root,
             vk_merkle_tree: merkle_tree,
@@ -352,45 +378,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let mut cache = self.compress_programs.lock().unwrap_or_else(|e| e.into_inner());
-        let shape = input.shape();
-        cache
-            .get_or_insert(shape.clone(), || {
-                let misses = self.compress_cache_misses.fetch_add(1, Ordering::Relaxed);
-                tracing::debug!("compress cache miss, misses: {}", misses);
-                // Get the operations.
-                let builder_span = tracing::debug_span!("build compress program").entered();
-                let mut builder = Builder::<InnerConfig>::default();
-
-                // read the input.
-                let input = input.read(&mut builder);
-                // Verify the proof.
-                ZKMCompressWithVKeyVerifier::verify(
-                    &mut builder,
-                    self.compress_prover.machine(),
-                    input,
-                    self.vk_verification,
-                    PublicValuesOutputDigest::Reduce,
-                );
-                let operations = builder.into_operations();
-                builder_span.exit();
-
-                // Compile the program.
-                let compiler_span = tracing::debug_span!("compile compress program").entered();
-                let mut compiler = AsmCompiler::<InnerConfig>::default();
-                let mut program = compiler.compile(operations);
-                if let Some(recursion_shape_config) = &self.recursion_shape_config {
-                    recursion_shape_config.fix_shape(&mut program);
-                }
-                let program = Arc::new(program);
-                compiler_span.exit();
-                program
-            })
-            .clone()
+        self.compress_program_map.get(&input.shape()).cloned().unwrap_or_else(|| {
+            tracing::warn!("compress program not found in map, recomputing join program.");
+            // Get the operations.
+            Arc::new(compress_program_from_input::<C>(
+                self.recursion_shape_config.as_ref(),
+                &self.compress_prover,
+                self.vk_verification,
+                input,
+            ))
+        })
     }
 
     pub fn shrink_program(
         &self,
+        shrink_shape: RecursionShape,
         input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         // Get the operations.
@@ -412,7 +414,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let compiler_span = tracing::debug_span!("compile shrink program").entered();
         let mut compiler = AsmCompiler::<InnerConfig>::default();
         let mut program = compiler.compile(operations);
-        program.shape = Some(ShrinkAir::<KoalaBear>::shrink_shape());
+        *program.shape_mut() = Some(shrink_shape);
         let program = Arc::new(program);
         compiler_span.exit();
         program
@@ -425,7 +427,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let builder_span = tracing::debug_span!("build compress program").entered();
                 let mut builder = Builder::<WrapConfig>::default();
 
-                let shrink_shape: ProofShape = ShrinkAir::<KoalaBear>::shrink_shape().into();
+                let shrink_shape: OrderedShape = ShrinkAir::<KoalaBear>::shrink_shape().into();
                 let input_shape = ZKMCompressShape::from(vec![shrink_shape]);
                 let shape = ZKMCompressWithVkeyShape {
                     compress_shape: input_shape,
@@ -927,7 +929,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let input_with_merkle = self.make_merkle_proofs(input);
 
-        let program = self.shrink_program(&input_with_merkle);
+        let program = self.shrink_program(ShrinkAir::<KoalaBear>::shrink_shape(), &input_with_merkle);
 
         // Run the compress program.
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
@@ -1150,6 +1152,39 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
     }
+}
+
+pub fn compress_program_from_input<C: ZKMProverComponents>(
+    config: Option<&RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
+    compress_prover: &C::CompressProver,
+    vk_verification: bool,
+    input: &ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2>,
+) -> RecursionProgram<KoalaBear> {
+    let builder_span = tracing::debug_span!("build compress program").entered();
+    let mut builder = Builder::<InnerConfig>::default();
+    // read the input.
+    let input = input.read(&mut builder);
+    // Verify the proof.
+    ZKMCompressWithVKeyVerifier::verify(
+        &mut builder,
+        compress_prover.machine(),
+        input,
+        vk_verification,
+        PublicValuesOutputDigest::Reduce,
+    );
+    let operations = builder.into_operations();
+    builder_span.exit();
+
+    // Compile the program.
+    let compiler_span = tracing::debug_span!("compile compress program").entered();
+    let mut compiler = AsmCompiler::<InnerConfig>::default();
+    let mut program = compiler.compile(operations);
+    if let Some(config) = config {
+        config.fix_shape(&mut program);
+    }
+    compiler_span.exit();
+
+    program
 }
 
 #[cfg(any(test, feature = "export-tests"))]

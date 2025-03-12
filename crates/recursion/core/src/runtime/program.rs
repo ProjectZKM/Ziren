@@ -39,4 +39,8 @@ impl<F: Field> RecursionProgram<F> {
             })
             .copied()
     }
+
+    pub fn shape_mut(&mut self) -> &mut Option<RecursionShape> {
+        &mut self.shape
+    }
 }

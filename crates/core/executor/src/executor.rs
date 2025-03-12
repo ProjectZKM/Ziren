@@ -1,17 +1,20 @@
 use std::{
     fs::File,
     io::{BufWriter, Write},
+    str::FromStr,
     sync::Arc,
 };
 
+use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zkm2_stark::ZKMCoreOpts;
+use zkm2_stark::{shape::Shape, ZKMCoreOpts};
 
 use crate::{
     context::ZKMContext,
     dependencies::{emit_cloclz_dependencies, emit_cpu_dependencies, emit_divrem_dependencies},
+    estimate_mips_event_counts,
     events::{
         AluEvent, CpuEvent, MemoryAccessPosition, MemoryInitializeFinalizeEvent,
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord, SyscallEvent,
@@ -23,17 +26,25 @@ use crate::{
     state::{ExecutionState, ForkState},
     subproof::{DefaultSubproofVerifier, SubproofVerifier},
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
-    ExecutionReport, Instruction, Opcode, Program, Register,
+    ExecutionReport, Instruction, Opcode, Program, Register, MipsAirId,
 };
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// /// Whether to verify deferred proofs during execution.
+/// The maximum number of instructions in a program.
+pub const MAX_PROGRAM_SIZE: usize = 1 << 22;
+
+/// The costs for the airs.
+pub const MIPS_COSTS: &str = include_str!("./artifacts/mips_costs.json");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Whether to verify deferred proofs during execution.
 pub enum DeferredProofVerification {
     /// Verify deferred proofs during execution.
     Enabled,
     /// Skip verification of deferred proofs
     Disabled,
 }
+
+const CHECK_CYCLE: usize = 16;
 
 /// An executor for the MIPS zkVM.
 ///
@@ -118,13 +129,21 @@ pub struct Executor<'a> {
 
     /// Report of the program execution.
     pub report: ExecutionReport,
+
+    /// Statistics for event counts.
+    pub local_counts: LocalCounts,
+
     /// Verifier used to sanity check `verify_sp1_proof` during runtime.
     pub subproof_verifier: Arc<dyn SubproofVerifier + 'a>,
 
     /// Registry of hooks, to be invoked by writing to certain file descriptors.
     pub hook_registry: HookRegistry<'a>,
+
     /// The maximal shapes for the program.
-    pub maximal_shapes: Option<Vec<HashMap<String, usize>>>,
+    pub maximal_shapes: Option<Vec<Shape<MipsAirId>>>,
+
+    /// The costs of the program.
+    pub costs: HashMap<MipsAirId, usize>,
 }
 
 /// The different modes the executor can run in.
@@ -136,6 +155,17 @@ pub enum ExecutorMode {
     Checkpoint,
     /// Run the execution with full tracing of events.
     Trace,
+}
+
+/// Information about event counts which are relevant for shape fixing.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LocalCounts {
+    /// The event counts.
+    pub event_counts: Box<EnumMap<Opcode, u64>>,
+    /// The number of syscalls sent globally in the current shard.
+    pub syscalls_sent: usize,
+    /// The number of addresses touched in this shard.
+    pub local_mem: usize,
 }
 
 /// Errors that the [``Executor``] can throw.
@@ -222,6 +252,10 @@ impl<'a> Executor<'a> {
             context.subproof_verifier.unwrap_or_else(|| Arc::new(DefaultSubproofVerifier::new()));
         let hook_registry = context.hook_registry.unwrap_or_default();
 
+        let costs: HashMap<String, usize> = serde_json::from_str(MIPS_COSTS).unwrap();
+        let costs: HashMap<MipsAirId, usize> =
+            costs.into_iter().map(|(k, v)| (MipsAirId::from_str(&k).unwrap(), v)).collect();
+
         Self {
             record,
             records: vec![],
@@ -240,6 +274,7 @@ impl<'a> Executor<'a> {
             emit_global_memory_events: true,
             max_syscall_cycles,
             report: ExecutionReport::default(),
+            local_counts: LocalCounts::default(),
             print_report: false,
             subproof_verifier,
             hook_registry,
@@ -254,6 +289,7 @@ impl<'a> Executor<'a> {
             uninitialized_memory_checkpoint: PagedMemory::new_preallocated(),
             local_memory_access: HashMap::new(),
             maximal_shapes: None,
+            costs,
         }
     }
 
@@ -430,6 +466,16 @@ impl<'a> Executor<'a> {
             }
         };
 
+        // We update the local memory counter in two cases:
+        //  1. This is the first time the address is touched, this corresponds to the
+        //     condition record.shard != shard.
+        //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
+        //     local_memory_access to detect this. *WARNING*: This means that we are counting
+        //     on the .is_some() condition to be true only in the SyscallContext.
+        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
+            self.local_counts.local_mem += 1;
+        }
+
         let prev_record = *record;
         record.shard = shard;
         record.timestamp = timestamp;
@@ -507,6 +553,16 @@ impl<'a> Executor<'a> {
                 entry.insert(MemoryRecord { value: *value, shard: 0, timestamp: 0 })
             }
         };
+
+        // We update the local memory counter in two cases:
+        //  1. This is the first time the address is touched, this corresponds to the
+        //     condition record.shard != shard.
+        //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
+        //     local_memory_access to detect this. *WARNING*: This means that we are counting
+        //     on the .is_some() condition to be true only in the SyscallContext.
+        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
+            self.local_counts.local_mem += 1;
+        }
 
         let prev_record = *record;
         record.value = value;
@@ -827,7 +883,7 @@ impl<'a> Executor<'a> {
 
         if !self.unconstrained {
             self.report.opcode_counts[instruction.opcode] += 1;
-            self.report.event_counts[instruction.opcode] += 1;
+            self.local_counts.event_counts[instruction.opcode] += 1;
             match instruction.opcode {
                 Opcode::LB
                 | Opcode::LH
@@ -837,25 +893,25 @@ impl<'a> Executor<'a> {
                 | Opcode::LWL
                 | Opcode::LWR
                 | Opcode::LL => {
-                    self.report.event_counts[Opcode::ADD] += 2;
+                    self.local_counts.event_counts[Opcode::ADD] += 2;
                 }
                 Opcode::JumpDirect => {
-                    self.report.event_counts[Opcode::ADD] += 1;
+                    self.local_counts.event_counts[Opcode::ADD] += 1;
                 }
                 Opcode::BEQ | Opcode::BNE => {
-                    self.report.event_counts[Opcode::ADD] += 1;
+                    self.local_counts.event_counts[Opcode::ADD] += 1;
                 }
                 Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ => {
-                    self.report.event_counts[Opcode::ADD] += 1;
-                    self.report.event_counts[Opcode::SLT] += 2;
+                    self.local_counts.event_counts[Opcode::ADD] += 1;
+                    self.local_counts.event_counts[Opcode::SLT] += 2;
                 }
                 Opcode::DIVU | Opcode::DIV => {
-                    self.report.event_counts[Opcode::MUL] += 2;
-                    self.report.event_counts[Opcode::ADD] += 2;
-                    self.report.event_counts[Opcode::SLTU] += 1;
+                    self.local_counts.event_counts[Opcode::MUL] += 2;
+                    self.local_counts.event_counts[Opcode::ADD] += 2;
+                    self.local_counts.event_counts[Opcode::SLTU] += 1;
                 }
                 Opcode::CLZ | Opcode::CLO => {
-                    self.report.event_counts[Opcode::SRL] += 1;
+                    self.local_counts.event_counts[Opcode::SRL] += 1;
                 }
                 _ => {}
             };
@@ -1482,101 +1538,49 @@ impl<'a> Executor<'a> {
             //
             // If we're close to not fitting, early stop the shard to ensure we don't OOM.
             let mut shape_match_found = true;
-            if self.state.global_clk % 16 == 0 {
-                let addsub_count = (self.report.event_counts[Opcode::ADD]
-                    + self.report.event_counts[Opcode::SUB])
-                    as usize;
-                let mul_count = (self.report.event_counts[Opcode::MUL]
-                    + self.report.event_counts[Opcode::MULT]
-                    + self.report.event_counts[Opcode::MULTU])
-                    as usize;
-                let bitwise_count = (self.report.event_counts[Opcode::XOR]
-                    + self.report.event_counts[Opcode::OR]
-                    + self.report.event_counts[Opcode::NOR]
-                    + self.report.event_counts[Opcode::AND])
-                    as usize;
-                let shift_left_count = self.report.event_counts[Opcode::SLL] as usize;
-                let shift_right_count = (self.report.event_counts[Opcode::SRL]
-                    + self.report.event_counts[Opcode::SRA]
-                    + self.report.event_counts[Opcode::ROR] )
-                    as usize;
-                let divrem_count = (self.report.event_counts[Opcode::DIV]
-                    + self.report.event_counts[Opcode::DIVU])
-                    as usize;
-                let lt_count = (self.report.event_counts[Opcode::SLT]
-                    + self.report.event_counts[Opcode::SLTU])
-                    as usize;
-                let cloclz_count = (self.report.event_counts[Opcode::CLZ]
-                    + self.report.event_counts[Opcode::CLO])
-                    as usize;
+            if self.state.global_clk % (CHECK_CYCLE as u64) == 0 {
+                // Estimate the number of events in the trace.
+                let event_counts = estimate_mips_event_counts(
+                    (self.state.clk / 5) as u64,
+                    self.local_counts.local_mem as u64,
+                    self.local_counts.syscalls_sent as u64,
+                    *self.local_counts.event_counts,
+                );
 
                 if let Some(maximal_shapes) = &self.maximal_shapes {
+                    let distance = |threshold: usize, count: usize| {
+                        (count != 0).then(|| threshold - count).unwrap_or(usize::MAX)
+                    };
+
                     shape_match_found = false;
 
                     for shape in maximal_shapes.iter() {
-                        let addsub_threshold = 1 << shape["AddSub"];
-                        if addsub_count > addsub_threshold {
+                        let cpu_threshold = shape.log2_height(&MipsAirId::Cpu).unwrap();
+                        if self.state.clk > ((1 << cpu_threshold) << 2) {
                             continue;
                         }
-                        let addsub_distance = addsub_threshold - addsub_count;
 
-                        let mul_threshold = 1 << shape["Mul"];
-                        if mul_count > mul_threshold {
+                        let mut distances = Vec::new();
+                        let mut shape_too_small = false;
+                        for air in MipsAirId::core() {
+                            if air == MipsAirId::Cpu {
+                                continue;
+                            }
+                            let threshold = shape.height(&air).unwrap_or_default();
+                            let count = event_counts[air] as usize;
+                            if count > threshold {
+                                shape_too_small = true;
+                                break;
+                            }
+                            distances.push(distance(threshold, count));
+                        }
+
+                        if shape_too_small {
                             continue;
                         }
-                        let mul_distance = mul_threshold - mul_count;
 
-                        let bitwise_threshold = 1 << shape["Bitwise"];
-                        if bitwise_count > bitwise_threshold {
-                            continue;
-                        }
-                        let bitwise_distance = bitwise_threshold - bitwise_count;
-
-                        let shift_left_threshold = 1 << shape["ShiftLeft"];
-                        if shift_left_count > shift_left_threshold {
-                            continue;
-                        }
-                        let shift_left_distance = shift_left_threshold - shift_left_count;
-
-                        let shift_right_threshold = 1 << shape["ShiftRight"];
-                        if shift_right_count > shift_right_threshold {
-                            continue;
-                        }
-                        let shift_right_distance = shift_right_threshold - shift_right_count;
-
-                        let divrem_threshold = 1 << shape["DivRem"];
-                        if divrem_count > divrem_threshold {
-                            continue;
-                        }
-                        let divrem_distance = divrem_threshold - divrem_count;
-
-                        let lt_threshold = 1 << shape["Lt"];
-                        if lt_count > lt_threshold {
-                            continue;
-                        }
-                        let lt_distance = lt_threshold - lt_count;
-
-                        let cloclz_threshold = 1 << shape["CloClz"];
-                        if cloclz_count > cloclz_threshold {
-                            continue;
-                        }
-                        let cloclz_distance = cloclz_threshold - cloclz_count;
-
-                        let l_infinity = vec![
-                            addsub_distance,
-                            mul_distance,
-                            bitwise_distance,
-                            shift_left_distance,
-                            shift_right_distance,
-                            divrem_distance,
-                            lt_distance,
-                            cloclz_distance,
-                        ]
-                        .into_iter()
-                        .min()
-                        .unwrap();
-
-                        if l_infinity >= 32 {
+                        let l_infinity = distances.into_iter().min().unwrap();
+                        if l_infinity >= 2 * CHECK_CYCLE {
                             shape_match_found = true;
                             break;
                         }
@@ -1585,24 +1589,10 @@ impl<'a> Executor<'a> {
                     if !shape_match_found {
                         log::warn!(
                             "stopping shard early due to no shapes fitting: \
-                            nb_cycles={}, \
-                            addsub_count={}, \
-                            mul_count={}, \
-                            bitwise_count={}, \
-                            shift_left_count={}, \
-                            shift_right_count={}, \
-                            divrem_count={}, \
-                            lt_count={}, \
-                            cloclz_count={}",
-                            self.state.clk / 4,
-                            log2_ceil_usize(addsub_count),
-                            log2_ceil_usize(mul_count),
-                            log2_ceil_usize(bitwise_count),
-                            log2_ceil_usize(shift_left_count),
-                            log2_ceil_usize(shift_right_count),
-                            log2_ceil_usize(divrem_count),
-                            log2_ceil_usize(lt_count),
-                            log2_ceil_usize(cloclz_count),
+                            clk: {},
+                            clk_usage: {}",
+                            (self.state.clk / 5).next_power_of_two().ilog2(),
+                            ((self.state.clk / 5) as f64).log2(),
                         );
                     }
                 }
@@ -1611,7 +1601,6 @@ impl<'a> Executor<'a> {
             if cpu_exit || !shape_match_found {
                 self.state.current_shard += 1;
                 self.state.clk = 0;
-                self.report.event_counts = Box::default();
                 self.bump_record();
             }
         }
@@ -1637,6 +1626,7 @@ impl<'a> Executor<'a> {
 
     /// Bump the record.
     pub fn bump_record(&mut self) {
+        self.local_counts = LocalCounts::default();
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
         if self.executor_mode == ExecutorMode::Trace {
             for (_, event) in self.local_memory_access.drain() {
@@ -1967,10 +1957,6 @@ impl Default for ExecutorMode {
 #[must_use]
 pub const fn align(addr: u32) -> u32 {
     addr - addr % 4
-}
-
-fn log2_ceil_usize(n: usize) -> usize {
-    (usize::BITS - n.saturating_sub(1).leading_zeros()) as usize
 }
 
 #[cfg(test)]

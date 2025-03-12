@@ -19,6 +19,7 @@ rayon-scan = "0.1.1"
 # p3
 p3-field = { workspace = true }
 p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-koala-bear = { workspace = true }
 
 # misc
 serde = { workspace = true, features = ["derive", "rc"] }
