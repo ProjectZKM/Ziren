@@ -1,9 +1,7 @@
 use p3_air::AirBuilder;
-use p3_field::FieldAlgebra;
-use zkm2_core_executor::syscalls::SyscallCode;
 use zkm2_stark::{
     air::{
-        BaseAirBuilder, LookupScope, PublicValues, ZKMAirBuilder, POSEIDON_NUM_WORDS,
+        BaseAirBuilder, LookupScope, ZKMAirBuilder,
         PV_DIGEST_NUM_WORDS,
     },
     Word,
