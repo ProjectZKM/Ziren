@@ -2,6 +2,7 @@ pub mod branch;
 pub mod memory;
 pub mod register;
 pub mod syscall;
+pub mod wsbh;
 
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
@@ -58,6 +59,8 @@ where
         self.eval_memory_address_and_access::<AB>(builder, local, is_memory_instruction.clone());
         self.eval_memory_load::<AB>(builder, local);
         self.eval_memory_store::<AB>(builder, local);
+
+        self.eval_wsbh::<AB>(builder, local);
 
         // ALU instructions.
         builder.send_alu_with_hi(

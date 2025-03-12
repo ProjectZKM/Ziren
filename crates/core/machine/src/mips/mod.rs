@@ -693,7 +693,7 @@ pub mod tests {
     #[test]
     fn test_shift_prove() {
         utils::setup_logger();
-        let shift_ops = [Opcode::SRL, Opcode::SRA, Opcode::SLL];
+        let shift_ops = [Opcode::SRL, Opcode::ROR, Opcode::SRA, Opcode::SLL];
         let operands =
             [(1, 1), (1234, 5678), (0xffff, 0xffff - 1), (u32::MAX - 1, u32::MAX), (u32::MAX, 0)];
         for shift_op in shift_ops.iter() {

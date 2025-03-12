@@ -67,6 +67,7 @@ pub struct OpcodeSelectorCols<T> {
     pub is_jumpd: T,
 
     /// Miscellaneous.
+    pub is_wsbh: T,
     pub is_unimpl: T,
 }
 
@@ -113,6 +114,8 @@ impl<F: PrimeField> OpcodeSelectorCols<F> {
             self.is_jump = F::ONE;
         } else if instruction.opcode == Opcode::JumpDirect {
             self.is_jumpd = F::ONE;
+        } else if instruction.opcode == Opcode::WSBH {
+            self.is_wsbh = F::ONE;
         }
     }
 }
@@ -151,6 +154,7 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.is_bgez,
             self.is_jump,
             self.is_jumpd,
+            self.is_wsbh,
             self.is_unimpl,
         ];
         assert_eq!(columns.len(), NUM_OPCODE_SELECTOR_COLS);

@@ -63,6 +63,10 @@ pub enum Opcode {
     NOP = 43,
     SYSCALL = 44,
     TEQ = 45,
+    SEXT = 46,
+    WSBH = 47,
+    EXT = 48,
+    ROR = 49,
     UNIMPL = 0xff,
 }
 
@@ -117,6 +121,10 @@ impl Opcode {
             Opcode::TEQ => "teq",
             Opcode::NOP => "nop",
             Opcode::SYSCALL => "syscall",
+            Opcode::SEXT => "seb",
+            Opcode::WSBH => "wsbh",
+            Opcode::EXT => "ext",
+            Opcode::ROR => "ror",
             Opcode::UNIMPL => "unimpl",
         }
     }

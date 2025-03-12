@@ -172,7 +172,8 @@ impl CostEstimator for ExecutionReport {
         total_area += (mul_events as u64) * costs[&MipsAirDiscriminants::Mul];
         total_chips += 1;
 
-        let shift_right_events = self.opcode_counts[Opcode::SRL] + self.opcode_counts[Opcode::SRA];
+        let shift_right_events = self.opcode_counts[Opcode::SRL] + self.opcode_counts[Opcode::SRA]
+                                      + self.opcode_counts[Opcode::ROR];
         total_area += (shift_right_events as u64) * costs[&MipsAirDiscriminants::ShiftRight];
         total_chips += 1;
 

@@ -130,7 +130,7 @@ impl ExecutionRecord {
                 Opcode::SLL => {
                     self.shift_left_events.append(value);
                 }
-                Opcode::SRL | Opcode::SRA => {
+                Opcode::SRL | Opcode::SRA | Opcode::ROR => {
                     self.shift_right_events.append(value);
                 }
                 Opcode::SLT | Opcode::SLTU => {

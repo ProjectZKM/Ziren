@@ -173,7 +173,7 @@ impl Instruction {
             // } // SRL: rd = rt >> sa
             (0b000000, 0b000010) => {
                 if rs == 1 {
-                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
+                    Ok(Self::new(Opcode::ROR, rd, rt, sa, false, true))
                 } else {
                     Ok(Self::new(Opcode::SRL, rd, rt, sa, false, true)) // SRL: rd = rt >> sa
                 }
@@ -469,6 +469,19 @@ impl Instruction {
             (0b110011, _) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // Pref
             // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
+            (0b011111, 0b100000) => {
+                if sa == 0b010000 {
+                    // Ok(Operation::Signext(rd, rt, 8)) // seb
+                    Ok(Self::new(Opcode::SEXT, rd, rt, 0, false, true))
+                } else if sa == 0b000010 {
+                    // Ok(Operation::SwapHalf(rd, rt)) // wsbh
+                    Ok(Self::new(Opcode::WSBH, rd as u8, rt, 0, false, true))
+                } else {
+                    Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
+                }
+            }
+            // (0b011111, 0b000000, _) => Ok(Operation::Ext(rt, rs, rd, sa)), // ext
+            (0b011111, 0b000000) => Ok(Self::new(Opcode::EXT, rt as u8, rs, (rd as u32) << 5 | sa, false, true)),
             _ => {
                 log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
                 Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
