@@ -53,6 +53,13 @@ pub enum Opcode {
     NOP = 43,
     SYSCALL = 44,
     TEQ = 45,
+    SEXT = 46,
+    WSBH = 47,
+    EXT = 48,
+    ROR = 49,
+    MADDU = 50,
+    MSUBU = 51,
+    INS = 52,
     UNIMPL = 0xff,
 }
 ```
@@ -152,6 +159,14 @@ The support instructions are as follows:
 | BAL         | 000001     | 00000       | 10001       | offset      | offset       | offset      | target_offset = sign_extend(offset \|\| 0 2 ) GPR[31] = PC + 8 PC = PC + target_offset |
 | PREF        | 110011     | base        | hint        | offset      | offset       | offset      | prefetch(nop)                                                |
 | TEQ         | 000000     | rs          | rt          | code        | code         | 110100      | trap，if rs == rt                                            |
+| ROR         |	000000	   | 00001	     | rt	       | rd	         | sa	        | 000010	  | rd = rotate_right(rt, sa）                                  |
+| WSBH 		  | 011111	   | 00000	     | rt	       | rd     	 | 00010	    | 100000      | rd = swaphalf(rt)                                           |	
+| EXT         |	011111     | rs	         | rt	       | msbd	     | lsb	        | 000000	  | rt =  rs[msbd+lsb..lsb]                                      |
+| SEB		  | 011111     | 00000       | rt          | rd	         | 10000        | 100000	  | rd = signExtend(rt[15..0])                                  |
+| INS         |	011111     | rs          | rt	       | msb	     | lsb	        | 000100	  | rt = rt[32:msb+1] || rs[msb+1-lsb : 0] || rt[lsb-1:0]         |
+| MADDU		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000001      | (hi, lo) = rs * rt + (hi,lo)                                |
+| MSUBU		  | 011100	   | rs	         | rt	       | 00000	     | 00000	    | 000101	  | (hi, lo) = (hi,lo) - rs * rt                                | 
+
 
 ## Supported syscalls
 
@@ -196,4 +211,29 @@ The support instructions are as follows:
 |  BN254_FP2_MUL = 0x00_01_01_2B,          |  Executes the `BN254_FP2_MUL` precompile.          |
 |  SECP256R1_ADD = 0x00_01_01_2C,          |  Executes the `SECP256R1_ADD` precompile.          |
 |  SECP256R1_DOUBLE = 0x00_00_01_2D,       |  Executes the `SECP256R1_DOUBLE` precompile.       |
-|  SECP256R1_DECOMPRESS = 0x00_00_01_2E,   |  Executes the `SECP256R1_DECOMPRESS` precompile.   |               
+|  SECP256R1_DECOMPRESS = 0x00_00_01_2E,   |  Executes the `SECP256R1_DECOMPRESS` precompile.   |
+
+## Benchmark Data
+| program	    | args      | num of insts      |
+| ------------- | --------- | ----------------- |
+| sha2	        | 32        | 11445             |
+|               | 256       | 26504             |
+|               | 512       | 41908             |
+|               | 1024      | 72716             |
+|               | 2048      | 134332            |
+| sha3	        | 32        | 27525             |
+|               | 256       | 50152             |
+|               | 512       | 92048             |
+|               | 1024      | 175827            |
+|               | 2048      | 343383            |
+| fibonacci     | 100       | 6001              |
+|               | 1000      | 27601             |
+|               | 10000     | 243601            |
+|               | 50000     | 1203601           |
+| bigmem	    | 5         | 931702            |
+| sha2-chain	| 230       | 768103            |
+|               | 460       | 1527103           |
+| sha3-chain	| 230       | 4479926           |
+|               | 460       | 8951356           |
+
+Latest data reference [zkvm benchmark data](https://docs.google.com/spreadsheets/d/1H5J3tsy2ixVjkL2VP0Yxkz9scOpXzPPxRo-CGafuK08/edit?usp=sharing)
