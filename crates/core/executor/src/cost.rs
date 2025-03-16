@@ -20,13 +20,14 @@ pub fn estimate_mips_event_counts(
 
     // Compute the number of events in the mul chip.
     events_counts[MipsAirId::Mul] = opcode_counts[Opcode::MUL]
-        + opcode_counts[Opcode::MUL]
         + opcode_counts[Opcode::MULT]
         + opcode_counts[Opcode::MULTU];
 
     // Compute the number of events in the bitwise chip.
-    events_counts[MipsAirId::Bitwise] =
-        opcode_counts[Opcode::XOR] + opcode_counts[Opcode::OR] + opcode_counts[Opcode::AND];
+    events_counts[MipsAirId::Bitwise] = opcode_counts[Opcode::XOR]
+        + opcode_counts[Opcode::OR]
+        + opcode_counts[Opcode::AND]
+        + opcode_counts[Opcode::NOR];
 
     // Compute the number of events in the shift left chip.
     events_counts[MipsAirId::ShiftLeft] = opcode_counts[Opcode::SLL];
