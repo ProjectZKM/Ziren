@@ -3,6 +3,7 @@ crates/test-artifacts/programs/target/
 crates/test-artifacts/programs/Cargo.lock
 .idea
 *.log
+bins
 
 # Proofs
 **/proof-with-pis.bin

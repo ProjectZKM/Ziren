@@ -25,9 +25,7 @@ use std::env;
 
 pub mod proof;
 pub mod provers;
-pub mod utils {
-    pub use zkm2_core_machine::utils::setup_logger;
-}
+pub mod utils;
 
 pub use proof::*;
 pub use provers::ZKMVerificationError;
@@ -46,6 +44,9 @@ pub use zkm2_prover::{
     CoreSC, HashableKey, InnerSC, OuterSC, PlonkBn254Proof, ProverMode, ZKMProver, ZKMProvingKey,
     ZKMVerifyingKey,
 };
+
+// Re-export the utilities.
+pub use utils::setup_logger;
 
 /// A client for interacting with ZKM2.
 pub struct ProverClient {

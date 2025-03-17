@@ -129,15 +129,7 @@ impl<'a> Prove<'a> {
         let context = context_builder.build();
 
         // Dump the program and stdin to files for debugging if `ZKM_DUMP` is set.
-        if std::env::var("ZKM_DUMP")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false)
-        {
-            let program = pk.elf.clone();
-            std::fs::write("program.bin", program).unwrap();
-            let stdin = bincode::serialize(&stdin).unwrap();
-            std::fs::write("stdin.bin", stdin.clone()).unwrap();
-        }
+        crate::utils::zkm_dump(&pk.elf, &stdin);
 
         prover.prove(pk, stdin, proof_opts, context, kind)
     }
