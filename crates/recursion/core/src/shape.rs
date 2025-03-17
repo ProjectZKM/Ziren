@@ -49,32 +49,29 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
 {
     pub fn fix_shape(&self, program: &mut RecursionProgram<F>) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
-        // Get the allowed shape with a minimal hamming distance from the current shape.
-        let mut min_distance = usize::MAX;
+
         let mut closest_shape = None;
+
         for shape in self.allowed_shapes.iter() {
-            let mut distance = 0;
-            let mut is_valid = true;
+            // If any of the heights is greater than the shape, continue.
+            let mut valid = true;
             for (name, height) in heights.iter() {
-                let next_power_of_two = height.next_power_of_two();
-                let allowed_log_height = shape.get(name).unwrap();
-                let allowed_height = 1 << allowed_log_height;
-                if next_power_of_two != allowed_height {
-                    distance += 1;
-                }
-                if next_power_of_two > allowed_height {
-                    is_valid = false;
+                if *height > (1 << shape.get(name).unwrap()) {
+                    valid = false;
                 }
             }
-            if is_valid && distance < min_distance {
-                min_distance = distance;
-                closest_shape = Some(shape.clone());
+
+            if !valid {
+                continue;
             }
+
+            closest_shape = Some(shape.clone());
+            break;
         }
 
         if let Some(shape) = closest_shape {
             let shape = RecursionShape { inner: shape };
-            program.shape = Some(shape);
+            *program.shape_mut() = Some(shape);
         } else {
             panic!("no shape found for heights: {:?}", heights);
         }
@@ -122,17 +119,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
 
         // Specify allowed shapes.
         let allowed_shapes = [
-            [
-                (mem_var.clone(), 19),
-                (select.clone(), 20),
-                (mem_const.clone(), 18),
-                (batch_fri.clone(), 18),
-                (base_alu.clone(), 16),
-                (ext_alu.clone(), 16),
-                (exp_reverse_bits_len.clone(), 18),
-                (poseidon2_wide.clone(), 17),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
+            // Fastest shape.
             [
                 (mem_var.clone(), 19),
                 (select.clone(), 19),
@@ -142,6 +129,18 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (ext_alu.clone(), 16),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // Second fastest shape.
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 20),
+                (mem_const.clone(), 18),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 16),
+                (ext_alu.clone(), 19),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
         ]

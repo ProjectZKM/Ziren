@@ -160,10 +160,15 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             }
 
             // Generate shapes and send them to the compiler workers.
-            all_shapes
+            let subset_shapes = all_shapes
                 .into_iter()
                 .enumerate()
                 .filter(|(i, _)| indices_set.as_ref().map(|set| set.contains(i)).unwrap_or(true))
+                .collect::<Vec<_>>();
+
+            subset_shapes
+                .clone()
+                .into_iter()
                 .map(|(i, shape)| (i, ZKMCompressProgramShape::from_proof_shape(shape, height)))
                 .for_each(|(i, program_shape)| {
                     shape_tx.send((i, program_shape)).unwrap();
@@ -177,6 +182,12 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             let vk_set = vk_rx.iter().collect::<BTreeSet<_>>();
 
             let panic_indices = panic_rx.iter().collect::<Vec<_>>();
+
+            for (i, shape) in subset_shapes {
+                if panic_indices.contains(&i) {
+                    tracing::info!("panic shape {}: {:?}", i, shape);
+                }
+            }
 
             (vk_set, panic_indices, height)
         })

@@ -7,13 +7,14 @@ use num::Integer;
 use p3_koala_bear::KoalaBear;
 use p3_field::PrimeField32;
 use p3_util::log2_ceil_usize;
+use thiserror::Error;
+
 use zkm2_core_executor::{ExecutionRecord, Program, MipsAirId};
 use zkm2_stark::{
     air::MachineAir,
     shape::{OrderedShape, Shape, ShapeCluster},
     MachineRecord,
 };
-use thiserror::Error;
 
 use super::mips::mips_chips::{ByteChip, ProgramChip, SyscallChip};
 use crate::{
@@ -41,7 +42,7 @@ pub struct CoreShapeConfig<F: PrimeField32> {
     partial_core_shapes: BTreeMap<usize, Vec<ShapeCluster<MipsAirId>>>,
     partial_memory_shapes: ShapeCluster<MipsAirId>,
     partial_precompile_shapes: HashMap<MipsAir<F>, (usize, Vec<usize>)>,
-    small_shapes: Vec<ShapeCluster<MipsAirId>>,
+    partial_small_shapes: Vec<ShapeCluster<MipsAirId>>,
     costs: HashMap<MipsAirId, usize>,
 }
 
@@ -90,29 +91,47 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             heights.extend(MipsAir::<F>::memory_heights(record));
 
             // Try to find a shape fitting within at least one of the candidate shapes.
-            for (i, cluster) in self.small_shapes.iter().enumerate() {
+            let mut minimal_shape = None;
+            let mut minimal_area = usize::MAX;
+            let mut minimal_cluster = None;
+            for (i, cluster) in self.partial_small_shapes.iter().enumerate() {
                 if let Some(shape) = cluster.find_shape(&heights) {
-                    let shard = record.public_values.shard;
-                    tracing::info!("Shard Lifted: Index={}, Cluster={}", shard, i);
-
-                    for (air, height) in heights.iter() {
-                        if let Some(log2_height) = shape.log2_height(air) {
-                            tracing::info!(
-                                "Chip {:<20}: {:<3} -> {:<3}",
-                                air,
-                                log2_ceil_usize(*height),
-                                log2_height,
-                            );
-                        }
+                    if self.estimate_lde_size(&shape) < minimal_area {
+                        minimal_area = self.estimate_lde_size(&shape);
+                        minimal_shape = Some(shape);
+                        minimal_cluster = Some(i);
                     }
-
-                    record.shape.as_mut().unwrap().extend(shape);
-                    return Ok(());
                 }
             }
 
+            if let Some(shape) = minimal_shape {
+                let shard = record.public_values.shard;
+                tracing::info!(
+                    "Shard Lifted: Index={}, Cluster={}",
+                    shard,
+                    minimal_cluster.unwrap()
+                );
+                for (air, height) in heights.iter() {
+                    if shape.contains(air) {
+                        tracing::info!(
+                            "Chip {:<20}: {:<3} -> {:<3}",
+                            air,
+                            log2_ceil_usize(*height),
+                            shape.log2_height(air).unwrap(),
+                        );
+                    }
+                }
+                record.shape.as_mut().unwrap().extend(shape);
+                return Ok(());
+            }
+
             // No shape found, so return an error.
-            return Err(CoreShapeError::ShapeError(record.stats()));
+            return Err(CoreShapeError::ShapeError(
+                heights
+                    .into_iter()
+                    .map(|(air, height)| (air.to_string(), log2_ceil_usize(height)))
+                    .collect(),
+            ));
         }
 
         // If this is a normal "core" record, try to fix the shape as such.
@@ -130,7 +149,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                     if let Some(shape) = cluster.find_shape(&heights) {
                         if self.estimate_lde_size(&shape) < minimal_area {
                             minimal_area = self.estimate_lde_size(&shape);
-                            minimal_shape = Some(shape);
+                            minimal_shape = Some(shape.clone());
                             minimal_cluster = Some(i);
                         }
                     }
@@ -258,7 +277,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                     ),
                 ]
             })
-            .collect()
+            .filter(|shape| shape[3].1 <= 22)
+            .collect::<Vec<_>>()
     }
 
     fn generate_all_shapes_from_allowed_log_heights(
@@ -314,6 +334,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         self.partial_core_shapes
             .values()
             .flatten()
+            .chain(self.partial_small_shapes.iter())
             .flat_map(move |allowed_log_heights| {
                 Self::generate_all_shapes_from_allowed_log_heights({
                     let mut log_heights = allowed_log_heights
@@ -400,11 +421,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     }
 
     fn estimate_lde_size(&self, shape: &Shape<MipsAirId>) -> usize {
-        shape.iter().map(|(air, height)| self.costs[air] * height).sum()
+        shape.iter().map(|(air, height)| self.costs[air] * (1 << height)).sum()
     }
 
     pub fn small_program_shapes(&self) -> Vec<OrderedShape> {
-        self.small_shapes
+        self.partial_small_shapes
             .iter()
             .map(|log_heights| {
                 OrderedShape::from_log2_heights(
@@ -438,12 +459,23 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 
         // Generate the clusters from the maximal shapes and register them indexed by log2 shard
         //  size.
+        let blacklist = [
+            27, 33, 47, 68, 75, 102, 104, 114, 116, 118, 137, 138, 139, 144, 145, 153, 155, 157,
+            158, 169, 170, 171, 184, 185, 187, 195, 216, 243, 252, 275, 281, 282, 285,
+        ];
         let mut core_allowed_log2_heights = BTreeMap::new();
         for (log2_shard_size, maximal_shapes) in maximal_shapes {
             let mut clusters = vec![];
 
-            for maximal_shape in maximal_shapes {
-                let cluster = derive_cluster_from_maximal_shape(&maximal_shape);
+            for (i, maximal_shape) in maximal_shapes.iter().enumerate() {
+                // WARNING: This must be tuned carefully.
+                //
+                // This is current hardcoded, but in the future it should be computed dynamically.
+                if log2_shard_size == 21 && blacklist.contains(&i) {
+                    continue;
+                }
+
+                let cluster = derive_cluster_from_maximal_shape(maximal_shape);
                 clusters.push(cluster);
             }
 
@@ -467,7 +499,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
         );
 
         let mut precompile_allowed_log2_heights = HashMap::new();
-        let precompile_heights = (3..19).collect::<Vec<_>>();
+        let precompile_heights = (3..21).collect::<Vec<_>>();
         for (air, memory_events_per_row) in
             MipsAir::<F>::precompile_airs_with_memory_events_per_row()
         {
@@ -480,7 +512,7 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
             partial_core_shapes: core_allowed_log2_heights,
             partial_memory_shapes: ShapeCluster::new(memory_allowed_log2_heights),
             partial_precompile_shapes: precompile_allowed_log2_heights,
-            small_shapes: small_shapes
+            partial_small_shapes: small_shapes
                 .into_iter()
                 .map(|x| {
                     ShapeCluster::new(x.into_iter().map(|(k, v)| (k, vec![Some(v)])).collect())
@@ -496,7 +528,8 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
 
 fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<MipsAirId> {
     // We first define a heuristic to derive the log heights from the maximal shape.
-    let min_log2_height_threshold = 18;
+    let log2_gap_from_21 = 21 - shape.log2_height(&MipsAirId::Cpu).unwrap();
+    let min_log2_height_threshold = 18 - log2_gap_from_21;
     let log2_height_buffer = 10;
     let heuristic = |maximal_log2_height: Option<usize>, min_offset: usize| {
         if let Some(maximal_log2_height) = maximal_log2_height {

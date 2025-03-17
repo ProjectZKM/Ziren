@@ -14,13 +14,14 @@ use zkm2_stark::{shape::Shape, ZKMCoreOpts};
 use crate::{
     context::ZKMContext,
     dependencies::{emit_cloclz_dependencies, emit_cpu_dependencies, emit_divrem_dependencies},
-    estimate_mips_event_counts,
+    estimate_mips_event_counts, estimate_mips_lde_size,
     events::{
         AluEvent, CpuEvent, MemoryAccessPosition, MemoryInitializeFinalizeEvent,
         MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord, SyscallEvent,
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, PagedMemory},
+    pad_mips_event_counts,
     record::{ExecutionRecord, MemoryAccessRecord},
     sign_extend,
     state::{ExecutionState, ForkState},
@@ -43,8 +44,6 @@ pub enum DeferredProofVerification {
     /// Skip verification of deferred proofs
     Disabled,
 }
-
-const CHECK_CYCLE: usize = 16;
 
 /// An executor for the MIPS zkVM.
 ///
@@ -143,7 +142,16 @@ pub struct Executor<'a> {
     pub maximal_shapes: Option<Vec<Shape<MipsAirId>>>,
 
     /// The costs of the program.
-    pub costs: HashMap<MipsAirId, usize>,
+    pub costs: HashMap<MipsAirId, u64>,
+
+    /// The frequency to check the stopping condition.
+    pub shape_check_frequency: u64,
+
+    /// Early exit if the estimate LDE size is too big.
+    pub lde_size_check: bool,
+
+    /// The maximum LDE size to allow.
+    pub lde_size_threshold: u64,
 }
 
 /// The different modes the executor can run in.
@@ -289,7 +297,10 @@ impl<'a> Executor<'a> {
             uninitialized_memory_checkpoint: PagedMemory::new_preallocated(),
             local_memory_access: HashMap::new(),
             maximal_shapes: None,
-            costs,
+            costs: costs.into_iter().map(|(k, v)| (k, v as u64)).collect(),
+            shape_check_frequency: 16,
+            lde_size_check: false,
+            lde_size_threshold: 0,
         }
     }
 
@@ -1538,7 +1549,7 @@ impl<'a> Executor<'a> {
             //
             // If we're close to not fitting, early stop the shard to ensure we don't OOM.
             let mut shape_match_found = true;
-            if self.state.global_clk % (CHECK_CYCLE as u64) == 0 {
+            if self.state.global_clk % self.shape_check_frequency == 0 {
                 // Estimate the number of events in the trace.
                 let event_counts = estimate_mips_event_counts(
                     (self.state.clk / 5) as u64,
@@ -1547,7 +1558,21 @@ impl<'a> Executor<'a> {
                     *self.local_counts.event_counts,
                 );
 
-                if let Some(maximal_shapes) = &self.maximal_shapes {
+                // Check if the LDE size is too large.
+                if self.lde_size_check {
+                    let padded_event_counts =
+                        pad_mips_event_counts(event_counts, self.shape_check_frequency);
+                    let padded_lde_size = estimate_mips_lde_size(padded_event_counts, &self.costs);
+                    if padded_lde_size > self.lde_size_threshold {
+                        tracing::warn!(
+                            "stopping shard early due to lde size: {} gb",
+                            (padded_lde_size as u64) / 1_000_000_000
+                        );
+                        shape_match_found = false;
+                    }
+                } else if let Some(maximal_shapes) = &self.maximal_shapes {
+                    // Check if we're too "close" to a maximal shape.
+
                     let distance = |threshold: usize, count: usize| {
                         (count != 0).then(|| threshold - count).unwrap_or(usize::MAX)
                     };
@@ -1560,33 +1585,37 @@ impl<'a> Executor<'a> {
                             continue;
                         }
 
-                        let mut distances = Vec::new();
+                        let mut l_infinity = usize::MAX;
                         let mut shape_too_small = false;
                         for air in MipsAirId::core() {
                             if air == MipsAirId::Cpu {
                                 continue;
                             }
+
                             let threshold = shape.height(&air).unwrap_or_default();
                             let count = event_counts[air] as usize;
                             if count > threshold {
                                 shape_too_small = true;
                                 break;
                             }
-                            distances.push(distance(threshold, count));
+
+                            if distance(threshold, count) < l_infinity {
+                                l_infinity = distance(threshold, count);
+                            }
                         }
 
                         if shape_too_small {
                             continue;
                         }
 
-                        let l_infinity = distances.into_iter().min().unwrap();
-                        if l_infinity >= 2 * CHECK_CYCLE {
+                        if l_infinity >= 32 * (self.shape_check_frequency as usize) {
                             shape_match_found = true;
                             break;
                         }
                     }
 
                     if !shape_match_found {
+                        self.record.counts = Some(event_counts);
                         log::warn!(
                             "stopping shard early due to no shapes fitting: \
                             clk: {},

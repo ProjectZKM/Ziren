@@ -1,3 +1,4 @@
+use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
 use p3_field::{FieldAlgebra, PrimeField};
@@ -66,6 +67,8 @@ pub struct ExecutionRecord {
     pub public_values: PublicValues<u32, u32>,
     /// The shape of the proof.
     pub shape: Option<Shape<MipsAirId>>,
+    /// The predicted counts of the proof.
+    pub counts: Option<EnumMap<MipsAirId, u64>>,
 }
 
 impl Default for ExecutionRecord {
@@ -91,6 +94,7 @@ impl Default for ExecutionRecord {
             global_lookup_events: Vec::default(),
             public_values: PublicValues::default(),
             shape: None,
+            counts: None,
         }
     }
 }

@@ -1,6 +1,82 @@
 use enum_map::EnumMap;
+use hashbrown::HashMap;
+use p3_koala_bear::KoalaBear;
 
 use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, Opcode, MipsAirId};
+
+const BYTE_NUM_ROWS: u64 = 1 << 16;
+const MAX_PROGRAM_SIZE: u64 = 1 << 22;
+
+/// Estimates the LDE area.
+#[must_use]
+pub fn estimate_mips_lde_size(
+    num_events_per_air: EnumMap<MipsAirId, u64>,
+    costs_per_air: &HashMap<MipsAirId, u64>,
+) -> u64 {
+    // Compute the byte chip contribution.
+    let mut cells = BYTE_NUM_ROWS * costs_per_air[&MipsAirId::Byte];
+
+    // Compute the program chip contribution.
+    cells += MAX_PROGRAM_SIZE * costs_per_air[&MipsAirId::Program];
+
+    // Compute the cpu chip contribution.
+    cells +=
+        (num_events_per_air[MipsAirId::Cpu]).next_power_of_two() * costs_per_air[&MipsAirId::Cpu];
+
+    // Compute the addsub chip contribution.
+    cells += (num_events_per_air[MipsAirId::AddSub]).next_power_of_two()
+        * costs_per_air[&MipsAirId::AddSub];
+
+    // Compute the mul chip contribution.
+    cells +=
+        (num_events_per_air[MipsAirId::Mul]).next_power_of_two() * costs_per_air[&MipsAirId::Mul];
+
+    // Compute the bitwise chip contribution.
+    cells += (num_events_per_air[MipsAirId::Bitwise]).next_power_of_two()
+        * costs_per_air[&MipsAirId::Bitwise];
+
+    // Compute the shift left chip contribution.
+    cells += (num_events_per_air[MipsAirId::ShiftLeft]).next_power_of_two()
+        * costs_per_air[&MipsAirId::ShiftLeft];
+
+    // Compute the shift right chip contribution.
+    cells += (num_events_per_air[MipsAirId::ShiftRight]).next_power_of_two()
+        * costs_per_air[&MipsAirId::ShiftRight];
+
+    // Compute the divrem chip contribution.
+    cells += (num_events_per_air[MipsAirId::DivRem]).next_power_of_two()
+        * costs_per_air[&MipsAirId::DivRem];
+
+    // Compute the lt chip contribution.
+    cells +=
+        (num_events_per_air[MipsAirId::Lt]).next_power_of_two() * costs_per_air[&MipsAirId::Lt];
+
+    // Compute the memory local chip contribution.
+    cells += (num_events_per_air[MipsAirId::MemoryLocal]).next_power_of_two()
+        * costs_per_air[&MipsAirId::MemoryLocal];
+
+    // // Compute the branch chip contribution.
+    // cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
+    //     * costs_per_air[&MipsAirId::Branch];
+
+    // // Compute the jump chip contribution.
+    // cells += (num_events_per_air[MipsAirId::Jump]).next_power_of_two()
+    //     * costs_per_air[&MipsAirId::Jump];
+
+    // Compute the cloclz chip contribution.
+    cells += (num_events_per_air[MipsAirId::CloClz]).next_power_of_two()
+        * costs_per_air[&MipsAirId::CloClz];
+
+    // Compute the syscall core chip contribution.
+    cells += (num_events_per_air[MipsAirId::SyscallCore]).next_power_of_two()
+        * costs_per_air[&MipsAirId::SyscallCore];
+
+    // Compute the global chip contribution.
+    cells += (num_events_per_air[MipsAirId::Global]).next_power_of_two()
+        * costs_per_air[&MipsAirId::Global];
+
+    cells * ((core::mem::size_of::<KoalaBear>() << 1) as u64)
+}
 
 /// Estimate
 /// Maps the opcode counts to the number of events in each air.
@@ -67,6 +143,13 @@ pub fn estimate_mips_event_counts(
 
     // Compute the number of events in the global chip.
     events_counts[MipsAirId::Global] = 2 * touched_addresses + syscalls_sent;
+
+    // Adjust for divrem dependencies.
+    events_counts[MipsAirId::Mul] += events_counts[MipsAirId::DivRem];
+    events_counts[MipsAirId::Lt] += events_counts[MipsAirId::DivRem];
+
+    // Note: we ignore the additional dependencies for addsub, since they are accounted for in
+    // the maximal shapes.
 
     events_counts
 }
