@@ -1,6 +1,7 @@
+use std::str::FromStr;
 use hashbrown::HashMap;
 
-use crate::Opcode;
+use crate::{Opcode, MipsAirId};
 use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -45,6 +46,14 @@ pub fn get_quotient_and_remainder(b: u32, c: u32, opcode: Opcode) -> (u32, u32) 
 #[must_use]
 pub const fn get_msb(a: u32) -> u8 {
     ((a >> 31) & 1) as u8
+}
+
+/// Load the cost of each air from the predefined JSON.
+#[must_use]
+pub fn mips_costs() -> HashMap<MipsAirId, usize> {
+    let costs: HashMap<String, usize> =
+        serde_json::from_str(include_str!("./artifacts/mips_costs.json")).unwrap();
+    costs.into_iter().map(|(k, v)| (MipsAirId::from_str(&k).unwrap(), v)).collect()
 }
 
 pub fn sign_extend<const N: usize>(value: u32) -> u32 {

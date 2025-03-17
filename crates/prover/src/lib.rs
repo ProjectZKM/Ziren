@@ -129,31 +129,31 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     pub wrap_prover: C::WrapProver,
 
     /// The cache of compiled recursion programs.
-    pub recursion_programs: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<KoalaBear>>>>,
+    pub lift_programs_lru: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<KoalaBear>>>>,
 
     /// The number of cache misses for recursion programs.
-    pub recursion_cache_misses: AtomicUsize,
+    pub lift_cache_misses: AtomicUsize,
 
     /// The cache of compiled compression programs.
-    pub compress_program_map: BTreeMap<ZKMCompressWithVkeyShape, Arc<RecursionProgram<KoalaBear>>>,
+    pub join_programs_map: BTreeMap<ZKMCompressWithVkeyShape, Arc<RecursionProgram<KoalaBear>>>,
 
     /// The number of cache misses for compression programs.
-    pub compress_cache_misses: AtomicUsize,
+    pub join_cache_misses: AtomicUsize,
 
     /// The root of the allowed recursion verification keys.
-    pub vk_root: <InnerSC as FieldHasher<KoalaBear>>::Digest,
+    pub recursion_vk_root: <InnerSC as FieldHasher<KoalaBear>>::Digest,
 
     /// The allowed VKs and their corresponding indices.
-    pub allowed_vk_map: BTreeMap<<InnerSC as FieldHasher<KoalaBear>>::Digest, usize>,
+    pub recursion_vk_map: BTreeMap<<InnerSC as FieldHasher<KoalaBear>>::Digest, usize>,
 
     /// The Merkle tree for the allowed VKs.
-    pub vk_merkle_tree: MerkleTree<KoalaBear, InnerSC>,
+    pub recursion_vk_tree: MerkleTree<KoalaBear, InnerSC>,
 
     /// The core shape configuration.
     pub core_shape_config: Option<CoreShapeConfig<KoalaBear>>,
 
     /// The recursion shape configuration.
-    pub recursion_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
+    pub compress_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
 
     /// The program for wrapping.
     pub wrap_program: OnceLock<Arc<RecursionProgram<KoalaBear>>>,
@@ -247,15 +247,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_prover,
             shrink_prover,
             wrap_prover,
-            recursion_programs: Mutex::new(LruCache::new(core_cache_size)),
-            recursion_cache_misses: AtomicUsize::new(0),
-            compress_program_map: compress_programs,
-            compress_cache_misses: AtomicUsize::new(0),
-            vk_root: root,
-            vk_merkle_tree: merkle_tree,
-            allowed_vk_map,
+            lift_programs_lru: Mutex::new(LruCache::new(core_cache_size)),
+            lift_cache_misses: AtomicUsize::new(0),
+            join_programs_map: compress_programs,
+            join_cache_misses: AtomicUsize::new(0),
+            recursion_vk_root: root,
+            recursion_vk_tree: merkle_tree,
+            recursion_vk_map: allowed_vk_map,
             core_shape_config,
-            recursion_shape_config,
+            compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_program: OnceLock::new(),
             wrap_vk: OnceLock::new(),
@@ -346,10 +346,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMRecursionWitnessValues<CoreSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let mut cache = self.recursion_programs.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.lift_programs_lru.lock().unwrap_or_else(|e| e.into_inner());
         cache
             .get_or_insert(input.shape(), || {
-                let misses = self.recursion_cache_misses.fetch_add(1, Ordering::Relaxed);
+                let misses = self.lift_cache_misses.fetch_add(1, Ordering::Relaxed);
                 tracing::debug!("core cache miss, misses: {}", misses);
                 // Get the operations.
                 let builder_span = tracing::debug_span!("build recursion program").entered();
@@ -364,7 +364,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let compiler_span = tracing::debug_span!("compile recursion program").entered();
                 let mut compiler = AsmCompiler::<InnerConfig>::default();
                 let mut program = compiler.compile(operations);
-                if let Some(recursion_shape_config) = &self.recursion_shape_config {
+                if let Some(recursion_shape_config) = &self.compress_shape_config {
                     recursion_shape_config.fix_shape(&mut program);
                 }
                 let program = Arc::new(program);
@@ -378,11 +378,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        self.compress_program_map.get(&input.shape()).cloned().unwrap_or_else(|| {
+        self.join_programs_map.get(&input.shape()).cloned().unwrap_or_else(|| {
             tracing::warn!("compress program not found in map, recomputing join program.");
             // Get the operations.
             Arc::new(compress_program_from_input::<C>(
-                self.recursion_shape_config.as_ref(),
+                self.compress_shape_config.as_ref(),
                 &self.compress_prover,
                 self.vk_verification,
                 input,
@@ -431,7 +431,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let input_shape = ZKMCompressShape::from(vec![shrink_shape]);
                 let shape = ZKMCompressWithVkeyShape {
                     compress_shape: input_shape,
-                    merkle_tree_height: self.vk_merkle_tree.height,
+                    merkle_tree_height: self.recursion_vk_tree.height,
                 };
                 let dummy_input =
                     ZKMCompressWithVKeyWitnessValues::dummy(self.shrink_prover.machine(), &shape);
@@ -440,7 +440,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
                 // Attest that the merkle tree root is correct.
                 let root = input.merkle_var.root;
-                for (val, expected) in root.iter().zip(self.vk_root.iter()) {
+                for (val, expected) in root.iter().zip(self.recursion_vk_root.iter()) {
                     builder.assert_felt_eq(*val, *expected);
                 }
                 // Verify the proof.
@@ -494,7 +494,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let compiler_span = tracing::debug_span!("compile deferred program").entered();
         let mut compiler = AsmCompiler::<InnerConfig>::default();
         let mut program = compiler.compile(operations);
-        if let Some(recursion_shape_config) = &self.recursion_shape_config {
+        if let Some(recursion_shape_config) = &self.compress_shape_config {
             recursion_shape_config.fix_shape(&mut program);
         }
         let program = Arc::new(program);
@@ -520,7 +520,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 shard_proofs: proofs.clone(),
                 is_complete,
                 is_first_shard: batch_idx == 0,
-                vk_root: self.vk_root,
+                vk_root: self.recursion_vk_root,
             });
         }
 
@@ -1105,14 +1105,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: ZKMCompressWitnessValues<CoreSC>,
     ) -> ZKMCompressWithVKeyWitnessValues<CoreSC> {
-        let num_vks = self.allowed_vk_map.len();
+        let num_vks = self.recursion_vk_map.len();
         let (vk_indices, vk_digest_values): (Vec<_>, Vec<_>) = if self.vk_verification {
             input
                 .vks_and_proofs
                 .iter()
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
-                    let index = self.allowed_vk_map.get(&vk_digest).expect("vk not allowed");
+                    let index = self.recursion_vk_map.get(&vk_digest).expect("vk not allowed");
                     (index, vk_digest)
                 })
                 .unzip()
@@ -1131,13 +1131,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let proofs = vk_indices
             .iter()
             .map(|index| {
-                let (_, proof) = MerkleTree::open(&self.vk_merkle_tree, *index);
+                let (_, proof) = MerkleTree::open(&self.recursion_vk_tree, *index);
                 proof
             })
             .collect();
 
         let merkle_val = ZKMMerkleProofWitnessValues {
-            root: self.vk_root,
+            root: self.recursion_vk_root,
             values: vk_digest_values,
             vk_merkle_proofs: proofs,
         };

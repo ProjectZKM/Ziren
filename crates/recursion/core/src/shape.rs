@@ -91,6 +91,19 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             .multi_cartesian_product()
     }
 
+    pub fn union_config_with_extra_room(&self) -> Self {
+        let mut map = HashMap::new();
+        for shape in self.allowed_shapes.clone() {
+            for key in shape.keys() {
+                let current = map.get(key).unwrap_or(&0);
+                map.insert(key.clone(), *current.max(shape.get(key).unwrap()));
+            }
+        }
+        map.values_mut().for_each(|x| *x += 2);
+        map.insert("PublicValues".to_string(), 4);
+        Self { allowed_shapes: vec![map], _marker: PhantomData }
+    }
+
     pub fn from_hash_map(hash_map: &HashMap<String, usize>) -> Self {
         Self { allowed_shapes: vec![hash_map.clone()], _marker: PhantomData }
     }

@@ -55,6 +55,79 @@ pub enum VkBuildError {
     Bincode(#[from] bincode::Error),
 }
 
+pub fn check_shapes<C: ZKMProverComponents>(
+    reduce_batch_size: usize,
+    no_precompiles: bool,
+    num_compiler_workers: usize,
+    prover: &ZKMProver<C>,
+) -> bool {
+    let (shape_tx, shape_rx) =
+        std::sync::mpsc::sync_channel::<ZKMCompressProgramShape>(num_compiler_workers);
+    let (panic_tx, panic_rx) = std::sync::mpsc::channel();
+    let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
+    let recursion_shape_config =
+        prover.compress_shape_config.as_ref().expect("recursion shape config not found");
+
+    let shape_rx = Mutex::new(shape_rx);
+
+    let all_maximal_shapes = ZKMProofShape::generate_maximal_shapes(
+        core_shape_config,
+        recursion_shape_config,
+        reduce_batch_size,
+        no_precompiles,
+    )
+    .collect::<BTreeSet<ZKMProofShape>>();
+    let num_shapes = all_maximal_shapes.len();
+    tracing::info!("number of shapes: {}", num_shapes);
+
+    // The Merkle tree height.
+    let height = num_shapes.next_power_of_two().ilog2() as usize;
+
+    let compress_ok = std::thread::scope(|s| {
+        // Initialize compiler workers.
+        for _ in 0..num_compiler_workers {
+            let shape_rx = &shape_rx;
+            let prover = &prover;
+            let panic_tx = panic_tx.clone();
+            s.spawn(move || {
+                while let Ok(shape) = shape_rx.lock().unwrap().recv() {
+                    tracing::info!("shape is {:?}", shape);
+                    let program = catch_unwind(AssertUnwindSafe(|| {
+                        // Try to build the recursion program from the given shape.
+                        prover.program_from_shape(shape.clone(), None)
+                    }));
+                    match program {
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                "Program generation failed for shape {:?}, with error: {:?}",
+                                shape,
+                                e
+                            );
+                            panic_tx.send(true).unwrap();
+                        }
+                    }
+                }
+            });
+        }
+
+        // Generate shapes and send them to the compiler workers.
+        all_maximal_shapes.into_iter().for_each(|program_shape| {
+            shape_tx
+                .send(ZKMCompressProgramShape::from_proof_shape(program_shape, height))
+                .unwrap();
+        });
+
+        drop(shape_tx);
+        drop(panic_tx);
+
+        // If the panic receiver has no panics, then the shape is correct.
+        panic_rx.iter().next().is_none()
+    });
+
+    compress_ok
+}
+
 pub fn build_vk_map<C: ZKMProverComponents>(
     reduce_batch_size: usize,
     dummy: bool,
@@ -66,7 +139,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
     prover.vk_verification = !dummy;
     let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
     let recursion_shape_config =
-        prover.recursion_shape_config.as_ref().expect("recursion shape config not found");
+        prover.compress_shape_config.as_ref().expect("recursion shape config not found");
 
     tracing::info!("building compress vk map");
     let (vk_set, panic_indices, height) = if dummy {
@@ -257,6 +330,38 @@ impl ZKMProofShape {
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
         recursion_shape_config.get_all_shape_combinations(reduce_batch_size)
+    }
+
+    pub fn generate_maximal_shapes<'a>(
+        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
+        recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
+        reduce_batch_size: usize,
+        no_precompiles: bool,
+    ) -> impl Iterator<Item = Self> + 'a {
+        let core_shape_iter = if no_precompiles {
+            core_shape_config.maximal_core_shapes(21).into_iter()
+        } else {
+            core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
+        };
+        core_shape_iter
+            .map(|core_shape| {
+                Self::Recursion(OrderedShape {
+                    inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+                })
+            })
+            .chain((1..=reduce_batch_size).flat_map(|batch_size| {
+                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
+            }))
+            .chain(
+                recursion_shape_config
+                    .get_all_shape_combinations(1)
+                    .map(|mut x| Self::Deferred(x.pop().unwrap())),
+            )
+            .chain(
+                recursion_shape_config
+                    .get_all_shape_combinations(1)
+                    .map(|mut x| Self::Shrink(x.pop().unwrap())),
+            )
     }
 
     pub fn dummy_vk_map<'a>(
