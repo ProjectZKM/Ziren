@@ -9,9 +9,9 @@ use zkm2_stark::{shape::Shape, ZKMCoreOpts};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(short, long, value_delimiter = ' ')]
+    #[clap(short, long, value_delimiter = ',')]
     list: Vec<String>,
-    #[clap(short, long, value_delimiter = ' ')]
+    #[clap(short, long, value_delimiter = ',')]
     shard_sizes: Vec<usize>,
     #[clap(short, long)]
     initial: Option<PathBuf>,

@@ -10,9 +10,9 @@ use zkm2_stark::shape::Shape;
 struct Args {
     #[clap(short, long)]
     maximal_shapes_json: PathBuf,
-    #[clap(short, long, value_delimiter = ' ')]
+    #[clap(short, long, value_delimiter = ',')]
     log2_memory_heights: Vec<usize>,
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "small_shapes.json")]
     output: PathBuf,
 }
 
@@ -56,6 +56,6 @@ fn main() {
 
     // Serialize the small shapes.
     let serialized =
-        serde_json::to_string(&small_shapes).expect("failed to serialize small shapes");
+        serde_json::to_string_pretty(&small_shapes).expect("failed to serialize small shapes");
     std::fs::write(&args.output, serialized).expect("failed to write small shapes");
 }

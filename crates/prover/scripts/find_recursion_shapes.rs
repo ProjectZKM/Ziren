@@ -21,7 +21,7 @@ struct Args {
     #[clap(short, long, default_value_t = 1)]
     num_compiler_workers: usize,
     #[clap(short, long, default_value_t = 1)]
-    num_setup_workers: usize,
+    count_setup_workers: usize,
     #[clap(short, long)]
     start: Option<usize>,
     #[clap(short, long)]

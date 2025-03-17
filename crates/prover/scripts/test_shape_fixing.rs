@@ -10,9 +10,9 @@ use zkm2_stark::ZKMCoreOpts;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(short, long, value_delimiter = ' ')]
+    #[clap(short, long, value_delimiter = ',')]
     list: Vec<String>,
-    #[clap(short, long, value_delimiter = ' ')]
+    #[clap(short, long, value_delimiter = ',')]
     shard_size: usize,
 }
 
