@@ -470,7 +470,7 @@ pub fn verify_groth16_bn254_public_inputs(
     Ok(())
 }
 
-impl<C: ZKMProverComponents> SubproofVerifier for &ZKMProver<C> {
+impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
         proof: &zkm2_core_machine::reduce::ZKMReduceProof<KoalaBearPoseidon2>,

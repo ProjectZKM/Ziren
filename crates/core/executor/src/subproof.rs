@@ -1,7 +1,6 @@
 //! Types and methods for subproof verification inside the [`crate::Executor`].
 
 use crate::ZKMReduceProof;
-use std::sync::atomic::AtomicBool;
 use zkm2_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, MachineVerificationError, StarkVerifyingKey,
 };
@@ -21,36 +20,6 @@ pub trait SubproofVerifier: Sync + Send {
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
     ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>>;
-}
-
-/// A dummy verifier which prints a warning on the first proof and does nothing else.
-#[derive(Default)]
-pub struct DefaultSubproofVerifier {
-    printed: AtomicBool,
-}
-
-impl DefaultSubproofVerifier {
-    /// Creates a new [`DefaultSubproofVerifier`].
-    #[must_use]
-    pub fn new() -> Self {
-        Self { printed: AtomicBool::new(false) }
-    }
-}
-
-impl SubproofVerifier for DefaultSubproofVerifier {
-    fn verify_deferred_proof(
-        &self,
-        _proof: &ZKMReduceProof<KoalaBearPoseidon2>,
-        _vk: &StarkVerifyingKey<KoalaBearPoseidon2>,
-        _vk_hash: [u32; 8],
-        _committed_value_digest: [u32; 8],
-    ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {
-        if !self.printed.load(std::sync::atomic::Ordering::SeqCst) {
-            tracing::info!("Not verifying sub proof during runtime");
-            self.printed.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        Ok(())
-    }
 }
 
 /// A dummy verifier which does nothing.

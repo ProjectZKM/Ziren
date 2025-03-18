@@ -297,7 +297,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         stdin: &ZKMStdin,
         mut context: ZKMContext<'a>,
     ) -> Result<(ZKMPublicValues, ExecutionReport), ExecutionError> {
-        context.subproof_verifier.replace(Arc::new(self));
+        context.subproof_verifier = Some(self);
         let program = self.get_program(elf).unwrap();
         let opts = ZKMCoreOpts::default();
         let mut runtime = Executor::with_context(program, opts, context);
@@ -319,7 +319,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         opts: ZKMProverOpts,
         mut context: ZKMContext<'a>,
     ) -> Result<ZKMCoreProof, ZKMCoreProverError> {
-        context.subproof_verifier.replace(Arc::new(self));
+        context.subproof_verifier = Some(self);
         let program = self.get_program(&pk.elf).unwrap();
         let pk = self.core_prover.pk_to_device(&pk.pk);
         let (proof, public_values_stream, cycles) =

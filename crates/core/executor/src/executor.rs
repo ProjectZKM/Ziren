@@ -25,7 +25,7 @@ use crate::{
     record::{ExecutionRecord, MemoryAccessRecord},
     sign_extend,
     state::{ExecutionState, ForkState},
-    subproof::{DefaultSubproofVerifier, SubproofVerifier},
+    subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
     ExecutionReport, Instruction, Opcode, Program, Register, MipsAirId,
 };
@@ -99,7 +99,8 @@ pub struct Executor<'a> {
     /// The maximum number of cpu cycles to use for execution.
     pub max_cycles: Option<u64>,
 
-    /// Skip deferred proof verification.
+    /// Skip deferred proof verification. This check is informational only, not related to circuit
+    /// correctness.
     pub deferred_proof_verification: DeferredProofVerification,
 
     /// The state of the execution.
@@ -133,7 +134,7 @@ pub struct Executor<'a> {
     pub local_counts: LocalCounts,
 
     /// Verifier used to sanity check `verify_sp1_proof` during runtime.
-    pub subproof_verifier: Arc<dyn SubproofVerifier + 'a>,
+    pub subproof_verifier: Option<&'a dyn SubproofVerifier>,
 
     /// Registry of hooks, to be invoked by writing to certain file descriptors.
     pub hook_registry: HookRegistry<'a>,
@@ -256,8 +257,6 @@ impl<'a> Executor<'a> {
             None
         };
 
-        let subproof_verifier =
-            context.subproof_verifier.unwrap_or_else(|| Arc::new(DefaultSubproofVerifier::new()));
         let hook_registry = context.hook_registry.unwrap_or_default();
 
         let costs: HashMap<String, usize> = serde_json::from_str(MIPS_COSTS).unwrap();
@@ -284,7 +283,7 @@ impl<'a> Executor<'a> {
             report: ExecutionReport::default(),
             local_counts: LocalCounts::default(),
             print_report: false,
-            subproof_verifier,
+            subproof_verifier: context.subproof_verifier,
             hook_registry,
             opts,
             max_cycles: context.max_cycles,
@@ -329,6 +328,9 @@ impl<'a> Executor<'a> {
     pub fn recover(program: Program, state: ExecutionState, opts: ZKMCoreOpts) -> Self {
         let mut runtime = Self::new(program, opts);
         runtime.state = state;
+        // Disable deferred proof verification since we're recovering from a checkpoint, and the
+        // checkpoint creator already had a chance to check the proofs.
+        runtime.deferred_proof_verification = DeferredProofVerification::Disabled;
         runtime
     }
 
@@ -1701,12 +1703,14 @@ impl<'a> Executor<'a> {
         self.executor_mode = ExecutorMode::Checkpoint;
         self.emit_global_memory_events = emit_global_memory_events;
 
-        // Clone self.state without memory and uninitialized_memory in it so it's faster.
+        // Clone self.state without memory, uninitialized_memory, proof_stream in it so it's faster.
         let memory = std::mem::take(&mut self.state.memory);
         let uninitialized_memory = std::mem::take(&mut self.state.uninitialized_memory);
+        let proof_stream = std::mem::take(&mut self.state.proof_stream);
         let mut checkpoint = tracing::debug_span!("clone").in_scope(|| self.state.clone());
         self.state.memory = memory;
         self.state.uninitialized_memory = uninitialized_memory;
+        self.state.proof_stream = proof_stream;
 
         let done = tracing::debug_span!("execute").in_scope(|| self.execute())?;
         // Create a checkpoint using `memory_checkpoint`. Just include all memory if `done` since we
