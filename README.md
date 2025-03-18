@@ -7,9 +7,9 @@
     <a href="https://GitHub.com/zkMIPS"><img src="https://img.shields.io/badge/contributors-22-ee8449"/></a>
 </p>
 
-# zkMIPS$^+$
+# zkMIPS<sup>+</sup> 
 
-zkMIPS$^+$ is the next generation of zkMIPS for real-time proving, and zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32R2 instruction set architecture(ISA). 
+zkMIPS<sup>+</sup>  is the next generation of zkMIPS for real-time proving, and zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32R2 instruction set architecture(ISA). 
 
 ZKM is a general verifiable computing infrastructure on zkMIPS, empowering Ethereum as the Global Settlement Layer.
 
@@ -22,6 +22,6 @@ ZKM is a general verifiable computing infrastructure on zkMIPS, empowering Ether
 > * More conditional selection instructions, MOVZ, MOVN etc.
 
 ## Acknowledgements
-The zkMIPS$^+$ draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
-- [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS$^+$'s proving backend is based on Plonky3.
-- [SP1](https://github.com/succinctlabs/sp1): zkMIPS$^+$'s recursion compiler, circuit builder, precompiles originate from SP1.
+The zkMIPS<sup>+</sup> draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
+- [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS<sup>+</sup>'s proving backend is based on Plonky3.
+- [SP1](https://github.com/succinctlabs/sp1): zkMIPS<sup>+</sup>'s recursion compiler, circuit builder, precompiles originate from SP1.
