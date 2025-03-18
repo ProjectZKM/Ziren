@@ -381,7 +381,7 @@ where
 
                                     #[cfg(debug_assertions)]
                                     {
-                                        if let Some(shape) = record.shape {
+                                        if let Some(ref shape) = record.shape {
                                             assert_eq!(
                                                 proof.shape(),
                                                 shape
