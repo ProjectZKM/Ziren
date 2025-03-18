@@ -392,6 +392,10 @@ where
                                         }
                                     }
 
+                                    rayon::spawn(move || {
+                                        drop(record);
+                                    });
+
                                     proof
                                 },
                             ),
