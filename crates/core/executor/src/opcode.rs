@@ -13,63 +13,63 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum Opcode {
     // BinaryOperator
-    ADD = 0,
-    SUB = 1,
-    MULT = 2,
-    MULTU = 3,
-    MUL = 4,
-    DIV = 5,
-    DIVU = 6,
-    SLL = 7,
-    SRL = 8,
-    SRA = 9,
-    SLT = 10,
-    SLTU = 11,
-    AND = 12,
-    OR = 13,
-    XOR = 14,
-    NOR = 15,
+    ADD = 0,     // ALU
+    SUB = 1,     // ALU
+    MULT = 2,    // ALU
+    MULTU = 3,   // ALU
+    MUL = 4,     // ALU
+    DIV = 5,     // ALU    
+    DIVU = 6,    // ALU
+    SLL = 7,     // ALU
+    SRL = 8,     // ALU
+    SRA = 9,     // ALU
+    SLT = 10,    // ALU
+    SLTU = 11,   // ALU
+    AND = 12,    // ALU
+    OR = 13,     // ALU
+    XOR = 14,    // ALU
+    NOR = 15,    // ALU
     // count leading zeros
-    CLZ = 16,
+    CLZ = 16,    // ALU
     // count leading ones
-    CLO = 17,
-    BEQ = 18,
-    BGEZ = 19,
-    BGTZ = 20,
-    BLEZ = 21,
-    BLTZ = 22,
-    BNE = 23,
-    // MovCond
-    MEQ = 24,
-    MNE = 25,
+    CLO = 17,    // ALU
+    BEQ = 18,    // BRANCH
+    BGEZ = 19,   // BRANCH
+    BGTZ = 20,   // BRANCH
+    BLEZ = 21,   // BRANCH
+    BLTZ = 22,   // BRANCH
+    BNE = 23,    // BRANCH
+    // MovCond 
+    MEQ = 24,    // MISC
+    MNE = 25,    // MISC
     // Memory Op
-    LH = 26,
-    LWL = 27,
-    LW = 28,
-    LB = 29,
-    LBU = 30,
-    LHU = 31,
-    LWR = 32,
-    LL = 33,
-    SB = 34,
-    SH = 35,
-    SWL = 36,
-    SW = 37,
-    SWR = 38,
-    SC = 39,
-    Jump = 40,
-    Jumpi = 41,
-    JumpDirect = 42,
-    NOP = 43,
-    SYSCALL = 44,
-    TEQ = 45,
-    SEXT = 46,
-    WSBH = 47,
-    EXT = 48,
-    ROR = 49,
-    MADDU = 50,
-    MSUBU = 51,
-    INS = 52,
+    LH = 26,     // LOAD
+    LWL = 27,    // LOAD
+    LW = 28,     // LOAD
+    LB = 29,     // LOAD
+    LBU = 30,    // LOAD
+    LHU = 31,    // LOAD
+    LWR = 32,    // LOAD
+    LL = 33,     // LOAD
+    SB = 34,     // STORE
+    SH = 35,     // STORE
+    SWL = 36,    // STORE
+    SW = 37,     // STORE
+    SWR = 38,    // STORE
+    SC = 39,     // STORE
+    Jump = 40,   // JUMP
+    Jumpi = 41,  // JUMP
+    JumpDirect = 42,  // JUMP
+    NOP = 43,     // MISC  
+    SYSCALL = 44, // SYSCALL
+    TEQ = 45,     // MISC
+    SEXT = 46,    // MISC
+    WSBH = 47,    // MISC
+    EXT = 48,     // MISC
+    ROR = 49,     // ALU
+    MADDU = 50,   // MISC  
+    MSUBU = 51,   // MISC
+    INS = 52,     // MISC
     UNIMPL = 0xff,
 }
 

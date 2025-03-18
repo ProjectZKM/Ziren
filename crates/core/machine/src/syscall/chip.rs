@@ -138,6 +138,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => input
                 .syscall_events
                 .par_iter()
+                .filter(|event| event.syscall_id.to_le_bytes()[1] == 1)
                 .map(|event| row_fn(event, false))
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => input
@@ -164,7 +165,13 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             shape.included::<F, _>(self)
         } else {
             match self.shard_kind {
-                SyscallShardKind::Core => !shard.syscall_events.is_empty(),
+                SyscallShardKind::Core =>
+                    shard.syscall_events
+                        .iter()
+                        .filter(|e| e.syscall_id.to_le_bytes()[1] == 1)
+                        .take(1)
+                        .count()
+                        > 0,
                 SyscallShardKind::Precompile => {
                     !shard.precompile_events.is_empty()
                         && shard.cpu_events.is_empty()

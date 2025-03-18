@@ -100,8 +100,9 @@ pub struct DivRemChip;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DivRemCols<T> {
-    /// The shard number, used for byte lookup table.
-    pub shard: T,
+    /// The pc.
+    pub pc: T,
+    pub next_pc: T,
 
     /// The quotient operand.
     pub lo: Word<T>,
@@ -220,7 +221,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.hi = Word::from(event.hi);
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
-                cols.shard = F::from_canonical_u32(event.shard);
+                cols.pc = F::from_canonical_u32(event.pc);
+                cols.next_pc = F::from_canonical_u32(event.next_pc);
                 cols.is_real = F::ONE;
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_div = F::from_bool(event.opcode == Opcode::DIV);
@@ -264,7 +266,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     for word in words.iter() {
                         let most_significant_byte = word.to_le_bytes()[WORD_SIZE - 1];
                         blu_events.push(ByteLookupEvent {
-                            shard: event.shard,
                             opcode: ByteOpcode::MSB,
                             a1: get_msb(*word) as u16,
                             a2: 0,
@@ -314,9 +315,9 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
                 // Range check.
                 {
-                    output.add_u8_range_checks(event.shard, &quotient.to_le_bytes());
-                    output.add_u8_range_checks(event.shard, &remainder.to_le_bytes());
-                    output.add_u8_range_checks(event.shard, &c_times_quotient);
+                    output.add_u8_range_checks(&quotient.to_le_bytes());
+                    output.add_u8_range_checks(&remainder.to_le_bytes());
+                    output.add_u8_range_checks(&c_times_quotient);
                 }
             }
 
@@ -434,7 +435,6 @@ where
                 local.quotient,
                 local.c,
                 Word(upper_half),
-                local.shard,
                 local.is_real,
             );
         }
@@ -588,7 +588,6 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.c,
                 local.abs_c,
-                local.shard,
                 local.abs_c_alu_event,
             );
             builder.send_alu(
@@ -596,7 +595,6 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.remainder,
                 local.abs_remainder,
-                local.shard,
                 local.abs_rem_alu_event,
             );
 
@@ -641,7 +639,6 @@ where
                 Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.abs_remainder,
                 local.max_abs_c_or_1,
-                local.shard,
                 local.remainder_check_multiplicity,
             );
         }
@@ -707,13 +704,22 @@ where
                 local.is_divu * divu + local.is_div * div
             };
 
-            builder.receive_alu_with_hi(
+            builder.receive_instruction(
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                local.pc,
+                local.next_pc,
+                AB::Expr::ZERO,
                 opcode,
                 local.lo,
                 local.b,
                 local.c,
                 local.hi,
-                local.shard,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
                 local.is_real,
             );
         }
@@ -735,7 +741,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.divrem_events = vec![AluEvent::new(0, 0, Opcode::DIVU, 2, 17, 3)];
+        shard.divrem_events = vec![AluEvent::new(0, Opcode::DIVU, 2, 17, 3, false)];
         let chip = DivRemChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -770,12 +776,12 @@ mod tests {
             (Opcode::DIV, 1 << 31, 1 << 31, neg(1), 0),
         ];
         for t in divrems.iter() {
-            divrem_events.push(AluEvent::new_with_hi(0, 0, t.0, t.1, t.2, t.3, t.4));
+            divrem_events.push(AluEvent::new_with_hi(0, t.0, t.1, t.2, t.3, false, t.4));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - divrems.len()) {
-            divrem_events.push(AluEvent::new_with_hi(0, 0, Opcode::DIVU, 1, 1, 1, 0));
+            divrem_events.push(AluEvent::new_with_hi(0, Opcode::DIVU, 1, 1, 1, false, 0));
         }
 
         let mut shard = ExecutionRecord::default();

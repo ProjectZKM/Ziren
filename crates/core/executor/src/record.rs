@@ -13,9 +13,9 @@ use std::{mem::take, sync::Arc, str::FromStr};
 
 use crate::{
     events::{
-        add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
+        AluEvent, BranchEvent, JumpEvent, MemInstrEvent, ByteLookupEvent, ByteRecord, CpuEvent,
         GlobalLookupEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
-        MemoryRecordEnum, PrecompileEvent, PrecompileEvents, SyscallEvent,
+        MemoryRecordEnum, PrecompileEvent, PrecompileEvents, SyscallEvent, MiscEvent,
     },
     syscalls::SyscallCode,
     MipsAirId, Opcode, Program,
@@ -49,8 +49,16 @@ pub struct ExecutionRecord {
     pub lt_events: Vec<AluEvent>,
     /// A trace of the CLO and CLZ events.
     pub cloclz_events: Vec<AluEvent>,
+    /// A trace of the memory instructions.
+    pub memory_instr_events: Vec<MemInstrEvent>,
+    /// A trace of the branch events.
+    pub branch_events: Vec<BranchEvent>,
+    /// A trace of the jump events.
+    pub jump_events: Vec<JumpEvent>,
+    /// A trace of the misc events.
+    pub misc_events: Vec<MiscEvent>,
     /// A trace of the byte lookups that are needed.
-    pub byte_lookups: HashMap<u32, HashMap<ByteLookupEvent, usize>>,
+    pub byte_lookups: HashMap<ByteLookupEvent, usize>,
     /// A trace of the precompile events.
     pub precompile_events: PrecompileEvents,
     // /// A trace of the global memory initialize events.
@@ -85,6 +93,10 @@ impl Default for ExecutionRecord {
             divrem_events: Vec::default(),
             lt_events: Vec::default(),
             cloclz_events: Vec::default(),
+            memory_instr_events: Vec::default(),
+            branch_events: Vec::default(),
+            jump_events: Vec::default(),
+            misc_events: Vec::default(),
             byte_lookups: HashMap::default(),
             precompile_events: PrecompileEvents::default(),
             global_memory_initialize_events: Vec::default(),
@@ -320,6 +332,7 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("lt_events".to_string(), self.lt_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
 
+
         for (syscall_code, events) in self.precompile_events.iter() {
             stats.insert(format!("syscall {syscall_code:?}"), events.len());
         }
@@ -336,8 +349,7 @@ impl MachineRecord for ExecutionRecord {
         if !self.cpu_events.is_empty() {
             let shard = self.public_values.shard;
             stats.insert(
-                "byte_lookups".to_string(),
-                self.byte_lookups.get(&shard).map_or(0, hashbrown::HashMap::len),
+                "byte_lookups".to_string(), self.byte_lookups.len()
             );
         }
         // Filter out the empty events.
@@ -363,7 +375,7 @@ impl MachineRecord for ExecutionRecord {
         if self.byte_lookups.is_empty() {
             self.byte_lookups = std::mem::take(&mut other.byte_lookups);
         } else {
-            self.add_sharded_byte_lookup_events(vec![&other.byte_lookups]);
+            self.add_byte_lookup_events_from_maps(vec![&other.byte_lookups]);
         }
 
         self.global_memory_initialize_events.append(&mut other.global_memory_initialize_events);
@@ -380,14 +392,18 @@ impl MachineRecord for ExecutionRecord {
 
 impl ByteRecord for ExecutionRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
-        *self.byte_lookups.entry(blu_event.shard).or_default().entry(blu_event).or_insert(0) += 1;
+        *self.byte_lookups.entry(blu_event).or_insert(0) += 1;
     }
 
     #[inline]
-    fn add_sharded_byte_lookup_events(
+    fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
+        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
     ) {
-        add_sharded_byte_lookup_events(&mut self.byte_lookups, new_events);
+        for new_blu_map in new_events {
+            for (blu_event, count) in new_blu_map.iter() {
+                *self.byte_lookups.entry(*blu_event).or_insert(0) += count;
+            }
+        }
     }
 }

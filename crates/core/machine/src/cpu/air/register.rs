@@ -14,31 +14,31 @@ impl CpuChip {
         &self,
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
-        is_branch_instruction: AB::Expr,
+        clk: AB::Expr,
     ) {
         // Load immediates into b and c, if the immediate flags are on.
         builder
-            .when(local.selectors.imm_b)
+            .when(local.instruction.imm_b)
             .assert_word_eq(local.op_b_val(), local.instruction.op_b);
         builder
-            .when(local.selectors.imm_c)
+            .when(local.instruction.imm_c)
             .assert_word_eq(local.op_c_val(), local.instruction.op_c);
 
         // If they are not immediates, read `b` and `c` from memory.
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
+            clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
             local.instruction.op_b[0],
             &local.op_b_access,
-            AB::Expr::ONE - local.selectors.imm_b,
+            AB::Expr::ONE - local.instruction.imm_b,
         );
 
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
+            clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
             local.instruction.op_c[0],
             &local.op_c_access,
-            AB::Expr::ONE - local.selectors.imm_c,
+            AB::Expr::ONE - local.instruction.imm_c,
         );
 
         // If we are writing to register 0, then the new value should be zero.
@@ -48,7 +48,7 @@ impl CpuChip {
         // we are performing a branch or a store.
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
+            clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
             local.instruction.op_a[0],
             &local.op_a_access,
             local.is_real,
@@ -57,10 +57,10 @@ impl CpuChip {
         // Write the HI register
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
+            clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
             local.instruction.op_hi[0],
             &local.op_hi_access,
-            local.selectors.has_hi,
+            local.has_hi,
         );
 
         // Always range check the word value in `op_a`, as JUMP instructions may witness
@@ -69,10 +69,7 @@ impl CpuChip {
 
         // If we are performing a branch or a store, then the value of `a` is the previous value.
         builder
-            .when(
-                is_branch_instruction.clone()
-                    + self.is_store_instruction_except_sc::<AB>(&local.selectors),
-            )
+            .when(local.op_a_immutable)
             .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
     }
 }

@@ -20,7 +20,7 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
-    ByteOpcode, ExecutionRecord, Opcode, Program,
+    ByteOpcode, ExecutionRecord, Opcode, Program
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::{air::MachineAir, Word};
@@ -44,10 +44,14 @@ pub struct CloClzChip;
 #[repr(C)]
 pub struct CloClzCols<T> {
     /// The shard number, used for byte lookup table.
-    pub shard: T,
+    pub pc: T,
+    pub next_pc: T,
 
     /// The result
-    pub a: T,
+    pub a: Word<T>,
+
+    /// Whether the first operand is not register 0.
+    pub op_a_not_0: T,
 
     /// The input operand.
     pub b: Word<T>,
@@ -107,12 +111,14 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
             let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.a = F::from_canonical_u8(event.a as u8);
+            cols.a = Word::from(event.a);
             cols.b = Word::from(event.b);
-            cols.shard = F::from_canonical_u32(event.shard);
+            cols.pc = F::from_canonical_u32(event.pc);
+            cols.next_pc = F::from_canonical_u32(event.next_pc);
             cols.is_real = F::ONE;
             cols.is_clo = F::from_bool(event.opcode == Opcode::CLO);
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
+            cols.op_a_not_0 = F::from_bool(!event.op_a_0);
 
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
@@ -124,17 +130,16 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             if bb != 0 {
                 let sr1_val = bb >> (31 - event.a);
                 cols.sr1 = Word::from(sr1_val);
-                cols.sr0.populate(output, event.shard, sr1_val, 1);
+                cols.sr0.populate(output, sr1_val, 1);
 
                 cols.is_sr0_zero.populate(sr1_val >> 1);
                 cols.is_sr1_one.populate(sr1_val, 1);
             }
 
             // Range check.
-            output.add_u8_range_checks(event.shard, &bb.to_le_bytes());
+            output.add_u8_range_checks(&bb.to_le_bytes());
             output.add_byte_lookup_event(ByteLookupEvent {
                 opcode: ByteOpcode::LTU,
-                shard: event.shard,
                 a1: 1,
                 a2: 0,
                 b: event.a as u8,
@@ -161,7 +166,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
             let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
             // clz(0) = 32
-            cols.a = F::from_canonical_u8(32);
+            cols.a = Word::from(32);
             cols.is_clz = F::ONE;
             cols.is_bb_zero.populate(0);
             cols.is_result_32.populate(0);
@@ -217,9 +222,32 @@ where
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,
-            local.a,
+            local.a[0],
             AB::Expr::from_canonical_u8(33),
             local.is_real,
+        );
+
+        // Get the opcode for the operation.
+        let cpu_opcode = local.is_clo * Opcode::CLO.as_field::<AB::F>()
+            + local.is_clz * Opcode::CLZ.as_field::<AB::F>();
+
+        builder.receive_instruction(
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            local.pc,
+            local.next_pc,
+            AB::Expr::ZERO,
+            cpu_opcode,
+            local.a,
+            local.b,
+            Word([AB::Expr::ZERO; 4]),
+            Word([AB::Expr::ZERO; 4]),
+            AB::Expr::ONE - local.op_a_not_0,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            local.is_clz + local.is_clo,
         );
 
         // if bb == 0, result is 32
@@ -234,7 +262,7 @@ where
 
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                AB::Expr::from_canonical_u32(32) - local.a,
+                AB::Expr::from_canonical_u32(32) - local.a[0],
                 local.is_result_32,
                 local.is_real.into(),
             );
@@ -249,12 +277,11 @@ where
                 local.sr1,
                 local.bb,
                 Word([
-                    AB::Expr::from_canonical_u32(31) - local.a,
+                    AB::Expr::from_canonical_u32(31) - local.a[0],
                     zero.clone(),
                     zero.clone(),
                     zero.clone(),
                 ]),
-                local.shard,
                 one.clone() - is_bb_zero.clone(),
             );
 
@@ -281,6 +308,9 @@ where
         builder.assert_bool(local.is_clo);
         builder.assert_bool(local.is_clz);
         builder.assert_one(local.is_clo + local.is_clz);
+        builder.assert_zero(local.a[1]);
+        builder.assert_zero(local.a[2]);
+        builder.assert_zero(local.a[3]);
     }
 }
 
@@ -300,12 +330,12 @@ mod tests {
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
         shard.cloclz_events = vec![
-            AluEvent::new(0, 0, Opcode::CLZ, 32, 0, 0),
-            AluEvent::new(0, 0, Opcode::CLZ, 8, 0x00800000, 0),
-            AluEvent::new(0, 0, Opcode::CLZ, 0, 0xffffffff, 0),
-            AluEvent::new(0, 0, Opcode::CLO, 32, 0xffffffff, 0),
-            AluEvent::new(0, 0, Opcode::CLO, 8, 0xff7fffff, 0),
-            AluEvent::new(0, 0, Opcode::CLO, 0, 0, 0),
+            AluEvent::new(0, Opcode::CLZ, 32, 0, 0, false),
+            AluEvent::new(0, Opcode::CLZ, 8, 0x00800000, 0, false),
+            AluEvent::new(0, Opcode::CLZ, 0, 0xffffffff, 0, false),
+            AluEvent::new(0, Opcode::CLO, 32, 0xffffffff, 0, false),
+            AluEvent::new(0, Opcode::CLO, 8, 0xff7fffff, 0, false),
+            AluEvent::new(0, Opcode::CLO, 0, 0, 0, false),
         ];
         let chip = CloClzChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -329,12 +359,12 @@ mod tests {
             (Opcode::CLO, 0, 0, 0),
         ];
         for t in clo_clzs.iter() {
-            cloclz_events.push(AluEvent::new(0, 0, t.0, t.1, t.2, t.3));
+            cloclz_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3, false));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - clo_clzs.len()) {
-            cloclz_events.push(AluEvent::new(0, 0, Opcode::CLZ, 32, 0, 0));
+            cloclz_events.push(AluEvent::new(0, Opcode::CLZ, 32, 0, 0, false));
         }
 
         let mut shard = ExecutionRecord::default();

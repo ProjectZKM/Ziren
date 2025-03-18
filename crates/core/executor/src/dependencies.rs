@@ -1,9 +1,8 @@
 use crate::{
-    events::AluEvent,
+    events::{AluEvent, BranchEvent, JumpEvent, MemInstrEvent, MiscEvent, MemoryRecord},
     utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
-    Executor, Opcode, WORD_SIZE,
+    Executor, Opcode, UNUSED_PC, DEFAULT_PC_INC,
 };
-
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
 pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
@@ -21,24 +20,26 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
 
     if c_neg == 1 {
         executor.record.add_events.push(AluEvent {
-            shard,
-            clk: event.clk,
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::ADD,
             hi: 0,
             a: 0,
             b: event.c,
             c: (event.c as i32).unsigned_abs(),
+            op_a_0: false,
         });
     }
     if rem_neg == 1 {
         executor.record.add_events.push(AluEvent {
-            shard,
-            clk: event.clk,
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::ADD,
             hi: 0,
             a: 0,
             b: remainder,
             c: (remainder as i32).unsigned_abs(),
+            op_a_0: false,
         });
     }
 
@@ -53,8 +54,8 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     let upper_word = u32::from_le_bytes(c_times_quotient[4..8].try_into().unwrap());
 
     let multiplication = AluEvent {
-        shard,
-        clk: event.clk,
+        pc: UNUSED_PC,
+        next_pc: UNUSED_PC + DEFAULT_PC_INC,
         opcode: {
             if is_signed_operation {
                 Opcode::MULT
@@ -66,28 +67,31 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         c: event.c,
         b: quotient,
         hi: upper_word,
+        op_a_0: false,
     };
     executor.record.mul_events.push(multiplication);
 
     let lt_event = if is_signed_operation {
         AluEvent {
-            shard,
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::SLTU,
             hi: 0,
             a: 1,
             b: (remainder as i32).unsigned_abs(),
             c: u32::max(1, (event.c as i32).unsigned_abs()),
-            clk: event.clk,
+            op_a_0: false,
         }
     } else {
         AluEvent {
-            shard,
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::SLTU,
             hi: 0,
             a: 1,
             b: remainder,
             c: u32::max(1, event.c),
-            clk: event.clk,
+            op_a_0: false,
         }
     };
 
@@ -104,142 +108,165 @@ pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
     let b = if event.opcode == Opcode::CLZ { event.b } else { !event.b };
     if b != 0 {
         let srl_event = AluEvent {
-            shard,
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::SRL,
             hi: 0,
             a: b >> (31 - event.a),
             b,
             c: 31 - event.a,
-            clk: event.clk,
+            op_a_0: false,
         };
 
         executor.record.shift_right_events.push(srl_event);
     }
 }
 
-/// Emit the dependencies for CPU events.
-#[allow(clippy::too_many_lines)]
-pub fn emit_cpu_dependencies(executor: &mut Executor, index: usize) {
-    let event = executor.record.cpu_events[index];
+/// Emit the dependencies for memory instructions.
+pub fn emit_memory_dependencies(
+    executor: &mut Executor,
+    event: MemInstrEvent,
+    memory_record: MemoryRecord,
+    index: usize
+) {
+    let cpu_event = executor.record.cpu_events[index];
     let shard = executor.shard();
-    let instruction = &executor.program.fetch(event.pc);
-    if matches!(
-        instruction.opcode,
-        Opcode::LB
-            | Opcode::LH
-            | Opcode::LW
-            | Opcode::LWR
-            | Opcode::LWL
-            | Opcode::LL
-            | Opcode::LBU
-            | Opcode::LHU
-            | Opcode::SB
-            | Opcode::SH
-            | Opcode::SW
-            | Opcode::SWR
-            | Opcode::SWL
-            | Opcode::SC
-    ) {
-        let memory_addr = event.b.wrapping_add(event.c);
-        // Add event to ALU check to check that addr == b + c
-        let add_event = AluEvent {
-            shard,
-            clk: event.clk,
-            opcode: Opcode::ADD,
-            hi: 0,
-            a: memory_addr,
-            b: event.b,
-            c: event.c,
-        };
-        executor.record.add_events.push(add_event);
-        let addr_offset = (memory_addr % WORD_SIZE as u32) as u8;
-        let mem_value = event.memory_record.unwrap().value();
+    let memory_addr = event.b.wrapping_add(event.c);
+    // Add event to ALU check to check that addr == b + c
+    let add_event = AluEvent {
+        pc: UNUSED_PC,
+        next_pc: UNUSED_PC + DEFAULT_PC_INC,
+        opcode: Opcode::ADD,
+        hi: 0,
+        a: memory_addr,
+        b: event.b,
+        c: event.c,
+        op_a_0: false,
+    };
+    executor.record.add_events.push(add_event);
+    let addr_offset = (memory_addr % 4_u32) as u8;
+    let mem_value = memory_record.value;
 
-        if matches!(instruction.opcode, Opcode::LB | Opcode::LH) {
-            let (unsigned_mem_val, most_sig_mem_value_byte, sign_value) = match instruction.opcode {
-                Opcode::LB => {
-                    let most_sig_mem_value_byte = mem_value.to_le_bytes()[addr_offset as usize];
-                    let sign_value = 256;
-                    (most_sig_mem_value_byte as u32, most_sig_mem_value_byte, sign_value)
-                }
-                Opcode::LH => {
-                    let sign_value = 65536;
-                    let unsigned_mem_val = match (addr_offset >> 1) % 2 {
-                        0 => mem_value & 0x0000FFFF,
-                        1 => (mem_value & 0xFFFF0000) >> 16,
-                        _ => unreachable!(),
-                    };
-                    let most_sig_mem_value_byte = unsigned_mem_val.to_le_bytes()[1];
-                    (unsigned_mem_val, most_sig_mem_value_byte, sign_value)
-                }
-                _ => unreachable!(),
-            };
-
-            if most_sig_mem_value_byte >> 7 & 0x01 == 1 {
-                let sub_event = AluEvent {
-                    shard,
-                    clk: event.clk,
-                    opcode: Opcode::SUB,
-                    hi: 0,
-                    a: event.a,
-                    b: unsigned_mem_val,
-                    c: sign_value,
-                };
-                executor.record.add_events.push(sub_event);
+    if matches!(event.opcode, Opcode::LB | Opcode::LH) {
+        let (unsigned_mem_val, most_sig_mem_value_byte, sign_value) = match event.opcode {
+            Opcode::LB => {
+                let most_sig_mem_value_byte = mem_value.to_le_bytes()[addr_offset as usize];
+                let sign_value = 256;
+                (
+                    most_sig_mem_value_byte as u32,
+                    most_sig_mem_value_byte,
+                    sign_value,
+                )
             }
-        }
-    }
-
-    if instruction.is_branch_instruction() {
-        let a_eq_b = event.a == event.b;
-        let a_eq_0 = (event.a as i32) == 0;
-        let a_lt_0 = (event.a as i32) < 0;
-        let a_gt_0 = (event.a as i32) > 0;
-
-        if instruction.opcode.signed_compare() {
-            // Add the ALU events for the comparisons
-            let lt_comp_event = AluEvent {
-                shard,
-                clk: event.clk,
-                opcode: Opcode::SLT,
-                hi: 0,
-                a: a_lt_0 as u32,
-                b: event.a,
-                c: 0,
-            };
-            let gt_comp_event = AluEvent {
-                shard,
-                clk: event.clk,
-                opcode: Opcode::SLT,
-                hi: 0,
-                a: a_gt_0 as u32,
-                b: 0,
-                c: event.a,
-            };
-            executor.record.lt_events.push(lt_comp_event);
-            executor.record.lt_events.push(gt_comp_event);
-        }
-
-        let branching = match instruction.opcode {
-            Opcode::BEQ => a_eq_b,
-            Opcode::BNE => !a_eq_b,
-            Opcode::BLTZ => a_lt_0,
-            Opcode::BLEZ => a_lt_0 || a_eq_0,
-            Opcode::BGTZ => a_gt_0,
-            Opcode::BGEZ => a_eq_0 || a_gt_0,
+            Opcode::LH => {
+                let sign_value = 65536;
+                let unsigned_mem_val = match (addr_offset >> 1) % 2 {
+                    0 => mem_value & 0x0000FFFF,
+                    1 => (mem_value & 0xFFFF0000) >> 16,
+                    _ => unreachable!(),
+                };
+                let most_sig_mem_value_byte = unsigned_mem_val.to_le_bytes()[1];
+                (unsigned_mem_val, most_sig_mem_value_byte, sign_value)
+            }
             _ => unreachable!(),
         };
-        if branching {
+
+        if most_sig_mem_value_byte >> 7 & 0x01 == 1 {
+            let sub_event = AluEvent {
+                pc: UNUSED_PC,
+                next_pc: UNUSED_PC + DEFAULT_PC_INC,
+                opcode: Opcode::SUB,
+                hi: 0,
+                a: event.a,
+                b: unsigned_mem_val,
+                c: sign_value,
+                op_a_0: false,
+            };
+            executor.record.add_events.push(sub_event);
+        }
+    }
+}
+
+/// Emit the dependencies for branch instructions.
+pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent, index: usize) {
+    let cpu_event = executor.record.cpu_events[index];
+    let shard = executor.shard();
+    let a_eq_b = event.a == event.b;
+    let a_lt_b = (event.a as i32) < (event.b as i32);
+    let a_gt_b = (event.a as i32) > (event.b as i32);
+
+    let lt_comp_event = AluEvent {
+        pc: UNUSED_PC,
+        next_pc: UNUSED_PC + DEFAULT_PC_INC,
+        opcode: Opcode::SLT,
+        hi: 0,
+        a: a_lt_b as u32,
+        b: event.a,
+        c: event.b,
+        op_a_0: false,
+    };
+    let gt_comp_event = AluEvent {
+        pc: UNUSED_PC,
+        next_pc: UNUSED_PC + DEFAULT_PC_INC,
+        opcode: Opcode::SLT,
+        hi: 0,
+        a: a_gt_b as u32,
+        b: event.b,
+        c: event.a,
+        op_a_0: false,
+    };
+    executor.record.lt_events.push(lt_comp_event);
+    executor.record.lt_events.push(gt_comp_event);
+    let branching = match event.opcode {
+        Opcode::BEQ => a_eq_b,
+        Opcode::BNE => !a_eq_b,
+        Opcode::BLTZ => a_lt_b,
+        Opcode::BLEZ => a_lt_b || a_eq_b,
+        Opcode::BGTZ => a_gt_b,
+        Opcode::BGEZ => a_eq_b || a_gt_b,
+        _ => unreachable!(),
+    };
+    if branching {
+        let add_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::ADD,
+            hi: 0,
+            a: event.next_next_pc,
+            b: event.next_pc,
+            c: event.c,
+            op_a_0: false,
+        };
+        executor.record.add_events.push(add_event);
+    }
+}
+
+/// Emit the dependencies for jump instructions.
+pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent, index: usize) {
+    let cpu_event = executor.record.cpu_events[index];
+    let shard = executor.shard();
+    match event.opcode {
+        Opcode::JumpDirect => {
+            let target_pc = event.next_pc.wrapping_add(event.b);
             let add_event = AluEvent {
-                shard,
-                clk: event.clk,
+                pc: UNUSED_PC,
+                next_pc: UNUSED_PC,
                 opcode: Opcode::ADD,
                 hi: 0,
-                a: event.next_next_pc,
+                a: target_pc,
                 b: event.next_pc,
-                c: event.c,
+                c: event.b,
+                op_a_0: false,
             };
             executor.record.add_events.push(add_event);
         }
+        Opcode::Jump | Opcode::Jumpi => {
+        }
+        _ => unreachable!(),
     }
+}
+
+/// Emit the dependencies for misc instructions.
+pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent, index: usize) {
+    // TODO
 }

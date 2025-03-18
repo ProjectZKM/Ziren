@@ -6,7 +6,7 @@ use core::{
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
-use p3_field::{PrimeField, PrimeField32};
+use p3_field::{PrimeField, PrimeField32, FieldAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm2_core_executor::{
@@ -41,7 +41,8 @@ pub struct AddSubChip;
 #[repr(C)]
 pub struct AddSubCols<T> {
     /// The shard number, used for byte lookup table.
-    pub shard: T,
+    pub pc: T,
+    pub next_pc: T,
 
     /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
@@ -52,6 +53,9 @@ pub struct AddSubCols<T> {
 
     /// The second input operand.  This will be `c` for both operations.
     pub operand_2: Word<T>,
+
+    /// Whether the first operand is not register 0.
+    pub op_a_not_0: T,
 
     /// Flag indicating whether the opcode is `ADD`.
     pub is_add: T,
@@ -113,7 +117,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         let blu_batches = event_iter
             .par_bridge()
             .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                     let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
@@ -123,7 +127,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             })
             .collect::<Vec<_>>();
 
-        output.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+        output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -147,7 +151,8 @@ impl AddSubChip {
         cols: &mut AddSubCols<F>,
         blu: &mut impl ByteRecord,
     ) {
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.pc = F::from_canonical_u32(event.pc);
+        cols.next_pc = F::from_canonical_u32(event.next_pc);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
@@ -156,9 +161,10 @@ impl AddSubChip {
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation.populate(blu, event.shard, operand_1, operand_2);
+        cols.add_operation.populate(blu, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
+        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
     }
 }
 
@@ -177,6 +183,9 @@ where
         let local = main.row_slice(0);
         let local: &AddSubCols<AB::Var> = (*local).borrow();
 
+        let opcode = AB::Expr::from_canonical_u32(Opcode::ADD as u32) * local.is_add
+            + AB::Expr::from_canonical_u32(Opcode::SUB as u32) * local.is_sub;
+
         // Evaluate the addition operation.
         AddOperation::<AB::F>::eval(
             builder,
@@ -186,24 +195,42 @@ where
             local.is_add + local.is_sub,
         );
 
-        // Receive the arguments.  There are separate receives for ADD and SUB.
-        // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
-        builder.receive_alu(
-            Opcode::ADD.as_field::<AB::F>(),
+        builder.receive_instruction(
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            local.pc,
+            local.next_pc,
+            AB::Expr::ZERO,
+            opcode.clone(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
-            local.shard,
+            Word([AB::Expr::ZERO; 4]),
+            AB::Expr::ONE - local.op_a_not_0,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_add,
         );
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
-        builder.receive_alu(
+        builder.receive_instruction(
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            local.pc,
+            local.next_pc,
+            AB::Expr::ZERO,
             Opcode::SUB.as_field::<AB::F>(),
             local.operand_1,
             local.add_operation.value,
             local.operand_2,
-            local.shard,
+            Word([AB::Expr::ZERO; 4]),
+            AB::Expr::ONE - local.op_a_not_0,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_sub,
         );
 
@@ -230,7 +257,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.add_events = vec![AluEvent::new(0, 0, Opcode::ADD, 14, 8, 6)];
+        shard.add_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6, false)];
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -248,12 +275,12 @@ mod tests {
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             let result = operand_1.wrapping_add(operand_2);
             shard.add_events.push(AluEvent::new(
-                i % 2,
-                0,
+                i << 2,
                 Opcode::ADD,
                 result,
                 operand_1,
                 operand_2,
+                false,
             ));
         }
         for i in 0..255 {
@@ -261,12 +288,12 @@ mod tests {
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             let result = operand_1.wrapping_sub(operand_2);
             shard.add_events.push(AluEvent::new(
-                i % 2,
-                0,
+                i << 2,
                 Opcode::SUB,
                 result,
                 operand_1,
                 operand_2,
+                false,
             ));
         }
 

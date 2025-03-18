@@ -1,0 +1,39 @@
+use zkm2_derive::AlignedBorrow;
+use zkm2_stark::Word;
+use std::mem::size_of;
+
+use crate::operations::KoalaBearWordRangeChecker;
+
+pub const NUM_JUMP_COLS: usize = size_of::<JumpColumns<u8>>();
+
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[repr(C)]
+pub struct JumpColumns<T> {
+    pub pc: T,
+
+    /// The current program counter.
+    pub next_pc: Word<T>,
+    pub next_pc_range_checker: KoalaBearWordRangeChecker<T>,
+
+    /// The next program counter.
+    pub target_pc: Word<T>,
+    pub target_pc_range_checker: KoalaBearWordRangeChecker<T>,
+
+    /// The value of the first operand.
+    pub op_a_value: Word<T>,
+    /// The value of the second operand.
+    pub op_b_value: Word<T>,
+    /// The value of the third operand.
+    pub op_c_value: Word<T>,
+
+    /// Whether the first operand is register 0.
+    pub op_a_0: T,
+
+    /// Jump Instructions.
+    pub is_jump: T,
+    pub is_jumpi: T,
+    pub is_jumpdirect: T,
+
+    // A range checker for `op_a` which may contain `pc + 4`.
+    pub op_a_range_checker: KoalaBearWordRangeChecker<T>,
+}

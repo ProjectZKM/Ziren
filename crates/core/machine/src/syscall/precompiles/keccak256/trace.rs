@@ -39,7 +39,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakPermuteChip {
                 let mut chunk = zeroed_f_vec::<F>(NUM_KECCAK_MEM_COLS * NUM_ROUNDS);
                 ops.iter().for_each(|(_, op)| {
                     if let PrecompileEvent::KeccakPermute(event) = op {
-                        Self::populate_chunk(event, &mut chunk, &mut blu);
+                        Self::populate_chunk(&event, &mut chunk, &mut blu);
                     } else {
                         unreachable!();
                     }
@@ -137,7 +137,7 @@ impl KeccakPermuteChip {
                 for (j, read_record) in event.state_read_records.iter().enumerate() {
                     cols.state_mem[j].populate_read(*read_record, new_byte_lookup_events);
                     new_byte_lookup_events
-                        .add_u8_range_checks(shard, &read_record.value.to_le_bytes());
+                        .add_u8_range_checks(&read_record.value.to_le_bytes());
                 }
                 cols.do_memory_check = F::ONE;
                 cols.receive_syscall = F::ONE;
@@ -148,7 +148,7 @@ impl KeccakPermuteChip {
                 for (j, write_record) in event.state_write_records.iter().enumerate() {
                     cols.state_mem[j].populate_write(*write_record, new_byte_lookup_events);
                     new_byte_lookup_events
-                        .add_u8_range_checks(shard, &write_record.value.to_le_bytes());
+                        .add_u8_range_checks(&write_record.value.to_le_bytes());
                 }
                 cols.do_memory_check = F::ONE;
             }

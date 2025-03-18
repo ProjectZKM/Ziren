@@ -76,7 +76,6 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops<F: PrimeField32>(
         blu_events: &mut Vec<ByteLookupEvent>,
-        shard: u32,
         cols: &mut WeierstrassAddAssignCols<F, E::BaseField>,
         p_x: BigUint,
         p_y: BigUint,
@@ -89,14 +88,13 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         // slope = (q.y - p.y) / (q.x - p.x).
         let slope = {
             let slope_numerator =
-                cols.slope_numerator.populate(blu_events, shard, &q_y, &p_y, FieldOperation::Sub);
+                cols.slope_numerator.populate(blu_events, &q_y, &p_y, FieldOperation::Sub);
 
             let slope_denominator =
-                cols.slope_denominator.populate(blu_events, shard, &q_x, &p_x, FieldOperation::Sub);
+                cols.slope_denominator.populate(blu_events, &q_x, &p_x, FieldOperation::Sub);
 
             cols.slope.populate(
                 blu_events,
-                shard,
                 &slope_numerator,
                 &slope_denominator,
                 FieldOperation::Div,
@@ -106,12 +104,11 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         // x = slope * slope - (p.x + q.x).
         let x = {
             let slope_squared =
-                cols.slope_squared.populate(blu_events, shard, &slope, &slope, FieldOperation::Mul);
+                cols.slope_squared.populate(blu_events, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_q_x =
-                cols.p_x_plus_q_x.populate(blu_events, shard, &p_x, &q_x, FieldOperation::Add);
+                cols.p_x_plus_q_x.populate(blu_events, &p_x, &q_x, FieldOperation::Add);
             cols.x3_ins.populate(
                 blu_events,
-                shard,
                 &slope_squared,
                 &p_x_plus_q_x,
                 FieldOperation::Sub,
@@ -121,17 +118,15 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         // y = slope * (p.x - x_3n) - p.y.
         {
             let p_x_minus_x =
-                cols.p_x_minus_x.populate(blu_events, shard, &p_x, &x, FieldOperation::Sub);
+                cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
-                shard,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
             cols.y3_ins.populate(
                 blu_events,
-                shard,
                 &slope_times_p_x_minus_x,
                 &p_y,
                 FieldOperation::Sub,
@@ -221,7 +216,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         let zero = BigUint::ZERO;
         Self::populate_field_ops(
             &mut vec![],
-            0,
             cols,
             zero.clone(),
             zero.clone(),
@@ -434,7 +428,7 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
         cols.p_ptr = F::from_canonical_u32(event.p_ptr);
         cols.q_ptr = F::from_canonical_u32(event.q_ptr);
 
-        Self::populate_field_ops(new_byte_lookup_events, event.shard, cols, p_x, p_y, q_x, q_y);
+        Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
         // Populate the memory access columns.
         for i in 0..cols.q_access.len() {

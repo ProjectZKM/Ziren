@@ -1,8 +1,4 @@
-pub mod branch;
-pub mod memory;
 pub mod register;
-pub mod syscall;
-pub mod wsbh;
 
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
@@ -17,14 +13,12 @@ use zkm2_stark::{
 use crate::{
     air::{MemoryAirBuilder, ZKMCoreAirBuilder},
     cpu::{
-        columns::{CpuCols, OpcodeSelectorCols, NUM_CPU_COLS},
+        columns::{CpuCols, NUM_CPU_COLS},
         CpuChip,
     },
     operations::KoalaBearWordRangeChecker,
 };
 use zkm2_core_executor::Opcode;
-
-use super::columns::OPCODE_SELECTORS_COL_MAP;
 
 impl<AB> Air<AB> for CpuChip
 where
@@ -38,198 +32,72 @@ where
         let local: &CpuCols<AB::Var> = (*local).borrow();
         let next: &CpuCols<AB::Var> = (*next).borrow();
 
+        let public_values_slice: [AB::PublicVar; ZKM_PROOF_NUM_PV_ELTS] =
+            core::array::from_fn(|i| builder.public_values()[i]);
+        let public_values: &PublicValues<Word<AB::PublicVar>, AB::PublicVar> =
+            public_values_slice.as_slice().borrow();
+
+        let clk =
+            AB::Expr::from_canonical_u32(1u32 << 16) * local.clk_8bit_limb + local.clk_16bit_limb;
+
         // Program constraints.
         builder.send_program(
             local.pc,
             local.instruction,
-            local.selectors,
-            local.shard,
             local.is_real,
         );
 
-        // Compute some flags for which type of instruction we are dealing with.
-        let is_memory_instruction: AB::Expr = self.is_memory_instruction::<AB>(&local.selectors);
-        let is_branch_instruction: AB::Expr = self.is_branch_instruction::<AB>(&local.selectors);
-        let is_alu_instruction: AB::Expr = self.is_alu_instruction::<AB>(&local.selectors);
-
         // Register constraints.
-        self.eval_registers::<AB>(builder, local, is_branch_instruction.clone());
+        self.eval_registers::<AB>(builder, local, clk.clone());
 
-        // Memory instructions.
-        self.eval_memory_address_and_access::<AB>(builder, local, is_memory_instruction.clone());
-        self.eval_memory_load::<AB>(builder, local);
-        self.eval_memory_store::<AB>(builder, local);
+        // Assert the shard and clk to send.  Only the memory and syscall instructions need the
+        // actual shard and clk values for memory access evals.
+        // SAFETY: The usage of `builder.if_else` requires `is_memory + is_syscall` to be boolean.
+        // The correctness of `is_memory` and `is_syscall` will be checked in the opcode specific chips.
+        // In these correct cases, `is_memory + is_syscall` will be always boolean.
+        let expected_shard_to_send =
+            builder.if_else(local.is_memory + local.is_syscall, local.shard, AB::Expr::ZERO);
+        let expected_clk_to_send =
+            builder.if_else(local.is_memory + local.is_syscall, clk.clone(), AB::Expr::ZERO);
+        builder.when(local.is_real).assert_eq(local.shard_to_send, expected_shard_to_send);
+        builder.when(local.is_real).assert_eq(local.clk_to_send, expected_clk_to_send);
 
-        self.eval_wsbh::<AB>(builder, local);
-
-        // ALU instructions.
-        builder.send_alu_with_hi(
+        builder.send_instruction(
+            local.shard_to_send,
+            local.clk_to_send,
+            local.pc,
+            local.next_pc,
+            local.num_extra_cycles,
             local.instruction.opcode,
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
             local.op_hi_val(),
-            local.shard,
-            is_alu_instruction,
+            local.instruction.op_a_0,
+            local.op_a_immutable,
+            local.is_memory,
+            local.is_syscall,
+            local.is_halt,
+            local.is_real,
         );
-
-        // Branch instructions.
-        self.eval_branch_ops::<AB>(builder, is_branch_instruction.clone(), local, next);
-
-        // Jump instructions.
-        self.eval_jump_ops::<AB>(builder, local, next);
-
-        // syscall instruction.
-        self.eval_syscall(builder, local);
-
-        // COMMIT/COMMIT_DEFERRED_PROOFS syscall instruction.
-        let public_values_slice: [AB::PublicVar; ZKM_PROOF_NUM_PV_ELTS] =
-            core::array::from_fn(|i| builder.public_values()[i]);
-        let public_values: &PublicValues<Word<AB::PublicVar>, AB::PublicVar> =
-            public_values_slice.as_slice().borrow();
-        self.eval_commit(
-            builder,
-            local,
-            public_values.committed_value_digest,
-            public_values.deferred_proofs_digest,
-        );
-
-        // HALT syscall and UNIMPL instruction.
-        self.eval_halt_unimpl(builder, local, next, public_values);
 
         // Check that the shard and clk is updated correctly.
-        self.eval_shard_clk(builder, local, next);
-
-        // Check that the pc is updated correctly.
-        self.eval_pc(builder, local, next, is_branch_instruction.clone());
+        self.eval_shard_clk(builder, local, next, clk.clone());
 
         // Check public values constraints.
-        self.eval_public_values(builder, local, next, public_values);
+        self.eval_pc(builder, local, next, public_values);
 
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
 
-        // Check that when `is_real=0` that all flags that send lookups are zero.
-        local.selectors.into_iter().enumerate().for_each(|(i, selector)| {
-            if i == OPCODE_SELECTORS_COL_MAP.imm_b {
-                builder.when(AB::Expr::ONE - local.is_real).assert_one(local.selectors.imm_b);
-            } else if i == OPCODE_SELECTORS_COL_MAP.imm_c {
-                builder.when(AB::Expr::ONE - local.is_real).assert_one(local.selectors.imm_c);
-            } else {
-                builder.when(AB::Expr::ONE - local.is_real).assert_zero(selector);
-            }
-        });
+        let not_real = AB::Expr::ONE - local.is_real;
+        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_b);
+        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_c);
+        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.is_syscall);
     }
 }
 
 impl CpuChip {
-    /// Whether the instruction is an ALU instruction.
-    pub(crate) fn is_alu_instruction<AB: ZKMAirBuilder>(
-        &self,
-        opcode_selectors: &OpcodeSelectorCols<AB::Var>,
-    ) -> AB::Expr {
-        opcode_selectors.is_alu.into()
-    }
-
-    /// Constraints related to jump operations.
-    pub(crate) fn eval_jump_ops<AB: ZKMAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local: &CpuCols<AB::Var>,
-        _next: &CpuCols<AB::Var>,
-    ) {
-        // Get the jump specific columns
-        let jump_columns = local.opcode_specific_columns.jump();
-
-        let is_jump_instruction = local.selectors.is_jump + local.selectors.is_jumpd;
-
-        // Verify that the local.pc + 8 is saved in op_a for both jump instructions.
-        // When op_a is set to register X0, the MIPS spec states that the jump instruction will
-        // not have a return destination address (it is effectively a GOTO command).  In this case,
-        // we shouldn't verify the return address.
-        builder
-            .when(is_jump_instruction.clone())
-            .when_not(local.instruction.op_a_0)
-            .assert_eq(local.op_a_val().reduce::<AB>(), local.pc + AB::F::from_canonical_u8(8));
-
-        // Verify that the word form of local.pc is correct for JAL instructions.
-        builder
-            .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
-
-        // Verify that the word form of target.pc is correct for both jump instructions.
-        builder
-            .when_transition()
-            .when(local.is_real)
-            .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.target_pc.reduce::<AB>(), local.next_next_pc);
-
-        // When the last row is real and it's a jump instruction, assert that local.next_pc <==>
-        // jump_column.next_pc
-        builder
-            .when(local.is_real)
-            .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.next_pc.reduce::<AB>(), local.next_pc);
-
-        // Range check op_a, pc, and next_pc.
-        KoalaBearWordRangeChecker::<AB::F>::range_check(
-            builder,
-            local.op_a_val(),
-            jump_columns.op_a_range_checker,
-            is_jump_instruction.clone(),
-        );
-        KoalaBearWordRangeChecker::<AB::F>::range_check(
-            builder,
-            jump_columns.next_pc,
-            jump_columns.next_pc_range_checker,
-            is_jump_instruction.clone(),
-        );
-        KoalaBearWordRangeChecker::<AB::F>::range_check(
-            builder,
-            jump_columns.target_pc,
-            jump_columns.target_pc_range_checker,
-            is_jump_instruction.clone(),
-        );
-
-        // Verify that the new pc is calculated correctly for Jumpdirect instructions.
-        builder.send_alu(
-            AB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            jump_columns.target_pc,
-            jump_columns.next_pc,
-            local.op_b_val(),
-            local.shard,
-            local.selectors.is_jumpd,
-        );
-    }
-
-    // /// Constraints related to the AUIPC opcode.
-    // pub(crate) fn eval_auipc<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &CpuCols<AB::Var>) {
-    //    // Get the auipc specific columns.
-    //     let auipc_columns = local.opcode_specific_columns.auipc();
-    //
-    //     // Verify that the word form of local.pc is correct.
-    //     builder.when(local.selectors.is_auipc).assert_eq(auipc_columns.pc.reduce::<AB>(), local.pc);
-    //
-    //     // Range check the pc.
-    //     KoalaBearWordRangeChecker::<AB::F>::range_check(
-    //         builder,
-    //         auipc_columns.pc,
-    //         auipc_columns.pc_range_checker,
-    //         local.selectors.is_auipc.into(),
-    //     );
-    //
-    //     // Verify that op_a == pc + op_b.
-    //     builder.send_alu(
-    //         AB::Expr::from_canonical_u32(Opcode::ADD as u32),
-    //         local.op_a_val(),
-    //         auipc_columns.pc,
-    //         local.op_b_val(),
-    //         local.shard,
-    //         auipc_columns.auipc_nonce,
-    //         local.selectors.is_auipc,
-    //     );
-    // }
-
     /// Constraints related to the shard and clk.
     ///
     /// This method ensures that all of the shard values are the same and that the clk starts at 0
@@ -242,6 +110,7 @@ impl CpuChip {
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
         next: &CpuCols<AB::Var>,
+        clk: AB::Expr,
     ) {
         // Verify that all shard values are the same.
         builder.when_transition().when(next.is_real).assert_eq(local.shard, next.shard);
@@ -256,73 +125,28 @@ impl CpuChip {
         );
 
         // Verify that the first row has a clk value of 0.
-        builder.when_first_row().assert_zero(local.clk);
-
-        // Verify that the clk increments are correct.  Most clk increment should be 4, but for some
-        // precompiles, there are additional cycles.
-        let num_extra_cycles = self.get_num_extra_syscall_cycles::<AB>(local);
+        builder.when_first_row().assert_zero(clk.clone());
 
         // We already assert that `local.clk < 2^24`. `num_extra_cycles` is an entry of a word and
         // therefore less than `2^8`, this means that the sum cannot overflow in a 31 bit field.
         let expected_next_clk =
-            local.clk + AB::Expr::from_canonical_u32(5) + num_extra_cycles.clone();
+            clk.clone() + AB::Expr::from_canonical_u32(5) + local.num_extra_cycles;
 
-        builder.when_transition().when(next.is_real).assert_eq(expected_next_clk.clone(), next.clk);
+        let next_clk =
+            AB::Expr::from_canonical_u32(1u32 << 16) * next.clk_8bit_limb + next.clk_16bit_limb;
+        builder.when_transition().when(next.is_real).assert_eq(expected_next_clk, next_clk);
 
         // Range check that the clk is within 24 bits using it's limb values.
         builder.eval_range_check_24bits(
-            local.clk,
+            clk,
             local.clk_16bit_limb,
             local.clk_8bit_limb,
             local.is_real,
         );
     }
 
-    /// Constraints related to the pc for non jump, branch, and halt instructions.
-    ///
-    /// The function will verify that the pc increments by 4 for all instructions except branch,
-    /// jump and halt instructions. Also, it ensures that the pc is carried down to the last row
-    /// for non-real rows.
-    pub(crate) fn eval_pc<AB: ZKMAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local: &CpuCols<AB::Var>,
-        next: &CpuCols<AB::Var>,
-        is_branch_instruction: AB::Expr,
-    ) {
-        // When is_sequential_instr is true, assert that instruction is not branch, jump.
-        // Note that the condition `when(local_is_real)` is implied from the previous constraint.
-        let is_halt = self.get_is_halt_syscall::<AB>(builder, local);
-        builder.when(local.is_real).assert_eq(
-            local.is_sequential_instr,
-            AB::Expr::ONE
-                - (is_branch_instruction
-                    + local.selectors.is_jump
-                    + local.selectors.is_jumpd
-                    + is_halt),
-        );
-
-        // Verify that the pc increments by 4 for all instructions except instruction after branch, jump
-        // instructions. The other case is handled by eval_jump, eval_branch and eval_syscall
-        // (for halt).
-        builder
-            .when(local.is_real)
-            .when(local.is_sequential_instr)
-            .assert_eq(local.next_pc + AB::Expr::from_canonical_u8(4), local.next_next_pc);
-
-        // When the last row is real and it's a sequential instruction, assert that local.next_pc
-        // <==> next.pc, local.next_next_pc <==> next.next_pc
-        builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
-
-        builder
-            .when_transition()
-            .when(next.is_real)
-            .when(next.is_sequential_instr)
-            .assert_eq(local.next_next_pc, next.next_pc);
-    }
-
     /// Constraints related to the public values.
-    pub(crate) fn eval_public_values<AB: ZKMAirBuilder>(
+    pub(crate) fn eval_pc<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
@@ -334,6 +158,8 @@ impl CpuChip {
 
         // Verify the public value's start pc.
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
+
+        builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
 
         // Verify the public value's next pc.  We need to handle two cases:
         // 1. The last real row is a transition row.
@@ -364,6 +190,8 @@ impl CpuChip {
         builder.assert_bool(local.is_real);
         builder.when_first_row().assert_one(local.is_real);
         builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
+         // If we're halting and it's a transition, then the next.is_real should be 0.
+         builder.when_transition().when(local.is_halt).assert_zero(next.is_real);
     }
 }
 

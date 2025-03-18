@@ -1,18 +1,6 @@
-mod branch;
-mod instruction;
-mod jump;
-mod memory;
-mod opcode;
-mod opcode_specific;
-mod syscall;
 
-pub use branch::*;
+mod instruction;
 pub use instruction::*;
-pub use jump::*;
-pub use memory::*;
-pub use opcode::*;
-pub use opcode_specific::*;
-pub use syscall::*;
 
 use p3_util::indices_arr;
 use std::mem::{size_of, transmute};
@@ -32,12 +20,17 @@ pub struct CpuCols<T: Copy> {
     /// The current shard.
     pub shard: T,
 
-    /// The clock cycle value.  This should be within 24 bits.
-    pub clk: T,
     /// The least significant 16 bit limb of clk.
     pub clk_16bit_limb: T,
     /// The most significant 8 bit limb of clk.
     pub clk_8bit_limb: T,
+
+    /// The shard to send to the opcode specific tables.  This should be 0 for all instructions other   
+    /// than the ecall and memory instructions.
+    pub shard_to_send: T,
+    /// The clk to send to the opcode specific tables.  This should be 0 for all instructions other
+    /// than the ecall and memory instructions.
+    pub clk_to_send: T,
 
     /// The program counter value.
     pub pc: T,
@@ -51,8 +44,17 @@ pub struct CpuCols<T: Copy> {
     /// Columns related to the instruction.
     pub instruction: InstructionCols<T>,
 
-    /// Selectors for the opcode.
-    pub selectors: OpcodeSelectorCols<T>,
+    /// The number of extra cycles to add to the clk for a syscall instruction.
+    pub num_extra_cycles: T,
+
+    /// Whether this is a memory instruction.
+    pub is_memory: T,
+
+    /// Table selectors for opcodes.
+    pub is_syscall: T,
+
+    /// Whether this is a halt instruction.
+    pub is_halt: T,
 
     /// Operand values, either from registers or immediate values.
     pub op_hi_access: MemoryReadWriteCols<T>,
@@ -60,60 +62,12 @@ pub struct CpuCols<T: Copy> {
     pub op_b_access: MemoryReadCols<T>,
     pub op_c_access: MemoryReadCols<T>,
 
-    pub opcode_specific_columns: OpcodeSpecificCols<T>,
+    pub has_hi: T,
 
     /// Selector to label whether this row is a non padded row.
     pub is_real: T,
 
-    /// The branching column is equal to:
-    ///
-    /// > is_beq & a_eq_b ||
-    /// > is_bne & !a_eq_b ||
-    /// > is_bltz & a_lt_0 ||
-    /// > is_bgtz & a_gt_0 ||
-    /// > is_blez & (a_lt_0  | a_eq_0) ||
-    /// > is_bgez & (a_gt_0  | a_eq_0)
-    pub branching: T,
-
-    /// The not branching column is equal to:
-    ///
-    /// > is_beq & !a_eq_b ||
-    /// > is_bne & a_eq_b ||
-    /// > is_bltz & (a_gt_0 | a_eq_0) ||
-    /// > is_bgtz & (a_lt_0 | a_eq_0) ||
-    /// > is_blez & a_gt_0 ||
-    /// > is_bgez & a_lt_0
-    pub not_branching: T,
-
-    /// Flag for load mem instructions where the value is negative and not writing to x0.
-    /// More formally, it is
-    ///
-    /// > (is_lb | is_lh) & (most_sig_byte_decomp[7] == 1) & (not writing to x0)
-    pub mem_value_is_neg_not_x0: T,
-
-    /// Flag for load mem instructions where the value is positive and not writing to x0.
-    /// More formally, it is
-    ///
-    /// (
-    ///     ((is_lb | is_lh) & (most_sig_byte_decomp[7] == 0)) |
-    ///     is_lbu | is_lhu | is_lw
-    /// ) &
-    /// (not writing to x0)
-    pub mem_value_is_pos_not_x0: T,
-
-    /// The unsigned memory value is the value after the offset logic is applied. Used for the load
-    /// memory opcodes (i.e. LB, LH, LW, LBU, and LHU).
-    pub unsigned_mem_val: Word<T>,
-
-    /// The result of selectors.is_syscall * the send_to_table column for the syscall opcode.
-    pub syscall_mul_send_to_table: T,
-
-    /// The result of selectors.is_syscall * (is_halt || is_commit_deferred_proofs)
-    pub syscall_range_check_operand: T,
-
-    /// This is true for all instructions that are not jumps, branches, and halt.  Those
-    /// instructions may move the program counter to a non sequential instruction.
-    pub is_sequential_instr: T,
+    pub op_a_immutable: T,
 }
 
 impl<T: Copy> CpuCols<T> {

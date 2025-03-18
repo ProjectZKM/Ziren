@@ -95,9 +95,9 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
         let shard = current_record.shard;
 
         // Add a byte table lookup with the 16Range op.
-        output.add_u16_range_check(shard, diff_16bit_limb);
+        output.add_u16_range_check(diff_16bit_limb);
 
         // Add a byte table lookup with the U8Range op.
-        output.add_u8_range_check(shard, 0, diff_8bit_limb as u8);
+        output.add_u8_range_check(0, diff_8bit_limb as u8);
     }
 }

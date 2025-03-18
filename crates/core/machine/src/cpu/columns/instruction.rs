@@ -27,6 +27,12 @@ pub struct InstructionCols<T> {
 
     /// Flags to indicate if op_a is register 0.
     pub op_a_0: T,
+
+    /// Whether op_b is an immediate value.
+    pub imm_b: T,
+
+    /// Whether op_c is an immediate value.
+    pub imm_c: T,
 }
 
 impl<F: PrimeField> InstructionCols<F> {
@@ -42,6 +48,8 @@ impl<F: PrimeField> InstructionCols<F> {
         self.op_c = instruction.op_c.into();
 
         self.op_a_0 = F::from_bool(instruction.op_a == Register::ZERO as u8);
+        self.imm_b = F::from_bool(instruction.imm_b);
+        self.imm_c = F::from_bool(instruction.imm_c);
     }
 }
 
@@ -55,6 +63,8 @@ impl<T> IntoIterator for InstructionCols<T> {
             .chain(self.op_b)
             .chain(self.op_c)
             .chain(once(self.op_a_0))
+            .chain(once(self.imm_b))
+            .chain(once(self.imm_c))
             .collect::<Vec<_>>()
             .into_iter()
     }
