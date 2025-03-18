@@ -57,14 +57,14 @@ impl Groth16Bn254Prover {
 
     pub fn build_contracts(build_dir: PathBuf) {
         // Write the corresponding asset files to the build dir.
-        let sp1_verifier_path = build_dir.join("SP1VerifierGroth16.sol");
+        let zkm2_verifier_path = build_dir.join("ZKMVerifierGroth16.sol");
         let vkey_hash = Self::get_vkey_hash(&build_dir);
-        let sp1_verifier_str = include_str!("../assets/SP1VerifierGroth16.txt")
-            .replace("{SP1_CIRCUIT_VERSION}", ZKM_CIRCUIT_VERSION)
+        let zkm2_verifier_str = include_str!("../assets/ZKMVerifierGroth16.txt")
+            .replace("{ZKM_CIRCUIT_VERSION}", ZKM_CIRCUIT_VERSION)
             .replace("{VERIFIER_HASH}", format!("0x{}", hex::encode(vkey_hash)).as_str())
             .replace("{PROOF_SYSTEM}", "Groth16");
-        let mut sp1_verifier_file = File::create(sp1_verifier_path).unwrap();
-        sp1_verifier_file.write_all(sp1_verifier_str.as_bytes()).unwrap();
+        let mut zkm2_verifier_file = File::create(zkm2_verifier_path).unwrap();
+        zkm2_verifier_file.write_all(zkm2_verifier_str.as_bytes()).unwrap();
 
         let groth16_verifier_path = build_dir.join("Groth16Verifier.sol");
         Self::modify_groth16_verifier(&groth16_verifier_path);
@@ -130,7 +130,7 @@ impl Groth16Bn254Prover {
         .expect("failed to verify proof")
     }
 
-    /// Modify the Groth16Verifier so that it works with the SP1Verifier.
+    /// Modify the Groth16Verifier so that it works with the ZKMVerifier.
     fn modify_groth16_verifier(file_path: &Path) {
         let mut content = String::new();
         File::open(file_path).unwrap().read_to_string(&mut content).unwrap();

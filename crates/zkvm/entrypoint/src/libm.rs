@@ -1,4 +1,4 @@
-//! Ported from Entrypoint for SP1 zkVM.
+//! Ported from Entrypoint for ZKM2 zkVM.
 //!
 #[no_mangle]
 pub extern "C" fn acos(x: f64) -> f64 {

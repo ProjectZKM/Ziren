@@ -1,4 +1,4 @@
-package sp1
+package zkm2
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
 	"github.com/consensys/gnark/frontend"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/koalabear"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
 )
 
 func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string) error {
@@ -38,10 +38,10 @@ func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHa
 
 	// Compute the public witness.
 	circuit := Circuit{
-		Vars:                 []frontend.Variable{},
-		Felts:                []koalabear.Variable{},
-		Exts:                 []koalabear.ExtensionVariable{},
-		VkeyHash:             verifyCmdVkeyHash,
+		Vars:                  []frontend.Variable{},
+		Felts:                 []koalabear.Variable{},
+		Exts:                  []koalabear.ExtensionVariable{},
+		VkeyHash:              verifyCmdVkeyHash,
 		CommittedValuesDigest: verifyCmdCommittedValuesDigest,
 	}
 	witness, err := frontend.NewWitness(&circuit, ecc.BN254.ScalarField())
@@ -84,10 +84,10 @@ func VerifyGroth16(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkey
 
 	// Compute the public witness.
 	circuit := Circuit{
-		Vars:                 []frontend.Variable{},
-		Felts:                []koalabear.Variable{},
-		Exts:                 []koalabear.ExtensionVariable{},
-		VkeyHash:             verifyCmdVkeyHash,
+		Vars:                  []frontend.Variable{},
+		Felts:                 []koalabear.Variable{},
+		Exts:                  []koalabear.ExtensionVariable{},
+		VkeyHash:              verifyCmdVkeyHash,
 		CommittedValuesDigest: verifyCmdCommittedValuesDigest,
 	}
 	witness, err := frontend.NewWitness(&circuit, ecc.BN254.ScalarField())

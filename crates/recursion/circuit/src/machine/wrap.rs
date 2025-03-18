@@ -42,7 +42,7 @@ where
     ///   `deferred_vk`.
     /// - Compress proofs: these are proofs which refer to a prove of this program. The key for it
     ///   is part of public values will be propagated across all levels of recursion and will be
-    ///   checked against itself as in [sp1_prover::Prover] or as in [super::ZKMRootVerifier].
+    ///   checked against itself as in [zkm2_prover::Prover] or as in [super::ZKMRootVerifier].
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,

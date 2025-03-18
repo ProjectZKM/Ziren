@@ -19,7 +19,7 @@ use crate::syscall::precompiles::weierstrass::WeierstrassDecompressChip;
 use crate::syscall::precompiles::weierstrass::WeierstrassDoubleAssignChip;
 use crate::syscall::{
     SyscallCommit, SyscallCommitDeferred, SyscallEnterUnconstrained, SyscallExitUnconstrained,
-    SyscallHalt, SyscallHintLen, SyscallHintRead, SyscallVerifySP1Proof, SyscallWrite,
+    SyscallHalt, SyscallHintLen, SyscallHintRead, SyscallVerifyZKMProof, SyscallWrite,
 };
 use crate::utils::ec::edwards::ed25519::{Ed25519, Ed25519Parameters};
 use crate::utils::ec::weierstrass::bls12_381::{Bls12381, Bls12381BaseField};
@@ -95,8 +95,8 @@ pub enum SyscallCode {
     /// Executes the `COMMIT_DEFERRED_PROOFS` precompile.
     COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A,
 
-    /// Executes the `VERIFY_SP1_PROOF` precompile.
-    VERIFY_SP1_PROOF = 0x00_00_00_1B,
+    /// Executes the `VERIFY_ZKM_PROOF` precompile.
+    VERIFY_ZKM_PROOF = 0x00_00_00_1B,
 
     /// Executes the `BLS12381_DECOMPRESS` precompile.
     BLS12381_DECOMPRESS = 0x00_00_01_1C,
@@ -181,7 +181,7 @@ impl SyscallCode {
             0x00_00_01_1F => SyscallCode::BLS12381_DOUBLE,
             0x00_00_00_10 => SyscallCode::COMMIT,
             0x00_00_00_1A => SyscallCode::COMMIT_DEFERRED_PROOFS,
-            0x00_00_00_1B => SyscallCode::VERIFY_SP1_PROOF,
+            0x00_00_00_1B => SyscallCode::VERIFY_ZKM_PROOF,
             0x00_00_00_F0 => SyscallCode::HINT_LEN,
             0x00_00_00_F1 => SyscallCode::HINT_READ,
             0x00_01_01_1D => SyscallCode::UINT256_MUL,
@@ -440,7 +440,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::WRITE, Arc::new(SyscallWrite::new()));
     syscall_map.insert(SyscallCode::COMMIT, Arc::new(SyscallCommit::new()));
     syscall_map.insert(SyscallCode::COMMIT_DEFERRED_PROOFS, Arc::new(SyscallCommitDeferred::new()));
-    syscall_map.insert(SyscallCode::VERIFY_SP1_PROOF, Arc::new(SyscallVerifySP1Proof::new()));
+    syscall_map.insert(SyscallCode::VERIFY_ZKM_PROOF, Arc::new(SyscallVerifyZKMProof::new()));
     syscall_map.insert(SyscallCode::HINT_LEN, Arc::new(SyscallHintLen::new()));
     syscall_map.insert(SyscallCode::HINT_READ, Arc::new(SyscallHintRead::new()));
     syscall_map.insert(
@@ -542,8 +542,8 @@ mod tests {
                 SyscallCode::COMMIT_DEFERRED_PROOFS => {
                     assert_eq!(code as u32, zkm2_zkvm::syscalls::COMMIT_DEFERRED_PROOFS)
                 }
-                SyscallCode::VERIFY_SP1_PROOF => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::VERIFY_SP1_PROOF)
+                SyscallCode::VERIFY_ZKM_PROOF => {
+                    assert_eq!(code as u32, zkm2_zkvm::syscalls::VERIFY_ZKM_PROOF)
                 }
                 SyscallCode::HINT_LEN => assert_eq!(code as u32, zkm2_zkvm::syscalls::HINT_LEN),
                 SyscallCode::HINT_READ => assert_eq!(code as u32, zkm2_zkvm::syscalls::HINT_READ),

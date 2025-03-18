@@ -1,9 +1,9 @@
-package sp1
+package zkm2
 
 import (
 	"github.com/consensys/gnark/frontend"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/koalabear"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/poseidon2"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/poseidon2"
 )
 
 type TestPoseidon2KoalaBearCircuit struct {

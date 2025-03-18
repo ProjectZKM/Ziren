@@ -31,9 +31,9 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
 	"github.com/consensys/gnark/test/unsafekzg"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/koalabear"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/poseidon2"
+	zkm2 "github.com/zkMIPS/zkm2-recursion-gnark/zkm2"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/poseidon2"
 )
 
 func main() {}
@@ -43,7 +43,7 @@ func ProvePlonkBn254(dataDir *C.char, witnessPath *C.char) *C.C_PlonkBn254Proof 
 	dataDirString := C.GoString(dataDir)
 	witnessPathString := C.GoString(witnessPath)
 
-	sp1PlonkBn254Proof := sp1.ProvePlonk(dataDirString, witnessPathString)
+	zkmPlonkBn254Proof := zkm2.ProvePlonk(dataDirString, witnessPathString)
 
 	ms := C.malloc(C.sizeof_C_PlonkBn254Proof)
 	if ms == nil {
@@ -51,10 +51,10 @@ func ProvePlonkBn254(dataDir *C.char, witnessPath *C.char) *C.C_PlonkBn254Proof 
 	}
 
 	structPtr := (*C.C_PlonkBn254Proof)(ms)
-	structPtr.PublicInputs[0] = C.CString(sp1PlonkBn254Proof.PublicInputs[0])
-	structPtr.PublicInputs[1] = C.CString(sp1PlonkBn254Proof.PublicInputs[1])
-	structPtr.EncodedProof = C.CString(sp1PlonkBn254Proof.EncodedProof)
-	structPtr.RawProof = C.CString(sp1PlonkBn254Proof.RawProof)
+	structPtr.PublicInputs[0] = C.CString(zkmPlonkBn254Proof.PublicInputs[0])
+	structPtr.PublicInputs[1] = C.CString(zkmPlonkBn254Proof.PublicInputs[1])
+	structPtr.EncodedProof = C.CString(zkmPlonkBn254Proof.EncodedProof)
+	structPtr.RawProof = C.CString(zkmPlonkBn254Proof.RawProof)
 	return structPtr
 }
 
@@ -72,7 +72,7 @@ func BuildPlonkBn254(dataDir *C.char) {
 	// Sanity check the required arguments have been provided.
 	dataDirString := C.GoString(dataDir)
 
-	sp1.BuildPlonk(dataDirString)
+	zkm2.BuildPlonk(dataDirString)
 }
 
 //export VerifyPlonkBn254
@@ -82,7 +82,7 @@ func VerifyPlonkBn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, committe
 	vkeyHashString := C.GoString(vkeyHash)
 	committedValuesDigestString := C.GoString(committedValuesDigest)
 
-	err := sp1.VerifyPlonk(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
+	err := zkm2.VerifyPlonk(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -112,7 +112,7 @@ func ProveGroth16Bn254(dataDir *C.char, witnessPath *C.char) *C.C_Groth16Bn254Pr
 	dataDirString := C.GoString(dataDir)
 	witnessPathString := C.GoString(witnessPath)
 
-	sp1Groth16Bn254Proof := sp1.ProveGroth16(dataDirString, witnessPathString)
+	zkm2Groth16Bn254Proof := zkm2.ProveGroth16(dataDirString, witnessPathString)
 
 	ms := C.malloc(C.sizeof_C_Groth16Bn254Proof)
 	if ms == nil {
@@ -120,10 +120,10 @@ func ProveGroth16Bn254(dataDir *C.char, witnessPath *C.char) *C.C_Groth16Bn254Pr
 	}
 
 	structPtr := (*C.C_Groth16Bn254Proof)(ms)
-	structPtr.PublicInputs[0] = C.CString(sp1Groth16Bn254Proof.PublicInputs[0])
-	structPtr.PublicInputs[1] = C.CString(sp1Groth16Bn254Proof.PublicInputs[1])
-	structPtr.EncodedProof = C.CString(sp1Groth16Bn254Proof.EncodedProof)
-	structPtr.RawProof = C.CString(sp1Groth16Bn254Proof.RawProof)
+	structPtr.PublicInputs[0] = C.CString(zkm2Groth16Bn254Proof.PublicInputs[0])
+	structPtr.PublicInputs[1] = C.CString(zkm2Groth16Bn254Proof.PublicInputs[1])
+	structPtr.EncodedProof = C.CString(zkm2Groth16Bn254Proof.EncodedProof)
+	structPtr.RawProof = C.CString(zkm2Groth16Bn254Proof.RawProof)
 	return structPtr
 }
 
@@ -141,7 +141,7 @@ func BuildGroth16Bn254(dataDir *C.char) {
 	// Sanity check the required arguments have been provided.
 	dataDirString := C.GoString(dataDir)
 
-	sp1.BuildGroth16(dataDirString)
+	zkm2.BuildGroth16(dataDirString)
 }
 
 //export VerifyGroth16Bn254
@@ -151,7 +151,7 @@ func VerifyGroth16Bn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, commit
 	vkeyHashString := C.GoString(vkeyHash)
 	committedValuesDigestString := C.GoString(committedValuesDigest)
 
-	err := sp1.VerifyGroth16(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
+	err := zkm2.VerifyGroth16(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -189,14 +189,14 @@ func TestMain() error {
 	}
 
 	// Deserialize the JSON data into a slice of Instruction structs
-	var inputs sp1.WitnessInput
+	var inputs zkm2.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return err
 	}
 
 	// Compile the circuit.
-	circuit := sp1.NewCircuit(inputs)
+	circuit := zkm2.NewCircuit(inputs)
 	builder := scs.NewBuilder
 	scs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestMain() error {
 	fmt.Println("[zkm2] run the dummy setup done")
 
 	// Generate witness.
-	assignment := sp1.NewCircuit(inputs)
+	assignment := zkm2.NewCircuit(inputs)
 	witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return err
@@ -274,8 +274,8 @@ func TestPoseidonKoalaBear2() *C.char {
 		koalabear.NewF("1825850772"),
 	}
 
-	circuit := sp1.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
-	assignment := sp1.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
+	circuit := zkm2.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
+	assignment := zkm2.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
 
 	builder := r1cs.NewBuilder
 	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)

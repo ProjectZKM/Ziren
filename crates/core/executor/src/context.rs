@@ -7,10 +7,10 @@ use crate::{
     subproof::SubproofVerifier,
 };
 
-/// Context to run a program inside SP1.
+/// Context to run a program inside ZKM2.
 #[derive(Clone, Default)]
 pub struct ZKMContext<'a> {
-    /// The registry of hooks invocable from inside SP1.
+    /// The registry of hooks invocable from inside ZKM2.
     ///
     /// Note: `None` denotes the default list of hooks.
     pub hook_registry: Option<HookRegistry<'a>>,
@@ -82,9 +82,9 @@ impl<'a> ZKMContextBuilder<'a> {
 
     /// Add a runtime [Hook](super::Hook) into the context.
     ///
-    /// Hooks may be invoked from within SP1 by writing to the specified file descriptor `fd`
-    /// with [`sp1_zkvm::io::write`], returning a list of arbitrary data that may be read
-    /// with successive calls to [`sp1_zkvm::io::read`].
+    /// Hooks may be invoked from within ZKM2 by writing to the specified file descriptor `fd`
+    /// with [`zkm2_zkvm::io::write`], returning a list of arbitrary data that may be read
+    /// with successive calls to [`zkm2_zkvm::io::read`].
     pub fn hook(
         &mut self,
         fd: u32,
@@ -105,7 +105,7 @@ impl<'a> ZKMContextBuilder<'a> {
 
     /// Add a subproof verifier.
     ///
-    /// The verifier is used to sanity check `verify_sp1_proof` during runtime.
+    /// The verifier is used to sanity check `verify_zkm2_proof` during runtime.
     pub fn subproof_verifier(
         &mut self,
         subproof_verifier: &'a dyn SubproofVerifier,

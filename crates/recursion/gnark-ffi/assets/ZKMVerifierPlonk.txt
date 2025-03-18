@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {ISP1Verifier, ISP1VerifierWithHash} from "../ISP1Verifier.sol";
-import {Groth16Verifier} from "./Groth16Verifier.sol";
+import {IZKMVerifier, IZKMVerifierWithHash} from "../IZKMVerifier.sol";
+import {PlonkVerifier} from "./PlonkVerifier.sol";
 
-/// @title SP1 Verifier
+/// @title ZKM2 Verifier
 /// @author Succinct Labs
-/// @notice This contracts implements a solidity verifier for SP1.
-contract SP1Verifier is Groth16Verifier, ISP1VerifierWithHash {
+/// @notice This contracts implements a solidity verifier for ZKM2.
+contract ZKMVerifier is PlonkVerifier, IZKMVerifierWithHash {
     /// @notice Thrown when the verifier selector from this proof does not match the one in this
     /// verifier. This indicates that this proof was sent to the wrong verifier.
     /// @param received The verifier selector from the first 4 bytes of the proof.
@@ -18,10 +18,10 @@ contract SP1Verifier is Groth16Verifier, ISP1VerifierWithHash {
     error InvalidProof();
 
     function VERSION() external pure returns (string memory) {
-        return "{SP1_CIRCUIT_VERSION}";
+        return "{ZKM_CIRCUIT_VERSION}";
     }
 
-    /// @inheritdoc ISP1VerifierWithHash
+    /// @inheritdoc IZKMVerifierWithHash
     function VERIFIER_HASH() public pure returns (bytes32) {
         return {VERIFIER_HASH};
     }
@@ -37,7 +37,7 @@ contract SP1Verifier is Groth16Verifier, ISP1VerifierWithHash {
     /// @notice Verifies a proof with given public values and vkey.
     /// @param programVKey The verification key for the RISC-V program.
     /// @param publicValues The public values encoded as bytes.
-    /// @param proofBytes The proof of the program execution the SP1 zkVM encoded as bytes.
+    /// @param proofBytes The proof of the program execution the ZKM2 zkVM encoded as bytes.
     function verifyProof(
         bytes32 programVKey,
         bytes calldata publicValues,
@@ -50,10 +50,12 @@ contract SP1Verifier is Groth16Verifier, ISP1VerifierWithHash {
         }
 
         bytes32 publicValuesDigest = hashPublicValues(publicValues);
-        uint256[2] memory inputs;
+        uint256[] memory inputs = new uint256[](2);
         inputs[0] = uint256(programVKey);
         inputs[1] = uint256(publicValuesDigest);
-        uint256[8] memory proof = abi.decode(proofBytes[4:], (uint256[8]));
-        this.Verify(proof, inputs);
+        bool success = this.Verify(proofBytes[4:], inputs);
+        if (!success) {
+            revert InvalidProof();
+        }
     }
 }

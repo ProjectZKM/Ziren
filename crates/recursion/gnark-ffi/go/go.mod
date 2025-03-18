@@ -1,4 +1,4 @@
-module github.com/succinctlabs/sp1-recursion-gnark
+module github.com/zkMIPS/zkm2-recursion-gnark
 
 go 1.22
 

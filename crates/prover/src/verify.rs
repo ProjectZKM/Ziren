@@ -33,7 +33,7 @@ pub enum PlonkVerificationError {
     )]
     InvalidVerificationKey,
     #[error(
-        "the public values in the sp1 proof do not match the public values in the inner plonk bn254 proof"
+        "the public values in the zkm2 proof do not match the public values in the inner plonk bn254 proof"
     )]
     InvalidPublicValues,
 }
@@ -45,7 +45,7 @@ pub enum Groth16VerificationError {
     )]
     InvalidVerificationKey,
     #[error(
-        "the public values in the sp1 proof do not match the public values in the inner groth16 bn254 proof"
+        "the public values in the zkm2 proof do not match the public values in the inner groth16 bn254 proof"
     )]
     InvalidPublicValues,
 }
@@ -316,10 +316,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        // Verify that the proof is for the sp1 vkey we are expecting.
+        // Verify that the proof is for the zkm2 vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm2_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("sp1 vk hash mismatch"));
+            return Err(MachineVerificationError::InvalidPublicValues("zkm2 vk hash mismatch"));
         }
 
         Ok(())
@@ -347,10 +347,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
-        // Verify that the proof is for the sp1 vkey we are expecting.
+        // Verify that the proof is for the zkm2 vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm2_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("sp1 vk hash mismatch"));
+            return Err(MachineVerificationError::InvalidPublicValues("zkm2 vk hash mismatch"));
         }
 
         Ok(())
@@ -372,10 +372,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let public_values: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
         assert_root_public_values_valid(self.shrink_prover.machine().config(), public_values);
 
-        // Verify that the proof is for the sp1 vkey we are expecting.
+        // Verify that the proof is for the zkm2 vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm2_vk_digest() != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("sp1 vk hash mismatch"));
+            return Err(MachineVerificationError::InvalidPublicValues("zkm2 vk hash mismatch"));
         }
 
         Ok(())

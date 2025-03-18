@@ -46,7 +46,7 @@ impl Write for SyscallWriter {
 ///
 /// ### Examples
 /// ```ignore
-/// let data: Vec<u8> = sp1_zkvm::io::read_vec();
+/// let data: Vec<u8> = zkm2_zkvm::io::read_vec();
 /// ```
 pub fn read_vec() -> Vec<u8> {
     // Round up to the nearest multiple of 4 so that the memory allocated is in whole words
@@ -86,7 +86,7 @@ pub fn read_vec() -> Vec<u8> {
 ///     b: u32,
 /// }
 ///
-/// let data: MyStruct = sp1_zkvm::io::read();
+/// let data: MyStruct = zkm2_zkvm::io::read();
 /// ```
 pub fn read<T: DeserializeOwned>() -> T {
     let vec = read_vec();
@@ -109,7 +109,7 @@ pub fn read<T: DeserializeOwned>() -> T {
 ///     a: 1,
 ///     b: 2,
 /// };
-/// sp1_zkvm::io::commit(&data);
+/// zkm2_zkvm::io::commit(&data);
 /// ```
 pub fn commit<T: Serialize>(value: &T) {
     let writer = SyscallWriter { fd: FD_PUBLIC_VALUES };
@@ -121,7 +121,7 @@ pub fn commit<T: Serialize>(value: &T) {
 /// ### Examples
 /// ```ignore
 /// let data = vec![1, 2, 3, 4];
-/// sp1_zkvm::io::commit_slice(&data);
+/// zkm2_zkvm::io::commit_slice(&data);
 /// ```
 pub fn commit_slice(buf: &[u8]) {
     let mut my_writer = SyscallWriter { fd: FD_PUBLIC_VALUES };
@@ -144,7 +144,7 @@ pub fn commit_slice(buf: &[u8]) {
 ///     a: 1,
 ///     b: 2,
 /// };
-/// sp1_zkvm::io::hint(&data);
+/// zkm2_zkvm::io::hint(&data);
 /// ```
 pub fn hint<T: Serialize>(value: &T) {
     let writer = SyscallWriter { fd: FD_HINT };
@@ -156,7 +156,7 @@ pub fn hint<T: Serialize>(value: &T) {
 /// ### Examples
 /// ```ignore
 /// let data = vec![1, 2, 3, 4];
-/// sp1_zkvm::io::hint_slice(&data);
+/// zkm2_zkvm::io::hint_slice(&data);
 /// ```
 pub fn hint_slice(buf: &[u8]) {
     let mut my_reader = SyscallWriter { fd: FD_HINT };
@@ -168,7 +168,7 @@ pub fn hint_slice(buf: &[u8]) {
 /// ### Examples
 /// ```ignore
 /// let data = vec![1, 2, 3, 4];
-/// sp1_zkvm::io::write(3, &data);
+/// zkm2_zkvm::io::write(3, &data);
 /// ```
 pub fn write(fd: u32, buf: &[u8]) {
     SyscallWriter { fd }.write_all(buf).unwrap();

@@ -4,7 +4,7 @@ import (
 	"math/big"
 
 	"github.com/consensys/gnark/frontend"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/koalabear"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
 )
 
 const KOALABEAR_WIDTH = 16

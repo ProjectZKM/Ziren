@@ -13,7 +13,7 @@ fn main() {
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
 
-    // Only execute the program and get a `SP1PublicValues` object.
+    // Only execute the program and get a `ZKMPublicValues` object.
     let client = ProverClient::new();
     let (mut public_values, execution_report) = client.execute(ELF, stdin).run().unwrap();
 

@@ -1,5 +1,5 @@
 //! This is a test program that takes in a zkm2_core vkey and a list of inputs, and then verifies the
-//! SP1 proof for each input.
+//! ZKM2 proof for each input.
 #![no_std]
 #![no_main]
 zkm2_zkvm::entrypoint!(main);

@@ -1,4 +1,4 @@
-package sp1
+package zkm2
 
 import (
 	"bytes"
@@ -9,10 +9,10 @@ import (
 	plonk "github.com/consensys/gnark/backend/plonk"
 	plonk_bn254 "github.com/consensys/gnark/backend/plonk/bn254"
 	"github.com/consensys/gnark/frontend"
-	"github.com/succinctlabs/sp1-recursion-gnark/sp1/koalabear"
+	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
 )
 
-func NewSP1PlonkBn254Proof(proof *plonk.Proof, witnessInput WitnessInput) Proof {
+func NewZKMPlonkBn254Proof(proof *plonk.Proof, witnessInput WitnessInput) Proof {
 	var buf bytes.Buffer
 	(*proof).WriteRawTo(&buf)
 	proofBytes := buf.Bytes()
@@ -33,7 +33,7 @@ func NewSP1PlonkBn254Proof(proof *plonk.Proof, witnessInput WitnessInput) Proof 
 	}
 }
 
-func NewSP1Groth16Proof(proof *groth16.Proof, witnessInput WitnessInput) Proof {
+func NewZKMGroth16Proof(proof *groth16.Proof, witnessInput WitnessInput) Proof {
 	var buf bytes.Buffer
 	(*proof).WriteRawTo(&buf)
 	proofBytes := buf.Bytes()
@@ -68,10 +68,10 @@ func NewCircuit(witnessInput WitnessInput) Circuit {
 		exts[i] = koalabear.NewE(witnessInput.Exts[i])
 	}
 	return Circuit{
-		VkeyHash:             witnessInput.VkeyHash,
+		VkeyHash:              witnessInput.VkeyHash,
 		CommittedValuesDigest: witnessInput.CommittedValuesDigest,
-		Vars:                 vars,
-		Felts:                felts,
-		Exts:                 exts,
+		Vars:                  vars,
+		Felts:                 felts,
+		Exts:                  exts,
 	}
 }

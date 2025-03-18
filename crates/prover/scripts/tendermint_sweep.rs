@@ -3,11 +3,11 @@
 use std::{fs::File, io::BufWriter, io::Write, time::Instant};
 
 use itertools::iproduct;
-use sp1_core_executor::SP1Context;
-use sp1_core_machine::io::SP1Stdin;
-use sp1_prover::components::DefaultProverComponents;
-use sp1_prover::SP1Prover;
-use sp1_stark::SP1ProverOpts;
+use zkm2_core_executor::ZKMContext;
+use zkm2_core_machine::io::ZKMStdin;
+use zkm2_prover::components::DefaultProverComponents;
+use zkm2_prover::ZKMProver;
+use zkm2_stark::ZKMProverOpts;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
@@ -21,7 +21,7 @@ fn main() {
         .add_directive("p3_fri=off".parse().unwrap())
         .add_directive("p3_challenger=off".parse().unwrap())
         .add_directive("p3_dft=off".parse().unwrap())
-        .add_directive("sp1_core=off".parse().unwrap());
+        .add_directive("zkm2_core=off".parse().unwrap());
     tracing_subscriber::fmt::Subscriber::builder()
         .with_ansi(false)
         .with_file(false)
@@ -37,7 +37,7 @@ fn main() {
     std::env::set_var("RECONSTRUCT_COMMITMENTS", "false");
 
     // Initialize prover.
-    let prover = SP1Prover::<DefaultProverComponents>::new();
+    let prover = ZKMProver::<DefaultProverComponents>::new();
 
     // Setup sweep.
     let iterations = [480000u32];
@@ -58,19 +58,19 @@ fn main() {
         );
         std::env::set_var("SHARD_SIZE", shard_size.to_string());
 
-        let stdin = SP1Stdin {
+        let stdin = ZKMStdin {
             buffer: vec![bincode::serialize::<u32>(&iterations).unwrap()],
             ptr: 0,
             proofs: vec![],
         };
         let leaf_proving_start = Instant::now();
         let proof = prover
-            .prove_core(&pk, &stdin, SP1ProverOpts::default(), SP1Context::default())
+            .prove_core(&pk, &stdin, ZKMProverOpts::default(), ZKMContext::default())
             .unwrap();
         let leaf_proving_duration = leaf_proving_start.elapsed().as_secs_f64();
 
         let recursion_proving_start = Instant::now();
-        let _ = prover.compress(&vk, proof, vec![], SP1ProverOpts::default());
+        let _ = prover.compress(&vk, proof, vec![], ZKMProverOpts::default());
         let recursion_proving_duration = recursion_proving_start.elapsed().as_secs_f64();
 
         lines.push(format!(

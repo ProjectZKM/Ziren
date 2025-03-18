@@ -32,7 +32,7 @@ pub fn try_build_plonk_bn254_artifacts_dev(
     template_proof: &ShardProof<OuterSC>,
 ) -> PathBuf {
     let build_dir = plonk_bn254_artifacts_dev_dir();
-    println!("[sp1] building plonk bn254 artifacts in development mode");
+    println!("[zkm2] building plonk bn254 artifacts in development mode");
     build_plonk_bn254_artifacts(template_vk, template_proof, &build_dir);
     build_dir
 }

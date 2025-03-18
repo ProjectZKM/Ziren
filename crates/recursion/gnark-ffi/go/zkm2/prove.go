@@ -1,4 +1,4 @@
-package sp1
+package zkm2
 
 import (
 	"bufio"
@@ -92,7 +92,7 @@ func ProvePlonk(dataDir string, witnessPath string) Proof {
 		panic(err)
 	}
 
-	return NewSP1PlonkBn254Proof(&proof, witnessInput)
+	return NewZKMPlonkBn254Proof(&proof, witnessInput)
 }
 
 func ProveGroth16(dataDir string, witnessPath string) Proof {
@@ -172,5 +172,5 @@ func ProveGroth16(dataDir string, witnessPath string) Proof {
 	}
 	fmt.Printf("Generating proof took %s\n", time.Since(start))
 
-	return NewSP1Groth16Proof(&proof, witnessInput)
+	return NewZKMGroth16Proof(&proof, witnessInput)
 }

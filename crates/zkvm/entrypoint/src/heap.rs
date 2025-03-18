@@ -1,4 +1,4 @@
-//! Ported from Entrypoint for SP1 zkVM.
+//! Ported from Entrypoint for ZKM2 zkVM.
 
 use core::alloc::{GlobalAlloc, Layout};
 

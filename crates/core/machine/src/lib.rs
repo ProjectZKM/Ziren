@@ -38,10 +38,10 @@ pub use mips::*;
 /// docker image.
 pub const ZKM_CIRCUIT_VERSION: &str = "v0.0.1";
 
-// Re-export the `SP1ReduceProof` struct from zkm2_core_machine.
+// Re-export the `ZKMReduceProof` struct from zkm2_core_machine.
 //
 // This is done to avoid a circular dependency between zkm2_core_machine and zkm2_core_executor, and
-// enable crates that depend on zkm2_core_machine to import the `SP1ReduceProof` type directly.
+// enable crates that depend on zkm2_core_machine to import the `ZKMReduceProof` type directly.
 pub mod reduce {
     pub use zkm2_core_executor::ZKMReduceProof;
 }
