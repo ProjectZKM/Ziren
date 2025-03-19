@@ -1,0 +1,19 @@
+[package]
+name = "tendermint-host"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+zkm2-sdk = { workspace = true }
+serde_json = { workspace = true }
+tendermint-light-client-verifier = { version = "0.35.0", default-features = false, features = [
+  "rust-crypto",
+] }
+serde_cbor = "0.11.2"
+
+[build-dependencies]
+zkm2-build = { workspace = true }
+
+[features]
+cuda = ["zkm2-sdk/cuda"]

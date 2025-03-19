@@ -1,0 +1,13 @@
+[package]
+name = "json-host"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+serde_json = { workspace = true }
+zkm2-sdk = { workspace = true }
+lib = { path = "../lib", package = "json-lib" }
+
+[build-dependencies]
+zkm2-build = { workspace = true }

@@ -1,0 +1,10 @@
+[package]
+name = "json"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkm2-zkvm = { path = "../../../crates/zkvm/entrypoint" }
+serde_json = { workspace = true }
+lib = { path = "../lib", package = "json-lib" }
