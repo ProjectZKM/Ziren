@@ -1564,7 +1564,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
-name = "fibonacci-program"
+name = "fibonacci"
 version = "1.1.0"
 dependencies = [
  "zkm2-zkvm 0.0.1",
@@ -2347,6 +2347,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak"
+version = "1.1.0"
+dependencies = [
+ "zkm2-zkvm 0.0.1",
+]
+
+[[package]]
 name = "keccak-asm"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2354,13 +2361,6 @@ checksum = "505d1856a39b200489082f90d897c3f07c455563880bc5952e38eabf731c83b6"
 dependencies = [
  "digest 0.10.7",
  "sha3-asm",
-]
-
-[[package]]
-name = "keccak"
-version = "1.1.0"
-dependencies = [
- "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -4133,7 +4133,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.7",
- "keccak",
+ "keccak 0.1.5",
 ]
 
 [[package]]
