@@ -69,7 +69,7 @@ where
             local.next_pc,
             local.num_extra_cycles,
             local.instruction.opcode,
-            local.op_a_val(),
+            local.op_a_value,
             local.op_b_val(),
             local.op_c_val(),
             local.op_hi_val(),

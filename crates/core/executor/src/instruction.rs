@@ -152,6 +152,8 @@ impl Instruction {
                 | Opcode::MULTU
                 | Opcode::DIV
                 | Opcode::DIVU
+                | Opcode::MADDU
+                | Opcode::MSUBU
         )
     }
 

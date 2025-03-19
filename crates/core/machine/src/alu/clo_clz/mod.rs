@@ -247,7 +247,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
-            local.is_clz + local.is_clo,
+            local.is_real,
         );
 
         // if bb == 0, result is 32

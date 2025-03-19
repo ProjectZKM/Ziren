@@ -143,6 +143,8 @@ impl CpuChip {
         );
         cols.is_syscall = F::from_bool(instruction.is_syscall_instruction());
 
+        cols.op_a_value = event.a.into();
+
         if let Some(hi) = event.hi {
             *cols.op_hi_access.value_mut() = hi.into();
         }

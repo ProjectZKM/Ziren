@@ -57,6 +57,7 @@ pub struct CpuCols<T: Copy> {
     pub is_halt: T,
 
     /// Operand values, either from registers or immediate values.
+    pub op_a_value: Word<T>,
     pub op_hi_access: MemoryReadWriteCols<T>,
     pub op_a_access: MemoryReadWriteCols<T>,
     pub op_b_access: MemoryReadCols<T>,
