@@ -35,7 +35,7 @@ contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
     }
 
     /// @notice Verifies a proof with given public values and vkey.
-    /// @param programVKey The verification key for the RISC-V program.
+    /// @param programVKey The verification key for the MIPS program.
     /// @param publicValues The public values encoded as bytes.
     /// @param proofBytes The proof of the program execution the ZKM2 zkVM encoded as bytes.
     function verifyProof(

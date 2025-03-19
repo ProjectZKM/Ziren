@@ -391,7 +391,7 @@ where
         // Constraints related to register %x0.
 
         // Register %x0 should always be 0. See 2.6 Load and Store Instruction on
-        // P.18 of the RISC-V spec.  To ensure that, we will constrain that the value is zero
+        // P.18 of the MIPS spec.  To ensure that, we will constrain that the value is zero
         // whenever the `is_first_comp` flag is set to to zero as well. This guarantees that the
         // presence of this flag asserts the initialization/finalization of %x0 to zero.
         //

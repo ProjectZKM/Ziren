@@ -1,8 +1,8 @@
-//! An end-to-end-prover implementation for the ZKM RISC-V zkVM.
+//! An end-to-end-prover implementation for the ZKM MIPS zkVM.
 //!
 //! Separates the proof generation process into multiple stages:
 //!
-//! 1. Generate shard proofs which split up and prove the valid execution of a RISC-V program.
+//! 1. Generate shard proofs which split up and prove the valid execution of a MIPS program.
 //! 2. Compress shard proofs into a single shard proof.
 //! 3. Wrap the shard proof into a SNARK-friendly field.
 //! 4. Wrap the last shard proof, proven over the SNARK-friendly field, into a PLONK proof.
@@ -114,7 +114,7 @@ pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
 
-/// A end-to-end prover implementation for the ZKM RISC-V zkVM.
+/// A end-to-end prover implementation for the ZKM MIPS zkVM.
 pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the core step.
     pub core_prover: C::CoreProver,
@@ -266,7 +266,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// lazily initialized. TODO: remove this.
     pub fn initialize(&mut self) {}
 
-    /// Creates a proving key and a verifying key for a given RISC-V ELF.
+    /// Creates a proving key and a verifying key for a given MIPS ELF.
     #[instrument(name = "setup", level = "debug", skip_all)]
     pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
         let program = self.get_program(elf).unwrap();
@@ -309,7 +309,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok((ZKMPublicValues::from(&runtime.state.public_values_stream), runtime.report))
     }
 
-    /// Generate shard proofs which split up and prove the valid execution of a RISC-V program with
+    /// Generate shard proofs which split up and prove the valid execution of a MIPS program with
     /// the core prover. Uses the provided context.
     #[instrument(name = "prove_core", level = "info", skip_all)]
     pub fn prove_core<'a>(

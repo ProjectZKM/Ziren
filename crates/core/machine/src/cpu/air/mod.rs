@@ -144,7 +144,7 @@ impl CpuChip {
         let is_jump_instruction = local.selectors.is_jump + local.selectors.is_jumpd;
 
         // Verify that the local.pc + 8 is saved in op_a for both jump instructions.
-        // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
+        // When op_a is set to register X0, the MIPS spec states that the jump instruction will
         // not have a return destination address (it is effectively a GOTO command).  In this case,
         // we shouldn't verify the return address.
         builder

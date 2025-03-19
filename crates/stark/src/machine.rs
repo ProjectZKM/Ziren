@@ -33,11 +33,11 @@ use super::{
 /// A chip in a machine.
 pub type MachineChip<SC, A> = Chip<Val<SC>, A>;
 
-/// A STARK for proving RISC-V execution.
+/// A STARK for proving MIPS execution.
 pub struct StarkMachine<SC: StarkGenericConfig, A> {
-    /// The STARK settings for the RISC-V STARK.
+    /// The STARK settings for the MIPS STARK.
     config: SC,
-    /// The chips that make up the RISC-V STARK machine, in order of their execution.
+    /// The chips that make up the MIPS STARK machine, in order of their execution.
     chips: Vec<Chip<Val<SC>, A>>,
 
     /// The number of public values elements that the machine uses
@@ -126,7 +126,7 @@ impl<SC: StarkGenericConfig> Debug for StarkVerifyingKey<SC> {
 }
 
 impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
-    /// Get an array containing a `ChipRef` for all the chips of this RISC-V STARK machine.
+    /// Get an array containing a `ChipRef` for all the chips of this MIPS STARK machine.
     pub fn chips(&self) -> &[MachineChip<SC, A>] {
         &self.chips
     }

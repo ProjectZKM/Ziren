@@ -28,7 +28,7 @@ pub fn is_signed_operation(opcode: Opcode) -> bool {
     opcode == Opcode::DIV
 }
 
-/// Calculate the correct `quotient` and `remainder` for the given `b` and `c` per RISC-V spec.
+/// Calculate the correct `quotient` and `remainder` for the given `b` and `c` per MIPS spec.
 #[must_use]
 pub fn get_quotient_and_remainder(b: u32, c: u32, opcode: Opcode) -> (u32, u32) {
     if c == 0 {

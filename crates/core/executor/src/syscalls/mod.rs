@@ -49,7 +49,7 @@ use zkm2_curves::{
 
 use crate::events::FieldOperation;
 
-/// A system call in the ZKM2 RISC-V zkVM.
+/// A system call in the ZKM2 MIPS zkVM.
 ///
 /// This trait implements methods needed to execute a system call inside the [`crate::Executor`].
 pub trait Syscall: Send + Sync {
