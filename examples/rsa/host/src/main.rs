@@ -60,9 +60,9 @@ fn main() {
     client.verify(&proof, &vk).expect("verification failed");
 
     // Test a round trip of proof serialization and deserialization.
-    proof.save("proof-with-pis").expect("saving proof failed");
+    proof.save("proof-with-pis.bin").expect("saving proof failed");
     let deserialized_proof =
-        ZKMProofWithPublicValues::load("proof-with-pis").expect("loading proof failed");
+        ZKMProofWithPublicValues::load("proof-with-pis.bin").expect("loading proof failed");
 
     // Verify the deserialized proof.
     client.verify(&deserialized_proof, &vk).expect("verification failed");
