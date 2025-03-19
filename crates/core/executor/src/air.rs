@@ -87,10 +87,12 @@ pub enum MipsAirId {
     Lt = 34,
     /// The CloClz chip.
     CloClz = 36,
-    // /// The branch chip.
-    // Branch = 37,
-    // /// The jump chip.
-    // Jump = 38,
+    /// The branch chip.
+    Branch = 37,
+    /// The jump chip.
+    Jump = 38,
+    /// The SyscallInstructionChip.
+    SyscallInstrs = 39,
     /// The memory global init chip.
     MemoryGlobalInit = 40,
     /// The memory global finalize chip.
@@ -101,6 +103,10 @@ pub enum MipsAirId {
     Global = 43,
     /// The byte chip.
     Byte = 44,
+    /// The MemoryInstructionChip.
+    MemoryInstrs = 45,
+    /// The MiscInstructionChip.
+    MiscInstrs = 46,
 }
 
 impl MipsAirId {
@@ -116,8 +122,11 @@ impl MipsAirId {
             MipsAirId::ShiftRight,
             MipsAirId::DivRem,
             MipsAirId::MemoryLocal,
-            // MipsAirId::Branch,
-            // MipsAirId::Jump,
+            MipsAirId::Branch,
+            MipsAirId::Jump,
+            MipsAirId::MemoryInstrs,
+            MipsAirId::SyscallInstrs,
+            MipsAirId::MiscInstrs,
             MipsAirId::SyscallCore,
             MipsAirId::Global,
         ]
@@ -163,13 +172,16 @@ impl MipsAirId {
             Self::ShiftLeft => "ShiftLeft",
             Self::Lt => "Lt",
             Self::CloClz => "CloClz",
-            // Self::Branch => "Branch",
-            // Self::Jump => "Jump",
+            Self::Branch => "Branch",
+            Self::Jump => "Jump",
+            Self::SyscallInstrs => "SyscallInstrs",
             Self::MemoryGlobalInit => "MemoryGlobalInit",
             Self::MemoryGlobalFinalize => "MemoryGlobalFinalize",
             Self::MemoryLocal => "MemoryLocal",
             Self::Global => "Global",
             Self::Byte => "Byte",
+            Self::MemoryInstrs => "MemoryInstrs",
+            Self::MiscInstrs => "MiscInstrs",
         }
     }
 }

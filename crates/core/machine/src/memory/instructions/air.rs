@@ -90,7 +90,7 @@ where
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
             local.op_a_0,
-            local.is_sb + local.is_sh + local.is_sw,
+            local.is_sb + local.is_sh + local.is_sw + local.is_swl + local.is_swr,
             AB::Expr::ONE,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

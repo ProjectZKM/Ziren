@@ -9,6 +9,7 @@ pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 pub struct MiscInstrColumns<T> {
     /// The program counter of the instruction.
     pub pc: T,
+    pub next_pc: T,
 
     /// The value of the second operand.
     pub op_a_value: Word<T>,
@@ -30,6 +31,4 @@ pub struct MiscInstrColumns<T> {
     pub is_teq: T,
 
     pub op_a_0: T,
-    /// Whether the current instruction is a real instruction.
-    pub is_real: T,
 }

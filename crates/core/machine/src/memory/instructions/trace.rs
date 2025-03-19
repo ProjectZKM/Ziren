@@ -225,7 +225,8 @@ impl MemoryInstructionsChip {
         cols.is_ll = F::from_bool(matches!(event.opcode, Opcode::LL));
         cols.is_sb = F::from_bool(matches!(event.opcode, Opcode::SB));
         cols.is_sh = F::from_bool(matches!(event.opcode, Opcode::SH));
-        cols.is_sw = F::from_bool(matches!(event.opcode, Opcode::SWL));
+        cols.is_sw = F::from_bool(matches!(event.opcode, Opcode::SW));
+        cols.is_swl = F::from_bool(matches!(event.opcode, Opcode::SWL));
         cols.is_swr = F::from_bool(matches!(event.opcode, Opcode::SWR));
         cols.is_sc = F::from_bool(matches!(event.opcode, Opcode::SC));
 

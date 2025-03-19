@@ -13,26 +13,26 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum Opcode {
     // BinaryOperator
-    ADD = 0,     // ALU
-    SUB = 1,     // ALU
-    MULT = 2,    // ALU
-    MULTU = 3,   // ALU
-    MUL = 4,     // ALU
-    DIV = 5,     // ALU    
-    DIVU = 6,    // ALU
-    SLL = 7,     // ALU
-    SRL = 8,     // ALU
-    SRA = 9,     // ALU
-    SLT = 10,    // ALU
-    SLTU = 11,   // ALU
-    AND = 12,    // ALU
-    OR = 13,     // ALU
-    XOR = 14,    // ALU
-    NOR = 15,    // ALU
+    ADD = 0,     // addsub
+    SUB = 1,     // addsub
+    MULT = 2,    // mul
+    MULTU = 3,   // mul
+    MUL = 4,     // mul
+    DIV = 5,     // divrem
+    DIVU = 6,    // divrem
+    SLL = 7,     // shiftleft
+    SRL = 8,     // shiftright
+    SRA = 9,     // shiftright
+    SLT = 10,    // lt
+    SLTU = 11,   // lt
+    AND = 12,    // bitwise
+    OR = 13,     // bitwise
+    XOR = 14,    // bitwise
+    NOR = 15,    // bitwise
     // count leading zeros
-    CLZ = 16,    // ALU
+    CLZ = 16,    // cloclz
     // count leading ones
-    CLO = 17,    // ALU
+    CLO = 17,    // cloclz
     BEQ = 18,    // BRANCH
     BGEZ = 19,   // BRANCH
     BGTZ = 20,   // BRANCH

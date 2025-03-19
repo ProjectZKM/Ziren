@@ -79,8 +79,8 @@ impl MiscInstrsChip {
         cols: &mut MiscInstrColumns<F>,
         blu: &mut impl ByteRecord,
     ) {
-        cols.is_real = F::ONE;
         cols.pc = F::from_canonical_u32(event.pc);
+        cols.next_pc = F::from_canonical_u32(event.next_pc);
 
         cols.op_a_value = event.a.into();
         cols.op_b_value = event.b.into();
@@ -94,5 +94,9 @@ impl MiscInstrsChip {
         cols.is_ins = F::from_bool(matches!(event.opcode, Opcode::INS));
         cols.is_maddu = F::from_bool(matches!(event.opcode, Opcode::MADDU));
         cols.is_msubu = F::from_bool(matches!(event.opcode, Opcode::MSUBU));
+        cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
+        cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
+        cols.is_nop = F::from_bool(matches!(event.opcode, Opcode::NOP));
+        cols.is_teq = F::from_bool(matches!(event.opcode, Opcode::TEQ));
     }
 }

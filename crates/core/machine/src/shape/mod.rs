@@ -570,11 +570,20 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
     let cloclz_log_height = shape.log2_height(&MipsAirId::CloClz);
     maybe_log2_heights.insert(MipsAirId::CloClz, heuristic(cloclz_log_height, 0));
 
-    // let branch_log_height = shape.log2_height(&MipsAirId::Branch);
-    // maybe_log2_heights.insert(MipsAirId::Branch, heuristic(branch_log_height, 0));
+    let branch_log_height = shape.log2_height(&MipsAirId::Branch);
+    maybe_log2_heights.insert(MipsAirId::Branch, heuristic(branch_log_height, 0));
 
-    // let jump_log_height = shape.log2_height(&MipsAirId::Jump);
-    // maybe_log2_heights.insert(MipsAirId::Jump, heuristic(jump_log_height, 0));
+    let jump_log_height = shape.log2_height(&MipsAirId::Jump);
+    maybe_log2_heights.insert(MipsAirId::Jump, heuristic(jump_log_height, 0));
+
+    let syscall_log_height = shape.log2_height(&MipsAirId::SyscallInstrs);
+    maybe_log2_heights.insert(MipsAirId::SyscallInstrs, heuristic(syscall_log_height, 0));
+
+    let memory_log_height = shape.log2_height(&MipsAirId::MemoryInstrs);
+    maybe_log2_heights.insert(MipsAirId::MemoryInstrs, heuristic(memory_log_height, 0));
+
+    let misc_log_height = shape.log2_height(&MipsAirId::MiscInstrs);
+    maybe_log2_heights.insert(MipsAirId::MiscInstrs, heuristic(misc_log_height, 0));
 
     let syscall_core_log_height = shape.log2_height(&MipsAirId::SyscallCore);
     maybe_log2_heights.insert(MipsAirId::SyscallCore, heuristic(syscall_core_log_height, 0));

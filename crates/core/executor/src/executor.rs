@@ -847,8 +847,7 @@ impl<'a> Executor<'a> {
         emit_memory_dependencies(
             self,
             event,
-            self.memory_accesses.memory.expect("Must have memory access").current_record(),
-            self.record.cpu_events.len() - 1
+            self.memory_accesses.memory.expect("Must have memory access").current_record()
         );
     }
 
@@ -866,7 +865,7 @@ impl<'a> Executor<'a> {
     ) {
         let event = BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 };
         self.record.branch_events.push(event);
-        emit_branch_dependencies(self, event, self.record.branch_events.len() - 1);
+        emit_branch_dependencies(self, event);
     }
 
     /// Emit a jump event.
@@ -882,7 +881,7 @@ impl<'a> Executor<'a> {
     ) {
         let event = JumpEvent::new(self.state.pc, next_pc, opcode, a, b, c, op_a_0);
         self.record.jump_events.push(event);
-        emit_jump_dependencies(self, event, self.record.jump_events.len() - 1);
+        emit_jump_dependencies(self, event);
     }
 
     /// Emit a misc event.
@@ -898,7 +897,7 @@ impl<'a> Executor<'a> {
     ) {
         let event = MiscEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, hi, op_a_0);
         self.record.misc_events.push(event);
-        emit_misc_dependencies(self, event, self.record.misc_events.len() - 1);
+        emit_misc_dependencies(self, event);
     }
 
     #[inline]

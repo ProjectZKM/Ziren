@@ -373,23 +373,23 @@ impl<F: PrimeField32> MipsAir<F> {
         chips.push(clo_clz);
 
         let memory_instructions = Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
-        costs.insert(MipsAirDiscriminants::MemoryInstrs, memory_instructions.cost());
+        costs.insert(memory_instructions.name(), memory_instructions.cost());
         chips.push(memory_instructions);
 
         let branch = Chip::new(MipsAir::Branch(BranchChip::default()));
-        costs.insert(MipsAirDiscriminants::Branch, branch.cost());
+        costs.insert(branch.name(), branch.cost());
         chips.push(branch);
 
         let jump = Chip::new(MipsAir::Jump(JumpChip::default()));
-        costs.insert(MipsAirDiscriminants::Jump, jump.cost());
+        costs.insert(jump.name(), jump.cost());
         chips.push(jump);
 
         let syscall_instrs = Chip::new(MipsAir::SyscallInstrs(SyscallInstrsChip::default()));
-        costs.insert(MipsAirDiscriminants::SyscallInstrs, syscall_instrs.cost());
+        costs.insert(syscall_instrs.name(), syscall_instrs.cost());
         chips.push(syscall_instrs);
 
         let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
-        costs.insert(MipsAirDiscriminants::MiscInstrs, misc_instrs.cost());
+        costs.insert(misc_instrs.name(), misc_instrs.cost());
         chips.push(misc_instrs);
 
         let memory_global_init =
@@ -429,6 +429,11 @@ impl<F: PrimeField32> MipsAir<F> {
     pub fn core_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
         vec![
             (MipsAirId::Cpu, record.cpu_events.len()),
+            (MipsAirId::Branch, record.branch_events.len()),
+            (MipsAirId::Jump, record.jump_events.len()),
+            (MipsAirId::MiscInstrs, record.misc_events.len()),
+            (MipsAirId::MemoryInstrs, record.memory_instr_events.len()),
+            (MipsAirId::SyscallInstrs, record.syscall_events.len()),
             (MipsAirId::DivRem, record.divrem_events.len()),
             (MipsAirId::AddSub, record.add_events.len() + record.sub_events.len()),
             (MipsAirId::Bitwise, record.bitwise_events.len()),

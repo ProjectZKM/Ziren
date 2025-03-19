@@ -43,6 +43,17 @@ where
             + local.is_mne * Opcode::MNE.as_field::<AB::F>()
             + local.is_nop * Opcode::NOP.as_field::<AB::F>()
             + local.is_teq * Opcode::TEQ.as_field::<AB::F>();
+
+        let is_real = local.is_wsbh
+            + local.is_seb
+            + local.is_ins
+            + local.is_ext
+            + local.is_maddu
+            + local.is_msubu
+            + local.is_meq
+            + local.is_mne
+            + local.is_nop
+            + local.is_teq;
             
         // SAFETY: This checks the following.
         // - `shard`, `clk` are correctly received from the CpuChip
@@ -60,7 +71,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             local.pc,
-            local.pc + AB::Expr::from_canonical_u32(DEFAULT_PC_INC),
+            local.next_pc,
             AB::Expr::ZERO,
             cpu_opcode,
             local.op_a_value,
@@ -72,7 +83,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
-            local.is_real,
+            is_real,
         );
 
         self.eval_wsbh(builder, local);

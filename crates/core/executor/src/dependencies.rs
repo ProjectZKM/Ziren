@@ -127,9 +127,7 @@ pub fn emit_memory_dependencies(
     executor: &mut Executor,
     event: MemInstrEvent,
     memory_record: MemoryRecord,
-    index: usize
 ) {
-    let cpu_event = executor.record.cpu_events[index];
     let shard = executor.shard();
     let memory_addr = event.b.wrapping_add(event.c);
     // Add event to ALU check to check that addr == b + c
@@ -188,8 +186,7 @@ pub fn emit_memory_dependencies(
 }
 
 /// Emit the dependencies for branch instructions.
-pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent, index: usize) {
-    let cpu_event = executor.record.cpu_events[index];
+pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
     let shard = executor.shard();
     let a_eq_b = event.a == event.b;
     let a_lt_b = (event.a as i32) < (event.b as i32);
@@ -242,8 +239,7 @@ pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent, ind
 }
 
 /// Emit the dependencies for jump instructions.
-pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent, index: usize) {
-    let cpu_event = executor.record.cpu_events[index];
+pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
     let shard = executor.shard();
     match event.opcode {
         Opcode::JumpDirect => {
@@ -267,6 +263,6 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent, index: 
 }
 
 /// Emit the dependencies for misc instructions.
-pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent, index: usize) {
+pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
     // TODO
 }

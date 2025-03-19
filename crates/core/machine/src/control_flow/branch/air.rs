@@ -83,6 +83,7 @@ where
             AB::Expr::ZERO,
             is_real.clone(),
         );
+
         // Evaluate program counter constraints.
         {
             // Range check branch_cols.pc and branch_cols.next_pc.

@@ -183,9 +183,6 @@ where
         let local = main.row_slice(0);
         let local: &AddSubCols<AB::Var> = (*local).borrow();
 
-        let opcode = AB::Expr::from_canonical_u32(Opcode::ADD as u32) * local.is_add
-            + AB::Expr::from_canonical_u32(Opcode::SUB as u32) * local.is_sub;
-
         // Evaluate the addition operation.
         AddOperation::<AB::F>::eval(
             builder,
@@ -201,7 +198,7 @@ where
             local.pc,
             local.next_pc,
             AB::Expr::ZERO,
-            opcode.clone(),
+            Opcode::ADD.as_field::<AB::F>(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
