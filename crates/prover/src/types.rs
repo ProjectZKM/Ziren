@@ -107,7 +107,7 @@ where
     }
 }
 
-/// A proof of a RISCV ELF execution with given inputs and outputs.
+/// A proof of a MIPS ELF execution with given inputs and outputs.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound(serialize = "P: Serialize"))]
 #[serde(bound(deserialize = "P: DeserializeOwned"))]

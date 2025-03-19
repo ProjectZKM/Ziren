@@ -32,7 +32,7 @@
 //     let args = Args::parse();
 //     let build_dir: PathBuf = args.build_dir.into();
 
-//     let elf = include_bytes!("../elf/riscv32im-succinct-zkvm-elf");
+//     let elf = include_bytes!("../elf/mipsel-zkm-zkvm-elf");
 
 //     tracing::info!("initializing prover");
 //     let prover: ZKMProver = ZKMProver::new();

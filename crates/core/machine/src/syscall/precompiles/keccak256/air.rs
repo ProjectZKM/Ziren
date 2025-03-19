@@ -134,7 +134,7 @@ where
 //mod test {
 //    use crate::{
 //        io::ZKMStdin,
-//        riscv::RiscvAir,
+//        mips::MipsAir,
 //        utils::{prove, setup_logger},
 //    };
 //    use zkm2_primitives::io::ZKMPublicValues;
@@ -183,7 +183,7 @@ where
 //
 //        let config = KoalaBearPoseidon2::new();
 //        let mut challenger = config.challenger();
-//        let machine = RiscvAir::machine(config);
+//        let machine = MipsAir::machine(config);
 //        let (_, vk) = machine.setup(&Program::from(KECCAK256_ELF).unwrap());
 //        let _ =
 //            tracing::info_span!("verify").in_scope(|| machine.verify(&vk, &proof, &mut challenger));
