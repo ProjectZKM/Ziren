@@ -744,7 +744,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "regex 1.11.1",
+ "regex",
  "rustc-hash 1.1.0",
  "shlex",
  "syn 2.0.87",
@@ -1578,7 +1578,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
 dependencies = [
  "log",
- "regex 1.11.1",
+ "regex",
 ]
 
 [[package]]
@@ -3869,14 +3869,6 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.1.0"
-dependencies = [
- "regex 1.11.1",
- "zkm2-zkvm 0.0.1",
-]
-
-[[package]]
-name = "regex"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b544ef1b4eac5dc2db33ea63606ae9ffcfac26c1416a2806ae0bf5f56b201191"
@@ -3905,14 +3897,6 @@ dependencies = [
  "aho-corasick",
  "memchr",
  "regex-syntax 0.8.5",
-]
-
-[[package]]
-name = "regex-host"
-version = "1.1.0"
-dependencies = [
- "zkm2-build",
- "zkm2-sdk",
 ]
 
 [[package]]
@@ -5258,7 +5242,7 @@ dependencies = [
  "matchers",
  "nu-ansi-term",
  "once_cell",
- "regex 1.11.1",
+ "regex",
  "sharded-slab",
  "smallvec",
  "thread_local",

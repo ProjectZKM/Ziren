@@ -7,12 +7,12 @@ const ELF: &[u8] = include_elf!("revme");
 
 fn prove_revm() {
     // 1. split ELF into segs
-    let json_path = env::var("JSON_PATH").expect("JSON file is missing");
+    let json_path = env::var("JSON_PATH").unwrap_or("../test-vectors/test.json".to_owned());
     let mut f = File::open(json_path).unwrap();
     let mut data = vec![];
     f.read_to_end(&mut data).unwrap();
 
-    println!("data: {:?}", data);
+    // println!("data: {:?}", data);
     // write input
     let mut stdin = ZKMStdin::new();
     stdin.write(&data);
