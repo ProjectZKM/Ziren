@@ -195,6 +195,9 @@ impl ZKMCoreOpts {
 /// Options for splitting deferred events.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SplitOpts {
+    /// The threshold for combining the memory init/finalize events in to the current shard in
+    /// terms of cycles.
+    pub combine_memory_threshold: usize,
     /// The threshold for default events.
     pub deferred: usize,
     /// The threshold for keccak events.
@@ -212,6 +215,7 @@ impl SplitOpts {
     #[must_use]
     pub fn new(deferred_split_threshold: usize) -> Self {
         Self {
+            combine_memory_threshold: 1 << 17,
             deferred: deferred_split_threshold,
             keccak: 8 * deferred_split_threshold / 24,
             sha_extend: 32 * deferred_split_threshold / 48,

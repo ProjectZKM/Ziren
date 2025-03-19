@@ -162,7 +162,7 @@ where
         // Spawn the checkpoint generator thread.
         let checkpoint_generator_span = tracing::Span::current().clone();
         let (checkpoints_tx, checkpoints_rx) =
-            sync_channel::<(usize, File, bool)>(opts.checkpoints_channel_capacity);
+            sync_channel::<(usize, File, bool, u64)>(opts.checkpoints_channel_capacity);
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
@@ -186,7 +186,7 @@ where
                             .map_err(ZKMCoreProverError::IoError)?;
 
                         // Send the checkpoint.
-                        checkpoints_tx.send((index, checkpoint_file, done)).unwrap();
+                        checkpoints_tx.send((index, checkpoint_file, done, runtime.state.global_clk)).unwrap();
 
                         // If we've reached the final checkpoint, break out of the loop.
                         if done {
@@ -239,7 +239,7 @@ where
                     loop {
                         // Receive the latest checkpoint.
                         let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, mut checkpoint, done)) = received {
+                        if let Ok((index, mut checkpoint, done, num_cycles)) = received {
                             // Trace the checkpoint and reconstruct the execution records.
                             let (mut records, report) = tracing::debug_span!("trace checkpoint")
                                 .in_scope(|| {
@@ -278,8 +278,22 @@ where
                                 deferred.append(&mut record.defer());
                             }
 
+                            // We combine the memory init/finalize events if they are "small"
+                            // and would affect performance.
+                            let last_record = if done
+                                && num_cycles < 1 << 21
+                                && deferred.global_memory_initialize_events.len()
+                                    < opts.split_opts.combine_memory_threshold
+                                && deferred.global_memory_finalize_events.len()
+                                    < opts.split_opts.combine_memory_threshold
+                            {
+                                records.last_mut()
+                            } else {
+                                None
+                            };
+
                             // See if any deferred shards are ready to be committed to.
-                            let mut deferred = deferred.split(done, opts.split_opts);
+                            let mut deferred = deferred.split(done, last_record, opts.split_opts);
                             log::debug!("deferred {} records", deferred.len());
 
                             // Update the public values & prover state for the shards which do not
