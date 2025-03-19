@@ -9,6 +9,7 @@ bins
 # Proofs
 **/proof-with-pis.bin
 **/proof-with-io.bin
+proof-with-is-prime.bin
 **/program.bin
 **/stdin.bin
 
