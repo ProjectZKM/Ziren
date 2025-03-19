@@ -1,6 +1,6 @@
-# Guide to Adding Precompiles in SP1
+# Guide to Adding Precompiles in ZKM2
 
-Precompiles are specialized chips that allow you to extend the functionality of vanilla SP1 to execute custom logic more efficiently. 
+Precompiles are specialized chips that allow you to extend the functionality of vanilla ZKM2 to execute custom logic more efficiently.
 
 ## Create the Chip
 Create a new rust Rust file for your chip in the `core/src/syscall/precompiles` directory. 
@@ -38,7 +38,7 @@ pub struct CustomOpCols<T> {
 Adjust these fields according to your chip.
 
 ### Implement the Chip Logic
-The Syscall trait is where the core execution logic of your chip will reside. This involves defining how the chip interacts with the SP1 runtime during execution time.
+The Syscall trait is where the core execution logic of your chip will reside. This involves defining how the chip interacts with the ZKM2 runtime during execution time.
 
 ```rust
 impl Syscall for Uint256MulChip {
@@ -54,7 +54,7 @@ impl Syscall for Uint256MulChip {
 ```
 
 ### Implement the `MachineAir` Trait
-The `MachineAir` trait integrates your chip with SP1’s Algebraic Intermediate Representation (AIR). This involves generating and evaluating traces that represent the chip's operations.
+The `MachineAir` trait integrates your chip with ZKM2’s Algebraic Intermediate Representation (AIR). This involves generating and evaluating traces that represent the chip's operations.
 
 ```rust
 impl<F: PrimeField32> MachineAir<F> for CustomOpChip {
@@ -117,7 +117,7 @@ fn get_local_mem_events(&self) -> impl IntoIterator<Item = &MemoryLocalEvent> {
 ```
 
 ### Implement the `Air` and `BaseAir` traits
-To fully integrate your chip with the SP1 AIR framework, implement the `Air` and `BaseAir` traits. These traits define how your chip’s operations are evaluated within the AIR system.
+To fully integrate your chip with the ZKM2 AIR framework, implement the `Air` and `BaseAir` traits. These traits define how your chip’s operations are evaluated within the AIR system.
 
 ```rust
 impl<F> BaseAir<F> for CustomOpChip {
@@ -129,7 +129,7 @@ impl<F> BaseAir<F> for CustomOpChip {
 
 impl<AB> Air<AB> for CustomOpChip
 where
-    AB: SP1AirBuilder,
+    AB: ZKMAirBuilder,
     Limbs<AB::Var, <U256Field as NumLimbs>::Limbs>: Copy,
 {
     fn eval(&self, builder: &mut AB) {
@@ -187,9 +187,9 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 ```
 
 ## Write Unit Tests for the New Precompile
-### Create a New SP1 Test Package
-Create a new SP1 crate for your custom precompile test package inside the directory
-`sp1/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
+### Create a New ZKM2 Test Package
+Create a new ZKM2 crate for your custom precompile test package inside the directory
+`zkm2/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
 ```toml
 [package]
 name = "custom-precompile-test"
@@ -198,22 +198,22 @@ edition = "2021"
 publish = false
 
 [dependencies]
-sp1-zkvm = { path = "../../../../zkvm/entrypoint" }
-sp1-derive = { path = "../../../../derive" }
+zkm2-zkvm = { path = "../../../../zkvm/entrypoint" }
+zkm2-derive = { path = "../../../../derive" }
 num-bigint = "0.4.6"
 rand = "0.8.5"
 ```
 Don't forget to include your crate to the workspace at `crates/test-artifacts/programs/Cargo.toml`. Then implement the tests and run `cargo prove build` to generate an ELF file. 
 
 ### Include the ELF File in `test-artifacts` crate `lib.rs`
-In your main SP1 project, include the generated ELF file by updating `crates/test-artifacts/src/lib.rs`. 
+In your main ZKM2 project, include the generated ELF file by updating `crates/test-artifacts/src/lib.rs`. 
 ```rust
 pub const CUSTOM_PRECOMPILE_ELF: &[u8] = include_elf!("your-test-crate-name");
 // Other ELF files...
 ```
 
 ### Write Tests for Your Custom Precompile
-Add tests that use this ELF file in your local SP1 project.
+Add tests that use this ELF file in your local ZKM2 project.
 ```rust
 // /path/to/your/precompile/mod.rs
 
@@ -224,7 +224,7 @@ pub use air::*;
 #[cfg(test)]
 mod tests {
     use crate::{
-        io::SP1Stdin,
+        io::ZKMStdin,
         runtime::Program,
         utils::{
             self,
@@ -238,7 +238,7 @@ mod tests {
     fn test_custom_precompile() {
         utils::setup_logger();
         let program = Program::from(CUSTOM_PRECOMPILE_ELF);
-        run_test_io::<CpuProver<_, _>>(program, SP1Stdin::new()).unwrap();
+        run_test_io::<CpuProver<_, _>>(program, ZKMStdin::new()).unwrap();
     }
 
     // Add additional tests as needed

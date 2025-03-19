@@ -5,7 +5,7 @@ set -e
 VERSION=$1
 
 # Specify the S3 bucket name
-S3_BUCKET="sp1-circuits"
+S3_BUCKET="zkm2-circuits"
 
 # Check for unstaged changes in the Git repository
 if ! git diff --quiet; then
@@ -21,7 +21,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Put the version in the build directory
-echo "$COMMIT_HASH $VERSION" > ./build/SP1_COMMIT
+echo "$COMMIT_HASH $VERSION" > ./build/ZKM_COMMIT
 
 # Create archives for Groth16, Plonk, and Trusted Setup
 GROTH16_ARCHIVE="${VERSION}-groth16.tar.gz"

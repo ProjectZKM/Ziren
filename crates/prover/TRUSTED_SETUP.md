@@ -29,7 +29,7 @@ git clone https://github.com/jtguibas/semaphore-gnark-11.git
 git checkout ee57a61abfc3924c61ffc0a3d033bb92dfe7bbe8
 go build
 mv semaphore-mtb-setup semaphore-gnark-11
-cp semaphore-gnark-11 ../sp1/crates/prover/
+cp semaphore-gnark-11 ../zkm2/crates/prover/
 ```
 
 ## Phase 1 Setup

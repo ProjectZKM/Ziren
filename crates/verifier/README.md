@@ -27,8 +27,8 @@ cargo test --package zkm2-verifier
 ```
 
 These tests verify the proofs in the [`test_binaries`](./test_binaries) directory. These test binaries
-were generated from the fibonacci [groth16](../../examples/fibonacci/script/bin/groth16_bn254.rs) and
-[plonk](../../examples/fibonacci/script/bin/plonk_bn254.rs) examples. You can reproduce these proofs
+were generated from the fibonacci [groth16](../../examples/fibonacci/host/bin/groth16_bn254.rs) and
+[plonk](../../examples/fibonacci/host/bin/plonk_bn254.rs) examples. You can reproduce these proofs
 from the examples by running `cargo run --bin groth16_bn254` and `cargo run --bin plonk_bn254` from the
 [`examples/fibonacci`](../../examples/fibonacci/) directory.
 
