@@ -1,0 +1,11 @@
+[package]
+name = "is-prime-host"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+zkm2-sdk = { workspace = true }
+
+[build-dependencies]
+zkm2-build = { workspace = true }

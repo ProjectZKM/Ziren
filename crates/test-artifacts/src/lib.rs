@@ -16,7 +16,7 @@ pub const KECCAK256_ELF: &[u8] = include_elf!("keccak256-test");
 pub const KECCAK_PERMUTE_ELF: &[u8] = include_elf!("keccak-permute-test");
 pub const PANIC_ELF: &[u8] = include_elf!("panic-test");
 
-pub const ED25519_ELF: &[u8] = include_elf!("ed25519-program");
+pub const ED25519_ELF: &[u8] = include_elf!("ed25519");
 
 pub const CYCLE_TRACKER_ELF: &[u8] = include_elf!("cycle-tracker-test");
 

@@ -1,0 +1,11 @@
+[package]
+version = "0.1.0"
+name = "bn254-host"
+edition = "2021"
+
+[dependencies]
+zkm2-sdk = { path = "../../../crates/sdk" }
+
+
+[build-dependencies]
+zkm2-build = { path = "../../../crates/build" }

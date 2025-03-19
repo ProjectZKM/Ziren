@@ -1,0 +1,10 @@
+[package]
+name = "bn254"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkm2-zkvm = { path = "../../../crates/zkvm/entrypoint" }
+substrate-bn = "0.6.0"
+rand = "0.8.5"
