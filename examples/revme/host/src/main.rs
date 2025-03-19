@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Read;
 use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
-const ELF: &[u8] = include_elf!("revme-program");
+const ELF: &[u8] = include_elf!("revme");
 
 fn prove_revm() {
     // 1. split ELF into segs

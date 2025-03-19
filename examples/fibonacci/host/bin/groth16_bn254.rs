@@ -1,7 +1,7 @@
 use zkm2_sdk::{include_elf, utils, HashableKey, ProverClient, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
-const ELF: &[u8] = include_elf!("fibonacci-program");
+const ELF: &[u8] = include_elf!("fibonacci");
 
 fn main() {
     // Setup logging.
@@ -18,8 +18,8 @@ fn main() {
     let (pk, vk) = client.setup(ELF);
     println!("vk: {:?}", vk.bytes32());
 
-    // Generate the Plonk proof.
-    let proof = client.prove(&pk, stdin).plonk().run().unwrap();
+    // Generate the Groth16 proof.
+    let proof = client.prove(&pk, stdin).groth16().run().unwrap();
     println!("generated proof");
 
     // Get the public values as bytes.
@@ -29,13 +29,12 @@ fn main() {
     // Get the proof as bytes.
     let solidity_proof = proof.bytes();
     println!("proof: 0x{}", hex::encode(solidity_proof));
-    println!("vk: {:?}", vk.bytes32());
 
     // Verify proof and public values
     client.verify(&proof, &vk).expect("verification failed");
 
     // Save the proof.
-    proof.save("fibonacci-plonk.bin").expect("saving proof failed");
+    proof.save("fibonacci-groth16.bin").expect("saving proof failed");
 
     println!("successfully generated and verified proof for the program!")
 }

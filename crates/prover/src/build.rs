@@ -148,7 +148,7 @@ pub fn build_constraints_and_witness(
 
 /// Generate a dummy proof that we can use to build the circuit. We need this to know the shape of
 /// the proof.
-pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, SegmentProof<OuterSC>) {
+pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     let elf = include_bytes!("../elf/mipsel-zkm-zkvm-elf");
 
     tracing::info!("initializing prover");

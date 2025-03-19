@@ -1571,7 +1571,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fibonacci-script"
+name = "fibonacci-host"
 version = "1.1.0"
 dependencies = [
  "hex",
@@ -2357,14 +2357,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "keccak-program"
+name = "keccak"
 version = "1.1.0"
 dependencies = [
  "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
-name = "keccak-script"
+name = "keccak-host"
 version = "1.1.0"
 dependencies = [
  "alloy-primitives 0.8.21",
@@ -3717,7 +3717,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "revme-program"
+name = "revme"
 version = "1.1.0"
 dependencies = [
  "k256",
@@ -3730,7 +3730,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "revme-script"
+name = "revme-host"
 version = "1.1.0"
 dependencies = [
  "zkm2-build",

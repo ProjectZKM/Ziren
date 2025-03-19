@@ -1,8 +1,8 @@
 [package]
-name = "keccak-script"
+name = "keccak-host"
 version = { workspace = true }
 edition = { workspace = true }
-default-run = "keccak-script"
+default-run = "keccak-host"
 publish = false
 
 [dependencies]
@@ -17,5 +17,5 @@ log = "0.4.22"
 zkm2-build = { workspace = true }
 
 [[bin]]
-name = "keccak-script"
+name = "keccak-host"
 path = "src/main.rs"

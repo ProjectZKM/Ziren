@@ -1,8 +1,8 @@
 [package]
-name = "fibonacci-script"
+name = "fibonacci-host"
 version = { workspace = true }
 edition = { workspace = true }
-default-run = "fibonacci-script"
+default-run = "fibonacci-host"
 publish = false
 
 [dependencies]
@@ -29,8 +29,8 @@ name = "execute"
 path = "bin/execute.rs"
 
 [[bin]]
-name = "fibonacci-script"
+name = "fibonacci-host"
 path = "src/main.rs"
 
 # [features]
-# cuda = ["sp1-sdk/cuda"]
+# cuda = ["zkm2-sdk/cuda"]
