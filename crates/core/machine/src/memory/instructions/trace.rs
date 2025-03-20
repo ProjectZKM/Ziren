@@ -98,7 +98,7 @@ impl MemoryInstructionsChip {
 
         // Populate memory accesses for reading from memory.
         cols.memory_access.populate(event.mem_access, blu);
-        cols.op_a_access.populate(event.op_a_access, blu);
+        cols.op_a_access.populate(event.op_a_access, &mut Vec::new());
 
         // Populate addr_word and addr_aligned columns.
         let memory_addr = event.b.wrapping_add(event.c);

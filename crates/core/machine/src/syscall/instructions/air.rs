@@ -54,7 +54,7 @@ where
         // `next_pc`, `num_extra_cycles`, `op_a_val`, `is_halt` need to be constrained. We outline the checks below.
         // `next_pc` is constrained for the case where `is_halt` is true to be `0` in `eval_is_halt_unimpl`.
         // `next_pc` is constrained for the case where `is_halt` is false to be `pc + 4` in `eval`.
-        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_ecall_cycles`, in `eval`.
+        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
         // `op_a_val` is constrained in `eval_syscall`.
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
         builder.receive_instruction(
@@ -68,11 +68,19 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO, // op_a is always register 5 for ecall instructions.
+            AB::Expr::ZERO, // op_a is always register 2 for syscall instructions.
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,
             local.is_halt,
+            local.is_real,
+        );
+
+        builder.eval_memory_access(
+            local.shard,
+            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
+            AB::Expr::from_canonical_u32(2),
+            &local.op_a_access,
             local.is_real,
         );
 
@@ -83,16 +91,16 @@ where
             .when(AB::Expr::ONE - local.is_halt)
             .assert_eq(local.next_pc, local.pc + AB::Expr::from_canonical_u32(4));
 
-        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_ecall_cycles`
+        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
         builder.assert_eq::<AB::Var, AB::Expr>(
             local.num_extra_cycles,
-            self.get_num_extra_ecall_cycles::<AB>(local),
+            self.get_num_extra_syscall_cycles::<AB>(local),
         );
 
         // SYSCALL instruction.
         self.eval_syscall(builder, local);
 
-        // COMMIT/COMMIT_DEFERRED_PROOFS ecall instruction.
+        // COMMIT/COMMIT_DEFERRED_PROOFS syscall instruction.
         self.eval_commit(
             builder,
             local,
@@ -100,7 +108,7 @@ where
             public_values.deferred_proofs_digest,
         );
 
-        // HALT ecall and UNIMPL instruction.
+        // HALT syscall and UNIMPL instruction.
         self.eval_halt_unimpl(builder, local, public_values);
     }
 }
@@ -138,7 +146,7 @@ impl SyscallInstrsChip {
             LookupScope::Local,
         );
 
-        // Compute whether this ecall is ENTER_UNCONSTRAINED.
+        // Compute whether this syscall is ENTER_UNCONSTRAINED.
         let is_enter_unconstrained = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -150,7 +158,7 @@ impl SyscallInstrsChip {
             local.is_enter_unconstrained.result
         };
 
-        // Compute whether this ecall is HINT_LEN.
+        // Compute whether this syscall is HINT_LEN.
         let is_hint_len = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -182,12 +190,12 @@ impl SyscallInstrsChip {
         // In the CpuChip, `op_a_val` is constrained to be a valid word via `eval_registers`.
         // As this is a syscall for HINT, the value itself being arbitrary is fine, as long as it is a valid word.
 
-        // Verify value of ecall_range_check_operand column.
+        // Verify value of syscall_range_check_operand column.
         // SAFETY: If `is_real = 0`, then `syscall_range_check_operand = 0`.
         // If `is_real = 1`, then `is_halt_check` and `is_commit_deferred_proofs` are constrained.
         // The two results will both be boolean due to `IsZeroOperation`, and both cannot be `1` at the same time.
         // Both of them being `1` will require `syscall_id` being `HALT` and `COMMIT_DEFERRED_PROOFS` at the same time.
-        // This implies that if `is_real = 1`, `ecall_range_check_operand` will be correct, and boolean.
+        // This implies that if `is_real = 1`, `syscall_range_check_operand` will be correct, and boolean.
         builder.assert_eq(
             local.syscall_range_check_operand,
             local.is_real * (local.is_halt_check.result + local.is_commit_deferred_proofs.result),
@@ -251,7 +259,7 @@ impl SyscallInstrsChip {
         }
 
         // Retrieve the expected public values digest word to check against the one passed into the
-        // commit ecall. Note that for the interaction builder, it will not have any digest words,
+        // commit syscall. Note that for the interaction builder, it will not have any digest words,
         // since it's used during AIR compilation time to parse for all send/receives. Since
         // that interaction builder will ignore the other constraints of the air, it is safe
         // to not include the verification check of the expected public values digest word.
@@ -312,7 +320,7 @@ impl SyscallInstrsChip {
 
         let syscall_id = syscall_code[0];
 
-        // Compute whether this ecall is HALT.
+        // Compute whether this syscall is HALT.
         let is_halt = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -341,7 +349,7 @@ impl SyscallInstrsChip {
 
         let syscall_id = syscall_code[0];
 
-        // Compute whether this ecall is COMMIT.
+        // Compute whether this syscall is COMMIT.
         let is_commit = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -352,7 +360,7 @@ impl SyscallInstrsChip {
             local.is_commit.result
         };
 
-        // Compute whether this ecall is COMMIT_DEFERRED_PROOFS.
+        // Compute whether this syscall is COMMIT_DEFERRED_PROOFS.
         let is_commit_deferred_proofs = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
@@ -370,7 +378,7 @@ impl SyscallInstrsChip {
     }
 
     /// Returns the number of extra cycles from an SYSCALL instruction.
-    pub(crate) fn get_num_extra_ecall_cycles<AB: ZKMAirBuilder>(
+    pub(crate) fn get_num_extra_syscall_cycles<AB: ZKMAirBuilder>(
         &self,
         local: &SyscallInstrColumns<AB::Var>,
     ) -> AB::Expr {

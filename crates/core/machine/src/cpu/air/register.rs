@@ -51,7 +51,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
             local.instruction.op_a[0],
             &local.op_a_access,
-            local.is_real,
+            AB::Expr::ONE - local.is_syscall,
         );
 
         // Write the HI register
