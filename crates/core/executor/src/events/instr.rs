@@ -63,7 +63,7 @@ impl AluEvent {
 
 /// Memory Instruction Event.
 ///
-/// This object encapsulated the information needed to prove a RISC-V memory operation.
+/// This object encapsulated the information needed to prove a MIPS memory operation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct MemInstrEvent {
@@ -113,7 +113,7 @@ impl MemInstrEvent {
 
 /// Branch Instruction Event.
 ///
-/// This object encapsulated the information needed to prove a RISC-V branch operation.
+/// This object encapsulated the information needed to prove a MIPS branch operation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct BranchEvent {
@@ -155,7 +155,7 @@ impl BranchEvent {
 
 /// Jump Instruction Event.
 ///
-/// This object encapsulated the information needed to prove a RISC-V jump operation.
+/// This object encapsulated the information needed to prove a MIPS jump operation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct JumpEvent {
@@ -194,7 +194,7 @@ impl JumpEvent {
 
 /// Misc Instruction Event.
 ///
-/// This object encapsulated the information needed to prove a RISC-V jump operation.
+/// This object encapsulated the information needed to prove a MIPS jump operation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct MiscEvent {

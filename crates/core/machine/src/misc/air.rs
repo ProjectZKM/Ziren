@@ -54,19 +54,7 @@ where
             + local.is_mne
             + local.is_nop
             + local.is_teq;
-            
-        // SAFETY: This checks the following.
-        // - `shard`, `clk` are correctly received from the CpuChip
-        // - `op_a_0 = 0` enforced, as `op_a = X5` for all SYSCALL
-        // - `op_a_immutable = 0`
-        // - `is_memory = 0`
-        // - `is_syscall = 0`
-        // `next_pc`, `num_extra_cycles`, `op_a_val`, `is_halt` need to be constrained. We outline the checks below.
-        // `next_pc` is constrained for the case where `is_halt` is true to be `0` in `eval_is_halt_unimpl`.
-        // `next_pc` is constrained for the case where `is_halt` is false to be `pc + 4` in `eval`.
-        // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_ecall_cycles`, in `eval`.
-        // `op_a_val` is constrained in `eval_syscall`.
-        // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
+
         builder.receive_instruction(
             AB::Expr::ZERO,
             AB::Expr::ZERO,

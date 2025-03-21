@@ -63,8 +63,8 @@ where
             AB::Expr::ZERO,
             is_real.clone(),
         );
-        // Verify that the local.pc + 4 is saved in op_a for both jump instructions.
-        // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
+        // Verify that the local.next_pc + 4 is saved in op_a for both jump instructions.
+        // When op_a is set to register X0, the MIPS spec states that the jump instruction will
         // not have a return destination address (it is effectively a GOTO command).  In this case,
         // we shouldn't verify the return address.
         builder.when(is_real.clone()).when_not(local.op_a_0).assert_eq(
