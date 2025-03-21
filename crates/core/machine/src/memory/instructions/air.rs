@@ -155,31 +155,6 @@ impl MemoryInstructionsChip {
         // byte in the KoalaBearWordRangeChecker, and the least sig one in the AND byte lookup below.
         builder.slice_range_check_u8(&local.addr_word.0[1..3], is_real.clone());
 
-        // We check that `addr_word >= 32`, or `addr_word > 31` to avoid registers.
-        // Check that if the most significant bytes are zero, then the least significant byte is at least 32.
-        builder.send_byte(
-            ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::ONE,
-            AB::Expr::from_canonical_u8(31),
-            local.addr_word[0],
-            local.most_sig_bytes_zero.result,
-        );
-
-        // SAFETY: Check that the above interaction is only sent if one of the opcode flags is set.
-        // If `is_real = 0`, then `local.most_sig_bytes_zero.result = 0`, leading to no interaction.
-        // Note that when `is_real = 1`, due to `IsZeroOperation`, `local.most_sig_bytes_zero.result` is boolean.
-        builder.when(local.most_sig_bytes_zero.result).assert_one(is_real.clone());
-
-        // Check the most_sig_byte_zero flag.  Note that we can simply add up the three most significant bytes
-        // and check if the sum is zero.  Those bytes are going to be byte range checked, so the only way
-        // the sum is zero is if all bytes are 0.
-        IsZeroOperation::<AB::F>::eval(
-            builder,
-            local.addr_word[1] + local.addr_word[2] + local.addr_word[3],
-            local.most_sig_bytes_zero,
-            is_real.clone(),
-        );
-
         // Evaluate the addr_offset column and offset flags.
         self.eval_offset_value_flags(builder, local);
 
@@ -250,7 +225,7 @@ impl MemoryInstructionsChip {
         // When the memory value is negative and not writing to x0, use the SUB opcode to compute
         // the signed value of the memory value and verify that the op_a value is correct.
         let signed_value = Word([
-            AB::Expr::ONE,
+            AB::Expr::ZERO,
             AB::Expr::ONE * local.is_lb,
             AB::Expr::ONE * local.is_lh,
             AB::Expr::ZERO,
@@ -272,7 +247,8 @@ impl MemoryInstructionsChip {
         let mem_value_is_pos = (local.is_lb + local.is_lh) * (AB::Expr::ONE - local.most_sig_bit)
             + local.is_lbu
             + local.is_lhu
-            + local.is_lw;
+            + local.is_lw
+            + local.is_ll;
         builder.assert_eq(
             local.mem_value_is_pos_not_x0,
             mem_value_is_pos * (AB::Expr::ONE - local.op_a_0),
@@ -283,9 +259,6 @@ impl MemoryInstructionsChip {
         builder
             .when(local.mem_value_is_pos_not_x0)
             .assert_word_eq(local.unsigned_mem_val, local.op_a_value);
-
-        // These two cases combine for all cases where it's a load instruction and `op_a_0 == 0`.
-        // Since the store instructions have `op_a_immutable = 1`, this completely constrains the `op_a`'s value.
     }
 
     /// Evaluates constraints related to storing to memory.
@@ -294,8 +267,6 @@ impl MemoryInstructionsChip {
         builder: &mut AB,
         local: &MemoryInstructionsColumns<AB::Var>,
     ) {
-        // Get the memory offset flags.
-        self.eval_offset_value_flags(builder, local);
         // Compute the offset_is_zero flag.  The other offset flags are already constrained by the
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
@@ -414,7 +385,6 @@ impl MemoryInstructionsChip {
         let mem_val = *local.memory_access.value();
         let prev_a_val = local.op_a_access.prev_value();
         let prev_mem_val = *local.memory_access.prev_value();
-
 
         // Compute the offset_is_zero flag.  The other offset flags are already constrained by the
         // method `eval_memory_address_and_access`, which is called in

@@ -209,8 +209,8 @@ impl MemoryInstructionsChip {
             // Set the `mem_value_is_pos_not_x0` composite flag.
             cols.mem_value_is_pos_not_x0 = F::from_bool(
                 ((matches!(event.opcode, Opcode::LB | Opcode::LH)
-                    && (cols.most_sig_bit == F::ONE))
-                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LWL | Opcode::LWR | Opcode::LL))
+                    && (cols.most_sig_bit == F::ZERO))
+                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LL))
                     && !event.op_a_0,
             )
         }
@@ -239,18 +239,5 @@ impl MemoryInstructionsChip {
             b: addr_bytes[1],
             c: addr_bytes[2],
         });
-
-        cols.most_sig_bytes_zero
-            .populate_from_field_element(cols.addr_word[1] + cols.addr_word[2] + cols.addr_word[3]);
-
-        if cols.most_sig_bytes_zero.result == F::ONE {
-            blu.add_byte_lookup_event(ByteLookupEvent {
-                opcode: ByteOpcode::LTU,
-                a1: 1,
-                a2: 0,
-                b: 31,
-                c: cols.addr_word[0].as_canonical_u32() as u8,
-            });
-        }
     }
 }
