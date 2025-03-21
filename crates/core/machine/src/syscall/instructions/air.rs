@@ -137,7 +137,7 @@ impl SyscallInstrsChip {
         builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table);
 
         builder.send_syscall(
-            local.pc,
+            local.shard,
             local.clk,
             syscall_id,
             local.op_b_value.reduce::<AB>(),
