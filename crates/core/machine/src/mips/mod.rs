@@ -372,10 +372,6 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(clo_clz.name(), clo_clz.cost());
         chips.push(clo_clz);
 
-        let memory_instructions = Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
-        costs.insert(memory_instructions.name(), memory_instructions.cost());
-        chips.push(memory_instructions);
-
         let branch = Chip::new(MipsAir::Branch(BranchChip::default()));
         costs.insert(branch.name(), branch.cost());
         chips.push(branch);
@@ -387,10 +383,6 @@ impl<F: PrimeField32> MipsAir<F> {
         let syscall_instrs = Chip::new(MipsAir::SyscallInstrs(SyscallInstrsChip::default()));
         costs.insert(syscall_instrs.name(), syscall_instrs.cost());
         chips.push(syscall_instrs);
-
-        let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
-        costs.insert(misc_instrs.name(), misc_instrs.cost());
-        chips.push(misc_instrs);
 
         let memory_global_init =
             Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)));
@@ -413,6 +405,14 @@ impl<F: PrimeField32> MipsAir<F> {
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
+        
+        let memory_instructions = Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
+        costs.insert(memory_instructions.name(), memory_instructions.cost());
+        chips.push(memory_instructions);
+
+        let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
+        costs.insert(misc_instrs.name(), misc_instrs.cost());
+        chips.push(misc_instrs);
 
         (chips, costs)
     }
@@ -677,6 +677,7 @@ pub mod tests {
         let costs: HashMap<String, u64> = serde_json::from_reader(file).unwrap();
         // Compare with costs computed by machine
         let machine_costs = MipsAir::<KoalaBear>::costs();
+        log::info!("{:?}", machine_costs);
         assert_eq!(costs, machine_costs);
     }
 
