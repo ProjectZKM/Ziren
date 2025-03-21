@@ -93,7 +93,6 @@ impl ShaExtendChip {
         rows: &mut Option<Vec<[F; NUM_SHA_EXTEND_COLS]>>,
         blu: &mut impl ByteRecord,
     ) {
-        let shard = event.shard;
         for j in 0..48usize {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();

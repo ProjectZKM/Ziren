@@ -347,7 +347,6 @@ impl MachineRecord for ExecutionRecord {
         );
         stats.insert("local_memory_access_events".to_string(), self.cpu_local_memory_access.len());
         if !self.cpu_events.is_empty() {
-            let shard = self.public_values.shard;
             stats.insert(
                 "byte_lookups".to_string(), self.byte_lookups.len()
             );

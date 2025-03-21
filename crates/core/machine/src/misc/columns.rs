@@ -1,5 +1,5 @@
 use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{air::PV_DIGEST_NUM_WORDS, Word};
+use zkm2_stark::Word;
 use std::mem::size_of;
 
 pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();

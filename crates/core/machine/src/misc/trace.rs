@@ -77,7 +77,7 @@ impl MiscInstrsChip {
         &self,
         event: &MiscEvent,
         cols: &mut MiscInstrColumns<F>,
-        blu: &mut impl ByteRecord,
+        _blu: &mut impl ByteRecord,
     ) {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);

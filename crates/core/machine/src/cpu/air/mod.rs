@@ -16,9 +16,7 @@ use crate::{
         columns::{CpuCols, NUM_CPU_COLS},
         CpuChip,
     },
-    operations::KoalaBearWordRangeChecker,
 };
-use zkm2_core_executor::Opcode;
 
 impl<AB> Air<AB> for CpuChip
 where

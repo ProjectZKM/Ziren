@@ -8,7 +8,7 @@ use zkm2_stark::{air::ZKMAirBuilder, Word};
 use crate::{
     air::{ZKMCoreAirBuilder, WordAirBuilder},
     memory::MemoryCols,
-    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
+    operations::KoalaBearWordRangeChecker,
 };
 use zkm2_core_executor::{
     events::MemoryAccessPosition, ByteOpcode, Opcode

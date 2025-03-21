@@ -4,7 +4,7 @@ use std::mem::size_of;
 
 use crate::{
     memory::MemoryReadWriteCols,
-    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
+    operations::KoalaBearWordRangeChecker,
 };
 
 pub const NUM_MEMORY_INSTRUCTIONS_COLUMNS: usize = size_of::<MemoryInstructionsColumns<u8>>();

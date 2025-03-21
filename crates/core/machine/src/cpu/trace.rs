@@ -1,15 +1,13 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
-use std::{array, borrow::BorrowMut};
+use std::borrow::BorrowMut;
 use zkm2_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     syscalls::SyscallCode,
     ByteOpcode::{self, U16Range},
-    ExecutionRecord, Instruction, Opcode, Program,
-    Register::ZERO,
+    ExecutionRecord, Instruction, Program,
 };
-use zkm2_primitives::consts::WORD_SIZE;
-use zkm2_stark::{air::MachineAir, Word};
+use zkm2_stark::air::MachineAir;
 
 use p3_field::{PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;

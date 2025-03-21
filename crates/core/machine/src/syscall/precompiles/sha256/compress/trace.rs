@@ -119,8 +119,6 @@ impl ShaCompressChip {
         rows: &mut Option<Vec<[F; NUM_SHA_COMPRESS_COLS]>>,
         blu: &mut impl ByteRecord,
     ) {
-        let shard = event.shard;
-
         let og_h = event.h;
 
         let mut octet_num_idx = 0;

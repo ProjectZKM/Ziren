@@ -3,22 +3,8 @@ use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm2_core_executor::{
-    Opcode, DEFAULT_PC_INC,
-};
-use zkm2_stark::{
-    air::{
-        BaseAirBuilder, LookupScope, PublicValues, ZKMAirBuilder, POSEIDON_NUM_WORDS,
-        PV_DIGEST_NUM_WORDS, ZKM_PROOF_NUM_PV_ELTS,
-    },
-    Word,
-};
-
-use crate::{
-    air::{MemoryAirBuilder, WordAirBuilder},
-    memory::MemoryCols,
-    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
-};
+use zkm2_core_executor::Opcode;
+use zkm2_stark::air::ZKMAirBuilder;
 
 use super::{columns::MiscInstrColumns, MiscInstrsChip};
 

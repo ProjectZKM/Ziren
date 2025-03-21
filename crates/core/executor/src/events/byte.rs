@@ -1,11 +1,7 @@
 use std::hash::Hash;
 
 use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
-use p3_maybe_rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
 use serde::{Deserialize, Serialize};
 
 use crate::{ByteOpcode, Opcode};
@@ -126,7 +122,7 @@ impl ByteRecord for Vec<ByteLookupEvent> {
 
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
+        _new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
     ) {
         todo!()
     }

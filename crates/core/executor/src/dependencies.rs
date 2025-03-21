@@ -6,7 +6,6 @@ use crate::{
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
 pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
-    let shard = executor.shard();
     let (quotient, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
     let c_msb = get_msb(event.c);
     let rem_msb = get_msb(remainder);
@@ -103,8 +102,6 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
 /// Emits the dependencies for clo and clz operations.
 #[allow(clippy::too_many_lines)]
 pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
-    let shard = executor.shard();
-
     let b = if event.opcode == Opcode::CLZ { event.b } else { !event.b };
     if b != 0 {
         let srl_event = AluEvent {
@@ -128,7 +125,6 @@ pub fn emit_memory_dependencies(
     event: MemInstrEvent,
     memory_record: MemoryRecord,
 ) {
-    let shard = executor.shard();
     let memory_addr = event.b.wrapping_add(event.c);
     // Add event to ALU check to check that addr == b + c
     let add_event = AluEvent {
@@ -187,7 +183,6 @@ pub fn emit_memory_dependencies(
 
 /// Emit the dependencies for branch instructions.
 pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
-    let shard = executor.shard();
     let a_eq_b = event.a == event.b;
     let a_lt_b = (event.a as i32) < (event.b as i32);
     let a_gt_b = (event.a as i32) > (event.b as i32);
@@ -240,7 +235,6 @@ pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
 
 /// Emit the dependencies for jump instructions.
 pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
-    let shard = executor.shard();
     match event.opcode {
         Opcode::JumpDirect => {
             let target_pc = event.next_pc.wrapping_add(event.b);
@@ -263,6 +257,6 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
 }
 
 /// Emit the dependencies for misc instructions.
-pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
+pub fn emit_misc_dependencies(_executor: &mut Executor, _event: MiscEvent) {
     // TODO
 }
