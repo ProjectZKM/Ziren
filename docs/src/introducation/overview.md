@@ -2,7 +2,7 @@
 ZKM2 is an optimized iteration of the [ZKM](https://docs.zkm.io/introduction) protocol, introducing a novel [​zkMIPS](https://github.com/zkMIPS)-based virtual machine that transforms [MIPS](https://en.wikipedia.org/wiki/MIPS_architecture) instructions into arithmetic circuits for STARK-powered zero-knowledge proofs. Designed for high-performance and trust-minimized computation, ZKM2 integrates cutting-edge cryptographic techniques and architectural improvements to address scalability bottlenecks in universal zkVMs.
 
 ## Architectural Workflow
-<!-- 添加一个流程图片，参考 https://docs.zkm.io/getting-started/combining-mips-with-zero-knowledge ![图片描述](图片路径) -->
+
 The workfolw of ZKM2 is as follows:
 - ​Frontend Compilation:
 Source code (Rust/Go) → MIPS assembly → Optimized MIPS instructions for algebraic representation.

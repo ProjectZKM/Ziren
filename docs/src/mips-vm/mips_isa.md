@@ -1,97 +1,27 @@
 # MIPS ISA
-The `Opcode` enum organizes MIPS instructions into several functional categories, each serving a specific role in the instruction set:
-```rust
-pub enum Opcode {
-    // BinaryOperator
-    ADD = 0,
-    SUB = 1,
-    MULT = 2,
-    MULTU = 3,
-    MUL = 4,
-    DIV = 5,
-    DIVU = 6,
-    SLL = 7,
-    SRL = 8,
-    SRA = 9,
-    SLT = 10,
-    SLTU = 11,
-    AND = 12,
-    OR = 13,
-    XOR = 14,
-    NOR = 15,
-    // count leading zeros
-    CLZ = 16,
-    // count leading ones
-    CLO = 17,
-    BEQ = 18,
-    BGEZ = 19,
-    BGTZ = 20,
-    BLEZ = 21,
-    BLTZ = 22,
-    BNE = 23,
-    // MovCond
-    MEQ = 24,
-    MNE = 25,
-    // Memory Op
-    LH = 26,
-    LWL = 27,
-    LW = 28,
-    LB = 29,
-    LBU = 30,
-    LHU = 31,
-    LWR = 32,
-    LL = 33,
-    SB = 34,
-    SH = 35,
-    SWL = 36,
-    SW = 37,
-    SWR = 38,
-    SC = 39,
-    Jump = 40,
-    Jumpi = 41,
-    JumpDirect = 42,
-    NOP = 43,
-    SYSCALL = 44,
-    TEQ = 45,
-    SEXT = 46,
-    WSBH = 47,
-    EXT = 48,
-    ROR = 49,
-    MADDU = 50,
-    MSUBU = 51,
-    INS = 52,
-    UNIMPL = 0xff,
-}
-```
 
-All MIPS instructions can be divided into the following taxonomies:
+MIPS instructions are categorized into ​core instructions and ​syscalls. 
 
-**Binary Operators**  
-This category includes the fundamental arithmetic and logical operations. It covers addition (ADD) and subtraction (SUB), several multiplication and division variants (MULT, MULTU, MUL, DIV, DIVU), as well as bit shifting operations (SLL, SRL, SRA), comparison operations like set less than (SLT, SLTU) and a range of bitwise logical operations (AND, OR, XOR, NOR). 
+​Core instructions includes all fundamental operations for program execution:
+- ​Arithmetic/Logic: ADD, SUB, AND, OR, XOR
+- Data Movement: LW (load from memory), SW (store to memory), MOVZ (conditional move)
+- ​Control Flow: BEQ (branch if equal), JAL (jump and link), J (unconditional jump)
+- Bit Manipulation: CLZ (count leading zeros) and SLL (logical shift left)
+- System Interface: SYSCALL (invoke system services)
 
-**Count Operations**  
-Within this group, there are specialized instructions that analyze bit patterns: CLZ counts the number of leading zeros, while CLO counts the number of leading ones. These operations are useful in bit-level data analysis.
+​Syscalls are predefined system-level operations for external interactions:
+- ​I/O Operations: WRITE (output data), SYSHINTREAD (read input)
+- ​Program Control: HALT (terminate program), SYSVERIFY (verify precompiled code)
+- Special Modes: ENTER_UNCONSTRAINED (enable unconstrained execution)
 
-**Branching Instructions**  
-Instructions BEQ (branch if equal), BGEZ (branch if greater than or equal to zero), BGTZ (branch if greater than zero), BLEZ (branch if less than or equal to zero), BLTZ (branch if less than zero), and BNE (branch if not equal) are used to change the flow of execution based on comparisons. These instructions are vital for implementing loops, conditionals, and other control structures.
+ZKM2's virtual machine fully complies with ​MIPS-I ISA (32-bit) and supports:
 
-**Conditional Move Instructions (MovCond)**  
-This type of instruction includes MEQ (move if equal) and MNE (move if not equal) in this category. These instructions perform data transfers between registers based on the result of a comparison, allowing the program to conditionally update values without resorting to full branch instructions. This can lead to more efficient execution in frequent conditional operations.
+- ​72 core instructions covering arithmetic, memory, control flow, and privileged operations
+- ​7 syscalls for system-level interactions
 
-**Memory Operations**  
-This category is dedicated to moving data between memory and registers. It contains a comprehensive set of load instructions—such as LH (load halfword), LWL (load word left), LW (load word), LB (load byte), LBU (load byte unsigned), LHU (load halfword unsigned), LWR (load word right), and LL (load linked)—as well as corresponding store instructions like SB (store byte), SH (store halfword), SWL (store word left), SW (store word), SWR (store word right), and SC (store conditional). These operations ensure that data is correctly and efficiently read from or written to memory.
+This implementation provides ​Turing-complete execution for programs compiled from C/C++, Go, Rust, and other high-level languages.
 
-**Jump Instructions**  
-Jump-related instructions, including Jump, Jumpi, and JumpDirect, are responsible for altering the execution flow by redirecting it to different parts of the program. They are used for implementing function calls, loops, and other control structures that require non-sequential execution, ensuring that the program can navigate its code dynamically.
-
-**Special Instructions**  
-This category includes instructions with unique roles. NOP (no operation) is used when no action is required—often for timing adjustments or to fill delay slots. SYSCALL triggers a system call, allowing the program to request services from the operating system. TEQ is typically used to test equality conditions between registers. UNIMPL represents an unimplemented or reserved opcode, serving as a placeholder for potential future instructions or as an indicator for unsupported operations.
-
-
-## Supported instructions
-
-The support instructions are as follows:
-
+## Supported core instructions
 | instruction | Op [31:26] | rs [25:21]  | rt [20:16]  | rd [15:11]  | shamt [10:6] | func [5:0]  | function                                                     |
 | ----------- | ---------- | ----------- | ----------- | ----------- | ------------ | ----------- | ------------------------------------------------------------ |
 | ADD         | 000000     | rs          | rt          | rd          | 00000        | 100000      | rd = rs+rt                                                   |
@@ -167,7 +97,6 @@ The support instructions are as follows:
 | MADDU		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000001      | (hi, lo) = rs * rt + (hi,lo)                                |
 | MSUBU		  | 011100	   | rs	         | rt	       | 00000	     | 00000	    | 000101	  | (hi, lo) = (hi,lo) - rs * rt                                | 
 
-
 ## Supported syscalls
 
 | syscall number                           | function                                           |
@@ -179,61 +108,3 @@ The support instructions are as follows:
 |  WRITE = 0x00_00_00_02,                  |  Write to the output buffer.                       |
 |  ENTER_UNCONSTRAINED = 0x00_00_00_03,    |  Enter unconstrained block.                        |
 |  EXIT_UNCONSTRAINED = 0x00_00_00_04,     |  Exit unconstrained block.                         |
-|  SHA_EXTEND = 0x00_30_01_05,             |  Executes the `SHA_EXTEND` precompile.             |
-|  SHA_COMPRESS = 0x00_01_01_06,           |  Executes the `SHA_COMPRESS` precompile.           |
-|  ED_ADD = 0x00_01_01_07,                 |  Executes the `ED_ADD` precompile.                 |
-|  ED_DECOMPRESS = 0x00_00_01_08,          |  Executes the `ED_DECOMPRESS` precompile.          |
-|  KECCAK_PERMUTE = 0x00_01_01_09,         |  Executes the `KECCAK_PERMUTE` precompile.         |
-|  SECP256K1_ADD = 0x00_01_01_0A,          |  Executes the `SECP256K1_ADD` precompile.          |
-|  SECP256K1_DOUBLE = 0x00_00_01_0B,       |  Executes the `SECP256K1_DOUBLE` precompile.       |
-|  SECP256K1_DECOMPRESS = 0x00_00_01_0C,   |  Executes the `SECP256K1_DECOMPRESS` precompile.   |
-|  BN254_ADD = 0x00_01_01_0E,              |  Executes the `BN254_ADD` precompile.              |
-|  BN254_DOUBLE = 0x00_00_01_0F,           |  Executes the `BN254_DOUBLE` precompile.           |
-|  COMMIT = 0x00_00_00_10,                 |  Executes the `COMMIT` precompile.                 |
-|  COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A, |  Executes the `COMMIT_DEFERRED_PROOFS` precompile. |
-|  VERIFY_ZKM_PROOF = 0x00_00_00_1B,       |  Executes the `VERIFY_ZKM_PROOF` precompile.       |
-|  BLS12381_DECOMPRESS = 0x00_00_01_1C,    |  Executes the `BLS12381_DECOMPRESS` precompile.    |
-|  UINT256_MUL = 0x00_01_01_1D,            |  Executes the `UINT256_MUL` precompile.            |
-|  U256XU2048_MUL = 0x00_01_01_2F,         |  Executes the `U256XU2048_MUL` precompile.         |
-|  BLS12381_ADD = 0x00_01_01_1E,           |  Executes the `BLS12381_ADD` precompile.           |
-|  BLS12381_DOUBLE = 0x00_00_01_1F,        |  Executes the `BLS12381_DOUBLE` precompile.        |
-|  BLS12381_FP_ADD = 0x00_01_01_20,        |  Executes the `BLS12381_FP_ADD` precompile.        |
-|  BLS12381_FP_SUB = 0x00_01_01_21,        |  Executes the `BLS12381_FP_SUB` precompile.        |
-|  BLS12381_FP_MUL = 0x00_01_01_22,        |  Executes the `BLS12381_FP_MUL` precompile.        |
-|  BLS12381_FP2_ADD = 0x00_01_01_23,       |  Executes the `BLS12381_FP2_ADD` precompile.       |
-|  BLS12381_FP2_SUB = 0x00_01_01_24,       |  Executes the `BLS12381_FP2_SUB` precompile.       |
-|  BLS12381_FP2_MUL = 0x00_01_01_25,       |  Executes the `BLS12381_FP2_MUL` precompile.       |
-|  BN254_FP_ADD = 0x00_01_01_26,           |  Executes the `BN254_FP_ADD` precompile.           |
-|  BN254_FP_SUB = 0x00_01_01_27,           |  Executes the `BN254_FP_SUB` precompile.           |
-|  BN254_FP_MUL = 0x00_01_01_28,           |  Executes the `BN254_FP_MUL` precompile.           |
-|  BN254_FP2_ADD = 0x00_01_01_29,          |  Executes the `BN254_FP2_ADD` precompile.          |
-|  BN254_FP2_SUB = 0x00_01_01_2A,          |  Executes the `BN254_FP2_SUB` precompile.          |
-|  BN254_FP2_MUL = 0x00_01_01_2B,          |  Executes the `BN254_FP2_MUL` precompile.          |
-|  SECP256R1_ADD = 0x00_01_01_2C,          |  Executes the `SECP256R1_ADD` precompile.          |
-|  SECP256R1_DOUBLE = 0x00_00_01_2D,       |  Executes the `SECP256R1_DOUBLE` precompile.       |
-|  SECP256R1_DECOMPRESS = 0x00_00_01_2E,   |  Executes the `SECP256R1_DECOMPRESS` precompile.   |
-
-## Benchmark Data
-| program	    | args      | num of insts      |
-| ------------- | --------- | ----------------- |
-| sha2	        | 32        | 11445             |
-|               | 256       | 26504             |
-|               | 512       | 41908             |
-|               | 1024      | 72716             |
-|               | 2048      | 134332            |
-| sha3	        | 32        | 27525             |
-|               | 256       | 50152             |
-|               | 512       | 92048             |
-|               | 1024      | 175827            |
-|               | 2048      | 343383            |
-| fibonacci     | 100       | 6001              |
-|               | 1000      | 27601             |
-|               | 10000     | 243601            |
-|               | 50000     | 1203601           |
-| bigmem	    | 5         | 931702            |
-| sha2-chain	| 230       | 768103            |
-|               | 460       | 1527103           |
-| sha3-chain	| 230       | 4479926           |
-|               | 460       | 8951356           |
-
-Latest data reference [zkvm benchmark data](https://docs.google.com/spreadsheets/d/1H5J3tsy2ixVjkL2VP0Yxkz9scOpXzPPxRo-CGafuK08/edit?usp=sharing)

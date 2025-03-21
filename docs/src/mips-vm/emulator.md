@@ -1,196 +1,134 @@
-# Emulator
+# Emulator Design
 
-The emulator mainly implements the simulation operation of MIPS instruction set and provides interfaces to run MIPS ELF program and generate segments. All the code can be found in [zkm/emulator](https://github.com/zkMIPS/zkm/tree/main/emulator).
+The instruction emulator is a critical component of the MIPS Virtual Machine (VM) in ZKM2. It is responsible for accurately simulating the execution of MIPS instructions while ensuring compatibility with the STARK framework. The design of the emulator must balance performance, correctness, and integration with the STARK proof system to enable efficient and verifiable computation.
 
+## Execution process of MIPS instructions
 
+The execution process of MIPS program is as follows: (The left is the common execution process, and the right is process of execution with segment splitting.)
 
-## Execution process
+![elf_execution_process](./elf_execuition_process.png)
 
-The execution process of MIPS program is as follows: (The left is common execution process, The right is process of execution with segments splitting)
+Here, "segments" are used to partition large programs for convenient proving. The main steps are as follows:  
 
-![elf_execuition_process](./elf_execuition_process.png)
+**​Initialization Phase:**
+- load_elf: Load MIPS ELF binaries into virtual memory.
+- patch_elf: Bypass non-provable runtime checks (e.g., dynamic linker validations).
+- patch_stack: Initialize stack with program arguments.
 
-The main steps are as follows:
-
-- load_elf: Load mips programs into simulated memory.
-- patch_elf: Hide some ignorable processes (such as some checks in runtime).
-- patch_stack: Initialize the initial runtime stack (including filling program parameters into the stack).
-- step: Execute an instruction. In the common execution process, directly determine whether the execution exit condition is triggered after the step. If triggered, enter the exit process, otherwise continue to execute the next step; if it is a segments-splitting execution process, after checking the exit condition Also check whether the number of currently executed steps reaches the segment threshold. If it does, enter the split_seg process. If the exit condition is triggered, enter the split_seg + exit process.
+**​Execution Loop:**
 - split_seg: Generate the pre-memory-image of the current segment (including the system architecture state) and the pre/post image_id, and use this information to generate the segment data structure and write it to the corresponding segment output file.
+- step: Execute an instruction. In the common execution process, directly determine whether the execution exit condition is triggered after the step. If triggered, enter the exit process, otherwise continue to execute the next step; if it is a segment-splitting execution process, after checking the exit condition, also check whether the number of currently executed steps reaches the segment threshold. 
+
+**​Termination:**
 - Exit: End program execution.
 
+## Core data structures
 
+The core data structures used in the system include:
 
-## Main data structure
-
-The main data structures used include: 
-
-- InstrumentedState:  Maintain the overall information of simulation system, includes the MIPS architecture state, current segment id, pre-state of current segment, such as pc, image id, hash root,  input, .etc.
+- InstrumentedState: Tracks the overall simulation state, including the MIPS architecture state, segment ID, pre-segment state (e.g., PC, image ID, hash root, input), and I/O writers.
 
   ```
   pub struct InstrumentedState {
-     /// state stores the state of the MIPS emulator
-     pub state: Box<State>,
-  
-  
-     /// writer for stdout
-     stdout_writer: Box<dyn Write>,
-     /// writer for stderr
-     stderr_writer: Box<dyn Write>,
-  
-  
-     pub pre_segment_id: u32,
-     pre_pc: u32,
-     pre_image_id: [u8; 32],
-     pre_hash_root: [u8; 32],
-     block_path: String,
-     pre_input: Vec<Vec<u8>>,
-     pre_input_ptr: usize,
-     pre_public_values: Vec<u8>,
-     pre_public_values_ptr: usize,
+    pub state: Box<State>, // MIPS emulator state
+    stdout_writer: Box<dyn Write>, // stdout writer
+    stderr_writer: Box<dyn Write>, // stderr writer
+    pub pre_segment_id: u32, // previous segment ID
+    pre_pc: u32, // previous PC
+    pre_image_id: [u8; 32], // previous image ID
+    pre_hash_root: [u8; 32], // previous hash root
+    block_path: String, // block path
+    pre_input: Vec<Vec<u8>>, // previous input
+    pre_input_ptr: usize, // input pointer
+    pre_public_values: Vec<u8>, // previous public values
+    pre_public_values_ptr: usize, // public values pointer
   }
   ```
-
-  
-
-- State:  Maintain the MiPS architecture state(register, memory, heap pointer, .etc. ) of simulation system.
-
+- State: Maintains the MIPS architecture state, including registers, memory, program counter (PC), heap/brk pointers, and execution metrics (steps, cycles).
   ```
   pub struct State {
-     pub memory: Box<Memory>,
-  
-  
-     /// the 32 general purpose registers of MIPS.
-     pub registers: [u32; 32],
-     /// the pc register stores the current execution instruction address.
-     pub pc: u32,
-     /// the next pc stores the next execution instruction address.
-     next_pc: u32,
-     /// the hi register stores the multiplier/divider result high(remainder) part.
-     hi: u32,
-     /// the low register stores the multiplier/divider result low(quotient) part.
-     lo: u32,
-  
-  
-     /// heap handles the mmap syscall.
-     heap: u32,
-  
-  
-     /// brk handles the brk syscall
-     brk: u32,
-  
-  
-     /// tlb addr
-     local_user: u32,
-  
-  
-     /// step tracks the total step has been executed.
-     pub step: u64,
-     pub total_step: u64,
-  
-  
-     /// cycle tracks the total cycle has been executed.
-     pub cycle: u64,
-     pub total_cycle: u64,
-  
-  
-     /// A stream of input values (global to the entire program).
-     pub input_stream: Vec<Vec<u8>>,
-  
-  
-     /// A ptr to the current position in the input stream incremented by HINT_READ opcode.
-     pub input_stream_ptr: usize,
-  
-  
-     /// A stream of public values from the program (global to entire program).
-     pub public_values_stream: Vec<u8>,
-  
-  
-     /// A ptr to the current position in the public values stream, incremented when reading from public_values_stream.
-     pub public_values_stream_ptr: usize,
-  
-  
-     pub exited: bool,
-     pub exit_code: u8,
-     dump_info: bool,
+    pub memory: Box<Memory>, // memory state
+    pub registers: [u32; 32], // MIPS general-purpose registers
+    pub pc: u32, // current PC
+    next_pc: u32, // next PC
+    hi: u32, // high register (multiplier/divider)
+    lo: u32, // low register (multiplier/divider)
+    heap: u32, // heap pointer
+    brk: u32, // brk pointer
+    local_user: u32, // TLB address
+    pub step: u64, // current step
+    pub total_step: u64, // total steps
+    pub cycle: u64, // current cycle
+    pub total_cycle: u64, // total cycles
+    pub input_stream: Vec<Vec<u8>>, // input stream
+    pub input_stream_ptr: usize, // input stream pointer
+    pub public_values_stream: Vec<u8>, // public values stream
+    pub public_values_stream_ptr: usize, // public values pointer
+    pub exited: bool, // exit flag
+    pub exit_code: u8, // exit code
+    dump_info: bool, // debug flag
   }
   ```
-
-  
-
-- Memory: Maintain the current memory image of the system and the access trace information of the current segment.
+- Memory: Manages the memory image and access traces, including page caching and read/write traces of the current segment.
 
   ```
   pub struct Memory {
-     /// page index -> cached page
-     pages: BTreeMap<u32, Rc<RefCell<CachedPage>>>,
-  
-  
-     // two caches: we often read instructions from one page, and do memory things with another page.
-     // this prevents map lookups each instruction
-     last_page_keys: [Option<u32>; 2],
-     last_page: [Option<Rc<RefCell<CachedPage>>>; 2],
-  
-  
-     // for implement std::io::Read trait
-     addr: u32,
-     count: u32,
-  
-  
-     rtrace: BTreeMap<u32, [u8; PAGE_SIZE]>,
-     wtrace: [BTreeMap<u32, Rc<RefCell<CachedPage>>>; 3],
+    pages: BTreeMap<u32, Rc<RefCell<CachedPage>>>, // memory pages
+    last_page_keys: [Option<u32>; 2], // cached page keys
+    last_page: [Option<Rc<RefCell<CachedPage>>>; 2], // cached pages
+    addr: u32, // current address
+    count: u32, // access count
+    rtrace: BTreeMap<u32, [u8; PAGE_SIZE]>, // read trace
+    wtrace: [BTreeMap<u32, Rc<RefCell<CachedPage>>>; 3], // write trace
   }
-  
   ```
-
-  
-
-- Segment: Maintain the segment related information.
+- Segment: Tracks segment-specific information, including memory image, PC, segment ID, hash roots, and input/public value streams.
 
   ```
   pub struct Segment {
-     pub mem_image: BTreeMap<u32, u32>,  // initial memory image of segment
-     pub pc: u32,                        // initial pc
-     pub segment_id: u32,                // segment id
-     pub pre_image_id: [u8; 32],         // image id of segment pre state 
-     pub pre_hash_root: [u8; 32],       // hash root of segment pre memory image      
-     pub image_id: [u8; 32],            // image id of segment post state 
-     pub page_hash_root: [u8; 32],      // hash root of segment post memory image
-     pub end_pc: u32,                   // end pc
-     pub step: u64,                     // step number of cur segment
-     pub input_stream: Vec<Vec<u8>>,
-     pub input_stream_ptr: usize,
-     pub public_values_stream: Vec<u8>,
-     pub public_values_stream_ptr: usize,
+    pub mem_image: BTreeMap<u32, u32>, // initial memory image
+    pub pc: u32, // initial PC
+    pub segment_id: u32, // segment ID
+    pub pre_image_id: [u8; 32], // pre-segment image ID
+    pub pre_hash_root: [u8; 32], // pre-segment hash root
+    pub image_id: [u8; 32], // post-segment image ID
+    pub page_hash_root: [u8; 32], // post-segment hash root
+    pub end_pc: u32, // end PC
+    pub step: u64, // segment steps
+    pub input_stream: Vec<Vec<u8>>, // input stream
+    pub input_stream_ptr: usize, // input stream pointer
+    pub public_values_stream: Vec<u8>, // public values stream
+    pub public_values_stream_ptr: usize, // public values pointer
   }
-  
   ```
+These structures collectively enable the simulation of MIPS programs, state management, and integration with the ZKM2 proving framework.
+
+## Instruction Emulator
+
+The instruction emulator is a foundational element of the ZKM2, enabling accurate simulation of MIPS programs while generating execution traces for STARK validation. By combining MIPS ISA compliance with ZKP-friendly optimizations, the emulator provides a robust and performant foundation for the zkVM system.
+
+**Key features of the instruction emulator:**
+- MIPS ISA compliance:
+The emulator supports full compliance with ​MIPS-I ISA, provides ​Turing-complete execution capability for high level language programs.
+- Efficient emulation engine:
+The emulator simulates the MIPS CPU pipeline, including the Arithmetic Logic Unit (ALU), registers, and control logic.
+It handles instruction decoding, execution, and state transitions, ensuring accurate emulation of the MIPS architecture. 
+- Integration with STARK framework:
+The emulator generates detailed execution traces, including register updates, memory accesses, and instruction executions. These traces are structured as several tables (CPU, ALU, Memory, Bytecodes, etc.; see [chip_design](../../design/design.md) for more details), which are designed to facilitate efficient arithmetization and validation by the STARK proof system.
+
+ZKM2 executor simulates the execution of the MIPS instructions (in forms of ELF file), recording all state changes and computational steps to form a complete execution trace. This trace serves as the core data for generating the zero-knowledge proof, ensuring that the proof accurately reflects the real execution of the program. Subsequently, the ZKM prover efficiently processes and compresses the generated trace to produce a zero-knowledge proof. 
+
+## Circuit Module
+In the realm of circuit design, ZKM2 employs a highly modular architecture, meticulously segmenting the entire MIPS program into distinct submodules, each with clearly delineated functions. This approach ensures rigorous management and verification of the execution state across all components. The system initiates with memory consistency checks, followed by a systematic division of the program into several specialized sections: kernel, memory, CPU, arithmetic logic unit (ALU), hashing, and byte processing, among others. 
+
+***The kernel module*** serves as the cornerstone of the system, overseeing the program's entry and exit points. It is tasked with maintaining the stability and consistency of the system state, ensuring a robust foundation for all operations.
+
+***The memory module*** delineates between global and local memory with precision, establishing well-defined boundaries for data access and state transitions. This segregation enhances data integrity and facilitates efficient memory management.
+
+***The CPU module*** is the workhorse of the system, executing core tasks such as branch and jump operations, memory I/O, register manipulation, and system calls. Its role is pivotal in ensuring the precise execution of program logic.
+
+***The ALU module*** is dedicated to arithmetic and logical computations, providing support for a wide array of specific operations, including specialized instructions like CLO/Z. Its efficiency and accuracy are crucial for the computational integrity of the emulator.
+
+Furthermore, ***dedicated hashing*** and ***byte processing*** modules are integral to the system, managing data validation and processing with high precision. Lastly, the ***bus module*** enables efficient communication and data exchange between the various submodules through its cross-table lookup functionality. 
 
 
-
-## Instruction simulation
-
-The emulator uses the instruction parsing method to execute instructions: first fetch the instruction, then parse and execute the corresponding function according to the instruction encoding, and update the system State/Memory status.
-The main code: mips_step() can be found in [state.rs](https://github.com/zkMIPS/zkm/blob/main/emulator/src/state.rs).
-
-The supported ISA can be found in [mips_isa](./mips_isa.md).
-
-
-
-### Memory simulation and image_id computation
-
-The memory is organized in a hash tree, with page (4KB) as node. The starting address of the hash page is 0x8000000, and the program address space is 0~0x8000000. The root hash page address is 0x81020000. As shown below:
-
-![memory](./memory.png)
-
-
-
-The calculation process of page hash and Image id is as follows:
-
-1. Organize the memory (Mem) in pages (4KB), calculate the corresponding hash, and store it in the corresponding hash page;
-2. Recursively calculate the hash value of the hash page until there is only one hash page left, which is the root hash page;
-3. Write the register information at the 0x400 offset from the hash page, calculate the hash value of the root hash page, and wait until the root hash value;
-4. Splice the root hash value and the corresponding pc value together, calculate the hash value, and obtain the image id.
-
-
-In order to reduce the frequency of page hash updates, the modified memory pages will be recorded during instruction execution. Therefore, during the image ID calculation process, only the corresponding hash pages need to be recursively updated for these modified memory pages to calculate the root hash and image ID.
