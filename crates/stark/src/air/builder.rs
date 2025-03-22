@@ -273,7 +273,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             LookupScope::Local,
         );
     }
-    /// Sends an ALU operation to be processed.
+    /// Sends an ALU operation to be processed. This will be received by receive_instruction of ALU chip.
     #[allow(clippy::too_many_arguments)]
     fn send_alu(
         &mut self,
@@ -286,7 +286,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         self.send_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), multiplicity);
     }
 
-    /// Sends an ALU operation with HI to be processed.
+    /// Sends an ALU operation with HI to be processed. This will be received by receive_instruction of ALU chip.
     #[allow(clippy::too_many_arguments)]
     fn send_alu_with_hi(
         &mut self,
@@ -299,50 +299,6 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.send_instruction(
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::from_canonical_u32(UNUSED_PC),
-            Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC),
-            Self::Expr::ZERO,
-            opcode,
-            a,
-            b,
-            c,
-            hi,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            multiplicity,
-        )
-    }
-
-    /// Receives an ALU operation to be processed.
-    #[allow(clippy::too_many_arguments)]
-    fn receive_alu(
-        &mut self,
-        opcode: impl Into<Self::Expr>,
-        a: Word<impl Into<Self::Expr>>,
-        b: Word<impl Into<Self::Expr>>,
-        c: Word<impl Into<Self::Expr>>,
-        multiplicity: impl Into<Self::Expr>,
-    ) {
-        self.receive_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), multiplicity);
-    }
-
-    /// Receives an ALU operation with HI to be processed.
-    #[allow(clippy::too_many_arguments)]
-    fn receive_alu_with_hi(
-        &mut self,
-        opcode: impl Into<Self::Expr>,
-        a: Word<impl Into<Self::Expr>>,
-        b: Word<impl Into<Self::Expr>>,
-        c: Word<impl Into<Self::Expr>>,
-        hi: Word<impl Into<Self::Expr>>,
-        multiplicity: impl Into<Self::Expr>,
-    ) {
-        self.receive_instruction(
             Self::Expr::ZERO,
             Self::Expr::ZERO,
             Self::Expr::from_canonical_u32(UNUSED_PC),
