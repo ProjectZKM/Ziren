@@ -30,10 +30,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "alloy-primitives"
-version = "0.6.4"
+name = "alloy-eips"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "600d34d8de81e23b6d909c094e23b3d357e01ca36b78a8c5424c501eedbe86f0"
+checksum = "f76ecab54890cdea1e4808fc0891c7e6cfcf71fe1a9fe26810c7280ef768f4ed"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde",
+ "c-kzg",
+ "serde",
+]
+
+[[package]]
+name = "alloy-primitives"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccb3ead547f4532bc8af961649942f0b9c16ee9226e26caa3f38420651cc0bf4"
 dependencies = [
  "alloy-rlp",
  "bytes",
@@ -42,6 +55,7 @@ dependencies = [
  "derive_more 0.99.19",
  "hex-literal",
  "itoa",
+ "k256",
  "ruint",
  "serde",
  "tiny-keccak 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -53,7 +67,30 @@ version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d6c1d995bff8d011f7cd6c81820d51825e6e06d6db73914c1630ecf544d83d6"
 dependencies = [
+ "alloy-rlp-derive",
  "bytes",
+]
+
+[[package]]
+name = "alloy-rlp-derive"
+version = "0.3.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a40e1ef334153322fd878d07e86af7a529bcb86b2439525920a88eba87bcf943"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
+name = "alloy-serde"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9416c52959e66ead795a11f4a86c248410e9e368a0765710e57055b8a1774dd6"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -130,7 +167,7 @@ dependencies = [
  "num",
  "rand",
  "zkm2-derive",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -177,8 +214,8 @@ dependencies = [
 name = "bls-decompress-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -187,15 +224,15 @@ version = "1.1.0"
 dependencies = [
  "common-test-utils",
  "zkm2-curves",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
 name = "bls12381-double-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -204,8 +241,8 @@ version = "1.1.1"
 dependencies = [
  "num-bigint",
  "rand",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -214,7 +251,7 @@ version = "1.1.1"
 dependencies = [
  "num-bigint",
  "rand",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -223,8 +260,8 @@ version = "1.1.1"
 dependencies = [
  "num-bigint",
  "rand",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -232,8 +269,21 @@ name = "bls12381-mul-test"
 version = "1.1.0"
 dependencies = [
  "zkm2-derive",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
+]
+
+[[package]]
+name = "bls12_381"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7bc6d6292be3a19e6379786dac800f551e5865a5bb51ebbe3064ab80433f403"
+dependencies = [
+ "ff",
+ "group",
+ "pairing",
+ "rand_core",
+ "subtle",
 ]
 
 [[package]]
@@ -254,15 +304,15 @@ version = "1.1.0"
 dependencies = [
  "common-test-utils",
  "zkm2-curves",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
 name = "bn254-double-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -271,7 +321,7 @@ version = "1.1.1"
 dependencies = [
  "num-bigint",
  "rand",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -280,7 +330,7 @@ version = "1.1.1"
 dependencies = [
  "num-bigint",
  "rand",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -289,7 +339,7 @@ version = "1.1.1"
 dependencies = [
  "num-bigint",
  "rand",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -297,8 +347,8 @@ name = "bn254-mul-test"
 version = "1.1.0"
 dependencies = [
  "zkm2-derive",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -330,9 +380,9 @@ dependencies = [
 
 [[package]]
 name = "c-kzg"
-version = "0.4.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94a4bc5367b6284358d2a6a6a1dc2d92ec4b86034561c3b9d3341909752fd848"
+checksum = "f0307f72feab3300336fb803a57134159f6e20139af1357f36c54cb90d8e8928"
 dependencies = [
  "blst",
  "cc",
@@ -362,7 +412,7 @@ name = "common-test-utils"
 version = "1.1.0"
 dependencies = [
  "num-bigint",
- "zkm2-lib",
+ "zkm2-lib 0.0.1",
 ]
 
 [[package]]
@@ -535,7 +585,7 @@ name = "cycle-tracker-test"
 version = "1.1.0"
 dependencies = [
  "zkm2-derive",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -683,6 +733,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c7a8fb8a9fbf66c1f703fe16184d10ca0ee9d23be5b4436400408ba54a95005"
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -700,7 +756,7 @@ dependencies = [
 name = "ed-add-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -708,7 +764,7 @@ name = "ed-decompress-test"
 version = "1.1.0"
 dependencies = [
  "hex-literal",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -717,7 +773,7 @@ version = "1.1.0"
 dependencies = [
  "ed25519-dalek",
  "hex-literal",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -807,6 +863,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
+ "bitvec",
  "rand_core",
  "subtle",
 ]
@@ -821,7 +878,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 name = "fibonacci"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -912,7 +969,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello-world"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -940,7 +997,7 @@ checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 name = "hint-io-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1025,7 +1082,7 @@ dependencies = [
 name = "keccak-permute-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1033,7 +1090,22 @@ name = "keccak256-test"
 version = "1.1.0"
 dependencies = [
  "tiny-keccak 2.0.2 (git+https://github.com/sp1-patches/tiny-keccak?branch=patch-v2.0.2)",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
+]
+
+[[package]]
+name = "kzg-rs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd9920cd4460ce3cbca19c62f3bb9a9611562478a4dc9d2c556f4a7d049c5b6b"
+dependencies = [
+ "bls12_381",
+ "glob",
+ "hex",
+ "once_cell",
+ "serde",
+ "serde_derive",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -1091,7 +1163,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "models"
 version = "0.1.0"
-source = "git+https://github.com/eigmax/powdr-revme?branch=continuations#0abf75bce415b9f713dcc86a034bf6977b984583"
+source = "git+https://github.com/zkMIPS/revme#0a642785cd9fbcaa79779f8499aae58ea5a48495"
 dependencies = [
  "revm",
  "serde",
@@ -1539,10 +1611,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pairing"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
+dependencies = [
+ "group",
+]
+
+[[package]]
 name = "panic-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1779,20 +1860,21 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "revm"
-version = "3.5.0"
-source = "git+https://github.com/powdr-labs/revm?branch=serde-no-std#8653c72bfd70cbac061b03d0c0de02153dbc6601"
+version = "11.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm2#28d75388ee3eb32d78527d4a4ba3b5bdc43de639"
 dependencies = [
  "auto_impl",
+ "cfg-if",
+ "dyn-clone",
  "revm-interpreter",
  "revm-precompile",
  "serde",
- "serde_json",
 ]
 
 [[package]]
 name = "revm-interpreter"
-version = "1.3.0"
-source = "git+https://github.com/powdr-labs/revm?branch=serde-no-std#8653c72bfd70cbac061b03d0c0de02153dbc6601"
+version = "7.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm2#28d75388ee3eb32d78527d4a4ba3b5bdc43de639"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -1800,10 +1882,11 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "2.2.0"
-source = "git+https://github.com/powdr-labs/revm?branch=serde-no-std#8653c72bfd70cbac061b03d0c0de02153dbc6601"
+version = "9.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm2#28d75388ee3eb32d78527d4a4ba3b5bdc43de639"
 dependencies = [
  "aurora-engine-modexp",
+ "cfg-if",
  "k256",
  "once_cell",
  "revm-primitives",
@@ -1814,18 +1897,23 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "1.3.0"
-source = "git+https://github.com/powdr-labs/revm?branch=serde-no-std#8653c72bfd70cbac061b03d0c0de02153dbc6601"
+version = "6.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm2#28d75388ee3eb32d78527d4a4ba3b5bdc43de639"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "bitflags",
  "bitvec",
  "c-kzg",
+ "cfg-if",
+ "dyn-clone",
  "enumn",
  "hashbrown 0.14.5",
  "hex",
+ "kzg-rs",
  "serde",
+ "zkm2-zkvm 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
 ]
 
 [[package]]
@@ -1838,7 +1926,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1971,22 +2059,22 @@ version = "1.1.0"
 dependencies = [
  "common-test-utils",
  "zkm2-curves",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
 name = "secp256k1-decompress-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
 name = "secp256k1-double-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1994,7 +2082,7 @@ name = "secp256k1-mul-test"
 version = "1.1.0"
 dependencies = [
  "zkm2-derive",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2007,15 +2095,15 @@ dependencies = [
  "num",
  "p256",
  "zkm2-curves",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
 name = "secp256r1-decompress-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2028,8 +2116,8 @@ dependencies = [
  "num",
  "p256",
  "zkm2-curves",
- "zkm2-lib",
- "zkm2-zkvm",
+ "zkm2-lib 0.0.1",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2071,17 +2159,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha-compress-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
 name = "sha-extend-test"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2110,7 +2211,7 @@ name = "sha2-rust"
 version = "0.1.0"
 dependencies = [
  "sha2 0.10.8",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2120,7 +2221,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "sha2 0.10.6",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2138,7 +2239,7 @@ name = "sha3-chain"
 version = "0.1.0"
 dependencies = [
  "sha3",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2474,7 +2575,7 @@ dependencies = [
  "num-bigint",
  "rand",
  "zkm2-derive",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2483,7 +2584,7 @@ version = "1.1.0"
 dependencies = [
  "crypto-bigint 0.6.0",
  "zkm2-derive",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2499,6 +2600,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a210d160f08b701c8721ba1c726c11662f877ea6b7094007e1ca9a1041945034"
 
 [[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
+
+[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2510,7 +2617,7 @@ version = "1.1.0"
 dependencies = [
  "hex",
  "sha2 0.10.8",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2729,6 +2836,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm2-lib"
+version = "0.0.1"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#9dec66b993b4951a45bd9863430a48daece29bff"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "serde",
+ "sha2 0.10.8",
+]
+
+[[package]]
 name = "zkm2-primitives"
 version = "0.0.1"
 dependencies = [
@@ -2783,7 +2901,7 @@ dependencies = [
  "tracing-subscriber",
  "zkm2-derive",
  "zkm2-primitives",
- "zkm2-zkvm",
+ "zkm2-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2800,6 +2918,22 @@ dependencies = [
  "rand",
  "serde",
  "sha2 0.10.8",
- "zkm2-lib",
+ "zkm2-lib 0.0.1",
  "zkm2-primitives",
+]
+
+[[package]]
+name = "zkm2-zkvm"
+version = "0.0.1"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#9dec66b993b4951a45bd9863430a48daece29bff"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "getrandom",
+ "lazy_static",
+ "libm",
+ "rand",
+ "serde",
+ "sha2 0.10.8",
+ "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
 ]
