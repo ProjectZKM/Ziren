@@ -45,7 +45,7 @@ pub const DEFAULT_PC_INC: u32 = 4;
 pub const UNUSED_PC: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// /// Whether to verify deferred proofs during execution.
+/// Whether to verify deferred proofs during execution.
 pub enum DeferredProofVerification {
     /// Verify deferred proofs during execution.
     Enabled,

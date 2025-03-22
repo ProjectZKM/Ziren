@@ -43,7 +43,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use zkm2_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
-    ExecutionRecord, Opcode, Program
+    ExecutionRecord, Opcode, Program,
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_primitives::consts::WORD_SIZE;
