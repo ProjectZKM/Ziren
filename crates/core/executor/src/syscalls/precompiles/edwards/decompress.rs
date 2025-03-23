@@ -64,10 +64,8 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         let x_memory_records_vec = rt.mw_slice(slice_ptr, &decompressed_x_words);
         let x_memory_records: [MemoryWriteRecord; 8] = x_memory_records_vec.try_into().unwrap();
 
-        let lookup_id = rt.syscall_lookup_id;
         let shard = rt.current_shard();
         let event = EdDecompressEvent {
-            lookup_id,
             shard,
             clk: start_clk,
             ptr: slice_ptr,
