@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::{
     memory::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
-    LookupId,
 };
 
 /// `U256xU2048` Mul Event.
@@ -10,8 +9,6 @@ use crate::events::{
 /// This event is emitted when a `U256xU2048` mul operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct U256xU2048MulEvent {
-    /// The lookup identifier.
-    pub lookup_id: LookupId,
     /// The shard number.
     pub shard: u32,
     /// The channel number.
