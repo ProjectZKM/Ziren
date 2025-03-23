@@ -2,7 +2,6 @@
 
 use zkm2_build::include_elf;
 
-pub const REVME_ELF: &[u8] = include_elf!("revme");
 pub const SHA2_RUST_ELF: &[u8] = include_elf!("sha2-rust");
 pub const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci");
 pub const HELLO_WORLD_ELF: &[u8] = include_elf!("hello-world");
