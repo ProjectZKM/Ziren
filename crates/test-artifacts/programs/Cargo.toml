@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "revme",
   "sha2-rust",
   "sha2",
   "sha-extend",
