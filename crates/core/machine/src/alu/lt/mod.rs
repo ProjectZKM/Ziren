@@ -33,7 +33,8 @@ pub struct LtChip;
 #[repr(C)]
 pub struct LtCols<T> {
     /// The shard number, used for byte lookup table.
-    pub shard: T,
+    pub pc: T,
+    pub next_pc: T,
 
     /// If the opcode is SLT.
     pub is_slt: T,
@@ -49,6 +50,8 @@ pub struct LtCols<T> {
 
     /// The second input operand.
     pub c: Word<T>,
+
+    pub op_a_not_0: T,
 
     /// Boolean flag to indicate which byte pair differs if the operands are not equal.
     pub byte_flags: [T; 4],
@@ -137,7 +140,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
             .lt_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_LT_COLS];
                     let cols: &mut LtCols<F> = row.as_mut_slice().borrow_mut();
@@ -147,7 +150,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
             })
             .collect::<Vec<_>>();
 
-        output.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+        output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -175,10 +178,12 @@ impl LtChip {
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.pc = F::from_canonical_u32(event.pc);
+        cols.next_pc = F::from_canonical_u32(event.next_pc);
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
+        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
 
         // If this is SLT, mask the MSB of b & c before computing cols.bits.
         let masked_b = b[3] & 0x7f;
@@ -188,7 +193,6 @@ impl LtChip {
 
         // Send the masked lookup.
         blu.add_byte_lookup_event(ByteLookupEvent {
-            shard: event.shard,
             opcode: ByteOpcode::AND,
             a1: masked_b as u16,
             a2: 0,
@@ -196,7 +200,6 @@ impl LtChip {
             c: 0x7f,
         });
         blu.add_byte_lookup_event(ByteLookupEvent {
-            shard: event.shard,
             opcode: ByteOpcode::AND,
             a1: masked_c as u16,
             a2: 0,
@@ -245,7 +248,6 @@ impl LtChip {
         assert_eq!(cols.a[0], cols.bit_b * (F::ONE - cols.bit_c) + cols.is_sign_eq * cols.sltu);
 
         blu.add_byte_lookup_event(ByteLookupEvent {
-            shard: event.shard,
             opcode: ByteOpcode::LTU,
             a1: cols.sltu.as_canonical_u32() as u16,
             a2: 0,
@@ -435,13 +437,23 @@ where
         builder.assert_bool(local.is_slt + local.is_sltu);
 
         // Receive the arguments.
-        builder.receive_alu(
+        builder.receive_instruction(
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            local.pc,
+            local.next_pc,
+            AB::Expr::ZERO,
             local.is_slt * AB::F::from_canonical_u32(Opcode::SLT as u32)
                 + local.is_sltu * AB::F::from_canonical_u32(Opcode::SLTU as u32),
             local.a,
             local.b,
             local.c,
-            local.shard,
+            Word([AB::Expr::ZERO; 4]),
+            AB::Expr::ONE - local.op_a_not_0,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             is_real,
         );
     }
@@ -463,7 +475,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.lt_events = vec![AluEvent::new(0, 0, Opcode::SLT, 0, 3, 2)];
+        shard.lt_events = vec![AluEvent::new(0, Opcode::SLT, 0, 3, 2, false)];
         let chip = LtChip::default();
         let generate_trace = chip.generate_trace(&shard, &mut ExecutionRecord::default());
         let trace: RowMajorMatrix<KoalaBear> = generate_trace;
@@ -491,21 +503,21 @@ mod tests {
         const NEG_4: u32 = 0b11111111111111111111111111111100;
         shard.lt_events = vec![
             // 0 == 3 < 2
-            AluEvent::new(0, 0, Opcode::SLT, 0, 3, 2),
+            AluEvent::new(0, Opcode::SLT, 0, 3, 2, false),
             // 1 == 2 < 3
-            AluEvent::new(0, 1, Opcode::SLT, 1, 2, 3),
+            AluEvent::new(0, Opcode::SLT, 1, 2, 3, false),
             // 0 == 5 < -3
-            AluEvent::new(0, 3, Opcode::SLT, 0, 5, NEG_3),
+            AluEvent::new(0, Opcode::SLT, 0, 5, NEG_3, false),
             // 1 == -3 < 5
-            AluEvent::new(0, 2, Opcode::SLT, 1, NEG_3, 5),
+            AluEvent::new(0, Opcode::SLT, 1, NEG_3, 5, false),
             // 0 == -3 < -4
-            AluEvent::new(0, 4, Opcode::SLT, 0, NEG_3, NEG_4),
+            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_4, false),
             // 1 == -4 < -3
-            AluEvent::new(0, 4, Opcode::SLT, 1, NEG_4, NEG_3),
+            AluEvent::new(0, Opcode::SLT, 1, NEG_4, NEG_3, false),
             // 0 == 3 < 3
-            AluEvent::new(0, 5, Opcode::SLT, 0, 3, 3),
+            AluEvent::new(0, Opcode::SLT, 0, 3, 3, false),
             // 0 == -3 < -3
-            AluEvent::new(0, 5, Opcode::SLT, 0, NEG_3, NEG_3),
+            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_3, false),
         ];
 
         prove_koalabear_template(&mut shard);
@@ -518,17 +530,17 @@ mod tests {
         const LARGE: u32 = 0b11111111111111111111111111111101;
         shard.lt_events = vec![
             // 0 == 3 < 2
-            AluEvent::new(0, 0, Opcode::SLTU, 0, 3, 2),
+            AluEvent::new(0, Opcode::SLTU, 0, 3, 2, false),
             // 1 == 2 < 3
-            AluEvent::new(0, 1, Opcode::SLTU, 1, 2, 3),
+            AluEvent::new(0, Opcode::SLTU, 1, 2, 3, false),
             // 0 == LARGE < 5
-            AluEvent::new(0, 2, Opcode::SLTU, 0, LARGE, 5),
+            AluEvent::new(0, Opcode::SLTU, 0, LARGE, 5, false),
             // 1 == 5 < LARGE
-            AluEvent::new(0, 3, Opcode::SLTU, 1, 5, LARGE),
+            AluEvent::new(0, Opcode::SLTU, 1, 5, LARGE, false),
             // 0 == 0 < 0
-            AluEvent::new(0, 5, Opcode::SLTU, 0, 0, 0),
+            AluEvent::new(0, Opcode::SLTU, 0, 0, 0, false),
             // 0 == LARGE < LARGE
-            AluEvent::new(0, 5, Opcode::SLTU, 0, LARGE, LARGE),
+            AluEvent::new(0, Opcode::SLTU, 0, LARGE, LARGE, false),
         ];
 
         prove_koalabear_template(&mut shard);

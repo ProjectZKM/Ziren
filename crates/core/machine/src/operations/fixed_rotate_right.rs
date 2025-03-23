@@ -42,7 +42,6 @@ impl<F: Field> FixedRotateRightOperation<F> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecord,
-        shard: u32,
         input: u32,
         rotation: usize,
     ) -> u32 {
@@ -73,7 +72,6 @@ impl<F: Field> FixedRotateRightOperation<F> {
             let (shift, carry) = shr_carry(b, c);
 
             let byte_event = ByteLookupEvent {
-                shard,
                 opcode: ByteOpcode::ShrCarry,
                 a1: shift as u16,
                 a2: carry,

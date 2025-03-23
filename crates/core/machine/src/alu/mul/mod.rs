@@ -42,7 +42,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm2_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
-    ByteOpcode, ExecutionRecord, Opcode, Program,
+    ByteOpcode, ExecutionRecord, Opcode, Program
 };
 use zkm2_derive::AlignedBorrow;
 use zkm2_primitives::consts::WORD_SIZE;
@@ -76,7 +76,11 @@ pub struct MulChip;
 #[repr(C)]
 pub struct MulCols<T> {
     /// The shard number, used for byte lookup table.
-    pub shard: T,
+    pub pc: T,
+    pub next_pc: T,
+
+    /// Whether the first operand is not register 0.
+    pub op_a_not_0: T,
 
     /// The upper bits of the output operand.
     pub hi: Word<T>,
@@ -169,7 +173,7 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
             .mul_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_MUL_COLS];
                     let cols: &mut MulCols<F> = row.as_mut_slice().borrow_mut();
@@ -179,7 +183,7 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
             })
             .collect::<Vec<_>>();
 
-        output.add_sharded_byte_lookup_events(blu_batches.iter().collect::<Vec<_>>());
+        output.add_byte_lookup_events_from_maps(blu_batches.iter().collect::<Vec<_>>());
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -203,7 +207,8 @@ impl MulChip {
         cols: &mut MulCols<F>,
         blu: &mut impl ByteRecord,
     ) {
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.pc = F::from_canonical_u32(event.pc);
+        cols.next_pc = F::from_canonical_u32(event.next_pc);
 
         let hi_word = event.hi.to_le_bytes();
         let a_word = event.a.to_le_bytes();
@@ -239,7 +244,6 @@ impl MulChip {
                 for word in words.iter() {
                     let most_significant_byte = word[WORD_SIZE - 1];
                     blu_events.push(ByteLookupEvent {
-                        shard: event.shard,
                         opcode: ByteOpcode::MSB,
                         a1: get_msb(*word) as u16,
                         a2: 0,
@@ -278,6 +282,7 @@ impl MulChip {
         cols.a = Word(a_word.map(F::from_canonical_u8));
         cols.b = Word(b_word.map(F::from_canonical_u8));
         cols.c = Word(c_word.map(F::from_canonical_u8));
+        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
@@ -285,8 +290,8 @@ impl MulChip {
 
         // Range check.
         {
-            blu.add_u16_range_checks(event.shard, &carry.map(|x| x as u16));
-            blu.add_u8_range_checks(event.shard, &product.map(|x| x as u8));
+            blu.add_u16_range_checks(&carry.map(|x| x as u16));
+            blu.add_u8_range_checks(&product.map(|x| x as u8));
         }
     }
 }
@@ -427,13 +432,22 @@ where
         }
 
         // Receive the arguments.
-        builder.receive_alu_with_hi(
+        builder.receive_instruction(
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            local.pc,
+            local.next_pc,
+            AB::Expr::ZERO,
             opcode,
             local.a,
             local.b,
             local.c,
             local.hi,
-            local.shard,
+            AB::Expr::ONE - local.op_a_not_0,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_real,
         );
     }
@@ -459,7 +473,7 @@ mod tests {
         // Fill mul_events with 10 MUL events.
         let mut mul_events: Vec<AluEvent> = Vec::new();
         for _ in 0..10 {
-            mul_events.push(AluEvent::new(0, 0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000));
+            mul_events.push(AluEvent::new(0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000, false));
         }
         shard.mul_events = mul_events;
         let chip = MulChip::default();
@@ -492,12 +506,12 @@ mod tests {
             (Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff),
         ];
         for t in mul_instructions.iter() {
-            mul_events.push(AluEvent::new(0, 0, t.0, t.1, t.2, t.3));
+            mul_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3, false));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - mul_instructions.len()) {
-            mul_events.push(AluEvent::new(0, 0, Opcode::MUL, 1, 1, 1));
+            mul_events.push(AluEvent::new(0, Opcode::MUL, 1, 1, 1, false));
         }
 
         shard.mul_events = mul_events;
