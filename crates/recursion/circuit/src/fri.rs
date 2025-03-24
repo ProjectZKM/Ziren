@@ -1,5 +1,5 @@
 use itertools::{izip, Itertools};
-use p3_commit::{PolynomialSpace};
+use p3_commit::PolynomialSpace;
 use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof};
 use p3_koala_bear::KoalaBear;

@@ -25,8 +25,7 @@ fn test_verify_groth16() {
     #[cfg(feature = "ark")]
     {
         let valid = crate::Groth16Verifier::ark_verify(
-            &proof,
-            &public_inputs,
+            &zkm2_proof_with_public_values,
             vkey_hash,
             &crate::GROTH16_VK_BYTES,
         )
@@ -53,7 +52,7 @@ fn test_verify_plonk() {
         .expect("Plonk proof is invalid");
 }
 
-// RUST_LOG=debug cargo test -r test_e2e_verify_groth16 --features ark -- --nocapture
+// ZKM_DEV=true RUST_LOG=debug cargo test -r test_e2e_verify_groth16 --features ark -- --nocapture
 #[test]
 fn test_e2e_verify_groth16() {
     // Set up the pk and vk.
@@ -87,8 +86,7 @@ fn test_e2e_verify_groth16() {
     #[cfg(feature = "ark")]
     {
         let valid = crate::Groth16Verifier::ark_verify(
-            &proof,
-            &public_inputs,
+            &zkm2_proof_with_public_values,
             &vkey_hash,
             &groth16_vk_bytes,
         )
