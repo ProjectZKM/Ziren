@@ -7,14 +7,14 @@ use bn::Fr;
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 
-use zkm2_sdk::ZKMProofWithPublicValues;
-
 pub(crate) use converter::{load_groth16_proof_from_bytes, load_groth16_verifying_key_from_bytes};
 pub(crate) use verify::*;
 use crate::{decode_zkm2_vkey_hash, error::Error, hash_public_inputs};
 
 use error::Groth16Error;
 
+#[cfg(feature = "ark")]
+use zkm2_sdk::ZKMProofWithPublicValues;
 #[cfg(feature = "ark")]
 use crate::ArkGroth16Error;
 #[cfg(feature = "ark")]

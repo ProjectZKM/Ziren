@@ -73,10 +73,10 @@ pub fn convert_ark(
     }
 
     // Convert gnark proof to arkworks proof
-    let ark_proof = load_ark_proof_from_bytes(&proof[4..]).unwrap();
-    let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes(groth16_vk).unwrap();
+    let ark_proof = load_ark_proof_from_bytes(&proof[4..])?;
+    let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes(groth16_vk)?;
     let ark_public_inputs = load_ark_public_inputs_from_bytes(
-        &decode_zkm2_vkey_hash(&vkey_hash).unwrap(),
+        &decode_zkm2_vkey_hash(&vkey_hash)?,
         &hash_public_inputs(&public_inputs),
     );
 
