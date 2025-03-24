@@ -29,10 +29,13 @@ pub(crate) mod mips_chips {
         },
         bytes::ByteChip,
         cpu::CpuChip,
-        memory::MemoryGlobalChip,
+        memory::{MemoryGlobalChip, MemoryInstructionsChip},
         program::ProgramChip,
+        control_flow::{BranchChip, JumpChip},
+        misc::MiscInstrsChip,
         syscall::{
             chip::SyscallChip,
+            instructions::SyscallInstrsChip,
             precompiles::{
                 edwards::{EdAddAssignChip, EdDecompressChip},
                 keccak256::KeccakPermuteChip,
@@ -91,6 +94,16 @@ pub enum MipsAir<F: PrimeField32> {
     ShiftRight(ShiftRightChip),
     /// A lookup table for byte operations.
     ByteLookup(ByteChip<F>),
+    /// An AIR for MIPS Branch instructions.
+    Branch(BranchChip),
+    /// An AIR for MIPS Jump instructions.
+    Jump(JumpChip),
+    /// An AIR for MIPS memory instructions.
+    MemoryInstrs(MemoryInstructionsChip),
+    /// An AIR for MIPS misc instructions.
+    MiscInstrs(MiscInstrsChip),
+    /// An AIR for MIPS syscall instructions.
+    SyscallInstrs(SyscallInstrsChip),
     /// A table for initializing the global memory state.
     MemoryGlobalInit(MemoryGlobalChip),
     /// A table for finalizing the global memory state.
@@ -359,6 +372,18 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(clo_clz.name(), clo_clz.cost());
         chips.push(clo_clz);
 
+        let branch = Chip::new(MipsAir::Branch(BranchChip::default()));
+        costs.insert(branch.name(), branch.cost());
+        chips.push(branch);
+
+        let jump = Chip::new(MipsAir::Jump(JumpChip::default()));
+        costs.insert(jump.name(), jump.cost());
+        chips.push(jump);
+
+        let syscall_instrs = Chip::new(MipsAir::SyscallInstrs(SyscallInstrsChip::default()));
+        costs.insert(syscall_instrs.name(), syscall_instrs.cost());
+        chips.push(syscall_instrs);
+
         let memory_global_init =
             Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)));
         costs.insert(memory_global_init.name(), memory_global_init.cost());
@@ -380,6 +405,14 @@ impl<F: PrimeField32> MipsAir<F> {
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
+        
+        let memory_instructions = Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
+        costs.insert(memory_instructions.name(), memory_instructions.cost());
+        chips.push(memory_instructions);
+
+        let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
+        costs.insert(misc_instrs.name(), misc_instrs.cost());
+        chips.push(misc_instrs);
 
         (chips, costs)
     }
@@ -396,6 +429,11 @@ impl<F: PrimeField32> MipsAir<F> {
     pub fn core_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
         vec![
             (MipsAirId::Cpu, record.cpu_events.len()),
+            (MipsAirId::Branch, record.branch_events.len()),
+            (MipsAirId::Jump, record.jump_events.len()),
+            (MipsAirId::MiscInstrs, record.misc_events.len()),
+            (MipsAirId::MemoryInstrs, record.memory_instr_events.len()),
+            (MipsAirId::SyscallInstrs, record.syscall_events.len()),
             (MipsAirId::DivRem, record.divrem_events.len()),
             (MipsAirId::AddSub, record.add_events.len() + record.sub_events.len()),
             (MipsAirId::Bitwise, record.bitwise_events.len()),
@@ -460,6 +498,11 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::CloClz(CloClzChip::default()),
             MipsAir::ShiftLeft(ShiftLeft::default()),
             MipsAir::ShiftRight(ShiftRightChip::default()),
+            MipsAir::Branch(BranchChip::default()),
+            MipsAir::Jump(JumpChip::default()),
+            MipsAir::SyscallInstrs(SyscallInstrsChip::default()),
+            MipsAir::MemoryInstrs(MemoryInstructionsChip::default()),
+            MipsAir::MiscInstrs(MiscInstrsChip::default()),
             MipsAir::MemoryLocal(MemoryLocalChip::new()),
             MipsAir::Global(GlobalChip),
             MipsAir::SyscallCore(SyscallChip::core()),
@@ -562,6 +605,11 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::ByteLookup(_) => unreachable!("Invalid for core chip"),
             Self::SyscallCore(_) => unreachable!("Invalid for core chip"),
             Self::SyscallPrecompile(_) => unreachable!("Invalid for syscall precompile chip"),
+            Self::Branch(_) => unreachable!("Invalid for core chip"),
+            Self::Jump(_) => unreachable!("Invalid for core chip"),
+            Self::SyscallInstrs(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryInstrs(_) => unreachable!("Invalid for core chip"),
+            Self::MiscInstrs(_) => unreachable!("Invalid for core chip"),
         }
     }
 }
@@ -629,6 +677,7 @@ pub mod tests {
         let costs: HashMap<String, u64> = serde_json::from_reader(file).unwrap();
         // Compare with costs computed by machine
         let machine_costs = MipsAir::<KoalaBear>::costs();
+        log::info!("{:?}", machine_costs);
         assert_eq!(costs, machine_costs);
     }
 

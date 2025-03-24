@@ -72,9 +72,28 @@ impl Instruction {
                 | Opcode::OR
                 | Opcode::XOR
                 | Opcode::NOR
+                | Opcode::CLZ
+                | Opcode::CLO
         )
     }
 
+    /// Returns if the instruction is an misc instruction.
+    #[must_use]
+    pub const fn is_misc_instruction(&self) -> bool {
+        matches!(
+            self.opcode,
+            Opcode::WSBH
+                | Opcode::SEXT
+                | Opcode::EXT
+                | Opcode::INS
+                | Opcode::MADDU
+                | Opcode::MSUBU
+                | Opcode::MEQ
+                | Opcode::MNE
+                | Opcode::NOP
+                | Opcode::TEQ
+        )
+    }
     /// Returns if the instruction is a syscall instruction.
     #[must_use]
     pub fn is_syscall_instruction(&self) -> bool {
@@ -103,12 +122,38 @@ impl Instruction {
         )
     }
 
+    pub const fn is_memory_load_instruction(&self) -> bool {
+        matches!(self.opcode, Opcode::LB | Opcode::LH | Opcode::LW | Opcode::LWL | Opcode::LWR | Opcode::LBU | Opcode::LHU | Opcode::LL)
+    }
+
+    pub const fn is_memory_store_instruction(&self) -> bool {
+        matches!(self.opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SC)
+    }
+
+    pub const fn is_memory_store_instruction_except_sc(&self) -> bool {
+        matches!(self.opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR)
+    }
+
     /// Returns if the instruction is a branch instruction.
     #[must_use]
     pub const fn is_branch_instruction(&self) -> bool {
         matches!(
             self.opcode,
             Opcode::BEQ | Opcode::BNE | Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ
+        )
+    }
+
+    /// Returns if the instruction is a mult/div instruction.
+    #[must_use]
+    pub fn is_mult_div_instruction(&self) -> bool {
+        matches!(
+            self.opcode,
+            Opcode::MULT
+                | Opcode::MULTU
+                | Opcode::DIV
+                | Opcode::DIVU
+                | Opcode::MADDU
+                | Opcode::MSUBU
         )
     }
 

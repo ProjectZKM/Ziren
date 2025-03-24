@@ -55,10 +55,8 @@ impl Syscall for U256xU2048MulSyscall {
 
         let lo_memory_records = rt.mw_slice(lo_ptr, &lo_words);
         let hi_memory_records = rt.mw_slice(hi_ptr, &hi_words);
-        let lookup_id = rt.syscall_lookup_id;
         let shard = rt.current_shard();
         let event = PrecompileEvent::U256xU2048Mul(U256xU2048MulEvent {
-            lookup_id,
             shard,
             clk,
             a_ptr,
@@ -79,7 +77,7 @@ impl Syscall for U256xU2048MulSyscall {
         });
 
         let sycall_event =
-            rt.rt.syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
+            rt.rt.syscall_event(clk, None, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, sycall_event, event);
 
         None

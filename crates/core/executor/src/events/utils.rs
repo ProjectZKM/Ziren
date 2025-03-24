@@ -1,9 +1,4 @@
-use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-
-/// A unique identifier for lookups.
-#[derive(Deserialize, Serialize, Debug, Clone, Copy, Default, Eq, Hash, PartialEq)]
-pub struct LookupId(pub u64);
 
 /// Returns a tuple containing everything needed to to correctly display a table of counts
 /// (e.g. `opcode_counts`):

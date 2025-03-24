@@ -11,7 +11,7 @@ mod tests {
     use test_artifacts::U256XU2048_MUL_ELF;
     use zkm2_core_executor::{
         events::{
-            LookupId, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,
+            MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,
             U256xU2048MulEvent,
         },
         syscalls::SyscallCode,
@@ -126,10 +126,7 @@ mod tests {
             });
         }
 
-        let lookup_id = LookupId(rng.gen());
-
         let event = PrecompileEvent::U256xU2048Mul(U256xU2048MulEvent {
-            lookup_id,
             shard: 0u32,
             clk: hi_ts,
             a_ptr,
@@ -151,9 +148,14 @@ mod tests {
 
         let syscall_code = SyscallCode::U256XU2048_MUL;
         let syscall_event = SyscallEvent {
+            pc: 32,
+            next_pc: 36,
             shard: 0u32,
             clk: hi_ts,
-            syscall_id: syscall_code as u32,
+            a_record: MemoryWriteRecord::default(),
+            a_record_is_real: false,
+            op_a_0: false,
+            syscall_id: syscall_code.syscall_id(),
             arg1: a_ptr,
             arg2: b_ptr,
         };

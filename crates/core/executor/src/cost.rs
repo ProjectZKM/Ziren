@@ -55,13 +55,25 @@ pub fn estimate_mips_lde_size(
     cells += (num_events_per_air[MipsAirId::MemoryLocal]).next_power_of_two()
         * costs_per_air[&MipsAirId::MemoryLocal];
 
-    // // Compute the branch chip contribution.
-    // cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
-    //     * costs_per_air[&MipsAirId::Branch];
+    // Compute the branch chip contribution.
+    cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
+         * costs_per_air[&MipsAirId::Branch];
 
-    // // Compute the jump chip contribution.
-    // cells += (num_events_per_air[MipsAirId::Jump]).next_power_of_two()
-    //     * costs_per_air[&MipsAirId::Jump];
+    // Compute the jump chip contribution.
+    cells += (num_events_per_air[MipsAirId::Jump]).next_power_of_two()
+         * costs_per_air[&MipsAirId::Jump];
+
+    // Compute the SyscallInstruction chip contribution.
+    cells += (num_events_per_air[MipsAirId::SyscallInstrs]).next_power_of_two()
+        * costs_per_air[&MipsAirId::SyscallInstrs];
+
+    // Compute the MemoryInstruction chip contribution.
+    cells += (num_events_per_air[MipsAirId::MemoryInstrs]).next_power_of_two()
+        * costs_per_air[&MipsAirId::MemoryInstrs];
+
+    // Compute the MiscInstruction chip contribution.
+    cells += (num_events_per_air[MipsAirId::MiscInstrs]).next_power_of_two()
+        * costs_per_air[&MipsAirId::MiscInstrs];
 
     // Compute the cloclz chip contribution.
     cells += (num_events_per_air[MipsAirId::CloClz]).next_power_of_two()

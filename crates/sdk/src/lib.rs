@@ -540,7 +540,6 @@ mod tests {
 
     #[test]
     fn test_e2e_prove_plonk() {
-        std::env::set_var("ZKM_DEV", "true");
         utils::setup_logger();
         std::env::set_var("ZKM_DEV", "true");
         std::env::set_var("FRI_QUERIES", "1");
@@ -564,7 +563,6 @@ mod tests {
     // RUST_LOG=debug ZKM_DEV=true FRI_QUERIES=1 cargo test -r test_e2e_prove_groth16
     #[test]
     fn test_e2e_prove_groth16() {
-        std::env::set_var("ZKM_DEV", "true");
         utils::setup_logger();
         std::env::set_var("ZKM_DEV", "true");
         std::env::set_var("FRI_QUERIES", "1");

@@ -70,11 +70,9 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
 
         let x_memory_records = rt.mw_slice(x_ptr, &result);
 
-        let lookup_id = rt.syscall_lookup_id;
         let shard = rt.current_shard();
         let op = self.op;
         let event = Fp2AddSubEvent {
-            lookup_id,
             shard,
             clk,
             op,
@@ -100,6 +98,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
 
                 let syscall_event = rt.rt.syscall_event(
                     clk,
+                    None, None, rt.next_pc, 
                     syscall_code.syscall_id(),
                     arg1,
                     arg2,
@@ -120,6 +119,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
 
                 let syscall_event = rt.rt.syscall_event(
                     clk,
+                    None, None, rt.next_pc, 
                     syscall_code.syscall_id(),
                     arg1,
                     arg2,

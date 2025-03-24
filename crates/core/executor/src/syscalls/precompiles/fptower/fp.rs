@@ -61,10 +61,8 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
         rt.clk += 1;
         let x_memory_records = rt.mw_slice(x_ptr, &result);
 
-        let lookup_id = rt.syscall_lookup_id;
         let shard = rt.current_shard();
         let event = FpOpEvent {
-            lookup_id,
             shard,
             clk,
             x_ptr,
@@ -93,6 +91,7 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
 
                 let syscall_event = rt.rt.syscall_event(
                     clk,
+                    None, None, rt.next_pc, 
                     syscall_code.syscall_id(),
                     arg1,
                     arg2,
@@ -113,6 +112,7 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
 
                 let syscall_event = rt.rt.syscall_event(
                     clk,
+                    None, None, rt.next_pc, 
                     syscall_code.syscall_id(),
                     arg1,
                     arg2,
