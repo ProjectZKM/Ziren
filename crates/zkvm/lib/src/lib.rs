@@ -68,7 +68,7 @@ extern "C" {
     pub fn syscall_bls12381_double(p: *mut [u32; 24]);
 
     /// Executes the Keccak-256 permutation on the given state.
-    pub fn syscall_keccak_permute(state: *mut [u64; 25]);
+    // pub fn syscall_keccak_permute(state: *mut [u64; 25]);
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
