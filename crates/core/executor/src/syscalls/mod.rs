@@ -24,7 +24,6 @@ use hint::{HintLenSyscall, HintReadSyscall};
 use precompiles::{
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{Fp2AddSubSyscall, Fp2MulSyscall, FpOpSyscall},
-    // keccak256::permute::Keccak256PermuteSyscall,
     sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
     u256x2048_mul::U256xU2048MulSyscall,
     uint256::Uint256MulSyscall,
@@ -48,6 +47,7 @@ use zkm2_curves::{
 };
 
 use crate::events::FieldOperation;
+use crate::syscalls::precompiles::keccak::sponge::KeccakSpongeSyscall;
 
 /// A system call in the ZKM2 MIPS zkVM.
 ///
@@ -94,7 +94,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     // todo: use HALT or both?
     syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
 
-    // syscall_map.insert(SyscallCode::KECCAK_PERMUTE, Arc::new(Keccak256PermuteSyscall));
+    syscall_map.insert(SyscallCode::KECCAK_SPONGE, Arc::new(KeccakSpongeSyscall));
 
     syscall_map.insert(
         SyscallCode::SECP256K1_ADD,
