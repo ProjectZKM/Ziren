@@ -19,17 +19,6 @@ pub(crate) struct KeccakMemCols<T> {
 
     pub shard: T,
     pub clk: T,
-    pub state_addr: T,
-
-    /// Memory columns for the state.
-    pub state_mem: [MemoryReadWriteCols<T>; STATE_NUM_WORDS],
-
-    // If row is real and first or last cycle of 24-cycle
-    pub do_memory_check: T,
-
-    // If row is real and first cycle of 24-cycle
-    pub receive_syscall: T,
-
     pub is_real: T,
 }
 

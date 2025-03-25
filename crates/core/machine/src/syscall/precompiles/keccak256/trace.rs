@@ -27,31 +27,6 @@ impl<F: PrimeField32> MachineAir<F> for KeccakPermuteChip {
         "KeccakPermute".to_string()
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
-        let chunk_size = 8;
-
-        // let blu_events: Vec<Vec<ByteLookupEvent>> = input
-        //     .get_precompile_events(SyscallCode::KECCAK_PERMUTE)
-        //     .par_chunks(chunk_size)
-        //     .map(|ops: &[(SyscallEvent, PrecompileEvent)]| {
-        //         // The blu map stores shard -> map(byte lookup event -> multiplicity).
-        //         let mut blu = Vec::new();
-        //         let mut chunk = zeroed_f_vec::<F>(NUM_KECCAK_MEM_COLS * NUM_ROUNDS);
-        //         ops.iter().for_each(|(_, op)| {
-        //             if let PrecompileEvent::KeccakPermute(event) = op {
-        //                 Self::populate_chunk(&event, &mut chunk, &mut blu);
-        //             } else {
-        //                 unreachable!();
-        //             }
-        //         });
-        //         blu
-        //     })
-        //     .collect();
-        // for blu in blu_events {
-        //     output.add_byte_lookup_events(blu);
-        // }
-    }
-
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -106,7 +81,6 @@ impl<F: PrimeField32> MachineAir<F> for KeccakPermuteChip {
         //     !shard.get_precompile_events(SyscallCode::KECCAK_PERMUTE).is_empty()
         // }
         true
-
     }
 }
 
