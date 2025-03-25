@@ -22,12 +22,8 @@ pub struct KeccakSpongeEvent {
     pub output: [u32; KECCAK_GENERAL_OUTPUT_U32S],
     /// The length of the input (in u32s).
     pub input_len_u32s: u32,
-    /// The rate size (in bytes)
-    pub rate_len_bytes: u32,
     /// The memory records for the input
     pub input_read_records: Vec<MemoryReadRecord>,
-    /// The memory record for the rate byte length
-    pub rate_length_record: MemoryReadRecord,
     /// The memory records for the input length
     pub input_length_record: MemoryReadRecord,
     /// The memory records for the output

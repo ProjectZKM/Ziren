@@ -35,7 +35,7 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
         count += 1;
         // each block already has 34 u32 numbers, need to pad 2 u32 0s for each
         if count == 34 {
-            for j in 0..2 {
+            for _ in 0..2 {
                 u32_array.push(0);
             }
             count = 0;
@@ -44,8 +44,7 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
     let mut general_result = [0u32; 16];
     let mut sha3_256_result = [0u8; 32];
     // Write the number which indicate the rate length (bytes) in the first cell of result.
-    general_result[0] = 136;
-    general_result[1] = u32_array.len() as u32;
+    general_result[0] = u32_array.len() as u32;
     // Call precompile
     unsafe {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);

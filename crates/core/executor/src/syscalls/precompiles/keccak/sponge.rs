@@ -34,17 +34,12 @@ impl Syscall for KeccakSpongeSyscall {
         let mut state = [0_u64; STATE_SIZE];
 
         let (
-            initial_records,
-            initial_values
-        ) = rt.mr_slice(result_ptr, 2);
+            input_length_record,
+            input_len_u32s
+        ) = rt.mr(result_ptr);
 
-        let [rate_len_bytes, input_len_u32s] = initial_values[0..2].try_into().unwrap();
-        let [rate_length_record, input_length_record] = initial_records[0..2].try_into().unwrap();
         // General block size = 36 u32s
         assert_eq!(input_len_u32s as usize % GENERAL_BLOCK_SIZE_U32S, 0);
-
-        // rate_len_bytes must be in {144, 136, 104, 72}
-        assert!([144, 136, 104, 72].contains(&rate_len_bytes));
 
         let (input_records, input_values) = rt.mr_slice(input_ptr, input_len_u32s as usize);
         input_read_records.extend_from_slice(&input_records);
@@ -63,8 +58,6 @@ impl Syscall for KeccakSpongeSyscall {
             }
             keccakf(&mut state);
         }
-
-        let saved_state = state.clone();
 
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         rt.clk += 1;
@@ -87,9 +80,7 @@ impl Syscall for KeccakSpongeSyscall {
             input: input_values,
             output: values_to_write.as_slice().try_into().unwrap(),
             input_len_u32s,
-            rate_len_bytes,
             input_read_records,
-            rate_length_record,
             input_length_record,
             output_write_records,
             input_addr: input_ptr,
