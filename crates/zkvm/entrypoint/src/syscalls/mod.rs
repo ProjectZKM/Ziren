@@ -5,7 +5,6 @@ mod ed25519;
 mod fptower;
 mod halt;
 mod io;
-mod keccak_permute;
 mod memory;
 mod secp256k1;
 mod secp256r1;
@@ -17,6 +16,7 @@ mod uint256_mul;
 mod unconstrained;
 #[cfg(feature = "verify")]
 mod verify;
+mod keccak_sponge;
 
 pub use bigint::*;
 pub use bls12381::*;
@@ -25,7 +25,7 @@ pub use ed25519::*;
 pub use fptower::*;
 pub use halt::*;
 pub use io::*;
-pub use keccak_permute::*;
+pub use keccak_sponge::*;
 pub use memory::*;
 pub use secp256k1::*;
 pub use secp256r1::*;
@@ -65,8 +65,8 @@ pub const ED_ADD: u32 = 0x00_01_01_07;
 /// Executes `ED_DECOMPRESS`.
 pub const ED_DECOMPRESS: u32 = 0x00_00_01_08;
 
-/// Executes `KECCAK_PERMUTE`.
-pub const KECCAK_PERMUTE: u32 = 0x00_01_01_09;
+/// Executes `KECCAK_SPONGE`.
+pub const KECCAK_SPONGE: u32 = 0x00_01_01_09;
 
 /// Executes `SECP256K1_ADD`.
 pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;

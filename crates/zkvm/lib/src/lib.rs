@@ -15,6 +15,8 @@ pub mod unconstrained;
 pub mod utils;
 #[cfg(feature = "verify")]
 pub mod verify;
+pub mod keccak256;
+
 extern "C" {
     /// Halts the program with the given exit code.
     pub fn syscall_halt(exit_code: u8) -> !;
@@ -67,8 +69,8 @@ extern "C" {
     /// Executes a BLS12-381 curve doubling on the given point.
     pub fn syscall_bls12381_double(p: *mut [u32; 24]);
 
-    /// Executes the Keccak-256 permutation on the given state.
-    // pub fn syscall_keccak_permute(state: *mut [u64; 25]);
+    /// Executes the Keccak Sponge
+    pub fn syscall_keccak_sponge(input: *const u32, result: *mut [u32; 16]);
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
