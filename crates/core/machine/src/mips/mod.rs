@@ -563,7 +563,6 @@ impl<F: PrimeField32> MipsAir<F> {
         match self {
             Self::Sha256Compress(_) => 80,
             Self::Sha256Extend(_) => 48,
-            Self::KeccakSponge(_) => 100,
             _ => 1,
         }
     }

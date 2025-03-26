@@ -59,11 +59,11 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();
         tracing::info!("num_real_rows: {}", num_real_rows);
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_KECCAK_SPONGE_COLS],
-            input.fixed_log2_rows::<F, _>(self),
-        );
+
+        let num_padded_rows = num_real_rows.next_power_of_two();
+        for _ in num_real_rows..num_padded_rows {
+            rows.push([F::ZERO; NUM_KECCAK_SPONGE_COLS]);
+        }
 
         let num_padded_rows = rows.len();
         tracing::info!("num_padded_rows: {}", num_padded_rows);
