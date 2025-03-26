@@ -20,6 +20,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use alloc::boxed::Box;
+use models::TestUnit;
 
 zkm2_zkvm::entrypoint!(main);
 
@@ -35,7 +36,7 @@ fn ethereum_test() {
 }
 
 pub fn read_suite(s: &Vec<u8>) -> TestSuite {
-    let btm: BTreeMap<String, TestUnit> = serde_json::from_slice(s).unwrap();
+    let btm: BTreeMap<String, TestUnit> = serde_cbor::from_slice(s).unwrap();
     TestSuite(btm)
 }
 

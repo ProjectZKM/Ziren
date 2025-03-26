@@ -1,21 +1,27 @@
 use std::env;
 use std::fs::File;
 use std::io::Read;
+
+extern crate alloc;
+use alloc::collections::BTreeMap;
+use models::TestUnit;
+
 use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 const ELF: &[u8] = include_elf!("revme");
 
 fn prove_revm() {
-    // 1. split ELF into segs
     let json_path = env::var("JSON_PATH").unwrap_or("../test-vectors/test.json".to_owned());
     let mut f = File::open(json_path).unwrap();
     let mut data = vec![];
     f.read_to_end(&mut data).unwrap();
 
-    // println!("data: {:?}", data);
+    let suite: BTreeMap<String, TestUnit> = serde_json::from_slice(&data).map_err(|e| e).unwrap();
+    let encoded = serde_cbor::to_vec(&suite).unwrap();
+
     // write input
     let mut stdin = ZKMStdin::new();
-    stdin.write(&data);
+    stdin.write(&encoded);
 
     // Create a `ProverClient` method.
     let client = ProverClient::new();
