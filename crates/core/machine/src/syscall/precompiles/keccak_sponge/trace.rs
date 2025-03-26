@@ -89,8 +89,8 @@ impl KeccakSpongeChip {
     ) {
         let mut state_u32s = [0_u32; KECCAK_STATE_U32S];
         let mut xored_rate_u32s = [0_u32; KECCAK_GENERAL_RATE_U32S];
-        let block_num = event.input.len() / KECCAK_GENERAL_RATE_U32S;
-        let mut already_absorbed_bytes = 0_u32;
+        let block_num = event.num_blocks();
+        let mut already_absorbed_u32s = 0_u32;
 
         for i in 0..block_num {
             let mut row = [F::ZERO; NUM_KECCAK_SPONGE_COLS];
@@ -100,13 +100,13 @@ impl KeccakSpongeChip {
             cols.clk = F::from_canonical_u32(event.clk);
             cols.is_real = F::ONE;
             cols.len = F::from_canonical_u32(event.input.len() as u32);
-            cols.already_absorbed_bytes = F::from_canonical_u32(already_absorbed_bytes);
+            cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
             cols.is_first_input_block = F::ZERO;
             cols.is_last_input_block = F::ZERO;
             // read the input
             for j in 0..KECCAK_GENERAL_RATE_U32S {
                 cols.block_mem[j].populate(event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j], blu);
-                // blu.add_u8_range_checks(&event.input[i * KECCAK_GENERAL_RATE_U32S + j].to_le_bytes());
+                blu.add_u8_range_checks(&event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j].value.to_le_bytes());
             }
 
             cols.output_address = F::from_canonical_u32(event.output_addr);
@@ -135,21 +135,19 @@ impl KeccakSpongeChip {
             if i == 0 {
                 cols.is_first_input_block = F::ONE;
                 cols.input_length_mem.populate(event.input_length_record, blu);
-                // blu
-                //     .add_u8_range_checks(&event.input_length_record.value.to_le_bytes());
+                blu.add_u8_range_checks(&event.input_length_record.value.to_le_bytes());
             }
 
             // if this is the last row, populate writing output
             if i == block_num - 1 {
                 cols.is_last_input_block = F::ONE;
-
                 for j in 0..KECCAK_GENERAL_OUTPUT_U32S {
                     cols.output_mem[j].populate(event.output_write_records[j], blu);
-                    // blu.add_u8_range_checks(&event.output_write_records[j].value.to_le_bytes());
+                    blu.add_u8_range_checks(&event.output_write_records[j].value.to_le_bytes());
                 }
             }
 
-            already_absorbed_bytes += KECCAK_GENERAL_RATE_U32S as u32;
+            already_absorbed_u32s += KECCAK_GENERAL_RATE_U32S as u32;
 
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);

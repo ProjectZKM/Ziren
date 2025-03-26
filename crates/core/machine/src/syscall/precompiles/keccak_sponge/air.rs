@@ -8,7 +8,7 @@ use crate::air::{MemoryAirBuilder, WordAirBuilder};
 use crate::memory::MemoryCols;
 use crate::operations::XorOperation;
 use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
-use crate::syscall::precompiles::keccak_sponge::{KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S};
+use crate::syscall::precompiles::keccak_sponge::{KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S};
 
 impl<F> BaseAir<F> for KeccakSpongeChip {
     fn width(&self) -> usize {
@@ -43,7 +43,7 @@ where
 
         // Constrain that the inputs stay the same throughout the rows of each cycle
         let mut transition_builder = builder.when_transition();
-        let mut transition_not_final_builder = transition_builder.when(not_final_block);
+        let mut transition_not_final_builder = transition_builder.when(not_final_block.clone());
         transition_not_final_builder.assert_eq(local.shard, next.shard);
         transition_not_final_builder.assert_eq(local.clk, next.clk);
         transition_not_final_builder.assert_eq(local.is_real, next.is_real);
@@ -75,7 +75,6 @@ where
         }
 
         // If this is the last block, write the output
-
         for i in 0..KECCAK_GENERAL_OUTPUT_U32S as u32 {
             builder.eval_memory_access(
                 local.shard,
@@ -97,15 +96,45 @@ where
             );
         }
 
+        // check the absorbed bytes
+        // If this is the first block, absorbed bytes should be 0
+        builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::ZERO);
+        // // If this is the last block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
+        builder.when(final_block).assert_eq(
+            local.already_absorbed_u32s,
+            local.len - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32),
+        );
+        // // If local is real and not the last block, absorbed bytes in next should be
+        // // equal to the previous absorbed bytes + KECCAK_GENERAL_RATE_U32S
+        builder.when(not_final_block.clone() * local.is_real).assert_eq(
+            local.already_absorbed_u32s,
+            next.already_absorbed_u32s - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32),
+        );
+
+        // check the state
+        let not_final_block = AB::Expr::ONE - final_block;
+        for i in 0..KECCAK_STATE_U32S {
+            builder.when(not_final_block.clone() * local.is_real).assert_word_eq(
+                local.updated_state[i],
+                next.original_state[i]
+            );
+        }
+
         // check the output if this is the final block
+        for i in 0..KECCAK_GENERAL_OUTPUT_U32S {
+            builder.when(final_block).assert_word_eq(
+                local.updated_state[i],
+                *local.output_mem[i].value(),
+            );
+        }
 
-        // check ....
-
-        // // Range check all the values in `original_rate_mem`, `block_mem`, `xored_rate_mem` to be bytes.
-        // for i in 0..RATE_SIZE_U32S {
-        //     builder.slice_range_check_u8(&local.original_rate_mem[i].value().0, local.is_real);
-        //     builder.slice_range_check_u8(&local.block_mem[i].value().0, local.is_real);
-        //     builder.slice_range_check_u8(&local.xored_rate_mem[i].value().0, local.is_real);
-        // }
+        // Range check all the values in `input length`, `block_mem`, `xored_rate_mem` to be bytes.
+        for i in 0..KECCAK_GENERAL_RATE_U32S {
+            builder.slice_range_check_u8(&local.block_mem[i].value().0, local.is_real);
+        }
+        builder.slice_range_check_u8(&local.input_length_mem.value().0, first_block);
+        for i in 0..KECCAK_GENERAL_OUTPUT_U32S {
+            builder.slice_range_check_u8(&local.output_mem[i].value().0, final_block);
+        }
     }
 }

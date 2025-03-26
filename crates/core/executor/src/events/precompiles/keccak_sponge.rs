@@ -6,6 +6,7 @@ use crate::events::{
 };
 
 pub(crate) const KECCAK_GENERAL_OUTPUT_U32S: usize = 16;
+pub(crate) const KECCAK_GENERAL_RATE_U32S: usize = 36;
 
 /// Keccak Sponge Event.
 ///
@@ -34,4 +35,10 @@ pub struct KeccakSpongeEvent {
     pub output_addr: u32,
     /// The local memory access records.
     pub local_mem_access: Vec<MemoryLocalEvent>,
+}
+
+impl KeccakSpongeEvent {
+    pub fn num_blocks(&self) -> usize {
+        self.input.len() / KECCAK_GENERAL_RATE_U32S
+    }
 }

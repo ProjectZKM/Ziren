@@ -14,6 +14,7 @@ use hashbrown::{HashMap, HashSet};
 pub use mips_chips::*;
 use p3_field::PrimeField32;
 use strum_macros::{EnumDiscriminants, EnumIter};
+use zkm2_core_executor::events::PrecompileEvent;
 use zkm2_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use zkm2_stark::{
     air::{LookupScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
@@ -474,8 +475,20 @@ impl<F: PrimeField32> MipsAir<F> {
             .get_events(self.syscall_code())
             .filter(|events| !events.is_empty())
             .map(|events| {
+                let mut num_rows = events.len() * self.rows_per_event();
+                if self.syscall_code() == SyscallCode::KECCAK_SPONGE {
+                    num_rows = events.iter().map(|(sys_e, pre_e)| {
+                        if let PrecompileEvent::KeccakSponge(event) = pre_e {
+                            event.num_blocks()
+                        } else {
+                            unreachable!()
+                        }
+                    }).sum::<usize>();
+                }
+
+
                 (
-                    events.len() * self.rows_per_event(),
+                    num_rows,
                     events.get_local_mem_events().into_iter().count(),
                     record.global_lookup_events.len(),
                 )

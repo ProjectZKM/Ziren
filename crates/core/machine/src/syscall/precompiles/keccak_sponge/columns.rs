@@ -19,7 +19,7 @@ pub(crate) struct KeccakSpongeCols<T> {
     pub input_address: T,
     pub output_address: T,
     pub len: T,
-    pub already_absorbed_bytes: T,
+    pub already_absorbed_u32s: T,
     pub is_first_input_block: T,
     pub is_last_input_block: T,
     pub original_state: [Word<T>; KECCAK_STATE_U32S],
