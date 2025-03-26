@@ -33,10 +33,7 @@ impl Syscall for KeccakSpongeSyscall {
 
         let mut state = [0_u64; STATE_SIZE];
 
-        let (
-            input_length_record,
-            input_len_u32s
-        ) = rt.mr(result_ptr);
+        let (input_length_record, input_len_u32s) = rt.mr(result_ptr + 16 * 4);
 
         // General block size = 36 u32s
         assert_eq!(input_len_u32s as usize % GENERAL_BLOCK_SIZE_U32S, 0);
@@ -72,7 +69,7 @@ impl Syscall for KeccakSpongeSyscall {
         let write_records = rt.mw_slice(result_ptr, values_to_write.as_slice());
         output_write_records.extend_from_slice(&write_records);
 
-        // Push the Keccak permute event.
+        // Push the Keccak sponge event.
         let shard = rt.current_shard();
         let event = PrecompileEvent::KeccakSponge(KeccakSpongeEvent {
             shard,

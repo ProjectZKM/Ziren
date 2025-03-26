@@ -41,10 +41,10 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
             count = 0;
         }
     }
-    let mut general_result = [0u32; 16];
+    let mut general_result = [0u32; 17];
     let mut sha3_256_result = [0u8; 32];
     // Write the number which indicate the rate length (bytes) in the first cell of result.
-    general_result[0] = u32_array.len() as u32;
+    general_result[16] = u32_array.len() as u32;
     // Call precompile
     unsafe {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);

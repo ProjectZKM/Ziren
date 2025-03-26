@@ -40,7 +40,9 @@ pub enum MipsAirId {
     /// The secp256r1 double assign chip.
     Secp256r1DoubleAssign = 11,
     /// The Keccak permute chip.
-    KeccakPermute = 12,
+    // KeccakPermute = 12,
+    /// The Keccak permute chip.
+    KeccakSponge = 12,
     /// The bn254 add assign chip.
     Bn254AddAssign = 13,
     /// The bn254 double assign chip.
@@ -148,7 +150,8 @@ impl MipsAirId {
             Self::Secp256r1Decompress => "Secp256r1Decompress",
             Self::Secp256r1AddAssign => "Secp256r1AddAssign",
             Self::Secp256r1DoubleAssign => "Secp256r1DoubleAssign",
-            Self::KeccakPermute => "KeccakPermute",
+            // Self::KeccakPermute => "KeccakPermute",
+            Self::KeccakSponge => "KeccakSponge",
             Self::Bn254AddAssign => "Bn254AddAssign",
             Self::Bn254DoubleAssign => "Bn254DoubleAssign",
             Self::Bls12381AddAssign => "Bls12381AddAssign",
