@@ -1,5 +1,4 @@
 use crate::{
-    // events::{KeccakPermuteEvent, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
 };
 
@@ -10,9 +9,9 @@ pub(crate) const STATE_SIZE: usize = 25;
 // The permutation state is 25 u64's.  Our word size is 32 bits, so it is 50 words.
 pub const STATE_NUM_WORDS: usize = STATE_SIZE * 2;
 
-pub(crate) struct Keccak256Permute;
+pub(crate) struct Keccak256PermuteSyscall;
 
-impl Keccak256Permute {
+impl Syscall for Keccak256PermuteSyscall {
     fn num_extra_cycles(&self) -> u32 {
         0
     }
@@ -20,6 +19,7 @@ impl Keccak256Permute {
     fn execute(
         &self,
         rt: &mut SyscallContext,
+        syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {

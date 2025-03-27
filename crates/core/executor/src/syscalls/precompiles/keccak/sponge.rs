@@ -3,9 +3,9 @@ use crate::{
 };
 
 use tiny_keccak::keccakf;
-use crate::events::{KeccakSpongeEvent, PrecompileEvent};
+use crate::events::{KeccakPermuteEvent, KeccakSpongeEvent, PrecompileEvent};
 
-pub(crate) const STATE_SIZE: usize = 25;
+pub(crate) const STATE_SIZE_U64S: usize = 25;
 pub(crate) const GENERAL_BLOCK_SIZE_U32S: usize = 36;
 pub(crate) const GENERAL_BLOCK_SIZE_U64S: usize = 18;
 pub(crate) const KECCAK_GENERAL_OUTPUT_U64S: usize = 8;
@@ -31,7 +31,7 @@ impl Syscall for KeccakSpongeSyscall {
         let mut input_read_records = Vec::new();
         let mut output_write_records = Vec::new();
 
-        let mut state = [0_u64; STATE_SIZE];
+        let mut state = [0_u64; STATE_SIZE_U64S];
 
         let (input_length_record, input_len_u32s) = rt.mr(result_ptr + 16 * 4);
 
@@ -48,11 +48,15 @@ impl Syscall for KeccakSpongeSyscall {
             input_u64_values.push(least_sig as u64 + ((most_sig as u64) << 32));
         }
 
+        let mut xored_state_list = vec![];
+
         // Perform
         for block in input_u64_values.chunks_exact(GENERAL_BLOCK_SIZE_U64S) {
             for (i, value) in block.iter().enumerate() {
                 state[i] ^= *value;
             }
+            xored_state_list.push(state);
+
             keccakf(&mut state);
         }
 
@@ -71,10 +75,10 @@ impl Syscall for KeccakSpongeSyscall {
 
         // Push the Keccak sponge event.
         let shard = rt.current_shard();
-        let event = PrecompileEvent::KeccakSponge(KeccakSpongeEvent {
+        let sponge_event = PrecompileEvent::KeccakSponge(KeccakSpongeEvent {
             shard,
             clk: start_clk,
-            input: input_values,
+            input: input_values.clone(),
             output: values_to_write.as_slice().try_into().unwrap(),
             input_len_u32s,
             input_read_records,
@@ -84,10 +88,20 @@ impl Syscall for KeccakSpongeSyscall {
             output_addr: result_ptr,
             local_mem_access: rt.postprocess(),
         });
-        let syscall_event =
+        let sponge_syscall_event =
             rt.rt.syscall_event(start_clk, None, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
-        rt.add_precompile_event(syscall_code, syscall_event, event);
+        rt.add_precompile_event(syscall_code, sponge_syscall_event, sponge_event);
 
+        let permute_event = PrecompileEvent::KecakPermute(KeccakPermuteEvent{
+            shard,
+            clk: start_clk,
+            xored_state_list,
+            local_mem_access: rt.postprocess(),
+        });
+
+        let permute_syscall_event =
+            rt.rt.syscall_event(start_clk, None, None, rt.next_pc, SyscallCode::KECCAK_PERMUTE.syscall_id(), 0, 0);
+        rt.add_precompile_event(SyscallCode::KECCAK_PERMUTE, permute_syscall_event, permute_event);
         None
     }
 }

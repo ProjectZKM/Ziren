@@ -139,7 +139,7 @@ pub enum MipsAir<F: PrimeField32> {
     /// A precompile for doubling a point on the Elliptic curve secp256r1.
     Secp256r1Double(WeierstrassDoubleAssignChip<SwCurve<Secp256r1Parameters>>),
     // /// A precompile for the Keccak permutation.
-    // KeccakP(KeccakPermuteChip),
+    KeccakP(KeccakPermuteChip),
     /// A precompile for the Keccak Sponge
     KeccakSponge(KeccakSpongeChip),
     /// A precompile for addition on the Elliptic curve bn254.
@@ -265,9 +265,9 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(secp256r1_double_assign.name(), secp256r1_double_assign.cost());
         chips.push(secp256r1_double_assign);
 
-        // let keccak_permute = Chip::new(MipsAir::KeccakP(KeccakPermuteChip::new()));
-        // costs.insert(keccak_permute.name(), 24 * keccak_permute.cost());
-        // chips.push(keccak_permute);
+        let keccak_permute = Chip::new(MipsAir::KeccakP(KeccakPermuteChip::new()));
+        costs.insert(keccak_permute.name(), 24 * keccak_permute.cost());
+        chips.push(keccak_permute);
 
         let keccak_sponge = Chip::new(MipsAir::KeccakSponge(KeccakSpongeChip::new()));
         costs.insert(keccak_sponge.name(),  keccak_sponge.cost());
@@ -606,7 +606,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
-            // Self::KeccakP(_) => unreachable!("KeccakP is not the syscall"),
+            Self::KeccakP(_) => SyscallCode::KECCAK_PERMUTE,
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
             Self::DivRem(_) => unreachable!("Invalid for core chip"),

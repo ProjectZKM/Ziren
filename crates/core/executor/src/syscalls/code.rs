@@ -52,8 +52,11 @@ pub enum SyscallCode {
     /// Executes the `ED_DECOMPRESS` precompile.
     ED_DECOMPRESS = 0x00_00_01_08,
 
+    /// Executes the `KECCAK_PERMUTE` precompile.
+    KECCAK_PERMUTE = 0x00_01_01_09,
+
     /// Executes the `KECCAK_SPONGE` precompile.
-    KECCAK_SPONGE = 0x00_01_01_09,
+    KECCAK_SPONGE = 0x00_01_01_30,
 
     /// Executes the `SECP256K1_ADD` precompile.
     SECP256K1_ADD = 0x00_01_01_0A,
@@ -159,7 +162,8 @@ impl SyscallCode {
             0x00_01_01_06 => SyscallCode::SHA_COMPRESS,
             0x00_01_01_07 => SyscallCode::ED_ADD,
             0x00_00_01_08 => SyscallCode::ED_DECOMPRESS,
-            0x00_01_01_09 => SyscallCode::KECCAK_SPONGE,
+            0x00_01_01_09 => SyscallCode::KECCAK_PERMUTE,
+            0x00_01_01_30 => SyscallCode::KECCAK_SPONGE,
             0x00_01_01_0A => SyscallCode::SECP256K1_ADD,
             0x00_00_01_0B => SyscallCode::SECP256K1_DOUBLE,
             0x00_00_01_0C => SyscallCode::SECP256K1_DECOMPRESS,
