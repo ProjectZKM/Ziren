@@ -2,10 +2,6 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 
-extern crate alloc;
-use alloc::collections::BTreeMap;
-use models::TestUnit;
-
 use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 const ELF: &[u8] = include_elf!("revme");
@@ -16,8 +12,7 @@ fn prove_revm() {
     let mut data = vec![];
     f.read_to_end(&mut data).unwrap();
 
-    let suite: BTreeMap<String, TestUnit> = serde_json::from_slice(&data).map_err(|e| e).unwrap();
-    let encoded = serde_cbor::to_vec(&suite).unwrap();
+    let encoded = guest_std::cbor_serialize(&data);
 
     // write input
     let mut stdin = ZKMStdin::new();

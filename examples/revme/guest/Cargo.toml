@@ -6,9 +6,7 @@ publish = false
 
 [dependencies]
 zkm2-zkvm = { path = "../../../crates/zkvm/entrypoint" }
-revm = { git = "https://github.com/zkMIPS/revm", branch = "zkm2", default-features = false, features = [ "serde", "optional_no_base_fee", "optional_balance_check" ] }
-models = { git = "https://github.com/zkMIPS/revme", package = "models", branch = "deserialize" }
-serde_cbor = "0.11.2"
+guest = { git = "https://github.com/zkMIPS/revme.git", package = "guest", branch = "cbor-zkm2" }
 
 k256 = { version = "0.13.3", features = ["ecdsa"], default-features = false }
 libc = { version = "0.2", features = ["extra_traits"] }
