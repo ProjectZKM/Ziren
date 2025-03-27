@@ -5,6 +5,31 @@ zkm2_zkvm::entrypoint!(main);
 
 use sha2::{Digest, Sha256};
 
+
+pub fn main() {
+    // Read the verification keys.
+    let vkeys = zkm2_zkvm::io::read::<Vec<[u32; 8]>>();
+
+    // Read the public values.
+    let public_values = zkm2_zkvm::io::read::<Vec<Vec<u8>>>();
+
+    // Verify the proofs.
+    assert_eq!(vkeys.len(), public_values.len());
+    for i in 0..vkeys.len() {
+        let vkey = &vkeys[i];
+        let public_values = &public_values[i];
+        let public_values_digest = Sha256::digest(public_values);
+        zkm2_zkvm::lib::verify::verify_zkm_proof(vkey, &public_values_digest.into());
+    }
+
+    // TODO: Do something interesting with the proofs here.
+    //
+    // For example, commit to the verified proofs in a merkle tree. For now, we'll just commit to
+    // all the (vkey, input) pairs.
+    let commitment = commit_proof_pairs(&vkeys, &public_values);
+    zkm2_zkvm::io::commit_slice(&commitment);
+}
+
 pub fn words_to_bytes_le(words: &[u32; 8]) -> [u8; 32] {
     let mut bytes = [0u8; 32];
     for i in 0..8 {
@@ -37,28 +62,4 @@ pub fn commit_proof_pairs(vkeys: &[[u32; 8]], committed_values: &[Vec<u8>]) -> V
     }
 
     res
-}
-
-pub fn main() {
-    // Read the verification keys.
-    let vkeys = zkm2_zkvm::io::read::<Vec<[u32; 8]>>();
-
-    // Read the public values.
-    let public_values = zkm2_zkvm::io::read::<Vec<Vec<u8>>>();
-
-    // Verify the proofs.
-    assert_eq!(vkeys.len(), public_values.len());
-    for i in 0..vkeys.len() {
-        let vkey = &vkeys[i];
-        let public_values = &public_values[i];
-        let public_values_digest = Sha256::digest(public_values);
-        zkm2_zkvm::lib::verify::verify_zkm_proof(vkey, &public_values_digest.into());
-    }
-
-    // TODO: Do something interesting with the proofs here.
-    //
-    // For example, commit to the verified proofs in a merkle tree. For now, we'll just commit to
-    // all the (vkey, input) pairs.
-    let commitment = commit_proof_pairs(&vkeys, &public_values);
-    zkm2_zkvm::io::commit_slice(&commitment);
 }

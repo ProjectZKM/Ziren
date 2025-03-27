@@ -2,8 +2,6 @@
 
 ## Prerequisites
 
-Make sure you have already built the circuits to the `build/groth16` directory.
-
 ```
 make build-circuits
 ```

@@ -1,86 +1,140 @@
 # Prover
 
-## ELF Loader
+The zkm2_sdk crate provides all the necessary tools for proof generation. Key features include the `ProverClient`, enabling you to:
+- Initialize proving/verifying keys via `setup()`. 
+- Execute your program via `execute()`.
+- Generate proofs with `prove()`.
+- Verify proofs through `verify()`.
+
+## Example: [Fibonacci](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/src/main.rs)
+
+The following code is a example of using zkm2_sdk in host.
 
 ```rust
-zkm_emulator::utils::load_elf_with_patch
-```
+use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
-## MIPS VM
-
-```rust
-zkm_emulator::utils::split_prog_into_segs
-```
-
-## Proving
-
-```rust
-zkm_utils::utils::prove_segments
-```
-
-## Example
-```rust
-use std::env;
-
-use zkm_emulator::utils::{load_elf_with_patch, split_prog_into_segs};
-use zkm_utils::utils::prove_segments;
-
-const ELF_PATH: &str = "../guest/elf/mips-zkm-zkvm-elf";
-
-/// This function sets up the state, loads the ELF file, adds inputs, splits the program into segments,
-/// and then generates the zero-knowledge proof for the SHA-2 hash computation.
-fn prove_sha2_rust() {
-    // 1. Retrieve the segment output path from the environment variable.
-    let seg_path = env::var("SEG_OUTPUT")
-        .expect("Segment output path is missing");
-    
-    // 2. Retrieve segment size from the environment variable or use default (65536).
-    let seg_size = env::var("SEG_SIZE").unwrap_or("65536".to_string());
-    let seg_size = seg_size.parse::<_>().unwrap_or(0);
-
-    // 3. Load the ELF file (with an empty patch vector) to initialize the program state.
-    let mut state = load_elf_with_patch(ELF_PATH, vec![]);
-    
-    // 4. Load inputs from the environment variable "ARGS".
-    // Expected format: "<public_hash_output> <data_to_hash>"
-    let args = env::var("ARGS").unwrap_or("data-to-hash".to_string());
-    // Split the arguments by whitespace.
-    let args: Vec<&str> = args.split_whitespace().collect();
-    // Ensure exactly 2 arguments are provided.
-    assert_eq!(args.len(), 2);
-
-    // 5. Process the first argument as the expected public hash output (in hexadecimal).
-    let public_input: Vec<u8> = hex::decode(args[0]).unwrap();
-    // Add the public input to the state as a public input stream.
-    state.add_input_stream(&public_input);
-    log::info!("expected public value in hex: {:X?}", args[0]);
-    log::info!("expected public value: {:X?}", public_input);
-
-    // 6. Process the second argument as the private input (data to be hashed).
-    let private_input = args[1].as_bytes().to_vec();
-    log::info!("private input value: {:X?}", private_input);
-    // Add the private input to the state.
-    state.add_input_stream(&private_input);
-
-    // 7. Split the program into segments using the specified segment path and size.
-    let (_total_steps, seg_num, mut state) = split_prog_into_segs(state, &seg_path, "", seg_size);
-
-    // 8. Read the public output value (the computed hash) from the state.
-    let value = state.read_public_values::<[u8; 32]>();
-    log::info!("public value: {:X?}", value);
-    log::info!("public value: {} in hex", hex::encode(value));
-
-    // 9. Generate the zero-knowledge proof based on the program segments.
-    // The parameters include segment path, empty configuration strings, segment number, and an offset of 0.
-    let _ = prove_segments(&seg_path, "", "", "", seg_num, 0, vec![]).unwrap();
-}
+/// The ELF we want to execute inside the zkVM.
+const ELF: &[u8] = include_elf!("fibonacci");
 
 fn main() {
-    // Initialize the logger for logging info and errors.
-    env_logger::try_init().unwrap_or_default();
-    // Execute the SHA-2 proof generation function.
-    prove_sha2_rust();
-}
+    // Create an input stream and write '1000' to it.
+    let n = 1000u32;
 
+    // The input stream that the guest will read from using `zkm2_zkvm::io::read`. Note that the
+    // types of the elements in the input stream must match the types being read in the program.
+    let mut stdin = ZKMStdin::new();
+    stdin.write(&n);
+
+    // Create a `ProverClient` method.
+    let client = ProverClient::new();
+
+    // Execute the guest using the `ProverClient.execute` method, without generating a proof.
+    let (_, report) = client.execute(ELF, stdin.clone()).run().unwrap();
+    println!("executed program with {} cycles", report.total_instruction_count());
+
+    // Generate the proof for the given program and input.
+    let (pk, vk) = client.setup(ELF);
+    let mut proof = client.prove(&pk, stdin).run().unwrap();
+
+    // Read and verify the output.
+    //
+    // Note that this output is read from values committed to in the program using
+    // `zkm2_zkvm::io::commit`.
+    let n = proof.public_values.read::<u32>();
+    let a = proof.public_values.read::<u32>();
+    let b = proof.public_values.read::<u32>();
+
+    println!("n: {}", n);
+    println!("a: {}", a);
+    println!("b: {}", b);
+
+    // Verify proof and public values
+    client.verify(&proof, &vk).expect("verification failed");
 }
+```
+
+## Proof Types
+
+zkMIPS<sup>+</sup> provides customizable proof generation options:
+
+```rust
+/// A proof generated with ZKM2 of a particular proof mode.
+#[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
+#[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
+#[strum_discriminants(name(ZKMProofKind))]
+pub enum ZKMProof {
+    /// A proof generated by the core proof mode.
+    ///
+    /// The proof size scales linearly with the number of cycles.
+    #[strum_discriminants(default)]
+    Core(Vec<ShardProof<CoreSC>>),
+    /// A proof generated by the compress proof mode.
+    ///
+    /// The proof size is constant, regardless of the number of cycles.
+    Compressed(Box<ZKMReduceProof<InnerSC>>),
+    /// A proof generated by the Plonk proof mode.
+    Plonk(PlonkBn254Proof),
+    /// A proof generated by the Groth16 proof mode.
+    Groth16(Groth16Bn254Proof),
+}
+```
+
+### [Core Proof (Default)](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/src/main.rs)
+
+The default prover mode generates a sequence of STARK proofs whose cumulative proof size scales linearly with the execution trace length.
+
+```rust
+let client = ProverClient::new();
+client.prove(&pk, stdin).run().unwrap();
+```
+
+### [Compressed Proof](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/bin/compressed.rs)
+
+The compressed proving mode generates constant-sized STARK proofs, but not suitable for on-chain verification.
+
+```rust
+let client = ProverClient::new();
+client.prove(&pk, stdin).compressed().run().unwrap();
+```
+
+### [Groth16 Proof (Recommended)](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/bin/groth16_bn254.rs)
+
+The Groth16 proving mode ​generates succinct SNARK proofs with a compact size of approximately 260 bytes, ​and features on-chain verification.
+
+```rust
+let client = ProverClient::new();
+client.prove(&pk, stdin).groth16().run().unwrap();
+```
+
+### [PLONK Proof](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/bin/plonk_bn254.rs)
+
+The PLONK proving mode generates succinct SNARK proofs with a compact size of approximately 868 bytes, while maintaining on-chain verifiability. In contrast to Groth16, PLONK removes the dependency on trusted setup ceremonies.
+
+```rust
+let client = ProverClient::new();
+client.prove(&pk, stdin).plonk().run().unwrap();
+```
+
+## Hardware Acceleration
+
+ZKM2 provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
+
+You can check your CPU's AVX compatibility by running:
+
+```shell
+grep avx /proc/cpuinfo
+```
+
+Check if you can see `avx2` or `avx512` in the results.
+
+To activate **AVX256** optimization, add these flags to your RUSTFLAGS environment variable:
+
+```shell
+RUSTFLAGS="-C target-cpu=native" cargo run --release
+```
+
+To activate **AVX512** optimization, add these flags to your RUSTFLAGS environment variable:
+
+```shell
+RUSTFLAGS="-C target-cpu=native -C target-feature=+avx512f" cargo run --release
 ```

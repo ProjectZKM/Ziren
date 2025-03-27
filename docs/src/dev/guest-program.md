@@ -1,98 +1,56 @@
 # Guest Program
 
-In zkMIPS, the guest program is the code that will be executed and proven by the zkMIPS.
+In zkMIPS<sup>+</sup>, the guest program is the code that will be executed and proven by the zkVM.
 
 Any program written in C, Go, Rust, etc. can be compiled into a MIPS R3000 be ELF executable file using a universal MIPS compiler, meeting the requirements.
 
-ZkMIPS provides Golang and Rust runtime libraries for guests to obtain input and commit output.
+zkMIPS<sup>+</sup> provides Rust runtime libraries for guest programs to handle input/output operations:
+- `zkm2_zkvm::io::read::<T>` (for reading structured data)
+- `zkm2_zkvm::io::commit::<T>` (for committing structured data)
 
-## Example: [RUST](https://github.com/zkMIPS/zkm-project-template/blob/main/guest-program/sha2-rust/src/main.rs)
+Note that type `T` must implement both `serde::Serialize` and `serde::Deserialize`. For direct byte-level operations, use the following methods to bypass serialization and reduce cycle counts:
+- `zkm2_zkvm::io::read_vec` (raw byte reading)
+- `zkm2_zkvm::io::commit_slice` (raw byte writing)
 
-```zkm_runtime::io::read```
-```zkm_runtime::io::commit```
+## Example: [Fibonacci](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/guest/src/main.rs)
 
-example:
 ```rust
+//! A simple program that takes a number `n` as input, and writes the `n-1`th and `n`th fibonacci
+//! number as an output.
+
+// These two lines are necessary for the program to properly compile.
+//
+// Under the hood, we wrap your main function with some extra code so that it behaves properly
+// inside the zkVM.
 #![no_std]
 #![no_main]
-
-use sha2::{Digest, Sha256};
-extern crate alloc;
-use alloc::vec::Vec;
-
-zkm_runtime::entrypoint!(main);
+zkm2_zkvm::entrypoint!(main);
 
 pub fn main() {
-    let public_input: Vec<u8> = zkm_runtime::io::read();
-    let input: Vec<u8> = zkm_runtime::io::read();
+    // Read an input to the program.
+    //
+    // Behind the scenes, this compiles down to a system call which handles reading inputs
+    // from the prover.
+    let n = zkm2_zkvm::io::read::<u32>();
 
-    let mut hasher = Sha256::new();
-    hasher.update(input);
-    let result = hasher.finalize();
+    // Write n to public input
+    zkm2_zkvm::io::commit(&n);
 
-    let output: [u8; 32] = result.into();
-    assert_eq!(output.to_vec(), public_input);
+    // Compute the n'th fibonacci number, using normal Rust code.
+    let mut a = 0;
+    let mut b = 1;
+    for _ in 0..n {
+        let mut c = a + b;
+        c %= 7919; // Modulus to prevent overflow.
+        a = b;
+        b = c;
+    }
 
-    zkm_runtime::io::commit::<[u8; 32]>(&output);
+    // Write the output of the program.
+    //
+    // Behind the scenes, this also compiles down to a system call which handles writing
+    // outputs to the prover.
+    zkm2_zkvm::io::commit(&a);
+    zkm2_zkvm::io::commit(&b);
 }
-```
-
-## Example: [GOLANG](https://github.com/zkMIPS/zkm-project-template/blob/main/guest-program/sha2-go/main.go)
-
-```zkm_runtime.Read[T]()```
-```zkm_runtime.Commit```
-
-example:
-```go
-package main
-
-import (
-	"bytes"
-	"crypto/sha256"
-	"log"
-
-	"github.com/zkMIPS/zkm/go-runtime/zkm_runtime"
-)
-
-type DataId uint32
-
-// use iota to create enum
-const (
-	TYPE1 DataId = iota
-	TYPE2
-	TYPE3
-)
-
-type Data struct {
-	Input1  [10]byte
-	Input2  uint8
-	Input3  int8
-	Input4  uint16
-	Input5  int16
-	Input6  uint32
-	Input7  int32
-	Input8  uint64
-	Input9  int64
-	Input10 []byte
-	Input11 DataId
-	Input12 string
-}
-
-func main() {
-	a := zkm_runtime.Read[Data]()
-
-	data := []byte(a.Input12)
-	hash := sha256.Sum256(data)
-
-	assertEqual(hash[:], a.Input10)
-
-	zkm_runtime.Commit[Data](a)
-}
-
-func assertEqual(a []byte, b []byte) {
-	if !bytes.Equal(a, b) {
-		log.Fatal("%x != %x", a, b)
-	}
-}
-
 ```

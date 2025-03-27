@@ -5,7 +5,6 @@ use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMSt
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("keccak");
 fn prove_keccak_rust() {
-    // 1. split ELF into segs
     let mut stdin = ZKMStdin::new();
 
     // load input
