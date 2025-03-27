@@ -24,6 +24,7 @@
         - [Other Components](./design/chips/other-components.md)
     - [Arithmetization](./design/arithmetization.md)
     - [Lookup Arguments](./design/lookup-arguments.md)
+    - [Memory Consistency Checking](./design/memory-checking.md)
     - [Stark](./design/stark.md)
     - [Prover Architecture](./design/prover-architecture.md)
         - [Stark Aggregation](./design/stark-aggregation.md)
