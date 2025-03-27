@@ -60,7 +60,6 @@ pub enum Opcode {
     Jump = 40,   // JUMP
     Jumpi = 41,  // JUMP
     JumpDirect = 42,  // JUMP
-    NOP = 43,     // MISC  
     SYSCALL = 44, // SYSCALL
     TEQ = 45,     // MISC
     SEXT = 46,    // MISC
@@ -122,7 +121,6 @@ impl Opcode {
             Opcode::Jumpi => "jumpi",
             Opcode::JumpDirect => "jump_direct",
             Opcode::TEQ => "teq",
-            Opcode::NOP => "nop",
             Opcode::SYSCALL => "syscall",
             Opcode::SEXT => "seb",
             Opcode::WSBH => "wsbh",

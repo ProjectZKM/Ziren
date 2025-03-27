@@ -6,10 +6,10 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm2_core_executor::{
-    events::{MiscEvent, ByteLookupEvent, ByteRecord},
-    ExecutionRecord, Opcode, Program,
+    events::{MiscEvent, ByteLookupEvent, ByteRecord, MemoryRecordEnum},
+    ExecutionRecord, Opcode, Program, ByteOpcode,
 };
-use zkm2_stark::air::MachineAir;
+use zkm2_stark::{air::MachineAir, Word};
 
 use crate::utils::{next_power_of_two, zeroed_f_vec};
 
@@ -77,7 +77,7 @@ impl MiscInstrsChip {
         &self,
         event: &MiscEvent,
         cols: &mut MiscInstrColumns<F>,
-        _blu: &mut impl ByteRecord,
+        blu: &mut impl ByteRecord,
     ) {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
@@ -96,7 +96,139 @@ impl MiscInstrsChip {
         cols.is_msubu = F::from_bool(matches!(event.opcode, Opcode::MSUBU));
         cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
-        cols.is_nop = F::from_bool(matches!(event.opcode, Opcode::NOP));
         cols.is_teq = F::from_bool(matches!(event.opcode, Opcode::TEQ));
+
+        self.populate_seb(cols, event, blu);
+        self.populate_movcond(cols, event, blu);
+        self.populate_maddsub(cols, event, blu);
+        self.populate_ext(cols, event, blu);
+        self.populate_ins(cols, event, blu);
     }
+
+    fn populate_seb<F: PrimeField32>(
+        &self,
+        cols: &mut MiscInstrColumns<F>,
+        event: &MiscEvent,
+        blu: &mut impl ByteRecord,
+    ) {
+        if !matches!(
+            event.opcode,
+            Opcode::SEXT
+        ) {
+            return;
+        }
+        let seb_cols = cols.misc_specific_columns.seb_mut();
+        let sig_bit = (event.b as u8) >> 7;
+        seb_cols.most_sig_bit = F::from_canonical_u8(sig_bit);
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::MSB,
+            a1: sig_bit as u16,
+            a2: 0,
+            b: event.b as u8,
+            c: 0,
+        });
+    }
+
+    fn populate_movcond<F: PrimeField32>(
+        &self,
+        cols: &mut MiscInstrColumns<F>,
+        event: &MiscEvent,
+        _blu: &mut impl ByteRecord,
+    ) {
+        if !matches!(
+            event.opcode,
+            Opcode::MNE |
+                Opcode::MEQ |
+                Opcode::TEQ
+        ) {
+            return;
+        }
+        let movcond_cols = cols.misc_specific_columns.movcond_mut();
+        movcond_cols.a_eq_b = F::from_bool(event.b == event.a);
+        movcond_cols.c_eq_0 = F::from_bool(event.c == 0);
+        movcond_cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), &mut Vec::new());
+    }
+
+    fn populate_maddsub<F: PrimeField32>(
+        &self,
+        cols: &mut MiscInstrColumns<F>,
+        event: &MiscEvent,
+        blu: &mut impl ByteRecord,
+    ) {
+        if !matches!(
+            event.opcode,
+            Opcode::MADDU |
+                Opcode::MSUBU
+        ) {
+            return;
+        }
+        let maddsub_cols = cols.misc_specific_columns.maddsub_mut();
+        maddsub_cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), &mut Vec::new());
+        maddsub_cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), &mut Vec::new());
+        let multiply = event.b as u64 * event.c as u64;
+        let mul_hi = (multiply >> 32) as u32;
+        let mul_lo = multiply as u32;
+        maddsub_cols.mul_hi =  Word::from(mul_hi);
+        maddsub_cols.mul_lo =  Word::from(mul_lo);
+        maddsub_cols.carry = F::ZERO;
+
+        let is_add = event.opcode == Opcode::MADDU;
+        let src2_lo = if is_add { event.a_record.prev_value } else { event.a_record.value };
+        let src2_hi = if is_add { event.hi_record.prev_value } else { event.hi_record.value };
+        maddsub_cols.src2_lo = Word::from(src2_lo);
+        maddsub_cols.src2_hi = Word::from(src2_hi);
+        let (_, carry) = maddsub_cols.low_add_operation.populate(blu, mul_lo, src2_lo, 0);
+        maddsub_cols.hi_add_operation.populate(blu, mul_hi, src2_hi, carry);
+    }
+
+    fn populate_ext<F: PrimeField32>(
+        &self,
+        cols: &mut MiscInstrColumns<F>,
+        event: &MiscEvent,
+        _blu: &mut impl ByteRecord,
+    ) {
+        if !matches!(
+            event.opcode,
+            Opcode::EXT
+        ) {
+            return;
+        }
+        let ext_cols = cols.misc_specific_columns.ext_mut();
+        let lsb = event.c & 0x1f;
+        let msbd = event.c >> 5;
+        let shift_left=  event.b << (31 - lsb - msbd); 
+        ext_cols.lsb = F::from_canonical_u32(lsb);
+        ext_cols.msbd = F::from_canonical_u32(msbd);
+        ext_cols.sll_val = Word::from(shift_left);
+    }
+
+    fn populate_ins<F: PrimeField32>(
+        &self,
+        cols: &mut MiscInstrColumns<F>,
+        event: &MiscEvent,
+        _blu: &mut impl ByteRecord,
+    ) {
+        if !matches!(
+            event.opcode,
+            Opcode::INS
+        ) {
+            return;
+        }
+        let ins_cols = cols.misc_specific_columns.ins_mut();
+        let lsb = event.c & 0x1f;
+        let msb = event.c >> 5;
+        ins_cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), &mut Vec::new());
+        let ror_val=  event.a_record.prev_value.rotate_right(lsb);
+        let srl_val = ror_val >> (msb - lsb + 1);
+        let sll_val = event.b << (31 - msb + lsb);
+        let add_val = srl_val + sll_val;
+        ins_cols.lsb = F::from_canonical_u32(lsb);
+        ins_cols.msb = F::from_canonical_u32(msb);
+        ins_cols.ror_val = Word::from(ror_val);
+        ins_cols.srl_val = Word::from(srl_val);
+        ins_cols.sll_val = Word::from(sll_val);
+        ins_cols.add_val = Word::from(add_val);
+
+    }
+
 }

@@ -90,7 +90,6 @@ impl Instruction {
                 | Opcode::MSUBU
                 | Opcode::MEQ
                 | Opcode::MNE
-                | Opcode::NOP
                 | Opcode::TEQ
         )
     }
@@ -295,7 +294,7 @@ impl Instruction {
             // } // MTLO: lo = rs
             (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)), // MTLO: lo = rs
             // (0b000000, 0b001111) => Ok(Operation::Nop),                                  // SYNC
-            (0b000000, 0b001111) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // SYNC
+            (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // SYNC
             // (0b011100, 0b100000) => Ok(Operation::Count(false, rs, rd)), // CLZ: rd = count_leading_zeros(rs)
             (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)), // CLZ: rd = count_leading_zeros(rs)
             // (0b011100, 0b100001) => Ok(Operation::Count(true, rs, rd)), // CLO: rd = count_leading_ones(rs)
@@ -512,7 +511,7 @@ impl Instruction {
             // (0b000000, 0b001100) => Ok(Operation::Syscall), // Syscall
             (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)), // Syscall
             // (0b110011, _) => Ok(Operation::Nop),            // Pref
-            (0b110011, _) => Ok(Self::new(Opcode::NOP, 0, 0, 0, true, true)), // Pref
+            (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // Pref
             // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
             (0b011111, 0b100000) => {

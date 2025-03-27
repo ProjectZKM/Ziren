@@ -1,3 +1,17 @@
+mod seb;
+mod maddsub;
+mod ext;
+mod ins;
+mod movcond;
+mod misc_specific;
+
+pub use seb::*;
+pub use maddsub::*;
+pub use ext::*;
+pub use ins::*;
+pub use movcond::*;
+pub use misc_specific::*;
+
 use zkm2_derive::AlignedBorrow;
 use zkm2_stark::Word;
 use std::mem::size_of;
@@ -6,7 +20,7 @@ pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct MiscInstrColumns<T> {
+pub struct MiscInstrColumns<T: Copy> {
     /// The program counter of the instruction.
     pub pc: T,
     pub next_pc: T,
@@ -19,6 +33,8 @@ pub struct MiscInstrColumns<T> {
     /// The value of the third operand.
     pub op_c_value: Word<T>,
 
+    pub misc_specific_columns: MiscSpecificCols<T>,
+
     pub is_wsbh: T,
     pub is_seb: T,
     pub is_ins: T,
@@ -27,7 +43,6 @@ pub struct MiscInstrColumns<T> {
     pub is_msubu: T,
     pub is_meq: T,
     pub is_mne: T,
-    pub is_nop: T,
     pub is_teq: T,
 
     pub op_a_0: T,

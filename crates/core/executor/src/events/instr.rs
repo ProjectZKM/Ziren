@@ -1,5 +1,6 @@
 use crate::Opcode;
 use super::MemoryRecordEnum;
+use super::MemoryWriteRecord;
 use serde::{Deserialize, Serialize};
 
 /// Arithmetic Logic Unit (ALU) Event.
@@ -211,8 +212,13 @@ pub struct MiscEvent {
     pub c: u32,
     /// The third operand value.
     pub hi: u32,
+    /// The first operand memory record.
+    pub a_record: MemoryWriteRecord,
+    /// The hi operand memory record.
+    pub hi_record: MemoryWriteRecord,
     /// Whether the first operand is register 0.
     pub op_a_0: bool,
+    
 }
 
 impl MiscEvent {
@@ -227,8 +233,10 @@ impl MiscEvent {
         b: u32,
         c: u32,
         hi: u32,
+        a_record: MemoryWriteRecord,
+        hi_record: MemoryWriteRecord,
         op_a_0: bool,
     ) -> Self {
-        Self { pc, next_pc, opcode, a, b, c, hi, op_a_0 }
+        Self { pc, next_pc, opcode, a, b, c, hi, a_record, hi_record, op_a_0 }
     }
 }

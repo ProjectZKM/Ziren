@@ -731,7 +731,7 @@ impl<'a> Executor<'a> {
         } else if instruction.is_syscall_instruction() {
             self.emit_syscall_event(clk, record.a, op_a_0, syscall_code, b, c, next_pc);
         } else if instruction.is_misc_instruction() {
-            self.emit_misc_event(instruction.opcode, a, b, c, hi.unwrap_or(0), op_a_0);
+            self.emit_misc_event(instruction.opcode, a, b, c, hi.unwrap_or(0), record.a, record.hi, op_a_0);
         } else {
             log::info!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -893,9 +893,21 @@ impl<'a> Executor<'a> {
         b: u32,
         c: u32,
         hi: u32,
+        a_record: Option<MemoryRecordEnum>,
+        hi_record: Option<MemoryRecordEnum>,
         op_a_0: bool,
     ) {
-        let event = MiscEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, hi, op_a_0);
+        let a_access = match a_record {
+            Some(MemoryRecordEnum::Write(record)) => record,
+            _ => MemoryWriteRecord::default(),
+        };
+
+        let hi_access = match hi_record {
+            Some(MemoryRecordEnum::Write(record)) => record,
+            _ => MemoryWriteRecord::default(),
+        };
+
+        let event = MiscEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, hi, a_access, hi_access, op_a_0);
         self.record.misc_events.push(event);
         emit_misc_dependencies(self, event);
     }
@@ -996,12 +1008,12 @@ impl<'a> Executor<'a> {
     fn branch_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (src1, src2, target) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
-        let a = self.rr(src1, MemoryAccessPosition::A);
         let b = if instruction.opcode.only_one_operand() {
             0
         } else {
             self.rr(src2, MemoryAccessPosition::B)
         };
+        let a = self.rr(src1, MemoryAccessPosition::A);
         (a, b, target)
     }
 
@@ -1021,9 +1033,7 @@ impl<'a> Executor<'a> {
         let mut next_pc = self.state.next_pc;
         let mut next_next_pc = self.state.next_pc.wrapping_add(4);
 
-        let mut a = 0u32;
-        let mut b = 0u32;
-        let mut c = 0u32;
+        let (a, b, c): (u32, u32, u32);
         let mut hi = None;
         let mut syscall_code = 0u32;
 
@@ -1062,6 +1072,19 @@ impl<'a> Executor<'a> {
                 }
                 Opcode::CLZ | Opcode::CLO => {
                     self.local_counts.event_counts[Opcode::SRL] += 1;
+                }
+                Opcode::MADDU | Opcode::MSUBU => {
+                    self.local_counts.event_counts[Opcode::MULT] += 1;
+                }
+                Opcode::EXT => {
+                    self.local_counts.event_counts[Opcode::SLL] += 1;
+                    self.local_counts.event_counts[Opcode::SRL] += 1;
+                }
+                Opcode::INS => {
+                    self.local_counts.event_counts[Opcode::ROR] += 2;
+                    self.local_counts.event_counts[Opcode::SLL] += 1;
+                    self.local_counts.event_counts[Opcode::SRL] += 1;
+                    self.local_counts.event_counts[Opcode::ADD] += 1;
                 }
                 _ => {}
             };
@@ -1222,11 +1245,6 @@ impl<'a> Executor<'a> {
                 (a, b, c, next_next_pc) = self.execute_jump_direct(instruction);
             }
 
-            // Opcode::GetContext | Opcode::SetContext => {}
-            Opcode::NOP => {
-                self.rw(Register::ZERO, 0, MemoryAccessPosition::A);
-            }
-
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
@@ -1288,8 +1306,8 @@ impl<'a> Executor<'a> {
             (instruction.op_b as u8).into(),
             (instruction.op_c as u8).into()
         );
-        let b = self.rr(rt, MemoryAccessPosition::B);
         let c = self.rr(rs, MemoryAccessPosition::C);
+        let b = self.rr(rt, MemoryAccessPosition::B);
         let multiply = b as u64 * c as u64;
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
@@ -1308,8 +1326,8 @@ impl<'a> Executor<'a> {
             (instruction.op_b as u8).into(),
             (instruction.op_c as u8).into()
         );
-        let b = self.rr(rt, MemoryAccessPosition::B);
         let c = self.rr(rs, MemoryAccessPosition::C);
+        let b = self.rr(rt, MemoryAccessPosition::B);
         let multiply = b as u64 * c as u64;
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
@@ -1382,8 +1400,8 @@ impl<'a> Executor<'a> {
     fn execute_teq(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
         let (rs, rt) = (instruction.op_a.into(), (instruction.op_b as u8).into());
 
-        let src1 = self.rr(rs, MemoryAccessPosition::A);
         let src2 = self.rr(rt, MemoryAccessPosition::B);
+        let src1 = self.rr(rs, MemoryAccessPosition::A);
 
         if src1 == src2 {
             panic!("Trap Error");

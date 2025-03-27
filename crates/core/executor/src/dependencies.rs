@@ -240,7 +240,7 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
             let target_pc = event.next_pc.wrapping_add(event.b);
             let add_event = AluEvent {
                 pc: UNUSED_PC,
-                next_pc: UNUSED_PC,
+                next_pc: UNUSED_PC + DEFAULT_PC_INC,
                 opcode: Opcode::ADD,
                 hi: 0,
                 a: target_pc,
@@ -257,6 +257,115 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
 }
 
 /// Emit the dependencies for misc instructions.
-pub fn emit_misc_dependencies(_executor: &mut Executor, _event: MiscEvent) {
-    // TODO
+pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
+    if matches!(event.opcode, Opcode::MADDU | Opcode::MSUBU) {
+        let multiply = event.b as u64 * event.c as u64;
+        let mul_hi = (multiply >> 32) as u32;
+        let mul_lo = multiply as u32;
+        let mul_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::MULTU,
+            hi: mul_hi,
+            a: mul_lo,
+            b: event.b,
+            c: event.c,
+            op_a_0: false,
+        };
+        executor.record.add_mul_event(mul_event);
+    } else if matches!(event.opcode, Opcode::EXT) {
+        let lsb = event.c & 0x1f;
+        let msbd = event.c >> 5;
+        let sll_val=  event.b << (31 - lsb - msbd); 
+        let sll_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::SLL,
+            hi: 0,
+            a: sll_val,
+            b: event.b,
+            c: 31 - lsb - msbd,
+            op_a_0: false,
+        };
+        executor.record.shift_left_events.push(sll_event);
+        let srl_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::SRL,
+            hi: 0,
+            a: event.a,
+            b: sll_val,
+            c: 31 - lsb,
+            op_a_0: false,
+        };
+        assert_eq!(event.a, sll_val >> (31 - lsb));
+        executor.record.shift_right_events.push(srl_event);
+    } else if matches!(event.opcode, Opcode::INS) {
+        let lsb = event.c & 0x1f;
+        let msb = event.c >> 5;
+        let ror_val=  event.a_record.prev_value.rotate_right(lsb);
+        let ror_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::ROR,
+            hi: 0,
+            a: ror_val,
+            b: event.a_record.prev_value,
+            c: lsb,
+            op_a_0: false,
+        };
+        executor.record.shift_right_events.push(ror_event);
+
+        let srl_val = ror_val >> (msb - lsb + 1);
+        let srl_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::SRL,
+            hi: 0,
+            a: srl_val,
+            b: ror_val,
+            c: msb - lsb + 1,
+            op_a_0: false,
+        };
+        executor.record.shift_right_events.push(srl_event);
+
+        let sll_val = event.b << (31 - msb + lsb);
+        let sll_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::SLL,
+            hi: 0,
+            a: sll_val,
+            b: event.b,
+            c: 31 - msb + lsb,
+            op_a_0: false,
+        };
+        executor.record.shift_left_events.push(sll_event);
+
+        let extra_shift = srl_val + sll_val;
+        let add_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::ADD,
+            hi: 0,
+            a: extra_shift,
+            b: srl_val,
+            c: sll_val,
+            op_a_0: false,
+        };
+        executor.record.add_events.push(add_event);
+
+        let ror_event2 = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::ROR,
+            hi: 0,
+            a: event.a,
+            b: extra_shift,
+            c: 31 - msb,
+            op_a_0: false,
+        };
+        assert_eq!(event.a, extra_shift.rotate_right(31 - msb));
+        executor.record.shift_right_events.push(ror_event2);
+    }
 }
