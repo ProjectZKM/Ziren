@@ -257,7 +257,7 @@ impl MiscInstrsChip {
             Opcode::SRL.as_field::<AB::F>(),
             local.op_a_value,
             ext_cols.sll_val,
-            Word([AB::Expr::from_canonical_u32(31) - ext_cols.lsb, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+            Word([AB::Expr::from_canonical_u32(31) - ext_cols.msbd, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
             local.is_ext.clone(),
         );
 

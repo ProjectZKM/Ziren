@@ -295,10 +295,10 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             hi: 0,
             a: event.a,
             b: sll_val,
-            c: 31 - lsb,
+            c: 31 - msbd,
             op_a_0: false,
         };
-        assert_eq!(event.a, sll_val >> (31 - lsb));
+        assert_eq!(event.a, sll_val >> (31 - msbd));
         executor.record.shift_right_events.push(srl_event);
     } else if matches!(event.opcode, Opcode::INS) {
         let lsb = event.c & 0x1f;
