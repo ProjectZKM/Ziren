@@ -16,7 +16,7 @@ fn prove_revm() {
 
     // write input
     let mut stdin = ZKMStdin::new();
-    stdin.write(&encoded);
+    stdin.write_vec(encoded);
 
     // Create a `ProverClient` method.
     let client = ProverClient::new();
