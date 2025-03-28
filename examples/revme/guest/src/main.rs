@@ -9,5 +9,5 @@ zkm2_zkvm::entrypoint!(main);
 
 pub fn main() {
     let input: Vec<u8> = zkm2_zkvm::io::read_vec();
-    assert!(verify_revm_tx(&input));
+    assert!(verify_revm_tx(&input).unwrap());
 }

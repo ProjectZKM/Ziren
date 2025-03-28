@@ -16,7 +16,7 @@ fn prove_revm() {
         guest_std::TEST_DATA.to_vec()
     };
 
-    let encoded = guest_std::cbor_serialize(&data);
+    let encoded = guest_std::cbor_serialize(&data).unwrap();
 
     // write input
     let mut stdin = ZKMStdin::new();
