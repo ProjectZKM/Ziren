@@ -965,9 +965,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck_derive"
-version = "1.9.2"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff22c2722516255d1823ce3cc4bc0b154dbc9364be5c905d6baa6eccbbc8774"
+checksum = "7ecc273b49b3205b83d648f0690daa588925572cc5063745bfe547fe7ec8e1a1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2191,7 +2191,7 @@ dependencies = [
 [[package]]
 name = "guest"
 version = "1.1.0"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#26b7f5a23e6d86870e34963b798e16fcbc0b2729"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#622318e62c0ac57343fcde549a8755194649bd82"
 dependencies = [
  "k256",
  "libc",
@@ -2205,7 +2205,7 @@ dependencies = [
 [[package]]
 name = "guest-std"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#26b7f5a23e6d86870e34963b798e16fcbc0b2729"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#622318e62c0ac57343fcde549a8755194649bd82"
 dependencies = [
  "guest",
  "models",
@@ -3078,7 +3078,7 @@ dependencies = [
 [[package]]
 name = "models"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#26b7f5a23e6d86870e34963b798e16fcbc0b2729"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#622318e62c0ac57343fcde549a8755194649bd82"
 dependencies = [
  "revm",
  "serde",
@@ -3330,9 +3330,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.1"
+version = "1.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d75b0bedcc4fe52caa0e03d9f1151a323e4aa5e2d78ba3580400cd3c9e2bc4bc"
+checksum = "c2806eaa3524762875e21c3dcd057bc4b7bfa01ce4da8d46be1cd43649e1cc6b"
 
 [[package]]
 name = "opaque-debug"
@@ -6797,7 +6797,7 @@ dependencies = [
 [[package]]
 name = "zkm2-lib"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#f6d3786e6658c0f28024413a38dcf68c1278ad9f"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#ad87f56d9fd27d752762a3addfe4e50c6333dc0a"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -7095,7 +7095,7 @@ dependencies = [
 [[package]]
 name = "zkm2-zkvm"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#f6d3786e6658c0f28024413a38dcf68c1278ad9f"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#ad87f56d9fd27d752762a3addfe4e50c6333dc0a"
 dependencies = [
  "bincode",
  "cfg-if",

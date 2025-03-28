@@ -7,10 +7,14 @@ use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMSt
 const ELF: &[u8] = include_elf!("revme");
 
 fn prove_revm() {
-    let json_path = env::var("JSON_PATH").unwrap_or("../test-vectors/test.json".to_owned());
-    let mut f = File::open(json_path).unwrap();
-    let mut data = vec![];
-    f.read_to_end(&mut data).unwrap();
+    let data = if let Ok(json_path) = env::var("JSON_PATH") {
+        let mut f = File::open(json_path).unwrap();
+        let mut data = vec![];
+        f.read_to_end(&mut data).unwrap();
+        data
+    } else {
+        guest_std::TEST_DATA.to_vec()
+    };
 
     let encoded = guest_std::cbor_serialize(&data);
 
