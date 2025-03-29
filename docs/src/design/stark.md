@@ -1,222 +1,112 @@
-# Stark
+# STARK Protocol
 
-## The Concepts
+## Polynomial Constraint System Architecture
 
-### Field
+Following [arithmetization]((./arithmetization.md)), the computation is represented through a structured polynomial system.
 
-* KoalaBear
-* Mersenne31
+### Core Components
+- ​Execution Trace Polynomials
+  
+  Encode state transitions across computation steps as:
+  \\[ T_i(x) = \sum_{k=0}^{N-1} t_{i,k} \cdot L_k(x),\\]
+  where \\(L_k(x)\\) are Lagrange basis polynomials over domain H. 
+​
+- Constraint Polynomials
+  Encode verification conditions as algebraic relations:
+  \\[C_j(x) = R_j(T_1(x),T_2(x), \cdots, T_m(x), T_1(g \cdot x), T_2(g \cdot x), \cdots, T_m(g \cdot x)) = 0,\\]
+  for all \\(x \in H\\), where \\(g\\) is the used generator of H.
 
+### Constraint Aggregation
+For proof efficiency, we combine constraints via:
+\\[C_{comb}(x) = \sum_j \alpha_j C_j(x),\\]
+where \\( \alpha_j\\) are derived through the Fiat-Shamir transformation.
 
-### Hash
+## Mixed Matrix Commitment Scheme (MMCS)
 
-1. CryptographicHasher: PaddingFreeSponge, a padding-free, overwrite-mode sponge function.
-2. CompressionFunction: An `N`-to-1 compression function collision-resistant in a hash tree setting
+### Polynomial Commitments in STARK
 
-#### Multiple Layers
+STARK uses Merkle trees for polynomial commitments:
 
-* External Initial Layer
-* Internal Layer
-* External Terminal Layer
+- Setup: No trusted setup is needed, but a hash function for Merkle tree construction must be predefined. We use Poseidon2 as the predefined hash function.
 
-#### Permutation
+- Commit: Evaluate polynomials at all roots of unity in its domain, construct a Merkle tree with these values as leaves, and publish the root as the commitment.
 
-Multiply a 4-element vector x by a 4x4 matrix.
+- Open: The verifier selects a random challenge point, and the prover provides the value and Merkle path for verification.
 
-* Mat4
-* HL Mat4
+### Batch Commitment Protocol
 
-#### Hasher
+The "Mixed Matrix Commitment Scheme" (MMCS) is a generalization of a vector commitment scheme used in ZKM2. It supports:
 
-Poseidon2KoalaBear
+- Committing to matrices.
+- Opening rows.
+- Batch operations - committing to multiple matrices simultaneously, even with different dimensions.
 
+When opening a particular row index:
 
-### MMC: Mixed Matric Commitment Scheme
+- For matrices with maximum height: use the full row index.
+- For smaller matrices: truncate least-significant bits of the index.
 
-A "Mixed Matrix Commitment Scheme" (MMCS) is a generalization of a vector commitment scheme.
-It supports committing to matrices and then opening rows. It is also batch-oriented; one can commit to a batch of matrices at once even if their widths and heights differ.
+These semantics are particularly useful in the FRI protocol.
 
-When a particular row index is opened, it is interpreted directly as a row index for matrices
-with the largest height. For matrices with smaller heights, some bits of the row index are
-removed (from the least-significant side) to get the effective row index. These semantics are
-useful in the FRI protocol.
+### Low-Degree Extension (LDE)
 
-A MerkleTreeMmmcs is used in our zkVM, which uses KoalaBear as a leaf value and a packed value as the node value.
+Suppose the trace polynomials are initially of length \\(N\\). For security, we evaluate them on a larger domain (e.g., \\(2^k \cdot N\\)), called the LDE domain.
 
-### Challenger
+Using Lagrange interpolation:
+- Compute polynomial coefficients.
+- Extend evaluations to the larger domain,
 
-A transcript that digests public input and common parameters, and generates randoms for challenging in PCS.
+ZKM2 implements this via Radix2DitParallel - a parallel FFT algorithm that divides butterfly network layers into two halves.
 
-```Rust
-fn observe(value) {
-    output_buffer.clear();
-    input_buffer.push(value);
-    if input_buffer.len() == RATE {
-        drain();
-        outstate = permute();
-        output_bufer.extend(outstate[..RATE])
-    }
-}
-```
+## Low-Degree Enforcement
 
-The function `drain` behaves different for different challanger.
+### Quotient Polynomial Construction
 
-### DFT
+To prove \\(C_{comb}(x)\\) vanishes over subset \\(H\\), construct quotient polynomial \\(Q(x)\\):
+\\[Q(x) = \frac{C_{comb}(x)} {Z_{H}(x)} = \frac{\sum_j \alpha_j C_j(x)}{\prod_{h \in H}(x-h)}.\\]
 
-* Radix2DitParallel: a parallel FFT algorithm which divides a butterfly network's layers into two halves.
-* RecursiveDft: a decimation-in-frequency in the forward direction, decimation-in-time in the backward (inverse) direction.
+The existence of such a low-degree \\(Q(x)\\) proves \\(C_{comb}(x)\\) vanishes over \\(H\\).
 
-### PCS
+## FRI Protocol 
 
-A (not necessarily hiding) polynomial commitment scheme, for committing to (batches of) polynomials.
+The Fast Reed-Solomon Interactive Oracle Proof (FRI) protocol proves the low-degree of \\(P(x)\\). ZKM2 optimizes FRI by leveraging:
+- Algebraic structure of quartic extension \\(\mathbb{F}_{p^4}\\).
+- KoalaBear prime field \\(p = 2^{31} - 2^{24} + 1\\).
+- Efficient Poseidon2 hash computation.
 
-* TwoAdicFriPcs:
-* CirclePcs
+**Three-Phase FRI Procedure**
+- Commitment Phase:
 
-## Implementations
+  - The prover splits \\(P(x)\\) into two lower-degree polynomials \\(P_0(x)\\), \\(P_1(x)\\), such that: \\(P(x) = P_0(x^2) + x \cdot P_1(x^2)\\).
 
-There are two impls in current Plonky3, Two-Adic PCS and Circle Stark.
+  - The verifier sends a random challenge \\(\alpha \in  \mathbb{F}_{p^4}\\) 
+  - The prover computes a new polynomial: \\(P'(x) = P_0(x) + \alpha \cdot P_1(x)\\), and send the commit of the polynomial to the verifier.
 
-### Two Adic
+- ​Recursive Reduction:
+  - Repeat splitting process for \\(P'(x)\\).
+  - Halve degree each iteration until constant term or degree ≤ d.
 
-#### Proving
+- ​Verification Phase:
+  - Verifier checks consistency between commitmented values at random point \\(z\\) in initial subgroup.
 
-1. Commit to the matrices
+## Verifing 
 
-```Rust
-(commits: [Root], prover_datas: [MerkleTree]) = PCS::commit(matrices);
-```
+### Verification contents
 
-2. Create a `Challenger`, and commit the Merkle Root
+Through merkle opening technique, verifier checks the following relation over a random chosen point at the LDE domain:
 
-```
-challener.observe(commit);
-zeta = challenger.sample_ext();
-points = vec![vec![zeta]; N_mats]
-```
+- Confirm correct folding via Merkle proofs.
 
-3. Open the points and generate the proof
+- Ensure the final polynomial is a constant (or has degree no more than d).
 
-* Calculate quotient polynomials Qs
+- Proper computation of
+  - Constraint polynomials  \\(C_j(x)\\).
+  -  Combined constraint \\(c_{comb}(x)\\).
 
-// Batch combination challenge
-\\[\alpha =  challenger.sample\\_ext(); \\]
+### Grinding Factor & Repeating Factor
 
-\\[ Qs(X) = \sum_{i=0}^{N_{mats}} \alpha^i \cdot \frac{(p(X) - y_)}{X - z}\\]
+Given the probabilistic nature of STARK verification, the protocol prevents brute-force attacks by requiring either:
+- A Proof of Work (PoW) accompanying each proof, or
+- multiple verification rounds.
 
-Where p is the polynomial in point-value format in prover_data matrices, y = p(z), z is zeta.
-
-X is in domain.
-
-* Run the FRI on Qs
-
-**Commit Phase**
-
-
-```
-commit_phase_commits = []
-commit_phase_data = []
-while folded.len() > config.blowup() {
-    let leaves = Matrix::new(folded, 2)
-    (commit, _prover_data) = commit_matrix(leaves);
-    challenger.observe(commit) // commit phase commits
-    commit_phase_commits.push(commit); commit_phase_data.push(_prover_data);
-
-    let beta = challenger.sample_ext();
-    folded = fold_matrix(beta, leaves); // reduce the domain size
-
-    merge_same_degree_polys(Qs, folded)
-}
-
-final_pols = foled[0];
-challenger.observe_ext(final_pols)
-
-return (commit_phase_commits, commit_phase_data, final_pols)
-```
-
-Do `queries` times `Query` and `Answer`.
-
-**Query Phase**
-
-
-```
-let global_max_height = mats.iter().map(|m| m.height()).max().unwrap();
-let log_global_max_height = log2_strict_usize(global_max_height);
-
-query_proofs = [];
-for i in 0..num_queruies{
-    ## open input / open_batch
-    for index, data in prover_data {
-        let log_max_height = log2_strict_usize(self.mmcs.get_max_height(data));
-        (opened_value, opening_proof) = open_batch(index >> (log_global_max_height - log_max_height), data);
-        input_proof = (opened_value, opening_proof);
-    }
-
-    ## answer query
-    for data in commit_phase_data {
-        (opened_value, opening_proof) = open_batch((index >> i)>>1, data);
-        commit_phase_openings = (opened_value, opening_proof);
-    }
-    query_proofs.push(QueryProof(input_proof, commit_phase_openings))
-}
-
-return query_proofs;
-```
-
-The final proof is `(commits, opened values, fri proofs)`, where:
-```
-opened values = y
-fri proofs = (commit_phase_commits, query_proofs, final_pols, pow_witness)
-```
-
-#### Verifying
-
-1. Create the challenger and sample \\( \alpha \\) from challenger.
-
-2. The challenger observes all the `commit_phase_commits` from fri proofs and final_pols, and samples all the `betas`.
-
-3. check witness. 
-
-4. Iterate `fri_proof.query_proofs` and verify each query.
-
-```Rust
-for qp in &proof.query_proofs {
-    let index = challenger.sample_bits(log_max_height + g.extra_query_index_bits());
-    let ro = open_input(index, &qp.input_proof).map_err(FriError::InputError)?;
-
-    debug_assert!(
-        ro.iter().tuple_windows().all(|((l, _), (r, _))| l > r),
-        "reduced openings sorted by height descending"
-    );
-
-    let folded_eval = verify_query(
-        g,
-        config,
-        index >> g.extra_query_index_bits(),
-        izip!(
-            &betas,
-            &proof.commit_phase_commits,
-            &qp.commit_phase_openings
-        ),
-        ro,
-        log_max_height,
-    )?;
-
-    if folded_eval != proof.final_poly {
-        return Err(FriError::FinalPolyMismatch);
-    }
-}
-```
-
-**open_input**
-
-
-
-
-**verify_query**
-
-
-
-### Circle Stark
-
-TBD
+This approach significantly increases the computational cost of malicious attempts. In ZKM2, we employ multiple verification rounds to achieve the desired security level.
