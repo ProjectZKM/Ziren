@@ -50,7 +50,6 @@ pub enum Opcode {
     Jump = 40,
     Jumpi = 41,
     JumpDirect = 42,
-    NOP = 43,
     SYSCALL = 44,
     TEQ = 45,
     SEXT = 46,
@@ -66,26 +65,23 @@ pub enum Opcode {
 
 All MIPS instructions can be divided into the following taxonomies:
 
-**Binary Operators**  
-This category includes the fundamental arithmetic and logical operations. It covers addition (ADD) and subtraction (SUB), several multiplication and division variants (MULT, MULTU, MUL, DIV, DIVU), as well as bit shifting operations (SLL, SRL, SRA), comparison operations like set less than (SLT, SLTU) and a range of bitwise logical operations (AND, OR, XOR, NOR). 
-
-**Count Operations**  
-Within this group, there are specialized instructions that analyze bit patterns: CLZ counts the number of leading zeros, while CLO counts the number of leading ones. These operations are useful in bit-level data analysis.
-
-**Branching Instructions**  
-Instructions BEQ (branch if equal), BGEZ (branch if greater than or equal to zero), BGTZ (branch if greater than zero), BLEZ (branch if less than or equal to zero), BLTZ (branch if less than zero), and BNE (branch if not equal) are used to change the flow of execution based on comparisons. These instructions are vital for implementing loops, conditionals, and other control structures.
-
-**Conditional Move Instructions (MovCond)**  
-This type of instruction includes MEQ (move if equal) and MNE (move if not equal) in this category. These instructions perform data transfers between registers based on the result of a comparison, allowing the program to conditionally update values without resorting to full branch instructions. This can lead to more efficient execution in frequent conditional operations.
+**ALU Operators**  
+This category includes the fundamental arithmetic logical operations and count operations. It covers addition (ADD) and subtraction (SUB), several multiplication and division variants (MULT, MULTU, MUL, DIV, DIVU), as well as bit shifting and rotation operations (SLL, SRL, SRA, ROR), comparison operations like set less than (SLT, SLTU) a range of bitwise logical operations (AND, OR, XOR, NOR) and count operations like CLZ counts the number of leading zeros, while CLO counts the number of leading ones. These operations are useful in bit-level data analysis.
 
 **Memory Operations**  
 This category is dedicated to moving data between memory and registers. It contains a comprehensive set of load instructions—such as LH (load halfword), LWL (load word left), LW (load word), LB (load byte), LBU (load byte unsigned), LHU (load halfword unsigned), LWR (load word right), and LL (load linked)—as well as corresponding store instructions like SB (store byte), SH (store halfword), SWL (store word left), SW (store word), SWR (store word right), and SC (store conditional). These operations ensure that data is correctly and efficiently read from or written to memory.
 
+**Branching Instructions**  
+Instructions BEQ (branch if equal), BGEZ (branch if greater than or equal to zero), BGTZ (branch if greater than zero), BLEZ (branch if less than or equal to zero), BLTZ (branch if less than zero), and BNE (branch if not equal) are used to change the flow of execution based on comparisons. These instructions are vital for implementing loops, conditionals, and other control structures.
+
 **Jump Instructions**  
 Jump-related instructions, including Jump, Jumpi, and JumpDirect, are responsible for altering the execution flow by redirecting it to different parts of the program. They are used for implementing function calls, loops, and other control structures that require non-sequential execution, ensuring that the program can navigate its code dynamically.
 
-**Special Instructions**  
-This category includes instructions with unique roles. NOP (no operation) is used when no action is required—often for timing adjustments or to fill delay slots. SYSCALL triggers a system call, allowing the program to request services from the operating system. TEQ is typically used to test equality conditions between registers. UNIMPL represents an unimplemented or reserved opcode, serving as a placeholder for potential future instructions or as an indicator for unsupported operations.
+**Syscall Instructions**  
+SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompiles computation, such as do sha extend operation by `SHA_EXTEND` precompile. it also can be input/output operation such as `SYSHINTREADYSHINTREAD` and `WRITE`.
+
+**Misc Instructions**  
+This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply acccumulation. EXT/INS is for bits extraction and insertion.
 
 
 ## Supported instructions
@@ -212,28 +208,3 @@ The support instructions are as follows:
 |  SECP256R1_ADD = 0x00_01_01_2C,          |  Executes the `SECP256R1_ADD` precompile.          |
 |  SECP256R1_DOUBLE = 0x00_00_01_2D,       |  Executes the `SECP256R1_DOUBLE` precompile.       |
 |  SECP256R1_DECOMPRESS = 0x00_00_01_2E,   |  Executes the `SECP256R1_DECOMPRESS` precompile.   |
-
-## Benchmark Data
-| program	    | args      | num of insts      |
-| ------------- | --------- | ----------------- |
-| sha2	        | 32        | 11445             |
-|               | 256       | 26504             |
-|               | 512       | 41908             |
-|               | 1024      | 72716             |
-|               | 2048      | 134332            |
-| sha3	        | 32        | 27525             |
-|               | 256       | 50152             |
-|               | 512       | 92048             |
-|               | 1024      | 175827            |
-|               | 2048      | 343383            |
-| fibonacci     | 100       | 6001              |
-|               | 1000      | 27601             |
-|               | 10000     | 243601            |
-|               | 50000     | 1203601           |
-| bigmem	    | 5         | 931702            |
-| sha2-chain	| 230       | 768103            |
-|               | 460       | 1527103           |
-| sha3-chain	| 230       | 4479926           |
-|               | 460       | 8951356           |
-
-Latest data reference [zkvm benchmark data](https://docs.google.com/spreadsheets/d/1H5J3tsy2ixVjkL2VP0Yxkz9scOpXzPPxRo-CGafuK08/edit?usp=sharing)

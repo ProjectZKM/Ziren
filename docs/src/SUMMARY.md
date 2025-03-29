@@ -6,7 +6,6 @@
     - [Benchmarks and Performance](./introducation/performance.md)
 - [MIPS VM](./mips-vm/mips-vm.md)
     - [MIPS ISA](./mips-vm/mips_isa.md)
-    - [Emulator](./mips-vm/emulator.md)
 - [Developer Tutorial](./dev/dev.md)
     - [Overview](./dev/overview.md)
     - [Runtime](./dev/runtime.md)
