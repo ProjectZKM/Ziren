@@ -25,7 +25,7 @@ where
         let local: &MiscInstrColumns<AB::Var> = (*local).borrow();
 
         let cpu_opcode = local.is_wsbh * Opcode::WSBH.as_field::<AB::F>()
-            + local.is_seb * Opcode::SEXT.as_field::<AB::F>()
+            + local.is_sext * Opcode::SEXT.as_field::<AB::F>()
             + local.is_ins * Opcode::INS.as_field::<AB::F>()
             + local.is_ext * Opcode::EXT.as_field::<AB::F>()
             + local.is_maddu * Opcode::MADDU.as_field::<AB::F>()
@@ -35,7 +35,7 @@ where
             + local.is_teq * Opcode::TEQ.as_field::<AB::F>();
 
         let is_real = local.is_wsbh
-            + local.is_seb
+            + local.is_sext
             + local.is_ins
             + local.is_ext
             + local.is_maddu
@@ -68,41 +68,73 @@ where
         self.eval_ins(builder, local);
         self.eval_movcond(builder, local);
         self.eval_maddsub(builder, local);
-        self.eval_seb(builder, local);
+        self.eval_sext(builder, local);
     }
 
 }
 
 impl MiscInstrsChip {
-    pub(crate) fn eval_seb<AB: ZKMAirBuilder>(
+    pub(crate) fn eval_sext<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
         local: &MiscInstrColumns<AB::Var>
     ) {
-        let seb_cols = local.misc_specific_columns.seb();
+        let sext_cols = local.misc_specific_columns.sext();
+
         builder.send_byte(
             ByteOpcode::MSB.as_field::<AB::F>(),
-            seb_cols.most_sig_bit,
-            local.op_b_value[0],
+            sext_cols.most_sig_bit,
+            sext_cols.sig_byte,
             AB::Expr::ZERO,
-            local.is_seb.clone(),
+            local.is_sext.clone(),
         );
 
-        let sign_byte = AB::Expr::from_canonical_u8(0xFF) * seb_cols.most_sig_bit;
         builder
-            .when(local.is_seb.clone())
-            .assert_eq(local.op_a_value[0], local.op_b_value[0]);
+            .when(local.is_sext.clone())
+            .assert_bool(local.op_c_value[0]);
 
         builder
-            .when(local.is_seb.clone())
+            .when(local.is_sext.clone())
+            .when(sext_cols.is_seb.clone())
+            .assert_zero(local.op_c_value[0]);
+
+        builder
+            .when(local.is_sext.clone())
+            .when(sext_cols.is_seh.clone())
+            .assert_one(local.op_c_value[0]);
+
+        builder
+            .when(local.is_sext.clone())
+            .when(sext_cols.is_seb.clone())
+            .assert_eq(local.op_a_value[0], sext_cols.sig_byte);
+
+        builder
+            .when(local.is_sext.clone())
+            .when(sext_cols.is_seh.clone())
+            .assert_eq(local.op_a_value[1], sext_cols.sig_byte);
+
+        let sign_byte = AB::Expr::from_canonical_u8(0xFF) * sext_cols.most_sig_bit;
+
+        builder
+            .when(local.is_sext.clone())
+            .assert_eq(local.op_a_value[0],  local.op_b_value[0]);
+
+        builder
+            .when(local.is_sext.clone())
+            .when(sext_cols.is_seb.clone())
             .assert_eq(local.op_a_value[1],  sign_byte.clone());
 
         builder
-            .when(local.is_seb.clone())
+            .when(local.is_sext.clone())
+            .when(sext_cols. is_seh.clone())
+            .assert_eq(local.op_a_value[1], local.op_b_value[1]);
+
+        builder
+            .when(local.is_sext.clone())
             .assert_eq(local.op_a_value[2],  sign_byte.clone());
         
         builder
-            .when(local.is_seb.clone())
+            .when(local.is_sext.clone())
             .assert_eq(local.op_a_value[3],  sign_byte);
         
     }

@@ -89,7 +89,7 @@ impl MiscInstrsChip {
         cols.op_a_0 = F::from_bool(event.op_a_0);
 
         cols.is_wsbh = F::from_bool(matches!(event.opcode, Opcode::WSBH));
-        cols.is_seb = F::from_bool(matches!(event.opcode, Opcode::SEXT));
+        cols.is_sext = F::from_bool(matches!(event.opcode, Opcode::SEXT));
         cols.is_ext = F::from_bool(matches!(event.opcode, Opcode::EXT));
         cols.is_ins = F::from_bool(matches!(event.opcode, Opcode::INS));
         cols.is_maddu = F::from_bool(matches!(event.opcode, Opcode::MADDU));
@@ -98,14 +98,14 @@ impl MiscInstrsChip {
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
         cols.is_teq = F::from_bool(matches!(event.opcode, Opcode::TEQ));
 
-        self.populate_seb(cols, event, blu);
+        self.populate_sext(cols, event, blu);
         self.populate_movcond(cols, event, blu);
         self.populate_maddsub(cols, event, blu);
         self.populate_ext(cols, event, blu);
         self.populate_ins(cols, event, blu);
     }
 
-    fn populate_seb<F: PrimeField32>(
+    fn populate_sext<F: PrimeField32>(
         &self,
         cols: &mut MiscInstrColumns<F>,
         event: &MiscEvent,
@@ -117,14 +117,22 @@ impl MiscInstrsChip {
         ) {
             return;
         }
-        let seb_cols = cols.misc_specific_columns.seb_mut();
-        let sig_bit = (event.b as u8) >> 7;
-        seb_cols.most_sig_bit = F::from_canonical_u8(sig_bit);
+        let sext_cols = cols.misc_specific_columns.sext_mut();
+
+        let (sig_bit, sig_byte) = if event.c > 0 {
+            sext_cols.is_seh =  F::ONE;
+            ((event.b as u16) >> 15, (event.b >> 8 &0xff) as u8)
+        } else {
+            sext_cols.is_seb =  F::ONE;
+            (((event.b as u8) >> 7) as u16, event.b as u8)
+        };
+        sext_cols.most_sig_bit = F::from_canonical_u16(sig_bit);
+        sext_cols.sig_byte = F::from_canonical_u8(sig_byte);
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::MSB,
-            a1: sig_bit as u16,
+            a1: sig_bit,
             a2: 0,
-            b: event.b as u8,
+            b: sig_byte,
             c: 0,
         });
     }

@@ -1,11 +1,11 @@
-mod seb;
+mod sext;
 mod maddsub;
 mod ext;
 mod ins;
 mod movcond;
 mod misc_specific;
 
-pub use seb::*;
+pub use sext::*;
 pub use maddsub::*;
 pub use ext::*;
 pub use ins::*;
@@ -36,7 +36,7 @@ pub struct MiscInstrColumns<T: Copy> {
     pub misc_specific_columns: MiscSpecificCols<T>,
 
     pub is_wsbh: T,
-    pub is_seb: T,
+    pub is_sext: T,
     pub is_ins: T,
     pub is_ext: T,
     pub is_maddu: T,

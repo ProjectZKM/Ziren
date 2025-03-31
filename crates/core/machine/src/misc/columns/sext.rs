@@ -2,12 +2,15 @@
 use std::mem::size_of;
 use zkm2_derive::AlignedBorrow;
 
-pub const NUM_SEB_COLS: usize = size_of::<SebCols<u8>>();
+pub const NUM_SEXT_COLS: usize = size_of::<SextCols<u8>>();
 
 /// The column layout for branching.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct SebCols<T> {
+pub struct SextCols<T> {
     /// The most significant bit of least byte.  This is relevant for seb instructions.
     pub most_sig_bit: T,
+    pub sig_byte: T,
+    pub is_seb: T,
+    pub is_seh: T,
 }

@@ -1341,14 +1341,19 @@ impl<'a> Executor<'a> {
     }
 
     fn execute_sext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt) = (
+        let (rd, rt, c) = (
             instruction.op_a.into(),
-            (instruction.op_b as u8).into()
+            (instruction.op_b as u8).into(),
+            instruction.op_c
         );
         let b = self.rr(rt, MemoryAccessPosition::B);
-        let a = (b & 0xff) as i8 as i32 as u32;
+        let a = if c > 0 {
+            (b & 0xffff) as i16 as i32 as u32
+        } else {
+            (b & 0xff) as i8 as i32 as u32
+        };
         self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, 0)
+        (a, b, c)
     }
 
     fn execute_wsbh(&mut self, instruction: &Instruction) -> (u32, u32, u32) {

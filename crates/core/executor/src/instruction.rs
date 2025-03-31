@@ -518,6 +518,9 @@ impl Instruction {
                 if sa == 0b010000 {
                     // Ok(Operation::Signext(rd, rt, 8)) // seb
                     Ok(Self::new(Opcode::SEXT, rd, rt, 0, false, true))
+                } else if sa == 0b110000 {
+                    // Ok(Operation::Signext(rd, rt, 16)) // seh
+                    Ok(Self::new(Opcode::SEXT, rd, rt, 1, false, true))
                 } else if sa == 0b000010 {
                     // Ok(Operation::SwapHalf(rd, rt)) // wsbh
                     Ok(Self::new(Opcode::WSBH, rd as u8, rt, 0, false, true))
