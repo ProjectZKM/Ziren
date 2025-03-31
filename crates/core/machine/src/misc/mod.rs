@@ -34,10 +34,13 @@ mod tests {
         utils::setup_logger();
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 0xf, false, true),
-            Instruction::new(Opcode::ADD, 28, 0, 0x8F, false, true),
+            Instruction::new(Opcode::ADD, 28, 0, 0x8F8F, false, true),
             Instruction::new(Opcode::SEXT, 30, 29, 0, false, true),
             Instruction::new(Opcode::SEXT, 31, 28, 0, false, true),
             Instruction::new(Opcode::SEXT, 0, 28, 0, false, true),
+            Instruction::new(Opcode::SEXT, 30, 29, 1, false, true),
+            Instruction::new(Opcode::SEXT, 31, 28, 1, false, true),
+            Instruction::new(Opcode::SEXT, 0, 28, 1, false, true),
             Instruction::new(Opcode::EXT, 30, 28, 0x21, false, true),
             Instruction::new(Opcode::EXT, 30, 31, 0x1EF, false, true),
             Instruction::new(Opcode::EXT, 0, 28, 0x21, false, true),

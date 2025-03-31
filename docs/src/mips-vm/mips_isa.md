@@ -81,7 +81,7 @@ Jump-related instructions, including Jump, Jumpi, and JumpDirect, are responsibl
 SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompiles computation, such as do sha extend operation by `SHA_EXTEND` precompile. it also can be input/output operation such as `SYSHINTREADYSHINTREAD` and `WRITE`.
 
 **Misc Instructions**  
-This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply acccumulation. EXT/INS is for bits extraction and insertion.
+This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply acccumulation. SEB/SEH is for data sign extended. EXT/INS is for bits extraction and insertion.
 
 
 ## Supported instructions
@@ -158,7 +158,8 @@ The support instructions are as follows:
 | ROR         |	000000	   | 00001	     | rt	       | rd	         | sa	        | 000010	  | rd = rotate_right(rt, sa）                                  |
 | WSBH 		  | 011111	   | 00000	     | rt	       | rd     	 | 00010	    | 100000      | rd = swaphalf(rt)                                           |	
 | EXT         |	011111     | rs	         | rt	       | msbd	     | lsb	        | 000000	  | rt =  rs[msbd+lsb..lsb]                                      |
-| SEB		  | 011111     | 00000       | rt          | rd	         | 10000        | 100000	  | rd = signExtend(rt[15..0])                                  |
+| SEH		  | 011111     | 00000       | rt          | rd	         | 11000        | 100000	  | rd = signExtend(rt[15..0])                                 |
+| SEB		  | 011111     | 00000       | rt          | rd	         | 10000        | 100000	  | rd = signExtend(rt[7..0])                                  |
 | INS         |	011111     | rs          | rt	       | msb	     | lsb	        | 000100	  | rt = rt[32:msb+1] || rs[msb+1-lsb : 0] || rt[lsb-1:0]         |
 | MADDU		  | 011100	   | rs	         | rt          | 00000	     | 00000	    | 000001      | (hi, lo) = rs * rt + (hi,lo)                                |
 | MSUBU		  | 011100	   | rs	         | rt	       | 00000	     | 00000	    | 000101	  | (hi, lo) = (hi,lo) - rs * rt                                | 
