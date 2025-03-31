@@ -8,8 +8,8 @@ The ALU is decomposed into dedicated verification units corresponding to MIPS in
 - ​AddSub Chip - Validates addition and subtion instructions, e.g., ADD,ADDI,SUB,SUBU, etc.
 - ​Bitwise Chip - Verifies bitwise instructions, e.g., AND, ANDI, OR, XOR, NOR, etc.
 - ​Mul Chip - Handles multiplication and division instruction, e.g., MUL, MULT, DIV, DIVU, etc.
-​- ShiftRight Chip - Processes logical/arithmetic shifts, e.g., SLL, SRA, SRL, etc.
-- lt Chip - Enforces SLT/SLTI comparisons.
+- ShiftRight Chip - Processes logical/arithmetic shifts, e.g., SLL, SRA, SRL, etc.
+- Lt Chip - Enforces SLT/SLTI comparisons.
 
 Each chip establishes correct calculation of corresponding instructions and constraint relationships with CPU table columns through Plookup-based verification, ensuring operational results match programmed instructions.
 

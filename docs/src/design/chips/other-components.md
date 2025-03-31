@@ -8,7 +8,7 @@ In addition to the CPU, Memory, and ALU chips, ZKM2 incorporates several special
 - Bytes Chip - Handles byte operations and u16 range check
 - Poseidon2 Hash Chip - Cryptographic primitive implementation
 - ​STARK Compression/SNARK-to-SNARK Adapter - Proof system optimization
-- ​Precompile Chips - Accelerated cryptographic operations
+- ​Precompiled Chips - Accelerated cryptographic operations
 
 
 ## Program Chip

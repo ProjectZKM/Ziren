@@ -18,15 +18,15 @@ Core Components:
 
 - ​Memory Chips
   
-  Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. ZKM2 use multiset hashing based offline memory consistnecy checking in the main operation of its memory argument with 4 memory tables.  
+  Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. ZKM2 use multiset hashing based offline memory consistnecy checking in the main operation of its memory argument with several memory tables.  
 
 - Custom Chips
   
   Several Custom Chips are used for accelecating proving time in ZKM2's proof system: Poseidon2 hash, STARK compression and STARK-to-SNARK adapter.
 
-- Precompile Chips:
+- Precompiled Chips:
 
-  Precompile chips are custom-designed chips for accelerating non-MIPS cryptographic operations in ZKM2. They are recommended for handling common yet computationally intensive cryptographic tasks, such as SHA-256/Keccak hashing, elliptic curve operations (e.g., BN254, Secp256k1), and pairing-based cryptography.
+  Precompiled chips are custom-designed chips for accelerating non-MIPS cryptographic operations in ZKM2. They are recommended for handling common yet computationally intensive cryptographic tasks, such as SHA-256/Keccak hashing, elliptic curve operations (e.g., BN254, Secp256k1), and pairing-based cryptography.
 
 
 Each chip consists of an AIR (Algebraic Intermediate Representation) to enforce functional correctness and received/sent signal vectors to connect with other chips. This modular design enables collaborative verification of MIPS instruction execution with full computational completeness, cryptographic security, and ​optimized proving performance featuring parallelizable constraint generation and sublinear verification complexity.
