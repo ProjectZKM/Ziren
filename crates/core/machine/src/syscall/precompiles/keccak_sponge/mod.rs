@@ -1,3 +1,6 @@
+use p3_keccak_air::KeccakAir;
+use crate::KeccakPermuteChip;
+
 mod air;
 mod columns;
 mod trace;
@@ -7,12 +10,13 @@ pub const KECCAK_GENERAL_RATE_U32S: usize = 36;
 pub const KECCAK_STATE_U32S: usize = 50;
 pub const KECCAK_GENERAL_OUTPUT_U32S: usize = 16;
 
-#[derive(Default)]
-pub struct KeccakSpongeChip;
+pub struct KeccakSpongeChip {
+    p3_keccak: KeccakAir,
+}
 
 impl KeccakSpongeChip {
     pub const fn new() -> Self {
-        Self {}
+        Self { p3_keccak: KeccakAir {} }
     }
 }
 #[cfg(test)]

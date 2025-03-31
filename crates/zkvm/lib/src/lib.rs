@@ -72,6 +72,9 @@ extern "C" {
     /// Executes the Keccak Sponge
     pub fn syscall_keccak_sponge(input: *const u32, result: *mut [u32; 17]);
 
+    /// Executes the Keccak Permute
+    pub fn syscall_keccak_permute();
+
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
 

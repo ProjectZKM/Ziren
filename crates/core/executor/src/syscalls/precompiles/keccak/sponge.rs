@@ -84,6 +84,7 @@ impl Syscall for KeccakSpongeSyscall {
             input_read_records,
             input_length_record,
             output_write_records,
+            xored_state_list,
             input_addr: input_ptr,
             output_addr: result_ptr,
             local_mem_access: rt.postprocess(),
@@ -91,17 +92,6 @@ impl Syscall for KeccakSpongeSyscall {
         let sponge_syscall_event =
             rt.rt.syscall_event(start_clk, None, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, sponge_syscall_event, sponge_event);
-
-        let permute_event = PrecompileEvent::KecakPermute(KeccakPermuteEvent{
-            shard,
-            clk: start_clk,
-            xored_state_list,
-            local_mem_access: rt.postprocess(),
-        });
-
-        let permute_syscall_event =
-            rt.rt.syscall_event(start_clk, None, None, rt.next_pc, SyscallCode::KECCAK_PERMUTE.syscall_id(), 0, 0);
-        rt.add_precompile_event(SyscallCode::KECCAK_PERMUTE, permute_syscall_event, permute_event);
         None
     }
 }

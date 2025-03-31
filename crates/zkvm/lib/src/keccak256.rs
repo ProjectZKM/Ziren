@@ -1,4 +1,4 @@
-use crate::syscall_keccak_sponge;
+use crate::{syscall_keccak_permute, syscall_keccak_sponge};
 
 pub fn keccak256(data: &[u8]) -> [u8; 32] {
     let len = data.len();

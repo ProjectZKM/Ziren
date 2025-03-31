@@ -479,7 +479,7 @@ impl<F: PrimeField32> MipsAir<F> {
                 if self.syscall_code() == SyscallCode::KECCAK_SPONGE {
                     num_rows = events.iter().map(|(sys_e, pre_e)| {
                         if let PrecompileEvent::KeccakSponge(event) = pre_e {
-                            event.num_blocks()
+                            event.num_blocks() * 24
                         } else {
                             unreachable!()
                         }

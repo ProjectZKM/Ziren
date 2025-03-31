@@ -29,6 +29,8 @@ pub struct KeccakSpongeEvent {
     pub input_length_record: MemoryReadRecord,
     /// The memory records for the output
     pub output_write_records: Vec<MemoryWriteRecord>,
+    /// The state of the sponge.
+    pub xored_state_list: Vec<[u64; 25]>,
     /// The address of the input.
     pub input_addr: u32,
     /// The address of the output.
