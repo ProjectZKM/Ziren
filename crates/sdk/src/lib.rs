@@ -31,7 +31,7 @@ use zkm2_prover::components::DefaultProverComponents;
 #[cfg(any(feature = "network", feature = "network-v2"))]
 use {std::future::Future, tokio::task::block_in_place};
 
-pub use provers::{CpuProver, Prover};
+pub use provers::{CpuProver, MockProver, Prover};
 
 pub use zkm2_build::include_elf;
 pub use zkm2_core_executor::{ExecutionReport, HookEnv, ZKMContext, ZKMContextBuilder};
@@ -71,8 +71,7 @@ impl ProverClient {
     pub fn new() -> Self {
         #[allow(unreachable_code)]
         match env::var("ZKM_PROVER").unwrap_or("local".to_string()).to_lowercase().as_str() {
-            // TODO: Anyone can implement it when a mock prover is needed.
-            // "mock" => Self { prover: Box::new(MockProver::new()) },
+            "mock" => Self { prover: Box::new(MockProver::new()) },
             "local" => {
                 #[cfg(debug_assertions)]
                 eprintln!("Warning: Local prover in dev mode is not recommended. Proof generation may be slow.");
@@ -126,8 +125,7 @@ impl ProverClient {
     /// let client = ProverClient::mock();
     /// ```
     pub fn mock() -> Self {
-        todo!();
-        // Self { prover: Box::new(MockProver::new()) }
+        Self { prover: Box::new(MockProver::new()) }
     }
 
     /// Creates a new [ProverClient] with the local prover, using the CPU.
@@ -359,7 +357,6 @@ impl ProverClientBuilder {
     pub fn build(self) -> ProverClient {
         match self.mode.expect("The prover mode is required") {
             ProverMode::Cpu => ProverClient::cpu(),
-            _ => unimplemented!("other provers not supported for now"),
             // ProverMode::Cuda => {
             //     cfg_if! {
             //         if #[cfg(feature = "cuda")] {
@@ -386,7 +383,8 @@ impl ProverClientBuilder {
             //         }
             //     }
             // }
-            // ProverMode::Mock => ProverClient::mock(),
+            ProverMode::Mock => ProverClient::mock(),
+            _ => unimplemented!("other provers not supported for now"),
         }
     }
 }
@@ -573,15 +571,15 @@ mod tests {
         client.verify(&proof, &vk).unwrap();
     }
 
-    // #[test]
-    // fn test_e2e_prove_plonk_mock() {
-    //     utils::setup_logger();
-    //     let client = ProverClient::mock();
-    //     let elf = test_artifacts::FIBONACCI_ELF;
-    //     let (pk, vk) = client.setup(elf);
-    //     let mut stdin = ZKMStdin::new();
-    //     stdin.write(&10usize);
-    //     let proof = client.prove(&pk, stdin).plonk().run().unwrap();
-    //     client.verify(&proof, &vk).unwrap();
-    // }
+    #[test]
+    fn test_e2e_prove_plonk_mock() {
+        utils::setup_logger();
+        let client = ProverClient::mock();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let (pk, vk) = client.setup(elf);
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&10usize);
+        let proof = client.prove(&pk, stdin).plonk().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+    }
 }
