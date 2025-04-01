@@ -11,7 +11,6 @@
     - [Runtime](./dev/runtime.md)
         - [Host Program](./dev/host-program.md)
         - [Guest Program](./dev/guest-program.md)
-    - [Trusted Setup](./dev/trusted-setup.md)
     - [Prover](./dev/prover.md)
     - [Proof Composition](./dev/proof-composition.md)
     - [Precompiles](./dev/precompiles.md)

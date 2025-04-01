@@ -15,7 +15,9 @@ To install the ZKM2 toolchain, use the `zkmup` installer. Simply open your termi
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
 ```
 
-It will install the latest ZKM2 Rust toolchain with support for compiling to the `mipsel-zkm-zkvm-elf` target.
+It will:
+- Download the `zkmup` installer.
+- Automatically utilize `zkmup` to install the latest ZKM2 Rust toolchain which has support for the `mipsel-zkm-zkvm-elf` compilation target.
 
 List all available toolchain versions:
 
@@ -39,36 +41,4 @@ Currently, our prebuilt binaries are built for Ubuntu 22.04 and macOS. Systems r
 
 ## Option 2: Building from Source
 
-Build/Install rustc:
-
-```bash
-git clone https://github.com/zkMIPS/rust-workspace.git
-cd rust-workspace
-git checkout Triple_mips-zkm-zkvm-elf
-cp config.example.toml config.toml
-    Edit config.toml in 
-    [install]
-      prefix = "/home/USERNAME/rust-staged"
-      sysconfdir = "etc"
-    [build]
-      docs = false
-    [rust]
-      lld = true
-    [llvm]
-      download-ci-llvm = false
-./x build library
-./x build --stage 2 compiler/rustc
-BOOTSTRAP_SKIP_TARGET_SANITY=1 ./x build --target x86_64-unknown-linux-gnu,mips-zkm-zkvm-elf
-BOOTSTRAP_SKIP_TARGET_SANITY=1 ./x install --target x86_64-unknown-linux-gnu,mips-zkm-zkvm-elf
-```
-
-Build/Install cargo:
-
-```bash
-git clone https://github.com/rust-lang/cargo.git
-cd cargo
-cargo build --release
-cargo install --path . --root=/home/USERNAME/rust-staged/
-```
-
-You now have the ZKM2 Rust toolchain installed in `/home/USERNAME/rust-staged/`.
+For more details, please refer to document [toolchain](https://github.com/zkMIPS/toolchain.git).
