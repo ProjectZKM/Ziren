@@ -43,8 +43,8 @@ wget https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONS
 ## Semaphore Install
 
 ```bash
-git clone https://github.com/jtguibas/semaphore-gnark-11.git
-git checkout ee57a61abfc3924c61ffc0a3d033bb92dfe7bbe8
+git clone https://github.com/felicityin/semaphore-gnark-11.git
+git checkout zkm2
 go build
 mv semaphore-mtb-setup semaphore-gnark-11
 cp semaphore-gnark-11 ../zkm2/crates/prover/
@@ -68,8 +68,8 @@ mkdir -p trusted-setup
 ```bash
 ./semaphore-gnark-11 p2c trusted-setup/phase2 trusted-setup/phase2-1-zkm
 ./semaphore-gnark-11 p2c trusted-setup/phase2-1-zkm trusted-setup/phase2-2-goat
-./semaphore-gnark-11 p2c trusted-setup/phase2-1-goat trusted-setup/phase2-2-metis
-cp trusted-setup/phase2-2-metis trusted-setup/phase2-final
+./semaphore-gnark-11 p2c trusted-setup/phase2-2-goat trusted-setup/phase2-3-metis
+cp trusted-setup/phase2-3-metis trusted-setup/phase2-final
 ```
 
 ## Export Keys

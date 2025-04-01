@@ -19,6 +19,8 @@ members = [
   "json/host",
   "keccak-precompile/guest",
   "keccak-precompile/host",
+  "plonk/guest",
+  "plonk/host",
   "regex/guest",
   "regex/host",
   "revme/guest",

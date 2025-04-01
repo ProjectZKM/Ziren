@@ -24,6 +24,7 @@ use zkm2_prover::{
 };
 use zkm2_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
+use crate::install::try_install_circuit_artifacts;
 use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 
 /// The type of prover.
@@ -152,8 +153,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &if zkm2_prover::build::zkm2_dev_mode() {
                         zkm2_prover::build::plonk_bn254_artifacts_dev_dir()
                     } else {
-                        panic!("only support dev mode for now");
-                        // try_install_circuit_artifacts("plonk")
+                        try_install_circuit_artifacts("plonk")
                     },
                 )
                 .map_err(ZKMVerificationError::Plonk),
@@ -166,8 +166,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &if zkm2_prover::build::zkm2_dev_mode() {
                         zkm2_prover::build::groth16_bn254_artifacts_dev_dir()
                     } else {
-                        panic!("only support dev mode for now");
-                        // try_install_circuit_artifacts("groth16")
+                        try_install_circuit_artifacts("groth16")
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),

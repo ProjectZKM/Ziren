@@ -2,24 +2,27 @@ use std::fs::File;
 use std::io::Read;
 use test_artifacts::HELLO_WORLD_ELF;
 use zkm2_prover::build::groth16_bn254_artifacts_dev_dir;
-use zkm2_sdk::{HashableKey, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm2_sdk::install::try_install_circuit_artifacts;
+use zkm2_sdk::{HashableKey, ProverClient, ZKMStdin};
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
 fn test_verify_groth16() {
-    // Location of the serialized ZKMProofWithPublicValues. See README.md for more information.
-    let proof_file = "test_binaries/fibonacci-groth16.bin";
+    // Set up the pk and vk.
+    let client = ProverClient::cpu();
+    let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
-    // Load the saved proof and extract the proof and public inputs.
-    let zkm2_proof_with_public_values = ZKMProofWithPublicValues::load(proof_file).unwrap();
+    // Generate the Groth16 proof.
+    let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
+    // Extract the proof and public inputs.
     let proof = zkm2_proof_with_public_values.bytes();
     let public_inputs = zkm2_proof_with_public_values.public_values.to_vec();
 
-    // This vkey hash was derived by calling `vk.bytes32()` on the verifying key.
-    let vkey_hash = "0x00572986f614be73c812f979a526a9ef1604ae040ec38b8c9a7eba87f5b6e5ee";
+    // Get the vkey hash.
+    let vkey_hash = vk.bytes32();
 
-    crate::Groth16Verifier::verify(&proof, &public_inputs, vkey_hash, &crate::GROTH16_VK_BYTES)
+    crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &crate::GROTH16_VK_BYTES)
         .expect("Groth16 proof is invalid");
 
     #[cfg(feature = "ark")]
@@ -36,24 +39,27 @@ fn test_verify_groth16() {
 
 #[test]
 fn test_verify_plonk() {
-    // Location of the serialized ZKMProofWithPublicValues. See README.md for more information.
-    let proof_file = "test_binaries/fibonacci-plonk.bin";
+    // Set up the pk and vk.
+    let client = ProverClient::cpu();
+    let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
-    // Load the saved proof and extract the proof and public inputs.
-    let zkm2_proof_with_public_values = ZKMProofWithPublicValues::load(proof_file).unwrap();
+    // Generate the Plonk proof.
+    let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).plonk().run().unwrap();
 
+    // Extract the proof and public inputs.
     let proof = zkm2_proof_with_public_values.bytes();
     let public_inputs = zkm2_proof_with_public_values.public_values.to_vec();
 
-    // This vkey hash was derived by calling `vk.bytes32()` on the verifying key.
-    let vkey_hash = "0x00e60860c07bfc6e4c480286c0ddbb879674eb47f84b4ef041cf858b17aa0ed1";
+    // Get the vkey hash.
+    let vkey_hash = vk.bytes32();
 
-    crate::PlonkVerifier::verify(&proof, &public_inputs, vkey_hash, &crate::PLONK_VK_BYTES)
+    crate::PlonkVerifier::verify(&proof, &public_inputs, &vkey_hash, &crate::PLONK_VK_BYTES)
         .expect("Plonk proof is invalid");
 }
 
 // ZKM_DEV=true RUST_LOG=debug cargo test -r test_e2e_verify_groth16 --features ark -- --nocapture
 #[test]
+#[ignore]
 fn test_e2e_verify_groth16() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
@@ -61,7 +67,6 @@ fn test_e2e_verify_groth16() {
 
     // Generate the Groth16 proof.
     std::env::set_var("ZKM_DEV", "true");
-    std::env::set_var("FRI_QUERIES", "1");
     let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
     client.verify(&zkm2_proof_with_public_values, &vk).unwrap();
@@ -93,4 +98,17 @@ fn test_e2e_verify_groth16() {
         .expect("Groth16 proof is invalid");
         assert!(valid);
     }
+}
+
+#[test]
+fn test_vkeys() {
+    let groth16_path = try_install_circuit_artifacts("groth16");
+    let s3_vkey_path = groth16_path.join("groth16_vk.bin");
+    let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
+    assert_eq!(s3_vkey_bytes, *crate::GROTH16_VK_BYTES);
+
+    let plonk_path = try_install_circuit_artifacts("plonk");
+    let s3_vkey_path = plonk_path.join("plonk_vk.bin");
+    let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
+    assert_eq!(s3_vkey_bytes, *crate::PLONK_VK_BYTES);
 }

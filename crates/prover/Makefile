@@ -8,11 +8,11 @@ build-circuits:
 	mkdir -p build/groth16 && \
 	mkdir -p build/plonk && \
 	RUST_LOG=debug RUSTFLAGS='-C target-cpu=native' \
-	cargo run -p zkm2-prover --release --bin build_groth16_bn254 --features native-gnark -- \
-	--build-dir=./build/groth16 && \
+		cargo run -p zkm2-prover --release --bin build_groth16_bn254 --features native-gnark -- \
+		--build-dir=./build/groth16 && \
 	RUST_LOG=debug RUSTFLAGS='-C target-cpu=native' \
-	cargo run -p zkm2-prover --release --bin build_plonk_bn254 --features native-gnark -- \
-	--build-dir=./build/plonk
+		cargo run -p zkm2-prover --release --bin build_plonk_bn254 --features native-gnark -- \
+		--build-dir=./build/plonk
 
 release-circuits:
 	@read -p "Release version (ex. v1.0.0-testnet)? " version; \

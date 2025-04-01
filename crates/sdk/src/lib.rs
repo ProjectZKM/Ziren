@@ -4,7 +4,7 @@
 
 pub mod action;
 // pub mod artifacts;
-// pub mod install;
+pub mod install;
 // #[cfg(feature = "network")]
 // pub mod network;
 // #[cfg(feature = "network-v2")]
@@ -514,8 +514,6 @@ mod tests {
     #[test]
     fn test_e2e_compressed() {
         utils::setup_logger();
-        std::env::set_var("ZKM_DEV", "true");
-        std::env::set_var("FRI_QUERIES", "1");
         let client = ProverClient::cpu();
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
@@ -536,8 +534,6 @@ mod tests {
     #[test]
     fn test_e2e_prove_plonk() {
         utils::setup_logger();
-        std::env::set_var("ZKM_DEV", "true");
-        std::env::set_var("FRI_QUERIES", "1");
         let client = ProverClient::cpu();
         let elf = test_artifacts::FIBONACCI_ELF;
         let (pk, vk) = client.setup(elf);
@@ -555,12 +551,9 @@ mod tests {
         }
     }
 
-    // RUST_LOG=debug ZKM_DEV=true FRI_QUERIES=1 cargo test -r test_e2e_prove_groth16
     #[test]
     fn test_e2e_prove_groth16() {
         utils::setup_logger();
-        std::env::set_var("ZKM_DEV", "true");
-        std::env::set_var("FRI_QUERIES", "1");
         let client = ProverClient::cpu();
         let elf = test_artifacts::HELLO_WORLD_ELF;
         let (pk, vk) = client.setup(elf);

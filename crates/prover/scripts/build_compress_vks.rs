@@ -18,7 +18,7 @@ struct Args {
     #[clap(short, long, default_value_t = 1)]
     num_compiler_workers: usize,
     #[clap(short, long, default_value_t = 1)]
-    num_setup_workers: usize,
+    count_setup_workers: usize,
     #[clap(short, long)]
     start: Option<usize>,
     #[clap(short, long)]
@@ -33,7 +33,7 @@ fn main() {
     let build_dir = args.build_dir;
     let dummy = args.dummy;
     let num_compiler_workers = args.num_compiler_workers;
-    let num_setup_workers = args.num_setup_workers;
+    let num_setup_workers = args.count_setup_workers;
     let range_start = args.start;
     let range_end = args.end;
 
