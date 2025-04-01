@@ -54,3 +54,61 @@ pub fn main() {
     zkm2_zkvm::io::commit(&b);
 }
 ```
+
+## Compiling Guest Program
+
+Now you need compile your guest program to an ELF file that can be executed in the zkVM.
+
+To enable automatic building of your guest crate when compiling/running the host crate, create a `build.rs` file in your `host/` directory (adjacent to the host crate's `Cargo.toml`) that utilizes the `zkm-build` crate.
+
+```shell
+.
+├── guest
+└── host
+    ├── build.rs # Add this file
+    ├── Cargo.toml
+    └── src
+```
+
+`build.rs`:
+```rust
+fn main() {
+    zkm2_build::build_program("../guest");
+}
+```
+
+And add `zkm2-build` as a build dependency in `host/Cargo.toml`:
+
+```toml
+[build-dependencies]
+zkm2-build = "1.0.0"
+```
+
+### Advanced Build Options
+
+The build process using `zkm2-build` can be configured by passing a `BuildArg`s struct to the `build_program_with_args()` function.
+
+For example, you can use the default `BuildArgs` to batch compile guest programs in a specified directory.
+
+```rust
+use std::io::{Error, Result};
+use std::io::path::PathBuf;
+
+use zkm2_build::{build_program_with_args, BuildArgs};
+
+fn main() -> Result<()> {
+    let tests_path = [env!("CARGO_MANIFEST_DIR"), "guests"]
+        .iter()
+        .collect::<PathBuf>()
+        .canonicalize()?;
+
+    build_program_with_args(
+        tests_path
+            .to_str()
+            .ok_or_else(|| Error::other(format!("expected {guests_path:?} to be valid UTF-8")))?,
+            BuildArgs::default(),
+    );
+
+    Ok(())
+}
+```

@@ -1,9 +1,6 @@
 //! # ZKM2 SDK
 //!
 //! A library for interacting with the ZKM2 MIPS zkVM.
-//!
-//! Visit the [Getting Started](https://succinctlabs.github.io/zkm2/getting-started.html) section
-//! in the official ZKM2 documentation for a quick start guide.
 
 pub mod action;
 // pub mod artifacts;

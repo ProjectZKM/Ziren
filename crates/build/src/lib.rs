@@ -20,7 +20,7 @@ pub const HELPER_TARGET_SUBDIR: &str = "elf-compilation";
 pub struct BuildArgs {
     #[clap(
         long,
-        help = "The ghcr.io/succinctlabs/ZKM image tag to use when building with Docker.",
+        help = "The ghcr.io/zkMIPS/ZKM image tag to use when building with Docker.",
         default_value = DEFAULT_TAG
     )]
     pub tag: String,
