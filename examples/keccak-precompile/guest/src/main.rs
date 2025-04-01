@@ -15,6 +15,6 @@ pub fn main() {
     zkm2_zkvm::io::commit::<Vec<u8>>(&input);
 
     let output = keccak256(&input.as_slice());
-    // assert_eq!(output.to_vec(), public_input);
+    assert_eq!(output.to_vec(), public_input);
     zkm2_zkvm::io::commit::<[u8; 32]>(&output);
 }
