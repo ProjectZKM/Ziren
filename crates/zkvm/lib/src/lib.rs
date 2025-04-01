@@ -10,6 +10,7 @@ pub mod io;
 pub mod keccak256;
 pub mod secp256k1;
 pub mod secp256r1;
+pub mod sha3;
 pub mod unconstrained;
 pub mod utils;
 #[cfg(feature = "verify")]

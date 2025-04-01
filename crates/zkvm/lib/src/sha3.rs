@@ -1,14 +1,13 @@
 use crate::syscall_keccak_sponge;
 
-pub fn keccak256(data: &[u8]) -> [u8; 32] {
+pub fn sha3_256(data: &[u8]) -> [u8; 32] {
     let len = data.len();
     let mut u32_array = Vec::new();
 
     if len == 0 {
         return [
-            0xC5, 0xD2, 0x46, 0x01, 0x86, 0xF7, 0x23, 0x3C, 0x92, 0x7E, 0x7D, 0xB2, 0xDC, 0xC7,
-            0x03, 0xC0, 0xE5, 0, 0xB6, 0x53, 0xCA, 0x82, 0x27, 0x3B, 0x7B, 0xFA, 0xD8, 0x04, 0x5D,
-            0x85, 0xA4, 0x70,
+            0xa7, 0xff, 0xc6, 0xf8, 0xbf, 0x1e, 0xd7, 0x66, 0x51, 0xc1, 0x47, 0x56, 0xa0, 0x61, 0xd6, 0x62,
+            0xf5, 0x80, 0xff, 0x4d, 0xe4, 0x3b, 0x49, 0xfa, 0x82, 0xd8, 0x0a, 0x4b, 0x80, 0xf8, 0x43, 0x4a
         ];
     }
 
@@ -21,10 +20,9 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
     padded_data.resize(padded_len, 0);
 
     if len % 136 == 135 {
-        // Both 1s are placed in the same byte.
-        padded_data[padded_len - 1 as usize] = 0b10000001;
+        padded_data[padded_len - 1 as usize] = 0b10000110;
     } else {
-        padded_data[len] = 1;
+        padded_data[len] = 6;
         padded_data[padded_len - 1 as usize] = 0b10000000;
     }
 
@@ -42,7 +40,7 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
     }
 
     let mut general_result = [0u32; 17];
-    let mut keccak256_result = [0u8; 32];
+    let mut sha3_256_result = [0u8; 32];
     // Write the number which indicate the rate length (bytes) in the first cell of result.
     general_result[16] = u32_array.len() as u32;
     // Call precompile
@@ -51,6 +49,6 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
     }
 
     let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result)};
-    keccak256_result.copy_from_slice(&tmp[..32]);
-    keccak256_result
+    sha3_256_result.copy_from_slice(&tmp[..32]);
+    sha3_256_result
 }
