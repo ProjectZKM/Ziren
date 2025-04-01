@@ -6,16 +6,14 @@
 pub mod bls12381;
 pub mod bn254;
 pub mod ed25519;
-pub mod hasher;
+pub mod keccak256;
 pub mod io;
-pub mod keccak;
 pub mod secp256k1;
 pub mod secp256r1;
 pub mod unconstrained;
 pub mod utils;
 #[cfg(feature = "verify")]
 pub mod verify;
-pub mod keccak256;
 
 extern "C" {
     /// Halts the program with the given exit code.
@@ -71,9 +69,6 @@ extern "C" {
 
     /// Executes the Keccak Sponge
     pub fn syscall_keccak_sponge(input: *const u32, result: *mut [u32; 17]);
-
-    /// Executes the Keccak Permute
-    pub fn syscall_keccak_permute();
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);

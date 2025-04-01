@@ -118,7 +118,7 @@ impl KeccakSpongeChip {
                 cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
                 cols.is_absorbed = F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
                 cols.is_first_input_block = F::from_bool(i == 0);
-                cols.is_last_input_block = F::from_bool(i == (block_num - 1));
+                cols.is_final_input_block = F::from_bool(i == (block_num - 1));
                 cols.read_block = F::from_bool(round == 0);
                 cols.receive_syscall = F::from_bool(i == 0 && round == 0);
                 cols.write_output = F::from_bool(i == (block_num - 1) && round == (NUM_ROUNDS - 1));

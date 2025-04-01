@@ -1,4 +1,4 @@
-use crate::{syscall_keccak_permute, syscall_keccak_sponge};
+use crate::syscall_keccak_sponge;
 
 pub fn keccak256(data: &[u8]) -> [u8; 32] {
     let len = data.len();
@@ -16,7 +16,8 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
     let final_block_len = len % 136;
     let padded_len = len - final_block_len + 136;
 
-    let mut padded_data = data.to_vec();
+    let mut padded_data = Vec::with_capacity(padded_len);
+    padded_data.extend_from_slice(data);
     padded_data.resize(padded_len, 0);
 
     if len % 136 == 135 {
@@ -29,18 +30,17 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 
     // covert to u32 to align the memory
     let mut count = 0;
-    for i in (0..padded_len).step_by(4) {
-        let u32_value = u32::from_be_bytes([padded_data[i + 3], padded_data[i + 2], padded_data[i + 1], padded_data[i]]);
+    u32_array.reserve(padded_len / 4 + (padded_len / 136) * 2);
+    for chunk in padded_data.chunks_exact(4) {
+        let u32_value = u32::from_be_bytes([chunk[3], chunk[2], chunk[1], chunk[0]]);
         u32_array.push(u32_value);
         count += 1;
-        // each block already has 34 u32 numbers, need to pad 2 u32 0s for each
         if count == 34 {
-            for _ in 0..2 {
-                u32_array.push(0);
-            }
+            u32_array.extend_from_slice(&[0, 0]);
             count = 0;
         }
     }
+
     let mut general_result = [0u32; 17];
     let mut sha3_256_result = [0u8; 32];
     // Write the number which indicate the rate length (bytes) in the first cell of result.

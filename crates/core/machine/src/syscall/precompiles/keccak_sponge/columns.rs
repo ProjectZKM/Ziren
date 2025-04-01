@@ -26,7 +26,7 @@ pub(crate) struct KeccakSpongeCols<T> {
     pub receive_syscall: T,
     pub write_output: T,
     pub is_first_input_block: T,
-    pub is_last_input_block: T,
+    pub is_final_input_block: T,
     pub original_state: [Word<T>; KECCAK_STATE_U32S],
     pub xored_general_rate: [XorOperation<T>; KECCAK_GENERAL_RATE_U32S],
     pub input_length_mem: MemoryReadCols<T>,
