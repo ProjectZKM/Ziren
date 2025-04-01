@@ -20,7 +20,6 @@ use zkm2_stark::{
     air::{LookupScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
     Chip, LookupKind, StarkGenericConfig, StarkMachine,
 };
-use crate::syscall::precompiles::keccak_sponge::KeccakSpongeChip;
 
 /// A module for importing all the different MIPS chips.
 pub(crate) mod mips_chips {
@@ -40,7 +39,7 @@ pub(crate) mod mips_chips {
             instructions::SyscallInstrsChip,
             precompiles::{
                 edwards::{EdAddAssignChip, EdDecompressChip},
-                keccak256::KeccakPermuteChip,
+                keccak_sponge::KeccakSpongeChip,
                 sha256::{ShaCompressChip, ShaExtendChip},
                 u256x2048_mul::U256x2048MulChip,
                 uint256::Uint256MulChip,
@@ -138,8 +137,6 @@ pub enum MipsAir<F: PrimeField32> {
     Secp256r1Add(WeierstrassAddAssignChip<SwCurve<Secp256r1Parameters>>),
     /// A precompile for doubling a point on the Elliptic curve secp256r1.
     Secp256r1Double(WeierstrassDoubleAssignChip<SwCurve<Secp256r1Parameters>>),
-    // /// A precompile for the Keccak permutation.
-    KeccakP(KeccakPermuteChip),
     /// A precompile for the Keccak Sponge
     KeccakSponge(KeccakSpongeChip),
     /// A precompile for addition on the Elliptic curve bn254.
@@ -265,12 +262,8 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(secp256r1_double_assign.name(), secp256r1_double_assign.cost());
         chips.push(secp256r1_double_assign);
 
-        let keccak_permute = Chip::new(MipsAir::KeccakP(KeccakPermuteChip::new()));
-        costs.insert(keccak_permute.name(), 24 * keccak_permute.cost());
-        chips.push(keccak_permute);
-
         let keccak_sponge = Chip::new(MipsAir::KeccakSponge(KeccakSpongeChip::new()));
-        costs.insert(keccak_sponge.name(),  keccak_sponge.cost());
+        costs.insert(keccak_sponge.name(),  24 * keccak_sponge.cost());
         chips.push(keccak_sponge);
 
         let bn254_add_assign = Chip::new(MipsAir::Bn254Add(WeierstrassAddAssignChip::<
@@ -477,7 +470,7 @@ impl<F: PrimeField32> MipsAir<F> {
             .map(|events| {
                 let mut num_rows = events.len() * self.rows_per_event();
                 if self.syscall_code() == SyscallCode::KECCAK_SPONGE {
-                    num_rows = events.iter().map(|(sys_e, pre_e)| {
+                    num_rows = events.iter().map(|(_, pre_e)| {
                         if let PrecompileEvent::KeccakSponge(event) = pre_e {
                             event.num_blocks() * 24
                         } else {
@@ -606,7 +599,6 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
-            Self::KeccakP(_) => SyscallCode::KECCAK_PERMUTE,
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
             Self::DivRem(_) => unreachable!("Invalid for core chip"),

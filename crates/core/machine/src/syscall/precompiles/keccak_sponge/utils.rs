@@ -1,5 +1,5 @@
-use tiny_keccak::keccakf;
 use crate::syscall::precompiles::keccak_sponge::KECCAK_STATE_U32S;
+use tiny_keccak::keccakf;
 
 /// Like tiny-keccak's `keccakf`, but deals with `u32` limbs instead of `u64` limbs.
 pub(crate) fn keccakf_u32s(state_u32s: &mut [u32; KECCAK_STATE_U32S]) {

@@ -6,7 +6,6 @@ mod sha256_compress;
 mod sha256_extend;
 mod u256x2048_mul;
 mod uint256;
-mod keccak256_permute;
 
 use crate::syscalls::SyscallCode;
 pub use ec::*;
@@ -14,7 +13,6 @@ pub use edwards::*;
 pub use fptower::*;
 use hashbrown::HashMap;
 pub use keccak_sponge::*;
-pub use keccak256_permute::*;
 use serde::{Deserialize, Serialize};
 pub use sha256_compress::*;
 pub use sha256_extend::*;
@@ -32,8 +30,6 @@ pub enum PrecompileEvent {
     ShaCompress(ShaCompressEvent),
     /// Keccak sponge precompile event.
     KeccakSponge(KeccakSpongeEvent),
-    /// Keccak permutation precompile event.
-    KecakPermute(KeccakPermuteEvent),
     /// Edwards curve add precompile event.
     EdAdd(EllipticCurveAddEvent),
     /// Edwards curve decompress precompile event.
@@ -99,9 +95,6 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::KeccakSponge(e) => {
-                    iterators.push(e.local_mem_access.iter());
-                }
-                PrecompileEvent::KecakPermute(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::EdDecompress(e) => {

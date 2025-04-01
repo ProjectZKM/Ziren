@@ -1,5 +1,4 @@
 use p3_keccak_air::KeccakAir;
-use crate::KeccakPermuteChip;
 
 mod air;
 mod columns;
@@ -24,7 +23,6 @@ pub mod sponge_tests {
     use test_artifacts::KECCAK_SPONGE_ELF;
     use zkm2_core_executor::Program;
     use zkm2_stark::CpuProver;
-//
     use crate::utils::{self, run_test};
     #[test]
     fn test_keccak_sponge_program_prove() {

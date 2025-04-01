@@ -1,21 +1,21 @@
+use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
+use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
+use crate::syscall::precompiles::keccak_sponge::{
+    KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
+};
+
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
-use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
-use zkm2_core_executor::{ExecutionRecord, Program};
-use zkm2_core_executor::events::{ByteLookupEvent, ByteRecord, KeccakSpongeEvent, PrecompileEvent, ShaCompressEvent};
-use zkm2_core_executor::syscalls::SyscallCode;
-use zkm2_stark::{MachineAir, Word};
-use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
-use crate::syscall::precompiles::keccak_sponge::{KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S};
-use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
-use std::borrow::BorrowMut;
 use p3_keccak_air::{generate_trace_rows, NUM_KECCAK_COLS, NUM_ROUNDS};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
-use crate::syscall::precompiles::keccak256::columns::NUM_KECCAK_PERMUTE_COLS;
-use crate::syscall::precompiles::keccak256::STATE_SIZE;
-use crate::utils::pad_rows_fixed;
+use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
+use std::borrow::BorrowMut;
+use zkm2_core_executor::events::{ByteLookupEvent, ByteRecord, KeccakSpongeEvent, PrecompileEvent};
+use zkm2_core_executor::syscalls::SyscallCode;
+use zkm2_core_executor::{ExecutionRecord, Program};
+use zkm2_stark::{MachineAir, Word};
 
 impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     type Record = ExecutionRecord;
@@ -63,7 +63,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();
 
-        let dummy_keccak_rows = generate_trace_rows::<F>(vec![[0; STATE_SIZE]]);
+        let dummy_keccak_rows = generate_trace_rows::<F>(vec![[0; KECCAK_STATE_U32S / 2]]);
         let mut dummy_chunk = Vec::new();
         for i in 0..NUM_ROUNDS {
             let dummy_row = dummy_keccak_rows.row(i);
@@ -107,7 +107,8 @@ impl KeccakSpongeChip {
             for round in 0..NUM_ROUNDS {
                 let mut row = [F::ZERO; NUM_KECCAK_SPONGE_COLS];
                 let p3_keccak_row = p3_keccak_trace.row(round);
-                row[..NUM_KECCAK_COLS].copy_from_slice(p3_keccak_row.collect::<Vec<_>>().as_slice());
+                row[..NUM_KECCAK_COLS]
+                    .copy_from_slice(p3_keccak_row.collect::<Vec<_>>().as_slice());
 
                 let cols: &mut KeccakSpongeCols<F> = row.as_mut_slice().borrow_mut();
 
@@ -121,15 +122,21 @@ impl KeccakSpongeChip {
                 cols.is_final_input_block = F::from_bool(i == (block_num - 1));
                 cols.read_block = F::from_bool(round == 0);
                 cols.receive_syscall = F::from_bool(i == 0 && round == 0);
-                cols.write_output = F::from_bool(i == (block_num - 1) && round == (NUM_ROUNDS - 1));
+                cols.write_output =
+                    F::from_bool(i == (block_num - 1) && round == (NUM_ROUNDS - 1));
                 cols.output_address = F::from_canonical_u32(event.output_addr);
                 // 4 bytes per u32
-                cols.input_address = F::from_canonical_u32(event.input_addr + i as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4);
+                cols.input_address = F::from_canonical_u32(
+                    event.input_addr + i as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4,
+                );
 
                 // read the input
                 if round == 0 {
                     for j in 0..KECCAK_GENERAL_RATE_U32S {
-                        cols.block_mem[j].populate(event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j], blu);
+                        cols.block_mem[j].populate(
+                            event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j],
+                            blu,
+                        );
                     }
                 }
 
@@ -142,7 +149,10 @@ impl KeccakSpongeChip {
                 if round == 0 {
                     for j in 0..KECCAK_GENERAL_RATE_U32S {
                         xored_rate_u32s[j] = cols.xored_general_rate[j].populate(
-                            blu, state_u32s[j], event.input[i * KECCAK_GENERAL_RATE_U32S + j]);
+                            blu,
+                            state_u32s[j],
+                            event.input[i * KECCAK_GENERAL_RATE_U32S + j],
+                        );
                     }
                 }
 

@@ -5,6 +5,7 @@ mod ed25519;
 mod fptower;
 mod halt;
 mod io;
+mod keccak_sponge;
 mod memory;
 mod secp256k1;
 mod secp256r1;
@@ -16,7 +17,6 @@ mod uint256_mul;
 mod unconstrained;
 #[cfg(feature = "verify")]
 mod verify;
-mod keccak_sponge;
 
 pub use bigint::*;
 pub use bls12381::*;

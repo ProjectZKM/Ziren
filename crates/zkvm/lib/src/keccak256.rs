@@ -50,8 +50,7 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }
 
-    let tmp: &mut [u8; 64] =
-        unsafe { core::mem::transmute(&mut general_result)};
+    let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result)};
     sha3_256_result.copy_from_slice(&tmp[..32]);
     sha3_256_result
 }

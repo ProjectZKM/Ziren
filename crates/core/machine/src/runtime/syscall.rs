@@ -10,7 +10,7 @@ use crate::runtime::{Register, Runtime};
 use crate::syscall::precompiles::edwards::EdAddAssignChip;
 use crate::syscall::precompiles::edwards::EdDecompressChip;
 use crate::syscall::precompiles::fptower::{Fp2AddSubSyscall, Fp2MulAssignChip, FpOpSyscall};
-use crate::syscall::precompiles::keccak256::KeccakPermuteChip;
+use crate::syscall::precompiles::keccak_sponge::KeccakSpongeChip;
 use crate::syscall::precompiles::sha256::{ShaCompressChip, ShaExtendChip};
 use crate::syscall::precompiles::u256x2048_mul::U256x2048MulChip;
 use crate::syscall::precompiles::uint256::Uint256MulChip;
@@ -61,9 +61,6 @@ pub enum SyscallCode {
 
     /// Executes the `ED_DECOMPRESS` precompile.
     ED_DECOMPRESS = 0x00_00_01_08,
-
-    /// Executes the `KECCAK_PERMUTE` precompile
-    KECCAK_PERMUTE = 0x00_01_01_09,
 
     /// Executes the `KECCAK_SPONGE` precompile.
     KECCAK_SPONGE = 0x00_01_01_30,
@@ -172,7 +169,6 @@ impl SyscallCode {
             0x00_01_01_07 => SyscallCode::ED_ADD,
             0x00_00_01_08 => SyscallCode::ED_DECOMPRESS,
             0x00_01_01_30 => SyscallCode::KECCAK_SPONGE,
-            0x00_01_01_09 => SyscallCode::KECCAK_PERMUTE,
             0x00_01_01_0A => SyscallCode::SECP256K1_ADD,
             0x00_00_01_0B => SyscallCode::SECP256K1_DOUBLE,
             0x00_00_01_0C => SyscallCode::SECP256K1_DECOMPRESS,
@@ -358,7 +354,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::ED_ADD, Arc::new(EdAddAssignChip::<Ed25519>::new()));
     syscall_map
         .insert(SyscallCode::ED_DECOMPRESS, Arc::new(EdDecompressChip::<Ed25519Parameters>::new()));
-    syscall_map.insert(SyscallCode::KECCAK_PERMUTE, Arc::new(KeccakPermuteChip::new()));
+    syscall_map.insert(SyscallCode::KECCAK_SPONGE, Arc::new(KeccakSpongeChip));
     syscall_map
         .insert(SyscallCode::SECP256K1_ADD, Arc::new(WeierstrassAddAssignChip::<Secp256k1>::new()));
     syscall_map.insert(
@@ -502,9 +498,6 @@ mod tests {
                 SyscallCode::ED_ADD => assert_eq!(code as u32, zkm2_zkvm::syscalls::ED_ADD),
                 SyscallCode::ED_DECOMPRESS => {
                     assert_eq!(code as u32, zkm2_zkvm::syscalls::ED_DECOMPRESS)
-                }
-                SyscallCode::KECCAK_PERMUTE => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::KECCAK_PERMUTE)
                 }
                 SyscallCode::SECP256K1_ADD => {
                     assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256K1_ADD)

@@ -3,7 +3,6 @@ members = [
   "sha2-rust",
   "sha2",
   "sha-extend",
-  "keccak-permute",
   "keccak256",
   "keccak-sponge",
   "panic",

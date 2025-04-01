@@ -1,3 +1,9 @@
+use crate::air::{MemoryAirBuilder, WordAirBuilder};
+use crate::memory::MemoryCols;
+use crate::operations::XorOperation;
+use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
+use crate::syscall::precompiles::keccak_sponge::{KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S};
+
 use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::FieldAlgebra;
@@ -5,11 +11,6 @@ use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
 use zkm2_core_executor::syscalls::SyscallCode;
 use zkm2_stark::{LookupScope, SubAirBuilder, ZKMAirBuilder};
-use crate::air::{MemoryAirBuilder, WordAirBuilder};
-use crate::memory::MemoryCols;
-use crate::operations::XorOperation;
-use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
-use crate::syscall::precompiles::keccak_sponge::{KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S};
 
 impl<F> BaseAir<F> for KeccakSpongeChip {
     fn width(&self) -> usize {
@@ -75,7 +76,10 @@ where
         }
 
         // Constrain the absorbed bytes
-        builder.when_transition().when(not_final_step).assert_eq(local.already_absorbed_u32s, next.already_absorbed_u32s);
+        builder
+            .when_transition()
+            .when(not_final_step)
+            .assert_eq(local.already_absorbed_u32s, next.already_absorbed_u32s);
         // If this is the first block, absorbed bytes should be 0
         builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::ZERO);
         // If this is the final block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
@@ -87,12 +91,14 @@ where
         // equal to the previous absorbed bytes + KECCAK_GENERAL_RATE_U32S
         builder.when(local.is_absorbed).assert_eq(
             local.already_absorbed_u32s,
-            next.already_absorbed_u32s - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32),
+            next.already_absorbed_u32s
+                - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32),
         );
         // check the input address
         builder.when(local.is_absorbed).assert_eq(
             local.input_address,
-            next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
+            next.input_address
+                - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
         // Eval the plonky3 keccak air
@@ -138,12 +144,12 @@ impl KeccakSpongeChip {
             local.clk,
             local.output_address + AB::Expr::from_canonical_u32(64),
             &local.input_length_mem,
-            local.receive_syscall
+            local.receive_syscall,
         );
         // Verify the input length has not changed
-        builder.when(local.is_real).assert_word_eq(
-            *local.input_length_mem.value(),
-            *local.input_length_mem.prev_value());
+        builder
+            .when(local.is_real)
+            .assert_word_eq(*local.input_length_mem.value(), *local.input_length_mem.prev_value());
 
         // Read the input block
         for i in 0..KECCAK_GENERAL_RATE_U32S as u32 {
@@ -157,9 +163,9 @@ impl KeccakSpongeChip {
         }
         // Verify the input has not changed
         for i in 0..KECCAK_GENERAL_RATE_U32S {
-            builder.when(local.is_real).assert_word_eq(
-                *local.block_mem[i].value(),
-                *local.block_mem[i].prev_value());
+            builder
+                .when(local.is_real)
+                .assert_word_eq(*local.block_mem[i].value(), *local.block_mem[i].prev_value());
         }
 
         // If this is the final round of the final block, write the output
@@ -222,7 +228,7 @@ impl KeccakSpongeChip {
             }
         }
 
-        for i in (KECCAK_GENERAL_RATE_U32S / 2)..(KECCAK_STATE_U32S / 2){
+        for i in (KECCAK_GENERAL_RATE_U32S / 2)..(KECCAK_STATE_U32S / 2) {
             let y_idx = i / 5;
             let x_idx = i % 5;
 

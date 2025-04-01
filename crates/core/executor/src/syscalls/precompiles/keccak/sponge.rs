@@ -3,7 +3,7 @@ use crate::{
 };
 
 use tiny_keccak::keccakf;
-use crate::events::{KeccakPermuteEvent, KeccakSpongeEvent, PrecompileEvent};
+use crate::events::{KeccakSpongeEvent, PrecompileEvent};
 
 pub(crate) const STATE_SIZE_U64S: usize = 25;
 pub(crate) const GENERAL_BLOCK_SIZE_U32S: usize = 36;

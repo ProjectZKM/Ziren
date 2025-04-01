@@ -47,7 +47,6 @@ use zkm2_curves::{
 };
 
 use crate::events::FieldOperation;
-use crate::syscalls::precompiles::keccak::permute::Keccak256PermuteSyscall;
 use crate::syscalls::precompiles::keccak::sponge::KeccakSpongeSyscall;
 
 /// A system call in the ZKM2 MIPS zkVM.
@@ -96,8 +95,6 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
 
     syscall_map.insert(SyscallCode::KECCAK_SPONGE, Arc::new(KeccakSpongeSyscall));
-
-    syscall_map.insert(SyscallCode::KECCAK_PERMUTE, Arc::new(Keccak256PermuteSyscall));
 
     syscall_map.insert(
         SyscallCode::SECP256K1_ADD,
