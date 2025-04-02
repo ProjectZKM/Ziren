@@ -14,6 +14,7 @@
     - [Prover](./dev/prover.md)
     - [Proof Composition](./dev/proof-composition.md)
     - [Precompiles](./dev/precompiles.md)
+    - [Patched Crates](./dev/patched-crates.md)
 - [Design](./design/design.md)
     - [State Machine](./design/chips/state-machine.md)
         - [CPU](./design/chips/cpu.md)

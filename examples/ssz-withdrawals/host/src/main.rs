@@ -10,6 +10,11 @@ fn main() {
     let stdin = ZKMStdin::new();
     let client = ProverClient::new();
     let (pk, vk) = client.setup(ELF);
+
+    // Execute the guest using the `ProverClient.execute` method, without generating a proof.
+    let (_, report) = client.execute(ELF, stdin.clone()).run().unwrap();
+    println!("executed program with {} cycles", report.total_instruction_count());
+
     let proof = client.prove(&pk, stdin).run().expect("proving failed");
 
     // Verify proof.
