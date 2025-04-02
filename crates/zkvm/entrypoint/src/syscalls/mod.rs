@@ -66,7 +66,7 @@ pub const ED_ADD: u32 = 0x00_01_01_07;
 pub const ED_DECOMPRESS: u32 = 0x00_00_01_08;
 
 /// Executes `KECCAK_SPONGE`.
-pub const KECCAK_SPONGE: u32 = 0x00_01_01_30;
+pub const KECCAK_SPONGE: u32 = 0x00_01_01_09;
 
 /// Executes `SECP256K1_ADD`.
 pub const SECP256K1_ADD: u32 = 0x00_01_01_0A;
