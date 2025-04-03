@@ -1,3 +1,5 @@
+# Patched Crates
+
 Patching a crate refers to replacing the implementation of a specific interface within the crate with a corresponding zkVM precompile, which can achieve significant performance improvements.
 
 ## Supported Crates
