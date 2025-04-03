@@ -57,28 +57,6 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     }
 }
 
-/*
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>> Witnessable<C>
-    for InnerPcsProof
-{
-    type WitnessVariable = TwoAdicPcsProofVariable<C, KoalaBearPoseidon2>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let fri_proof = self.fri_proof.read(builder);
-        let query_openings = self.query_openings.read(builder);
-        Self::WitnessVariable {
-            fri_proof,
-            query_openings,
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.fri_proof.write(witness);
-        self.query_openings.write(witness);
-    }
-}
-*/
-
 impl<C> Witnessable<C> for InnerBatchOpening
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>,

@@ -2,11 +2,12 @@ Patching a crate refers to replacing the implementation of a specific interface 
 
 ## Supported Crates
 
-| Crate Name        | **Repository**                                               | **Notes**      | **Versions** |
+| **Crate Name**        | **Repository**                                               | **Notes**      | **Versions** |
 | ----------------- | ------------------------------------------------------------ | -------------- | ------------ |
 | revm-primitives/k | [zkMIPS/revm](https://github.com/zkMIPS/revm)                | keccak256      | 6.0.0        |
 | sha2              | [zkMIPS-patches/RustCrypto-hashes](https://github.com/zkMIPS-patches/RustCrypto-hashes) | sha256         | 0.10.8       |
 | curve25519-dalek  | [zkMIPS-patches/curve25519-dalek](https://github.com/zkMIPS-patches/curve25519-dalek) | ed25519 verify | 4.1.3        |
+| rsa               | [zkMIPS-patches/RustCrypto-RSA](https://github.com/zkMIPS-patches/RustCrypto-RSA) | RSA            | 0.9.6        |
 
 ## Using Patched Crates
 
@@ -34,6 +35,9 @@ sha2 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes.git", packag
 When patching a crate from a GitHub repository rather than crates.io, you need to explicitly declare the source repository in the patch section. For example:
 
 ```
+[dependencies]
+ed25519-dalek = { git = "https://github.com/dalek-cryptography/curve25519-dalek" }
+
 [patch."https://github.com/dalek-cryptography/curve25519-dalek"]
 ed25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", branch = "patch-curve25519-v4.1.3" }
 ```

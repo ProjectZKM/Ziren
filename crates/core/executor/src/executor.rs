@@ -342,41 +342,6 @@ impl<'a> Executor<'a> {
         runtime
     }
 
-    /*
-        /// Get the current values of the registers.
-        #[allow(clippy::single_match_else)]
-        #[must_use]
-        pub fn registers(&mut self) -> [u32; 32] {
-            let mut registers = [0; 32];
-            for i in 0..32 {
-                let addr = Register::from_u8(i as u8) as u32;
-                let record = self.state.memory.get(addr);
-
-                // Only add the previous memory state to checkpoint map if we're in checkpoint mode,
-                // or if we're in unconstrained mode. In unconstrained mode, the mode is always
-                // Simple.
-                if self.executor_mode == ExecutorMode::Checkpoint || self.unconstrained {
-                    match record {
-                        Some(record) => {
-                            self.memory_checkpoint
-                                .entry(addr)
-                                .or_insert_with(|| Some(*record));
-                        }
-                        None => {
-                            self.memory_checkpoint.entry(addr).or_insert(None);
-                        }
-                    }
-                }
-
-                registers[i] = match record {
-                    Some(record) => record.value,
-                    None => 0,
-                };
-            }
-            registers
-        }
-    */
-
     /// Get the current value of a register, but doesn't use a memory record.
     /// Careful call it directly.
     #[must_use]

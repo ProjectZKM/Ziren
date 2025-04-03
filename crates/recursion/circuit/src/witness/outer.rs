@@ -66,26 +66,6 @@ impl Witnessable<OuterConfig> for OuterBatchOpening {
     }
 }
 
-/*
-impl Witnessable<OuterConfig> for OuterPcsProof {
-    type WitnessVariable = TwoAdicPcsProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
-
-    fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
-        let fri_proof = self.fri_proof.read(builder);
-        let query_openings = self.query_openings.read(builder);
-        Self::WitnessVariable {
-            fri_proof,
-            query_openings,
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        self.fri_proof.write(witness);
-        self.query_openings.write(witness);
-    }
-}
-*/
-
 impl Witnessable<OuterConfig> for OuterFriProof {
     type WitnessVariable = FriProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
