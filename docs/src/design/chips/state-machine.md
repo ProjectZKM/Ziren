@@ -16,6 +16,10 @@ Core Components:
    
   The ALU Chips manage common field operations and bitwise operations. These chips are responsible for verifying correctness of arithmetic and bitwise operations and throug corss-table lookups from the main CPU Chip to make sure executing the correct instructions.
 
+- Flow-Control Chips
+  
+  Flow control mechanisms are ​fundamental components in modern computer programs, ​enhancing program functionality and execution flexibility by providing structured control mechanisms. In the ZKM2, ​dedicated modules — ​the Branch Chip and Jump Chip — ​are implemented to handle branch instructions and jump instructions ​respectively within the MIPS Instruction Set Architecture (ISA).
+  
 - ​Memory Chips
   
   Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. ZKM2 use multiset hashing based offline memory consistnecy checking in the main operation of its memory argument with several memory tables.  
