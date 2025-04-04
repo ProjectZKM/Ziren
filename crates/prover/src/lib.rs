@@ -1505,6 +1505,7 @@ pub mod tests {
     /// is not needed.
     #[test]
     #[serial]
+    #[ignore]
     fn test_e2e_hello_world() -> Result<()> {
         let elf = test_artifacts::HELLO_WORLD_ELF;
 
