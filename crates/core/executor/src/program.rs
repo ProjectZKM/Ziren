@@ -1,4 +1,4 @@
-//! Programs that can be executed by the ZKM.
+//! Programs that can be executed by the ZKM2.
 
 extern crate alloc;
 

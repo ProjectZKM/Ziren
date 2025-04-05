@@ -300,7 +300,6 @@ impl ExecutionRecord {
 }
 
 /// A memory access record.
-/// todo: use mips
 #[derive(Debug, Copy, Clone, Default)]
 pub struct MemoryAccessRecord {
     /// The memory access of the `a` register. read && write

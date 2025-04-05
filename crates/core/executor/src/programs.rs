@@ -1,4 +1,4 @@
-//! RV32IM ELFs used for testing.
+//! MIPS ELFs used for testing.
 
 #[allow(dead_code)]
 #[allow(missing_docs)]
