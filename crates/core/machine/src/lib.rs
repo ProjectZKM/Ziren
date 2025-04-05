@@ -38,7 +38,7 @@ pub use mips::*;
 /// This string should be updated whenever any step in verifying an ZKM2 proof changes, including
 /// core, recursion, and plonk-bn254. This string is used to download ZKM2 artifacts and the gnark
 /// docker image.
-pub const ZKM_CIRCUIT_VERSION: &str = "v0.0.2";
+pub const ZKM_CIRCUIT_VERSION: &str = "v1.0.0";
 
 // Re-export the `ZKMReduceProof` struct from zkm2_core_machine.
 //
