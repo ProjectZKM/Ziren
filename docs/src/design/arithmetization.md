@@ -1,21 +1,21 @@
 # Arithmetization
 
-
 Algebraic Intermediate Representation (AIR) serves as the arithmeticization foundation in the ZKM2 system, bridging computation and succinct cryptographic proofs. AIR provides a structured method to represent computations through polynomial constraints over execution traces.
 
-## Key Concepts of AIR:
+## Key Concepts of AIR
 - Execution Trace
-
+  
   A tabular structure where each row represents system state at a computation step, with columns corresponding to registers/variables. 
+
 - Transition Constraints
-
+  
   Algebraic relationships enforced between consecutive rows, expressed as low-degree polynomials (e.g., \\(P(state_i, state_{i+1}) = 0\\)).
-- Boundary Constraints
 
+- Boundary Constraints
+  
   Ensure valid initial/final states (e.g., \\(state_0 = initial\\_value\\)).
 
-These constraints utilize low-degree polynomials for efficient proof generation/verification. See [AIR](https://eprint.iacr.org/2023/661.pdf) for a rigorous and detailed technical exposition.
-
+These constraints utilize low-degree polynomials for efficient proof generation/verification. ZKM2 mandates degree-3 polynomial constraints within its AIR framework, establishing a formally verifiable equilibrium between proof generation efficiency and trace column representation compactness. [See AIR paper](https://eprint.iacr.org/2023/661.pdf) for rigorous technical details.
 
 ## AIR Implementation in ZKM2 Chips
 
@@ -27,106 +27,119 @@ This process aligns with AIR's core functionality by:
 - Treating column values as polynomial evaluations.
 - Encoding value constraints as polynomial relationships.
 
-We use AddSub Chip as an example to show how AIR is used in ZKM2. The AddSub Chip demonstrates AIR's application for verifying 32-bit integer arithmetic operations. Recall the structural definition of AddSub Chip: 
+## AddSub Chip Example
+
+### Supported MIPS Instructions
+
+| instruction | Op [31:26] | rs [25:21]  | rt [20:16]  | rd [15:11]  | shamt [10:6] | func [5:0]  | function                                                     |
+| ----------- | ---------- | ----------- | ----------- | ----------- | ------------ | ----------- | ------------------------------------------------------------ |
+| ADD         | 000000     | rs          | rt          | rd          | 00000        | 100000      | rd = rs+rt                                                   |
+| ADDI        | 001000     | rs          | rt          | imm         | imm          | imm         | rt = rs + sext(imm)                                          |
+| ADDIU       | 001001     | rs          | rt          | imm         | imm          | imm         | rt = rs + sext(imm)                                          |
+| ADDU        | 000000     | rs          | rt          | rd          | 00000        | 100001      | rd = rs+rt                                                   |
+| SUB         | 000000     | rs          | rt          | rd          | 00000        | 100010      | rd = rs - rt                                                 |
+| SUBU        | 000000     | rs          | rt          | rd          | 00000        | 100011      | rd = rs - rt |
+
+
+### Column Structure
 
 ```rust
 pub struct AddSubCols<T> {
-    /// Execution context identifier for table joins
-    pub shard: T,
+    // Program flow
+    pub pc: T,          
+    pub next_pc: T,    
     
-    /// Additive operation constraints (a = b + c)
-    pub add_operation: AddOperation<T>,
+    // Core operation
+    pub add_operation: AddOperation<T>,  // Shared adder for both ops (a = b + c)
     
-    /// Primary operand (b in ADD, a in SUB) 
-    pub operand_1: Word<T>,
-    
-    /// Secondary operand
+    // Input operands (context-sensitive):
+    // - ADD: operand_1 = b, operand_2 = c 
+    // - SUB: operand_1 = a, operand_2 = c
+    pub operand_1: Word<T>,  
     pub operand_2: Word<T>,
     
-    /// Operation flags
-    pub is_add: T,  // ADD/ADDI flag
-    pub is_sub: T   // SUB flag
+    // Validation flags
+    pub op_a_not_0: T,  // Non-zero guard for first operand
+    pub is_add: T,      // ADD opcode flag
+    pub is_sub: T,      // SUB opcode flag
 }
 
 pub struct AddOperation<T> {
     pub value: Word<T>,
     pub carry: [T; 3],
 }
-
+// 32-bit word structure
 pub struct Word<T>(pub [T; WORD_SIZE]); // WORD_SIZE = 4
 ```
 
-Focusing on computational validity constraints:
+The AddSub Chip implementation utilizes 20 columns：
+- `operand_1.[0-3], operand_2.[0-3]`: 4-byte operands (8 columns), 
+- `add_operation.value.[0-3]`: 4-byte results (4 columns),
+- `add_operation.carry.[0-2]`: Carry flags (3 columns),
+- `pc, next_pc, op_a_not_0, is_add, is_sub`: Control signals (5 columns).
 
-```rust
-pub fn eval<AB: ZKMAirBuilder>(
-        builder: &mut AB,
-        a: Word<AB::Var>,
-        b: Word<AB::Var>,
-        cols: AddOperation<AB::Var>,
-        is_real: AB::Expr,
-    ) {
-        let one = AB::Expr::ONE;
-        let base = AB::F::from_canonical_u32(256);
+### Computational Validity Constraints 
 
-        let mut builder_is_real = builder.when(is_real.clone());
+The corresponding constraints support (we use op_1, op_2, add_op for short of operand_1, operand_2 and add_operation respectively):
+- Zero Constraints
 
-        // For each limb, assert that difference between the carried result and the non-carried
-        // result is either zero or the base.
-        let overflow_0 = a[0] + b[0] - cols.value[0];
-        let overflow_1 = a[1] + b[1] - cols.value[1] + cols.carry[0];
-        let overflow_2 = a[2] + b[2] - cols.value[2] + cols.carry[1];
-        let overflow_3 = a[3] + b[3] - cols.value[3] + cols.carry[2];
-        builder_is_real.assert_zero(overflow_0.clone() * (overflow_0.clone() - base));
-        builder_is_real.assert_zero(overflow_1.clone() * (overflow_1.clone() - base));
-        builder_is_real.assert_zero(overflow_2.clone() * (overflow_2.clone() - base));
-        builder_is_real.assert_zero(overflow_3.clone() * (overflow_3.clone() - base));
+  Enforces add/sub validity for each byte, e.g., for addition \\(op\\_1.0 + op\\_2.0 - add\\_op.value.0 = 0 \\) or \\(op\\_1.0 + op\\_2.0 - add\\_op.value.0 = 256 \\).
+- bool constraints
+ 
+  carry values are bool, e.g., \\( add\\_op.carry.0 \in \\{0,1\\} \\).
+- range check
+  8-bits values for op_1.i, op_2.i, add_op.value.i. e.g., \\(op\\_1.0 \in \\{0,1,2,\cdots,255\\}\\).
 
-        // If the carry is one, then the overflow must be the base.
-        builder_is_real.assert_zero(cols.carry[0] * (overflow_0.clone() - base));
-        builder_is_real.assert_zero(cols.carry[1] * (overflow_1.clone() - base));
-        builder_is_real.assert_zero(cols.carry[2] * (overflow_2.clone() - base));
+### Matrix Polulation
 
-        // If the carry is not one, then the overflow must be zero.
-        builder_is_real.assert_zero((cols.carry[0] - one.clone()) * overflow_0.clone());
-        builder_is_real.assert_zero((cols.carry[1] - one.clone()) * overflow_1.clone());
-        builder_is_real.assert_zero((cols.carry[2] - one.clone()) * overflow_2.clone());
+Sample register state evolution:
 
-        // Assert that the carry is either zero or one.
-        builder_is_real.assert_bool(cols.carry[0]);
-        builder_is_real.assert_bool(cols.carry[1]);
-        builder_is_real.assert_bool(cols.carry[2]);
-        builder_is_real.assert_bool(is_real.clone());
+| program count | instruction | description | ....  | r1  | r2  | r3 | r4 | r5| r6| r7|                                                   
+|------| ---------- | ----------- | ------- | ----|---|--- | ---|----|----- | -----------| 
+| 0        |      | initial        | ......      | x     | 30|10|9|13|13685| 21| 
+| 1        | add $r5 $r6 $r7   | r7 = r5 + r6 | ...... | x   | 30|10|9|13|13685| 13698| 
+| 2        | addi $r6 $r5 0    | r5 = r6 + 0  | ...... | x   | 30|10|9|13685|13685| 13698| 
+| 3        | addi $r7 $r6 0    | r6 = r7 + 0  | ...... | x   | 30|10|9|13685|13698|13698 | 
+| 4        | addi $r4 $r4 1    | r4 = r4 + 1  | ...... | x   | 30|10|10|13685|13698| 13698| 
+| 5        | slt $r2 $r6 $r7   | r2 = r6 < r7? 1:0| ......| x| 0|10|10|13685|13698| 13698| 
+| 6        | sub $r6 $r4 $r5  | r5 = r6 - r4 | ...... |    x | 0|10|10|13688|13698| 13698| 
 
-        // Range check each byte.
-        {
-            builder.slice_range_check_u8(&a.0, is_real.clone());
-            builder.slice_range_check_u8(&b.0, is_real.clone());
-            builder.slice_range_check_u8(&cols.value.0, is_real);
-        }
-    }
-```
+Instructions 1, 2, 3, 4, and 6 are integrated with the AddSub Chip. The trace matrix (illustrated below, with the final row highlighting polynomial constraints) delineates their computational pathways.
 
-This implementation utilizes 15 columns from the AddSub Chip:
+| pc|next_pc | add_op.value.0 | add_op.value.1 |add_op.value.2|add_op.value.3| add_op.carry.0  | add_op.carry.1  |add_op.carry.2| op_1.0 | op_1.1 | op_1.2|op_1.3|  op_2.0 | op_2.1 | op_2.2|op_1.3|op_a_not_0|is_add|is_sub|                                                   
+|--|--|---|---- |---- |---|----| --|--|---|---| ---|----|---|-- |--|--|--|--|--|
+|1|2|130|53|0|0|0|0|0|13|0|0|0|117|53|0|0|1|1|0|
+|2|3|119|53|0|0|0|0|0|119|53|0|0|0|0|0|0|1|1|0| 
+|3|4|130|53|0|0|0|0|0|130|53|0|0|0|0|0|0|1|1|0| 
+|4|5|10|0|0|0|0|0|0|9|0|0|0|1|0|0|0|1|1|0| 
+|6|7|120|53|0|0|0|0|0|130|53|0|0|10|0|0|0|1|0|1| 
+|a(x)|b(x)|c(x)|d(x)|e(x)|f(x)|g(x)|h(x)|i(x)|j(x)|k(x)|l(x)|m(x)|n(x)|o(x)|p(x)|q(x)|r(x)|s(x)|t(x)|
 
-- \\(a[i], b[i]\\): Operand bytes (4 each),
-- \\(cols.value[i]\\): Result bytes (4),
-- \\(cols.carry[j]\\): Carry flags (3).
+### AIR Transformation Example
 
-The corresponding constraints support:
+Each column is represented as a polynomial defined over a ​​2-adic subgroup​​ within the ​​KoalaBear prime field​​. To demonstrate AIR expression, we analyze the ​​first-byte computation​​ in the addition operation: 
 
-- zero constraint: e.g., assert_zero(overflow_0.clone() * (overflow_0.clone() - base)) enforces \\(a[0] + b[0] - cols.value[0] = 0 \\) or \\( a[0] + b[0] - cols.value[0] = 256\\).
-- bool constraint: e.g., builder_is_real.assert_bool(cols.carry[0]) enforces  \\( cols.carry[0] \in \{0,1\} \\).
-- range check: e.g., builder.slice_range_check_u8(&a.0, is_real.clone()) enforce \\(a_i \in \{0,1,2,\cdots,255}\\).
+\\[P_{add}(x) := (j(x) + n(x) - c(x))(j(x) + n(x) - c(x)-256) = 0.\\]
 
-Using low-degree polynomials is important, the degree of polynomials corresponds to the number of rows and the constraint expression. It is convenient for us to use low-degree polynomial for zero constraint and bool constraint above. For range check, we prefer to use another techbique called lookup tables to enforce values to be between 0 and 255. Lookup tables are widely used for constructing constraint between two or more chips.
+And for sub operation, 
+\\[P_{sub}(x) := (j(x) + n(x) - c(x))(j(x) + n(x) - c(x)-256) = 0.\\]
 
-In the AddSub Chip, each row represents a single addition/subtraction operation, with no inherent dependencies between rows. However, certain constraints may span multiple adjacent rows. To efficiently handle such cases, AIR defines the evaluation domain as a cyclic group \\( \{g^m \mid m = 0, 1, \dots, 2^d-1\} \\). Here, the value of a polynomial \\( f(x) \\) at the next row is expressed as \\( f(g \cdot x) \\). This approach offers two key advantages:
+Using operation selectors \\(s(x), t(x)\\),  the derived polynomila constraint is 
+\\[ s(x)\cdot P_{add}(x) + t(x) \cdot P_{sub}(x) = 0.\\]
 
-- Simplified constraint representation for row-to-row relationships.
+Where:​​
+- s(x): Add operation selector,
+- t(x): Sub operation selector,
+- j(x): First byte of op_1, 
+- n(x): First byte of op_2,
+- c(x): First byte of result value add_op.value.
 
-- Accelerated polynomial computations via FFT techniques.
+### Conclusion
 
-For a generalized AIR implementation, refer to the [detailed technical discussion](https://hackmd.io/@aztec-network/plonk-arithmetiization-air). 
+The AIR framework transforms trace constraints into polynomial identities, where increased rows only expand the evaluation domain rather than polynomial complexity. ZKM2 also enhances efficiency through:
+- ​Lookup Tables​​ for range checks.
+- ​Multiset Hashing​​ for memory consistency.
+- ​FRI for polynomial interactive oracle proofs (IOP).
+​
 
-Additionally, we employ multiset hashing to verify memory consistency. These techniques - including FRI proofs, lookup tables, and multiset hashing - used in ZKM2 will be comprehensively covered in subsequent sections.
+These components constitute the foundational architecture of ZKM2 and will be elaborated in subsequent sections. 

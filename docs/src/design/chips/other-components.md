@@ -22,6 +22,8 @@ pub struct ProgramPreprocessedCols<T> {
     pub selectors: OpcodeSelectorCols<T>, // Instruction type flags
 }
 ```
+## Global Chip
+Global Chip in ZKM2 is responsible for processing and verifying global lookup events (such as memory accesses, system calls), ensuring compliance with predefined rules and generating cryptographic proof data.
 
 ## Bytes Chip
 The Bytes Chip is a preprocessed table usde to validate 16-bit unsigned integer range check and  byte logic/arithmetic operations.

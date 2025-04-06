@@ -24,6 +24,10 @@ Core Components:
   
   Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. ZKM2 use multiset hashing based offline memory consistnecy checking in the main operation of its memory argument with several memory tables.  
 
+- Global Chip
+
+  Global Chip in ZKM2 is responsible for processing and verifying global lookup events (such as memory accesses, system calls), ensuring compliance with predefined rules and generating cryptographic proof data.
+
 - Custom Chips
   
   Several Custom Chips are used for accelecating proving time in ZKM2's proof system: Poseidon2 hash, STARK compression and STARK-to-SNARK adapter.
