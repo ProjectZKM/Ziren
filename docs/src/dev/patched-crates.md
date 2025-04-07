@@ -4,12 +4,15 @@ Patching a crate refers to replacing the implementation of a specific interface 
 
 ## Supported Crates
 
-| **Crate Name**        | **Repository**                                               | **Notes**      | **Versions** |
-| ----------------- | ------------------------------------------------------------ | -------------- | ------------ |
-| revm-primitives/k | [zkMIPS/revm](https://github.com/zkMIPS/revm)                | keccak256      | 6.0.0        |
-| sha2              | [zkMIPS-patches/RustCrypto-hashes](https://github.com/zkMIPS-patches/RustCrypto-hashes) | sha256         | 0.10.8       |
-| curve25519-dalek  | [zkMIPS-patches/curve25519-dalek](https://github.com/zkMIPS-patches/curve25519-dalek) | ed25519 verify | 4.1.3        |
-| rsa               | [zkMIPS-patches/RustCrypto-RSA](https://github.com/zkMIPS-patches/RustCrypto-RSA) | RSA            | 0.9.6        |
+| **Crate Name**        | **Repository**                                               | **Versions** |
+| ----------------- | ------------------------------------------------------------ | ------------ |
+| revm | `revm = { git = "https://github.com/zkMIPS/revm", branch = "zkm2" }` | 6.0.0        |
+| sha2              | `sha2-v0-10-8 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes", package = "sha2", branch = "patch-sha2-0.10.8" }` | 0.10.8       |
+| curve25519-dalek  | `curve25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", branch = "patch-4.1.3" }` | 4.1.3        |
+| curve25519-dalek-ng | `curve25519-dalek-ng = { git = "https://github.com/zkMIPS-patches/curve25519-dalek-ng", branch = "patch-4.1.1" } ` | 4.1.1 |
+| secp256k1 | `secp256k1 = { git = "https://github.com/zkMIPS-patches/rust-secp256k1", branch = "patch-0.29.1" }` | 0.29.1 |
+| substrate-bn | `substrate-bn = { git = "https://github.com/zkMIPS-patches/bn", branch = "patch-0.6.0" }` | 0.6.0 |
+| rsa               | `rsa = { git = "https://github.com/zkMIPS-patches/RustCrypto-RSA.git", branch = "patch-rsa-0.9.6" }` | 0.9.6        |
 
 ## Using Patched Crates
 
@@ -21,8 +24,6 @@ Option 1: Directly add the patched crates as dependencies in the guest program's
 [dependencies]
 sha2 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes.git", package = "sha2", branch = "patch-sha2-0.10.8" }
 ```
-
-Here is a example: a
 
 Option 2: Add the appropriate patch entries to your guest's `Cargo.toml`. For example:
 
