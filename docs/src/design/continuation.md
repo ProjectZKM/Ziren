@@ -39,7 +39,7 @@ A program execution forms a ​Session, which is dynamically partitioned into at
 
 - Segment Proof
 
-  Prove all instructions' execution in this segment, collecting all reading memory and writing memory records (using [multiset-hashing](../offline_memory_consistency_checking.md)).
+  Prove all instructions' execution in this segment, collecting all reading memory and writing memory records.
 
 - Session Proof Aggregation
 

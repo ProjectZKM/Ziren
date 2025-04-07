@@ -1,42 +1,20 @@
 # ALU
-
-The Arithmetic Logic Unit (ALU) chips comprises specialized verification circuits that enforce correctness for arithmetic and bitwise operations. These circuits implement cross-table lookups with the main CPU table to maintain instruction-execution integrity across the processor pipeline.
+The Arithmetic Logic Unit (ALU) chips comprises ​​specialized verification circuits​​ designed to enforce computational correctness for all arithmetic and bitwise operations. These circuits implement ​​cross-table lookup protocols​​ with the main CPU table, ensuring instruction-execution integrity throughout the processor pipeline.
 
 ## Modular Design
-The ALU is decomposed into dedicated verification units corresponding to MIPS instruction classes:
 
-- ​AddSub Chip - Validates addition and subtion instructions, e.g., ADD,ADDI,SUB,SUBU, etc.
-- ​Bitwise Chip - Verifies bitwise instructions, e.g., AND, ANDI, OR, XOR, NOR, etc.
-- ​Mul Chip - Handles multiplication and division instruction, e.g., MUL, MULT, DIV, DIVU, etc.
-- ShiftRight Chip - Processes logical/arithmetic shifts, e.g., SLL, SRA, SRL, etc.
-- Lt Chip - Enforces SLT/SLTI comparisons.
+The ALU employs a ​​hierarchical verification architecture​​ organized by MIPS instruction class:
 
-Each chip establishes correct calculation of corresponding instructions and constraint relationships with CPU table columns through Plookup-based verification, ensuring operational results match programmed instructions.
+- ​AddSub Chip​​ - Validates addition/subtraction instructions (ADD, ADDI, SUB, SUBU).
+- ​Bitwise Chip​​ - Verifies logical operations (AND, ANDI, OR, XOR, NOR).
+- ​​CloClz Chip​​ - Processes count-leading-ones/zeros operations (CLO/CLZ).
+- ​​DivRem Chip​​ - Implements division/remainder operations (DIV/REM).
+- ​​Lt Chip​​ - Enforces signed/unsigned comparisons (SLT, SLTI, SLTU).
+- ​​Mul Chip​​ - Handles multiplication operations (MUL, MULT, MULTU).
+- ​​ShiftLeft Chip​​ - Executes logical left shifts (SLL, SLLI).
+- ​​ShiftRight Chip​​ - Manages logical/arithmetic right shifts (SRL, SRA).
+​
 
-Taking the AddSub Chip as an example, introduce its composition.
+Each chip employs domain-specific verification to ensure accurate execution of programmed instructions and [LogUp](https://eprint.iacr.org/2023/1518)-based proper alignment with CPU table constraints, thereby guaranteeing consistency between computational results and predefined operational logic.
 
-## AddSub Chip
-The AddSub module provides formal verification for MIPS integer addition and subtraction operations through constrained algebraic relationships.
-
-```rust
-pub struct AddSubCols<T> {
-    /// Execution context identifier for table joins
-    pub shard: T,
-    
-    /// Additive operation constraints (a = b + c, a in ADD, b in SUB)
-    pub add_operation: AddOperation<T>,
-    
-    /// Primary operand (b in ADD, a in SUB)
-    pub operand_1: Word<T>,
-    
-    /// Secondary operand (c in both operations)
-    pub operand_2: Word<T>,
-    
-    /// Opcode verification flags
-    pub is_add: T,  // ADD/ADDI assertion
-    pub is_sub: T   // SUB assertion
-}
-```
-The ​AddSub Chip enforces computational validity for addition/subtraction operations. Using lookup-based verification, CPU table entries corresponding to ADD/SUB instructions establish constrained connections with the AddSub Chip. All these ALU chips collectively implement a ​modular verification framework for MIPS instructions' execution.
-
-
+In Section [arithmetization](../arithmetization.md), we analyze the AddSub Chip to demonstrate its ​​column architecture​​ and ​​constraint system implementation​​, providing concrete insights into ALU verification mechanisms.

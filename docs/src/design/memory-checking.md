@@ -6,7 +6,7 @@ This is in contrast to "online memory checking" techniques like Merkle hashing w
 
 ZKM2 replaces ZKM’s online memory checking with multiset-hashing-based offline memory checking for improved efficiency. ZKM2's verifies the consistency of read/write operations by constructing a ​read set \\(RS\\) and a ​write set \\(WS\\) and proving their equivalence. This mechanism leverages ​multiset hashing on an elliptic curve over KoalaBear Prime's 7th extension field to ensure memory integrity efficiently. Below is a detailed breakdown of its key components.
 
-## Construction of read set \\(RS\\) and write set \\(WS\\) 
+## Construction of Read Set and Write Set
 
 Definition: The read set \\(RS\\) and write set  \\(WS\\) are sets of tuples \\(a, v, c\\), where:
 
@@ -34,7 +34,7 @@ Post-processing：
 - For all memory cells \\(a_i\\), add the last tuple \\((a_i, v_i, c_i)\\) in write set \\(WS\\) to \\(RS\\): \\(RS = RS \bigcup \\{(a_i, v_i, c_i)\\}\\).
 
 
-## Core observation
+## Core Observation
 
 The prover adheres to the memory rules ​if the following conditions hold:
 
@@ -46,42 +46,16 @@ The prover adheres to the memory rules ​if the following conditions hold:
 
 Brief Proof: Consider the first erroneous read memory operation. Assume that a read operation was expected to return the tuple \\((a,v,c)\\), but it actually returned an incorrect tuple \\((a, v' \neq v, c')\\) and added it to read set \\(RS\\). Note that all tuples in \\(WS\\) are distinct. After adding \\((a,v',c_{now})\\) to \\(WS\\), the tuples \\((a,v,c)\\) and \\((a,v',c_{now})\\) are not in the read set \\(RS\\). According to restriction 3, after each read-write operation, there are always at least two tuples in \\(WS\\) that are not in \\(RS\\), making it impossible to adjust to \\(RS = WS\\) through post-processing.
 
-## Multiset hashing method
+## Multiset Hashing
 
 Multiset hashing maps a (multi-)set to a short string, making it computationally infeasible to find two distinct sets with the same hash. The hash is computed incrementally, with ​order-independence as a key property.
 
-**Implementation on an Elliptic Curve**
+**Implementation on Elliptic Curve**
 
 Consider the group \\(G\\) as the set of points \\((x,y)\\) on the elliptic curve \\(y^2 = x^3 +Ax+B\\) (including the point at infinity). We can implement a hash-to-group approach. To hash a set element into a point on the elliptic curve, we first map the set element to the \\(x\\)-coordinate of the point. Since this may not be a valid \\(x\\)-coordinate on the elliptic curve, we add an 8-bit tweak \\(t\\). Additionally, we constrain the sign of the \\(y\\)-coordinate to prevent flipping, either by ensuring \\(y\\) is a quadratic residue or by adding range checks.
 
-
-
 In ZKM2, the following parameters are used.
-- KoalaBear Prime field: \\(\mathbb{F}_P\\), with \\(P = 2^31 - 2^24 +1\\).
+- KoalaBear Prime field: \\(\mathbb{F}_P\\), with \\(P = 2^{31} - 2^{24} +1\\).
 - Septic extension field: Defined under irreducible polynomial \\( u^7 + 2u -8\\).
 - Elliptic curve: Defined with \\(A = 3*u , B= -3\\) (provides ≥102-bit security).
 - Hash algorithm: Poseidon2 is used as the hash algorithm.
-
-**Example: Columns and Constraints Construction**
-
-Columns:
-
-- \\(a\\): address of the operation;
-- \\(v_r, v_w\\): values added to the read/write sets;
-- \\(c_r, c_w\\): op counters added to the read/write sets;
-- \\(f_r, f_w\\): mapping of a set element to a single value, ensuring the mapping is injective (e.g., if \\(a, v, c\\) are all within 32 bits, we can use \\(f = a << 72 + v << 40 + c << 8\\));
-- \\(t_r, t_w\\):  8-bit tweak;
-- \\(x_r, x_w\\): \\(x\\)-coordinate, satisfying \\(x = f + t\\);
-- \\(y_r, y_w\\): \\(y\\)-coordinate;
-- \\(z_r, z_w\\): satisfying \\(y = z^2\\), ensuring \\(y\\) is a quadratic residue;
-- \\(h_r, h_w\\): current hash value of the read/write sets.
-
- Constraints:
-
-1) Range checks for  \\(a, v, c, t\\);
-2) Monotonic counters: \\(c_{now} = c_w > c_r\\);
-3) Curve validation: \\(x= a << 72 + v << 40 + c << 8 + t, y^2 = x^3 + A x + B, y = z^2\\);
-4) Hash accumulation: \\(h = h_{old} + (x,y)\\);
-5) Final equivalence: \\(h_r = h_w\\).
-
-Note: The actual ZKM2 implementation involves ​more columns and complex constraints compared to this simplified example.
