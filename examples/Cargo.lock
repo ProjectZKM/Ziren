@@ -32,7 +32,7 @@ checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 name = "aggregation"
 version = "1.1.0"
 dependencies = [
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "zkm2-zkvm 0.0.1",
 ]
 
@@ -139,7 +139,7 @@ dependencies = [
  "derive_more 1.0.0",
  "once_cell",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -256,7 +256,7 @@ dependencies = [
  "derive_more 2.0.1",
  "foldhash",
  "hashbrown 0.15.2",
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "itoa",
  "k256",
  "keccak-asm",
@@ -386,7 +386,7 @@ dependencies = [
  "alloy-sol-macro-input",
  "const-hex",
  "heck",
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "proc-macro-error2",
  "proc-macro2",
  "quote",
@@ -1038,9 +1038,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.17"
+version = "1.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fcb57c740ae1daf453ae85f16e37396f672b039e00d9d866e07ddb24e328e3a"
+checksum = "525046617d8376e3db1deffb079e91cef90a89fc3ca5c185bbf8c9ecdd15cd5c"
 dependencies = [
  "jobserver",
  "libc",
@@ -1326,9 +1326,9 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#d7d6abfee8f66abbe4fa0194bf4ac0cecce3e14b"
 dependencies = [
+ "anyhow",
  "cfg-if",
  "cpufeatures",
  "curve25519-dalek-derive",
@@ -1336,13 +1336,13 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
+ "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
 ]
 
 [[package]]
 name = "curve25519-dalek-derive"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#d7d6abfee8f66abbe4fa0194bf4ac0cecce3e14b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1515,9 +1515,9 @@ dependencies = [
 
 [[package]]
 name = "deranged"
-version = "0.4.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28cfac68e08048ae1883171632c2aef3ebc555621ae56fbccce1cbf22dd7f058"
+checksum = "9c9e6a11ca8224451684bc0d7d5a7adbf8f2fd6887261a1cfc3c0432f9d4068e"
 dependencies = [
  "powerfmt",
  "serde",
@@ -1663,15 +1663,18 @@ checksum = "1c7a8fb8a9fbf66c1f703fe16184d10ca0ee9d23be5b4436400408ba54a95005"
 [[package]]
 name = "ecdsa"
 version = "0.16.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
+source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#de899b72abbf773f6bac509ecdb886f9fe809c02"
 dependencies = [
+ "anyhow",
+ "cfg-if",
  "der 0.7.9",
  "digest 0.10.7",
  "elliptic-curve",
+ "hex-literal",
  "rfc6979",
  "signature",
  "spki 0.7.3",
+ "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
 ]
 
 [[package]]
@@ -1798,9 +1801,9 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "errno"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
+checksum = "976dd42dc7e85965fe702eb8164f21f450704bdde31faefd6471dba214cb594e"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
@@ -2267,7 +2270,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_arrays",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "static_assertions",
  "subtle",
  "unroll",
@@ -2664,9 +2667,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.8.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3954d50fe15b02142bf25d3b8bdadb634ec3948f103d04ffe3031bc8fe9d7058"
+checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
 dependencies = [
  "equivalent",
  "hashbrown 0.15.2",
@@ -2849,7 +2852,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "once_cell",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "signature",
 ]
 
@@ -3059,9 +3062,9 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.5"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e3e04debbb59698c15bacbb6d93584a8c0ca9cc3213cb423d31f760d8843ce5"
+checksum = "ff70ce3e48ae43fa075863cef62e8b43b71a4f2382229920e0df362592919430"
 dependencies = [
  "adler2",
 ]
@@ -3363,7 +3366,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -3930,9 +3933,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.31"
+version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5316f57387668042f561aae71480de936257848f9c43ce528e311d89a07cadeb"
+checksum = "664ec5419c51e34154eec046ebcba56312d5a2fc3b09a06da188e1ad21afadf6"
 dependencies = [
  "proc-macro2",
  "syn 2.0.100",
@@ -4311,9 +4314,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.10"
+version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b8c0c260b63a8219631167be35e6a988e9554dbd323f8bd08439c8ed1302bd1"
+checksum = "d2f103c6d277498fbceb16e84d317e2a400f160f46904d5f5410848c829511a3"
 dependencies = [
  "bitflags",
 ]
@@ -4482,7 +4485,7 @@ dependencies = [
  "once_cell",
  "revm-primitives",
  "ripemd",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "substrate-bn",
 ]
 
@@ -4529,8 +4532,7 @@ dependencies = [
 [[package]]
 name = "rfc6979"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
+source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#de899b72abbf773f6bac509ecdb886f9fe809c02"
 dependencies = [
  "hmac",
  "subtle",
@@ -4625,7 +4627,7 @@ name = "rsa"
 version = "1.1.0"
 dependencies = [
  "rsa 0.9.8",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "zkm2-zkvm 0.0.1",
 ]
 
@@ -4982,7 +4984,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5008,7 +5010,7 @@ version = "0.9.34+deprecated"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
 dependencies = [
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "itoa",
  "ryu",
  "serde",
@@ -5056,18 +5058,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793db75ad2bcafc3ffa7c68b215fee268f537982cd901d132f89c6343f3a3dc8"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest 0.10.7",
-]
-
-[[package]]
-name = "sha2"
-version = "0.10.8"
-source = "git+https://github.com/zkMIPS-patches/RustCrypto-hashes.git?branch=patch-sha2-v0.10.8#62d9223ba171ef6d5b637b275c4b982f56d0a949"
+source = "git+https://github.com/zkMIPS-patches/RustCrypto-hashes?branch=patch-sha2-0.10.8#62d9223ba171ef6d5b637b275c4b982f56d0a949"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -5145,9 +5136,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.14.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
+checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 
 [[package]]
 name = "snowbridge-amcl"
@@ -5214,7 +5205,7 @@ dependencies = [
  "hex-literal",
  "serde",
  "serde_with",
- "sha2 0.10.8 (git+https://github.com/zkMIPS-patches/RustCrypto-hashes.git?branch=patch-sha2-v0.10.8)",
+ "sha2 0.10.8",
  "ssz_rs",
  "zkm2-zkvm 0.0.1",
 ]
@@ -5301,14 +5292,17 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b5bbfa79abbae15dd642ea8176a21a635ff3c00059961d1ea27ad04e5b441c"
+source = "git+https://github.com/zkMIPS-patches/bn?branch=patch-0.6.0#5cc7991be6c6df8bfc1ff348969504d234db7471"
 dependencies = [
+ "bytemuck",
  "byteorder",
+ "cfg-if",
  "crunchy",
  "lazy_static",
+ "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
+ "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
 ]
 
 [[package]]
@@ -5469,11 +5463,39 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "serde_repr",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "signature",
  "subtle",
  "subtle-encoding",
- "tendermint-proto",
+ "tendermint-proto 0.35.0",
+ "time",
+ "zeroize",
+]
+
+[[package]]
+name = "tendermint"
+version = "0.40.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bed57bd840305efef8e83b752dd63dde3bb0fc1c35b6490f0a4de3a0ffd8dd9"
+dependencies = [
+ "bytes",
+ "digest 0.10.7",
+ "ed25519",
+ "ed25519-consensus",
+ "flex-error",
+ "futures",
+ "num-traits",
+ "once_cell",
+ "prost 0.13.5",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "serde_repr",
+ "sha2 0.10.8",
+ "signature",
+ "subtle",
+ "subtle-encoding",
+ "tendermint-proto 0.40.2",
  "time",
  "zeroize",
 ]
@@ -5483,7 +5505,7 @@ name = "tendermint"
 version = "1.1.0"
 dependencies = [
  "serde_cbor",
- "tendermint-light-client-verifier",
+ "tendermint-light-client-verifier 0.40.2",
  "zkm2-zkvm 0.0.1",
 ]
 
@@ -5493,7 +5515,7 @@ version = "1.1.0"
 dependencies = [
  "serde_cbor",
  "serde_json",
- "tendermint-light-client-verifier",
+ "tendermint-light-client-verifier 0.35.0",
  "zkm2-build",
  "zkm2-sdk",
 ]
@@ -5512,6 +5534,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tendermint-light-client-verifier"
+version = "0.40.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92f2fd222980465e4aa2e04d6218014658461ae934aa5697a16ded5cf7a33492"
+dependencies = [
+ "derive_more 0.99.19",
+ "flex-error",
+ "serde",
+ "tendermint 0.40.2",
+ "time",
+]
+
+[[package]]
 name = "tendermint-proto"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5523,6 +5558,21 @@ dependencies = [
  "num-traits",
  "prost 0.12.6",
  "prost-types",
+ "serde",
+ "serde_bytes",
+ "subtle-encoding",
+ "time",
+]
+
+[[package]]
+name = "tendermint-proto"
+version = "0.40.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a218320a6e92ac731ac094169cb742e3203a3ab24d30417b72cfdaab5d50c67"
+dependencies = [
+ "bytes",
+ "flex-error",
+ "prost 0.13.5",
  "serde",
  "serde_bytes",
  "subtle-encoding",
@@ -5664,9 +5714,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.44.1"
+version = "1.44.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f382da615b842244d4b8738c82ed1275e6c5dd90c459a30941cd07080b06c91a"
+checksum = "e6b88822cbe49de4185e3a4cbf8321dd487cf5fe0c5c65695fef6346371e9c48"
 dependencies = [
  "backtrace",
  "bytes",
@@ -5726,7 +5776,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "toml_datetime",
  "winnow 0.5.40",
 ]
@@ -5737,7 +5787,7 @@ version = "0.22.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17b4795ff5edd201c7cd6dca065ae59972ce77d1b80fa0a84d94950ece7d1474"
 dependencies = [
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "toml_datetime",
  "winnow 0.7.4",
 ]
@@ -6709,7 +6759,7 @@ dependencies = [
  "pasta_curves 0.5.1",
  "rand 0.8.5",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "sha3",
  "subtle",
 ]
@@ -6750,7 +6800,7 @@ dependencies = [
  "rrs-succinct",
  "serde",
  "serde_json",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "strum",
  "strum_macros",
  "test-artifacts",
@@ -6852,18 +6902,18 @@ dependencies = [
  "bincode",
  "cfg-if",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
 ]
 
 [[package]]
 name = "zkm2-lib"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#968b761656a7aff6f25e8401dafcabcf8837143b"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#d9d632437a2fb78cedb62d4cc6fa4a0c64f5ccfe"
 dependencies = [
  "bincode",
  "cfg-if",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -6880,7 +6930,7 @@ dependencies = [
  "p3-poseidon2",
  "p3-symmetric",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -7033,7 +7083,7 @@ dependencies = [
  "p3-symmetric",
  "serde",
  "serde_json",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "tempfile",
  "zkm2-core-machine",
  "zkm2-recursion-compiler",
@@ -7129,7 +7179,7 @@ dependencies = [
  "anyhow",
  "hex",
  "lazy_static",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "substrate-bn-succinct",
  "thiserror 2.0.12",
 ]
@@ -7147,7 +7197,7 @@ dependencies = [
  "p3-koala-bear",
  "rand 0.8.5",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "zkm2-lib 0.0.1",
  "zkm2-primitives",
 ]
@@ -7155,7 +7205,7 @@ dependencies = [
 [[package]]
 name = "zkm2-zkvm"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#968b761656a7aff6f25e8401dafcabcf8837143b"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#d9d632437a2fb78cedb62d4cc6fa4a0c64f5ccfe"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -7164,6 +7214,16 @@ dependencies = [
  "libm",
  "rand 0.8.5",
  "serde",
- "sha2 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.10.8",
  "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
 ]
+
+[[patch.unused]]
+name = "rsa"
+version = "0.9.6"
+source = "git+https://github.com/zkMIPS-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#c8dc9547b298d54e0a570f3520de45ad87449ca9"
+
+[[patch.unused]]
+name = "secp256k1"
+version = "0.29.1"
+source = "git+https://github.com/zkMIPS-patches/rust-secp256k1?branch=patch-0.29.1#266fd11bfbe1a10552ddecc5d1ce7e957a324897"

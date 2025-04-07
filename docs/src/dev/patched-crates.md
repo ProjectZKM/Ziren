@@ -19,7 +19,7 @@ Option 1: Directly add the patched crates as dependencies in the guest program's
 
 ```
 [dependencies]
-sha2 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes.git", package = "sha2", branch = "patch-sha2-v0.10.8" }
+sha2 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes.git", package = "sha2", branch = "patch-sha2-0.10.8" }
 ```
 
 Here is a example: a
@@ -31,7 +31,7 @@ Option 2: Add the appropriate patch entries to your guest's `Cargo.toml`. For ex
 sha2 = "0.10.8"
 
 [patch.crates-io]
-sha2 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes.git", package = "sha2", branch = "patch-sha2-v0.10.8" }
+sha2 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes.git", package = "sha2", branch = "patch-sha2-0.10.8" }
 ```
 
 When patching a crate from a GitHub repository rather than crates.io, you need to explicitly declare the source repository in the patch section. For example:
@@ -41,7 +41,7 @@ When patching a crate from a GitHub repository rather than crates.io, you need t
 ed25519-dalek = { git = "https://github.com/dalek-cryptography/curve25519-dalek" }
 
 [patch."https://github.com/dalek-cryptography/curve25519-dalek"]
-ed25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", branch = "patch-curve25519-v4.1.3" }
+ed25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", branch = "patch-4.1.3" }
 ```
 
 ## How to Patch a Crate
