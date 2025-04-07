@@ -1,9 +1,8 @@
 # Summary
 
-- [Introducation](./introducation/introducation.md)
-    - [Overview](./introducation/overview.md)
+- [Introducation](./introducation/overview.md)
     - [Installation](./introducation/installation.md)
-    - [Benchmarks and Performance](./introducation/performance.md)
+    - [Performance](./introducation/performance.md)
 - [MIPS VM](./mips-vm/overview)
     - [Execution Trace](./mips-vm/execution_trace.md)
     - [MIPS ISA](./mips-vm/mips_isa.md)
@@ -31,3 +30,5 @@
         - [STARK-to-SNARK](./design/prover-architecture/stark-to-snark.md)
         - [Proof Composition](./design/prover-architecture/proof-composition.md)
     - [Continuation](./design/continuation.md)
+
+- [References](./references.md)

@@ -40,7 +40,7 @@ Building on ZKM's full functionality, ZKM2 optimizes the entire ​workflow to a
 ZKM2 enables ​universal verifiable computation via STARK proofs, including:
 - Hybrid Rollups
   
-  Combines optimistic rollup’s cost efficiency with validity proof verifiability, allowing users to choose withdrawal modes (fast/high-cost vs. slow/low-cost) while enhancing cross-chain capital efficiency. [Goat](https://www.goat.network/), a Bitcoin L2 ​built on ZKM2, leverages Taproot scripts to validate computations, enabling ​non-EVM chains like Bitcoin to achieve Turing completeness while ​maintaining transaction finality via Bitcoin. 
+  Combines optimistic rollup’s cost efficiency with validity proof verifiability, allowing users to choose withdrawal modes (fast/high-cost vs. slow/low-cost) while enhancing cross-chain capital efficiency. [GOAT Network](https://www.goat.network/), a Bitcoin L2 ​built on ZKM2, leverages Taproot scripts to validate computations, enabling ​non-EVM chains like Bitcoin to achieve Turing completeness while ​maintaining transaction finality via Bitcoin. 
 - Entangled Rollup
 
   Uses entangled rollups for trustless cross-chain communication, with universal L2 extension resolving fragmented liquidity via proof-of-burn mechanisms (e.g., cross-chain asset transfers).
