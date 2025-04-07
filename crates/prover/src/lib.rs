@@ -1383,7 +1383,7 @@ pub mod tests {
         opts: ZKMProverOpts,
     ) -> Result<()> {
         // Test program which proves the Keccak-256 hash of various inputs.
-        let keccak_elf = test_artifacts::KECCAK256_ELF;
+        let keccak_elf = test_artifacts::KECCAK_SPONGE_ELF;
 
         // Test program which verifies proofs of a vkey and a list of committed inputs.
         let verify_elf = test_artifacts::VERIFY_PROOF_ELF;
