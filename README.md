@@ -7,11 +7,13 @@
     <a href="https://GitHub.com/zkMIPS"><img src="https://img.shields.io/badge/contributors-22-ee8449"/></a>
 </p>
 
-# zkMIPS<sup>+</sup> 
+# zkMIPS
 
-zkMIPS<sup>+</sup>  is the next generation of zkMIPS for real-time proving, and zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32R2 instruction set architecture(ISA). 
+zkMIPS is the next generation of zkMIPS for real-time proving, and zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32R2 instruction set architecture(ISA).
 
-ZKM is a general verifiable computing infrastructure on zkMIPS, empowering Ethereum as the Global Settlement Layer.
+
+zkMIPS is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. zkMIPS is fully open-source and comes equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, built on zkMIPS, is a native asset cross-chain circulation protocol, with typical application cases including Metis Hybrid Rollup and GOAT Network.
+
 
 ## Why MIPS?
 
@@ -22,6 +24,6 @@ ZKM is a general verifiable computing infrastructure on zkMIPS, empowering Ether
 > * More conditional selection instructions, MOVZ, MOVN etc.
 
 ## Acknowledgements
-The zkMIPS<sup>+</sup> draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
-- [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS<sup>+</sup>'s proving backend is based on Plonky3.
-- [SP1](https://github.com/succinctlabs/sp1): zkMIPS<sup>+</sup>'s recursion compiler, circuit builder, precompiles originate from SP1.
+The zkMIPS draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
+- [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS proving backend is based on Plonky3.
+- [SP1](https://github.com/succinctlabs/sp1): zkMIPS recursion compiler, circuit builder, precompiles originate from SP1.
