@@ -7,14 +7,14 @@ The ZKM2 proving system implements a hierarchical verification model through fou
 
 - Runtime Executor
   
-  Processes program instructions, partitions execution into verifiable segments, and generates cryptographic execution records:
-  - Instruction-level parallelism through pipelined execution for different segments.
+  Processes program instructions, partitions execution into verifiable shards, and generates cryptographic execution records:
+  - Instruction-level parallelism through pipelined execution for different shards.
   - Multiset hashing based memory state transitions.
   - Event-based constraint generation.
 
 - Machine Prover
   
-  Generates [STARK](../stark.md) proofs for individual execution segments using:
+  Generates [STARK](../stark.md) proofs for individual execution shards using:
 
   - STARK config with KoalaBear field optimization.
   - Merkle Matrix Commitment Scheme (MMCS) with Poseidon2 hash algorithm.
@@ -22,7 +22,7 @@ The ZKM2 proving system implements a hierarchical verification model through fou
 
 - STARK Aggregation
   
-  Recursively composes proofs across execution segments with custom recursive constraint chip over KoalaBear field.
+  Recursively composes proofs across execution shards with custom recursive constraint chip over KoalaBear field.
 
 - STARK-to-SNARK Adapter
   

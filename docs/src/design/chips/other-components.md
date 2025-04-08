@@ -33,11 +33,11 @@ ZKM2's implementation integrates specialized permutation logic with KoalaBear fi
 ## ​STARK Compression/SNARK-to-SNARK Adapter
 
 Three proofs are used in ZKM2
-- Segment Proofs: Used to verify correct execution of patched MIPS instructions (i.e., segment).
+- Shard Proofs: Used to verify correct execution of patched MIPS instructions (i.e., shard).
 - STARK Compressed Proof: Compress segements proof into one STARK proof.
 - STARK-to-SNARK Adapter: Transform final STARK proof into Groth16-compatible SNARK proof.
 
-After emulating MIPS instructions into STARK circuits, where each circuit processes fixed-length instruction segments, and after deriving the corresponding segment STARK proofs, these proofs are first compressed into a single STARK proof. This consolidated proof is then transformed into a SNARK proof. The chips responsible for STARK compression and the STARK-to-SNARK adapter are custom-designed specifically for proof verification over the KoalaBear field.
+After emulating MIPS instructions into STARK circuits, where each circuit processes fixed-length instruction shards, and after deriving the corresponding shard STARK proofs, these proofs are first compressed into a single STARK proof. This consolidated proof is then transformed into a SNARK proof. The chips responsible for STARK compression and the STARK-to-SNARK adapter are custom-designed specifically for proof verification over the KoalaBear field.
 
 ## Precompiled Chips
 

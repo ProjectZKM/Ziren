@@ -7,7 +7,7 @@ The CPU architecture employs a structured column-based design to manage instruct
 ## Column Classification 
 
 The CPU columns in ZKM2 encapsulate the core execution context of MIPS instructions within the zkVM. Key components include:
-- ​Segment Management​​: Tracks execution segments for cross-segment operations like syscalls and memory access.
+- ​Shard Management​​: Tracks execution shards for cross-shard operations like syscalls and memory access.
 - Clock System​​: Tracking the global clock cycles.
 - ​Program Counter​​: Sequential validation via pc, next_pc, and next_next_pc for instruction flow correctness.
 - Instruction Decoding​​: Stores opcode, operands, and immediate flags.
