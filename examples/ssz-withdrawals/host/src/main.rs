@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 const ELF: &[u8] = include_elf!("ssz-withdrawals");
 

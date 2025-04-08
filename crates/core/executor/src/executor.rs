@@ -9,7 +9,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zkm2_stark::{shape::Shape, ZKMCoreOpts};
+use zkm_stark::{shape::Shape, ZKMCoreOpts};
 
 use crate::{
     context::ZKMContext,
@@ -141,7 +141,7 @@ pub struct Executor<'a> {
     /// Statistics for event counts.
     pub local_counts: LocalCounts,
 
-    /// Verifier used to sanity check `verify_zkm2_proof` during runtime.
+    /// Verifier used to sanity check `verify_zkm_proof` during runtime.
     pub subproof_verifier: Option<&'a dyn SubproofVerifier>,
 
     /// Registry of hooks, to be invoked by writing to certain file descriptors.
@@ -2024,7 +2024,7 @@ impl<'a> Executor<'a> {
         if self.state.proof_stream_ptr != self.state.proof_stream.len() {
             tracing::warn!(
                 "Not all proofs were read. Proving will fail during recursion. Did you pass too
-        many proofs in or forget to call verify_zkm2_proof?"
+        many proofs in or forget to call verify_zkm_proof?"
             );
         }
         if self.state.input_stream_ptr != self.state.input_stream.len() {
@@ -2126,7 +2126,7 @@ mod tests {
         fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program,
         simple_memory_program, simple_program, ssz_withdrawals_program, u256xu2048_mul_program,
     };
-    use zkm2_stark::ZKMCoreOpts;
+    use zkm_stark::ZKMCoreOpts;
 
     use crate::{Instruction, Opcode, Register};
 

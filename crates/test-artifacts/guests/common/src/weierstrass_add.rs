@@ -1,5 +1,5 @@
 use num_bigint::BigUint;
-use zkm2_lib::utils::{AffinePoint, WeierstrassAffinePoint};
+use zkm_lib::utils::{AffinePoint, WeierstrassAffinePoint};
 
 /// Test all of the potential special cases for addition for Weierstrass elliptic curves.
 pub fn test_weierstrass_add<P: AffinePoint<N> + WeierstrassAffinePoint<N>, const N: usize>(

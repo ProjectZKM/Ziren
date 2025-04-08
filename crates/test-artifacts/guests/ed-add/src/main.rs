@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use zkm2_zkvm::syscalls::syscall_ed_add;
+use zkm_zkvm::syscalls::syscall_ed_add;
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     for _ in 0..4 {

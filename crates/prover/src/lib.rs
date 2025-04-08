@@ -38,16 +38,16 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use shapes::ZKMProofShape;
 use tracing::instrument;
-use zkm2_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
-use zkm2_core_machine::{
+use zkm_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
+use zkm_core_machine::{
     io::ZKMStdin,
     mips::MipsAir,
     shape::CoreShapeConfig,
     reduce::ZKMReduceProof,
     utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
 };
-use zkm2_primitives::{hash_deferred_proof, io::ZKMPublicValues};
-use zkm2_recursion_circuit::{
+use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
+use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
         PublicValuesOutputDigest, ZKMCompressRootVerifierWithVKey, ZKMCompressShape,
@@ -60,31 +60,31 @@ use zkm2_recursion_circuit::{
     witness::Witnessable,
     WrapConfig,
 };
-use zkm2_recursion_compiler::{
+use zkm_recursion_compiler::{
     circuit::AsmCompiler,
     config::InnerConfig,
     ir::{Builder, Witness},
 };
-use zkm2_recursion_core::{
+use zkm_recursion_core::{
     air::RecursionPublicValues, machine::RecursionAir, runtime::ExecutionRecord,
     shape::{RecursionShape, RecursionShapeConfig}, stark::KoalaBearPoseidon2Outer, RecursionProgram,
     Runtime as RecursionRuntime,
 };
-pub use zkm2_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
-use zkm2_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover};
-use zkm2_stark::{
+pub use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
+use zkm_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover};
+use zkm_stark::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge,
     MachineProver, ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
-use zkm2_stark::{shape::OrderedShape, MachineProvingKey};
+use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 
 pub use types::*;
-use utils::{words_to_bytes, zkm2_committed_values_digest_bn254, zkm2_vkey_digest_bn254};
+use utils::{words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254};
 
 use components::{DefaultProverComponents, ZKMProverComponents};
 
-pub use zkm2_core_machine::ZKM_CIRCUIT_VERSION;
+pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 
 /// The configuration for the core prover.
 pub type CoreSC = KoalaBearPoseidon2;
@@ -104,7 +104,7 @@ pub const REDUCE_BATCH_SIZE: usize = 2;
 
 // TODO: FIX
 //
-// const SHAPES_URL_PREFIX: &str = "https://zkm2-circuits.s3.us-east-2.amazonaws.com/shapes";
+// const SHAPES_URL_PREFIX: &str = "https://zkm-circuits.s3.us-east-2.amazonaws.com/shapes";
 // const SHAPES_VERSION: &str = "146079e0e";
 // lazy_static! {
 //     static ref SHAPES_INIT: Once = Once::new();
@@ -323,7 +323,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let program = self.get_program(&pk.elf).unwrap();
         let pk = self.core_prover.pk_to_device(&pk.pk);
         let (proof, public_values_stream, cycles) =
-            zkm2_core_machine::utils::prove_with_context::<_, C::CoreProver>(
+            zkm_core_machine::utils::prove_with_context::<_, C::CoreProver>(
                 &self.core_prover,
                 &pk,
                 program,
@@ -551,7 +551,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 vk_merkle_data: merkle_val,
                 start_reconstruct_deferred_digest: deferred_digest,
                 is_complete: false,
-                zkm2_vk_digest: vk.hash_koalabear(),
+                zkm_vk_digest: vk.hash_koalabear(),
                 end_pc: Val::<InnerSC>::ZERO,
                 end_shard: last_proof_pv.shard + KoalaBear::ONE,
                 end_execution_shard: last_proof_pv.execution_shard,
@@ -794,7 +794,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .machine()
                                     .verify(
                                         &vk,
-                                        &zkm2_stark::MachineProof {
+                                        &zkm_stark::MachineProof {
                                             shard_proofs: vec![proof.clone()],
                                         },
                                         &mut self.compress_prover.config().challenger(),
@@ -1027,8 +1027,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = zkm2_vkey_digest_bn254(&proof);
-        let committed_values_digest = zkm2_committed_values_digest_bn254(&proof);
+        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();
         input.write(&mut witness);
@@ -1060,8 +1060,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = zkm2_vkey_digest_bn254(&proof);
-        let committed_values_digest = zkm2_committed_values_digest_bn254(&proof);
+        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();
         input.write(&mut witness);
@@ -1094,7 +1094,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let committed_values_digest = words_to_bytes(&pv.committed_value_digest);
             digest = hash_deferred_proof(
                 &digest,
-                &pv.zkm2_vk_digest,
+                &pv.zkm_vk_digest,
                 &committed_values_digest.try_into().unwrap(),
             );
         }
@@ -1203,13 +1203,13 @@ pub mod tests {
     use p3_field::PrimeField32;
 
     use shapes::ZKMProofShape;
-    use zkm2_recursion_core::air::RecursionPublicValues;
+    use zkm_recursion_core::air::RecursionPublicValues;
 
     #[cfg(test)]
     use serial_test::serial;
-    use utils::zkm2_vkey_digest_koalabear;
+    use utils::zkm_vkey_digest_koalabear;
     #[cfg(test)]
-    use zkm2_core_machine::utils::setup_logger;
+    use zkm_core_machine::utils::setup_logger;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Test {
@@ -1331,11 +1331,11 @@ pub mod tests {
         }
 
         tracing::info!("checking vkey hash koalabear");
-        let vk_digest_koalabear = zkm2_vkey_digest_koalabear(&wrapped_bn254_proof);
+        let vk_digest_koalabear = zkm_vkey_digest_koalabear(&wrapped_bn254_proof);
         assert_eq!(vk_digest_koalabear, vk.hash_koalabear());
 
         tracing::info!("checking vkey hash bn254");
-        let vk_digest_bn254 = zkm2_vkey_digest_bn254(&wrapped_bn254_proof);
+        let vk_digest_bn254 = zkm_vkey_digest_bn254(&wrapped_bn254_proof);
         assert_eq!(vk_digest_bn254, vk.hash_bn254());
 
         tracing::info!("Test the outer Plonk circuit");

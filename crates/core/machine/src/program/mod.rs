@@ -12,9 +12,9 @@ use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
-use zkm2_core_executor::{ExecutionRecord, Program};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{MachineAir, ZKMAirBuilder};
+use zkm_core_executor::{ExecutionRecord, Program};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{MachineAir, ZKMAirBuilder};
 
 use crate::cpu::columns::InstructionCols;
 
@@ -181,8 +181,8 @@ mod tests {
     use p3_koala_bear::KoalaBear;
 
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm2_core_executor::{ExecutionRecord, Instruction, Opcode, Program};
-    use zkm2_stark::air::MachineAir;
+    use zkm_core_executor::{ExecutionRecord, Instruction, Opcode, Program};
+    use zkm_stark::air::MachineAir;
 
     use crate::program::ProgramChip;
 

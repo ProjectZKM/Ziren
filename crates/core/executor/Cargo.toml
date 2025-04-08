@@ -1,5 +1,5 @@
 [package]
-name = "zkm2-core-executor"
+name = "zkm-core-executor"
 description = "zkMIPS executor"
 readme = "../../../README.md"
 version = { workspace = true }
@@ -10,9 +10,9 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-zkm2-primitives = { workspace = true }
-zkm2-curves = { workspace = true }
-zkm2-stark = { workspace = true }
+zkm-primitives = { workspace = true }
+zkm-curves = { workspace = true }
+zkm-stark = { workspace = true }
 
 rayon-scan = "0.1.1"
 
@@ -51,10 +51,10 @@ tracing-subscriber = "0.3.19"
 env_logger = "0.11.6"
 
 [dev-dependencies]
-zkm2-zkvm = { workspace = true }
-zkm2-lib = { workspace = true }
+zkm-zkvm = { workspace = true }
+zkm-lib = { workspace = true }
 
 [features]
 default = ["programs"]
 programs = ["dep:test-artifacts"]
-bigint-rug = ["zkm2-curves/bigint-rug"]
+bigint-rug = ["zkm-curves/bigint-rug"]

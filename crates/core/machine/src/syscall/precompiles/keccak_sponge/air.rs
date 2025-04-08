@@ -9,8 +9,8 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::FieldAlgebra;
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
-use zkm2_core_executor::syscalls::SyscallCode;
-use zkm2_stark::{LookupScope, SubAirBuilder, ZKMAirBuilder};
+use zkm_core_executor::syscalls::SyscallCode;
+use zkm_stark::{LookupScope, SubAirBuilder, ZKMAirBuilder};
 
 impl<F> BaseAir<F> for KeccakSpongeChip {
     fn width(&self) -> usize {

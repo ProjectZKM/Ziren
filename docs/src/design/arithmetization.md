@@ -1,6 +1,6 @@
 # Arithmetization
 
-Algebraic Intermediate Representation (AIR) serves as the arithmeticization foundation in the ZKM2 system, bridging computation and succinct cryptographic proofs. AIR provides a structured method to represent computations through polynomial constraints over execution traces.
+Algebraic Intermediate Representation (AIR) serves as the arithmeticization foundation in the zkMIPS system, bridging computation and succinct cryptographic proofs. AIR provides a structured method to represent computations through polynomial constraints over execution traces.
 
 ## Key Concepts of AIR
 - Execution Trace
@@ -15,11 +15,11 @@ Algebraic Intermediate Representation (AIR) serves as the arithmeticization foun
   
   Ensure valid initial/final states (e.g., \\(state_0 = initial\\_value\\)).
 
-These constraints utilize low-degree polynomials for efficient proof generation/verification. ZKM2 mandates degree-3 polynomial constraints within its AIR framework, establishing a formally verifiable equilibrium between proof generation efficiency and trace column representation compactness. [See AIR paper](https://eprint.iacr.org/2023/661.pdf) for rigorous technical details.
+These constraints utilize low-degree polynomials for efficient proof generation/verification. zkMIPS mandates degree-3 polynomial constraints within its AIR framework, establishing a formally verifiable equilibrium between proof generation efficiency and trace column representation compactness. [See AIR paper](https://eprint.iacr.org/2023/661.pdf) for rigorous technical details.
 
-## AIR Implementation in ZKM2 Chips
+## AIR Implementation in zkMIPS Chips
 
-Having introduced various chip/table structures in ZKM2, we note that building a chip involves:
+Having introduced various chip/table structures in zkMIPS, we note that building a chip involves:
 - ​Matrix Population - Filling values into a matrix structure.
 - Constraint Construction - Establishing relationships between values, particularly across consecutive rows.
 
@@ -136,10 +136,10 @@ Where:​​
 
 ### Conclusion
 
-The AIR framework transforms trace constraints into polynomial identities, where increased rows only expand the evaluation domain rather than polynomial complexity. ZKM2 also enhances efficiency through:
+The AIR framework transforms trace constraints into polynomial identities, where increased rows only expand the evaluation domain rather than polynomial complexity. zkMIPS also enhances efficiency through:
 - ​Lookup Tables​​ for range checks.
 - ​Multiset Hashing​​ for memory consistency.
 - ​FRI for polynomial interactive oracle proofs (IOP).
 ​
 
-These components constitute the foundational architecture of ZKM2 and will be elaborated in subsequent sections. 
+These components constitute the foundational architecture of zkMIPS and will be elaborated in subsequent sections. 

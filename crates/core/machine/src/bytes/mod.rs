@@ -5,7 +5,7 @@ pub mod columns;
 pub mod trace;
 pub mod utils;
 
-use zkm2_core_executor::{events::ByteLookupEvent, ByteOpcode};
+use zkm_core_executor::{events::ByteLookupEvent, ByteOpcode};
 
 use core::borrow::BorrowMut;
 use std::marker::PhantomData;

@@ -9,12 +9,12 @@ use p3_air::{Air, BaseAir};
 use p3_field::{PrimeField, PrimeField32, FieldAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{
     air::{MachineAir, ZKMAirBuilder},
     Word,
 };
@@ -234,8 +234,8 @@ where
 mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{
+    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_stark::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 

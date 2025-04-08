@@ -10,5 +10,5 @@ pub mod ir;
 
 pub mod prelude {
     pub use crate::ir::*;
-    pub use zkm2_recursion_derive::DslVariable;
+    pub use zkm_recursion_derive::DslVariable;
 }

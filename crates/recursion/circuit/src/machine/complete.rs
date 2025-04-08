@@ -2,9 +2,9 @@ use itertools::Itertools;
 use p3_koala_bear::KoalaBear;
 use p3_field::FieldAlgebra;
 
-use zkm2_recursion_compiler::circuit::CircuitV2Builder;
-use zkm2_recursion_compiler::ir::{Builder, Config, Felt};
-use zkm2_recursion_core::air::RecursionPublicValues;
+use zkm_recursion_compiler::circuit::CircuitV2Builder;
+use zkm_recursion_compiler::ir::{Builder, Config, Felt};
+use zkm_recursion_core::air::RecursionPublicValues;
 
 /// Assertions on recursion public values which represent a complete proof.
 ///

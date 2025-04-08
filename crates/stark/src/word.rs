@@ -7,8 +7,8 @@ use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
 use serde::{Deserialize, Serialize};
 use std::array::IntoIter;
-use zkm2_derive::AlignedBorrow;
-use zkm2_primitives::consts::WORD_SIZE;
+use zkm_derive::AlignedBorrow;
+use zkm_primitives::consts::WORD_SIZE;
 
 /// An array of four bytes to represent a 32-bit value.
 ///

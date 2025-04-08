@@ -2,9 +2,9 @@ use std::array;
 
 use itertools::Itertools;
 use p3_field::FieldAlgebra;
-use zkm2_core_executor::ByteOpcode;
-use zkm2_primitives::consts::WORD_SIZE;
-use zkm2_stark::{air::ByteAirBuilder, Word};
+use zkm_core_executor::ByteOpcode;
+use zkm_primitives::consts::WORD_SIZE;
+use zkm_stark::{air::ByteAirBuilder, Word};
 
 pub trait WordAirBuilder: ByteAirBuilder {
     /// Asserts that the two words are equal.

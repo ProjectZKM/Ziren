@@ -1,4 +1,4 @@
-use zkm2_recursion_derive::DslVariable;
+use zkm_recursion_derive::DslVariable;
 
 use super::{Ext, Felt, Var};
 use crate::ir::{Array, Builder, Config, MemIndex, MemVariable, Ptr, Variable};

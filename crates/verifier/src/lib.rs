@@ -1,5 +1,5 @@
-//! This crate provides verifiers for ZKM2 Groth16 and Plonk BN254 proofs in a no-std environment.
-//! It is patched for efficient verification within the ZKM2 zkVM context.
+//! This crate provides verifiers for zkMIPS Groth16 and Plonk BN254 proofs in a no-std environment.
+//! It is patched for efficient verification within the zkMIPS zkVM context.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
@@ -7,12 +7,12 @@ extern crate alloc;
 use lazy_static::lazy_static;
 
 lazy_static! {
-    /// The PLONK verifying key for this ZKM2 version.
+    /// The PLONK verifying key for this zkMIPS version.
     pub static ref PLONK_VK_BYTES: &'static [u8] = include_bytes!("../bn254-vk/plonk_vk.bin");
 }
 
 lazy_static! {
-    /// The Groth16 verifying key for this ZKM2 version.
+    /// The Groth16 verifying key for this zkMIPS version.
     pub static ref GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../bn254-vk/groth16_vk.bin");
 }
 

@@ -1,7 +1,7 @@
 //! A script that generates a Groth16 proof for the Fibonacci program, and verifies the
 //! Groth16 proof in ZKM.
 
-use zkm2_sdk::{include_elf, utils, HashableKey, ProverClient, ZKMStdin};
+use zkm_sdk::{include_elf, utils, HashableKey, ProverClient, ZKMStdin};
 
 /// The ELF for the Groth16 verifier program.
 const GROTH16_ELF: &[u8] = include_elf!("groth16-verifier");
@@ -10,14 +10,14 @@ const GROTH16_ELF: &[u8] = include_elf!("groth16-verifier");
 const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci");
 
 /// Generates the proof, public values, and vkey hash for the Fibonacci program in a format that
-/// can be read by `zkm2-verifier`.
+/// can be read by `zkm-verifier`.
 ///
 /// Returns the proof bytes, public values, and vkey hash.
 fn generate_fibonacci_proof() -> (Vec<u8>, Vec<u8>, String) {
     // Create an input stream and write '20' to it.
     let n = 20u32;
 
-    // The input stream that the program will read from using `zkm2_zkvm::io::read`. Note that the
+    // The input stream that the program will read from using `zkm_zkvm::io::read`. Note that the
     // types of the elements in the input stream must match the types being read in the program.
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);

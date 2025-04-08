@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use num::{BigUint, One};
 //use rand::Rng;
-use zkm2_zkvm::syscalls::sys_bigint;
+use zkm_zkvm::syscalls::sys_bigint;
 
 fn uint256_mul(x: &[u8; 32], y: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
     // println!("cycle-tracker-start: uint256_mul");

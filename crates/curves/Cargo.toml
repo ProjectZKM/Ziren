@@ -1,5 +1,5 @@
 [package]
-name = "zkm2-curves"
+name = "zkm-curves"
 description = "zkMIPS"
 readme = "../../README.md"
 version = { workspace = true }
@@ -23,9 +23,9 @@ amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = fals
 elliptic-curve = "0.13.8"
 dashu = "0.4.2"
 
-zkm2-stark = { workspace = true }
+zkm-stark = { workspace = true }
 
-zkm2-primitives = { workspace = true }
+zkm-primitives = { workspace = true }
 p3-field = { workspace = true }
 itertools = { workspace = true }
 rug = { version = "1.26.1", optional = true }

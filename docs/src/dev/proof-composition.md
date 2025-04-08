@@ -6,16 +6,16 @@ A receipt gives the results of your program along with proof that they were prod
 
 ## What is Proof Composition
 
-You can verify other receipts in the guest use `zkm2_zkvm::lib::verify::verify_zkm_proof()`
+You can verify other receipts in the guest use `zkm_zkvm::lib::verify::verify_zkm_proof()`
 
-## Example: [Aggregation](https://github.com/zkMIPS/zkm2/tree/dev/init/examples/aggregation)
+## Example: [Aggregation](https://github.com/zkMIPS/zkm/tree/dev/init/examples/aggregation)
 
 ### Host
 
 ```rust
 //! A simple example showing how to aggregate proofs of multiple programs with ZKM.
 
-use zkm2_sdk::{
+use zkm_sdk::{
     include_elf, HashableKey, ProverClient, ZKMProof, ZKMProofWithPublicValues, ZKMStdin,
     ZKMVerifyingKey,
 };
@@ -36,7 +36,7 @@ struct AggregationInput {
 
 fn main() {
     // Setup the logger.
-    zkm2_sdk::utils::setup_logger();
+    zkm_sdk::utils::setup_logger();
 
     // Initialize the proving client.
     let client = ProverClient::new();
@@ -102,16 +102,16 @@ fn main() {
 //! A simple program that aggregates the proofs of multiple programs proven with the zkVM.
 
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use sha2::{Digest, Sha256};
 
 pub fn main() {
     // Read the verification keys.
-    let vkeys = zkm2_zkvm::io::read::<Vec<[u32; 8]>>();
+    let vkeys = zkm_zkvm::io::read::<Vec<[u32; 8]>>();
 
     // Read the public values.
-    let public_values = zkm2_zkvm::io::read::<Vec<Vec<u8>>>();
+    let public_values = zkm_zkvm::io::read::<Vec<Vec<u8>>>();
 
     // Verify the proofs.
     assert_eq!(vkeys.len(), public_values.len());
@@ -119,7 +119,7 @@ pub fn main() {
         let vkey = &vkeys[i];
         let public_values = &public_values[i];
         let public_values_digest = Sha256::digest(public_values);
-        zkm2_zkvm::lib::verify::verify_zkm_proof(vkey, &public_values_digest.into());
+        zkm_zkvm::lib::verify::verify_zkm_proof(vkey, &public_values_digest.into());
     }
 
     // TODO: Do something interesting with the proofs here.
@@ -127,7 +127,7 @@ pub fn main() {
     // For example, commit to the verified proofs in a merkle tree. For now, we'll just commit to
     // all the (vkey, input) pairs.
     let commitment = commit_proof_pairs(&vkeys, &public_values);
-    zkm2_zkvm::io::commit_slice(&commitment);
+    zkm_zkvm::io::commit_slice(&commitment);
 }
 
 pub fn words_to_bytes_le(words: &[u32; 8]) -> [u8; 32] {

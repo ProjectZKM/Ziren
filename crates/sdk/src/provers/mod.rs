@@ -16,13 +16,13 @@ use std::time::Duration;
 use anyhow::Result;
 use strum_macros::EnumString;
 use thiserror::Error;
-use zkm2_core_executor::ZKMContext;
-use zkm2_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
-use zkm2_prover::{
+use zkm_core_executor::ZKMContext;
+use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
+use zkm_prover::{
     components::ZKMProverComponents, CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey,
     ZKMVerifyingKey,
 };
-use zkm2_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
+use zkm_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::install::try_install_circuit_artifacts;
 use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
@@ -40,7 +40,7 @@ pub enum ProverType {
 #[derive(Clone, Default)]
 pub struct ProofOpts {
     /// Options to configure the ZKM prover.
-    pub zkm2_prover_opts: ZKMProverOpts,
+    pub zkm_prover_opts: ZKMProverOpts,
     /// Optional timeout duration for proof generation.
     pub timeout: Option<Duration>,
 }
@@ -65,7 +65,7 @@ pub enum ZKMVerificationError {
 pub trait Prover<C: ZKMProverComponents>: Send + Sync {
     fn id(&self) -> ProverType;
 
-    fn zkm2_prover(&self) -> &ZKMProver<C>;
+    fn zkm_prover(&self) -> &ZKMProver<C>;
 
     fn version(&self) -> &str {
         ZKM_CIRCUIT_VERSION
@@ -83,7 +83,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues>;
 
-    /// Verify that an ZKM2 proof is valid given its vkey and metadata.
+    /// Verify that an zkMIPS proof is valid given its vkey and metadata.
     /// For Plonk proofs, verifies that the public inputs of the PlonkBn254 proof match
     /// the hash of the VK and the committed public values of the ZKMProofWithPublicValues.
     fn verify(
@@ -91,8 +91,8 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         bundle: &ZKMProofWithPublicValues,
         vkey: &ZKMVerifyingKey,
     ) -> Result<(), ZKMVerificationError> {
-        if bundle.zkm2_version != self.version() {
-            return Err(ZKMVerificationError::VersionMismatch(bundle.zkm2_version.clone()));
+        if bundle.zkm_version != self.version() {
+            return Err(ZKMVerificationError::VersionMismatch(bundle.zkm_version.clone()));
         }
         match &bundle.proof {
             ZKMProof::Core(proof) => {
@@ -116,7 +116,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                 }
 
                 // Verify the core proof.
-                self.zkm2_prover()
+                self.zkm_prover()
                     .verify(&ZKMCoreProofData(proof.clone()), vkey)
                     .map_err(ZKMVerificationError::Core)
             }
@@ -140,31 +140,31 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     }
                 }
 
-                self.zkm2_prover()
+                self.zkm_prover()
                     .verify_compressed(proof, vkey)
                     .map_err(ZKMVerificationError::Recursion)
             }
             ZKMProof::Plonk(proof) => self
-                .zkm2_prover()
+                .zkm_prover()
                 .verify_plonk_bn254(
                     proof,
                     vkey,
                     &bundle.public_values,
-                    &if zkm2_prover::build::zkm2_dev_mode() {
-                        zkm2_prover::build::plonk_bn254_artifacts_dev_dir()
+                    &if zkm_prover::build::zkm_dev_mode() {
+                        zkm_prover::build::plonk_bn254_artifacts_dev_dir()
                     } else {
                         try_install_circuit_artifacts("plonk")
                     },
                 )
                 .map_err(ZKMVerificationError::Plonk),
             ZKMProof::Groth16(proof) => self
-                .zkm2_prover()
+                .zkm_prover()
                 .verify_groth16_bn254(
                     proof,
                     vkey,
                     &bundle.public_values,
-                    &if zkm2_prover::build::zkm2_dev_mode() {
-                        zkm2_prover::build::groth16_bn254_artifacts_dev_dir()
+                    &if zkm_prover::build::zkm_dev_mode() {
+                        zkm_prover::build::groth16_bn254_artifacts_dev_dir()
                     } else {
                         try_install_circuit_artifacts("groth16")
                     },

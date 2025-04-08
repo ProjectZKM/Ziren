@@ -5,9 +5,9 @@ use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
-use zkm2_core_machine::utils::{next_power_of_two, pad_rows_fixed};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::MachineAir;
+use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::MachineAir;
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 

@@ -1,17 +1,17 @@
 # Prover
 
-The zkm2_sdk crate provides all the necessary tools for proof generation. Key features include the `ProverClient`, enabling you to:
+The zkm_sdk crate provides all the necessary tools for proof generation. Key features include the `ProverClient`, enabling you to:
 - Initialize proving/verifying keys via `setup()`. 
 - Execute your program via `execute()`.
 - Generate proofs with `prove()`.
 - Verify proofs through `verify()`.
 
-## Example: [Fibonacci](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/src/main.rs)
+## Example: [Fibonacci](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/src/main.rs)
 
-The following code is a example of using zkm2_sdk in host.
+The following code is a example of using zkm_sdk in host.
 
 ```rust
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("fibonacci");
@@ -20,7 +20,7 @@ fn main() {
     // Create an input stream and write '1000' to it.
     let n = 1000u32;
 
-    // The input stream that the guest will read from using `zkm2_zkvm::io::read`. Note that the
+    // The input stream that the guest will read from using `zkm_zkvm::io::read`. Note that the
     // types of the elements in the input stream must match the types being read in the program.
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
@@ -39,7 +39,7 @@ fn main() {
     // Read and verify the output.
     //
     // Note that this output is read from values committed to in the program using
-    // `zkm2_zkvm::io::commit`.
+    // `zkm_zkvm::io::commit`.
     let n = proof.public_values.read::<u32>();
     let a = proof.public_values.read::<u32>();
     let b = proof.public_values.read::<u32>();
@@ -58,7 +58,7 @@ fn main() {
 zkMIPS<sup>+</sup> provides customizable proof generation options:
 
 ```rust
-/// A proof generated with ZKM2 of a particular proof mode.
+/// A proof generated with zkMIPS of a particular proof mode.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
@@ -79,7 +79,7 @@ pub enum ZKMProof {
 }
 ```
 
-### [Core Proof (Default)](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/src/main.rs)
+### [Core Proof (Default)](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/src/main.rs)
 
 The default prover mode generates a sequence of STARK proofs whose cumulative proof size scales linearly with the execution trace length.
 
@@ -88,7 +88,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).run().unwrap();
 ```
 
-### [Compressed Proof](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/bin/compressed.rs)
+### [Compressed Proof](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/bin/compressed.rs)
 
 The compressed proving mode generates constant-sized STARK proofs, but not suitable for on-chain verification.
 
@@ -97,7 +97,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).compressed().run().unwrap();
 ```
 
-### [Groth16 Proof (Recommended)](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/bin/groth16_bn254.rs)
+### [Groth16 Proof (Recommended)](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/bin/groth16_bn254.rs)
 
 The Groth16 proving mode ​generates succinct SNARK proofs with a compact size of approximately 260 bytes, ​and features on-chain verification.
 
@@ -106,7 +106,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).groth16().run().unwrap();
 ```
 
-### [PLONK Proof](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/bin/plonk_bn254.rs)
+### [PLONK Proof](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/bin/plonk_bn254.rs)
 
 The PLONK proving mode generates succinct SNARK proofs with a compact size of approximately 868 bytes, while maintaining on-chain verifiability. In contrast to Groth16, PLONK removes the dependency on trusted setup ceremonies.
 
@@ -117,7 +117,7 @@ client.prove(&pk, stdin).plonk().run().unwrap();
 
 ## Hardware Acceleration
 
-ZKM2 provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
+zkMIPS provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
 
 You can check your CPU's AVX compatibility by running:
 

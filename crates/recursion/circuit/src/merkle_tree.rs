@@ -5,8 +5,8 @@ use rayon::prelude::*;
 use p3_field::Field;
 use p3_util::{reverse_bits_len, reverse_slice_index_bits};
 use serde::{Deserialize, Serialize};
-use zkm2_core_machine::utils::log2_strict_usize;
-use zkm2_recursion_compiler::ir::Builder;
+use zkm_core_machine::utils::log2_strict_usize;
+use zkm_recursion_compiler::ir::Builder;
 
 use crate::{
     hash::{FieldHasher, FieldHasherVariable},
@@ -157,12 +157,12 @@ mod tests {
     use p3_util::log2_ceil_usize;
     use rand::rngs::OsRng;
     use zkhash::ark_ff::UniformRand;
-    use zkm2_recursion_compiler::{
+    use zkm_recursion_compiler::{
         config::InnerConfig,
         ir::{Builder, Felt},
     };
-    use zkm2_recursion_core::DIGEST_SIZE;
-    use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_recursion_core::DIGEST_SIZE;
+    use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
 
     use crate::{
         merkle_tree::{verify, MerkleTree},

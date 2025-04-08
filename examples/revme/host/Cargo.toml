@@ -6,11 +6,11 @@ default-run = "revme-host"
 publish = false
 
 [dependencies]
-zkm2-sdk = { workspace = true }
-guest-std = { git = "https://github.com/zkMIPS/revme.git", package = "guest-std", branch = "cbor-zkm2" }
+zkm-sdk = { workspace = true }
+guest-std = { git = "https://github.com/zkMIPS/revme.git", package = "guest-std", branch = "cbor-zkm" }
 
 [build-dependencies]
-zkm2-build = { workspace = true }
+zkm-build = { workspace = true }
 
 [[bin]]
 name = "revme-host"

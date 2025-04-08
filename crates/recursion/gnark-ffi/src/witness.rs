@@ -2,7 +2,7 @@ use std::{fs::File, io::Write};
 
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField};
 use serde::{Deserialize, Serialize};
-use zkm2_recursion_compiler::ir::{Config, Witness};
+use zkm_recursion_compiler::ir::{Config, Witness};
 
 /// A witness that can be used to initialize values for witness generation inside Gnark.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

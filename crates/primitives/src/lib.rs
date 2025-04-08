@@ -1,4 +1,4 @@
-//! zkm2-primitives contains types and functions that are used in both zkm2-core and zkm2-zkvm.
+//! zkm-primitives contains types and functions that are used in both zkm-core and zkm-zkvm.
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
 use lazy_static::lazy_static;

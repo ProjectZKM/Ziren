@@ -1,7 +1,7 @@
 use p3_bn254_fr::Bn254Fr;
 use p3_field::extension::BinomialExtensionField;
 use p3_koala_bear::KoalaBear;
-use zkm2_stark::{InnerChallenge, InnerVal};
+use zkm_stark::{InnerChallenge, InnerVal};
 
 use crate::{circuit::AsmConfig, prelude::Config};
 

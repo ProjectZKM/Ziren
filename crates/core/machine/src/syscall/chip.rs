@@ -12,12 +12,12 @@ use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelBridge;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
-use zkm2_core_executor::events::GlobalLookupEvent;
-use zkm2_core_executor::{events::SyscallEvent, ExecutionRecord, Program};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::AirLookup;
-use zkm2_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
-use zkm2_stark::LookupKind;
+use zkm_core_executor::events::GlobalLookupEvent;
+use zkm_core_executor::{events::SyscallEvent, ExecutionRecord, Program};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::AirLookup;
+use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_stark::LookupKind;
 
 use crate::utils::pad_rows_fixed;
 

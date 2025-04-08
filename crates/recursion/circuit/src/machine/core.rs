@@ -12,28 +12,28 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm2_core_machine::{
+use zkm_core_machine::{
     cpu::MAX_CPU_LOG_DEGREE,
     mips::{MipsAir, MAX_LOG_NUMBER_OF_SHARDS},
 };
 
-use zkm2_recursion_core::air::PV_DIGEST_NUM_WORDS;
-use zkm2_stark::air::LookupScope;
-use zkm2_stark::air::MachineAir;
-use zkm2_stark::{
+use zkm_recursion_core::air::PV_DIGEST_NUM_WORDS;
+use zkm_stark::air::LookupScope;
+use zkm_stark::air::MachineAir;
+use zkm_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
     Dom, StarkMachine, Word,
 };
 
-use zkm2_stark::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
+use zkm_stark::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
 
-use zkm2_recursion_compiler::{
+use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Config, Felt, SymbolicFelt},
 };
 
-use zkm2_recursion_core::{
+use zkm_recursion_core::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
 };
@@ -546,7 +546,7 @@ where
             recursion_public_values.previous_finalize_addr_bits =
                 initial_previous_finalize_addr_bits;
             recursion_public_values.last_finalize_addr_bits = current_finalize_addr_bits;
-            recursion_public_values.zkm2_vk_digest = vk_digest;
+            recursion_public_values.zkm_vk_digest = vk_digest;
             recursion_public_values.global_cumulative_sum = global_cumulative_sum;
             recursion_public_values.start_reconstruct_deferred_digest = start_deferred_digest;
             recursion_public_values.end_reconstruct_deferred_digest = end_deferred_digest;

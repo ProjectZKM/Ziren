@@ -1,7 +1,7 @@
 use num::{BigUint, One, Zero};
 
-use zkm2_curves::edwards::WORDS_FIELD_ELEMENT;
-use zkm2_primitives::consts::{bytes_to_words_le, words_to_bytes_le_vec, WORD_SIZE};
+use zkm_curves::edwards::WORDS_FIELD_ELEMENT;
+use zkm_primitives::consts::{bytes_to_words_le, words_to_bytes_le_vec, WORD_SIZE};
 
 use crate::{
     events::{PrecompileEvent, Uint256MulEvent},

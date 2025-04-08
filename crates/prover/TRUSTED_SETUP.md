@@ -18,7 +18,7 @@ The trusted setup process will overwrite the proving key, verifying key, and the
 contracts in the `build/groth16` directory:
 
 ```bash
-zkm2/crates/prover$ tree build/groth16
+zkMIPS/crates/prover$ tree build/groth16
 build/groth16
 ├── constraints.json
 ├── groth16_circuit.bin
@@ -47,7 +47,7 @@ git clone https://github.com/zkMIPS/semaphore-gnark-11.git
 git checkout zkm2
 go build
 mv semaphore-mtb-setup semaphore-gnark-11
-cp semaphore-gnark-11 ../zkm2/crates/prover/
+cp semaphore-gnark-11 ../zkMIPS/crates/prover/
 ```
 
 ## Phase 1 Setup

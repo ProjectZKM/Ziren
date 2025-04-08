@@ -4,12 +4,12 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaExtendEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_stark::air::MachineAir;
+use zkm_stark::air::MachineAir;
 
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
 

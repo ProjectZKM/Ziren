@@ -4,7 +4,7 @@
 /// PLONK proofs. This is useful for development and testing purposes.
 ///
 /// By default, the variable is disabled.
-pub fn zkm2_dev_mode() -> bool {
+pub fn zkm_dev_mode() -> bool {
     let value = std::env::var("ZKM_DEV").unwrap_or_else(|_| "false".to_string());
     let enabled = value == "1" || value.to_lowercase() == "true";
     if enabled {

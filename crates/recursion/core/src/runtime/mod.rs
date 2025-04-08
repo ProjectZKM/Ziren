@@ -35,8 +35,8 @@ use p3_symmetric::{CryptographicPermutation, Permutation};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
 
-use zkm2_stark::septic_curve::SepticCurve;
-use zkm2_stark::septic_extension::SepticExtension;
+use zkm_stark::septic_curve::SepticCurve;
+use zkm_stark::septic_extension::SepticExtension;
 
 use crate::air::{Block, RECURSIVE_PROOF_NUM_PV_ELTS};
 
@@ -71,7 +71,7 @@ pub struct CycleTrackerEntry {
 }
 
 /// TODO fully document.
-/// Taken from [`zkm2_recursion_core::runtime::Runtime`].
+/// Taken from [`zkm_recursion_core::runtime::Runtime`].
 /// Many missing things (compared to the old `Runtime`) will need to be implemented.
 pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     pub timestamp: usize,
@@ -256,7 +256,7 @@ where
         }
     }
 
-    /// Compare to [zkm2_recursion_core::runtime::Runtime::run].
+    /// Compare to [zkm_recursion_core::runtime::Runtime::run].
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
         let early_exit_ts = std::env::var("RECURSION_EARLY_EXIT_TS")
             .map_or(usize::MAX, |ts: String| ts.parse().unwrap());

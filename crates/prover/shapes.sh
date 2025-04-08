@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # S3 bucket name.
-S3_BUCKET="zkm2-circuits"
+S3_BUCKET="zkm-circuits"
 
 # Check for unstaged changes in the Git repository
 if ! git diff --quiet; then

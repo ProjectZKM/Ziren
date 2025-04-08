@@ -1,7 +1,7 @@
 use core::iter::{once, repeat};
 use p3_air::{AirBuilder, AirBuilderWithPublicValues};
 use p3_field::FieldAlgebra;
-use zkm2_stark::{
+use zkm_stark::{
     air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},
     LookupKind,
 };

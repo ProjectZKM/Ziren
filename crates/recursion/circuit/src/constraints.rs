@@ -4,10 +4,10 @@ use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use zkm2_recursion_compiler::ir::{
+use zkm_recursion_compiler::ir::{
     Builder, Config, Ext, ExtConst, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
 };
-use zkm2_stark::{
+use zkm_stark::{
     air::MachineAir, AirOpenedValues, ChipOpenedValues, GenericVerifierConstraintFolder,
     MachineChip, OpeningShapeError,
 };

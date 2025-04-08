@@ -8,7 +8,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-zkm2-build = { path = "../build" }
+zkm-build = { path = "../build" }
 
 [build-dependencies]
-zkm2-build = { path = "../build" }
+zkm-build = { path = "../build" }

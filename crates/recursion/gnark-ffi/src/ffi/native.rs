@@ -11,7 +11,7 @@ use std::{
     ffi::{c_char, CStr, CString},
     mem::forget,
 };
-use zkm2_core_machine::ZKM_CIRCUIT_VERSION;
+use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 
 #[allow(warnings, clippy::all)]
 mod bind {
@@ -257,7 +257,7 @@ mod tests {
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::Permutation;
-    use zkm2_stark::inner_perm;
+    use zkm_stark::inner_perm;
 
     #[test]
     pub fn test_koalabear_poseidon2() {

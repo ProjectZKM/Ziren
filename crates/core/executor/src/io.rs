@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use serde::{de::DeserializeOwned, Serialize};
-use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
+use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
 
 use super::Executor;
 use crate::ZKMReduceProof;

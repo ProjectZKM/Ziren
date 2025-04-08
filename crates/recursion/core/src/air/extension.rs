@@ -2,7 +2,7 @@ use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     Field, FieldExtensionAlgebra,
 };
-use zkm2_stark::air::BinomialExtension;
+use zkm_stark::air::BinomialExtension;
 
 use super::Block;
 

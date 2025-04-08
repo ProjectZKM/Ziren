@@ -6,9 +6,9 @@ pub use air::*;
 mod tests {
 
     use test_artifacts::UINT256_MUL_ELF;
-    use zkm2_core_executor::Program;
-    use zkm2_curves::{params::FieldParameters, uint256::U256Field, utils::biguint_from_limbs};
-    use zkm2_stark::CpuProver;
+    use zkm_core_executor::Program;
+    use zkm_curves::{params::FieldParameters, uint256::U256Field, utils::biguint_from_limbs};
+    use zkm_stark::CpuProver;
 
     use crate::{
         io::ZKMStdin,

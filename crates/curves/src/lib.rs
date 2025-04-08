@@ -30,7 +30,7 @@ use std::{
     ops::{Add, Neg},
 };
 use typenum::Unsigned;
-use zkm2_primitives::consts::WORD_SIZE;
+use zkm_primitives::consts::WORD_SIZE;
 
 use num::BigUint;
 use serde::{de::DeserializeOwned, Serialize};

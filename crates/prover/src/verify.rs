@@ -4,17 +4,17 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use p3_field::{FieldAlgebra, PrimeField};
 use p3_koala_bear::KoalaBear;
-use zkm2_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
-use zkm2_core_machine::cpu::MAX_CPU_LOG_DEGREE;
-use zkm2_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
+use zkm_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
+use zkm_core_machine::cpu::MAX_CPU_LOG_DEGREE;
+use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
 
 use thiserror::Error;
-use zkm2_recursion_circuit::machine::RootPublicValues;
-use zkm2_recursion_core::{air::RecursionPublicValues, stark::KoalaBearPoseidon2Outer};
-use zkm2_recursion_gnark_ffi::{
+use zkm_recursion_circuit::machine::RootPublicValues;
+use zkm_recursion_core::{air::RecursionPublicValues, stark::KoalaBearPoseidon2Outer};
+use zkm_recursion_gnark_ffi::{
     Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
 };
-use zkm2_stark::{
+use zkm_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
     MachineProof, MachineProver, MachineVerificationError, StarkGenericConfig, Word,
@@ -33,7 +33,7 @@ pub enum PlonkVerificationError {
     )]
     InvalidVerificationKey,
     #[error(
-        "the public values in the zkm2 proof do not match the public values in the inner plonk bn254 proof"
+        "the public values in the zkMIPS proof do not match the public values in the inner plonk bn254 proof"
     )]
     InvalidPublicValues,
 }
@@ -45,7 +45,7 @@ pub enum Groth16VerificationError {
     )]
     InvalidVerificationKey,
     #[error(
-        "the public values in the zkm2 proof do not match the public values in the inner groth16 bn254 proof"
+        "the public values in the zkMIPS proof do not match the public values in the inner groth16 bn254 proof"
     )]
     InvalidPublicValues,
 }
@@ -316,10 +316,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        // Verify that the proof is for the zkm2 vkey we are expecting.
+        // Verify that the proof is for the zkMIPS vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
-        if public_values.zkm2_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("zkm2 vk hash mismatch"));
+        if public_values.zkm_vk_digest != vkey_hash {
+            return Err(MachineVerificationError::InvalidPublicValues("zkMIPS vk hash mismatch"));
         }
 
         Ok(())
@@ -347,10 +347,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
-        // Verify that the proof is for the zkm2 vkey we are expecting.
+        // Verify that the proof is for the zkMIPS vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
-        if public_values.zkm2_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("zkm2 vk hash mismatch"));
+        if public_values.zkm_vk_digest != vkey_hash {
+            return Err(MachineVerificationError::InvalidPublicValues("zkMIPS vk hash mismatch"));
         }
 
         Ok(())
@@ -372,10 +372,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let public_values: &RootPublicValues<_> = proof.proof.public_values.as_slice().borrow();
         assert_root_public_values_valid(self.shrink_prover.machine().config(), public_values);
 
-        // Verify that the proof is for the zkm2 vkey we are expecting.
+        // Verify that the proof is for the zkMIPS vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
-        if *public_values.zkm2_vk_digest() != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("zkm2 vk hash mismatch"));
+        if *public_values.zkm_vk_digest() != vkey_hash {
+            return Err(MachineVerificationError::InvalidPublicValues("zkMIPS vk hash mismatch"));
         }
 
         Ok(())
@@ -473,8 +473,8 @@ pub fn verify_groth16_bn254_public_inputs(
 impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
-        proof: &zkm2_core_machine::reduce::ZKMReduceProof<KoalaBearPoseidon2>,
-        vk: &zkm2_stark::StarkVerifyingKey<KoalaBearPoseidon2>,
+        proof: &zkm_core_machine::reduce::ZKMReduceProof<KoalaBearPoseidon2>,
+        vk: &zkm_stark::StarkVerifyingKey<KoalaBearPoseidon2>,
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
     ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {

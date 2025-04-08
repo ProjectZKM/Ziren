@@ -3,14 +3,14 @@ use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm2_stark::{air::ZKMAirBuilder, Word};
+use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::{
     air::{ZKMCoreAirBuilder, WordAirBuilder},
     memory::MemoryCols,
     operations::KoalaBearWordRangeChecker,
 };
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::MemoryAccessPosition, ByteOpcode, Opcode
 };
 

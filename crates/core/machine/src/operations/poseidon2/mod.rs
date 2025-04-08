@@ -1,5 +1,5 @@
 use permutation::Poseidon2Degree3Cols;
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 pub mod air;
 pub mod permutation;

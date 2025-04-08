@@ -1,21 +1,21 @@
-# ZKM2 Verifier
+# zkMIPS Verifier
 
-This crate provides verifiers for ZKM2 Groth16 and Plonk zero-knowledge proofs. These proofs are expected
-to be generated using the [ZKM2 SDK](../sdk).
+This crate provides verifiers for zkMIPS Groth16 and Plonk zero-knowledge proofs. These proofs are expected
+to be generated using the [zkMIPS SDK](../sdk).
 
 ## Features
 
 Groth16 and Plonk proof verification are supported in `no-std` environments. Verification in the
-ZKM2 zkVM context is patched, in order to make use of the
+zkMIPS zkVM context is patched, in order to make use of the
 [bn254 precompiles](https://blog.succinct.xyz/succinctshipsprecompiles/).
 
 ### Pre-generated verification keys
 
 Verification keys for Groth16 and Plonk are stored in the [`bn254-vk`](./bn254-vk/) directory. These
-vkeys are used to verify all ZKM2 proofs.
+vkeys are used to verify all zkMIPS proofs.
 
 These vkeys are the same as those found locally in
-`~/.zkm2/circuits/<circuit_name>/<version>/<circuit_name>_vk.bin`, and should be automatically
+`~/.zkm/circuits/<circuit_name>/<version>/<circuit_name>_vk.bin`, and should be automatically
 updated after every release.
 
 ## Tests
@@ -23,7 +23,7 @@ updated after every release.
 Run tests with the following command:
 
 ```sh
-cargo test --package zkm2-verifier
+cargo test --package zkm-verifier
 ```
 
 These tests verify the proofs in the [`test_binaries`](./test_binaries) directory. These test binaries

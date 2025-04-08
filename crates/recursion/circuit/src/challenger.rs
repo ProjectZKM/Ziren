@@ -1,11 +1,11 @@
 use p3_field::{Field, FieldAlgebra};
 use p3_koala_bear::KoalaBear;
-use zkm2_recursion_compiler::{
+use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{DslIr, Var},
     prelude::{Builder, Config, Ext, Felt},
 };
-use zkm2_recursion_core::{
+use zkm_recursion_core::{
     air::ChallengerPublicValues,
     runtime::{HASH_RATE, PERMUTATION_WIDTH},
     stark::{OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE, OUTER_MULTI_FIELD_CHALLENGER_RATE},
@@ -437,17 +437,17 @@ pub(crate) mod tests {
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
-    use zkm2_recursion_compiler::{
+    use zkm_recursion_compiler::{
         circuit::{AsmBuilder, AsmConfig},
         config::OuterConfig,
         constraints::ConstraintCompiler,
         ir::{Builder, Config, Ext, ExtConst, Felt, Var},
     };
-    use zkm2_recursion_core::stark::{
+    use zkm_recursion_core::stark::{
         outer_perm, KoalaBearPoseidon2Outer, OuterCompress, OuterHash,
     };
-    use zkm2_recursion_gnark_ffi::PlonkBn254Prover;
-    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_recursion_gnark_ffi::PlonkBn254Prover;
+    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         challenger::{DuplexChallengerVariable, FieldChallengerVariable},

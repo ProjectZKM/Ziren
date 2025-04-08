@@ -13,9 +13,9 @@ mod tests {
     use p3_field::FieldAlgebra;
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
 
-    use zkm2_core_machine::utils::run_test_machine;
-    use zkm2_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
-    use zkm2_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
+    use zkm_core_machine::utils::run_test_machine;
+    use zkm_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
+    use zkm_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
 
     use crate::{
         circuit::{AsmBuilder, AsmCompiler, CircuitV2Builder},

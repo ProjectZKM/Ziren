@@ -2,9 +2,9 @@ use std::{cmp::Ordering, collections::BTreeMap, path::PathBuf, sync::mpsc};
 
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
-use zkm2_core_executor::{Executor, Program, MipsAirId, ZKMContext};
-use zkm2_core_machine::{io::ZKMStdin, mips::MipsAir, utils::setup_logger};
-use zkm2_stark::{shape::Shape, ZKMCoreOpts};
+use zkm_core_executor::{Executor, Program, MipsAirId, ZKMContext};
+use zkm_core_machine::{io::ZKMStdin, mips::MipsAir, utils::setup_logger};
+use zkm_stark::{shape::Shape, ZKMCoreOpts};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -68,7 +68,7 @@ fn main() {
             .args([
                 "s3",
                 "cp",
-                &format!("s3://zkm2-testing-suite/{}/program.bin", s3_path),
+                &format!("s3://zkm-testing-suite/{}/program.bin", s3_path),
                 "program.bin",
             ])
             .status()
@@ -82,7 +82,7 @@ fn main() {
             .args([
                 "s3",
                 "cp",
-                &format!("s3://zkm2-testing-suite/{}/stdin.bin", s3_path),
+                &format!("s3://zkm-testing-suite/{}/stdin.bin", s3_path),
                 "stdin.bin",
             ])
             .status()

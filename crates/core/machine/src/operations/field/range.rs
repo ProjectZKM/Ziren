@@ -1,18 +1,18 @@
 use itertools::izip;
 use std::fmt::Debug;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
-use zkm2_stark::air::{BaseAirBuilder, Polynomial, ZKMAirBuilder};
+use zkm_stark::air::{BaseAirBuilder, Polynomial, ZKMAirBuilder};
 
 use num::BigUint;
 
 use p3_air::AirBuilder;
 use p3_field::{FieldAlgebra, PrimeField32};
-use zkm2_curves::params::{FieldParameters, Limbs};
+use zkm_curves::params::{FieldParameters, Limbs};
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 /// Operation columns for verifying that `lhs < rhs`.
 #[derive(Debug, Clone, AlignedBorrow)]

@@ -5,7 +5,7 @@ edition = { workspace = true }
 publish = false
 
 [dependencies]
-zkm2-sdk = { workspace = true }
+zkm-sdk = { workspace = true }
 
 [build-dependencies]
-zkm2-build = { workspace = true }
+zkm-build = { workspace = true }

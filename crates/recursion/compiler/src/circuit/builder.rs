@@ -5,11 +5,11 @@ use std::iter::repeat;
 use itertools::Itertools;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_koala_bear::KoalaBear;
-use zkm2_recursion_core::air::RecursionPublicValues;
-use zkm2_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
-use zkm2_stark::septic_curve::SepticCurve;
-use zkm2_stark::septic_digest::SepticDigest;
-use zkm2_stark::septic_extension::SepticExtension;
+use zkm_recursion_core::air::RecursionPublicValues;
+use zkm_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
+use zkm_stark::septic_curve::SepticCurve;
+use zkm_stark::septic_digest::SepticDigest;
+use zkm_stark::septic_extension::SepticExtension;
 
 use crate::prelude::*;
 pub trait CircuitV2Builder<C: Config> {

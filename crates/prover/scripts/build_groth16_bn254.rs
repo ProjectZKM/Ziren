@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use zkm2_core_machine::utils::setup_logger;
-use zkm2_prover::build::build_groth16_bn254_artifacts_with_dummy;
+use zkm_core_machine::utils::setup_logger;
+use zkm_prover::build::build_groth16_bn254_artifacts_with_dummy;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

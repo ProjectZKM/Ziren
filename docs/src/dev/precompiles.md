@@ -8,13 +8,13 @@ Within the zkVM, precompiles are made available as system calls executed through
 
 For advanced users, it's possible to directly interact with the precompiles through external system calls.
 
-Here is a list of all available [system calls & precompiles](https://github.com/zkMIPS/zkm2/blob/dev/init/crates/zkvm/lib/src/lib.rs).
+Here is a list of all available [system calls & precompiles](https://github.com/zkMIPS/zkm/blob/dev/init/crates/zkvm/lib/src/lib.rs).
 
 ```rust
-//! Syscalls for the zkm2 zkVM.
+//! Syscalls for the zkMIPS zkVM.
 //!
 //! Documentation for these syscalls can be found in the zkVM entrypoint
-//! `zkm2_zkvm::syscalls` module.
+//! `zkm_zkvm::syscalls` module.
 
 pub mod bls12381;
 pub mod bn254;
@@ -99,7 +99,7 @@ extern "C" {
     /// Exits unconstrained mode.
     pub fn syscall_exit_unconstrained();
 
-    /// Defers the verification of a valid ZKM2 zkVM proof.
+    /// Defers the verification of a valid zkMIPS zkVM proof.
     pub fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]);
 
     /// Returns the length of the next element in the hint stream.
@@ -162,12 +162,12 @@ extern "C" {
 }
 ```
 
-## Guest Example: [syscall_sha256_extend](https://github.com/zkMIPS/zkm2/tree/dev/init/crates/test-artifacts/guests/sha-extend)
+## Guest Example: [syscall_sha256_extend](https://github.com/zkMIPS/zkm/tree/dev/init/crates/test-artifacts/guests/sha-extend)
 
 In the guest program, you can call the precompile `syscall_sha256_extend()` in the following way:
 
 ```rust
-zkm2_zkvm::syscalls::syscall_sha256_extend
+zkm_zkvm::syscalls::syscall_sha256_extend
 ```
 
 The complete code is as follows:
@@ -175,9 +175,9 @@ The complete code is as follows:
 ```rust
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-use zkm2_zkvm::syscalls::syscall_sha256_extend;
+use zkm_zkvm::syscalls::syscall_sha256_extend;
 
 pub fn main() {
     let mut w = [1u32; 64];

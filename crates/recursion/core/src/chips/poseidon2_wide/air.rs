@@ -6,7 +6,7 @@ use std::{array, borrow::Borrow};
 use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm2_primitives::RC_16_30_U32;
+use zkm_primitives::RC_16_30_U32;
 
 use crate::builder::ZKMRecursionAirBuilder;
 

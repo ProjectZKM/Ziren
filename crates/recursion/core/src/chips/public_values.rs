@@ -3,9 +3,9 @@ use std::borrow::{Borrow, BorrowMut};
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use zkm2_core_machine::utils::pad_rows_fixed;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::MachineAir;
+use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::MachineAir;
 
 use crate::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
@@ -179,10 +179,10 @@ where
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use zkm2_core_machine::utils::setup_logger;
+    use zkm_core_machine::utils::setup_logger;
 
     use std::{array, borrow::Borrow};
-    use zkm2_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm_stark::{air::MachineAir, StarkGenericConfig};
 
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;

@@ -3,12 +3,12 @@ use itertools::izip;
 use p3_air::AirBuilder;
 use p3_field::{FieldAlgebra, PrimeField32};
 
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BaseAirBuilder, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
 
 /// Operation columns for verifying that an element is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]

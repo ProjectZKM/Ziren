@@ -3,11 +3,11 @@
 use std::time::Instant;
 
 use itertools::iproduct;
-use zkm2_core_executor::ZKMContext;
-use zkm2_core_machine::io::ZKMStdin;
-use zkm2_prover::components::DefaultProverComponents;
-use zkm2_prover::ZKMProver;
-use zkm2_stark::ZKMProverOpts;
+use zkm_core_executor::ZKMContext;
+use zkm_core_machine::io::ZKMStdin;
+use zkm_prover::components::DefaultProverComponents;
+use zkm_prover::ZKMProver;
+use zkm_stark::ZKMProverOpts;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
@@ -22,7 +22,7 @@ fn main() {
         .add_directive("p3_fri=off".parse().unwrap())
         .add_directive("p3_challenger=off".parse().unwrap())
         .add_directive("p3_dft=off".parse().unwrap())
-        .add_directive("zkm2_core=off".parse().unwrap());
+        .add_directive("zkm_core=off".parse().unwrap());
     tracing_subscriber::fmt::Subscriber::builder()
         .with_ansi(false)
         .with_file(false)

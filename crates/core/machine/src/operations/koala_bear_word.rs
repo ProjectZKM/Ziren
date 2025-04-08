@@ -2,8 +2,8 @@ use std::array;
 
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{air::ZKMAirBuilder, Word};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{air::ZKMAirBuilder, Word};
 
 /// A set of columns needed to compute the add of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

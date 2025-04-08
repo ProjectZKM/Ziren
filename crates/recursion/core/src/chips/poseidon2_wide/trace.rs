@@ -5,9 +5,9 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
-use zkm2_core_machine::utils::next_power_of_two;
-use zkm2_primitives::RC_16_30_U32;
-use zkm2_stark::air::MachineAir;
+use zkm_core_machine::utils::next_power_of_two;
+use zkm_primitives::RC_16_30_U32;
+use zkm_stark::air::MachineAir;
 
 use crate::{
     chips::{
@@ -285,7 +285,7 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
     use zkhash::ark_ff::UniformRand;
-    use zkm2_stark::{air::MachineAir, inner_perm};
+    use zkm_stark::{air::MachineAir, inner_perm};
 
     use crate::{
         chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},

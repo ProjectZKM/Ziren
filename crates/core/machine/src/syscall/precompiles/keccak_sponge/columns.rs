@@ -8,8 +8,8 @@ use crate::syscall::precompiles::keccak_sponge::{
 
 
 use p3_keccak_air::KeccakCols;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::Word;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::Word;
 
 /// KeccakSpongeCols is the column layout for the keccak sponge.
 /// The number of rows equal to the number of block.

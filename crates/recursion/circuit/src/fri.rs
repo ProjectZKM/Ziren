@@ -9,9 +9,9 @@ use std::{
     cmp::Reverse,
     iter::{once, repeat_with, zip},
 };
-use zkm2_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
-use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::{InnerChallenge, InnerChallengeMmcs, InnerInputProof, InnerPcsProof, InnerVal};
+use zkm_recursion_compiler::ir::{Builder, DslIr, Felt, SymbolicExt};
+use zkm_recursion_core::DIGEST_SIZE;
+use zkm_stark::{InnerChallenge, InnerChallengeMmcs, InnerInputProof, InnerPcsProof, InnerVal};
 
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
@@ -466,18 +466,18 @@ mod tests {
     use p3_util::reverse_bits_len;
     use rand::rngs::OsRng;
     use std::collections::BTreeMap;
-    use zkm2_recursion_compiler::{
+    use zkm_recursion_compiler::{
         circuit::AsmBuilder,
         config::InnerConfig,
         ir::{Builder, Ext, SymbolicExt},
     };
-    use zkm2_stark::{
+    use zkm_stark::{
         inner_fri_config, inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerChallenge,
         InnerChallenger, InnerCompress, InnerDft, InnerFriProof, InnerHash, InnerPcs, InnerVal,
         InnerValMmcs, StarkGenericConfig,
     };
 
-    use zkm2_recursion_core::DIGEST_SIZE;
+    use zkm_recursion_core::DIGEST_SIZE;
 
     type C = InnerConfig;
     type SC = KoalaBearPoseidon2;

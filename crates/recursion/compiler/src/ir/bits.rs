@@ -1,5 +1,5 @@
 use p3_field::{Field, FieldAlgebra};
-use zkm2_recursion_core::runtime::NUM_BITS;
+use zkm_recursion_core::runtime::NUM_BITS;
 
 use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
 

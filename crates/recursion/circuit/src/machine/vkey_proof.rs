@@ -6,9 +6,9 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
-use zkm2_recursion_compiler::ir::{Builder, Felt};
-use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::{
+use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_core::DIGEST_SIZE;
+use zkm_stark::{
     air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, OpeningProof,
     StarkGenericConfig, StarkMachine,
 };

@@ -4,9 +4,9 @@ use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, iter::zip};
-use zkm2_core_machine::utils::next_power_of_two;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{ExtensionAirBuilder, MachineAir};
+use zkm_core_machine::utils::next_power_of_two;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{ExtensionAirBuilder, MachineAir};
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
@@ -203,7 +203,7 @@ mod tests {
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use stark::KoalaBearPoseidon2Outer;
-    use zkm2_stark::StarkGenericConfig;
+    use zkm_stark::StarkGenericConfig;
 
     use super::*;
 

@@ -2,7 +2,7 @@
 
 use substrate_bn::{pairing, pairing_batch, Fq, Fq2, Fr, Group, G1, G2};
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     {

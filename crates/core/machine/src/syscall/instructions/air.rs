@@ -3,10 +3,10 @@ use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::MemoryAccessPosition, syscalls::SyscallCode, Opcode
 };
-use zkm2_stark::{
+use zkm_stark::{
     air::{
         BaseAirBuilder, LookupScope, PublicValues, ZKMAirBuilder, POSEIDON_NUM_WORDS,
         PV_DIGEST_NUM_WORDS, ZKM_PROOF_NUM_PV_ELTS,

@@ -4,8 +4,8 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm2_core_executor::ByteOpcode;
-use zkm2_stark::{
+use zkm_core_executor::ByteOpcode;
+use zkm_stark::{
     air::{BaseAirBuilder, PublicValues, ZKMAirBuilder, ZKM_PROOF_NUM_PV_ELTS},
     Word,
 };

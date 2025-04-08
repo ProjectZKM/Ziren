@@ -1,4 +1,4 @@
-package zkm2
+package zkm
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
 )
 
 func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string) error {

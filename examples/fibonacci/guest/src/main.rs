@@ -7,17 +7,17 @@
 // inside the zkVM.
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     // Read an input to the program.
     //
     // Behind the scenes, this compiles down to a system call which handles reading inputs
     // from the prover.
-    let n = zkm2_zkvm::io::read::<u32>();
+    let n = zkm_zkvm::io::read::<u32>();
 
     // Write n to public input
-    zkm2_zkvm::io::commit(&n);
+    zkm_zkvm::io::commit(&n);
 
     // Compute the n'th fibonacci number, using normal Rust code.
     let mut a = 0;
@@ -33,6 +33,6 @@ pub fn main() {
     //
     // Behind the scenes, this also compiles down to a system call which handles writing
     // outputs to the prover.
-    zkm2_zkvm::io::commit(&a);
-    zkm2_zkvm::io::commit(&b);
+    zkm_zkvm::io::commit(&a);
+    zkm_zkvm::io::commit(&b);
 }

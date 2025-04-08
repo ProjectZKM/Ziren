@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, utils, HashableKey, ProverClient, ZKMStdin};
+use zkm_sdk::{include_elf, utils, HashableKey, ProverClient, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("fibonacci");

@@ -1,6 +1,6 @@
 [package]
-name = "zkm2-derive"
-description = "zkMIPS"
+name = "zkm-derive"
+description = "zkMIPS derive"
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

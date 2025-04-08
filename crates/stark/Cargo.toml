@@ -1,5 +1,5 @@
 [package]
-name = "zkm2-stark"
+name = "zkm-stark"
 version = "0.0.1"
 edition = "2021"
 
@@ -30,9 +30,9 @@ p3-poseidon2 = { workspace = true  }
 p3-symmetric = { workspace = true  }
 rand = { workspace = true }
 
-zkm2-derive = { workspace = true }
-zkm2-primitives = { workspace = true }
-zkm2-zkvm = { workspace = true }
+zkm-derive = { workspace = true }
+zkm-primitives = { workspace = true }
+zkm-zkvm = { workspace = true }
 
 strum = "0.26.3"
 strum_macros = "0.26.4"

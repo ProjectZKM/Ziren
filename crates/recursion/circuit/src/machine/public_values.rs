@@ -1,11 +1,11 @@
 use itertools::Itertools;
-use zkm2_derive::AlignedBorrow;
-use zkm2_recursion_compiler::ir::{Builder, Felt};
-use zkm2_recursion_core::{
+use zkm_derive::AlignedBorrow;
+use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     DIGEST_SIZE,
 };
-use zkm2_stark::{air::PV_DIGEST_NUM_WORDS, Word};
+use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
 
 use crate::{hash::Posedion2KoalaBearHasherVariable, CircuitConfig};
 
@@ -66,7 +66,7 @@ where
     H: Posedion2KoalaBearHasherVariable<C>,
 {
     let input = public_values
-        .zkm2_vk_digest
+        .zkm_vk_digest
         .into_iter()
         .chain(public_values.committed_value_digest.into_iter().flat_map(|word| word.0.into_iter()))
         .collect::<Vec<_>>();
@@ -79,8 +79,8 @@ impl<T> RootPublicValues<T> {
     }
 
     #[inline]
-    pub const fn zkm2_vk_digest(&self) -> &[T; DIGEST_SIZE] {
-        &self.inner.zkm2_vk_digest
+    pub const fn zkm_vk_digest(&self) -> &[T; DIGEST_SIZE] {
+        &self.inner.zkm_vk_digest
     }
 
     #[inline]

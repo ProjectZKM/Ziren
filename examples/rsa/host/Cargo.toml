@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 rsa = "0.6"
-zkm2-sdk = { workspace = true }
+zkm-sdk = { workspace = true }
 
 [build-dependencies]
-zkm2-build = { workspace = true }
+zkm-build = { workspace = true }

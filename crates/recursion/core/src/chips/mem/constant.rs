@@ -4,9 +4,9 @@ use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
-use zkm2_core_machine::utils::pad_rows_fixed;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::MachineAir;
+use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::MachineAir;
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
@@ -153,8 +153,8 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::stark::KoalaBearPoseidon2Outer;
-    use zkm2_core_machine::utils::run_test_machine;
-    use zkm2_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
+    use zkm_core_machine::utils::run_test_machine;
+    use zkm_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
 
     use super::*;
 

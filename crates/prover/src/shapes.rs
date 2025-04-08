@@ -13,13 +13,13 @@ use thiserror::Error;
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm2_core_machine::shape::CoreShapeConfig;
-use zkm2_recursion_circuit::machine::{
+use zkm_core_machine::shape::CoreShapeConfig;
+use zkm_recursion_circuit::machine::{
     ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape, ZKMDeferredShape,
     ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
 };
-use zkm2_recursion_core::{shape::{RecursionShape, RecursionShapeConfig}, RecursionProgram};
-use zkm2_stark::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
+use zkm_recursion_core::{shape::{RecursionShape, RecursionShapeConfig}, RecursionProgram};
+use zkm_stark::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
 use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver, ShrinkAir};
 

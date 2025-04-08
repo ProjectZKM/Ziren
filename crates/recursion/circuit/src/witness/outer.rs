@@ -4,12 +4,12 @@ use p3_bn254_fr::Bn254Fr;
 use p3_field::FieldAlgebra;
 
 use p3_fri::{CommitPhaseProofStep, QueryProof};
-pub use zkm2_recursion_compiler::ir::Witness as OuterWitness;
-use zkm2_recursion_compiler::{
+pub use zkm_recursion_compiler::ir::Witness as OuterWitness;
+use zkm_recursion_compiler::{
     config::OuterConfig,
     ir::{Builder, Var},
 };
-use zkm2_recursion_core::stark::{
+use zkm_recursion_core::stark::{
     KoalaBearPoseidon2Outer, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs, OuterDigest,
     OuterFriProof, OuterInputProof, OuterVal,
 };

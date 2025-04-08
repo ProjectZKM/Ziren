@@ -23,11 +23,11 @@ mod tests {
         utils::run_test,
     };
 
-    use zkm2_core_executor::{
+    use zkm_core_executor::{
         Instruction, Opcode, Program,
     };
 
-    use zkm2_stark::CpuProver;
+    use zkm_stark::CpuProver;
 
     #[test]
     fn test_misc_prove() {

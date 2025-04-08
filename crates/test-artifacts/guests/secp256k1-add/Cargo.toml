@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
-zkm2-lib = { path = "../../../../crates/zkvm/lib" }
-zkm2-curves = { path = "../../../../crates/curves" }
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm-lib = { path = "../../../../crates/zkvm/lib" }
+zkm-curves = { path = "../../../../crates/curves" }
 common-test-utils = { path = "../common" }

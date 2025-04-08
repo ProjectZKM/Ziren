@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use num_bigint::BigUint;
 //use rand::Rng;
-use zkm2_zkvm::syscalls::{syscall_bn254_fp2_addmod, syscall_bn254_fp2_submod};
+use zkm_zkvm::syscalls::{syscall_bn254_fp2_addmod, syscall_bn254_fp2_submod};
 use core::{mem::transmute, str::FromStr};
 
 const MODULUS: &str =

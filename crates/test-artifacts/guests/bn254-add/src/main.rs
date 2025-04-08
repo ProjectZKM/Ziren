@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use zkm2_curves::params::FieldParameters;
-use zkm2_lib::bn254::Bn254Point;
-zkm2_zkvm::entrypoint!(main);
+use zkm_curves::params::FieldParameters;
+use zkm_lib::bn254::Bn254Point;
+zkm_zkvm::entrypoint!(main);
 
 // generator.
 // 1
@@ -34,10 +34,10 @@ const C: [u8; 64] = [
 ];
 
 pub fn main() {
-    common_test_utils::weierstrass_add::test_weierstrass_add::<Bn254Point, { zkm2_lib::bn254::N }>(
+    common_test_utils::weierstrass_add::test_weierstrass_add::<Bn254Point, { zkm_lib::bn254::N }>(
         &A,
         &B,
         &C,
-        zkm2_curves::weierstrass::bn254::Bn254BaseField::MODULUS,
+        zkm_curves::weierstrass::bn254::Bn254BaseField::MODULUS,
     );
 }

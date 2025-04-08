@@ -1,7 +1,7 @@
 use num::BigUint;
 use std::marker::PhantomData;
 use typenum::Unsigned;
-use zkm2_curves::{
+use zkm_curves::{
     params::NumWords,
     weierstrass::{FieldType, FpOpField},
 };

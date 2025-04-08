@@ -13,5 +13,5 @@ name = "report"
 path = "bin/report.rs"
 
 [dependencies]
-zkm2-zkvm = { path = "../../../crates/zkvm/entrypoint" }
-zkm2-derive = { path = "../../../crates/derive" }
+zkm-zkvm = { path = "../../../crates/zkvm/entrypoint" }
+zkm-derive = { path = "../../../crates/derive" }

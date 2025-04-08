@@ -4,7 +4,7 @@ use std::{
     mem::size_of,
 };
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::operations::poseidon2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 use crate::utils::indices_arr;

@@ -3,7 +3,7 @@ use std::{
     mem::size_of,
 };
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::chips::poseidon2_wide::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 

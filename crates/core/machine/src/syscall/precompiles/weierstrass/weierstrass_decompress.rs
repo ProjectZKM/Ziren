@@ -12,12 +12,12 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::marker::PhantomData;
 use typenum::Unsigned;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_curves::{
+use zkm_curves::{
     params::{limbs_from_vec, FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::{
         bls12_381::bls12381_sqrt, secp256k1::secp256k1_sqrt, secp256r1::secp256r1_sqrt,
@@ -25,8 +25,8 @@ use zkm2_curves::{
     },
     CurveType, EllipticCurve,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryReadWriteCols},
@@ -531,8 +531,8 @@ mod tests {
     use test_artifacts::{
         BLS12381_DECOMPRESS_ELF, SECP256K1_DECOMPRESS_ELF, SECP256R1_DECOMPRESS_ELF,
     };
-    use zkm2_core_executor::Program;
-    use zkm2_stark::CpuProver;
+    use zkm_core_executor::Program;
+    use zkm_stark::CpuProver;
     //
     use crate::utils::run_test_io;
     //

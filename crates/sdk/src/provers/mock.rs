@@ -1,8 +1,8 @@
 #![allow(unused_variables)]
 use hashbrown::HashMap;
-use zkm2_core_executor::{ZKMContext, ZKMReduceProof};
-use zkm2_core_machine::io::ZKMStdin;
-use zkm2_stark::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
+use zkm_core_executor::{ZKMContext, ZKMReduceProof};
+use zkm_core_machine::io::ZKMStdin;
+use zkm_stark::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
 
 use crate::{
     Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
@@ -12,12 +12,12 @@ use anyhow::Result;
 use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, PrimeField};
 use p3_fri::FriProof;
-use zkm2_prover::{
+use zkm_prover::{
     components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
     Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
-use zkm2_stark::septic_digest::SepticDigest;
+use zkm_stark::septic_digest::SepticDigest;
 
 use super::{ProofOpts, ProverType};
 
@@ -43,7 +43,7 @@ impl Prover<DefaultProverComponents> for MockProver {
         self.prover.setup(elf)
     }
 
-    fn zkm2_prover(&self) -> &ZKMProver {
+    fn zkm_prover(&self) -> &ZKMProver {
         &self.prover
     }
 
@@ -62,7 +62,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                     proof: ZKMProof::Core(vec![]),
                     stdin,
                     public_values,
-                    zkm2_version: self.version().to_string(),
+                    zkm_version: self.version().to_string(),
                 })
             }
             ZKMProofKind::Compressed => {
@@ -102,7 +102,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                     proof,
                     stdin,
                     public_values,
-                    zkm2_version: self.version().to_string(),
+                    zkm_version: self.version().to_string(),
                 })
             }
             ZKMProofKind::Plonk => {
@@ -119,7 +119,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                     }),
                     stdin,
                     public_values,
-                    zkm2_version: self.version().to_string(),
+                    zkm_version: self.version().to_string(),
                 })
             }
             ZKMProofKind::Groth16 => {
@@ -136,7 +136,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                     }),
                     stdin,
                     public_values,
-                    zkm2_version: self.version().to_string(),
+                    zkm_version: self.version().to_string(),
                 })
             }
         }

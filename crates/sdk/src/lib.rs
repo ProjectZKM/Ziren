@@ -1,6 +1,6 @@
-//! # ZKM2 SDK
+//! # zkMIPS SDK
 //!
-//! A library for interacting with the ZKM2 MIPS zkVM.
+//! A library for interacting with the zkMIPS zkVM.
 
 pub mod action;
 // pub mod artifacts;
@@ -26,18 +26,18 @@ pub mod utils;
 
 pub use proof::*;
 pub use provers::ZKMVerificationError;
-use zkm2_prover::components::DefaultProverComponents;
+use zkm_prover::components::DefaultProverComponents;
 
 #[cfg(any(feature = "network", feature = "network-v2"))]
 use {std::future::Future, tokio::task::block_in_place};
 
 pub use provers::{CpuProver, MockProver, Prover};
 
-pub use zkm2_build::include_elf;
-pub use zkm2_core_executor::{ExecutionReport, HookEnv, ZKMContext, ZKMContextBuilder};
-pub use zkm2_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
-pub use zkm2_primitives::io::ZKMPublicValues;
-pub use zkm2_prover::{
+pub use zkm_build::include_elf;
+pub use zkm_core_executor::{ExecutionReport, HookEnv, ZKMContext, ZKMContextBuilder};
+pub use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
+pub use zkm_primitives::io::ZKMPublicValues;
+pub use zkm_prover::{
     CoreSC, HashableKey, InnerSC, OuterSC, PlonkBn254Proof, ProverMode, ZKMProver, ZKMProvingKey,
     ZKMVerifyingKey,
 };
@@ -45,7 +45,7 @@ pub use zkm2_prover::{
 // Re-export the utilities.
 pub use utils::setup_logger;
 
-/// A client for interacting with ZKM2.
+/// A client for interacting with zkMIPS.
 pub struct ProverClient {
     /// The underlying prover implementation.
     pub prover: Box<dyn Prover<DefaultProverComponents>>,
@@ -63,7 +63,7 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    /// use zkm2_sdk::ProverClient;
+    /// use zkm_sdk::ProverClient;
     ///
     /// std::env::set_var("ZKM_PROVER", "local");
     /// let client = ProverClient::new();
@@ -120,7 +120,7 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    /// use zkm2_sdk::ProverClient;
+    /// use zkm_sdk::ProverClient;
     ///
     /// let client = ProverClient::mock();
     /// ```
@@ -133,7 +133,7 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    /// use zkm2_sdk::ProverClient;
+    /// use zkm_sdk::ProverClient;
     ///
     /// let client = ProverClient::local();
     /// ```
@@ -147,7 +147,7 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    /// use zkm2_sdk::ProverClient;
+    /// use zkm_sdk::ProverClient;
     ///
     /// let client = ProverClient::cpu();
     /// ```
@@ -160,7 +160,7 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    /// use zkm2_sdk::ProverClient;
+    /// use zkm_sdk::ProverClient;
     ///
     /// let client = ProverClient::cuda();
     /// ```
@@ -174,7 +174,7 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    /// use zkm2_sdk::ProverClient;
+    /// use zkm_sdk::ProverClient;
     ///
     /// let private_key = std::env::var("ZKM_PRIVATE_KEY").unwrap();
     /// let rpc_url = std::env::var("PROVER_NETWORK_RPC").ok();
@@ -210,7 +210,7 @@ impl ProverClient {
     ///
     /// ### Examples
     /// ```no_run
-    /// use zkm2_sdk::{ProverClient, ZKMContext, ZKMStdin};
+    /// use zkm_sdk::{ProverClient, ZKMContext, ZKMStdin};
     ///
     /// // Load the program.
     /// let elf = test_artifacts::FIBONACCI_ELF;
@@ -240,7 +240,7 @@ impl ProverClient {
     ///
     /// ### Examples
     /// ```no_run
-    /// use zkm2_sdk::{ProverClient, ZKMContext, ZKMStdin};
+    /// use zkm_sdk::{ProverClient, ZKMContext, ZKMStdin};
     ///
     /// // Load the program.
     /// let elf = test_artifacts::FIBONACCI_ELF;
@@ -267,7 +267,7 @@ impl ProverClient {
     ///
     /// ### Examples
     /// ```no_run
-    /// use zkm2_sdk::{ProverClient, ZKMStdin};
+    /// use zkm_sdk::{ProverClient, ZKMStdin};
     ///
     /// let elf = test_artifacts::FIBONACCI_ELF;
     /// let client = ProverClient::new();
@@ -300,7 +300,7 @@ impl ProverClient {
     ///
     /// ### Examples
     /// ```no_run
-    /// use zkm2_sdk::{ProverClient, ZKMStdin};
+    /// use zkm_sdk::{ProverClient, ZKMStdin};
     ///
     /// let elf = test_artifacts::FIBONACCI_ELF;
     /// let client = ProverClient::new();
@@ -454,7 +454,7 @@ pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
 #[cfg(test)]
 mod tests {
 
-    use zkm2_primitives::io::ZKMPublicValues;
+    use zkm_primitives::io::ZKMPublicValues;
 
     use crate::{utils, ProverClient, ZKMStdin};
 

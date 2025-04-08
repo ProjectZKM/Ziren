@@ -3,8 +3,8 @@ use core::fmt::Debug;
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 use hashbrown::HashMap;
-use zkm2_curves::k256::{Invert, RecoveryId, Signature, VerifyingKey};
-use zkm2_curves::p256::Signature as p256Signature;
+use zkm_curves::k256::{Invert, RecoveryId, Signature, VerifyingKey};
+use zkm_curves::p256::Signature as p256Signature;
 
 use crate::Executor;
 
@@ -172,7 +172,7 @@ pub mod tests {
 
     // #[test]
     // pub fn hook_fds_match() {
-    //     use zkm2_zkvm::io;
+    //     use zkm_zkvm::io;
     //     assert_eq!(K1_ECRECOVER_HOOK, io::K1_ECRECOVER_HOOK);
     //     assert_eq!(R1_ECRECOVER_HOOK, io::R1_ECRECOVER_HOOK);
     // }

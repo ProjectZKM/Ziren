@@ -1,7 +1,7 @@
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-#[zkm2_derive::cycle_tracker]
+#[zkm_derive::cycle_tracker]
 pub fn expensive_function(x: usize) -> usize {
     let mut y = 1;
     for _ in 0..100 {

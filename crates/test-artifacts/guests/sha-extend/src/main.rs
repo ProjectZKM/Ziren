@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-use zkm2_zkvm::syscalls::syscall_sha256_extend;
+use zkm_zkvm::syscalls::syscall_sha256_extend;
 
 pub fn main() {
     let mut w = [1u32; 64];

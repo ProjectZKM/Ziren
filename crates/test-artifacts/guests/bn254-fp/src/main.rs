@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 use core::str::FromStr;
 
-use zkm2_zkvm::syscalls::{syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp_submod};
+use zkm_zkvm::syscalls::{syscall_bn254_fp_addmod, syscall_bn254_fp_mulmod, syscall_bn254_fp_submod};
 
 use num_bigint::BigUint;
 //use rand::Rng;

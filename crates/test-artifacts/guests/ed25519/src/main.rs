@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use ed25519_dalek::*;
 use hex_literal::hex;

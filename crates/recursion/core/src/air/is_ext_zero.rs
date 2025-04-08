@@ -10,8 +10,8 @@ use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     Field, FieldAlgebra,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BinomialExtension, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{BinomialExtension, ZKMAirBuilder};
 
 use crate::air::extension::BinomialExtensionUtils;
 

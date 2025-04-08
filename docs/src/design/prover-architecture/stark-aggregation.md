@@ -1,10 +1,10 @@
 # STARK Aggregation
 
-ZKM2's STARK aggregation system decomposes complex program proofs into parallelizable segment proofs and recursively compresses them into a single STARK proof. 
+zkMIPS's STARK aggregation system decomposes complex program proofs into parallelizable segment proofs and recursively compresses them into a single STARK proof. 
 
 ## Segment Proof Generation
 
-ZKM2 processes execution trace proofs for segments through three key phases:
+zkMIPS processes execution trace proofs for segments through three key phases:
 - ​Execution Segmentation​​
 
   Splits program execution (compiled ELF binaries) into fixed-size batches and maintains execution context continuity across segments.

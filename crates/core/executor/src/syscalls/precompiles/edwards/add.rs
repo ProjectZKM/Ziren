@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use zkm2_curves::{edwards::EdwardsParameters, EllipticCurve};
+use zkm_curves::{edwards::EdwardsParameters, EllipticCurve};
 
 use crate::{
     events::{create_ec_add_event, PrecompileEvent},

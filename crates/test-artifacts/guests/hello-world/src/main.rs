@@ -7,9 +7,9 @@
 // inside the zkVM.
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     let a = "hello world";
-    zkm2_zkvm::io::commit(&a);
+    zkm_zkvm::io::commit(&a);
 }

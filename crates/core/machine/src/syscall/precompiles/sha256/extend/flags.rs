@@ -3,7 +3,7 @@ use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
-use zkm2_stark::air::{BaseAirBuilder, ZKMAirBuilder};
+use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
 
 use crate::operations::IsZeroOperation;
 

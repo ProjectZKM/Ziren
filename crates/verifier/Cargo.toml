@@ -1,6 +1,6 @@
 [package]
-name = "zkm2-verifier"
-description = "Verifier for ZKM2 Groth16 and Plonk proofs."
+name = "zkm-verifier"
+description = "Verifier for zkMIPS Groth16 and Plonk proofs."
 readme = "README.md"
 version = { workspace = true }
 edition = { workspace = true }
@@ -25,8 +25,8 @@ ark-groth16 = { version = "0.5", optional = true }
 ark-ec = { version = "0.5", optional = true }
 
 [dev-dependencies]
-zkm2-prover = { workspace = true }
-zkm2-sdk = { workspace = true }
+zkm-prover = { workspace = true }
+zkm-sdk = { workspace = true }
 test-artifacts = { workspace = true }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"

@@ -1,5 +1,5 @@
 //! A program that takes a number `n` as input, and writes if `n` is prime as an output.
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 const ELF: &[u8] = include_elf!("is-prime");
 

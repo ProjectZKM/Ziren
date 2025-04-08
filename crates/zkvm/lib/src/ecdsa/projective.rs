@@ -1,8 +1,8 @@
-//! Implementation of the ZKM2 accelerated projective point. The projective point wraps the affine point.
+//! Implementation of the zkMIPS accelerated projective point. The projective point wraps the affine point.
 //!
 //! This type is mainly used in the `ecdsa-core` algorithms.
 //!
-//! Note: When performing curve operations, accelerated crates for ZKM2 use affine arithmetic instead of projective arithmetic for performance.
+//! Note: When performing curve operations, accelerated crates for zkMIPS use affine arithmetic instead of projective arithmetic for performance.
 
 use super::{AffinePoint, ECDSACurve, ZKMAffinePointTrait};
 
@@ -27,12 +27,12 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use std::borrow::Borrow;
 
-/// The ZKM2 accelerated projective point.
+/// The zkMIPS accelerated projective point.
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectivePoint<C: ECDSACurve> {
     /// The inner affine point.
     ///
-    /// ZKM2 uses affine arithmetic for all operations.
+    /// zkMIPS uses affine arithmetic for all operations.
     pub inner: AffinePoint<C>,
 }
 
@@ -134,10 +134,10 @@ impl<C: ECDSACurve> LinearCombination for ProjectivePoint<C> {
         let a_bits_le = be_bytes_to_le_bits(k.to_repr().as_ref());
         let b_bits_le = be_bytes_to_le_bits(l.to_repr().as_ref());
 
-        let zkm2_point =
+        let zkm_point =
             C::ZKMAffinePoint::multi_scalar_multiplication(&a_bits_le, x, &b_bits_le, y);
 
-        Self::from_zkvm_point(zkm2_point)
+        Self::from_zkvm_point(zkm_point)
     }
 }
 
@@ -147,8 +147,8 @@ impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for ProjectivePoint<C> {
     type Output = ProjectivePoint<C>;
 
     fn mul(mut self, rhs: T) -> Self::Output {
-        let zkm2_point = self.as_mut_zkvm_point();
-        zkm2_point.mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
+        let zkm_point = self.as_mut_zkvm_point();
+        zkm_point.mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
 
         self
     }

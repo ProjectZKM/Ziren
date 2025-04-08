@@ -7,6 +7,6 @@ publish = false
 [dependencies]
 rand = "0.8"
 num = { version = "0.4.1" }
-zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
-zkm2-derive = { path = "../../../../crates/derive" }
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm-derive = { path = "../../../../crates/derive" }
 bytemuck = "1.15.0"

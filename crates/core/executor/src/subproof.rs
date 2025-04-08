@@ -1,16 +1,16 @@
 //! Types and methods for subproof verification inside the [`crate::Executor`].
 
 use crate::ZKMReduceProof;
-use zkm2_stark::{
+use zkm_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, MachineVerificationError, StarkVerifyingKey,
 };
 
-/// Verifier used in runtime when `zkm2_zkvm::precompiles::verify::verify_zkm2_proof` is called. This
+/// Verifier used in runtime when `zkm_zkvm::precompiles::verify::verify_zkm_proof` is called. This
 /// is then used to sanity check that the user passed in the correct proof; the actual constraints
 /// happen in the recursion layer.
 ///
 /// This needs to be passed in rather than written directly since the actual implementation relies
-/// on crates in recursion that depend on zkm2-core.
+/// on crates in recursion that depend on zkm-core.
 pub trait SubproofVerifier: Sync + Send {
     /// Verify a deferred proof.
     fn verify_deferred_proof(

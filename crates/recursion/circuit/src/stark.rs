@@ -9,19 +9,19 @@ use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 
-use zkm2_recursion_compiler::{
+use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     ir::{Builder, Config, DslIr, Ext, ExtConst},
     prelude::Felt,
 };
-use zkm2_stark::septic_digest::SepticDigest;
-use zkm2_stark::{
+use zkm_stark::septic_digest::SepticDigest;
+use zkm_stark::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, Challenger,
     shape::OrderedShape,
     Chip, ChipOpenedValues, InnerChallenge, ShardCommitment, ShardOpenedValues,
     ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
-use zkm2_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
+use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
 use crate::{
     challenger::CanObserveVariable,
@@ -36,7 +36,7 @@ use crate::{
     TwoAdicPcsRoundVariable, VerifyingKeyVariable,
 };
 
-/// Reference: [zkm2_core::stark::ShardProof]
+/// Reference: [zkm_core::stark::ShardProof]
 #[derive(Clone)]
 pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
     pub commitment: ShardCommitment<SC::DigestVariable>,
@@ -502,20 +502,20 @@ pub mod tests {
         KoalaBearFriConfig,
     };
 
-    use zkm2_core_executor::Program;
-    use zkm2_core_machine::{
+    use zkm_core_executor::Program;
+    use zkm_core_machine::{
         io::ZKMStdin,
         mips::MipsAir,
         utils::{prove, setup_logger},
     };
-    use zkm2_recursion_compiler::{
+    use zkm_recursion_compiler::{
         config::{InnerConfig, OuterConfig},
         ir::{Builder, DslIr, TracedVec},
     };
 
     use test_artifacts::FIBONACCI_ELF;
-    use zkm2_recursion_core::{air::Block, machine::RecursionAir, stark::KoalaBearPoseidon2Outer};
-    use zkm2_stark::{
+    use zkm_recursion_core::{air::Block, machine::RecursionAir, stark::KoalaBearPoseidon2Outer};
+    use zkm_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerVal, MachineProver, ShardProof,
         ZKMCoreOpts,
     };

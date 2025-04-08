@@ -12,17 +12,17 @@ use p3_air::{Air, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use typenum::Unsigned;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_curves::{
+use zkm_curves::{
     params::{Limbs, NumLimbs},
     weierstrass::{FieldType, FpOpField},
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},

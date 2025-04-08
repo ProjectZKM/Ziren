@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMStdin};
 pub const ELF: &[u8] = include_elf!("bn254");
 
 fn main() {

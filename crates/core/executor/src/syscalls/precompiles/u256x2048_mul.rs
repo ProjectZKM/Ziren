@@ -1,6 +1,6 @@
 use num::{BigUint, Integer, One};
 
-use zkm2_primitives::consts::{bytes_to_words_le, words_to_bytes_le_vec};
+use zkm_primitives::consts::{bytes_to_words_le, words_to_bytes_le_vec};
 
 use crate::{
     events::{PrecompileEvent, U256xU2048MulEvent},

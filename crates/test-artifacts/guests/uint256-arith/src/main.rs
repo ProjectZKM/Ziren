@@ -1,7 +1,7 @@
 //! Program for uint256 arithmetic operations.
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use crypto_bigint::{Wrapping, U256};
 use core::hint::black_box;

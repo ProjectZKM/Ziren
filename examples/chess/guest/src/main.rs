@@ -1,5 +1,5 @@
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use chess::{Board, ChessMove};
 use std::str::FromStr;
@@ -7,8 +7,8 @@ use std::str::FromStr;
 pub fn main() {
     // Read the board position in Forsyth-Edwards Notation (FEN), and a move in Standard Algebraic
     // Notation (SAN)
-    let fen = zkm2_zkvm::io::read::<String>();
-    let san = zkm2_zkvm::io::read::<String>();
+    let fen = zkm_zkvm::io::read::<String>();
+    let san = zkm_zkvm::io::read::<String>();
 
     // Generate the chessboard from the FEN input
     let b = Board::from_str(&fen).expect("valid FEN board");
@@ -17,5 +17,5 @@ pub fn main() {
     let is_valid_move = ChessMove::from_san(&b, &san).is_ok();
 
     // Write whether or not the move is legal
-    zkm2_zkvm::io::commit(&is_valid_move);
+    zkm_zkvm::io::commit(&is_valid_move);
 }

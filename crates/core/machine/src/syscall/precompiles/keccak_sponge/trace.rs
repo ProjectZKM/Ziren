@@ -12,10 +12,10 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
-use zkm2_core_executor::events::{ByteLookupEvent, ByteRecord, KeccakSpongeEvent, PrecompileEvent};
-use zkm2_core_executor::syscalls::SyscallCode;
-use zkm2_core_executor::{ExecutionRecord, Program};
-use zkm2_stark::{MachineAir, Word};
+use zkm_core_executor::events::{ByteLookupEvent, ByteRecord, KeccakSpongeEvent, PrecompileEvent};
+use zkm_core_executor::syscalls::SyscallCode;
+use zkm_core_executor::{ExecutionRecord, Program};
+use zkm_stark::{MachineAir, Word};
 
 impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     type Record = ExecutionRecord;

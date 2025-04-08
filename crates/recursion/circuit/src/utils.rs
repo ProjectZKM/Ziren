@@ -2,10 +2,10 @@ use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 
-use zkm2_recursion_compiler::ir::{Builder, Config, Felt, Var};
-use zkm2_recursion_core::DIGEST_SIZE;
+use zkm_recursion_compiler::ir::{Builder, Config, Felt, Var};
+use zkm_recursion_core::DIGEST_SIZE;
 
-use zkm2_stark::Word;
+use zkm_stark::Word;
 
 /// Convert 8 KoalaBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
 /// word becomes the least significant bits.
@@ -92,12 +92,12 @@ pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use zkm2_core_machine::utils::{run_test_machine_with_prover, setup_logger};
-    use zkm2_recursion_compiler::{circuit::AsmCompiler, circuit::AsmConfig, ir::DslIr};
+    use zkm_core_machine::utils::{run_test_machine_with_prover, setup_logger};
+    use zkm_recursion_compiler::{circuit::AsmCompiler, circuit::AsmConfig, ir::DslIr};
 
-    use zkm2_recursion_compiler::ir::TracedVec;
-    use zkm2_recursion_core::{machine::RecursionAir, Runtime};
-    use zkm2_stark::{
+    use zkm_recursion_compiler::ir::TracedVec;
+    use zkm_recursion_core::{machine::RecursionAir, Runtime};
+    use zkm_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerChallenge, InnerVal,
         MachineProver,
     };

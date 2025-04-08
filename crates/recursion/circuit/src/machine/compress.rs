@@ -15,11 +15,11 @@ use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm2_recursion_compiler::circuit::CircuitV2Builder;
-use zkm2_recursion_compiler::ir::{Builder, Felt, SymbolicFelt};
-use zkm2_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
+use zkm_recursion_compiler::circuit::CircuitV2Builder;
+use zkm_recursion_compiler::ir::{Builder, Felt, SymbolicFelt};
+use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 
-use zkm2_stark::{
+use zkm_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
     Dom, ShardProof, StarkGenericConfig, StarkMachine, StarkVerifyingKey, Word,
@@ -90,7 +90,7 @@ where
     ///   `deferred_vk`.
     /// - Compress proofs: these are proofs which refer to a prove of this program. The key for it
     ///   is part of public values will be propagated across all levels of recursion and will be
-    ///   checked against itself as in [zkm2_prover::Prover] or as in [super::ZKMRootVerifier].
+    ///   checked against itself as in [zkm_prover::Prover] or as in [super::ZKMRootVerifier].
     pub fn verify(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
@@ -115,7 +115,7 @@ where
         assert!(!vks_and_proofs.is_empty());
 
         // Initialize the consistency check variables.
-        let mut zkm2_vk_digest: [Felt<_>; DIGEST_SIZE] =
+        let mut zkm_vk_digest: [Felt<_>; DIGEST_SIZE] =
             array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
         let mut pc: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
         let mut shard: Felt<_> = unsafe { MaybeUninit::zeroed().assume_init() };
@@ -191,9 +191,9 @@ where
                     *global_digest = *current_digest;
                 }
 
-                // Initialize the zkm2_vk digest
+                // Initialize the zkm_vk digest
                 for (digest, first_digest) in
-                    zkm2_vk_digest.iter_mut().zip(current_public_values.zkm2_vk_digest)
+                    zkm_vk_digest.iter_mut().zip(current_public_values.zkm_vk_digest)
                 {
                     *digest = first_digest;
                 }
@@ -263,8 +263,8 @@ where
 
             // // Consistency checks for all accumulated values.
 
-            // Assert that the zkm2_vk digest is always the same.
-            for (digest, current) in zkm2_vk_digest.iter().zip(current_public_values.zkm2_vk_digest)
+            // Assert that the zkm_vk digest is always the same.
+            for (digest, current) in zkm_vk_digest.iter().zip(current_public_values.zkm_vk_digest)
             {
                 builder.assert_felt_eq(*digest, current);
             }
@@ -455,8 +455,8 @@ where
         let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
 
         // Update the global values from the last accumulated values.
-        // Set zkm2_vk digest to the one from the proof values.
-        compress_public_values.zkm2_vk_digest = zkm2_vk_digest;
+        // Set zkm_vk digest to the one from the proof values.
+        compress_public_values.zkm_vk_digest = zkm_vk_digest;
         // Set next_pc to be the last pc (which is the same as accumulated pc)
         compress_public_values.next_pc = pc;
         // Set next shard to be the last shard

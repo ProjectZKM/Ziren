@@ -1,4 +1,4 @@
-//! Copied from [`zkm2_recursion_program`].
+//! Copied from [`zkm_recursion_program`].
 
 use challenger::{
     CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
@@ -10,7 +10,7 @@ use p3_bn254_fr::Bn254Fr;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 use std::iter::{repeat, zip};
-use zkm2_recursion_compiler::{
+use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
     config::{InnerConfig, OuterConfig},
     ir::{Builder, Config, DslIr, Ext, Felt, SymbolicFelt, Var, Variable},
@@ -30,7 +30,7 @@ pub(crate) mod utils;
 pub mod witness;
 
 pub use types::*;
-use zkm2_stark::{
+use zkm_stark::{
     koala_bear_poseidon2::{KoalaBearPoseidon2, ValMmcs},
     StarkGenericConfig,
 };
@@ -39,7 +39,7 @@ use p3_challenger::{CanObserve, CanSample, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DitParallel;
 use p3_fri::{FriConfig, TwoAdicFriPcs};
-use zkm2_recursion_core::{
+use zkm_recursion_core::{
     air::RecursionPublicValues,
     stark::{KoalaBearPoseidon2Outer, OuterValMmcs},
     D,
@@ -626,7 +626,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
             felt_bytes_to_bn254_var(builder, &committed_values_digest_bytes_felts);
         builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);
 
-        let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm2_vk_digest);
+        let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
         builder.commit_vkey_hash_circuit(vkey_hash);
     }
 }

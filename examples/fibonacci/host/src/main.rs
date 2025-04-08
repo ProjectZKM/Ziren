@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("fibonacci");
@@ -10,7 +10,7 @@ fn main() {
     // Create an input stream and write '1000' to it.
     let n = 1000u32;
 
-    // The input stream that the guest will read from using `zkm2_zkvm::io::read`. Note that the
+    // The input stream that the guest will read from using `zkm_zkvm::io::read`. Note that the
     // types of the elements in the input stream must match the types being read in the guest.
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
@@ -31,7 +31,7 @@ fn main() {
     // Read and verify the output.
     //
     // Note that this output is read from values committed to in the guest using
-    // `zkm2_zkvm::io::commit`.
+    // `zkm_zkvm::io::commit`.
     let _ = proof.public_values.read::<u32>();
     let a = proof.public_values.read::<u32>();
     let b = proof.public_values.read::<u32>();

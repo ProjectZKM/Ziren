@@ -1,4 +1,4 @@
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::{
     chips::{mem::MemoryAccessCols, poseidon2_wide::WIDTH},

@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-use zkm2_curves::params::FieldParameters;
-use zkm2_zkvm::lib::secp256r1::Secp256r1Point;
+use zkm_curves::params::FieldParameters;
+use zkm_zkvm::lib::secp256r1::Secp256r1Point;
 
 pub fn main() {
     // generator.
@@ -40,6 +40,6 @@ pub fn main() {
     // Tests A + B == C, sum of points of infinity, A + A == 2 * A, and A + (-A) == infinity.
     common_test_utils::weierstrass_add::test_weierstrass_add::<
         Secp256r1Point,
-        { zkm2_lib::secp256r1::N },
-    >(&A, &B, &C, zkm2_curves::weierstrass::secp256r1::Secp256r1BaseField::MODULUS);
+        { zkm_lib::secp256r1::N },
+    >(&A, &B, &C, zkm_curves::weierstrass::secp256r1::Secp256r1BaseField::MODULUS);
 }

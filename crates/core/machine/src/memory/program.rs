@@ -8,9 +8,9 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
-use zkm2_core_executor::{events::GlobalLookupEvent, ExecutionRecord, Program};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{
+use zkm_core_executor::{events::GlobalLookupEvent, ExecutionRecord, Program};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{
     air::{
         AirLookup, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
         ZKM_PROOF_NUM_PV_ELTS,

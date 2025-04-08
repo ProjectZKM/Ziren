@@ -6,8 +6,8 @@ publish = false
 
 [dependencies]
 serde_json = { workspace = true }
-zkm2-sdk = { workspace = true }
+zkm-sdk = { workspace = true }
 lib = { path = "../lib", package = "json-lib" }
 
 [build-dependencies]
-zkm2-build = { workspace = true }
+zkm-build = { workspace = true }

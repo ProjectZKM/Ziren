@@ -4,12 +4,12 @@ use p3_field::Field;
 use p3_field::FieldAlgebra;
 use p3_field::FieldExtensionAlgebra;
 use p3_field::PrimeField32;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::BaseAirBuilder;
-use zkm2_stark::air::SepticExtensionAirBuilder;
-use zkm2_stark::septic_curve::SepticCurveComplete;
-use zkm2_stark::ZKMAirBuilder;
-use zkm2_stark::{
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::BaseAirBuilder;
+use zkm_stark::air::SepticExtensionAirBuilder;
+use zkm_stark::septic_curve::SepticCurveComplete;
+use zkm_stark::ZKMAirBuilder;
+use zkm_stark::{
     septic_curve::SepticCurve,
     septic_digest::SepticDigest,
     septic_extension::{SepticBlock, SepticExtension},

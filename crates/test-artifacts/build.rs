@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
 };
 
-use zkm2_build::build_program_with_args;
+use zkm_build::build_program_with_args;
 
 fn main() -> Result<()> {
     let tests_path =

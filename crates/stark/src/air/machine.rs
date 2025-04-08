@@ -4,7 +4,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{septic_digest::SepticDigest, MachineRecord};
 
-pub use zkm2_derive::MachineAir;
+pub use zkm_derive::MachineAir;
 
 use super::LookupScope;
 

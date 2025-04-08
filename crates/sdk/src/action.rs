@@ -1,11 +1,11 @@
-use zkm2_core_executor::{ExecutionReport, HookEnv, ZKMContextBuilder};
-use zkm2_core_machine::io::ZKMStdin;
-use zkm2_primitives::io::ZKMPublicValues;
-use zkm2_prover::{components::DefaultProverComponents, ZKMProvingKey};
+use zkm_core_executor::{ExecutionReport, HookEnv, ZKMContextBuilder};
+use zkm_core_machine::io::ZKMStdin;
+use zkm_primitives::io::ZKMPublicValues;
+use zkm_prover::{components::DefaultProverComponents, ZKMProvingKey};
 
 use anyhow::{Ok, Result};
 use std::time::Duration;
-use zkm2_stark::{ZKMCoreOpts, ZKMProverOpts};
+use zkm_stark::{ZKMCoreOpts, ZKMProverOpts};
 
 use crate::{provers::ProofOpts, Prover, ZKMProofKind, ZKMProofWithPublicValues};
 
@@ -35,14 +35,14 @@ impl<'a> Execute<'a> {
     pub fn run(self) -> Result<(ZKMPublicValues, ExecutionReport)> {
         let Self { prover, elf, stdin, mut context_builder } = self;
         let context = context_builder.build();
-        Ok(prover.zkm2_prover().execute(elf, &stdin, context)?)
+        Ok(prover.zkm_prover().execute(elf, &stdin, context)?)
     }
 
     /// Add a runtime [Hook](super::Hook) into the context.
     ///
     /// Hooks may be invoked from within ZKM by writing to the specified file descriptor `fd`
-    /// with [`zkm2_zkvm::io::write`], returning a list of arbitrary data that may be read
-    /// with successive calls to [`zkm2_zkvm::io::read`].
+    /// with [`zkm_zkvm::io::write`], returning a list of arbitrary data that may be read
+    /// with successive calls to [`zkm_zkvm::io::read`].
     pub fn with_hook(
         mut self,
         fd: u32,
@@ -64,7 +64,7 @@ impl<'a> Execute<'a> {
     /// Set the maximum number of cpu cycles to use for execution.
     ///
     /// If the cycle limit is exceeded, execution will return
-    /// [`zkm2_core_executor::ExecutionError::ExceededCycleLimit`].
+    /// [`zkm_core_executor::ExecutionError::ExceededCycleLimit`].
     pub fn max_cycles(mut self, max_cycles: u64) -> Self {
         self.context_builder.max_cycles(max_cycles);
         self
@@ -125,7 +125,7 @@ impl<'a> Prove<'a> {
             timeout,
         } = self;
         let opts = ZKMProverOpts { core_opts, recursion_opts };
-        let proof_opts = ProofOpts { zkm2_prover_opts: opts, timeout };
+        let proof_opts = ProofOpts { zkm_prover_opts: opts, timeout };
         let context = context_builder.build();
 
         // Dump the program and stdin to files for debugging if `ZKM_DUMP` is set.
@@ -161,8 +161,8 @@ impl<'a> Prove<'a> {
     /// Add a runtime [Hook](super::Hook) into the context.
     ///
     /// Hooks may be invoked from within ZKM by writing to the specified file descriptor `fd`
-    /// with [`zkm2_zkvm::io::write`], returning a list of arbitrary data that may be read
-    /// with successive calls to [`zkm2_zkvm::io::read`].
+    /// with [`zkm_zkvm::io::write`], returning a list of arbitrary data that may be read
+    /// with successive calls to [`zkm_zkvm::io::read`].
     pub fn with_hook(
         mut self,
         fd: u32,
@@ -202,7 +202,7 @@ impl<'a> Prove<'a> {
     /// Set the maximum number of cpu cycles to use for execution.
     ///
     /// If the cycle limit is exceeded, execution will return
-    /// [`zkm2_core_executor::ExecutionError::ExceededCycleLimit`].
+    /// [`zkm_core_executor::ExecutionError::ExceededCycleLimit`].
     pub fn cycle_limit(mut self, cycle_limit: u64) -> Self {
         self.context_builder.max_cycles(cycle_limit);
         self

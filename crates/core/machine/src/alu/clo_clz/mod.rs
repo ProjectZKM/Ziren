@@ -18,12 +18,12 @@ use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{air::MachineAir, Word};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{air::MachineAir, Word};
 
 use crate::operations::{FixedShiftRightOperation, IsEqualWordOperation, IsZeroOperation};
 use crate::{air::ZKMCoreAirBuilder, operations::IsZeroWordOperation, utils::pad_rows_fixed};
@@ -319,8 +319,8 @@ mod tests {
     use crate::utils::{uni_stark_prove, uni_stark_verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm2_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm2_stark::{
+    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_stark::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 

@@ -1,6 +1,6 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm2_core_executor::ZKMReduceProof;
-use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
+use zkm_core_executor::ZKMReduceProof;
+use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkVerifyingKey};
 
 /// Standard input for the prover.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -64,7 +64,7 @@ impl ZKMStdin {
 
 pub mod proof_serde {
     use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
-    use zkm2_stark::{MachineProof, StarkGenericConfig};
+    use zkm_stark::{MachineProof, StarkGenericConfig};
 
     pub fn serialize<S, SC: StarkGenericConfig + Serialize>(
         proof: &MachineProof<SC>,

@@ -9,8 +9,8 @@ use p3_field::PrimeField32;
 use p3_util::log2_ceil_usize;
 use thiserror::Error;
 
-use zkm2_core_executor::{ExecutionRecord, Program, MipsAirId};
-use zkm2_stark::{
+use zkm_core_executor::{ExecutionRecord, Program, MipsAirId};
+use zkm_stark::{
     air::MachineAir,
     shape::{OrderedShape, Shape, ShapeCluster},
     MachineRecord,
@@ -617,7 +617,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use hashbrown::HashSet;
-    use zkm2_stark::{Dom, MachineProver, StarkGenericConfig};
+    use zkm_stark::{Dom, MachineProver, StarkGenericConfig};
 
     use super::*;
 
@@ -676,7 +676,7 @@ pub mod tests {
     fn test_dummy_record() {
         use crate::utils::setup_logger;
         use p3_koala_bear::KoalaBear;
-        use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver};
+        use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver};
 
         type SC = KoalaBearPoseidon2;
         type A = MipsAir<KoalaBear>;

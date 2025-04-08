@@ -2,12 +2,12 @@
 
 In a zkMIPS<sup>+</sup> application, the host is the machine that is running the zkVM. The host is an untrusted agent that sets up the zkVM environment and handles inputs/outputs during execution for guest.
 
-## Example: [Fibonacci](https://github.com/zkMIPS/zkm2/blob/dev/init/examples/fibonacci/host/src/main.rs)
+## Example: [Fibonacci](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/src/main.rs)
 
 This host program sends the input `n = 1000` to the guest program for proving knowledge of the Nth Fibonacci number without revealing the computational path.
 
 ```rust
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("fibonacci");
@@ -16,7 +16,7 @@ fn main() {
     // Create an input stream and write '1000' to it.
     let n = 1000u32;
 
-    // The input stream that the guest will read from using `zkm2_zkvm::io::read`. Note that the
+    // The input stream that the guest will read from using `zkm_zkvm::io::read`. Note that the
     // types of the elements in the input stream must match the types being read in the program.
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
@@ -35,7 +35,7 @@ fn main() {
     // Read and verify the output.
     //
     // Note that this output is read from values committed to in the program using
-    // `zkm2_zkvm::io::commit`.
+    // `zkm_zkvm::io::commit`.
     let n = proof.public_values.read::<u32>();
     let a = proof.public_values.read::<u32>();
     let b = proof.public_values.read::<u32>();

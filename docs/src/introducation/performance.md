@@ -33,12 +33,12 @@ To achieve a more fair comparison among the different zkVMs, we provides a [zkvm
 On a AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge), the performances is shown as below. 
 
 
-Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - ZKM2)/ZKM2`.
+Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)/zkMIPS`.
 
 
 **Fibonacci**
 
-| n      | RISC0  | ZKM    | ZKM2   | SP1     | Rate |
+| n      | RISC0  | ZKM    | zkMIPS   | SP1     | Rate |
 |--------|--------|--------|--------|---------|-------------------|
 | 100    | 3004   | 6478   | 1947   | 5828    | 199.3323061       |
 | 1000   | 5854   | 8037   | 1933   | 5728    | 196.3269529       |
@@ -47,7 +47,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - ZKM2)/Z
 
 **sha2**
 
-| Byte Length | RISC0  | ZKM    | ZKM2   | SP1   | Rate |
+| Byte Length | RISC0  | ZKM    | zkMIPS   | SP1   | Rate |
 |-------------|--------|--------|--------|-------|-------------------|
 | 32          | 5982   | 7866   | 1927   | 5931  | 207.7841204       |
 | 256         | 5939   | 8318   | 1913   | 5872  | 206.9524307       |
@@ -57,7 +57,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - ZKM2)/Z
 
 **sha3**
 
-| Byte Length | RISC0  | ZKM    | ZKM2   | SP1   | Rate |
+| Byte Length | RISC0  | ZKM    | zkMIPS   | SP1   | Rate |
 |-------------|--------|--------|--------|-------|-----------------------|
 | 32          | 5934   | 7891   | 1972   | 5942  | 201.3184584           |
 | 256         | 11663  | 10636  | 2267   | 5909  | 160.6528452           |
@@ -68,20 +68,20 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - ZKM2)/Z
 
 **big-memory**
 
-| Value | RISC0   | ZKM     | ZKM2   | SP1    | Rate |
+| Value | RISC0   | ZKM     | zkMIPS   | SP1    | Rate |
 |-------|---------|---------|--------|--------|-----------------------|
 | 5     | 191125  | 199344  | 21218  | 36927  | 74.03619568           |
 
 **sha2-chain**
 
-| Iterations | RISC0  | ZKM     | ZKM2   | SP1    | Rate |
+| Iterations | RISC0  | ZKM     | zkMIPS   | SP1    | Rate |
 |------------|--------|---------|--------|--------|-----------------------|
 | 230        | 95827  | 141451  | 8756   | 15850  | 81.01873001           |
 | 460        | 155192 | 321358  | 17789  | 31799  | 78.75653494           |
 
 **sha3-chain**
 
-| Iterations | RISC0   | ZKM      | ZKM2   | SP1    | Rate |
+| Iterations | RISC0   | ZKM      | zkMIPS   | SP1    | Rate |
 |------------|---------|----------|--------|--------|-----------------------|
 | 230        | 287944  | 718678   | 36205  | 39987  | 10.44607098           |
 | 460        | 574644  | 1358248  | 68488  | 68790  | 0.4409531597          |

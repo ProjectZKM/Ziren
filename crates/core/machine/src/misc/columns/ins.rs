@@ -1,6 +1,6 @@
 use std::mem::size_of;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::Word;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::Word;
 use crate::memory::MemoryReadWriteCols;
 
 pub const NUM_INS_COLS: usize = size_of::<InsCols<u8>>();

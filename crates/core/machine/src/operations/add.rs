@@ -1,9 +1,9 @@
-use zkm2_core_executor::events::ByteRecord;
-use zkm2_stark::{air::ZKMAirBuilder, Word};
+use zkm_core_executor::events::ByteRecord;
+use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::air::WordAirBuilder;
 

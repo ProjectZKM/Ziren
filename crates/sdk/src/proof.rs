@@ -3,14 +3,14 @@ use std::{fmt::Debug, fs::File, path::Path};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumTryAs};
-use zkm2_core_executor::ZKMReduceProof;
-use zkm2_core_machine::io::ZKMStdin;
-use zkm2_primitives::io::ZKMPublicValues;
+use zkm_core_executor::ZKMReduceProof;
+use zkm_core_machine::io::ZKMStdin;
+use zkm_primitives::io::ZKMPublicValues;
 
-use zkm2_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
-use zkm2_stark::{MachineVerificationError, ShardProof};
+use zkm_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
+use zkm_stark::{MachineVerificationError, ShardProof};
 
-/// A proof generated with ZKM2 of a particular proof mode.
+/// A proof generated with zkMIPS of a particular proof mode.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
@@ -36,7 +36,7 @@ pub struct ZKMProofWithPublicValues {
     pub proof: ZKMProof,
     pub stdin: ZKMStdin,
     pub public_values: ZKMPublicValues,
-    pub zkm2_version: String,
+    pub zkm_version: String,
 }
 
 impl ZKMProofWithPublicValues {
@@ -112,7 +112,7 @@ mod tests {
             }),
             stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
-            zkm2_version: "".to_string(),
+            zkm_version: "".to_string(),
         };
         let expected_bytes = [vec![0, 0, 0, 0], hex::decode("ab").unwrap()].concat();
         assert_eq!(plonk_proof.bytes(), expected_bytes);
@@ -129,7 +129,7 @@ mod tests {
             }),
             stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
-            zkm2_version: "".to_string(),
+            zkm_version: "".to_string(),
         };
         let expected_bytes = [vec![0, 0, 0, 0], hex::decode("ab").unwrap()].concat();
         assert_eq!(groth16_proof.bytes(), expected_bytes);
@@ -146,7 +146,7 @@ mod tests {
             }),
             stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
-            zkm2_version: "".to_string(),
+            zkm_version: "".to_string(),
         };
         assert_eq!(mock_plonk_proof.bytes(), Vec::<u8>::new());
     }
@@ -162,7 +162,7 @@ mod tests {
             }),
             stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
-            zkm2_version: "".to_string(),
+            zkm_version: "".to_string(),
         };
         assert_eq!(mock_groth16_proof.bytes(), Vec::<u8>::new());
     }
@@ -174,7 +174,7 @@ mod tests {
             proof: ZKMProof::Core(vec![]),
             stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
-            zkm2_version: "".to_string(),
+            zkm_version: "".to_string(),
         };
         core_proof.bytes();
     }

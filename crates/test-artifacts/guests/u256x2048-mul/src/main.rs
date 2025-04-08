@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use num::BigUint;
 //use rand::Rng;
-use zkm2_zkvm::syscalls::syscall_u256x2048_mul;
+use zkm_zkvm::syscalls::syscall_u256x2048_mul;
 
 fn u256_to_bytes_le(x: &BigUint) -> [u8; 32] {
     let mut bytes = x.to_bytes_le();

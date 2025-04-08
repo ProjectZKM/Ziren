@@ -1,4 +1,4 @@
-package zkm2
+package zkm
 
 import (
 	"encoding/json"
@@ -15,7 +15,7 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
 	"github.com/consensys/gnark/test/unsafekzg"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/trusted_setup"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/trusted_setup"
 )
 
 func BuildPlonk(dataDir string) {

@@ -1,12 +1,12 @@
-//! Ported from Entrypoint for ZKM2 zkVM.
+//! Ported from Entrypoint for zkMIPS zkVM.
 #![feature(asm_experimental_arch)]
 pub mod heap;
 pub mod syscalls;
 pub mod io {
-    pub use zkm2_lib::io::*;
+    pub use zkm_lib::io::*;
 }
 pub mod lib {
-    pub use zkm2_lib::*;
+    pub use zkm_lib::*;
 }
 
 extern crate alloc;

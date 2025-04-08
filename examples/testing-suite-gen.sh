@@ -20,8 +20,8 @@ for program in "${PROGRAMS[@]}"; do
 
         # Run the cargo command and upload files to AWS S3
         ZKM_DUMP=1 cargo run --release -- --prove
-        aws s3 cp stdin.bin "s3://zkm2-testing-suite/v4/$program_name/stdin.bin"
-        aws s3 cp program.bin "s3://zkm2-testing-suite/v4/$program_name/program.bin"
+        aws s3 cp stdin.bin "s3://zkm-testing-suite/v4/$program_name/stdin.bin"
+        aws s3 cp program.bin "s3://zkm-testing-suite/v4/$program_name/program.bin"
 
         # Return to the root directory
         cd - > /dev/null

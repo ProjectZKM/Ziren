@@ -13,18 +13,18 @@ use p3_air::{Air, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_curves::{
+use zkm_curves::{
     edwards::{ed25519::Ed25519BaseField, EdwardsParameters, NUM_LIMBS, WORDS_CURVE_POINT},
     params::{FieldParameters, Limbs, NumLimbs},
     AffinePoint, EllipticCurve,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -324,9 +324,9 @@ where
 mod tests {
     use crate::utils;
     use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
-    use zkm2_core_executor::Executor;
-    use zkm2_core_executor::Program;
-    use zkm2_stark::{CpuProver, ZKMCoreOpts};
+    use zkm_core_executor::Executor;
+    use zkm_core_executor::Program;
+    use zkm_stark::{CpuProver, ZKMCoreOpts};
 
     #[test]
     pub fn test_ed_add_program_execute() {

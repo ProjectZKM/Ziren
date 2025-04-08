@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use zkm2_curves::{CurveType, EllipticCurve};
+use zkm_curves::{CurveType, EllipticCurve};
 
 use crate::{
     events::{create_ec_decompress_event, PrecompileEvent},

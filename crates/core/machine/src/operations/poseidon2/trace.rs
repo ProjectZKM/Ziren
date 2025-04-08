@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use p3_field::PrimeField32;
-use zkm2_primitives::RC_16_30_U32;
+use zkm_primitives::RC_16_30_U32;
 
 use super::{
     air::{external_linear_layer, external_linear_layer_mut, internal_linear_layer_mut},

@@ -7,17 +7,17 @@ use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use zkm2_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
-use zkm2_primitives::{io::ZKMPublicValues, poseidon2_hash};
+use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
+use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 
-use zkm2_recursion_circuit::machine::{
+use zkm_recursion_circuit::machine::{
     ZKMCompressWitnessValues, ZKMDeferredWitnessValues, ZKMRecursionWitnessValues,
 };
 
-use zkm2_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
+use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
 use thiserror::Error;
-use zkm2_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
+use zkm_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
 
 use crate::{
     utils::{koalabears_to_bn254, words_to_bytes_be},

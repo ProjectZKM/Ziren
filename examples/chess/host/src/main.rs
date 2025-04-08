@@ -1,4 +1,4 @@
-use zkm2_sdk::{include_elf, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 const ELF: &[u8] = include_elf!("chess");
 

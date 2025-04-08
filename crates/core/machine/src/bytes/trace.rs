@@ -2,8 +2,8 @@ use std::borrow::BorrowMut;
 
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use zkm2_core_executor::{ByteOpcode, ExecutionRecord, Program};
-use zkm2_stark::air::MachineAir;
+use zkm_core_executor::{ByteOpcode, ExecutionRecord, Program};
+use zkm_stark::air::MachineAir;
 
 use crate::utils::zeroed_f_vec;
 

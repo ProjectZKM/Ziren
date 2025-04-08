@@ -2,9 +2,9 @@
 #![no_main]
 
 use hex_literal::hex;
-use zkm2_zkvm::syscalls::syscall_ed_decompress;
+use zkm_zkvm::syscalls::syscall_ed_decompress;
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     for _ in 0..4 {

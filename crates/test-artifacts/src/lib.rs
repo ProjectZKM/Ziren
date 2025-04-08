@@ -1,6 +1,6 @@
 #![warn(clippy::pedantic)]
 
-use zkm2_build::include_elf;
+use zkm_build::include_elf;
 
 pub const SHA2_RUST_ELF: &[u8] = include_elf!("sha2-rust");
 pub const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci");

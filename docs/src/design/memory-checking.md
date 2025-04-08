@@ -4,7 +4,7 @@
 
 This is in contrast to "online memory checking" techniques like Merkle hashing which ​immediately verify that a memory read was done correctly by insisting that each read includes an authentication path. Merkle hashing is  ​computationally expensive on a per-read basis for ZK provers, and offline memory checking suffices for zkVM design.
 
-ZKM2 replaces ZKM’s online memory checking with multiset-hashing-based offline memory checking for improved efficiency. ZKM2's verifies the consistency of read/write operations by constructing a ​read set \\(RS\\) and a ​write set \\(WS\\) and proving their equivalence. This mechanism leverages ​multiset hashing on an elliptic curve over KoalaBear Prime's 7th extension field to ensure memory integrity efficiently. Below is a detailed breakdown of its key components.
+zkMIPS replaces ZKM’s online memory checking with multiset-hashing-based offline memory checking for improved efficiency. zkMIPS's verifies the consistency of read/write operations by constructing a ​read set \\(RS\\) and a ​write set \\(WS\\) and proving their equivalence. This mechanism leverages ​multiset hashing on an elliptic curve over KoalaBear Prime's 7th extension field to ensure memory integrity efficiently. Below is a detailed breakdown of its key components.
 
 ## Construction of Read Set and Write Set
 
@@ -54,7 +54,7 @@ Multiset hashing maps a (multi-)set to a short string, making it computationally
 
 Consider the group \\(G\\) as the set of points \\((x,y)\\) on the elliptic curve \\(y^2 = x^3 +Ax+B\\) (including the point at infinity). We can implement a hash-to-group approach. To hash a set element into a point on the elliptic curve, we first map the set element to the \\(x\\)-coordinate of the point. Since this may not be a valid \\(x\\)-coordinate on the elliptic curve, we add an 8-bit tweak \\(t\\). Additionally, we constrain the sign of the \\(y\\)-coordinate to prevent flipping, either by ensuring \\(y\\) is a quadratic residue or by adding range checks.
 
-In ZKM2, the following parameters are used.
+In zkMIPS, the following parameters are used.
 - KoalaBear Prime field: \\(\mathbb{F}_P\\), with \\(P = 2^{31} - 2^{24} +1\\).
 - Septic extension field: Defined under irreducible polynomial \\( u^7 + 2u -8\\).
 - Elliptic curve: Defined with \\(A = 3*u , B= -3\\) (provides ≥102-bit security).

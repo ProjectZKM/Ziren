@@ -1,7 +1,7 @@
 use anyhow::Result;
-use zkm2_core_executor::ZKMContext;
-use zkm2_core_machine::io::ZKMStdin;
-use zkm2_prover::{components::DefaultProverComponents, ZKMProver};
+use zkm_core_executor::ZKMContext;
+use zkm_core_machine::io::ZKMStdin;
+use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
 use crate::install::try_install_circuit_artifacts;
 use crate::{
@@ -38,7 +38,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         self.prover.setup(elf)
     }
 
-    fn zkm2_prover(&self) -> &ZKMProver<DefaultProverComponents> {
+    fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
         &self.prover
     }
 
@@ -51,14 +51,14 @@ impl Prover<DefaultProverComponents> for CpuProver {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
         // Generate the core proof.
-        let proof: zkm2_prover::ZKMProofWithMetadata<zkm2_prover::ZKMCoreProofData> =
-            self.prover.prove_core(pk, &stdin, opts.zkm2_prover_opts, context)?;
+        let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
+            self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
         if kind == ZKMProofKind::Core {
             return Ok(ZKMProofWithPublicValues {
                 proof: ZKMProof::Core(proof.proof.0),
                 stdin: proof.stdin,
                 public_values: proof.public_values,
-                zkm2_version: self.version().to_string(),
+                zkm_version: self.version().to_string(),
             });
         }
 
@@ -68,25 +68,25 @@ impl Prover<DefaultProverComponents> for CpuProver {
 
         // Generate the compressed proof.
         let reduce_proof =
-            self.prover.compress(&pk.vk, proof, deferred_proofs, opts.zkm2_prover_opts)?;
+            self.prover.compress(&pk.vk, proof, deferred_proofs, opts.zkm_prover_opts)?;
         if kind == ZKMProofKind::Compressed {
             return Ok(ZKMProofWithPublicValues {
                 proof: ZKMProof::Compressed(Box::new(reduce_proof)),
                 stdin,
                 public_values,
-                zkm2_version: self.version().to_string(),
+                zkm_version: self.version().to_string(),
             });
         }
 
         // Generate the shrink proof.
-        let compress_proof = self.prover.shrink(reduce_proof, opts.zkm2_prover_opts)?;
+        let compress_proof = self.prover.shrink(reduce_proof, opts.zkm_prover_opts)?;
 
         // Genenerate the wrap proof.
-        let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm2_prover_opts)?;
+        let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
 
         if kind == ZKMProofKind::Plonk {
-            let plonk_bn254_artifacts = if zkm2_prover::build::zkm2_dev_mode() {
-                zkm2_prover::build::try_build_plonk_bn254_artifacts_dev(
+            let plonk_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+                zkm_prover::build::try_build_plonk_bn254_artifacts_dev(
                     &outer_proof.vk,
                     &outer_proof.proof,
                 )
@@ -99,11 +99,11 @@ impl Prover<DefaultProverComponents> for CpuProver {
                 proof: ZKMProof::Plonk(proof),
                 stdin,
                 public_values,
-                zkm2_version: self.version().to_string(),
+                zkm_version: self.version().to_string(),
             });
         } else if kind == ZKMProofKind::Groth16 {
-            let groth16_bn254_artifacts = if zkm2_prover::build::zkm2_dev_mode() {
-                zkm2_prover::build::try_build_groth16_bn254_artifacts_dev(
+            let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+                zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
                     &outer_proof.vk,
                     &outer_proof.proof,
                 )
@@ -116,7 +116,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                 proof: ZKMProof::Groth16(proof),
                 stdin,
                 public_values,
-                zkm2_version: self.version().to_string(),
+                zkm_version: self.version().to_string(),
             });
         }
 

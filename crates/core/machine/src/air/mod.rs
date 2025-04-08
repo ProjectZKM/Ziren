@@ -6,7 +6,7 @@ pub use memory::*;
 pub use program::*;
 pub use word::*;
 
-use zkm2_stark::air::{BaseAirBuilder, ZKMAirBuilder};
+use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
 
 /// A trait which contains methods related to memory lookups in an AIR.
 

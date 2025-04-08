@@ -6,6 +6,6 @@ publish = false
 
 
 [dependencies]
-zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
 num-bigint = "0.4.6"
 rand = "0.8.5"

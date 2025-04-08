@@ -1,6 +1,6 @@
 //! A simple example showing how to aggregate proofs of multiple programs with ZKM.
 
-use zkm2_sdk::{
+use zkm_sdk::{
     include_elf, HashableKey, ProverClient, ZKMProof, ZKMProofWithPublicValues, ZKMStdin,
     ZKMVerifyingKey,
 };
@@ -21,7 +21,7 @@ struct AggregationInput {
 
 fn main() {
     // Setup the logger.
-    zkm2_sdk::utils::setup_logger();
+    zkm_sdk::utils::setup_logger();
 
     // Initialize the proving client.
     let client = ProverClient::new();

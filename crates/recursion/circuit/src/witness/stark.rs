@@ -4,9 +4,9 @@ use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
 use p3_koala_bear::KoalaBear;
 
-use zkm2_recursion_compiler::ir::{Builder, Config, Ext, Felt};
-use zkm2_recursion_core::air::Block;
-use zkm2_stark::{
+use zkm_recursion_compiler::ir::{Builder, Config, Ext, Felt};
+use zkm_recursion_core::air::Block;
+use zkm_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
     InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerInputProof, InnerVal,
 };

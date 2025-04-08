@@ -3,17 +3,17 @@
 // use clap::Parser;
 // use p3_koala_bear::KoalaBear;
 // use p3_field::PrimeField;
-// use zkm2_core_executor::ZKMContext;
-// use zkm2_core_machine::io::ZKMStdin;
-// use zkm2_prover::{
+// use zkm_core_executor::ZKMContext;
+// use zkm_core_machine::io::ZKMStdin;
+// use zkm_prover::{
 //     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
 //     ZKMProver,
 // };
-// use zkm2_recursion_circuit::{stark::build_wrap_circuit, witness::Witnessable};
-// use zkm2_recursion_compiler::ir::Witness;
-// use zkm2_recursion_core::air::RecursionPublicValues;
-// use zkm2_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
-// use zkm2_stark::ZKMProverOpts;
+// use zkm_recursion_circuit::{stark::build_wrap_circuit, witness::Witnessable};
+// use zkm_recursion_compiler::ir::Witness;
+// use zkm_recursion_core::air::RecursionPublicValues;
+// use zkm_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
+// use zkm_stark::ZKMProverOpts;
 // use subtle_encoding::hex;
 
 // #[derive(Parser, Debug)]
@@ -26,7 +26,7 @@
 // }
 
 // pub fn main() {
-//     zkm2_core_machine::utils::setup_logger();
+//     zkm_core_machine::utils::setup_logger();
 //     std::env::set_var("RECONSTRUCT_COMMITMENTS", "false");
 
 //     let args = Args::parse();
@@ -61,7 +61,7 @@
 
 //     tracing::info!("building template witness");
 //     let pv: &RecursionPublicValues<_> = wrapped_proof.proof.public_values.as_slice().borrow();
-//     let vkey_hash = koalabears_to_bn254(&pv.zkm2_vk_digest);
+//     let vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
 //     let committed_values_digest_bytes: [KoalaBear; 32] =
 //         words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
 //     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);

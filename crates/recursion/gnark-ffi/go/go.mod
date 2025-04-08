@@ -1,4 +1,4 @@
-module github.com/zkMIPS/zkm2-recursion-gnark
+module github.com/zkMIPS/zkm-recursion-gnark
 
 go 1.22
 

@@ -5,6 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint", features = ["verify"] }
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint", features = ["verify"] }
 hex = "0.4.3"
 sha2 = "0.10.8"

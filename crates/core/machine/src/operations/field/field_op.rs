@@ -6,15 +6,15 @@ use num::BigUint;
 use p3_air::AirBuilder;
 use p3_field::PrimeField32;
 
-use zkm2_core_executor::events::{ByteRecord, FieldOperation};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{Polynomial, ZKMAirBuilder};
+use zkm_core_executor::events::{ByteRecord, FieldOperation};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{Polynomial, ZKMAirBuilder};
 
 use super::{
     util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
     util_air::eval_field_operation,
 };
-use zkm2_curves::params::{FieldParameters, Limbs};
+use zkm_curves::params::{FieldParameters, Limbs};
 
 use typenum::Unsigned;
 
@@ -190,7 +190,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
                 // inverse.
                 cfg_if::cfg_if! {
                     if #[cfg(feature = "bigint-rug")] {
-                        use zkm2_curves::utils::{biguint_to_rug, rug_to_biguint};
+                        use zkm_curves::utils::{biguint_to_rug, rug_to_biguint};
                         let rug_a = biguint_to_rug(a);
                         let rug_b = biguint_to_rug(b);
                         let rug_modulus = biguint_to_rug(modulus);
@@ -378,9 +378,9 @@ mod tests {
     use num::BigUint;
     use p3_air::BaseAir;
     use p3_field::{Field, PrimeField32};
-    use zkm2_core_executor::{ExecutionRecord, Program};
-    use zkm2_curves::params::FieldParameters;
-    use zkm2_stark::{
+    use zkm_core_executor::{ExecutionRecord, Program};
+    use zkm_curves::params::FieldParameters;
+    use zkm_stark::{
         air::{MachineAir, ZKMAirBuilder},
         StarkGenericConfig,
     };
@@ -396,12 +396,12 @@ mod tests {
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
     use std::mem::size_of;
-    use zkm2_core_executor::events::ByteRecord;
-    use zkm2_curves::{
+    use zkm_core_executor::events::ByteRecord;
+    use zkm_curves::{
         edwards::ed25519::Ed25519BaseField, weierstrass::secp256k1::Secp256k1BaseField,
     };
-    use zkm2_derive::AlignedBorrow;
-    use zkm2_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_derive::AlignedBorrow;
+    use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
 
     #[derive(AlignedBorrow, Debug, Clone)]
     pub struct TestCols<T, P: FieldParameters> {

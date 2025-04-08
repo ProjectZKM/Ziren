@@ -6,7 +6,7 @@ The CPU architecture employs a structured column-based design to manage instruct
 
 ## Column Classification 
 
-The CPU columns in ZKM2 encapsulate the core execution context of MIPS instructions within the zkVM. Key components include:
+The CPU columns in zkMIPS encapsulate the core execution context of MIPS instructions within the zkVM. Key components include:
 - ​Segment Management​​: Tracks execution segments for cross-segment operations like syscalls and memory access.
 - Clock System​​: Tracking the global clock cycles.
 - ​Program Counter​​: Sequential validation via pc, next_pc, and next_next_pc for instruction flow correctness.
@@ -17,7 +17,7 @@ The CPU columns in ZKM2 encapsulate the core execution context of MIPS instructi
 
 ## ​Constraint Categories​​
 
-ZKM2's CPU constraints ensure instruction integrity across four key dimensions:
+zkMIPS's CPU constraints ensure instruction integrity across four key dimensions:
 
 - Flow Constraints​​
 
@@ -38,4 +38,4 @@ ZKM2's CPU constraints ensure instruction integrity across four key dimensions:
   Instruction exclusivity: Maintains instruction type exclusivity.
   Real-row validation: Enforces operational validity flags for non-padded execution.
 
-These constraints are implemented through AIR polynomial identities, cross-table lookup arguments, boolean assertions, and multi-set hashing ensuring verifiable MIPS execution within ZKM2's zkVM framework.
+These constraints are implemented through AIR polynomial identities, cross-table lookup arguments, boolean assertions, and multi-set hashing ensuring verifiable MIPS execution within zkMIPS's zkVM framework.

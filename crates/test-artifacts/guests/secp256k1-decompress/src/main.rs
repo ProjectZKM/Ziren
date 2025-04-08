@@ -1,12 +1,12 @@
 #![no_std]
 #![no_main]
 
-use zkm2_zkvm::syscalls::syscall_secp256k1_decompress;
+use zkm_zkvm::syscalls::syscall_secp256k1_decompress;
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
-    let compressed_key: [u8; 33] = zkm2_zkvm::io::read_vec().try_into().unwrap();
+    let compressed_key: [u8; 33] = zkm_zkvm::io::read_vec().try_into().unwrap();
 
     for _ in 0..4 {
         let mut decompressed_key: [u8; 64] = [0; 64];
@@ -22,6 +22,6 @@ pub fn main() {
         result[0] = 4;
         result[1..].copy_from_slice(&decompressed_key);
 
-        zkm2_zkvm::io::commit_slice(&result);
+        zkm_zkvm::io::commit_slice(&result);
     }
 }

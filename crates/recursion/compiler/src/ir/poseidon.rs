@@ -1,5 +1,5 @@
 use p3_field::FieldAlgebra;
-use zkm2_recursion_core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
+use zkm_recursion_core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, Usize, Var};
 

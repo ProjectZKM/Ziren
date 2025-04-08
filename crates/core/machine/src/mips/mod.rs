@@ -1,6 +1,6 @@
 use core::fmt;
 use itertools::Itertools;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord,
     Program, MipsAirId,
 };
@@ -14,9 +14,9 @@ use hashbrown::{HashMap, HashSet};
 pub use mips_chips::*;
 use p3_field::PrimeField32;
 use strum_macros::{EnumDiscriminants, EnumIter};
-use zkm2_core_executor::events::PrecompileEvent;
-use zkm2_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
-use zkm2_stark::{
+use zkm_core_executor::events::PrecompileEvent;
+use zkm_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
+use zkm_stark::{
     air::{LookupScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
     Chip, LookupKind, StarkGenericConfig, StarkMachine,
 };
@@ -50,7 +50,7 @@ pub(crate) mod mips_chips {
             },
         },
     };
-    pub use zkm2_curves::{
+    pub use zkm_curves::{
         edwards::{ed25519::Ed25519Parameters, EdwardsCurve},
         weierstrass::{
             bls12_381::Bls12381Parameters, bn254::Bn254Parameters, secp256k1::Secp256k1Parameters,
@@ -70,7 +70,7 @@ pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 /// This enum contains all the different AIRs that are used in the zkMIPS IOP. Each variant is
 /// a different AIR that is used to encode a different part of the zkMIPS execution, and the
 /// different AIR variants have a joint lookup argument.
-#[derive(zkm2_derive::MachineAir, EnumDiscriminants)]
+#[derive(zkm_derive::MachineAir, EnumDiscriminants)]
 #[strum_discriminants(derive(Hash, EnumIter))]
 pub enum MipsAir<F: PrimeField32> {
     /// An AIR that contains a preprocessed program table and a lookup for the instructions.
@@ -661,16 +661,16 @@ pub mod tests {
     use p3_koala_bear::KoalaBear;
     use strum::IntoEnumIterator;
 
-    use zkm2_core_executor::programs::tests::other_memory_program;
-    use zkm2_core_executor::{
+    use zkm_core_executor::programs::tests::other_memory_program;
+    use zkm_core_executor::{
         programs::tests::{
             fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
             simple_program, ssz_withdrawals_program,
         },
         MipsAirId, Instruction, Opcode, Program,
     };
-    use zkm2_stark::air::MachineAir;
-    use zkm2_stark::{
+    use zkm_stark::air::MachineAir;
+    use zkm_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkProvingKey, StarkVerifyingKey,
         ZKMCoreOpts,
     };

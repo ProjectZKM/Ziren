@@ -1,25 +1,25 @@
 use std::{borrow::Borrow, path::PathBuf};
 
 use p3_koala_bear::KoalaBear;
-use zkm2_core_executor::ZKMContext;
-use zkm2_core_machine::io::ZKMStdin;
-use zkm2_recursion_circuit::{
+use zkm_core_executor::ZKMContext;
+use zkm_core_machine::io::ZKMStdin;
+use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
     machine::{ZKMCompressWitnessValues, ZKMWrapVerifier},
 };
-use zkm2_recursion_compiler::{
+use zkm_recursion_compiler::{
     config::OuterConfig,
     constraints::{Constraint, ConstraintCompiler},
     ir::Builder,
 };
 
-use zkm2_recursion_core::air::RecursionPublicValues;
-pub use zkm2_recursion_core::stark::zkm2_dev_mode;
+use zkm_recursion_core::air::RecursionPublicValues;
+pub use zkm_recursion_core::stark::zkm_dev_mode;
 
-pub use zkm2_recursion_circuit::witness::{OuterWitness, Witnessable};
+pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
-use zkm2_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
-use zkm2_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
+use zkm_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
+use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
@@ -32,7 +32,7 @@ pub fn try_build_plonk_bn254_artifacts_dev(
     template_proof: &ShardProof<OuterSC>,
 ) -> PathBuf {
     let build_dir = plonk_bn254_artifacts_dev_dir();
-    println!("[zkm2] building plonk bn254 artifacts in development mode");
+    println!("[zkm] building plonk bn254 artifacts in development mode");
     build_plonk_bn254_artifacts(template_vk, template_proof, &build_dir);
     build_dir
 }
@@ -43,19 +43,19 @@ pub fn try_build_groth16_bn254_artifacts_dev(
     template_proof: &ShardProof<OuterSC>,
 ) -> PathBuf {
     let build_dir = groth16_bn254_artifacts_dev_dir();
-    println!("[zkm2] building groth16 bn254 artifacts in development mode");
+    println!("[zkm] building groth16 bn254 artifacts in development mode");
     build_groth16_bn254_artifacts(template_vk, template_proof, &build_dir);
     build_dir
 }
 
 /// Gets the directory where the PLONK artifacts are installed in development mode.
 pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(".zkm2").join("circuits").join("dev")
+    dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
 }
 
 /// Gets the directory where the groth16 artifacts are installed in development mode.
 pub fn groth16_bn254_artifacts_dev_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(".zkm2").join("circuits").join("dev")
+    dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
 }
 
 /// Build the plonk bn254 artifacts to the given directory for the given verification key and
@@ -132,7 +132,7 @@ pub fn build_constraints_and_witness(
         tracing::info_span!("wrap circuit").in_scope(|| build_outer_circuit(&template_input));
 
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
-    let vkey_hash = koalabears_to_bn254(&pv.zkm2_vk_digest);
+    let vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
     let committed_values_digest_bytes: [KoalaBear; 32] =
         words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);

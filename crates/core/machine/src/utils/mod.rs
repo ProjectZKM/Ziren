@@ -9,13 +9,13 @@ use p3_field::Field;
 pub use prove::*;
 pub use span::*;
 pub use tracer::*;
-use zkm2_curves::params::Limbs;
+use zkm_curves::params::Limbs;
 
 use crate::memory::MemoryCols;
 use generic_array::ArrayLength;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 
-pub use zkm2_primitives::consts::{
+pub use zkm_primitives::consts::{
     bytes_to_words_le, bytes_to_words_le_vec, num_to_comma_separated, words_to_bytes_le,
     words_to_bytes_le_vec,
 };
@@ -144,7 +144,7 @@ where
 /// as whether cycle tracking is performed for circuit programs.
 ///
 /// By default, the variable is disabled.
-pub fn zkm2_debug_mode() -> bool {
+pub fn zkm_debug_mode() -> bool {
     let value = std::env::var("ZKM_DEBUG").unwrap_or_else(|_| "false".to_string());
     value == "1" || value.to_lowercase() == "true"
 }

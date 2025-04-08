@@ -4,9 +4,9 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, iter::zip};
-use zkm2_core_machine::utils::next_power_of_two;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::MachineAir;
+use zkm_core_machine::utils::next_power_of_two;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::MachineAir;
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
@@ -198,7 +198,7 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::*;
 

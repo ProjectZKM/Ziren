@@ -9,11 +9,11 @@ use rayon::iter::{
 };
 use rayon_scan::ScanParallelIterator;
 use std::borrow::BorrowMut;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, GlobalLookupEvent},
     ExecutionRecord, Program,
 };
-use zkm2_stark::{
+use zkm_stark::{
     air::{AirLookup, LookupScope, MachineAir},
     septic_curve::{SepticCurve, SepticCurveComplete},
     septic_digest::SepticDigest,
@@ -25,7 +25,7 @@ use crate::{
     operations::{GlobalAccumulationOperation, GlobalLookupOperation},
     utils::{indices_arr, next_power_of_two, zeroed_f_vec},
 };
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 const NUM_GLOBAL_COLS: usize = size_of::<GlobalCols<u8>>();
 
@@ -260,8 +260,8 @@ mod tests {
     use super::*;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm2_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
-    use zkm2_stark::{air::MachineAir, ZKMCoreOpts};
+    use zkm_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
+    use zkm_stark::{air::MachineAir, ZKMCoreOpts};
 
     #[test]
     fn test_global_generate_trace() {

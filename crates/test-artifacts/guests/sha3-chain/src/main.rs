@@ -3,7 +3,7 @@
 
 use sha3::{Digest, Keccak256};
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     let input = [5u8; 32];
@@ -16,5 +16,5 @@ pub fn main() {
         hash = Into::<[u8; 32]>::into (*res);
     }
 
-    zkm2_zkvm::io::commit::<[u8; 32]>(&hash.into());
+    zkm_zkvm::io::commit::<[u8; 32]>(&hash.into());
 }

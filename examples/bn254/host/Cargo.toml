@@ -4,8 +4,8 @@ name = "bn254-host"
 edition = "2021"
 
 [dependencies]
-zkm2-sdk = { path = "../../../crates/sdk" }
+zkm-sdk = { path = "../../../crates/sdk" }
 
 
 [build-dependencies]
-zkm2-build = { path = "../../../crates/build" }
+zkm-build = { path = "../../../crates/build" }

@@ -5,13 +5,13 @@ use p3_koala_bear::KoalaBear;
 use p3_symmetric::Hash;
 
 use p3_field::FieldAlgebra;
-use zkm2_recursion_compiler::ir::Builder;
-use zkm2_stark::{
+use zkm_recursion_compiler::ir::Builder;
+use zkm_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
     OpeningProof, StarkVerifyingKey, Word,
 };
 
-use zkm2_recursion_compiler::ir::Felt;
+use zkm_recursion_compiler::ir::Felt;
 
 use crate::{
     challenger::DuplexChallengerVariable,
@@ -164,7 +164,7 @@ where
         let vk_merkle_data = self.vk_merkle_data.read(builder);
         let start_reconstruct_deferred_digest =
             self.start_reconstruct_deferred_digest.read(builder);
-        let zkm2_vk_digest = self.zkm2_vk_digest.read(builder);
+        let zkm_vk_digest = self.zkm_vk_digest.read(builder);
         let committed_value_digest = self.committed_value_digest.read(builder);
         let deferred_proofs_digest = self.deferred_proofs_digest.read(builder);
         let end_pc = self.end_pc.read(builder);
@@ -178,7 +178,7 @@ where
             vks_and_proofs,
             vk_merkle_data,
             start_reconstruct_deferred_digest,
-            zkm2_vk_digest,
+            zkm_vk_digest,
             committed_value_digest,
             deferred_proofs_digest,
             end_pc,
@@ -194,7 +194,7 @@ where
         self.vks_and_proofs.write(witness);
         self.vk_merkle_data.write(witness);
         self.start_reconstruct_deferred_digest.write(witness);
-        self.zkm2_vk_digest.write(witness);
+        self.zkm_vk_digest.write(witness);
         self.committed_value_digest.write(witness);
         self.deferred_proofs_digest.write(witness);
         self.end_pc.write(witness);

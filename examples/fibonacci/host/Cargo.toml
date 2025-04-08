@@ -7,10 +7,10 @@ publish = false
 
 [dependencies]
 hex = "0.4.3"
-zkm2-sdk = { workspace = true }
+zkm-sdk = { workspace = true }
 
 [build-dependencies]
-zkm2-build = { workspace = true }
+zkm-build = { workspace = true }
 
 [[bin]]
 name = "plonk_bn254"
@@ -33,4 +33,4 @@ name = "fibonacci-host"
 path = "src/main.rs"
 
 # [features]
-# cuda = ["zkm2-sdk/cuda"]
+# cuda = ["zkm-sdk/cuda"]

@@ -1,13 +1,13 @@
-//! This is a test program that takes in a zkm2_core vkey and a list of inputs, and then verifies the
-//! ZKM2 proof for each input.
+//! This is a test program that takes in a zkm_core vkey and a list of inputs, and then verifies the
+//! zkMIPS proof for each input.
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use sha2::{Digest, Sha256};
 extern crate alloc;
 use alloc::vec::Vec;
-use zkm2_zkvm::lib::verify::verify_zkm_proof;
+use zkm_zkvm::lib::verify::verify_zkm_proof;
 
 fn words_to_bytes(words: &[u32; 8]) -> [u8; 32] {
     let mut bytes = [0u8; 32];
@@ -19,9 +19,9 @@ fn words_to_bytes(words: &[u32; 8]) -> [u8; 32] {
 }
 
 pub fn main() {
-    let vkey = zkm2_zkvm::io::read::<[u32; 8]>();
+    let vkey = zkm_zkvm::io::read::<[u32; 8]>();
     // println!("Read vkey: {:?}", hex::encode(words_to_bytes(&vkey)));
-    let inputs = zkm2_zkvm::io::read::<Vec<Vec<u8>>>();
+    let inputs = zkm_zkvm::io::read::<Vec<Vec<u8>>>();
     inputs.iter().for_each(|input| {
         // Get expected pv_digest hash: sha256(input)
         let pv_digest = Sha256::digest(input);

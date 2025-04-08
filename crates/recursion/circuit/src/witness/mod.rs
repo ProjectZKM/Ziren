@@ -1,11 +1,11 @@
 mod outer;
 mod stark;
 
-use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 pub use outer::*;
 pub use stark::*;
-use zkm2_stark::{
+use zkm_stark::{
     septic_curve::SepticCurve, septic_digest::SepticDigest, septic_extension::SepticExtension,
     ChipOpenedValues, Com, InnerChallenge, InnerVal, OpeningProof, ShardCommitment,
     ShardOpenedValues, ShardProof,

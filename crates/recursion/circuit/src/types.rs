@@ -3,16 +3,16 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_matrix::Dimensions;
 
-use zkm2_recursion_compiler::ir::{Builder, Ext, Felt};
-use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::septic_digest::SepticDigest;
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
+use zkm_recursion_core::DIGEST_SIZE;
+use zkm_stark::septic_digest::SepticDigest;
 
 use crate::{
     challenger::CanObserveVariable, hash::FieldHasherVariable, CircuitConfig,
     KoalaBearFriConfigVariable,
 };
 
-/// Reference: [zkm2_core::stark::StarkVerifyingKey]
+/// Reference: [zkm_core::stark::StarkVerifyingKey]
 #[derive(Clone)]
 pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
     pub commitment: SC::DigestVariable,

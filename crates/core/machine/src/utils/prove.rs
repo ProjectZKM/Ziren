@@ -14,7 +14,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
 use std::thread::ScopedJoinHandle;
 use thiserror::Error;
-use zkm2_stark::{
+use zkm_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey,
     MachineVerificationError,
 };
@@ -27,15 +27,15 @@ use crate::{
     utils::{chunk_vec, concurrency::TurnBasedSync},
 };
 use crate::shape::CoreShapeConfig;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{format_table_line, sorted_table_lines},
     subproof::NoOpSubproofVerifier,
     ExecutionError, ExecutionRecord, ExecutionReport, ExecutionState, Executor, Program,
     ZKMContext,
 };
-use zkm2_primitives::io::ZKMPublicValues;
+use zkm_primitives::io::ZKMPublicValues;
 
-use zkm2_stark::{
+use zkm_stark::{
     air::{MachineAir, PublicValues},
     Com, CpuProver, DebugConstraintBuilder, LookupBuilder, MachineProof, MachineProver,
     MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,

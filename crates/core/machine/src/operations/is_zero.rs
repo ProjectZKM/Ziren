@@ -6,9 +6,9 @@
 //! is 0.
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
-use zkm2_stark::air::ZKMAirBuilder;
+use zkm_stark::air::ZKMAirBuilder;
 
 /// A set of columns needed to compute whether the given word is 0.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

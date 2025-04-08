@@ -4,5 +4,5 @@ name = "sha2-rust"
 edition = "2021"
 
 [dependencies]
-zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
 sha2 = { version = "0.10.8", default-features = false }

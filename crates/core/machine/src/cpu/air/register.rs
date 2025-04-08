@@ -1,12 +1,12 @@
 use p3_field::FieldAlgebra;
-use zkm2_stark::air::ZKMAirBuilder;
+use zkm_stark::air::ZKMAirBuilder;
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},
     cpu::{columns::CpuCols, CpuChip},
     memory::MemoryCols,
 };
-use zkm2_core_executor::events::MemoryAccessPosition;
+use zkm_core_executor::events::MemoryAccessPosition;
 
 impl CpuChip {
     /// Computes whether the opcode is a branch instruction.

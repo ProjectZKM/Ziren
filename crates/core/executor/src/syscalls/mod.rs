@@ -36,7 +36,7 @@ use precompiles::{
 use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
 use verify::VerifySyscall;
 use write::WriteSyscall;
-use zkm2_curves::{
+use zkm_curves::{
     edwards::ed25519::{Ed25519, Ed25519Parameters},
     weierstrass::{
         bls12_381::{Bls12381, Bls12381BaseField},
@@ -49,7 +49,7 @@ use zkm2_curves::{
 use crate::events::FieldOperation;
 use crate::syscalls::precompiles::keccak::sponge::KeccakSpongeSyscall;
 
-/// A system call in the ZKM2 MIPS zkVM.
+/// A system call in the zkMIPS zkVM.
 ///
 /// This trait implements methods needed to execute a system call inside the [`crate::Executor`].
 pub trait Syscall: Send + Sync {

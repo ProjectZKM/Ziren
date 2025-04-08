@@ -483,103 +483,103 @@ mod tests {
     fn test_syscall_consistency_zkvm() {
         for code in SyscallCode::iter() {
             match code {
-                SyscallCode::HALT => assert_eq!(code as u32, zkm2_zkvm::syscalls::HALT),
-                SyscallCode::WRITE => assert_eq!(code as u32, zkm2_zkvm::syscalls::WRITE),
+                SyscallCode::HALT => assert_eq!(code as u32, zkm_zkvm::syscalls::HALT),
+                SyscallCode::WRITE => assert_eq!(code as u32, zkm_zkvm::syscalls::WRITE),
                 SyscallCode::ENTER_UNCONSTRAINED => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::ENTER_UNCONSTRAINED)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::ENTER_UNCONSTRAINED)
                 }
                 SyscallCode::EXIT_UNCONSTRAINED => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::EXIT_UNCONSTRAINED)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::EXIT_UNCONSTRAINED)
                 }
-                SyscallCode::SHA_EXTEND => assert_eq!(code as u32, zkm2_zkvm::syscalls::SHA_EXTEND),
+                SyscallCode::SHA_EXTEND => assert_eq!(code as u32, zkm_zkvm::syscalls::SHA_EXTEND),
                 SyscallCode::SHA_COMPRESS => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SHA_COMPRESS)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SHA_COMPRESS)
                 }
-                SyscallCode::ED_ADD => assert_eq!(code as u32, zkm2_zkvm::syscalls::ED_ADD),
+                SyscallCode::ED_ADD => assert_eq!(code as u32, zkm_zkvm::syscalls::ED_ADD),
                 SyscallCode::ED_DECOMPRESS => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::ED_DECOMPRESS)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::ED_DECOMPRESS)
                 }
                 SyscallCode::SECP256K1_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256K1_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SECP256K1_ADD)
                 }
                 SyscallCode::SECP256R1_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256R1_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SECP256R1_ADD)
                 }
                 SyscallCode::SECP256K1_DOUBLE => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256K1_DOUBLE)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SECP256K1_DOUBLE)
                 }
                 SyscallCode::SECP256R1_DOUBLE => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256R1_DOUBLE)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SECP256R1_DOUBLE)
                 }
                 SyscallCode::BLS12381_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_ADD)
                 }
                 SyscallCode::BLS12381_DOUBLE => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_DOUBLE)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_DOUBLE)
                 }
                 SyscallCode::SECP256K1_DECOMPRESS => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256K1_DECOMPRESS)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SECP256K1_DECOMPRESS)
                 }
                 SyscallCode::SECP256R1_DECOMPRESS => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::SECP256R1_DECOMPRESS)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::SECP256R1_DECOMPRESS)
                 }
-                SyscallCode::BN254_ADD => assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_ADD),
+                SyscallCode::BN254_ADD => assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_ADD),
                 SyscallCode::BN254_DOUBLE => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_DOUBLE)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_DOUBLE)
                 }
                 SyscallCode::UINT256_MUL => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::UINT256_MUL)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::UINT256_MUL)
                 }
                 SyscallCode::U256X2048_MUL => {
-                     assert_eq!(code as u32, zkm2_zkvm::syscalls::U256X2048_MUL)
+                     assert_eq!(code as u32, zkm_zkvm::syscalls::U256X2048_MUL)
                 }
-                SyscallCode::COMMIT => assert_eq!(code as u32, zkm2_zkvm::syscalls::COMMIT),
+                SyscallCode::COMMIT => assert_eq!(code as u32, zkm_zkvm::syscalls::COMMIT),
                 SyscallCode::COMMIT_DEFERRED_PROOFS => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::COMMIT_DEFERRED_PROOFS)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::COMMIT_DEFERRED_PROOFS)
                 }
                 SyscallCode::VERIFY_ZKM_PROOF => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::VERIFY_ZKM_PROOF)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::VERIFY_ZKM_PROOF)
                 }
-                SyscallCode::HINT_LEN => assert_eq!(code as u32, zkm2_zkvm::syscalls::HINT_LEN),
-                SyscallCode::HINT_READ => assert_eq!(code as u32, zkm2_zkvm::syscalls::HINT_READ),
+                SyscallCode::HINT_LEN => assert_eq!(code as u32, zkm_zkvm::syscalls::HINT_LEN),
+                SyscallCode::HINT_READ => assert_eq!(code as u32, zkm_zkvm::syscalls::HINT_READ),
                 SyscallCode::BLS12381_DECOMPRESS => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_DECOMPRESS)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_DECOMPRESS)
                 }
                 SyscallCode::BLS12381_FP_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_FP_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_FP_ADD)
                 }
                 SyscallCode::BLS12381_FP_SUB => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_FP_SUB)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_FP_SUB)
                 }
                 SyscallCode::BLS12381_FP_MUL => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_FP_MUL)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_FP_MUL)
                 }
                 SyscallCode::BLS12381_FP2_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_FP2_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_FP2_ADD)
                 }
                 SyscallCode::BLS12381_FP2_SUB => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_FP2_SUB)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_FP2_SUB)
                 }
                 SyscallCode::BLS12381_FP2_MUL => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BLS12381_FP2_MUL)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BLS12381_FP2_MUL)
                 }
                 SyscallCode::BN254_FP_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_FP_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_FP_ADD)
                 }
                 SyscallCode::BN254_FP_SUB => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_FP_SUB)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_FP_SUB)
                 }
                 SyscallCode::BN254_FP_MUL => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_FP_MUL)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_FP_MUL)
                 }
                 SyscallCode::BN254_FP2_ADD => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_FP2_ADD)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_FP2_ADD)
                 }
                 SyscallCode::BN254_FP2_SUB => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_FP2_SUB)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_FP2_SUB)
                 }
                 SyscallCode::BN254_FP2_MUL => {
-                    assert_eq!(code as u32, zkm2_zkvm::syscalls::BN254_FP2_MUL)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::BN254_FP2_MUL)
                 }
             }
         }

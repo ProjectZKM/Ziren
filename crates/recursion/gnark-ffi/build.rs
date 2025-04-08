@@ -14,7 +14,7 @@ fn main() {
             // Define the output directory
             let out_dir = env::var("OUT_DIR").unwrap();
             let dest_path = PathBuf::from(&out_dir);
-            let lib_name = "zkm2gnark";
+            let lib_name = "zkmgnark";
             let dest = dest_path.join(format!("lib{}.a", lib_name));
 
             println!("Building Go library at {}", dest.display());

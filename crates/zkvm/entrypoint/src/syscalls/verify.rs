@@ -7,7 +7,7 @@ cfg_if::cfg_if! {
         use crate::zkvm::DEFERRED_PROOFS_DIGEST;
         use p3_koala_bear::KoalaBear;
         use p3_field::FieldAlgebra;
-        use zkm2_primitives::hash_deferred_proof;
+        use zkm_primitives::hash_deferred_proof;
     }
 }
 

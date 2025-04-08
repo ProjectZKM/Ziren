@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-zkm2-zkvm = { path = "../../../crates/zkvm/entrypoint" }
+zkm-zkvm = { path = "../../../crates/zkvm/entrypoint" }
 hex-literal = "0.4.1"
 ssz_rs = { version = "0.9.0", features = ["serde"] }
 hex = "0.4.3"

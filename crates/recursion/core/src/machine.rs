@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign};
 
 use hashbrown::HashMap;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
-use zkm2_stark::{
+use zkm_stark::{
     air::{LookupScope, MachineAir}, shape::OrderedShape,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
 };
@@ -28,8 +28,8 @@ use crate::{
     ExpReverseBitsInstr, Instruction, RecursionProgram, D,
 };
 
-#[derive(zkm2_derive::MachineAir)]
-#[zkm2_core_path = "zkm2_core_machine"]
+#[derive(zkm_derive::MachineAir)]
+#[zkm_core_path = "zkm_core_machine"]
 #[execution_record_path = "crate::ExecutionRecord<F>"]
 #[program_path = "crate::RecursionProgram<F>"]
 #[builder_path = "crate::builder::ZKMRecursionAirBuilder<F = F>"]
@@ -272,8 +272,8 @@ pub mod tests {
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
-    use zkm2_core_machine::utils::run_test_machine;
-    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_core_machine::utils::run_test_machine;
+    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     // TODO expand glob import
     use crate::{runtime::instruction as instr, *};

@@ -5,6 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-zkm2-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
-zkm2-lib = { path = "../../../../crates/zkvm/lib" }
-zkm2-derive = { path = "../../../../crates/derive" }
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint" }
+zkm-lib = { path = "../../../../crates/zkvm/lib" }
+zkm-derive = { path = "../../../../crates/derive" }

@@ -193,7 +193,7 @@ name = "sha2-rust"
 version = "0.1.0"
 dependencies = [
  "sha2",
- "zkm2-zkvm",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -253,7 +253,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-lib"
+name = "zkm-lib"
 version = "0.0.1"
 dependencies = [
  "bincode",
@@ -263,7 +263,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-zkvm"
+name = "zkm-zkvm"
 version = "0.0.1"
 dependencies = [
  "bincode",
@@ -274,5 +274,5 @@ dependencies = [
  "rand",
  "serde",
  "sha2",
- "zkm2-lib",
+ "zkm-lib",
 ]

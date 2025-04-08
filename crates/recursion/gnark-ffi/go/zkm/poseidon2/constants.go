@@ -3,7 +3,7 @@ package poseidon2
 
 import (
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
 )
 
 // Poseidon2 round constants for a state consisting of three BN254 field elements.

@@ -10,7 +10,7 @@ use typenum::{Unsigned, U2, U4};
 
 use generic_array::{sequence::GenericSequence, ArrayLength, GenericArray};
 use num::BigUint;
-use zkm2_stark::air::Polynomial;
+use zkm_stark::air::Polynomial;
 
 use p3_field::Field;
 

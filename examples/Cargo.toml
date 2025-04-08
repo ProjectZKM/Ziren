@@ -39,23 +39,23 @@ version = "1.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-zkm2-build = { path = "../crates/build" }
-zkm2-derive = { path = "../crates/derive" }
-zkm2-core-executor = { path = "../crates/core/executor" }
-zkm2-core-machine = { path = "../crates/core/machine" }
-zkm2-cli = { path = "../crates/cli", default-features = false }
-zkm2-eval = { path = "../crates/eval", default-features = false }
-zkm2-helper = { path = "../crates/helper", default-features = false }
-zkm2-primitives = { path = "../crates/primitives" }
-zkm2-prover = { path = "../crates/prover" }
-zkm2-recursion-compiler = { path = "../crates/recursion/compiler" }
-zkm2-recursion-core = { path = "../crates/recursion/core", default-features = false }
-zkm2-recursion-derive = { path = "../crates/recursion/derive", default-features = false }
-zkm2-recursion-gnark-ffi = { path = "../crates/recursion/gnark-ffi", default-features = false }
-zkm2-recursion-circuit = { path = "../crates/recursion/circuit", default-features = false }
-zkm2-sdk = { path = "../crates/sdk" }
-zkm2-lib = { path = "../crates/zkvm/lib", default-features = false }
-zkm2-zkvm = { path = "../crates/zkvm/entrypoint", default-features = false }
+zkm-build = { path = "../crates/build" }
+zkm-derive = { path = "../crates/derive" }
+zkm-core-executor = { path = "../crates/core/executor" }
+zkm-core-machine = { path = "../crates/core/machine" }
+zkm-cli = { path = "../crates/cli", default-features = false }
+zkm-eval = { path = "../crates/eval", default-features = false }
+zkm-helper = { path = "../crates/helper", default-features = false }
+zkm-primitives = { path = "../crates/primitives" }
+zkm-prover = { path = "../crates/prover" }
+zkm-recursion-compiler = { path = "../crates/recursion/compiler" }
+zkm-recursion-core = { path = "../crates/recursion/core", default-features = false }
+zkm-recursion-derive = { path = "../crates/recursion/derive", default-features = false }
+zkm-recursion-gnark-ffi = { path = "../crates/recursion/gnark-ffi", default-features = false }
+zkm-recursion-circuit = { path = "../crates/recursion/circuit", default-features = false }
+zkm-sdk = { path = "../crates/sdk" }
+zkm-lib = { path = "../crates/zkvm/lib", default-features = false }
+zkm-zkvm = { path = "../crates/zkvm/entrypoint", default-features = false }
 
 # misc
 serde = "1.0.204"

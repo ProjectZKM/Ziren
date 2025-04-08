@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use zkm2_curves::params::FieldParameters;
-use zkm2_zkvm::lib::secp256k1::Secp256k1Point;
-zkm2_zkvm::entrypoint!(main);
+use zkm_curves::params::FieldParameters;
+use zkm_zkvm::lib::secp256k1::Secp256k1Point;
+zkm_zkvm::entrypoint!(main);
 
 const A: [u8; 64] = [
     152, 23, 248, 22, 91, 129, 242, 89, 217, 40, 206, 45, 219, 252, 155, 2, 7, 11, 135, 206, 149,
@@ -33,6 +33,6 @@ const C: [u8; 64] = [
 pub fn main() {
     common_test_utils::weierstrass_add::test_weierstrass_add::<
         Secp256k1Point,
-        { zkm2_lib::secp256k1::N },
-    >(&A, &B, &C, zkm2_curves::weierstrass::secp256k1::Secp256k1BaseField::MODULUS);
+        { zkm_lib::secp256k1::N },
+    >(&A, &B, &C, zkm_curves::weierstrass::secp256k1::Secp256k1BaseField::MODULUS);
 }

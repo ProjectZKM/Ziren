@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
 
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 use core::str::FromStr;
 
-use zkm2_lib::{
+use zkm_lib::{
     syscall_bls12381_fp_addmod, syscall_bls12381_fp_mulmod, syscall_bls12381_fp_submod,
 };
 

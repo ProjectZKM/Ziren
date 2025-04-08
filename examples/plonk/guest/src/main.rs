@@ -1,17 +1,17 @@
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-use zkm2_verifier::PlonkVerifier;
+use zkm_verifier::PlonkVerifier;
 
 fn main() {
     // Read the proof, public values, and vkey hash from the input stream.
-    let proof = zkm2_zkvm::io::read_vec();
-    let zkm2_public_values = zkm2_zkvm::io::read_vec();
-    let zkm2_vkey_hash: String = zkm2_zkvm::io::read();
+    let proof = zkm_zkvm::io::read_vec();
+    let zkm_public_values = zkm_zkvm::io::read_vec();
+    let zkm_vkey_hash: String = zkm_zkvm::io::read();
 
     // Verify the groth16 proof.
-    let plonk_vk = *zkm2_verifier::PLONK_VK_BYTES;
-    let result = PlonkVerifier::verify(&proof, &zkm2_public_values, &zkm2_vkey_hash, plonk_vk);
+    let plonk_vk = *zkm_verifier::PLONK_VK_BYTES;
+    let result = PlonkVerifier::verify(&proof, &zkm_public_values, &zkm_vkey_hash, plonk_vk);
 
     match result {
         Ok(()) => {

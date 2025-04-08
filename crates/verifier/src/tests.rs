@@ -1,9 +1,9 @@
 use std::fs::File;
 use std::io::Read;
 use test_artifacts::HELLO_WORLD_ELF;
-use zkm2_prover::build::groth16_bn254_artifacts_dev_dir;
-use zkm2_sdk::install::try_install_circuit_artifacts;
-use zkm2_sdk::{HashableKey, ProverClient, ZKMStdin};
+use zkm_prover::build::groth16_bn254_artifacts_dev_dir;
+use zkm_sdk::install::try_install_circuit_artifacts;
+use zkm_sdk::{HashableKey, ProverClient, ZKMStdin};
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
@@ -13,11 +13,11 @@ fn test_verify_groth16() {
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
     // Generate the Groth16 proof.
-    let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
+    let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
     // Extract the proof and public inputs.
-    let proof = zkm2_proof_with_public_values.bytes();
-    let public_inputs = zkm2_proof_with_public_values.public_values.to_vec();
+    let proof = zkm_proof_with_public_values.bytes();
+    let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
@@ -28,7 +28,7 @@ fn test_verify_groth16() {
     #[cfg(feature = "ark")]
     {
         let valid = crate::Groth16Verifier::ark_verify(
-            &zkm2_proof_with_public_values,
+            &zkm_proof_with_public_values,
             vkey_hash,
             &crate::GROTH16_VK_BYTES,
         )
@@ -44,11 +44,11 @@ fn test_verify_plonk() {
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
     // Generate the Plonk proof.
-    let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).plonk().run().unwrap();
+    let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).plonk().run().unwrap();
 
     // Extract the proof and public inputs.
-    let proof = zkm2_proof_with_public_values.bytes();
-    let public_inputs = zkm2_proof_with_public_values.public_values.to_vec();
+    let proof = zkm_proof_with_public_values.bytes();
+    let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
@@ -67,14 +67,14 @@ fn test_e2e_verify_groth16() {
 
     // Generate the Groth16 proof.
     std::env::set_var("ZKM_DEV", "true");
-    let zkm2_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
+    let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
-    client.verify(&zkm2_proof_with_public_values, &vk).unwrap();
-    // zkm2_proof_with_public_values.save("test_binaries/hello-world-groth16.bin").expect("saving proof failed");
+    client.verify(&zkm_proof_with_public_values, &vk).unwrap();
+    // zkm_proof_with_public_values.save("test_binaries/hello-world-groth16.bin").expect("saving proof failed");
 
     // Extract the proof and public inputs.
-    let proof = zkm2_proof_with_public_values.bytes();
-    let public_inputs = zkm2_proof_with_public_values.public_values.to_vec();
+    let proof = zkm_proof_with_public_values.bytes();
+    let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
 
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
@@ -91,7 +91,7 @@ fn test_e2e_verify_groth16() {
     #[cfg(feature = "ark")]
     {
         let valid = crate::Groth16Verifier::ark_verify(
-            &zkm2_proof_with_public_values,
+            &zkm_proof_with_public_values,
             &vkey_hash,
             &groth16_vk_bytes,
         )

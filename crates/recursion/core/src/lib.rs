@@ -1,6 +1,6 @@
 use p3_field::PrimeField64;
 use serde::{Deserialize, Serialize};
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::air::{Block, RecursionPublicValues};
 
@@ -14,8 +14,8 @@ pub mod stark;
 
 pub use runtime::*;
 
-// Re-export the stark stuff from `zkm2_recursion_core` for now, until we will migrate it here.
-// pub use zkm2_recursion_core::stark;
+// Re-export the stark stuff from `zkm_recursion_core` for now, until we will migrate it here.
+// pub use zkm_recursion_core::stark;
 
 use crate::chips::poseidon2_skinny::WIDTH;
 

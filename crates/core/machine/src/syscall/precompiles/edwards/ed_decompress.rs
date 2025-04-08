@@ -11,20 +11,20 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use typenum::U32;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, EdDecompressEvent, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_curves::{
+use zkm_curves::{
     edwards::{
         ed25519::{ed25519_sqrt, Ed25519BaseField},
         EdwardsParameters, WordsFieldElement,
     },
     params::{limbs_from_vec, FieldParameters, Limbs},
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -276,8 +276,8 @@ where
 #[cfg(test)]
 pub mod tests {
     use test_artifacts::ED_DECOMPRESS_ELF;
-    use zkm2_core_executor::Program;
-    use zkm2_stark::CpuProver;
+    use zkm_core_executor::Program;
+    use zkm_stark::CpuProver;
 
     use crate::utils;
 

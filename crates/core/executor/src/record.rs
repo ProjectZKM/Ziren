@@ -2,7 +2,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
 use p3_field::{FieldAlgebra, PrimeField};
-use zkm2_stark::{
+use zkm_stark::{
     air::{MachineAir, PublicValues},
     shape::Shape,
     MachineRecord, SplitOpts, ZKMCoreOpts,

@@ -1,5 +1,5 @@
 use std::env;
-use zkm2_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_elf!("keccak");
@@ -36,7 +36,7 @@ fn prove_keccak_rust() {
     // Read and verify the output.
     //
     // Note that this output is read from values committed to in the program using
-    // `zkm2_zkvm::io::commit`.
+    // `zkm_zkvm::io::commit`.
     let public_input = proof.public_values.read::<Vec<u8>>();
     let input = proof.public_values.read::<Vec<u8>>();
     log::info!("public input: {} in hex", hex::encode(&public_input));

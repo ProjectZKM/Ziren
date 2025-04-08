@@ -1,4 +1,4 @@
-package zkm2
+package zkm
 
 import (
 	"bufio"

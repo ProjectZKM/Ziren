@@ -1,6 +1,6 @@
 # Continuation
 
-ZKM2 implements an advanced continuation framework within its zkVM architecture, combining recursive proof composition with ​multi-segment execution capabilities. This design enables unbounded computational scalability with cryptographically verifiable state transitions while minimizing resource overhead. It has the following advantage:
+zkMIPS implements an advanced continuation framework within its zkVM architecture, combining recursive proof composition with ​multi-segment execution capabilities. This design enables unbounded computational scalability with cryptographically verifiable state transitions while minimizing resource overhead. It has the following advantage:
 - Scalability
 ​
   Segmentation avoids single proof size explosion for long computations.

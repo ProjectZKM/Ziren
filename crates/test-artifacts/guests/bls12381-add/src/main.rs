@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use zkm2_curves::params::FieldParameters;
-use zkm2_lib::bls12381::Bls12381Point;
-zkm2_zkvm::entrypoint!(main);
+use zkm_curves::params::FieldParameters;
+use zkm_lib::bls12381::Bls12381Point;
+zkm_zkvm::entrypoint!(main);
 
 // generator.
 // 3685416753713387016781088315183077757961620795782546409894578378688607592378376318836054947676345821548104185464507
@@ -41,6 +41,6 @@ const C: [u8; 96] = [
 pub fn main() {
     common_test_utils::weierstrass_add::test_weierstrass_add::<
         Bls12381Point,
-        { zkm2_lib::bls12381::N },
-    >(&A, &B, &C, zkm2_curves::weierstrass::bls12_381::Bls12381BaseField::MODULUS);
+        { zkm_lib::bls12381::N },
+    >(&A, &B, &C, zkm_curves::weierstrass::bls12_381::Bls12381BaseField::MODULUS);
 }

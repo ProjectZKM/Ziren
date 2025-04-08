@@ -5,12 +5,12 @@ use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, PrecompileEvent, ShaCompressEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, Word};
 
 use super::{
     columns::{ShaCompressCols, NUM_SHA_COMPRESS_COLS},

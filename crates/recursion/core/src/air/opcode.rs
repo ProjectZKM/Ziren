@@ -1,6 +1,6 @@
 use std::borrow::BorrowMut;
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 pub(crate) const OPCODE_COUNT: usize = core::mem::size_of::<OpcodeSelectorCols<u8>>();
 

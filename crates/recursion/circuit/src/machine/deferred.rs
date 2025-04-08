@@ -11,17 +11,17 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use zkm2_primitives::consts::WORD_SIZE;
-use zkm2_recursion_compiler::ir::{Builder, Felt};
-use zkm2_stark::septic_curve::SepticCurve;
-use zkm2_stark::septic_digest::SepticDigest;
-use zkm2_stark::{
+use zkm_primitives::consts::WORD_SIZE;
+use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_stark::septic_curve::SepticCurve;
+use zkm_stark::septic_digest::SepticDigest;
+use zkm_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
     Dom, ShardProof, StarkMachine, StarkVerifyingKey, Word,
 };
 
-use zkm2_recursion_core::{
+use zkm_recursion_core::{
     air::{RecursionPublicValues, PV_DIGEST_NUM_WORDS, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
 };
@@ -61,7 +61,7 @@ pub struct ZKMDeferredWitnessValues<SC: KoalaBearFriConfig + FieldHasher<KoalaBe
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, ShardProof<SC>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; POSEIDON_NUM_WORDS],
-    pub zkm2_vk_digest: [SC::Val; DIGEST_SIZE],
+    pub zkm_vk_digest: [SC::Val; DIGEST_SIZE],
     pub committed_value_digest: [Word<SC::Val>; PV_DIGEST_NUM_WORDS],
     pub deferred_proofs_digest: [SC::Val; POSEIDON_NUM_WORDS],
     pub end_pc: SC::Val,
@@ -79,7 +79,7 @@ pub struct ZKMDeferredWitnessVariable<
     pub vks_and_proofs: Vec<(VerifyingKeyVariable<C, SC>, ShardProofVariable<C, SC>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
-    pub zkm2_vk_digest: [Felt<C::F>; DIGEST_SIZE],
+    pub zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE],
     pub committed_value_digest: [Word<Felt<C::F>>; PV_DIGEST_NUM_WORDS],
     pub deferred_proofs_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub end_pc: Felt<C::F>,
@@ -120,7 +120,7 @@ where
             vks_and_proofs,
             vk_merkle_data,
             start_reconstruct_deferred_digest,
-            zkm2_vk_digest,
+            zkm_vk_digest,
             committed_value_digest,
             deferred_proofs_digest,
             end_pc,
@@ -183,13 +183,13 @@ where
             builder.assert_felt_eq(current_public_values.is_complete, C::F::ONE);
 
             // Update deferred proof digest
-            // poseidon2( current_digest[..8] || pv.zkm2_vk_digest[..8] ||
+            // poseidon2( current_digest[..8] || pv.zkm_vk_digest[..8] ||
             // pv.committed_value_digest[..32] )
             let mut inputs: [Felt<C::F>; 48] = array::from_fn(|_| builder.uninit());
             inputs[0..DIGEST_SIZE].copy_from_slice(&reconstruct_deferred_digest);
 
             inputs[DIGEST_SIZE..DIGEST_SIZE + DIGEST_SIZE]
-                .copy_from_slice(&current_public_values.zkm2_vk_digest);
+                .copy_from_slice(&current_public_values.zkm_vk_digest);
 
             for j in 0..PV_DIGEST_NUM_WORDS {
                 for k in 0..WORD_SIZE {
@@ -215,8 +215,8 @@ where
         deferred_public_values.previous_finalize_addr_bits = finalize_addr_bits;
         deferred_public_values.last_finalize_addr_bits = finalize_addr_bits;
 
-        // Set the zkm2_vk_digest to be the hitned value.
-        deferred_public_values.zkm2_vk_digest = zkm2_vk_digest;
+        // Set the zkm_vk_digest to be the hitned value.
+        deferred_public_values.zkm_vk_digest = zkm_vk_digest;
 
         // Set the committed value digest to be the hitned value.
         deferred_public_values.committed_value_digest = committed_value_digest;
@@ -261,7 +261,7 @@ impl ZKMDeferredWitnessValues<KoalaBearPoseidon2> {
             vks_and_proofs,
             vk_merkle_data,
             is_complete: true,
-            zkm2_vk_digest: [KoalaBear::ZERO; DIGEST_SIZE],
+            zkm_vk_digest: [KoalaBear::ZERO; DIGEST_SIZE],
             start_reconstruct_deferred_digest: [KoalaBear::ZERO; POSEIDON_NUM_WORDS],
             committed_value_digest: [Word::default(); PV_DIGEST_NUM_WORDS],
             deferred_proofs_digest: [KoalaBear::ZERO; POSEIDON_NUM_WORDS],

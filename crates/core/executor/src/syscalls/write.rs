@@ -1,4 +1,4 @@
-use zkm2_primitives::consts::num_to_comma_separated;
+use zkm_primitives::consts::num_to_comma_separated;
 
 use crate::{Executor, Register};
 

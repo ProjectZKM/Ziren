@@ -1,4 +1,4 @@
-use zkm2_primitives::consts::WORD_SIZE;
+use zkm_primitives::consts::WORD_SIZE;
 
 use super::BYTE_SIZE;
 

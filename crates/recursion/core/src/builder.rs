@@ -2,7 +2,7 @@ use std::iter::once;
 
 use p3_air::AirBuilderWithPublicValues;
 use p3_field::FieldAlgebra;
-use zkm2_stark::{
+use zkm_stark::{
     air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},
     LookupKind,
 };

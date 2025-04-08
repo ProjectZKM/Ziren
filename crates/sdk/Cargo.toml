@@ -1,6 +1,6 @@
 [package]
-name = "zkm2-sdk"
-description = "ZKM2 is a performant, 100% open-source, contributor-friendly zkVM."
+name = "zkm-sdk"
+description = "zkMIPS is a performant, 100% open-source, contributor-friendly zkVM."
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }
@@ -21,10 +21,10 @@ reqwest = { version = "0.12.4", default-features = false, features = [
   "stream",
 ], optional = true }
 anyhow = "1.0.83"
-zkm2-prover = { workspace = true }
-zkm2-core-machine = { workspace = true }
-# zkm2-cuda = { workspace = true, optional = true }
-zkm2-build = { workspace = true }
+zkm-prover = { workspace = true }
+zkm-core-machine = { workspace = true }
+# zkm-cuda = { workspace = true, optional = true }
+zkm-build = { workspace = true }
 futures = "0.3.30"
 bincode = "1.3.3"
 tokio = { version = "1.39.2", features = ["full"], optional = true }
@@ -42,9 +42,9 @@ strum = "0.26.3"
 strum_macros = "0.26.4"
 thiserror = "1.0.63"
 hashbrown = { workspace = true }
-zkm2-core-executor = { workspace = true }
-zkm2-stark = { workspace = true }
-zkm2-primitives = { workspace = true }
+zkm-core-executor = { workspace = true }
+zkm-stark = { workspace = true }
+zkm-primitives = { workspace = true }
 itertools = { workspace = true }
 tonic = { version = "0.12", features = ["tls", "tls-roots"], optional = true }
 alloy-sol-types = { version = "0.8", optional = true }
@@ -58,7 +58,7 @@ test-artifacts = { workspace = true }
 
 [features]
 default = ["network"]
-native-gnark = ["zkm2-prover/native-gnark"]
+native-gnark = ["zkm-prover/native-gnark"]
 # TODO: Once alloy has a 1.* release, we can likely remove this feature flag, as there will be less 
 # dependency resolution issues.
 network = [
@@ -85,7 +85,7 @@ network-v2 = [
   "dep:tonic",
   "dep:backoff",
 ]
-# cuda = ["zkm2-cuda"]
+# cuda = ["zkm-cuda"]
 cuda = []
 
 [build-dependencies]

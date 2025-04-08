@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display, hash::Hash, iter::once};
 
 use thiserror::Error;
-use zkm2_core_executor::events::{format_table_line, sorted_table_lines};
+use zkm_core_executor::events::{format_table_line, sorted_table_lines};
 
 /// A builder to create a [`Span`].
 /// `S` is the type of span names and `T` is the type of item names.

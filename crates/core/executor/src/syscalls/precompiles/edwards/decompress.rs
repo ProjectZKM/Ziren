@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-use zkm2_curves::{
+use zkm_curves::{
     curve25519_dalek::CompressedEdwardsY,
     edwards::{ed25519::decompress, EdwardsParameters, WORDS_FIELD_ELEMENT},
     COMPRESSED_POINT_BYTES,
 };
-use zkm2_primitives::consts::{bytes_to_words_le, words_to_bytes_le};
+use zkm_primitives::consts::{bytes_to_words_le, words_to_bytes_le};
 
 use crate::{
     events::{EdDecompressEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent},

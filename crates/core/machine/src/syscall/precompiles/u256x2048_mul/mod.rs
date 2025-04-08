@@ -9,7 +9,7 @@ mod tests {
     use p3_matrix::dense::RowMajorMatrix;
     use rand::Rng;
     use test_artifacts::U256XU2048_MUL_ELF;
-    use zkm2_core_executor::{
+    use zkm_core_executor::{
         events::{
             MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,
             U256xU2048MulEvent,
@@ -17,8 +17,8 @@ mod tests {
         syscalls::SyscallCode,
         ExecutionRecord, Program,
     };
-    use zkm2_primitives::consts::bytes_to_words_le;
-    use zkm2_stark::{
+    use zkm_primitives::consts::bytes_to_words_le;
+    use zkm_stark::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkGenericConfig,
     };
 
@@ -165,8 +165,8 @@ mod tests {
         execution_record
     }
 
-    use zkm2_core_executor::Executor;
-    use zkm2_stark::ZKMCoreOpts;
+    use zkm_core_executor::Executor;
+    use zkm_stark::ZKMCoreOpts;
     #[test]
     pub fn test_uint256_mul_program_execute() {
         utils::setup_logger();

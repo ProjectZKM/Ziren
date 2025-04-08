@@ -3,14 +3,14 @@ use std::fmt::Debug;
 use num::BigUint;
 use p3_air::AirBuilder;
 use p3_field::PrimeField32;
-use zkm2_curves::params::{limbs_from_vec, FieldParameters, Limbs};
-use zkm2_derive::AlignedBorrow;
+use zkm_curves::params::{limbs_from_vec, FieldParameters, Limbs};
+use zkm_derive::AlignedBorrow;
 
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, FieldOperation},
     ByteOpcode,
 };
-use zkm2_stark::air::ZKMAirBuilder;
+use zkm_stark::air::ZKMAirBuilder;
 
 use super::{field_op::FieldOpCols, range::FieldLtCols};
 use crate::air::WordAirBuilder;
@@ -145,9 +145,9 @@ mod tests {
     use num::{BigUint, One};
     use p3_air::BaseAir;
     use p3_field::{Field, PrimeField32};
-    use zkm2_core_executor::{ExecutionRecord, Program};
-    use zkm2_curves::params::{FieldParameters, Limbs};
-    use zkm2_stark::air::{MachineAir, ZKMAirBuilder};
+    use zkm_core_executor::{ExecutionRecord, Program};
+    use zkm_curves::params::{FieldParameters, Limbs};
+    use zkm_stark::air::{MachineAir, ZKMAirBuilder};
 
     use crate::utils::{pad_to_power_of_two, uni_stark_prove as prove, uni_stark_verify as verify};
     use core::{
@@ -160,10 +160,10 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
-    use zkm2_core_executor::events::ByteRecord;
-    use zkm2_curves::edwards::ed25519::{ed25519_sqrt, Ed25519BaseField};
-    use zkm2_derive::AlignedBorrow;
-    use zkm2_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_core_executor::events::ByteRecord;
+    use zkm_curves::edwards::ed25519::{ed25519_sqrt, Ed25519BaseField};
+    use zkm_derive::AlignedBorrow;
+    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::FieldSqrtCols;
 

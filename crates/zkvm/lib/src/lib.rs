@@ -1,7 +1,7 @@
-//! Syscalls for the zkm2 zkVM.
+//! Syscalls for the zkMIPS zkVM.
 //!
 //! Documentation for these syscalls can be found in the zkVM entrypoint
-//! `zkm2_zkvm::syscalls` module.
+//! `zkm_zkvm::syscalls` module.
 
 pub mod bls12381;
 pub mod bn254;
@@ -87,7 +87,7 @@ extern "C" {
     /// Exits unconstrained mode.
     pub fn syscall_exit_unconstrained();
 
-    /// Defers the verification of a valid ZKM2 zkVM proof.
+    /// Defers the verification of a valid zkMIPS zkVM proof.
     pub fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]);
 
     /// Returns the length of the next element in the hint stream.

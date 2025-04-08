@@ -1,5 +1,5 @@
 use p3_field::PrimeField32;
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::air::Block;
 

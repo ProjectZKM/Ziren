@@ -1,6 +1,6 @@
 # Installation
 
-ZKM2 is now available for Linux and macOS systems.
+zkMIPS is now available for Linux and macOS systems.
 
 ## Requirements
 
@@ -9,7 +9,7 @@ ZKM2 is now available for Linux and macOS systems.
 
 ## Option 1: Quick Install
 
-To install the ZKM2 toolchain, use the `zkmup` installer. Simply open your terminal, run the command below, and follow the on-screen instructions:
+To install the zkMIPS toolchain, use the `zkmup` installer. Simply open your terminal, run the command below, and follow the on-screen instructions:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
@@ -17,7 +17,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/to
 
 It will:
 - Download the `zkmup` installer.
-- Automatically utilize `zkmup` to install the latest ZKM2 Rust toolchain which has support for the `mipsel-zkm-zkvm-elf` compilation target.
+- Automatically utilize `zkmup` to install the latest zkMIPS Rust toolchain which has support for the `mipsel-zkm-zkvm-elf` compilation target.
 
 List all available toolchain versions:
 

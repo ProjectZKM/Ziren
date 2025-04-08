@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use hex_literal::hex;
 use sha2::{Digest, Sha256};

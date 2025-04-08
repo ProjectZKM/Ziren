@@ -7,7 +7,7 @@
 // inside the zkVM.
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     // Read an input to the program.
@@ -24,6 +24,6 @@ pub fn main() {
         a = b;
         b = c;
     }
-    zkm2_zkvm::io::commit(&a);
-    zkm2_zkvm::io::commit(&b);
+    zkm_zkvm::io::commit(&a);
+    zkm_zkvm::io::commit(&b);
 }

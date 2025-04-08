@@ -10,10 +10,10 @@ use p3_field::Field;
 use p3_field::FieldAlgebra;
 use p3_field::FieldExtensionAlgebra;
 use p3_field::PrimeField32;
-use zkm2_core_executor::ByteOpcode;
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::ZKMAirBuilder;
-use zkm2_stark::{
+use zkm_core_executor::ByteOpcode;
+use zkm_derive::AlignedBorrow;
+use zkm_stark::ZKMAirBuilder;
+use zkm_stark::{
     septic_curve::{SepticCurve, CURVE_WITNESS_DUMMY_POINT_X, CURVE_WITNESS_DUMMY_POINT_Y},
     septic_extension::{SepticBlock, SepticExtension},
 };

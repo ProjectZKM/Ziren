@@ -2,14 +2,14 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
-use zkm2_core_machine::utils::setup_logger;
-use zkm2_prover::{
+use zkm_core_machine::utils::setup_logger;
+use zkm_prover::{
     components::DefaultProverComponents,
     shapes::{check_shapes, ZKMProofShape},
     ZKMProver, ShrinkAir, REDUCE_BATCH_SIZE,
 };
-use zkm2_recursion_core::shape::RecursionShapeConfig;
-use zkm2_stark::{shape::OrderedShape, MachineProver};
+use zkm_recursion_core::shape::RecursionShapeConfig;
+use zkm_stark::{shape::OrderedShape, MachineProver};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -117,7 +117,7 @@ fn main() {
         prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&answer));
         catch_unwind(AssertUnwindSafe(|| {
             prover.shrink_prover.setup(&prover.program_from_shape(
-                zkm2_prover::shapes::ZKMCompressProgramShape::from_proof_shape(
+                zkm_prover::shapes::ZKMCompressProgramShape::from_proof_shape(
                     ZKMProofShape::Shrink(OrderedShape {
                         inner: answer.clone().into_iter().collect::<Vec<_>>(),
                     }),
@@ -140,7 +140,7 @@ fn main() {
                 prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&answer));
                 done = catch_unwind(AssertUnwindSafe(|| {
                     prover.shrink_prover.setup(&prover.program_from_shape(
-                        zkm2_prover::shapes::ZKMCompressProgramShape::from_proof_shape(
+                        zkm_prover::shapes::ZKMCompressProgramShape::from_proof_shape(
                             ZKMProofShape::Shrink(OrderedShape {
                                 inner: answer.clone().into_iter().collect::<Vec<_>>(),
                             }),

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use zkm2_curves::{edwards::WORDS_FIELD_ELEMENT, COMPRESSED_POINT_BYTES, NUM_BYTES_FIELD_ELEMENT};
+use zkm_curves::{edwards::WORDS_FIELD_ELEMENT, COMPRESSED_POINT_BYTES, NUM_BYTES_FIELD_ELEMENT};
 
 use crate::events::{
     memory::{MemoryReadRecord, MemoryWriteRecord},

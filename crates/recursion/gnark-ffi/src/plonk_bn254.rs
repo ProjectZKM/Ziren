@@ -12,8 +12,8 @@ use crate::{
 
 use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
-use zkm2_core_machine::ZKM_CIRCUIT_VERSION;
-use zkm2_recursion_compiler::{
+use zkm_core_machine::ZKM_CIRCUIT_VERSION;
+use zkm_recursion_compiler::{
     constraints::Constraint,
     ir::{Config, Witness},
 };
@@ -73,14 +73,14 @@ impl PlonkBn254Prover {
         build_plonk_bn254(build_dir.to_str().unwrap());
 
         // Write the corresponding asset files to the build dir.
-        let zkm2_verifier_path = build_dir.join("ZKMVerifierPlonk.sol");
+        let zkm_verifier_path = build_dir.join("ZKMVerifierPlonk.sol");
         let vkey_hash = Self::get_vkey_hash(&build_dir);
-        let zkm2_verifier_str = include_str!("../assets/ZKMVerifierPlonk.txt")
+        let zkm_verifier_str = include_str!("../assets/ZKMVerifierPlonk.txt")
             .replace("{ZKM_CIRCUIT_VERSION}", ZKM_CIRCUIT_VERSION)
             .replace("{VERIFIER_HASH}", format!("0x{}", hex::encode(vkey_hash)).as_str())
             .replace("{PROOF_SYSTEM}", "Plonk");
-        let mut zkm2_verifier_file = File::create(zkm2_verifier_path).unwrap();
-        zkm2_verifier_file.write_all(zkm2_verifier_str.as_bytes()).unwrap();
+        let mut zkm_verifier_file = File::create(zkm_verifier_path).unwrap();
+        zkm_verifier_file.write_all(zkm_verifier_str.as_bytes()).unwrap();
 
         let plonk_verifier_path = build_dir.join("PlonkVerifier.sol");
         Self::modify_plonk_verifier(&plonk_verifier_path);

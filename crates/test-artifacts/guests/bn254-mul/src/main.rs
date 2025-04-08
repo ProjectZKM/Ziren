@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-use zkm2_lib::bn254::Bn254Point;
-use zkm2_lib::utils::AffinePoint;
+use zkm_lib::bn254::Bn254Point;
+use zkm_lib::utils::AffinePoint;
 
 pub fn main() {
     for _ in 0..4 {

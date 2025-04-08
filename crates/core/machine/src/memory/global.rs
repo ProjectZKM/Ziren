@@ -8,10 +8,10 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
-use zkm2_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
-use zkm2_core_executor::{ExecutionRecord, Program};
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{
+use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
+use zkm_core_executor::{ExecutionRecord, Program};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{
     air::{
         AirLookup, BaseAirBuilder, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
         ZKM_PROOF_NUM_PV_ELTS,
@@ -437,8 +437,8 @@ mod tests {
         utils::setup_logger,
     };
     use p3_koala_bear::KoalaBear;
-    use zkm2_core_executor::{programs::tests::simple_program, Executor};
-    use zkm2_stark::{
+    use zkm_core_executor::{programs::tests::simple_program, Executor};
+    use zkm_stark::{
         debug_lookups_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, StarkMachine,
         ZKMCoreOpts,
     };

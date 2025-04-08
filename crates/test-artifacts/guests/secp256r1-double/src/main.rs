@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
-use zkm2_zkvm::syscalls::syscall_secp256r1_double;
+use zkm_zkvm::syscalls::syscall_secp256r1_double;
 
 pub fn main() {
     // generator.

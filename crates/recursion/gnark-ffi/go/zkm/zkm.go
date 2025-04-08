@@ -1,4 +1,4 @@
-package zkm2
+package zkm
 
 import (
 	"encoding/json"
@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/poseidon2"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/poseidon2"
 )
 
 var srsFile string = "srs.bin"

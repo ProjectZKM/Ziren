@@ -1,5 +1,5 @@
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Sign, RsaPublicKey};
 use sha2::{Digest, Sha256}; // Ensure this is imported for the Digest trait to work
@@ -8,9 +8,9 @@ pub fn main() {
     // Read an input to the program.
     //
     // Behind the scenes, this compiles down to a system call which handles reading inputs
-    let pk_der = zkm2_zkvm::io::read::<Vec<u8>>();
-    let message = zkm2_zkvm::io::read::<Vec<u8>>();
-    let signature = zkm2_zkvm::io::read::<Vec<u8>>();
+    let pk_der = zkm_zkvm::io::read::<Vec<u8>>();
+    let message = zkm_zkvm::io::read::<Vec<u8>>();
+    let signature = zkm_zkvm::io::read::<Vec<u8>>();
 
     let public_key = RsaPublicKey::from_public_key_der(&pk_der).unwrap();
 
@@ -34,5 +34,5 @@ pub fn main() {
     // Write the output of the program.
     //
     // Behind the scenes, this also compiles down to a system call which handles writing
-    zkm2_zkvm::io::commit(&verified);
+    zkm_zkvm::io::commit(&verified);
 }

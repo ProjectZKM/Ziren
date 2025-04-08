@@ -4,15 +4,15 @@ use core::borrow::Borrow;
 use itertools::Itertools;
 use std::borrow::BorrowMut;
 use tracing::instrument;
-use zkm2_core_machine::utils::pad_rows_fixed;
-use zkm2_stark::air::{BinomialExtension, MachineAir};
+use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_stark::air::{BinomialExtension, MachineAir};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use zkm2_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
+use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::{
     air::Block,
@@ -355,8 +355,8 @@ mod tests {
     use p3_field::FieldExtensionAlgebra;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::mem::size_of;
-    use zkm2_core_machine::utils::setup_logger;
-    use zkm2_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm_core_machine::utils::setup_logger;
+    use zkm_stark::{air::MachineAir, StarkGenericConfig};
 
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;

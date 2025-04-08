@@ -33,8 +33,8 @@ impl ShaCompressChip {
 pub mod compress_tests {
 
     use test_artifacts::SHA_COMPRESS_ELF;
-    use zkm2_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
-    use zkm2_stark::CpuProver;
+    use zkm_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
+    use zkm_stark::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

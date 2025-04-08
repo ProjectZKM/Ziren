@@ -2,7 +2,7 @@ use std::{array, sync::Arc};
 
 use hashbrown::HashMap;
 use p3_field::{Field, FieldAlgebra, PrimeField32};
-use zkm2_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
+use zkm_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,

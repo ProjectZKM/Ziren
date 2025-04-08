@@ -32,18 +32,18 @@ pub mod utils;
 pub use cpu::*;
 pub use mips::*;
 
-/// The global version for all components of ZKM2.
+/// The global version for all components of zkMIPS.
 
 ///
-/// This string should be updated whenever any step in verifying an ZKM2 proof changes, including
-/// core, recursion, and plonk-bn254. This string is used to download ZKM2 artifacts and the gnark
+/// This string should be updated whenever any step in verifying an zkMIPS proof changes, including
+/// core, recursion, and plonk-bn254. This string is used to download zkMIPS artifacts and the gnark
 /// docker image.
 pub const ZKM_CIRCUIT_VERSION: &str = "v1.0.0";
 
-// Re-export the `ZKMReduceProof` struct from zkm2_core_machine.
+// Re-export the `ZKMReduceProof` struct from zkm_core_machine.
 //
-// This is done to avoid a circular dependency between zkm2_core_machine and zkm2_core_executor, and
-// enable crates that depend on zkm2_core_machine to import the `ZKMReduceProof` type directly.
+// This is done to avoid a circular dependency between zkm_core_machine and zkm_core_executor, and
+// enable crates that depend on zkm_core_machine to import the `ZKMReduceProof` type directly.
 pub mod reduce {
-    pub use zkm2_core_executor::ZKMReduceProof;
+    pub use zkm_core_executor::ZKMReduceProof;
 }

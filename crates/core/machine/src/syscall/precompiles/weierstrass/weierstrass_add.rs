@@ -12,7 +12,7 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use typenum::Unsigned;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{
         ByteLookupEvent, ByteRecord, EllipticCurveAddEvent, FieldOperation, PrecompileEvent,
         SyscallEvent,
@@ -20,13 +20,13 @@ use zkm2_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_curves::{
+use zkm_curves::{
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::WeierstrassParameters,
     AffinePoint, CurveType, EllipticCurve,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryReadCols, MemoryWriteCols},
@@ -447,8 +447,8 @@ mod tests {
         BLS12381_ADD_ELF, BLS12381_DOUBLE_ELF, BLS12381_MUL_ELF, BN254_ADD_ELF, BN254_MUL_ELF,
         SECP256K1_ADD_ELF, SECP256K1_MUL_ELF, SECP256R1_ADD_ELF,
     };
-    use zkm2_core_executor::Program;
-    use zkm2_stark::CpuProver;
+    use zkm_core_executor::Program;
+    use zkm_stark::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

@@ -1,6 +1,6 @@
 [package]
-name = "zkm2-recursion-core"
-description = "zkMIPS"
+name = "zkm-recursion-core"
+description = "zkMIPS recursion core"
 readme = "../../../README.md"
 version = { workspace = true }
 edition = { workspace = true }
@@ -36,13 +36,13 @@ thiserror = "1.0.60"
 vec_map = "0.8.2"
 p3-monty-31 = { workspace = true }
 
-zkm2-derive = { workspace = true }
-zkm2-stark = { workspace = true }
-zkm2-core-machine = { workspace = true }
-zkm2-primitives = { workspace = true }
+zkm-derive = { workspace = true }
+zkm-stark = { workspace = true }
+zkm-core-machine = { workspace = true }
+zkm-primitives = { workspace = true }
 
 [dev-dependencies]
 rand = "0.8.5"
 
 [features]
-debug = ["zkm2-core-machine/debug"]
+debug = ["zkm-core-machine/debug"]

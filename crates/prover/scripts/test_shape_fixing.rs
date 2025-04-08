@@ -1,11 +1,11 @@
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
 use p3_util::log2_ceil_usize;
-use zkm2_core_executor::{Executor, Program, MipsAirId, ZKMContext};
-use zkm2_core_machine::{
+use zkm_core_executor::{Executor, Program, MipsAirId, ZKMContext};
+use zkm_core_machine::{
     io::ZKMStdin, mips::MipsAir, shape::CoreShapeConfig, utils::setup_logger,
 };
-use zkm2_stark::ZKMCoreOpts;
+use zkm_stark::ZKMCoreOpts;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -40,7 +40,7 @@ fn main() {
             .args([
                 "s3",
                 "cp",
-                &format!("s3://zkm2-testing-suite/{}/program.bin", s3_path),
+                &format!("s3://zkm-testing-suite/{}/program.bin", s3_path),
                 "program.bin",
             ])
             .status()
@@ -54,7 +54,7 @@ fn main() {
             .args([
                 "s3",
                 "cp",
-                &format!("s3://zkm2-testing-suite/{}/stdin.bin", s3_path),
+                &format!("s3://zkm-testing-suite/{}/stdin.bin", s3_path),
                 "stdin.bin",
             ])
             .status()

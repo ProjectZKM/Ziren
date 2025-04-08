@@ -31,9 +31,9 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
 	"github.com/consensys/gnark/test/unsafekzg"
-	zkm2 "github.com/zkMIPS/zkm2-recursion-gnark/zkm2"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/koalabear"
-	"github.com/zkMIPS/zkm2-recursion-gnark/zkm2/poseidon2"
+	zkm "github.com/zkMIPS/zkm-recursion-gnark/zkm"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/zkMIPS/zkm-recursion-gnark/zkm/poseidon2"
 )
 
 func main() {}
@@ -43,7 +43,7 @@ func ProvePlonkBn254(dataDir *C.char, witnessPath *C.char) *C.C_PlonkBn254Proof 
 	dataDirString := C.GoString(dataDir)
 	witnessPathString := C.GoString(witnessPath)
 
-	zkmPlonkBn254Proof := zkm2.ProvePlonk(dataDirString, witnessPathString)
+	zkmPlonkBn254Proof := zkm.ProvePlonk(dataDirString, witnessPathString)
 
 	ms := C.malloc(C.sizeof_C_PlonkBn254Proof)
 	if ms == nil {
@@ -72,7 +72,7 @@ func BuildPlonkBn254(dataDir *C.char) {
 	// Sanity check the required arguments have been provided.
 	dataDirString := C.GoString(dataDir)
 
-	zkm2.BuildPlonk(dataDirString)
+	zkm.BuildPlonk(dataDirString)
 }
 
 //export VerifyPlonkBn254
@@ -82,7 +82,7 @@ func VerifyPlonkBn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, committe
 	vkeyHashString := C.GoString(vkeyHash)
 	committedValuesDigestString := C.GoString(committedValuesDigest)
 
-	err := zkm2.VerifyPlonk(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
+	err := zkm.VerifyPlonk(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -112,7 +112,7 @@ func ProveGroth16Bn254(dataDir *C.char, witnessPath *C.char) *C.C_Groth16Bn254Pr
 	dataDirString := C.GoString(dataDir)
 	witnessPathString := C.GoString(witnessPath)
 
-	zkm2Groth16Bn254Proof := zkm2.ProveGroth16(dataDirString, witnessPathString)
+	zkmGroth16Bn254Proof := zkm.ProveGroth16(dataDirString, witnessPathString)
 
 	ms := C.malloc(C.sizeof_C_Groth16Bn254Proof)
 	if ms == nil {
@@ -120,10 +120,10 @@ func ProveGroth16Bn254(dataDir *C.char, witnessPath *C.char) *C.C_Groth16Bn254Pr
 	}
 
 	structPtr := (*C.C_Groth16Bn254Proof)(ms)
-	structPtr.PublicInputs[0] = C.CString(zkm2Groth16Bn254Proof.PublicInputs[0])
-	structPtr.PublicInputs[1] = C.CString(zkm2Groth16Bn254Proof.PublicInputs[1])
-	structPtr.EncodedProof = C.CString(zkm2Groth16Bn254Proof.EncodedProof)
-	structPtr.RawProof = C.CString(zkm2Groth16Bn254Proof.RawProof)
+	structPtr.PublicInputs[0] = C.CString(zkmGroth16Bn254Proof.PublicInputs[0])
+	structPtr.PublicInputs[1] = C.CString(zkmGroth16Bn254Proof.PublicInputs[1])
+	structPtr.EncodedProof = C.CString(zkmGroth16Bn254Proof.EncodedProof)
+	structPtr.RawProof = C.CString(zkmGroth16Bn254Proof.RawProof)
 	return structPtr
 }
 
@@ -141,7 +141,7 @@ func BuildGroth16Bn254(dataDir *C.char) {
 	// Sanity check the required arguments have been provided.
 	dataDirString := C.GoString(dataDir)
 
-	zkm2.BuildGroth16(dataDirString)
+	zkm.BuildGroth16(dataDirString)
 }
 
 //export VerifyGroth16Bn254
@@ -151,7 +151,7 @@ func VerifyGroth16Bn254(dataDir *C.char, proof *C.char, vkeyHash *C.char, commit
 	vkeyHashString := C.GoString(vkeyHash)
 	committedValuesDigestString := C.GoString(committedValuesDigest)
 
-	err := zkm2.VerifyGroth16(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
+	err := zkm.VerifyGroth16(dataDirString, proofString, vkeyHashString, committedValuesDigestString)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -189,20 +189,20 @@ func TestMain() error {
 	}
 
 	// Deserialize the JSON data into a slice of Instruction structs
-	var inputs zkm2.WitnessInput
+	var inputs zkm.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return err
 	}
 
 	// Compile the circuit.
-	circuit := zkm2.NewCircuit(inputs)
+	circuit := zkm.NewCircuit(inputs)
 	builder := scs.NewBuilder
 	scs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)
 	if err != nil {
 		return err
 	}
-	fmt.Println("[zkm2] gnark verifier constraints:", scs.GetNbConstraints())
+	fmt.Println("[zkm] gnark verifier constraints:", scs.GetNbConstraints())
 
 	// Run the dummy setup.
 	srs, srsLagrange, err := unsafekzg.NewSRS(scs)
@@ -214,22 +214,22 @@ func TestMain() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("[zkm2] run the dummy setup done")
+	fmt.Println("[zkm] run the dummy setup done")
 
 	// Generate witness.
-	assignment := zkm2.NewCircuit(inputs)
+	assignment := zkm.NewCircuit(inputs)
 	witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return err
 	}
-	fmt.Println("[zkm2] generate witness done")
+	fmt.Println("[zkm] generate witness done")
 
 	// Generate the proof.
 	_, err = plonk.Prove(scs, pk, witness)
 	if err != nil {
 		return err
 	}
-	fmt.Println("[zkm2] generate the proof done")
+	fmt.Println("[zkm] generate the proof done")
 
 	return nil
 }
@@ -274,8 +274,8 @@ func TestPoseidonKoalaBear2() *C.char {
 		koalabear.NewF("1825850772"),
 	}
 
-	circuit := zkm2.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
-	assignment := zkm2.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
+	circuit := zkm.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
+	assignment := zkm.TestPoseidon2KoalaBearCircuit{Input: input, ExpectedOutput: expectedOutput}
 
 	builder := r1cs.NewBuilder
 	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)

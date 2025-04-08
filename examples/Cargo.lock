@@ -33,7 +33,7 @@ name = "aggregation"
 version = "1.1.0"
 dependencies = [
  "sha2 0.10.8",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -41,8 +41,8 @@ name = "aggregation-host"
 version = "1.1.0"
 dependencies = [
  "tracing",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -931,15 +931,15 @@ version = "1.1.0"
 dependencies = [
  "rand 0.8.5",
  "substrate-bn",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
 name = "bn254-host"
 version = "0.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -1073,7 +1073,7 @@ name = "chess"
 version = "1.1.0"
 dependencies = [
  "chess 3.2.0",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -1092,8 +1092,8 @@ dependencies = [
 name = "chess-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -1336,7 +1336,7 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
- "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
+ "zkm2-lib",
 ]
 
 [[package]]
@@ -1366,16 +1366,16 @@ dependencies = [
 name = "cycle-tracking"
 version = "1.1.0"
 dependencies = [
- "zkm2-derive",
- "zkm2-zkvm 0.0.1",
+ "zkm-derive",
+ "zkm-zkvm",
 ]
 
 [[package]]
 name = "cycle-tracking-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -1674,7 +1674,7 @@ dependencies = [
  "rfc6979",
  "signature",
  "spki 0.7.3",
- "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
+ "zkm2-lib",
 ]
 
 [[package]]
@@ -1724,6 +1724,7 @@ dependencies = [
  "ff 0.13.1",
  "generic-array 0.14.7",
  "group 0.13.0",
+ "hkdf",
  "pem-rfc7468 0.7.0",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
@@ -1918,7 +1919,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 name = "fibonacci"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -1926,8 +1927,8 @@ name = "fibonacci-host"
 version = "1.1.0"
 dependencies = [
  "hex",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -2156,16 +2157,16 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 name = "groth16-verifier"
 version = "1.1.0"
 dependencies = [
- "zkm2-verifier",
- "zkm2-zkvm 0.0.1",
+ "zkm-verifier",
+ "zkm-zkvm",
 ]
 
 [[package]]
 name = "groth16-verifier-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -2194,11 +2195,25 @@ dependencies = [
 [[package]]
 name = "guest"
 version = "1.1.0"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+dependencies = [
+ "k256",
+ "libc",
+ "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm)",
+ "revm",
+ "serde",
+ "serde_cbor",
+ "serde_json",
+]
+
+[[package]]
+name = "guest"
+version = "1.1.0"
 source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
 dependencies = [
  "k256",
  "libc",
- "models",
+ "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2)",
  "revm",
  "serde",
  "serde_cbor",
@@ -2208,10 +2223,10 @@ dependencies = [
 [[package]]
 name = "guest-std"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
 dependencies = [
- "guest",
- "models",
+ "guest 1.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm)",
+ "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm)",
  "revm",
  "serde_cbor",
  "serde_json",
@@ -2345,6 +2360,15 @@ name = "hex-literal"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
+
+[[package]]
+name = "hkdf"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+dependencies = [
+ "hmac",
+]
 
 [[package]]
 name = "hmac"
@@ -2699,15 +2723,15 @@ checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
 name = "is-prime"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
 name = "is-prime-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -2808,7 +2832,7 @@ version = "1.1.0"
 dependencies = [
  "json-lib",
  "serde_json",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -2817,8 +2841,8 @@ version = "1.1.0"
 dependencies = [
  "json-lib",
  "serde_json",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -2869,7 +2893,7 @@ dependencies = [
 name = "keccak"
 version = "1.1.0"
 dependencies = [
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -2889,8 +2913,8 @@ dependencies = [
  "alloy-primitives 0.8.25",
  "hex",
  "log",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -3078,6 +3102,16 @@ dependencies = [
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "models"
+version = "0.1.0"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+dependencies = [
+ "revm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3889,16 +3923,16 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 name = "plonk-verifier"
 version = "1.1.0"
 dependencies = [
- "zkm2-verifier",
- "zkm2-zkvm 0.0.1",
+ "zkm-verifier",
+ "zkm-zkvm",
 ]
 
 [[package]]
 name = "plonk-verifier-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -4337,7 +4371,7 @@ name = "regex"
 version = "1.1.0"
 dependencies = [
  "regex 1.11.1",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -4376,8 +4410,8 @@ dependencies = [
 name = "regex-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -4507,17 +4541,17 @@ dependencies = [
  "hex",
  "kzg-rs",
  "serde",
- "zkm2-zkvm 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
+ "zkm2-zkvm",
 ]
 
 [[package]]
 name = "revme"
 version = "1.1.0"
 dependencies = [
- "guest",
+ "guest 1.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2)",
  "k256",
  "libc",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -4525,8 +4559,8 @@ name = "revme-host"
 version = "1.1.0"
 dependencies = [
  "guest-std",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -4628,7 +4662,7 @@ version = "1.1.0"
 dependencies = [
  "rsa 0.9.8",
  "sha2 0.10.8",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -4636,8 +4670,8 @@ name = "rsa-host"
 version = "1.1.0"
 dependencies = [
  "rsa 0.6.1",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -5207,15 +5241,15 @@ dependencies = [
  "serde_with",
  "sha2 0.10.8",
  "ssz_rs",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
 name = "ssz-withdrawals-host"
 version = "1.1.0"
 dependencies = [
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -5302,7 +5336,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
+ "zkm2-lib",
 ]
 
 [[package]]
@@ -5506,7 +5540,7 @@ version = "1.1.0"
 dependencies = [
  "serde_cbor",
  "tendermint-light-client-verifier 0.40.2",
- "zkm2-zkvm 0.0.1",
+ "zkm-zkvm",
 ]
 
 [[package]]
@@ -5516,8 +5550,8 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "tendermint-light-client-verifier 0.35.0",
- "zkm2-build",
- "zkm2-sdk",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]
@@ -5583,7 +5617,7 @@ dependencies = [
 name = "test-artifacts"
 version = "0.0.1"
 dependencies = [
- "zkm2-build",
+ "zkm-build",
 ]
 
 [[package]]
@@ -6765,7 +6799,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-build"
+name = "zkm-build"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -6776,7 +6810,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-core-executor"
+name = "zkm-core-executor"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -6810,13 +6844,13 @@ dependencies = [
  "tracing-subscriber",
  "typenum",
  "vec_map",
- "zkm2-curves",
- "zkm2-primitives",
- "zkm2-stark",
+ "zkm-curves",
+ "zkm-primitives",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-core-machine"
+name = "zkm-core-machine"
 version = "0.0.1"
 dependencies = [
  "bincode",
@@ -6859,15 +6893,15 @@ dependencies = [
  "tracing-subscriber",
  "typenum",
  "web-time",
- "zkm2-core-executor",
- "zkm2-curves",
- "zkm2-derive",
- "zkm2-primitives",
- "zkm2-stark",
+ "zkm-core-executor",
+ "zkm-curves",
+ "zkm-derive",
+ "zkm-primitives",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-curves"
+name = "zkm-curves"
 version = "0.0.1"
 dependencies = [
  "cfg-if",
@@ -6883,12 +6917,12 @@ dependencies = [
  "serde",
  "snowbridge-amcl",
  "typenum",
- "zkm2-primitives",
- "zkm2-stark",
+ "zkm-primitives",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-derive"
+name = "zkm-derive"
 version = "0.0.1"
 dependencies = [
  "quote",
@@ -6896,28 +6930,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-lib"
+name = "zkm-lib"
 version = "0.0.1"
 dependencies = [
  "bincode",
  "cfg-if",
+ "elliptic-curve",
  "serde",
  "sha2 0.10.8",
 ]
 
 [[package]]
-name = "zkm2-lib"
-version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#d9d632437a2fb78cedb62d4cc6fa4a0c64f5ccfe"
-dependencies = [
- "bincode",
- "cfg-if",
- "serde",
- "sha2 0.10.8",
-]
-
-[[package]]
-name = "zkm2-primitives"
+name = "zkm-primitives"
 version = "0.0.1"
 dependencies = [
  "bincode",
@@ -6934,7 +6958,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-prover"
+name = "zkm-prover"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -6961,18 +6985,18 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "zkm2-core-executor",
- "zkm2-core-machine",
- "zkm2-primitives",
- "zkm2-recursion-circuit",
- "zkm2-recursion-compiler",
- "zkm2-recursion-core",
- "zkm2-recursion-gnark-ffi",
- "zkm2-stark",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-primitives",
+ "zkm-recursion-circuit",
+ "zkm-recursion-compiler",
+ "zkm-recursion-core",
+ "zkm-recursion-gnark-ffi",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-recursion-circuit"
+name = "zkm-recursion-circuit"
 version = "0.0.1"
 dependencies = [
  "hashbrown 0.14.5",
@@ -6993,18 +7017,18 @@ dependencies = [
  "rayon",
  "serde",
  "tracing",
- "zkm2-core-executor",
- "zkm2-core-machine",
- "zkm2-derive",
- "zkm2-primitives",
- "zkm2-recursion-compiler",
- "zkm2-recursion-core",
- "zkm2-recursion-gnark-ffi",
- "zkm2-stark",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-derive",
+ "zkm-primitives",
+ "zkm-recursion-compiler",
+ "zkm-recursion-core",
+ "zkm-recursion-gnark-ffi",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-recursion-compiler"
+name = "zkm-recursion-compiler"
 version = "0.0.1"
 dependencies = [
  "backtrace",
@@ -7016,15 +7040,15 @@ dependencies = [
  "serde",
  "tracing",
  "vec_map",
- "zkm2-core-machine",
- "zkm2-primitives",
- "zkm2-recursion-core",
- "zkm2-recursion-derive",
- "zkm2-stark",
+ "zkm-core-machine",
+ "zkm-primitives",
+ "zkm-recursion-core",
+ "zkm-recursion-derive",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-recursion-core"
+name = "zkm-recursion-core"
 version = "0.0.1"
 dependencies = [
  "backtrace",
@@ -7052,14 +7076,14 @@ dependencies = [
  "tracing",
  "vec_map",
  "zkhash",
- "zkm2-core-machine",
- "zkm2-derive",
- "zkm2-primitives",
- "zkm2-stark",
+ "zkm-core-machine",
+ "zkm-derive",
+ "zkm-primitives",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-recursion-derive"
+name = "zkm-recursion-derive"
 version = "0.0.1"
 dependencies = [
  "quote",
@@ -7067,7 +7091,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-recursion-gnark-ffi"
+name = "zkm-recursion-gnark-ffi"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -7085,13 +7109,13 @@ dependencies = [
  "serde_json",
  "sha2 0.10.8",
  "tempfile",
- "zkm2-core-machine",
- "zkm2-recursion-compiler",
- "zkm2-stark",
+ "zkm-core-machine",
+ "zkm-recursion-compiler",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-sdk"
+name = "zkm-sdk"
 version = "0.0.1"
 dependencies = [
  "alloy-signer",
@@ -7123,16 +7147,16 @@ dependencies = [
  "tracing",
  "twirp-rs",
  "vergen",
- "zkm2-build",
- "zkm2-core-executor",
- "zkm2-core-machine",
- "zkm2-primitives",
- "zkm2-prover",
- "zkm2-stark",
+ "zkm-build",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-primitives",
+ "zkm-prover",
+ "zkm-stark",
 ]
 
 [[package]]
-name = "zkm2-stark"
+name = "zkm-stark"
 version = "0.0.1"
 dependencies = [
  "arrayref",
@@ -7167,13 +7191,13 @@ dependencies = [
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
- "zkm2-derive",
- "zkm2-primitives",
- "zkm2-zkvm 0.0.1",
+ "zkm-derive",
+ "zkm-primitives",
+ "zkm-zkvm",
 ]
 
 [[package]]
-name = "zkm2-verifier"
+name = "zkm-verifier"
 version = "0.0.1"
 dependencies = [
  "anyhow",
@@ -7185,7 +7209,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkm2-zkvm"
+name = "zkm-zkvm"
 version = "0.0.1"
 dependencies = [
  "bincode",
@@ -7198,14 +7222,26 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2 0.10.8",
- "zkm2-lib 0.0.1",
- "zkm2-primitives",
+ "zkm-lib",
+ "zkm-primitives",
+]
+
+[[package]]
+name = "zkm2-lib"
+version = "0.0.1"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#0358e7f0a0a898aee2c7aab7a3a875798ab5e1b6"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "elliptic-curve",
+ "serde",
+ "sha2 0.10.8",
 ]
 
 [[package]]
 name = "zkm2-zkvm"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#d9d632437a2fb78cedb62d4cc6fa4a0c64f5ccfe"
+source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#0358e7f0a0a898aee2c7aab7a3a875798ab5e1b6"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -7215,7 +7251,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2 0.10.8",
- "zkm2-lib 0.0.1 (git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit)",
+ "zkm2-lib",
 ]
 
 [[patch.unused]]

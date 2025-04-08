@@ -1,17 +1,17 @@
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use lib::{Account, Transaction}; // Custom structs.
 use serde_json::Value; // Generic JSON.
 
 pub fn main() {
     // read generic JSON example inputs.
-    let data_str = zkm2_zkvm::io::read::<String>();
-    let key = zkm2_zkvm::io::read::<String>();
+    let data_str = zkm_zkvm::io::read::<String>();
+    let key = zkm_zkvm::io::read::<String>();
 
     // read custom struct example inputs.
-    let mut old_account_state = zkm2_zkvm::io::read::<Account>();
-    let txs = zkm2_zkvm::io::read::<Vec<Transaction>>();
+    let mut old_account_state = zkm_zkvm::io::read::<Account>();
+    let txs = zkm_zkvm::io::read::<Vec<Transaction>>();
 
     // do stuff with generic JSON.
     let v: Value = serde_json::from_str(&data_str).unwrap();
@@ -27,6 +27,6 @@ pub fn main() {
             new_account_state.balance += tx.amount;
         }
     }
-    zkm2_zkvm::io::commit(&val);
-    zkm2_zkvm::io::commit(&new_account_state);
+    zkm_zkvm::io::commit(&val);
+    zkm_zkvm::io::commit(&new_account_state);
 }

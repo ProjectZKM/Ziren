@@ -1,6 +1,6 @@
 use p3_commit::{LagrangeSelectors, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
-use zkm2_recursion_compiler::prelude::*;
+use zkm_recursion_compiler::prelude::*;
 
 /// Reference: [p3_commit::PolynomialSpace]
 pub trait PolynomialSpaceVariable<C: Config>: Sized + PolynomialSpace<Val = C::F> {

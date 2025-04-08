@@ -22,17 +22,17 @@ use std::{
     mem::size_of,
 };
 use typenum::Unsigned;
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm2_curves::{
+use zkm_curves::{
     params::{Limbs, NumLimbs, NumWords},
     uint256::U256Field,
 };
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{
     air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
     MachineRecord,
 };

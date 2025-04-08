@@ -1,5 +1,5 @@
 use p3_field::PrimeField32;
-use zkm2_core_executor::events::{
+use zkm_core_executor::events::{
     ByteRecord, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
 };
 

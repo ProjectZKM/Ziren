@@ -10,7 +10,7 @@ use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use zkm2_primitives::poseidon2_init;
+use zkm_primitives::poseidon2_init;
 
 pub const DIGEST_SIZE: usize = 8;
 
@@ -49,9 +49,9 @@ pub fn inner_perm() -> InnerPerm {
     poseidon2_init()
 }
 
-/// The FRI config for zkm2 proofs.
+/// The FRI config for zkMIPS proofs.
 #[must_use]
-pub fn zkm2_fri_config() -> FriConfig<InnerChallengeMmcs> {
+pub fn zkm_fri_config() -> FriConfig<InnerChallengeMmcs> {
     let perm = inner_perm();
     let hash = InnerHash::new(perm.clone());
     let compress = InnerCompress::new(perm.clone());
@@ -162,7 +162,7 @@ pub mod koala_bear_poseidon2 {
     use p3_poseidon2::ExternalLayerConstants;
     use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
     use serde::{Deserialize, Serialize};
-    use zkm2_primitives::RC_16_30;
+    use zkm_primitives::RC_16_30;
 
     use crate::{Com, StarkGenericConfig, ZeroCommitment, DIGEST_SIZE};
 

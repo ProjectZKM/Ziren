@@ -1,6 +1,6 @@
 # Flow Control
 
-ZKM2 enforces MIPS32r2 control flow verification via dedicated Branch and Jump Chips, ensuring precise execution of program control instructions.
+zkMIPS enforces MIPS32r2 control flow verification via dedicated Branch and Jump Chips, ensuring precise execution of program control instructions.
 
  ## Branch Chip
 

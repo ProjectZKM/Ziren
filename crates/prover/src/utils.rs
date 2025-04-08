@@ -10,29 +10,29 @@ use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::CryptographicHasher;
-use zkm2_core_executor::{Executor, Program};
-use zkm2_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
-use zkm2_recursion_circuit::machine::RootPublicValues;
-use zkm2_recursion_core::{
+use zkm_core_executor::{Executor, Program};
+use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
+use zkm_recursion_circuit::machine::RootPublicValues;
+use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     stark::KoalaBearPoseidon2Outer,
 };
-use zkm2_stark::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
+use zkm_stark::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 
 use crate::{InnerSC, ZKMCoreProofData};
 
 /// Get the ZKM vkey KoalaBear Poseidon2 digest this reduce proof is representing.
-pub fn zkm2_vkey_digest_koalabear(
+pub fn zkm_vkey_digest_koalabear(
     proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
 ) -> [KoalaBear; 8] {
     let proof = &proof.proof;
     let pv: &RecursionPublicValues<KoalaBear> = proof.public_values.as_slice().borrow();
-    pv.zkm2_vk_digest
+    pv.zkm_vk_digest
 }
 
 /// Get the ZKM vkey Bn Poseidon2 digest this reduce proof is representing.
-pub fn zkm2_vkey_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn254Fr {
-    koalabears_to_bn254(&zkm2_vkey_digest_koalabear(proof))
+pub fn zkm_vkey_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn254Fr {
+    koalabears_to_bn254(&zkm_vkey_digest_koalabear(proof))
 }
 
 /// Compute the digest of the public values.
@@ -50,7 +50,7 @@ pub fn root_public_values_digest(
     public_values: &RootPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
-    let input = (*public_values.zkm2_vk_digest())
+    let input = (*public_values.zkm_vk_digest())
         .into_iter()
         .chain(
             (*public_values.committed_value_digest())
@@ -83,7 +83,7 @@ pub fn assert_recursion_public_values_valid(
 }
 
 /// Get the committed values Bn Poseidon2 digest this reduce proof is representing.
-pub fn zkm2_committed_values_digest_bn254(
+pub fn zkm_committed_values_digest_bn254(
     proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
 ) -> Bn254Fr {
     let proof = &proof.proof;

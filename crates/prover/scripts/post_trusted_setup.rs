@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use zkm2_core_machine::utils::setup_logger;
-use zkm2_recursion_gnark_ffi::Groth16Bn254Prover;
+use zkm_core_machine::utils::setup_logger;
+use zkm_recursion_gnark_ffi::Groth16Bn254Prover;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

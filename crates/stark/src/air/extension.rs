@@ -4,7 +4,7 @@ use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     Field, FieldAlgebra, FieldExtensionAlgebra,
 };
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 const D: usize = 4;
 

@@ -6,7 +6,7 @@ Patching a crate refers to replacing the implementation of a specific interface 
 
 | **Crate Name**        | **Repository**                                               | **Versions** |
 | ----------------- | ------------------------------------------------------------ | ------------ |
-| revm | `revm = { git = "https://github.com/zkMIPS/revm", branch = "zkm2" }` | 6.0.0        |
+| revm | `revm = { git = "https://github.com/zkMIPS/revm", branch = "zkm" }` | 6.0.0        |
 | sha2              | `sha2-v0-10-8 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes", package = "sha2", branch = "patch-sha2-0.10.8" }` | 0.10.8       |
 | curve25519-dalek  | `curve25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", branch = "patch-4.1.3" }` | 4.1.3        |
 | curve25519-dalek-ng | `curve25519-dalek-ng = { git = "https://github.com/zkMIPS-patches/curve25519-dalek-ng", branch = "patch-4.1.1" } ` | 4.1.1 |
@@ -49,10 +49,10 @@ ed25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", br
 
 First, implement the target precompile in zkVM (e.g., `syscall_keccak_sponge`) with full circuit logic. Given the implementation complexity, we recommend submitting an issue for requested precompiles.
 
-Then replace the target crate's existing implementation with the zkVM precompile (e.g., `syscall_keccak_sponge`). For example, we have reimplemented [keccak256](https://github.com/zkMIPS/zkm2/blob/dev/init/crates/zkvm/lib/src/keccak256.rs) by `syscall_keccak_sponge`, and use this implementation to replace `keccak256` in the revm crate.
+Then replace the target crate's existing implementation with the zkVM precompile (e.g., `syscall_keccak_sponge`). For example, we have reimplemented [keccak256](https://github.com/zkMIPS/zkm/blob/dev/init/crates/zkvm/lib/src/keccak256.rs) by `syscall_keccak_sponge`, and use this implementation to replace `keccak256` in the revm crate.
 
 ```rust
-use zkm2_zkvm::lib::keccak256::keccak256 as keccak256_zkvm;
+use zkm_zkvm::lib::keccak256::keccak256 as keccak256_zkvm;
 
 // Define the keccak256 function
 #[inline]
@@ -68,4 +68,4 @@ pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> B256 {
 }
 ```
 
-Finally, we can use the new `keccak256` in the [revme guest lib](https://github.com/zkMIPS/revme/blob/cbor-zkm2/guest/src/lib.rs), which the [revme guest](https://github.com/zkMIPS/zkm2/tree/dev/init/examples/revme/guest) depends on.
+Finally, we can use the new `keccak256` in the [revme guest lib](https://github.com/zkMIPS/revme/blob/cbor-zkm/guest/src/lib.rs), which the [revme guest](https://github.com/zkMIPS/zkm/tree/dev/init/examples/revme/guest) depends on.

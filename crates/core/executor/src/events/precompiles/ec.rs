@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use typenum::Unsigned;
-use zkm2_curves::{
+use zkm_curves::{
     params::{NumLimbs, NumWords},
     weierstrass::{
         bls12_381::bls12381_decompress, secp256k1::secp256k1_decompress,
@@ -9,7 +9,7 @@ use zkm2_curves::{
     },
     AffinePoint, CurveType, EllipticCurve,
 };
-use zkm2_primitives::consts::{bytes_to_words_le_vec, words_to_bytes_le_vec};
+use zkm_primitives::consts::{bytes_to_words_le_vec, words_to_bytes_le_vec};
 
 use crate::{
     events::{

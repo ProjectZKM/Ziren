@@ -2,7 +2,7 @@ pub mod air;
 pub mod columns;
 pub mod trace;
 
-use zkm2_core_executor::MipsAirId;
+use zkm_core_executor::MipsAirId;
 
 /// The maximum log degree of the CPU chip to avoid lookup multiplicity overflow.
 pub const MAX_CPU_LOG_DEGREE: usize = 22;

@@ -1,5 +1,5 @@
-use zkm2_derive::AlignedBorrow;
-use zkm2_stark::{air::PV_DIGEST_NUM_WORDS, Word};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
 use std::mem::size_of;
 
 use crate::{

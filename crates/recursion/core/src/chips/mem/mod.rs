@@ -4,7 +4,7 @@ pub mod variable;
 pub use constant::MemoryChip as MemoryConstChip;
 pub use variable::MemoryChip as MemoryVarChip;
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::Address;
 

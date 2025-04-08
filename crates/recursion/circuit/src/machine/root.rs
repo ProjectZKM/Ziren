@@ -14,9 +14,9 @@ use crate::{
     challenger::DuplexChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
     CircuitConfig, KoalaBearFriConfigVariable,
 };
-use zkm2_recursion_compiler::ir::{Builder, Felt};
-use zkm2_recursion_core::DIGEST_SIZE;
-use zkm2_stark::{air::MachineAir, StarkMachine};
+use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_core::DIGEST_SIZE;
+use zkm_stark::{air::MachineAir, StarkMachine};
 
 /// A program to verify a single recursive proof representing a complete proof of program execution.
 ///

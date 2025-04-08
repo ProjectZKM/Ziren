@@ -1,10 +1,10 @@
 #![no_std]
 #![no_main]
-zkm2_zkvm::entrypoint!(main);
+zkm_zkvm::entrypoint!(main);
 
 use num_bigint::BigUint;
 //use rand::Rng;
-use zkm2_zkvm::syscalls::{syscall_bls12381_fp2_addmod, syscall_bls12381_fp2_submod};
+use zkm_zkvm::syscalls::{syscall_bls12381_fp2_addmod, syscall_bls12381_fp2_submod};
 use core::{mem::transmute, str::FromStr};
 
 const MODULUS: &str = "4002409555221667393417789825735904156556882819939007885332058136124031650490837864442687629129015664037894272559787";

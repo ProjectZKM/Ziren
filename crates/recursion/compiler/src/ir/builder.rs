@@ -2,8 +2,8 @@ use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
 use p3_field::FieldAlgebra;
-use zkm2_core_machine::utils::zkm2_debug_mode;
-use zkm2_primitives::types::RecursionProgramType;
+use zkm_core_machine::utils::zkm_debug_mode;
+use zkm_primitives::types::RecursionProgramType;
 
 use super::{
     Array, Config, DslIr, Ext, ExtHandle, ExtOperations, Felt, FeltHandle, FeltOperations,
@@ -51,7 +51,7 @@ impl<T> TracedVec<T> {
         self.vec.push(value);
         #[cfg(feature = "debug")]
         {
-            if zkm2_debug_mode() {
+            if zkm_debug_mode() {
                 self.traces.push(Some(Backtrace::new_unresolved()));
             } else {
                 self.traces.push(None);

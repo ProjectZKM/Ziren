@@ -5,7 +5,7 @@ use std::slice::Iter;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use zkm2_stark::air::Polynomial;
+use zkm_stark::air::Polynomial;
 use typenum::Unsigned;
 use typenum::{U2, U4};
 
@@ -15,7 +15,7 @@ use num::BigUint;
 
 use p3_field::Field;
 
-use zkm2_curves::utils::biguint_from_limbs;
+use zkm_curves::utils::biguint_from_limbs;
 
 pub const NB_BITS_PER_LIMB: usize = 8;
 

@@ -5,12 +5,12 @@ use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use zkm2_core_executor::{
+use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemInstrEvent},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm2_primitives::consts::WORD_SIZE;
-use zkm2_stark::air::MachineAir;
+use zkm_primitives::consts::WORD_SIZE;
+use zkm_stark::air::MachineAir;
 
 use crate::utils::{next_power_of_two, zeroed_f_vec};
 

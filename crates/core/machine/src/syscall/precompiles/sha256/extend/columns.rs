@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use zkm2_derive::AlignedBorrow;
+use zkm_derive::AlignedBorrow;
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
