@@ -17,12 +17,12 @@ As ​MIPS instruction set based zkVM, zkMIPS is designed to generate efficient 
 - Hybrid Proof System
 
   zkMIPS employs a three-stage proof workflow to balance modularity and efficiency:
-  - Segmented STARK Proofs:
+  - Sharded STARK Proofs:
 
-    MIPS instructions are partitioned into fixed-length segments, each verified via fast STARK proofs. 
+    MIPS instructions are partitioned into fixed-length shards, each verified via fast STARK proofs. 
   - Recursive Aggregation:
 
-    Segment proofs are compressed using a recursive STARK composition scheme.
+    Shard proofs are compressed using a recursive STARK composition scheme.
   - SNARK Finalization:
 
     The aggregated proof is wrapped into a Groth16-compatible SNARK for efficient on-chain verification.
