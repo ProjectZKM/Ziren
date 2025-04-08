@@ -285,14 +285,14 @@ impl ProverClient {
         self.prover.verify(proof, vk)
     }
 
-    /// Gets the current version of the ZKM zkVM.
+    /// Gets the current version of the zkMIPS zkVM.
     ///
-    /// Note: This is not the same as the version of the ZKM SDK.
+    /// Note: This is not the same as the version of the zkMIPS SDK.
     pub fn version(&self) -> String {
         ZKM_CIRCUIT_VERSION.to_string()
     }
 
-    /// Setup a program to be proven and verified by the ZKM MIPS zkVM by computing the proving
+    /// Setup a program to be proven and verified by the zkMIPS MIPS zkVM by computing the proving
     /// and verifying keys.
     ///
     /// The proving key and verifying key essentially embed the program, as well as other auxiliary

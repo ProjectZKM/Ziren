@@ -11,7 +11,7 @@ const DEFAULT_TAG: &str = "latest";
 pub const DEFAULT_OUTPUT_DIR: &str = "elf";
 pub const HELPER_TARGET_SUBDIR: &str = "elf-compilation";
 
-/// Compile an ZKM program.
+/// Compile an zkMIPS program.
 ///
 /// Additional arguments are useful for configuring the build process, including options for using
 /// Docker, specifying binary and ELF names, ignoring Rust version checks, and enabling specific
@@ -20,7 +20,7 @@ pub const HELPER_TARGET_SUBDIR: &str = "elf-compilation";
 pub struct BuildArgs {
     #[clap(
         long,
-        help = "The ghcr.io/zkMIPS/ZKM image tag to use when building with Docker.",
+        help = "The ghcr.io/zkMIPS/zkMIPS image tag to use when building with Docker.",
         default_value = DEFAULT_TAG
     )]
     pub tag: String,

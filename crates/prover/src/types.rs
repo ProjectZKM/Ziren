@@ -136,20 +136,20 @@ impl<P: std::fmt::Debug + Clone> std::fmt::Debug for ZKMProofWithMetadata<P> {
     }
 }
 
-/// A proof of an ZKM program without any wrapping.
+/// A proof of an zkMIPS program without any wrapping.
 pub type ZKMCoreProof = ZKMProofWithMetadata<ZKMCoreProofData>;
 
-/// An ZKM proof that has been recursively reduced into a single proof. This proof can be verified
-/// within ZKM programs.
+/// An zkMIPS proof that has been recursively reduced into a single proof. This proof can be verified
+/// within zkMIPS programs.
 pub type ZKMReducedProof = ZKMProofWithMetadata<ZKMReducedProofData>;
 
-/// An ZKM proof that has been wrapped into a single PLONK proof and can be verified onchain.
+/// An zkMIPS proof that has been wrapped into a single PLONK proof and can be verified onchain.
 pub type ZKMPlonkBn254Proof = ZKMProofWithMetadata<ZKMPlonkBn254ProofData>;
 
-/// An ZKM proof that has been wrapped into a single Groth16 proof and can be verified onchain.
+/// An zkMIPS proof that has been wrapped into a single Groth16 proof and can be verified onchain.
 pub type ZKMGroth16Bn254Proof = ZKMProofWithMetadata<ZKMGroth16Bn254ProofData>;
 
-/// An ZKM proof that has been wrapped into a single proof and can be verified onchain.
+/// An zkMIPS proof that has been wrapped into a single proof and can be verified onchain.
 pub type ZKMProof = ZKMProofWithMetadata<ZKMBn254ProofData>;
 
 #[derive(Serialize, Deserialize, Clone)]

@@ -39,7 +39,7 @@ pub enum ProverType {
 /// Options to configure proof generation.
 #[derive(Clone, Default)]
 pub struct ProofOpts {
-    /// Options to configure the ZKM prover.
+    /// Options to configure the zkMIPS prover.
     pub zkm_prover_opts: ZKMProverOpts,
     /// Optional timeout duration for proof generation.
     pub timeout: Option<Duration>,

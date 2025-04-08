@@ -30,7 +30,7 @@ pub enum ZKMProof {
     Groth16(Groth16Bn254Proof),
 }
 
-/// A proof generated with ZKM, bundled together with stdin, public values, and the ZKM version.
+/// A proof generated with ZKM, bundled together with stdin, public values, and the zkMIPS version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZKMProofWithPublicValues {
     pub proof: ZKMProof,
@@ -68,7 +68,7 @@ impl ZKMProofWithPublicValues {
         match &self.proof {
             ZKMProof::Plonk(plonk_proof) => {
                 if plonk_proof.encoded_proof.is_empty() {
-                    // If the proof is empty, then this is a mock proof. The mock ZKM verifier
+                    // If the proof is empty, then this is a mock proof. The mock zkMIPS verifier
                     // expects an empty byte array for verification, so return an empty byte array.
                     return Vec::new();
                 }
@@ -79,7 +79,7 @@ impl ZKMProofWithPublicValues {
             }
             ZKMProof::Groth16(groth16_proof) => {
                 if groth16_proof.encoded_proof.is_empty() {
-                    // If the proof is empty, then this is a mock proof. The mock ZKM verifier
+                    // If the proof is empty, then this is a mock proof. The mock zkMIPS verifier
                     // expects an empty byte array for verification, so return an empty byte array.
                     return Vec::new();
                 }

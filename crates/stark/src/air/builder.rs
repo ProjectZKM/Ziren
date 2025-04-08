@@ -442,14 +442,14 @@ pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
     fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum>;
 }
 
-/// A trait that contains the common helper methods for building `ZKM recursion` and ZKM machine
+/// A trait that contains the common helper methods for building `zkMIPS recursion` and zkMIPS machine
 /// AIRs.
 pub trait MachineAirBuilder:
     BaseAirBuilder + ExtensionAirBuilder + SepticExtensionAirBuilder + AirBuilderWithPublicValues
 {
 }
 
-/// A trait which contains all helper methods for building ZKM machine AIRs.
+/// A trait which contains all helper methods for building zkMIPS machine AIRs.
 pub trait ZKMAirBuilder: MachineAirBuilder + ByteAirBuilder + InstructionAirBuilder {}
 
 impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBuilder<'_, AB> {
