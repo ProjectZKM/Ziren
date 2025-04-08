@@ -33,7 +33,7 @@ name = "aggregation"
 version = "1.1.0"
 dependencies = [
  "sha2 0.10.8",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -418,7 +418,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d162f8524adfdfb0e4bd0505c734c985f3e2474eb022af32eef0d52a4f3935c"
 dependencies = [
  "serde",
- "winnow 0.7.4",
+ "winnow 0.7.6",
 ]
 
 [[package]]
@@ -931,7 +931,7 @@ version = "1.1.0"
 dependencies = [
  "rand 0.8.5",
  "substrate-bn",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1073,7 +1073,7 @@ name = "chess"
 version = "1.1.0"
 dependencies = [
  "chess 3.2.0",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1326,7 +1326,7 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
-source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#d7d6abfee8f66abbe4fa0194bf4ac0cecce3e14b"
+source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#76f427106a48c00d8aa92718bc15230107e6d370"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -1336,13 +1336,13 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
- "zkm2-lib",
+ "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
 ]
 
 [[package]]
 name = "curve25519-dalek-derive"
 version = "0.1.1"
-source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#d7d6abfee8f66abbe4fa0194bf4ac0cecce3e14b"
+source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#76f427106a48c00d8aa92718bc15230107e6d370"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1367,7 +1367,7 @@ name = "cycle-tracking"
 version = "1.1.0"
 dependencies = [
  "zkm-derive",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -1663,7 +1663,7 @@ checksum = "1c7a8fb8a9fbf66c1f703fe16184d10ca0ee9d23be5b4436400408ba54a95005"
 [[package]]
 name = "ecdsa"
 version = "0.16.9"
-source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#de899b72abbf773f6bac509ecdb886f9fe809c02"
+source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#a6713c3f75640144e92e80762b07db1e310e2085"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -1674,7 +1674,7 @@ dependencies = [
  "rfc6979",
  "signature",
  "spki 0.7.3",
- "zkm2-lib",
+ "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
 ]
 
 [[package]]
@@ -1919,7 +1919,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 name = "fibonacci"
 version = "1.1.0"
 dependencies = [
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2158,7 +2158,7 @@ name = "groth16-verifier"
 version = "1.1.0"
 dependencies = [
  "zkm-verifier",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2195,12 +2195,12 @@ dependencies = [
 [[package]]
 name = "guest"
 version = "1.1.0"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#3c628ef06107d65d6adff637143ce4ba2e5a6265"
 dependencies = [
  "k256",
  "libc",
  "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm)",
- "revm",
+ "revm 11.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
  "serde",
  "serde_cbor",
  "serde_json",
@@ -2209,12 +2209,12 @@ dependencies = [
 [[package]]
 name = "guest"
 version = "1.1.0"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+source = "git+https://github.com/zkMIPS/revme.git?branch=zkMIPS#2afce834bfec5b21669cc243f6dd8a18150a2548"
 dependencies = [
  "k256",
  "libc",
- "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2)",
- "revm",
+ "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=zkMIPS)",
+ "revm 11.0.0 (git+https://github.com/zkMIPS/revm?branch=zkMIPS)",
  "serde",
  "serde_cbor",
  "serde_json",
@@ -2223,11 +2223,11 @@ dependencies = [
 [[package]]
 name = "guest-std"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#3c628ef06107d65d6adff637143ce4ba2e5a6265"
 dependencies = [
  "guest 1.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm)",
  "models 0.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm)",
- "revm",
+ "revm 11.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
  "serde_cbor",
  "serde_json",
 ]
@@ -2723,7 +2723,7 @@ checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
 name = "is-prime"
 version = "1.1.0"
 dependencies = [
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2784,9 +2784,9 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "jiff"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c102670231191d07d37a35af3eb77f1f0dbf7a71be51a962dcd57ea607be7260"
+checksum = "1f33145a5cbea837164362c7bd596106eb7c5198f97d1ba6f6ebb3223952e488"
 dependencies = [
  "jiff-static",
  "log",
@@ -2797,9 +2797,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cdde31a9d349f1b1f51a0b3714a5940ac022976f4b49485fc04be052b183b4c"
+checksum = "43ce13c40ec6956157a3635d97a1ee2df323b263f09ea14165131289cb0f5c19"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2832,7 +2832,7 @@ version = "1.1.0"
 dependencies = [
  "json-lib",
  "serde_json",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -2893,7 +2893,7 @@ dependencies = [
 name = "keccak"
 version = "1.1.0"
 dependencies = [
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -3107,9 +3107,9 @@ dependencies = [
 [[package]]
 name = "models"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm#3c628ef06107d65d6adff637143ce4ba2e5a6265"
 dependencies = [
- "revm",
+ "revm 11.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
  "serde",
  "serde_json",
 ]
@@ -3117,9 +3117,9 @@ dependencies = [
 [[package]]
 name = "models"
 version = "0.1.0"
-source = "git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2#cb466f7c002fb0f6b0ccf5b03268812521ea87b8"
+source = "git+https://github.com/zkMIPS/revme.git?branch=zkMIPS#2afce834bfec5b21669cc243f6dd8a18150a2548"
 dependencies = [
- "revm",
+ "revm 11.0.0 (git+https://github.com/zkMIPS/revm?branch=zkMIPS)",
  "serde",
  "serde_json",
 ]
@@ -3924,7 +3924,7 @@ name = "plonk-verifier"
 version = "1.1.0"
 dependencies = [
  "zkm-verifier",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -4371,7 +4371,7 @@ name = "regex"
 version = "1.1.0"
 dependencies = [
  "regex 1.11.1",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -4489,35 +4489,72 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "11.0.0"
-source = "git+https://github.com/zkMIPS/revm?branch=zkm2#1fc7d7c5b919c9e4b07bbb41c48bbf6a0e6afb6c"
+source = "git+https://github.com/zkMIPS/revm?branch=zkMIPS#046eaf992b1902dd5df4eb22d3a544ec8f6e914a"
 dependencies = [
  "auto_impl",
  "cfg-if",
  "dyn-clone",
- "revm-interpreter",
- "revm-precompile",
+ "revm-interpreter 7.0.0 (git+https://github.com/zkMIPS/revm?branch=zkMIPS)",
+ "revm-precompile 9.0.0 (git+https://github.com/zkMIPS/revm?branch=zkMIPS)",
+ "serde",
+]
+
+[[package]]
+name = "revm"
+version = "11.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm#b23ee6f2482e492f046d32f03f5a4e0beb907476"
+dependencies = [
+ "auto_impl",
+ "cfg-if",
+ "dyn-clone",
+ "revm-interpreter 7.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
+ "revm-precompile 9.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
  "serde",
 ]
 
 [[package]]
 name = "revm-interpreter"
 version = "7.0.0"
-source = "git+https://github.com/zkMIPS/revm?branch=zkm2#1fc7d7c5b919c9e4b07bbb41c48bbf6a0e6afb6c"
+source = "git+https://github.com/zkMIPS/revm?branch=zkMIPS#046eaf992b1902dd5df4eb22d3a544ec8f6e914a"
 dependencies = [
- "revm-primitives",
+ "revm-primitives 6.0.0 (git+https://github.com/zkMIPS/revm?branch=zkMIPS)",
+ "serde",
+]
+
+[[package]]
+name = "revm-interpreter"
+version = "7.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm#b23ee6f2482e492f046d32f03f5a4e0beb907476"
+dependencies = [
+ "revm-primitives 6.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
  "serde",
 ]
 
 [[package]]
 name = "revm-precompile"
 version = "9.0.0"
-source = "git+https://github.com/zkMIPS/revm?branch=zkm2#1fc7d7c5b919c9e4b07bbb41c48bbf6a0e6afb6c"
+source = "git+https://github.com/zkMIPS/revm?branch=zkMIPS#046eaf992b1902dd5df4eb22d3a544ec8f6e914a"
 dependencies = [
  "aurora-engine-modexp",
  "cfg-if",
  "k256",
  "once_cell",
- "revm-primitives",
+ "revm-primitives 6.0.0 (git+https://github.com/zkMIPS/revm?branch=zkMIPS)",
+ "ripemd",
+ "sha2 0.10.8",
+ "substrate-bn",
+]
+
+[[package]]
+name = "revm-precompile"
+version = "9.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm#b23ee6f2482e492f046d32f03f5a4e0beb907476"
+dependencies = [
+ "aurora-engine-modexp",
+ "cfg-if",
+ "k256",
+ "once_cell",
+ "revm-primitives 6.0.0 (git+https://github.com/zkMIPS/revm?branch=zkm)",
  "ripemd",
  "sha2 0.10.8",
  "substrate-bn",
@@ -4526,7 +4563,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "6.0.0"
-source = "git+https://github.com/zkMIPS/revm?branch=zkm2#1fc7d7c5b919c9e4b07bbb41c48bbf6a0e6afb6c"
+source = "git+https://github.com/zkMIPS/revm?branch=zkMIPS#046eaf992b1902dd5df4eb22d3a544ec8f6e914a"
 dependencies = [
  "alloy-eips 0.1.4",
  "alloy-primitives 0.7.7",
@@ -4541,17 +4578,38 @@ dependencies = [
  "hex",
  "kzg-rs",
  "serde",
- "zkm2-zkvm",
+ "zkm-zkvm 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+]
+
+[[package]]
+name = "revm-primitives"
+version = "6.0.0"
+source = "git+https://github.com/zkMIPS/revm?branch=zkm#b23ee6f2482e492f046d32f03f5a4e0beb907476"
+dependencies = [
+ "alloy-eips 0.1.4",
+ "alloy-primitives 0.7.7",
+ "auto_impl",
+ "bitflags",
+ "bitvec",
+ "c-kzg",
+ "cfg-if",
+ "dyn-clone",
+ "enumn",
+ "hashbrown 0.14.5",
+ "hex",
+ "kzg-rs",
+ "serde",
+ "zkm-runtime",
 ]
 
 [[package]]
 name = "revme"
 version = "1.1.0"
 dependencies = [
- "guest 1.1.0 (git+https://github.com/zkMIPS/revme.git?branch=cbor-zkm2)",
+ "guest 1.1.0 (git+https://github.com/zkMIPS/revme.git?branch=zkMIPS)",
  "k256",
  "libc",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -4566,7 +4624,7 @@ dependencies = [
 [[package]]
 name = "rfc6979"
 version = "0.4.0"
-source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#de899b72abbf773f6bac509ecdb886f9fe809c02"
+source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#a6713c3f75640144e92e80762b07db1e310e2085"
 dependencies = [
  "hmac",
  "subtle",
@@ -4638,11 +4696,13 @@ dependencies = [
 
 [[package]]
 name = "rsa"
-version = "0.9.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78928ac1ed176a5ca1d17e578a1825f3d81ca54cf41053a592584b020cfd691b"
+version = "0.9.6"
+source = "git+https://github.com/zkMIPS-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#b48eded4df3b8f563f09876441fcd07c7113d6b1"
 dependencies = [
+ "bytemuck",
+ "cfg-if",
  "const-oid 0.9.6",
+ "crypto-bigint 0.5.5",
  "digest 0.10.7",
  "num-bigint-dig",
  "num-integer",
@@ -4654,15 +4714,16 @@ dependencies = [
  "spki 0.7.3",
  "subtle",
  "zeroize",
+ "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
 ]
 
 [[package]]
 name = "rsa"
 version = "1.1.0"
 dependencies = [
- "rsa 0.9.8",
+ "rsa 0.9.6",
  "sha2 0.10.8",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -5241,7 +5302,7 @@ dependencies = [
  "serde_with",
  "sha2 0.10.8",
  "ssz_rs",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -5326,7 +5387,7 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/zkMIPS-patches/bn?branch=patch-0.6.0#5cc7991be6c6df8bfc1ff348969504d234db7471"
+source = "git+https://github.com/zkMIPS-patches/bn?branch=patch-0.6.0#db7d3a84eacf54295e8154a96ef16f609eaea2af"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -5336,7 +5397,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "zkm2-lib",
+ "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
 ]
 
 [[package]]
@@ -5540,7 +5601,7 @@ version = "1.1.0"
 dependencies = [
  "serde_cbor",
  "tendermint-light-client-verifier 0.40.2",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -5823,7 +5884,7 @@ checksum = "17b4795ff5edd201c7cd6dca065ae59972ce77d1b80fa0a84d94950ece7d1474"
 dependencies = [
  "indexmap 2.9.0",
  "toml_datetime",
- "winnow 0.7.4",
+ "winnow 0.7.6",
 ]
 
 [[package]]
@@ -6607,9 +6668,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.7.4"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e97b544156e9bebe1a0ffbc03484fc1ffe3100cbce3ffb17eac35f7cdd7ab36"
+checksum = "63d3fcd9bba44b03821e7d699eeee959f3126dcc4aa8e4ae18ec617c2a5cea10"
 dependencies = [
  "memchr",
 ]
@@ -6941,6 +7002,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-lib"
+version = "0.0.1"
+source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#b1a1dfa6bfd79a04d2b2dab77ac863242b298bb7"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "elliptic-curve",
+ "serde",
+ "sha2 0.10.8",
+]
+
+[[package]]
+name = "zkm-precompiles"
+version = "0.2.0"
+source = "git+https://github.com/zkMIPS/zkm#04117ce36d28ac31b80ee24beba10a917e47179d"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "serde",
+ "sha2 0.10.8",
+]
+
+[[package]]
 name = "zkm-primitives"
 version = "0.0.1"
 dependencies = [
@@ -7115,6 +7199,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-runtime"
+version = "0.2.0"
+source = "git+https://github.com/zkMIPS/zkm#04117ce36d28ac31b80ee24beba10a917e47179d"
+dependencies = [
+ "bincode",
+ "bytemuck",
+ "cfg-if",
+ "getrandom 0.2.15",
+ "lazy_static",
+ "libm",
+ "rand 0.8.5",
+ "serde",
+ "sha2 0.10.8",
+ "zkm-precompiles",
+]
+
+[[package]]
 name = "zkm-sdk"
 version = "0.0.1"
 dependencies = [
@@ -7193,7 +7294,7 @@ dependencies = [
  "tracing-subscriber",
  "zkm-derive",
  "zkm-primitives",
- "zkm-zkvm",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -7222,26 +7323,14 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2 0.10.8",
- "zkm-lib",
+ "zkm-lib 0.0.1",
  "zkm-primitives",
 ]
 
 [[package]]
-name = "zkm2-lib"
+name = "zkm-zkvm"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#0358e7f0a0a898aee2c7aab7a3a875798ab5e1b6"
-dependencies = [
- "bincode",
- "cfg-if",
- "elliptic-curve",
- "serde",
- "sha2 0.10.8",
-]
-
-[[package]]
-name = "zkm2-zkvm"
-version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkm2?branch=dev%2Finit#0358e7f0a0a898aee2c7aab7a3a875798ab5e1b6"
+source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#b1a1dfa6bfd79a04d2b2dab77ac863242b298bb7"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -7251,15 +7340,10 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2 0.10.8",
- "zkm2-lib",
+ "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
 ]
-
-[[patch.unused]]
-name = "rsa"
-version = "0.9.6"
-source = "git+https://github.com/zkMIPS-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#c8dc9547b298d54e0a570f3520de45ad87449ca9"
 
 [[patch.unused]]
 name = "secp256k1"
 version = "0.29.1"
-source = "git+https://github.com/zkMIPS-patches/rust-secp256k1?branch=patch-0.29.1#266fd11bfbe1a10552ddecc5d1ce7e957a324897"
+source = "git+https://github.com/zkMIPS-patches/rust-secp256k1?branch=patch-0.29.1#c071b3acbbba387370169f744b09c75ada45156f"
