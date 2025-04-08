@@ -4697,7 +4697,7 @@ dependencies = [
 [[package]]
 name = "rsa"
 version = "0.9.6"
-source = "git+https://github.com/zkMIPS-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#b48eded4df3b8f563f09876441fcd07c7113d6b1"
+source = "git+https://github.com/zkMIPS-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#ec57bbdbb49b6c0c09586cbe9012f159f9af1b47"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -5562,35 +5562,7 @@ dependencies = [
  "signature",
  "subtle",
  "subtle-encoding",
- "tendermint-proto 0.35.0",
- "time",
- "zeroize",
-]
-
-[[package]]
-name = "tendermint"
-version = "0.40.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bed57bd840305efef8e83b752dd63dde3bb0fc1c35b6490f0a4de3a0ffd8dd9"
-dependencies = [
- "bytes",
- "digest 0.10.7",
- "ed25519",
- "ed25519-consensus",
- "flex-error",
- "futures",
- "num-traits",
- "once_cell",
- "prost 0.13.5",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_repr",
- "sha2 0.10.8",
- "signature",
- "subtle",
- "subtle-encoding",
- "tendermint-proto 0.40.2",
+ "tendermint-proto",
  "time",
  "zeroize",
 ]
@@ -5600,7 +5572,7 @@ name = "tendermint"
 version = "1.1.0"
 dependencies = [
  "serde_cbor",
- "tendermint-light-client-verifier 0.40.2",
+ "tendermint-light-client-verifier",
  "zkm-zkvm 0.0.1",
 ]
 
@@ -5610,7 +5582,7 @@ version = "1.1.0"
 dependencies = [
  "serde_cbor",
  "serde_json",
- "tendermint-light-client-verifier 0.35.0",
+ "tendermint-light-client-verifier",
  "zkm-build",
  "zkm-sdk",
 ]
@@ -5629,19 +5601,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tendermint-light-client-verifier"
-version = "0.40.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92f2fd222980465e4aa2e04d6218014658461ae934aa5697a16ded5cf7a33492"
-dependencies = [
- "derive_more 0.99.19",
- "flex-error",
- "serde",
- "tendermint 0.40.2",
- "time",
-]
-
-[[package]]
 name = "tendermint-proto"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5653,21 +5612,6 @@ dependencies = [
  "num-traits",
  "prost 0.12.6",
  "prost-types",
- "serde",
- "serde_bytes",
- "subtle-encoding",
- "time",
-]
-
-[[package]]
-name = "tendermint-proto"
-version = "0.40.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a218320a6e92ac731ac094169cb742e3203a3ab24d30417b72cfdaab5d50c67"
-dependencies = [
- "bytes",
- "flex-error",
- "prost 0.13.5",
  "serde",
  "serde_bytes",
  "subtle-encoding",
@@ -7004,7 +6948,7 @@ dependencies = [
 [[package]]
 name = "zkm-lib"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#b1a1dfa6bfd79a04d2b2dab77ac863242b298bb7"
+source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#416269b7715f902b3b9962d5fe37fc44f3af4898"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -7330,7 +7274,7 @@ dependencies = [
 [[package]]
 name = "zkm-zkvm"
 version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#b1a1dfa6bfd79a04d2b2dab77ac863242b298bb7"
+source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#416269b7715f902b3b9962d5fe37fc44f3af4898"
 dependencies = [
  "bincode",
  "cfg-if",
