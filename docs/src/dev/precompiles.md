@@ -1,6 +1,6 @@
 # Precompiles
 
-Precompiles are built into the zkMIPS<sup>+</sup> to optimize the performance of zero-knowledge proofs (ZKPs) and related cryptographic operations. The goal is to enable more efficient handling of complex cryptographic tasks that would otherwise be computationally expensive if implemented in smart contracts.
+Precompiles are built into the zkMIPS to optimize the performance of zero-knowledge proofs (ZKPs) and related cryptographic operations. The goal is to enable more efficient handling of complex cryptographic tasks that would otherwise be computationally expensive if implemented in smart contracts.
 
 Within the zkVM, precompiles are made available as system calls executed through the `syscall` MIPS instruction. Each precompile is identified by a distinct system call number and provides a specific computational interface.
 

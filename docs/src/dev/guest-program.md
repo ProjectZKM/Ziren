@@ -1,10 +1,10 @@
 # Guest Program
 
-In zkMIPS<sup>+</sup>, the guest program is the code that will be executed and proven by the zkVM.
+In zkMIPS, the guest program is the code that will be executed and proven by the zkVM.
 
 Any program written in C, Go, Rust, etc. can be compiled into a MIPS R3000 be ELF executable file using a universal MIPS compiler, meeting the requirements.
 
-zkMIPS<sup>+</sup> provides Rust runtime libraries for guest programs to handle input/output operations:
+zkMIPS provides Rust runtime libraries for guest programs to handle input/output operations:
 - `zkm_zkvm::io::read::<T>` (for reading structured data)
 - `zkm_zkvm::io::commit::<T>` (for committing structured data)
 

@@ -55,7 +55,7 @@ fn main() {
 
 ## Proof Types
 
-zkMIPS<sup>+</sup> provides customizable proof generation options:
+zkMIPS provides customizable proof generation options:
 
 ```rust
 /// A proof generated with zkMIPS of a particular proof mode.
