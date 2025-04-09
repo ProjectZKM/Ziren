@@ -29,7 +29,7 @@ fn test_verify_groth16() {
     {
         let valid = crate::Groth16Verifier::ark_verify(
             &zkm_proof_with_public_values,
-            vkey_hash,
+            &vkey_hash,
             &crate::GROTH16_VK_BYTES,
         )
         .expect("Groth16 proof is invalid");
