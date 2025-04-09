@@ -17,6 +17,7 @@
 pub mod air;
 pub mod alu;
 pub mod bytes;
+pub mod control_flow;
 pub mod cpu;
 pub mod global;
 pub mod io;
@@ -27,13 +28,11 @@ pub mod operations;
 pub mod program;
 pub mod shape;
 pub mod syscall;
-pub mod control_flow;
 pub mod utils;
 pub use cpu::*;
 pub use mips::*;
 
 /// The global version for all components of zkMIPS.
-
 ///
 /// This string should be updated whenever any step in verifying an zkMIPS proof changes, including
 /// core, recursion, and plonk-bn254. This string is used to download zkMIPS artifacts and the gnark

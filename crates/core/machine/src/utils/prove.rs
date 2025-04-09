@@ -15,18 +15,17 @@ use size::Size;
 use std::thread::ScopedJoinHandle;
 use thiserror::Error;
 use zkm_stark::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey,
-    MachineVerificationError,
+    koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey, MachineVerificationError,
 };
 
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 
+use crate::shape::CoreShapeConfig;
 use crate::{
     io::ZKMStdin,
     utils::{chunk_vec, concurrency::TurnBasedSync},
 };
-use crate::shape::CoreShapeConfig;
 use zkm_core_executor::{
     events::{format_table_line, sorted_table_lines},
     subproof::NoOpSubproofVerifier,

@@ -5,7 +5,10 @@
 pub mod tests {
     use crate::{Instruction, Opcode, Program};
 
-    use test_artifacts::{FIBONACCI_ELF, HELLO_WORLD_ELF, KECCAK_SPONGE_ELF, PANIC_ELF, SECP256R1_ADD_ELF, SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF};
+    use test_artifacts::{
+        FIBONACCI_ELF, HELLO_WORLD_ELF, KECCAK_SPONGE_ELF, PANIC_ELF, SECP256R1_ADD_ELF,
+        SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF,
+    };
 
     #[must_use]
     pub fn simple_program() -> Program {

@@ -4,12 +4,12 @@ use std::str::FromStr;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use num::Integer;
-use p3_koala_bear::KoalaBear;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use p3_util::log2_ceil_usize;
 use thiserror::Error;
 
-use zkm_core_executor::{ExecutionRecord, Program, MipsAirId};
+use zkm_core_executor::{ExecutionRecord, MipsAirId, Program};
 use zkm_stark::{
     air::MachineAir,
     shape::{OrderedShape, Shape, ShapeCluster},
@@ -215,9 +215,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                                 && num_global_events <= (1 << global_events_height)
                             {
                                 record.shape.as_mut().unwrap().extend(
-                                    shape
-                                        .iter()
-                                        .map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
+                                    shape.iter().map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
                                 );
                                 return Ok(());
                             }

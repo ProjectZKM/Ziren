@@ -130,8 +130,9 @@ impl Default for ZKMCoreOpts {
         };
 
         tracing::info!(
-            "shard_size: {:?}, shard_batch_size: {:?}", 
-            opts.shard_size, opts.shard_batch_size,
+            "shard_size: {:?}, shard_batch_size: {:?}",
+            opts.shard_size,
+            opts.shard_batch_size,
         );
 
         let divisor = 1 << default_log2_divisor;

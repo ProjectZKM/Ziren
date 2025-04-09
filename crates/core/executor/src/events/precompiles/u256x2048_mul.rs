@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::events::{
-    memory::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
-};
+use crate::events::memory::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord};
 
 /// `U256xU2048` Mul Event.
 ///

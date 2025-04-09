@@ -3,9 +3,7 @@ use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm_core_executor::{
-    events::MemoryAccessPosition, syscalls::SyscallCode, Opcode
-};
+use zkm_core_executor::{events::MemoryAccessPosition, syscalls::SyscallCode, Opcode};
 use zkm_stark::{
     air::{
         BaseAirBuilder, LookupScope, PublicValues, ZKMAirBuilder, POSEIDON_NUM_WORDS,
@@ -17,7 +15,7 @@ use zkm_stark::{
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},
     memory::MemoryCols,
-    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
+    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
 };
 
 use super::{columns::SyscallInstrColumns, SyscallInstrsChip};

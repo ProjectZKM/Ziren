@@ -16,10 +16,9 @@ use zkm_recursion_compiler::{
 };
 use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
-    air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, Challenger,
-    shape::OrderedShape,
-    Chip, ChipOpenedValues, InnerChallenge, ShardCommitment, ShardOpenedValues,
-    ShardProof, Val, PROOF_MAX_NUM_PVS,
+    air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
+    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, ShardCommitment,
+    ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
 use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
@@ -40,6 +39,7 @@ use crate::{
 #[derive(Clone)]
 pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
     pub commitment: ShardCommitment<SC::DigestVariable>,
+    #[allow(clippy::type_complexity)]
     pub opened_values: ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
     pub opening_proof: FriProofVariable<C, SC>,
     pub chip_ordering: HashMap<String, usize>,
@@ -311,11 +311,8 @@ where
                 builder.assert_digest_zero_v2(is_real, global_sum);
             }
 
-            let has_local_lookups = chip
-                .sends()
-                .iter()
-                .chain(chip.receives())
-                .any(|i| i.scope == LookupScope::Local);
+            let has_local_lookups =
+                chip.sends().iter().chain(chip.receives()).any(|i| i.scope == LookupScope::Local);
             if !has_local_lookups {
                 builder.assert_ext_eq(opening.local_cumulative_sum, C::EF::ZERO.cons());
             }

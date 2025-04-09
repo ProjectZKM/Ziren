@@ -1,5 +1,3 @@
-use std::iter::repeat;
-
 use p3_field::PrimeField64;
 use vec_map::{Entry, VecMap};
 
@@ -95,7 +93,7 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
 
     fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) -> &mut MemoryEntry<F> {
         let addr_usize = addr.as_usize();
-        self.0.extend(repeat(None).take((addr_usize + 1).saturating_sub(self.0.len())));
+        self.0.extend(std::iter::repeat_n(None, (addr_usize + 1).saturating_sub(self.0.len())));
         match &mut self.0[addr_usize] {
             Some(entry) => panic!(
                 "tried to write to assigned address: {entry:?}\nbacktrace: {:?}",

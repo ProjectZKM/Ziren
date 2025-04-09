@@ -41,6 +41,7 @@ impl Syscall for Sha256CompressSyscall {
 
         // Execute the "initialize" phase where we read in the h values.
         let mut hx = [0u32; 8];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..8 {
             let (record, value) = rt.mr(h_ptr + i as u32 * 4);
             h_read_records.push(record);
@@ -106,8 +107,15 @@ impl Syscall for Sha256CompressSyscall {
             h_write_records: h_write_records.try_into().unwrap(),
             local_mem_access: rt.postprocess(),
         });
-        let syscall_event =
-            rt.rt.syscall_event(start_clk, None, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
+        let syscall_event = rt.rt.syscall_event(
+            start_clk,
+            None,
+            None,
+            rt.next_pc,
+            syscall_code.syscall_id(),
+            arg1,
+            arg2,
+        );
         rt.add_precompile_event(syscall_code, syscall_event, event);
 
         None

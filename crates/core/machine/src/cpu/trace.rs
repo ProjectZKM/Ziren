@@ -57,13 +57,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.cpu_events[idx];
                         let instruction = &input.program.fetch(event.pc);
-                        self.event_to_row(
-                            event,
-                            cols,
-                            &mut byte_lookup_events,
-                            shard,
-                            instruction,
-                        );
+                        self.event_to_row(event, cols, &mut byte_lookup_events, shard, instruction);
                     }
                 });
             },
@@ -89,13 +83,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
                     let mut row = [F::ZERO; NUM_CPU_COLS];
                     let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
                     let instruction = &input.program.fetch(op.pc);
-                    self.event_to_row::<F>(
-                        op,
-                        cols,
-                        &mut blu,
-                        shard,
-                        instruction,
-                    );
+                    self.event_to_row::<F>(op, cols, &mut blu, shard, instruction);
                 });
                 blu
             })
@@ -133,7 +121,8 @@ impl CpuChip {
         cols.instruction.populate(instruction);
 
         cols.op_a_immutable = F::from_bool(
-            instruction.is_memory_store_instruction_except_sc() || instruction.is_branch_instruction(),
+            instruction.is_memory_store_instruction_except_sc()
+                || instruction.is_branch_instruction(),
         );
 
         cols.is_memory = F::from_bool(
@@ -171,7 +160,7 @@ impl CpuChip {
         if let Some(record) = event.hi_record {
             cols.op_hi_access.populate(record, blu_events);
         }
-        
+
         // Populate memory accesses for a, b, and c.
         if let Some(record) = event.a_record {
             if instruction.is_syscall_instruction() {
@@ -183,7 +172,7 @@ impl CpuChip {
                 cols.op_a_access.populate(record, blu_events);
             }
         }
-        
+
         if let Some(MemoryRecordEnum::Read(record)) = event.b_record {
             cols.op_b_access.populate(record, blu_events);
         }
@@ -200,7 +189,7 @@ impl CpuChip {
         }
 
         cols.has_hi = F::from_bool(instruction.is_mult_div_instruction());
-    
+
         // Populate range checks for a.
         let a_bytes = cols
             .op_a_access
@@ -244,20 +233,8 @@ impl CpuChip {
         cols.clk_16bit_limb = F::from_canonical_u16(clk_16bit_limb);
         cols.clk_8bit_limb = F::from_canonical_u8(clk_8bit_limb);
 
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            U16Range,
-            shard as u16,
-            0,
-            0,
-            0,
-        ));
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            U16Range,
-            clk_16bit_limb,
-            0,
-            0,
-            0,
-        ));
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(U16Range, shard as u16, 0, 0, 0));
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(U16Range, clk_16bit_limb, 0, 0, 0));
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(
             ByteOpcode::U8Range,
             0,
@@ -266,5 +243,4 @@ impl CpuChip {
             clk_8bit_limb as u8,
         ));
     }
-
 }

@@ -61,7 +61,7 @@ impl<F: Field> AddCarryOperation<F> {
             record.add_u8_range_checks(&b);
             record.add_u8_range_checks(&expected.to_le_bytes());
         }
-        (expected,  carry[3] as u32)
+        (expected, carry[3] as u32)
     }
 
     pub fn eval<AB: ZKMAirBuilder>(

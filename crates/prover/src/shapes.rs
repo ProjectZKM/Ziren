@@ -18,10 +18,13 @@ use zkm_recursion_circuit::machine::{
     ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape, ZKMDeferredShape,
     ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
 };
-use zkm_recursion_core::{shape::{RecursionShape, RecursionShapeConfig}, RecursionProgram};
+use zkm_recursion_core::{
+    shape::{RecursionShape, RecursionShapeConfig},
+    RecursionProgram,
+};
 use zkm_stark::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
-use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver, ShrinkAir};
+use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir, ZKMProver};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {

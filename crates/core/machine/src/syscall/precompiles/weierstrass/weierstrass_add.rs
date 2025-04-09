@@ -107,30 +107,19 @@ impl<E: EllipticCurve> WeierstrassAddAssignChip<E> {
                 cols.slope_squared.populate(blu_events, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_q_x =
                 cols.p_x_plus_q_x.populate(blu_events, &p_x, &q_x, FieldOperation::Add);
-            cols.x3_ins.populate(
-                blu_events,
-                &slope_squared,
-                &p_x_plus_q_x,
-                FieldOperation::Sub,
-            )
+            cols.x3_ins.populate(blu_events, &slope_squared, &p_x_plus_q_x, FieldOperation::Sub)
         };
 
         // y = slope * (p.x - x_3n) - p.y.
         {
-            let p_x_minus_x =
-                cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
+            let p_x_minus_x = cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
-            cols.y3_ins.populate(
-                blu_events,
-                &slope_times_p_x_minus_x,
-                &p_y,
-                FieldOperation::Sub,
-            );
+            cols.y3_ins.populate(blu_events, &slope_times_p_x_minus_x, &p_y, FieldOperation::Sub);
         }
     }
 }
@@ -214,14 +203,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         let cols: &mut WeierstrassAddAssignCols<F, E::BaseField> =
             dummy_row.as_mut_slice().borrow_mut();
         let zero = BigUint::ZERO;
-        Self::populate_field_ops(
-            &mut vec![],
-            cols,
-            zero.clone(),
-            zero.clone(),
-            zero.clone(),
-            zero,
-        );
+        Self::populate_field_ops(&mut vec![], cols, zero.clone(), zero.clone(), zero.clone(), zero);
 
         values.chunks_mut(chunk_size * num_cols).enumerate().par_bridge().for_each(|(i, rows)| {
             rows.chunks_mut(num_cols).enumerate().for_each(|(j, row)| {

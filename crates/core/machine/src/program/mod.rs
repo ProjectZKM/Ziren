@@ -166,11 +166,7 @@ where
         let mult_local: &ProgramMultiplicityCols<AB::Var> = (*mult_local).borrow();
 
         // Constrain the lookup with CPU table
-        builder.receive_program(
-            prep_local.pc,
-            prep_local.instruction,
-            mult_local.multiplicity,
-        );
+        builder.receive_program(prep_local.pc, prep_local.instruction, mult_local.multiplicity);
     }
 }
 

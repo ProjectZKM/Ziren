@@ -157,8 +157,7 @@ where
             if !chip.included(shard) {
                 continue;
             }
-            let (_, count) =
-                debug_lookups::<SC, A>(chip, pkey, shard, lookup_kinds.clone(), scope);
+            let (_, count) = debug_lookups::<SC, A>(chip, pkey, shard, lookup_kinds.clone(), scope);
             total_events += count.len();
             for (key, value) in count.iter() {
                 let entry =
@@ -177,11 +176,7 @@ where
     let mut any_nonzero = false;
     for (key, (value, chip_values)) in final_map.clone() {
         if !Val::<SC>::is_zero(&value) {
-            tracing::info!(
-                "Lookup key: {} Send-Receive Discrepancy: {}",
-                key,
-                field_to_int(value)
-            );
+            tracing::info!("Lookup key: {} Send-Receive Discrepancy: {}", key, field_to_int(value));
             any_nonzero = true;
             for (chip, chip_value) in chip_values {
                 tracing::info!(

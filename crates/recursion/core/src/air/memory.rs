@@ -51,7 +51,7 @@ impl<T: PrimeField32> MemoryInitCols<T> {
 /// NOTE: These are very similar to core/src/memory/columns.rs
 /// The reason we cannot use those structs directly is that they use "shard".
 /// In our recursive VM, we don't have shards, we only have `clk` (i.e. timestamp).
-
+///
 /// Memory read access.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]

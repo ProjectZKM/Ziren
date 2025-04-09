@@ -5,9 +5,9 @@
 //! the constraints.
 
 mod add;
-mod addcarry;
 mod add4;
 mod add5;
+mod addcarry;
 mod and;
 pub mod field;
 mod fixed_rotate_right;
@@ -26,9 +26,9 @@ pub mod poseidon2;
 mod xor;
 
 pub use add::*;
-pub use addcarry::*;
 pub use add4::*;
 pub use add5::*;
+pub use addcarry::*;
 pub use and::*;
 pub use fixed_rotate_right::*;
 pub use fixed_shift_right::*;

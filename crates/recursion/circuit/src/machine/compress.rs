@@ -21,9 +21,9 @@ use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS
 
 use zkm_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
-    Dom, ShardProof, StarkGenericConfig, StarkMachine, StarkVerifyingKey, Word,
-    DIGEST_SIZE,
+    koala_bear_poseidon2::KoalaBearPoseidon2,
+    shape::OrderedShape,
+    Dom, ShardProof, StarkGenericConfig, StarkMachine, StarkVerifyingKey, Word, DIGEST_SIZE,
 };
 
 use crate::{
@@ -264,8 +264,7 @@ where
             // // Consistency checks for all accumulated values.
 
             // Assert that the zkm_vk digest is always the same.
-            for (digest, current) in zkm_vk_digest.iter().zip(current_public_values.zkm_vk_digest)
-            {
+            for (digest, current) in zkm_vk_digest.iter().zip(current_public_values.zkm_vk_digest) {
                 builder.assert_felt_eq(*digest, current);
             }
 

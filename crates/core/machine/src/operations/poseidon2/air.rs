@@ -1,8 +1,8 @@
 use std::array;
 
 use p3_air::PairBuilder;
-use p3_koala_bear::KoalaBear;
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_poseidon2::matmul_internal;
 use zkm_primitives::RC_16_30_U32;
 use zkm_stark::air::MachineAirBuilder;

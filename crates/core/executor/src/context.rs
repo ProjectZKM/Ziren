@@ -106,10 +106,7 @@ impl<'a> ZKMContextBuilder<'a> {
     /// Add a subproof verifier.
     ///
     /// The verifier is used to sanity check `verify_zkm_proof` during runtime.
-    pub fn subproof_verifier(
-        &mut self,
-        subproof_verifier: &'a dyn SubproofVerifier,
-    ) -> &mut Self {
+    pub fn subproof_verifier(&mut self, subproof_verifier: &'a dyn SubproofVerifier) -> &mut Self {
         self.subproof_verifier = Some(subproof_verifier);
         self
     }
@@ -164,9 +161,8 @@ mod tests {
     #[test]
     fn subproof_verifier() {
         let verifier = NoOpSubproofVerifier;
-        let ZKMContext { subproof_verifier, .. } = ZKMContext::builder()
-            .subproof_verifier(&verifier)
-            .build();
+        let ZKMContext { subproof_verifier, .. } =
+            ZKMContext::builder().subproof_verifier(&verifier).build();
         assert!(subproof_verifier.is_some());
     }
 }

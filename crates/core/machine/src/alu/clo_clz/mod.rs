@@ -20,7 +20,7 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
-    ByteOpcode, ExecutionRecord, Opcode, Program
+    ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::MachineAir, Word};

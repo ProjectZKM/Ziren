@@ -42,8 +42,8 @@ use zkm_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMC
 use zkm_core_machine::{
     io::ZKMStdin,
     mips::MipsAir,
-    shape::CoreShapeConfig,
     reduce::ZKMReduceProof,
+    shape::CoreShapeConfig,
     utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
 };
 use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
@@ -66,16 +66,19 @@ use zkm_recursion_compiler::{
     ir::{Builder, Witness},
 };
 use zkm_recursion_core::{
-    air::RecursionPublicValues, machine::RecursionAir, runtime::ExecutionRecord,
-    shape::{RecursionShape, RecursionShapeConfig}, stark::KoalaBearPoseidon2Outer, RecursionProgram,
-    Runtime as RecursionRuntime,
+    air::RecursionPublicValues,
+    machine::RecursionAir,
+    runtime::ExecutionRecord,
+    shape::{RecursionShape, RecursionShapeConfig},
+    stark::KoalaBearPoseidon2Outer,
+    RecursionProgram, Runtime as RecursionRuntime,
 };
 pub use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 use zkm_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover};
 use zkm_stark::{
-    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge,
-    MachineProver, ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
-    ZKMProverOpts, DIGEST_SIZE,
+    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
+    ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts, ZKMProverOpts,
+    DIGEST_SIZE,
 };
 use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 
@@ -929,7 +932,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let input_with_merkle = self.make_merkle_proofs(input);
 
-        let program = self.shrink_program(ShrinkAir::<KoalaBear>::shrink_shape(), &input_with_merkle);
+        let program =
+            self.shrink_program(ShrinkAir::<KoalaBear>::shrink_shape(), &input_with_merkle);
 
         // Run the compress program.
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(

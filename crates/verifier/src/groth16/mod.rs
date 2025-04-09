@@ -7,20 +7,20 @@ use bn::Fr;
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
 
+use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
 pub(crate) use converter::{load_groth16_proof_from_bytes, load_groth16_verifying_key_from_bytes};
 pub(crate) use verify::*;
-use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
 
 use error::Groth16Error;
 
-#[cfg(feature = "ark")]
-use zkm_sdk::ZKMProofWithPublicValues;
 #[cfg(feature = "ark")]
 use crate::ArkGroth16Error;
 #[cfg(feature = "ark")]
 use ark_bn254::Bn254;
 #[cfg(feature = "ark")]
 use ark_groth16::{r1cs_to_qap::LibsnarkReduction, Groth16};
+#[cfg(feature = "ark")]
+use zkm_sdk::ZKMProofWithPublicValues;
 #[cfg(feature = "ark")]
 pub mod ark_converter;
 
@@ -91,7 +91,8 @@ impl Groth16Verifier {
             &ark_proof.groth16_vk,
             &ark_proof.proof,
             &ark_proof.public_inputs,
-        ).map_err(|_| ArkGroth16Error::ProofVerificationFailed)
+        )
+        .map_err(|_| ArkGroth16Error::ProofVerificationFailed)
     }
 
     /// Verifies a Gnark Groth16 proof using raw byte inputs.

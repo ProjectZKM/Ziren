@@ -37,7 +37,6 @@ where
             + local.is_jumpi * Opcode::Jumpi.as_field::<AB::F>()
             + local.is_jumpdirect * Opcode::JumpDirect.as_field::<AB::F>();
 
-  
         // SAFETY: This checks the following.
         // - `num_extra_cycles = 0`
         // - `op_a_immutable = 0`

@@ -1,17 +1,17 @@
 use anyhow::Result;
 use ark_bn254::{Bn254, Config, Fr, FrConfig, G1Affine, G2Affine};
-use ark_ec::AffineRepr;
 use ark_ec::bn::Bn;
+use ark_ec::AffineRepr;
 use ark_ff::{Fp, MontBackend, PrimeField};
-use ark_groth16::{Proof, PreparedVerifyingKey, VerifyingKey};
+use ark_groth16::{PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, Compress, Validate};
-use thiserror::Error;
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 
 use zkm_sdk::ZKMProofWithPublicValues;
 
-use crate::{decode_zkm_vkey_hash, hash_public_inputs};
 use crate::error::Error;
+use crate::{decode_zkm_vkey_hash, hash_public_inputs};
 
 const GNARK_MASK: u8 = 0b11 << 6;
 const GNARK_COMPRESSED_POSITIVE: u8 = 0b10 << 6;

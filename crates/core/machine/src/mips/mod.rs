@@ -1,8 +1,7 @@
 use core::fmt;
 use itertools::Itertools;
 use zkm_core_executor::{
-    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord,
-    Program, MipsAirId,
+    events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, MipsAirId, Program,
 };
 
 use crate::{
@@ -29,11 +28,11 @@ pub(crate) mod mips_chips {
             ShiftRightChip,
         },
         bytes::ByteChip,
+        control_flow::{BranchChip, JumpChip},
         cpu::CpuChip,
         memory::{MemoryGlobalChip, MemoryInstructionsChip},
-        program::ProgramChip,
-        control_flow::{BranchChip, JumpChip},
         misc::MiscInstrsChip,
+        program::ProgramChip,
         syscall::{
             chip::SyscallChip,
             instructions::SyscallInstrsChip,
@@ -263,7 +262,7 @@ impl<F: PrimeField32> MipsAir<F> {
         chips.push(secp256r1_double_assign);
 
         let keccak_sponge = Chip::new(MipsAir::KeccakSponge(KeccakSpongeChip::new()));
-        costs.insert(keccak_sponge.name(),  24 * keccak_sponge.cost());
+        costs.insert(keccak_sponge.name(), 24 * keccak_sponge.cost());
         chips.push(keccak_sponge);
 
         let bn254_add_assign = Chip::new(MipsAir::Bn254Add(WeierstrassAddAssignChip::<
@@ -406,8 +405,9 @@ impl<F: PrimeField32> MipsAir<F> {
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
-        
-        let memory_instructions = Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
+
+        let memory_instructions =
+            Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
         costs.insert(memory_instructions.name(), memory_instructions.cost());
         chips.push(memory_instructions);
 
@@ -420,10 +420,7 @@ impl<F: PrimeField32> MipsAir<F> {
 
     /// Get the heights of the preprocessed chips for a given program.
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(MipsAirId, usize)> {
-        vec![
-            (MipsAirId::Program, program.instructions.len()),
-            (MipsAirId::Byte, 1 << 16),
-        ]
+        vec![(MipsAirId::Program, program.instructions.len()), (MipsAirId::Byte, 1 << 16)]
     }
 
     /// Get the heights of the chips for a given execution record.
@@ -470,15 +467,17 @@ impl<F: PrimeField32> MipsAir<F> {
             .map(|events| {
                 let mut num_rows = events.len() * self.rows_per_event();
                 if self.syscall_code() == SyscallCode::KECCAK_SPONGE {
-                    num_rows = events.iter().map(|(_, pre_e)| {
-                        if let PrecompileEvent::KeccakSponge(event) = pre_e {
-                            event.num_blocks() * 24
-                        } else {
-                            unreachable!()
-                        }
-                    }).sum::<usize>();
+                    num_rows = events
+                        .iter()
+                        .map(|(_, pre_e)| {
+                            if let PrecompileEvent::KeccakSponge(event) = pre_e {
+                                event.num_blocks() * 24
+                            } else {
+                                unreachable!()
+                            }
+                        })
+                        .sum::<usize>();
                 }
-
 
                 (
                     num_rows,
@@ -555,8 +554,7 @@ impl<F: PrimeField32> MipsAir<F> {
                     .iter()
                     .chain(chip.receives())
                     .filter(|lookup| {
-                        lookup.kind == LookupKind::Memory
-                            && lookup.scope == LookupScope::Local
+                        lookup.kind == LookupKind::Memory && lookup.scope == LookupScope::Local
                     })
                     .count();
 
@@ -667,7 +665,7 @@ pub mod tests {
             fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
             simple_program, ssz_withdrawals_program,
         },
-        MipsAirId, Instruction, Opcode, Program,
+        Instruction, MipsAirId, Opcode, Program,
     };
     use zkm_stark::air::MachineAir;
     use zkm_stark::{

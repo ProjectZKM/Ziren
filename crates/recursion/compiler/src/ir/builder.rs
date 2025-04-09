@@ -83,7 +83,7 @@ impl<T> IntoIterator for TracedVec<T> {
         let vec_len = self.vec.len();
         let mut traces = self.traces;
         if traces.len() < vec_len {
-            traces.extend(std::iter::repeat(None).take(vec_len - traces.len()));
+            traces.extend(std::iter::repeat_n(None, vec_len - traces.len()));
         }
         self.vec.into_iter().zip(traces)
     }

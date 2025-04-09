@@ -1,8 +1,8 @@
+use crate::memory::MemoryReadWriteCols;
+use crate::operations::AddCarryOperation;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;
-use crate::operations::AddCarryOperation;
-use crate::memory::MemoryReadWriteCols;
 
 pub const NUM_MADDSUB_COLS: usize = size_of::<MaddsubCols<u8>>();
 

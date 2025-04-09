@@ -1,4 +1,4 @@
-use crate::misc::columns::{SextCols, MovcondCols, MaddsubCols, InsCols, ExtCols};
+use crate::misc::columns::{ExtCols, InsCols, MaddsubCols, MovcondCols, SextCols};
 use std::{
     fmt::{Debug, Formatter},
     mem::{size_of, transmute},

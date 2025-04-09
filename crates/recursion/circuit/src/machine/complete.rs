@@ -1,6 +1,6 @@
 use itertools::Itertools;
-use p3_koala_bear::KoalaBear;
 use p3_field::FieldAlgebra;
+use p3_koala_bear::KoalaBear;
 
 use zkm_recursion_compiler::circuit::CircuitV2Builder;
 use zkm_recursion_compiler::ir::{Builder, Config, Felt};

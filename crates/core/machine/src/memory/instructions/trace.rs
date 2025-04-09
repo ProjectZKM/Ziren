@@ -160,19 +160,19 @@ impl MemoryInstructionsChip {
                 Opcode::LWL => {
                     // LWL:
                     //    let val = mem << (24 - (rs & 3) * 8);
-                    //    let mask = 0xffFFffFFu32 << (24 - (rs & 3) * 8);
+                    //    let mask = 0xFFFFFFFF_u32 << (24 - (rs & 3) * 8);
                     //    (rt & (!mask)) | val
                     let val = mem_value << (24 - addr_ls_two_bits * 8);
-                    let mask = 0xffFFffFFu32 << (24 - addr_ls_two_bits * 8);
+                    let mask = 0xFFFFFFFF_u32 << (24 - addr_ls_two_bits * 8);
                     cols.unsigned_mem_val = ((mem_value & (!mask)) | val).into();
                 }
                 Opcode::LWR => {
                     // LWR:
                     //     let val = mem >> ((rs & 3) * 8);
-                    //     let mask = 0xffFFffFFu32 >> ((rs & 3) * 8);
+                    //     let mask = 0xFFFFFFFF_u322 >> ((rs & 3) * 8);
                     //     (rt & (!mask)) | val
                     let val = mem_value >> (addr_ls_two_bits * 8);
-                    let mask = 0xffFFffFFu32 >> (addr_ls_two_bits * 8);
+                    let mask = 0xFFFFFFFF_u32 >> (addr_ls_two_bits * 8);
                     cols.unsigned_mem_val = ((mem_value & (!mask)) | val).into();
                 }
                 Opcode::LL => {

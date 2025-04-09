@@ -2,7 +2,7 @@ use std::{cmp::Ordering, collections::BTreeMap, path::PathBuf, sync::mpsc};
 
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
-use zkm_core_executor::{Executor, Program, MipsAirId, ZKMContext};
+use zkm_core_executor::{Executor, MipsAirId, Program, ZKMContext};
 use zkm_core_machine::{io::ZKMStdin, mips::MipsAir, utils::setup_logger};
 use zkm_stark::{shape::Shape, ZKMCoreOpts};
 
@@ -59,7 +59,7 @@ fn main() {
     let (tx, rx) = mpsc::sync_channel(10);
     let program_list = args.list;
     for path in program_list {
-        /* 
+        /*
         // Download program and stdin files from S3.
         tracing::info!("download elf and input for {}", s3_path);
 

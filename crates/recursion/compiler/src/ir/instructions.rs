@@ -1,5 +1,3 @@
-#![deny(clippy::large_enum_variant)]
-
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_stark::septic_curve::SepticCurve;
 
@@ -13,6 +11,7 @@ use super::{
 /// Programs written in the DSL can compile both to the recursive zkVM and the R1CS or Plonk-ish
 /// circuits.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum DslIr<C: Config> {
     // Immediates.
     /// Assigns an immediate to a variable (var = imm).

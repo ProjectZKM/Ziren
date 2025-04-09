@@ -1,4 +1,4 @@
-use core::iter::{once, repeat};
+use core::iter::once;
 use p3_air::{AirBuilder, AirBuilderWithPublicValues};
 use p3_field::FieldAlgebra;
 use zkm_stark::{
@@ -52,10 +52,7 @@ pub trait RecursionMemoryAirBuilder: RecursionLookupAirBuilder {
             AirLookup::new(prev_values, is_real.clone(), LookupKind::Memory),
             LookupScope::Local,
         );
-        self.send(
-            AirLookup::new(current_values, is_real, LookupKind::Memory),
-            LookupScope::Local,
-        );
+        self.send(AirLookup::new(current_values, is_real, LookupKind::Memory), LookupScope::Local);
     }
 
     fn recursion_eval_memory_access_single<E: Into<Self::Expr> + Clone>(
@@ -78,22 +75,19 @@ pub trait RecursionMemoryAirBuilder: RecursionLookupAirBuilder {
         let prev_values = once(prev_timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.prev_value().clone().into()))
-            .chain(repeat(Self::Expr::ZERO).take(3))
+            .chain(std::iter::repeat_n(Self::Expr::ZERO, 3))
             .collect();
         let current_values = once(timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.value().clone().into()))
-            .chain(repeat(Self::Expr::ZERO).take(3))
+            .chain(std::iter::repeat_n(Self::Expr::ZERO, 3))
             .collect();
 
         self.receive(
             AirLookup::new(prev_values, is_real.clone(), LookupKind::Memory),
             LookupScope::Local,
         );
-        self.send(
-            AirLookup::new(current_values, is_real, LookupKind::Memory),
-            LookupScope::Local,
-        );
+        self.send(AirLookup::new(current_values, is_real, LookupKind::Memory), LookupScope::Local);
     }
 
     /// Verifies that the memory access happens after the previous memory access.
@@ -230,10 +224,7 @@ pub trait RecursionLookupAirBuilder: BaseAirBuilder {
     ) {
         let table_lookup_vals = table.iter().map(|x| x.clone().into());
         let values = once(opcode.into()).chain(table_lookup_vals).collect();
-        self.send(
-            AirLookup::new(values, is_real.into(), LookupKind::Syscall),
-            LookupScope::Local,
-        );
+        self.send(AirLookup::new(values, is_real.into(), LookupKind::Syscall), LookupScope::Local);
     }
 
     fn receive_table<E: Into<Self::Expr> + Clone>(

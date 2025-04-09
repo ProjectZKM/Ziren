@@ -11,8 +11,7 @@ mod tests {
     use test_artifacts::U256XU2048_MUL_ELF;
     use zkm_core_executor::{
         events::{
-            MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,
-            U256xU2048MulEvent,
+            MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent, U256xU2048MulEvent,
         },
         syscalls::SyscallCode,
         ExecutionRecord, Program,

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::MemoryWriteRecord;
+use serde::{Deserialize, Serialize};
 
 /// Syscall Event.
 ///

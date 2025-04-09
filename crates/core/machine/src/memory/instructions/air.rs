@@ -6,13 +6,11 @@ use p3_matrix::Matrix;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::{
-    air::{ZKMCoreAirBuilder, WordAirBuilder},
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
     memory::MemoryCols,
     operations::KoalaBearWordRangeChecker,
 };
-use zkm_core_executor::{
-    events::MemoryAccessPosition, ByteOpcode, Opcode
-};
+use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode};
 
 use super::{columns::MemoryInstructionsColumns, MemoryInstructionsChip};
 
@@ -186,7 +184,16 @@ impl MemoryInstructionsChip {
 
         // On memory load instructions, make sure that the memory value is not changed.
         builder
-            .when(local.is_lb + local.is_lbu + local.is_lh + local.is_lhu + local.is_lw + local.is_lwl + local.is_lwr + local.is_ll)
+            .when(
+                local.is_lb
+                    + local.is_lbu
+                    + local.is_lh
+                    + local.is_lhu
+                    + local.is_lw
+                    + local.is_lwl
+                    + local.is_lwr
+                    + local.is_ll,
+            )
             .assert_word_eq(*local.memory_access.value(), *local.memory_access.prev_value());
     }
 
@@ -316,7 +323,7 @@ impl MemoryInstructionsChip {
         builder
             .when(local.is_sw)
             .assert_word_eq(mem_val.map(|x| x.into()), a_val.map(|x| x.into()));
-    
+
         // When the instruction is SWL: compute the expected stored value
         let swl_expected_stored_value = Word([
             a_val[3] * offset_is_zero.clone()
@@ -433,43 +440,38 @@ impl MemoryInstructionsChip {
         let lwr_expected_load_value = Word([
             mem_val[0] * offset_is_zero.clone()
                 + mem_val[1] * local.ls_bits_is_one
-                + mem_val[2] *local.ls_bits_is_two
+                + mem_val[2] * local.ls_bits_is_two
                 + mem_val[3] * local.ls_bits_is_three,
             mem_val[1] * offset_is_zero.clone()
                 + mem_val[2] * local.ls_bits_is_one
-                + mem_val[3] *local.ls_bits_is_two
+                + mem_val[3] * local.ls_bits_is_two
                 + prev_a_val[1] * local.ls_bits_is_three,
             mem_val[2] * offset_is_zero.clone()
                 + mem_val[3] * local.ls_bits_is_one
-                + prev_a_val[2]
-                    * (one.clone() - local.ls_bits_is_one - offset_is_zero.clone()),
+                + prev_a_val[2] * (one.clone() - local.ls_bits_is_one - offset_is_zero.clone()),
             mem_val[3] * offset_is_zero.clone()
                 + prev_a_val[3] * (one.clone() - offset_is_zero.clone()),
         ]);
-        builder
-            .when(local.is_lwr)
-            .assert_word_eq(a_val.map(|x| x.into()), lwr_expected_load_value);
+        builder.when(local.is_lwr).assert_word_eq(a_val.map(|x| x.into()), lwr_expected_load_value);
 
         // Compute the expected stored value for a LWL instruction.
         let lwl_expected_load_value = Word([
             mem_val[0] * local.ls_bits_is_three
                 + prev_a_val[0] * (one.clone() - local.ls_bits_is_three),
             mem_val[1] * local.ls_bits_is_three
-                + mem_val[0] *local.ls_bits_is_two
+                + mem_val[0] * local.ls_bits_is_two
                 + prev_a_val[1] * local.ls_bits_is_one
                 + prev_a_val[1] * offset_is_zero.clone(),
             mem_val[2] * local.ls_bits_is_three
-                + mem_val[1] *local.ls_bits_is_two
+                + mem_val[1] * local.ls_bits_is_two
                 + mem_val[0] * local.ls_bits_is_one
                 + prev_a_val[2] * offset_is_zero.clone(),
             mem_val[3] * local.ls_bits_is_three
-                + mem_val[2] *local.ls_bits_is_two
+                + mem_val[2] * local.ls_bits_is_two
                 + mem_val[1] * local.ls_bits_is_one
                 + mem_val[0] * offset_is_zero.clone(),
         ]);
-        builder
-            .when(local.is_lwl)
-            .assert_word_eq(a_val.map(|x| x.into()), lwl_expected_load_value);
+        builder.when(local.is_lwl).assert_word_eq(a_val.map(|x| x.into()), lwl_expected_load_value);
 
         // Compute the expected stored value for a LL instruction.
         builder.when(local.is_ll).assert_word_eq(a_val.map(|x| x.into()), mem_val);
@@ -477,12 +479,8 @@ impl MemoryInstructionsChip {
         builder.when(local.is_ll).assert_one(offset_is_zero.clone());
 
         // value stay the same.
-        builder
-            .when(local.is_lwr)
-            .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
-        builder
-            .when(local.is_lwl)
-            .assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
+        builder.when(local.is_lwr).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
+        builder.when(local.is_lwl).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
         builder.when(local.is_ll).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
     }
 

@@ -94,7 +94,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
                     } else {
                         unreachable!()
                     };
-                    self.event_to_rows::<F>(&event, &mut None, &mut blu);
+                    self.event_to_rows::<F>(event, &mut None, &mut blu);
                 });
                 blu
             })

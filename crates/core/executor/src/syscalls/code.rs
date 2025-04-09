@@ -21,6 +21,7 @@ use strum_macros::EnumIter;
 #[derive(
     Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, Ord, PartialOrd, Serialize, Deserialize, Enum,
 )]
+#[allow(clippy::enum_clike_unportable_variant)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum SyscallCode {

@@ -6,7 +6,6 @@ use crate::syscall::precompiles::keccak_sponge::{
     KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
 };
 
-
 use p3_keccak_air::KeccakCols;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;

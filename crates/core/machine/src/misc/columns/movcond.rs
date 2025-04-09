@@ -1,6 +1,6 @@
+use crate::memory::MemoryReadWriteCols;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
-use crate::memory::MemoryReadWriteCols;
 
 pub const NUM_MOVCOND_COLS: usize = size_of::<MovcondCols<u8>>();
 

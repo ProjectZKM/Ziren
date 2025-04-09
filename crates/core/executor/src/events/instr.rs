@@ -1,6 +1,6 @@
-use crate::Opcode;
 use super::MemoryRecordEnum;
 use super::MemoryWriteRecord;
+use crate::Opcode;
 use serde::{Deserialize, Serialize};
 
 /// Arithmetic Logic Unit (ALU) Event.
@@ -25,40 +25,29 @@ pub struct AluEvent {
 
     /// Whether the first operand is register 0.
     pub op_a_0: bool,
-
 }
 
 impl AluEvent {
     /// Create a new [`AluEvent`].
     #[must_use]
     pub fn new(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, op_a_0: bool) -> Self {
-        Self {
-            pc,
-            next_pc: pc + 4,
-            opcode,
-            a,
-            b,
-            c,
-            op_a_0,
-            hi: 0,
-        }
+        Self { pc, next_pc: pc + 4, opcode, a, b, c, op_a_0, hi: 0 }
     }
 
     /// Create a new [`AluEvent`].
     /// Used for opcode with LO and HI registers
     /// DIV DIVU MULT MULLTU
     #[must_use]
-    pub fn new_with_hi(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, op_a_0: bool, hi: u32) -> Self {
-        Self {
-            pc,
-            next_pc: pc + 4,
-            opcode,
-            a,
-            b,
-            c,
-            op_a_0,
-            hi,
-        }
+    pub fn new_with_hi(
+        pc: u32,
+        opcode: Opcode,
+        a: u32,
+        b: u32,
+        c: u32,
+        op_a_0: bool,
+        hi: u32,
+    ) -> Self {
+        Self { pc, next_pc: pc + 4, opcode, a, b, c, op_a_0, hi }
     }
 }
 
@@ -218,7 +207,6 @@ pub struct MiscEvent {
     pub hi_record: MemoryWriteRecord,
     /// Whether the first operand is register 0.
     pub op_a_0: bool,
-    
 }
 
 impl MiscEvent {

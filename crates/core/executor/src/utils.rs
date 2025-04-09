@@ -1,7 +1,7 @@
-use std::str::FromStr;
 use hashbrown::HashMap;
+use std::str::FromStr;
 
-use crate::{Opcode, MipsAirId};
+use crate::{MipsAirId, Opcode};
 use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 

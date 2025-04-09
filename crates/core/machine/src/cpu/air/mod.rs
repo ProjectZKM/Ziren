@@ -39,11 +39,7 @@ where
             AB::Expr::from_canonical_u32(1u32 << 16) * local.clk_8bit_limb + local.clk_16bit_limb;
 
         // Program constraints.
-        builder.send_program(
-            local.pc,
-            local.instruction,
-            local.is_real,
-        );
+        builder.send_program(local.pc, local.instruction, local.is_real);
 
         // Register constraints.
         self.eval_registers::<AB>(builder, local, clk.clone());
@@ -188,8 +184,8 @@ impl CpuChip {
         builder.assert_bool(local.is_real);
         builder.when_first_row().assert_one(local.is_real);
         builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
-         // If we're halting and it's a transition, then the next.is_real should be 0.
-         builder.when_transition().when(local.is_halt).assert_zero(next.is_real);
+        // If we're halting and it's a transition, then the next.is_real should be 0.
+        builder.when_transition().when(local.is_halt).assert_zero(next.is_real);
     }
 }
 

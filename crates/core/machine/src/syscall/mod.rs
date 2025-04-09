@@ -1,3 +1,3 @@
 pub mod chip;
-pub mod precompiles;
 pub mod instructions;
+pub mod precompiles;

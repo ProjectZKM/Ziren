@@ -668,7 +668,7 @@ mod tests {
             .commit_phase_commits
             .iter()
             .map(|comm| {
-                dummy_challenger.observe(comm.clone());
+                dummy_challenger.observe(*comm);
                 dummy_challenger.sample_ext_element()
             })
             .collect();
@@ -693,7 +693,7 @@ mod tests {
         }
         drop(dummy_challenger);
 
-        let _ = verifier::verify(&g, &config, &proof, &mut challenger, |index, input_proof| {
+        verifier::verify(&g, &config, &proof, &mut challenger, |index, input_proof| {
             // TODO: separate this out into functions
 
             // log_height -> (alpha_pow, reduced_opening)
@@ -778,10 +778,12 @@ mod tests {
             &mut challenger,
         );
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..betas_gt.len() {
             builder.assert_ext_eq(SymbolicExt::from_f(betas_gt[i]), fri_challenges.betas[i]);
         }
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..query_indices_gt.len() {
             let query_indices =
                 C::bits2num(&mut builder, fri_challenges.query_indices[i].iter().cloned());

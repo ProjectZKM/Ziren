@@ -1,10 +1,10 @@
+use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
-use std::mem::size_of;
 
 use crate::{
     memory::MemoryReadWriteCols,
-    operations::{KoalaBearWordRangeChecker, IsZeroOperation},
+    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
 };
 
 pub const NUM_SYSCALL_INSTR_COLS: usize = size_of::<SyscallInstrColumns<u8>>();

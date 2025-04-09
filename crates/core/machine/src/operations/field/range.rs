@@ -27,12 +27,7 @@ pub struct FieldLtCols<T, P: FieldParameters> {
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
-    pub fn populate(
-        &mut self,
-        record: &mut impl ByteRecord,
-        lhs: &BigUint,
-        rhs: &BigUint,
-    ) {
+    pub fn populate(&mut self, record: &mut impl ByteRecord, lhs: &BigUint, rhs: &BigUint) {
         assert!(lhs < rhs);
 
         let value_limbs = P::to_limbs(lhs);

@@ -46,11 +46,7 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
     /// Creates a new [`StarkMachine`].
-    pub const fn new(
-        config: SC,
-        chips: Vec<Chip<Val<SC>, A>>,
-        num_pv_elts: usize,
-    ) -> Self {
+    pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
         Self { config, chips, num_pv_elts }
     }
 }
@@ -335,48 +331,50 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     #[allow(clippy::redundant_closure_for_method_calls)]
     pub fn setup(&self, program: &A::Program) -> (StarkProvingKey<SC>, StarkVerifyingKey<SC>) {
         let parent_span = tracing::debug_span!("generate preprocessed traces");
-        let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) = parent_span.in_scope(|| {
-            self.chips()
-                .par_iter()
-                .map(|chip| {
-                    let chip_name = chip.name();
-                    let begin = Instant::now();
-                    let prep_trace = chip.generate_preprocessed_trace(program);
-                    tracing::debug!(
-                        parent: &parent_span,
-                        "generated preprocessed trace for chip {} in {:?}",
-                        chip_name,
-                        begin.elapsed()
-                    );
-                    // Assert that the chip width data is correct.
-                    let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
-                    assert_eq!(
-                        expected_width,
-                        chip.preprocessed_width(),
-                        "Incorrect number of preprocessed columns for chip {chip_name}"
-                    );
+        let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) =
+            parent_span.in_scope(|| {
+                self.chips()
+                    .par_iter()
+                    .map(|chip| {
+                        let chip_name = chip.name();
+                        let begin = Instant::now();
+                        let prep_trace = chip.generate_preprocessed_trace(program);
+                        tracing::debug!(
+                            parent: &parent_span,
+                            "generated preprocessed trace for chip {} in {:?}",
+                            chip_name,
+                            begin.elapsed()
+                        );
+                        // Assert that the chip width data is correct.
+                        let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
+                        assert_eq!(
+                            expected_width,
+                            chip.preprocessed_width(),
+                            "Incorrect number of preprocessed columns for chip {chip_name}"
+                        );
 
-                    // Count the number of constraints.
-                    let num_main_constraints = get_symbolic_constraints(
-                        &chip.air,
-                        chip.preprocessed_width(),
-                        PROOF_MAX_NUM_PVS,
-                    )
-                    .len();
+                        // Count the number of constraints.
+                        let num_main_constraints = get_symbolic_constraints(
+                            &chip.air,
+                            chip.preprocessed_width(),
+                            PROOF_MAX_NUM_PVS,
+                        )
+                        .len();
 
-                    let num_permutation_constraints = count_permutation_constraints(
-                        &chip.sends,
-                        &chip.receives,
-                        chip.logup_batch_size(),
-                        chip.air.commit_scope(),
-                    );
+                        let num_permutation_constraints = count_permutation_constraints(
+                            &chip.sends,
+                            &chip.receives,
+                            chip.logup_batch_size(),
+                            chip.air.commit_scope(),
+                        );
 
-                    (
-                        prep_trace.map(move |t| (chip.name(), chip.local_only(), t)),
-                        (chip_name, num_main_constraints + num_permutation_constraints),
-                    )
-                }).unzip()
-        });
+                        (
+                            prep_trace.map(move |t| (chip.name(), chip.local_only(), t)),
+                            (chip_name, num_main_constraints + num_permutation_constraints),
+                        )
+                    })
+                    .unzip()
+            });
 
         let mut named_preprocessed_traces =
             named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
@@ -524,10 +522,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 .sum::<SepticDigest<Val<SC>>>();
 
             if !sum.is_zero() {
-                return Err(MachineVerificationError::NonZeroCumulativeSum(
-                    LookupScope::Global,
-                    0,
-                ));
+                return Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0));
             }
 
             Ok(())

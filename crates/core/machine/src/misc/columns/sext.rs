@@ -1,4 +1,3 @@
-
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 

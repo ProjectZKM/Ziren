@@ -134,7 +134,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let allowed_shapes = [
             // Fastest shape.
             [
-                (mem_var.clone(),18),
+                (mem_var.clone(), 18),
                 (select.clone(), 18),
                 (mem_const.clone(), 16),
                 (batch_fri.clone(), 17),

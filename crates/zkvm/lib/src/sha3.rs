@@ -6,8 +6,9 @@ pub fn sha3_256(data: &[u8]) -> [u8; 32] {
 
     if len == 0 {
         return [
-            0xa7, 0xff, 0xc6, 0xf8, 0xbf, 0x1e, 0xd7, 0x66, 0x51, 0xc1, 0x47, 0x56, 0xa0, 0x61, 0xd6, 0x62,
-            0xf5, 0x80, 0xff, 0x4d, 0xe4, 0x3b, 0x49, 0xfa, 0x82, 0xd8, 0x0a, 0x4b, 0x80, 0xf8, 0x43, 0x4a
+            0xa7, 0xff, 0xc6, 0xf8, 0xbf, 0x1e, 0xd7, 0x66, 0x51, 0xc1, 0x47, 0x56, 0xa0, 0x61,
+            0xd6, 0x62, 0xf5, 0x80, 0xff, 0x4d, 0xe4, 0x3b, 0x49, 0xfa, 0x82, 0xd8, 0x0a, 0x4b,
+            0x80, 0xf8, 0x43, 0x4a,
         ];
     }
 
@@ -20,10 +21,10 @@ pub fn sha3_256(data: &[u8]) -> [u8; 32] {
     padded_data.resize(padded_len, 0);
 
     if len % 136 == 135 {
-        padded_data[padded_len - 1 as usize] = 0b10000110;
+        padded_data[padded_len - 1_usize] = 0b10000110;
     } else {
         padded_data[len] = 6;
-        padded_data[padded_len - 1 as usize] = 0b10000000;
+        padded_data[padded_len - 1_usize] = 0b10000000;
     }
 
     // covert to u32 to align the memory
@@ -48,7 +49,7 @@ pub fn sha3_256(data: &[u8]) -> [u8; 32] {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }
 
-    let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result)};
+    let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result) };
     sha3_256_result.copy_from_slice(&tmp[..32]);
     sha3_256_result
 }

@@ -11,10 +11,7 @@ use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{events::GlobalLookupEvent, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{
-    air::{
-        AirLookup, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
-        ZKM_PROOF_NUM_PV_ELTS,
-    },
+    air::{AirLookup, LookupScope, MachineAir, PublicValues, ZKMAirBuilder, ZKM_PROOF_NUM_PV_ELTS},
     LookupKind, Word,
 };
 

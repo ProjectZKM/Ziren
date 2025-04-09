@@ -101,20 +101,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
 
         let events = events
             .iter()
-            .map(|event| {
-                GlobalLookupEvent {
-                    message: [
-                        event.shard,
-                        event.clk,
-                        event.syscall_id,
-                        event.arg1,
-                        event.arg2,
-                        0,
-                        0,
-                    ],
-                    is_receive: self.shard_kind == SyscallShardKind::Precompile,
-                    kind: LookupKind::Syscall as u8,
-                }
+            .map(|event| GlobalLookupEvent {
+                message: [event.shard, event.clk, event.syscall_id, event.arg1, event.arg2, 0, 0],
+                is_receive: self.shard_kind == SyscallShardKind::Precompile,
+                kind: LookupKind::Syscall as u8,
             })
             .collect_vec();
         output.global_lookup_events.extend(events);
@@ -170,13 +160,15 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             shape.included::<F, _>(self)
         } else {
             match self.shard_kind {
-                SyscallShardKind::Core =>
-                    shard.syscall_events
+                SyscallShardKind::Core => {
+                    shard
+                        .syscall_events
                         .iter()
                         .filter(|e| e.a_record.prev_value.to_le_bytes()[1] == 1)
                         .take(1)
                         .count()
-                        > 0,
+                        > 0
+                }
                 SyscallShardKind::Precompile => {
                     !shard.precompile_events.is_empty()
                         && shard.cpu_events.is_empty()

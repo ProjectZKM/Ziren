@@ -73,8 +73,7 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
 pub fn scoped_lookups<F: Field>(
     sends: &[Lookup<F>],
     receives: &[Lookup<F>],
-) -> (HashMap<LookupScope, Vec<Lookup<F>>>, HashMap<LookupScope, Vec<Lookup<F>>>)
-{
+) -> (HashMap<LookupScope, Vec<Lookup<F>>>, HashMap<LookupScope, Vec<Lookup<F>>>) {
     // Create a hashmap of scope -> vec<send lookups>.
     let mut sends = sends.to_vec();
     sends.sort_by_key(|k| k.scope);
@@ -285,9 +284,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
 
                 let send_factor = if is_send { AB::F::ONE } else { -AB::F::ONE };
                 multiplicities.push(
-                    lookup
-                        .multiplicity
-                        .apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local)
+                    lookup.multiplicity.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local)
                         * send_factor,
                 );
             }
@@ -371,8 +368,7 @@ pub fn count_permutation_constraints<F: Field>(
     let num_local_lookups = local_sends.len() + local_receives.len();
 
     if num_local_lookups > 0 {
-        let local_permutation_width =
-            local_permutation_trace_width(num_local_lookups, batch_size);
+        let local_permutation_width = local_permutation_trace_width(num_local_lookups, batch_size);
         // We loop over (local_permutation_width - 1) lookups with one assert per iteration.
         count += local_permutation_width - 1;
 

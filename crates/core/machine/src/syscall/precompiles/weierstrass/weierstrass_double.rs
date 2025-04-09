@@ -122,30 +122,19 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
                 cols.slope_squared.populate(blu_events, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_p_x =
                 cols.p_x_plus_p_x.populate(blu_events, &p_x, &p_x, FieldOperation::Add);
-            cols.x3_ins.populate(
-                blu_events,
-                &slope_squared,
-                &p_x_plus_p_x,
-                FieldOperation::Sub,
-            )
+            cols.x3_ins.populate(blu_events, &slope_squared, &p_x_plus_p_x, FieldOperation::Sub)
         };
 
         // y = slope * (p.x - x) - p.y.
         {
-            let p_x_minus_x =
-                cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
+            let p_x_minus_x = cols.p_x_minus_x.populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
-            cols.y3_ins.populate(
-                blu_events,
-                &slope_times_p_x_minus_x,
-                &p_y,
-                FieldOperation::Sub,
-            );
+            cols.y3_ins.populate(blu_events, &slope_times_p_x_minus_x, &p_y, FieldOperation::Sub);
         }
     }
 }

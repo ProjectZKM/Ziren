@@ -35,6 +35,7 @@ where
     A: MachineAir<C::F> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
 {
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
     pub fn verify_constraints(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
@@ -66,6 +67,7 @@ where
         builder.assert_ext_eq(folded_constraints * sels.inv_zeroifier, quotient);
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn eval_constraints(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
@@ -117,6 +119,7 @@ where
         builder.eval(folder.accumulator)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn recompute_quotient(
         builder: &mut Builder<C>,
         opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -191,6 +194,7 @@ where
         )
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn verify_opening_shape(
         chip: &MachineChip<SC, A>,
         opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,

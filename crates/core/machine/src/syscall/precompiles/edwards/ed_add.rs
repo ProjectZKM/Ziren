@@ -128,7 +128,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
                 let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                 let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
                 let mut blu = Vec::new();
-                self.event_to_row(&event, cols, &mut blu);
+                self.event_to_row(event, cols, &mut blu);
                 row
             })
             .collect::<Vec<_>>();
@@ -173,7 +173,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
 
                     let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                     let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(&event, cols, &mut blu);
+                    self.event_to_row(event, cols, &mut blu);
                 });
                 blu
             })

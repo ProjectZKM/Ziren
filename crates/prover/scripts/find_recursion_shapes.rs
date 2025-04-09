@@ -6,7 +6,7 @@ use zkm_core_machine::utils::setup_logger;
 use zkm_prover::{
     components::DefaultProverComponents,
     shapes::{check_shapes, ZKMProofShape},
-    ZKMProver, ShrinkAir, REDUCE_BATCH_SIZE,
+    ShrinkAir, ZKMProver, REDUCE_BATCH_SIZE,
 };
 use zkm_recursion_core::shape::RecursionShapeConfig;
 use zkm_stark::{shape::OrderedShape, MachineProver};
@@ -55,9 +55,7 @@ fn main() {
 
     // Check that this candidate is big enough for all core shapes, including those with
     // precompiles.
-    assert!(
-        check_shapes(args.recursion_batch_size, false, args.num_compiler_workers, &mut prover,)
-    );
+    assert!(check_shapes(args.recursion_batch_size, false, args.num_compiler_workers, &prover,));
 
     let mut answer = candidate.clone();
 
@@ -76,7 +74,7 @@ fn main() {
                     args.recursion_batch_size,
                     false,
                     args.num_compiler_workers,
-                    &mut prover,
+                    &prover,
                 );
             }
             answer.insert(key.clone(), new_val + 1);
@@ -99,7 +97,7 @@ fn main() {
                     args.recursion_batch_size,
                     true,
                     args.num_compiler_workers,
-                    &mut prover,
+                    &prover,
                 );
             }
             no_precompile_answer.insert(key.clone(), new_val + 1);

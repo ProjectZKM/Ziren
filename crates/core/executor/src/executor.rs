@@ -13,10 +13,15 @@ use zkm_stark::{shape::Shape, ZKMCoreOpts};
 
 use crate::{
     context::ZKMContext,
-    dependencies::{emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies, emit_jump_dependencies, emit_memory_dependencies, emit_misc_dependencies },
+    dependencies::{
+        emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies,
+        emit_jump_dependencies, emit_memory_dependencies, emit_misc_dependencies,
+    },
     estimate_mips_event_counts, estimate_mips_lde_size,
     events::{
-        AluEvent, BranchEvent, CpuEvent, JumpEvent, MemInstrEvent, MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent, SyscallEvent
+        AluEvent, BranchEvent, CpuEvent, JumpEvent, MemInstrEvent, MemoryAccessPosition,
+        MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord, MemoryRecord,
+        MemoryRecordEnum, MemoryWriteRecord, MiscEvent, SyscallEvent,
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, PagedMemory},
@@ -26,7 +31,7 @@ use crate::{
     state::{ExecutionState, ForkState},
     subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
-    ExecutionReport, Instruction, Opcode, Program, Register, MipsAirId,
+    ExecutionReport, Instruction, MipsAirId, Opcode, Program, Register,
 };
 
 /// The maximum number of instructions in a program.
@@ -34,7 +39,6 @@ pub const MAX_PROGRAM_SIZE: usize = 1 << 22;
 
 /// The costs for the airs.
 pub const MIPS_COSTS: &str = include_str!("./artifacts/mips_costs.json");
-
 
 /// Whether to verify deferred proofs during execution.
 /// The default increment for the program counter.  Is used for all instructions except
@@ -696,7 +700,16 @@ impl<'a> Executor<'a> {
         } else if instruction.is_syscall_instruction() {
             self.emit_syscall_event(clk, record.a, op_a_0, syscall_code, b, c, next_pc);
         } else if instruction.is_misc_instruction() {
-            self.emit_misc_event(instruction.opcode, a, b, c, hi.unwrap_or(0), record.a, record.hi, op_a_0);
+            self.emit_misc_event(
+                instruction.opcode,
+                a,
+                b,
+                c,
+                hi.unwrap_or(0),
+                record.a,
+                record.hi,
+                op_a_0,
+            );
         } else {
             log::info!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -812,12 +825,13 @@ impl<'a> Executor<'a> {
         emit_memory_dependencies(
             self,
             event,
-            self.memory_accesses.memory.expect("Must have memory access").current_record()
+            self.memory_accesses.memory.expect("Must have memory access").current_record(),
         );
     }
 
     /// Emit a branch event.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn emit_branch_event(
         &mut self,
         opcode: Opcode,
@@ -828,7 +842,8 @@ impl<'a> Executor<'a> {
         next_pc: u32,
         next_next_pc: u32,
     ) {
-        let event = BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 };
+        let event =
+            BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 };
         self.record.branch_events.push(event);
         emit_branch_dependencies(self, event);
     }
@@ -851,6 +866,7 @@ impl<'a> Executor<'a> {
 
     /// Emit a misc event.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn emit_misc_event(
         &mut self,
         opcode: Opcode,
@@ -872,12 +888,24 @@ impl<'a> Executor<'a> {
             _ => MemoryWriteRecord::default(),
         };
 
-        let event = MiscEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, hi, a_access, hi_access, op_a_0);
+        let event = MiscEvent::new(
+            self.state.pc,
+            self.state.next_pc,
+            opcode,
+            a,
+            b,
+            c,
+            hi,
+            a_access,
+            hi_access,
+            op_a_0,
+        );
         self.record.misc_events.push(event);
         emit_misc_dependencies(self, event);
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn syscall_event(
         &self,
         clk: u32,
@@ -887,7 +915,6 @@ impl<'a> Executor<'a> {
         syscall_id: u32,
         arg1: u32,
         arg2: u32,
-        
     ) -> SyscallEvent {
         let (write, is_real) = match a_record {
             Some(MemoryRecordEnum::Write(record)) => (record, true),
@@ -910,6 +937,7 @@ impl<'a> Executor<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_syscall_event(
         &mut self,
         clk: u32,
@@ -920,7 +948,8 @@ impl<'a> Executor<'a> {
         arg2: u32,
         next_pc: u32,
     ) {
-        let syscall_event = self.syscall_event(clk, a_record, Some(op_a_0), next_pc, syscall_id, arg1, arg2);
+        let syscall_event =
+            self.syscall_event(clk, a_record, Some(op_a_0), next_pc, syscall_id, arg1, arg2);
 
         self.record.syscall_events.push(syscall_event);
     }
@@ -1081,11 +1110,7 @@ impl<'a> Executor<'a> {
 
                 // Update the syscall counts.
                 let syscall_for_count = syscall.count_map();
-                let syscall_count = self
-                    .state
-                    .syscall_counts
-                    .entry(syscall_for_count)
-                    .or_insert(0);
+                let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
                 *syscall_count += 1;
 
                 let syscall_impl = self.get_syscall(syscall).cloned();
@@ -1180,12 +1205,7 @@ impl<'a> Executor<'a> {
             }
 
             // Store instructions.
-            Opcode::SB
-            | Opcode::SH
-            | Opcode::SW
-            | Opcode::SWL
-            | Opcode::SWR
-            | Opcode::SC => {
+            Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SC => {
                 (a, b, c) = self.execute_store(instruction)?;
             }
 
@@ -1255,7 +1275,6 @@ impl<'a> Executor<'a> {
             );
         };
 
-        
         // Update the program counter.
         self.state.pc = next_pc;
         self.state.next_pc = next_next_pc;
@@ -1269,7 +1288,7 @@ impl<'a> Executor<'a> {
         let (lo, rt, rs) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
-            (instruction.op_c as u8).into()
+            (instruction.op_c as u8).into(),
         );
         let c = self.rr(rs, MemoryAccessPosition::C);
         let b = self.rr(rt, MemoryAccessPosition::B);
@@ -1281,7 +1300,7 @@ impl<'a> Executor<'a> {
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw(lo, out_lo, MemoryAccessPosition::A);
-        self.rw(Register::HI, out_hi , MemoryAccessPosition::HI);
+        self.rw(Register::HI, out_hi, MemoryAccessPosition::HI);
         (Some(out_hi), out_lo, b, c)
     }
 
@@ -1289,7 +1308,7 @@ impl<'a> Executor<'a> {
         let (lo, rt, rs) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
-            (instruction.op_c as u8).into()
+            (instruction.op_c as u8).into(),
         );
         let c = self.rr(rs, MemoryAccessPosition::C);
         let b = self.rr(rt, MemoryAccessPosition::B);
@@ -1301,31 +1320,22 @@ impl<'a> Executor<'a> {
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw(lo, out_lo, MemoryAccessPosition::A);
-        self.rw(Register::HI, out_hi , MemoryAccessPosition::HI);
+        self.rw(Register::HI, out_hi, MemoryAccessPosition::HI);
         (Some(out_hi), out_lo, b, c)
     }
 
     fn execute_sext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt, c) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c
-        );
+        let (rd, rt, c) =
+            (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let b = self.rr(rt, MemoryAccessPosition::B);
-        let a = if c > 0 {
-            (b & 0xffff) as i16 as i32 as u32
-        } else {
-            (b & 0xff) as i8 as i32 as u32
-        };
+        let a =
+            if c > 0 { (b & 0xffff) as i16 as i32 as u32 } else { (b & 0xff) as i8 as i32 as u32 };
         self.rw(rd, a, MemoryAccessPosition::A);
         (a, b, c)
     }
 
     fn execute_wsbh(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into()
-        );
+        let (rd, rt) = (instruction.op_a.into(), (instruction.op_b as u8).into());
         let b = self.rr(rt, MemoryAccessPosition::B);
         let a = (((b >> 16) & 0xFF) << 24)
             | (((b >> 24) & 0xFF) << 16)
@@ -1336,13 +1346,10 @@ impl<'a> Executor<'a> {
     }
 
     fn execute_ext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt, c) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c
-        );
+        let (rd, rt, c) =
+            (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let b = self.rr(rt, MemoryAccessPosition::B);
-        let msbd =  c >> 5;
+        let msbd = c >> 5;
         let lsb = c & 0x1f;
         let mask_msb = (1 << (msbd + lsb + 1)) - 1;
         let a = (b & mask_msb) >> lsb;
@@ -1351,14 +1358,11 @@ impl<'a> Executor<'a> {
     }
 
     fn execute_ins(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
-        let (rd, rt, c) = (
-            instruction.op_a.into(),
-            (instruction.op_b as u8).into(),
-            instruction.op_c
-        );
+        let (rd, rt, c) =
+            (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let b = self.rr(rt, MemoryAccessPosition::B);
         let a = self.register(rd);
-        let msb =  c >> 5;
+        let msb = c >> 5;
         let lsb = c & 0x1f;
         let mask = (1 << (msb - lsb + 1)) - 1;
         let mask_field = mask << lsb;
@@ -1401,10 +1405,7 @@ impl<'a> Executor<'a> {
         (a, b, c)
     }
 
-    fn execute_alu(
-        &mut self,
-        instruction: &Instruction,
-    ) -> (Option<u32>, u32, u32, u32) {
+    fn execute_alu(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
         let (rd, b, c) = self.alu_rr(instruction);
         let (a, hi) = match instruction.opcode {
             Opcode::ADD => (b.overflowing_add(c).0, 0),
@@ -1491,7 +1492,7 @@ impl<'a> Executor<'a> {
             Opcode::LWL => {
                 let out = |i: u32| -> u32 {
                     let val = mem << (24 - i * 8);
-                    let mask: u32 = 0xffFFffFFu32 << (24 - i * 8);
+                    let mask: u32 = 0xFFFFFFFF_u32 << (24 - i * 8);
                     (rt & (!mask)) | val
                 };
                 out(rs & 3)
@@ -1508,7 +1509,7 @@ impl<'a> Executor<'a> {
             Opcode::LWR => {
                 let out = |i: u32| -> u32 {
                     let val = mem >> (i * 8);
-                    let mask = 0xffFFffFFu32 >> (i * 8);
+                    let mask = 0xFFFFFFFF_u32 >> (i * 8);
                     (rt & (!mask)) | val
                 };
                 out(rs & 3)
@@ -1547,7 +1548,7 @@ impl<'a> Executor<'a> {
             Opcode::SB => {
                 let out = |i: u32| -> u32 {
                     let val = (rt & 0xff) << (i * 8);
-                    let mask = 0xffFFffFFu32 ^ (0xff << (i * 8));
+                    let mask = 0xFFFFFFFF_u32 ^ (0xff << (i * 8));
                     (mem & mask) | val
                 };
                 out(virt_raw & 3)
@@ -1555,7 +1556,7 @@ impl<'a> Executor<'a> {
             Opcode::SH => {
                 let mem_fc = |i: u32| -> u32 {
                     let val = (rt & 0xffff) << (i * 8);
-                    let mask = 0xffFFffFFu32 ^ (0xffff << (i * 8));
+                    let mask = 0xFFFFFFFF_u32 ^ (0xffff << (i * 8));
                     (mem & mask) | val
                 };
                 mem_fc(virt_raw & 2)
@@ -1563,7 +1564,7 @@ impl<'a> Executor<'a> {
             Opcode::SWL => {
                 let out = |i: u32| -> u32 {
                     let val = rt >> (24 - i * 8);
-                    let mask = 0xffFFffFFu32 >> (24 - i * 8);
+                    let mask = 0xFFFFFFFF_u32 >> (24 - i * 8);
                     (mem & (!mask)) | val
                 };
                 out(virt_raw & 3)
@@ -1572,7 +1573,7 @@ impl<'a> Executor<'a> {
             Opcode::SWR => {
                 let out = |i: u32| -> u32 {
                     let val = rt << (i * 8);
-                    let mask = 0xffFFffFFu32 << (i * 8);
+                    let mask = 0xFFFFFFFF_u32 << (i * 8);
                     (mem & (!mask)) | val
                 };
                 out(virt_raw & 3)
@@ -1704,7 +1705,11 @@ impl<'a> Executor<'a> {
                     // Check if we're too "close" to a maximal shape.
 
                     let distance = |threshold: usize, count: usize| {
-                        (count != 0).then(|| threshold - count).unwrap_or(usize::MAX)
+                        if count != 0 {
+                            threshold - count
+                        } else {
+                            usize::MAX
+                        }
                     };
 
                     shape_match_found = false;

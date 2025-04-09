@@ -121,13 +121,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
             cols.x_ptr = F::from_canonical_u32(event.x_ptr);
             cols.y_ptr = F::from_canonical_u32(event.y_ptr);
 
-            Self::populate_field_ops(
-                &mut new_byte_lookup_events,
-                cols,
-                p,
-                q,
-                event.op,
-            );
+            Self::populate_field_ops(&mut new_byte_lookup_events, cols, p, q, event.op);
 
             // Populate the memory access columns.
             for i in 0..cols.y_access.len() {

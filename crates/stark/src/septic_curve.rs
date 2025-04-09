@@ -1,7 +1,7 @@
 //! Elliptic Curve `y^2 = x^3 + 3z*x - 3` over the `F_{p^7} = F_p[z]/(z^7 + 2z - 8)` extension field.
 use crate::{koala_bear_poseidon2::KoalaBearPoseidon2, septic_extension::SepticExtension};
-use p3_koala_bear::KoalaBear;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
@@ -69,15 +69,17 @@ impl<F: Field> SepticCurve<F> {
     #[must_use]
     /// Double the elliptic curve point.
     pub fn double(&self) -> Self {
-        let slope = (self.x * self.x * F::from_canonical_u8(3u8) + SepticExtension::from_base_slice(&[
-            F::ZERO,
-            F::from_canonical_u32(3),
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-        ])) / (self.y * F::TWO);
+        let slope = (self.x * self.x * F::from_canonical_u8(3u8)
+            + SepticExtension::from_base_slice(&[
+                F::ZERO,
+                F::from_canonical_u32(3),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+            ]))
+            / (self.y * F::TWO);
         let result_x = slope.square() - self.x * F::TWO;
         let result_y = slope * (self.x - result_x) - self.y;
         Self { x: result_x, y: result_y }
@@ -101,24 +103,24 @@ impl<F: FieldAlgebra> SepticCurve<F> {
     /// Evaluates the curve formula y^2 = x^3 + 3z*x -3
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
         x.cube()
-        + x * SepticExtension::from_base_slice(&[
-            F::ZERO,
-            F::from_canonical_u32(3),
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-        ])
-        - SepticExtension::from_base_slice(&[
-            F::from_canonical_u32(3),
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-            F::ZERO,
-        ])
+            + x * SepticExtension::from_base_slice(&[
+                F::ZERO,
+                F::from_canonical_u32(3),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+            ])
+            - SepticExtension::from_base_slice(&[
+                F::from_canonical_u32(3),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+            ])
     }
 }
 

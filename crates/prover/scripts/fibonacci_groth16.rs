@@ -3,14 +3,14 @@
 use std::time::Instant;
 
 use itertools::iproduct;
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::ZKMProver;
 use zkm_stark::ZKMProverOpts;
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 fn main() {
     // Setup tracer.

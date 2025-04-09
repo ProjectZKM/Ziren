@@ -1,4 +1,6 @@
-use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
+use crate::syscall::precompiles::keccak_sponge::columns::{
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+};
 use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
     KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
@@ -39,7 +41,7 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
                     } else {
                         unreachable!()
                     };
-                    self.event_to_rows::<F>(&event, &mut None, &mut blu);
+                    self.event_to_rows::<F>(event, &mut None, &mut blu);
                 });
                 blu
             })
@@ -117,13 +119,13 @@ impl KeccakSpongeChip {
                 cols.is_real = F::ONE;
                 cols.input_len = F::from_canonical_u32(event.input.len() as u32);
                 cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
-                cols.is_absorbed = F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
+                cols.is_absorbed =
+                    F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
                 cols.is_first_input_block = F::from_bool(i == 0);
                 cols.is_final_input_block = F::from_bool(i == (block_num - 1));
                 cols.read_block = F::from_bool(round == 0);
                 cols.receive_syscall = F::from_bool(i == 0 && round == 0);
-                cols.write_output =
-                    F::from_bool(i == (block_num - 1) && round == (NUM_ROUNDS - 1));
+                cols.write_output = F::from_bool(i == (block_num - 1) && round == (NUM_ROUNDS - 1));
                 cols.output_address = F::from_canonical_u32(event.output_addr);
                 // 4 bytes per u32
                 cols.input_address = F::from_canonical_u32(

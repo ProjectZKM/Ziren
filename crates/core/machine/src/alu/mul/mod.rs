@@ -42,7 +42,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
-    ByteOpcode, ExecutionRecord, Opcode, Program
+    ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
@@ -473,7 +473,14 @@ mod tests {
         // Fill mul_events with 10 MUL events.
         let mut mul_events: Vec<AluEvent> = Vec::new();
         for _ in 0..10 {
-            mul_events.push(AluEvent::new(0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000, false));
+            mul_events.push(AluEvent::new(
+                0,
+                Opcode::MUL,
+                0x80004000,
+                0x80000000,
+                0xffff8000,
+                false,
+            ));
         }
         shard.mul_events = mul_events;
         let chip = MulChip::default();

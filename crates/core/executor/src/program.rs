@@ -2,10 +2,10 @@
 
 extern crate alloc;
 
-use std::str::FromStr;
 use alloc::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context, Result};
 use elf::{endian::LittleEndian, file::Class, ElfBytes};
+use std::str::FromStr;
 
 use p3_field::Field;
 use p3_field::FieldExtensionAlgebra;
@@ -18,8 +18,8 @@ use zkm_stark::air::{MachineAir, MachineProgram};
 use zkm_stark::septic_curve::{SepticCurve, SepticCurveComplete};
 use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::septic_extension::SepticExtension;
-use zkm_stark::LookupKind;
 use zkm_stark::shape::Shape;
+use zkm_stark::LookupKind;
 
 use crate::{Instruction, MipsAirId};
 

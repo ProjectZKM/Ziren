@@ -22,7 +22,8 @@ use zkm_stark::air::LookupScope;
 use zkm_stark::air::MachineAir;
 use zkm_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
-    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
+    koala_bear_poseidon2::KoalaBearPoseidon2,
+    shape::OrderedShape,
     Dom, StarkMachine, Word,
 };
 

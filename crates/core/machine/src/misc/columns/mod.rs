@@ -1,20 +1,20 @@
-mod sext;
-mod maddsub;
 mod ext;
 mod ins;
-mod movcond;
+mod maddsub;
 mod misc_specific;
+mod movcond;
+mod sext;
 
-pub use sext::*;
-pub use maddsub::*;
 pub use ext::*;
 pub use ins::*;
-pub use movcond::*;
+pub use maddsub::*;
 pub use misc_specific::*;
+pub use movcond::*;
+pub use sext::*;
 
+use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;
-use std::mem::size_of;
 
 pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 

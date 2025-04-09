@@ -7,7 +7,7 @@ use itertools::Itertools;
 use p3_field::{
     Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField, PrimeField64, TwoAdicField,
 };
-use std::{borrow::Borrow, collections::HashMap, iter::repeat, mem::transmute};
+use std::{borrow::Borrow, collections::HashMap, mem::transmute};
 use vec_map::VecMap;
 use zkm_core_machine::utils::{zkm_debug_mode, SpanBuilder};
 use zkm_recursion_core::{
@@ -731,7 +731,7 @@ where
         let (instructions, traces) = tracing::debug_span!("construct program").in_scope(|| {
             if debug_mode {
                 let instrs_all = instrs_consts.chain(instrs);
-                let traces_all = repeat(None).take(total_consts).chain(traces);
+                let traces_all = std::iter::repeat_n(None, total_consts).chain(traces);
                 (instrs_all.collect(), traces_all.collect())
             } else {
                 (instrs_consts.chain(instrs).collect(), traces)
@@ -762,6 +762,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum CompileOneErr<C: Config> {
     Unsupported(DslIr<C>),
     CycleTrackerEnter(String),

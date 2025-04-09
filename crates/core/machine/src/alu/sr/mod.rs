@@ -404,7 +404,8 @@ where
                 sign_extended_b.push(local.b[i].into());
             }
             for i in 0..WORD_SIZE {
-                let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_canonical_u8(0xff) + local.is_ror * local.b[i].into();
+                let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_canonical_u8(0xff)
+                    + local.is_ror * local.b[i].into();
                 sign_extended_b.push(leading_byte.clone());
             }
 

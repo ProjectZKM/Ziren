@@ -47,7 +47,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
 
                     if idx < input.branch_events.len() {
                         let event = &input.branch_events[idx];
-                        self.event_to_row(event, cols,  &mut blu);
+                        self.event_to_row(event, cols, &mut blu);
                     }
                 });
                 blu
@@ -110,7 +110,7 @@ impl BranchChip {
             Opcode::BLEZ => a_lt_b || a_eq_b,
             Opcode::BGTZ => a_gt_b,
             Opcode::BGEZ => a_eq_b || a_gt_b,
-            _ => panic!("Invalid opcode: {}", event.opcode)
+            _ => panic!("Invalid opcode: {}", event.opcode),
         };
 
         let target_pc = event.next_pc.wrapping_add(event.c);
@@ -120,7 +120,7 @@ impl BranchChip {
         cols.next_pc_range_checker.populate(event.next_pc);
         cols.target_pc_range_checker.populate(target_pc);
         cols.next_next_pc_range_checker.populate(event.next_next_pc);
-    
+
         if branching {
             cols.is_branching = F::ONE;
         } else {

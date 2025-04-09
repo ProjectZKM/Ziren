@@ -3,13 +3,13 @@
 use std::{fs::File, io::BufWriter, io::Write, time::Instant};
 
 use itertools::iproduct;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::ZKMProver;
 use zkm_stark::ZKMProverOpts;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 
 fn main() {
     // Setup tracer.

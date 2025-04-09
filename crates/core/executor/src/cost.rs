@@ -2,7 +2,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use p3_koala_bear::KoalaBear;
 
-use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, Opcode, MipsAirId};
+use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, MipsAirId, Opcode};
 
 const BYTE_NUM_ROWS: u64 = 1 << 16;
 const MAX_PROGRAM_SIZE: u64 = 1 << 22;
@@ -57,11 +57,11 @@ pub fn estimate_mips_lde_size(
 
     // Compute the branch chip contribution.
     cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
-         * costs_per_air[&MipsAirId::Branch];
+        * costs_per_air[&MipsAirId::Branch];
 
     // Compute the jump chip contribution.
-    cells += (num_events_per_air[MipsAirId::Jump]).next_power_of_two()
-         * costs_per_air[&MipsAirId::Jump];
+    cells +=
+        (num_events_per_air[MipsAirId::Jump]).next_power_of_two() * costs_per_air[&MipsAirId::Jump];
 
     // Compute the SyscallInstruction chip contribution.
     cells += (num_events_per_air[MipsAirId::SyscallInstrs]).next_power_of_two()
@@ -107,9 +107,8 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::AddSub] = opcode_counts[Opcode::ADD] + opcode_counts[Opcode::SUB];
 
     // Compute the number of events in the mul chip.
-    events_counts[MipsAirId::Mul] = opcode_counts[Opcode::MUL]
-        + opcode_counts[Opcode::MULT]
-        + opcode_counts[Opcode::MULTU];
+    events_counts[MipsAirId::Mul] =
+        opcode_counts[Opcode::MUL] + opcode_counts[Opcode::MULT] + opcode_counts[Opcode::MULTU];
 
     // Compute the number of events in the bitwise chip.
     events_counts[MipsAirId::Bitwise] = opcode_counts[Opcode::XOR]
@@ -124,8 +123,7 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::ShiftRight] = opcode_counts[Opcode::SRL] + opcode_counts[Opcode::SRA];
 
     // Compute the number of events in the divrem chip.
-    events_counts[MipsAirId::DivRem] = opcode_counts[Opcode::DIV]
-        + opcode_counts[Opcode::DIVU];
+    events_counts[MipsAirId::DivRem] = opcode_counts[Opcode::DIV] + opcode_counts[Opcode::DIVU];
 
     // Compute the number of events in the lt chip.
     events_counts[MipsAirId::Lt] = opcode_counts[Opcode::SLT] + opcode_counts[Opcode::SLTU];

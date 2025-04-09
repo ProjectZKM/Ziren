@@ -22,10 +22,10 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
 
     if len % 136 == 135 {
         // Both 1s are placed in the same byte.
-        padded_data[padded_len - 1 as usize] = 0b10000001;
+        padded_data[padded_len - 1_usize] = 0b10000001;
     } else {
         padded_data[len] = 1;
-        padded_data[padded_len - 1 as usize] = 0b10000000;
+        padded_data[padded_len - 1_usize] = 0b10000000;
     }
 
     // covert to u32 to align the memory
@@ -50,7 +50,7 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
         syscall_keccak_sponge(u32_array.as_ptr(), &mut general_result);
     }
 
-    let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result)};
+    let tmp: &mut [u8; 64] = unsafe { core::mem::transmute(&mut general_result) };
     keccak256_result.copy_from_slice(&tmp[..32]);
     keccak256_result
 }

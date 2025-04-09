@@ -181,6 +181,7 @@ impl<F: FieldAlgebra> FieldExtensionAlgebra<F> for SepticExtension<F> {
 
     fn from_base_iter<I: Iterator<Item = F>>(mut iter: I) -> Self {
         let mut arr = [F::ZERO; 7];
+        #[allow(clippy::needless_range_loop)]
         for i in 0..7 {
             arr[i] = iter.next().unwrap();
         }
@@ -464,7 +465,7 @@ impl<F: Field> SepticExtension<F> {
                 F::from_canonical_u32(141214579),
             ]);
         }
-        if index == 2 { 
+        if index == 2 {
             return SepticExtension([
                 F::from_canonical_u32(836146895),
                 F::from_canonical_u32(2043859405),
@@ -633,7 +634,7 @@ impl<F: PrimeField32> SepticExtension<F> {
 
     /// Returns whether the extension field element viewed as an y-coordinate of a digest represents a send lookup.
     pub fn is_send(&self) -> bool {
-        (F::ORDER_U32 + 1) / 2 <= self.0[6].as_canonical_u32()
+        F::ORDER_U32.div_ceil(2) <= self.0[6].as_canonical_u32()
             && self.0[6].as_canonical_u32() <= (F::ORDER_U32 - 1)
     }
 

@@ -50,8 +50,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
         let sqrt = sqrt_fn(a);
 
         // Use FieldOpCols to compute result * result.
-        let sqrt_squared =
-            self.multiplication.populate(record, &sqrt, &sqrt, FieldOperation::Mul);
+        let sqrt_squared = self.multiplication.populate(record, &sqrt, &sqrt, FieldOperation::Mul);
 
         // If the result is indeed the square root of a, then result * result = a.
         assert_eq!(sqrt_squared, a.clone());

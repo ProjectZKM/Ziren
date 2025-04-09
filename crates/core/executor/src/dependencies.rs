@@ -1,7 +1,7 @@
 use crate::{
-    events::{AluEvent, BranchEvent, JumpEvent, MemInstrEvent, MiscEvent, MemoryRecord},
+    events::{AluEvent, BranchEvent, JumpEvent, MemInstrEvent, MemoryRecord, MiscEvent},
     utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
-    Executor, Opcode, UNUSED_PC, DEFAULT_PC_INC,
+    Executor, Opcode, DEFAULT_PC_INC, UNUSED_PC,
 };
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
@@ -146,11 +146,7 @@ pub fn emit_memory_dependencies(
             Opcode::LB => {
                 let most_sig_mem_value_byte = mem_value.to_le_bytes()[addr_offset as usize];
                 let sign_value = 256;
-                (
-                    most_sig_mem_value_byte as u32,
-                    most_sig_mem_value_byte,
-                    sign_value,
-                )
+                (most_sig_mem_value_byte as u32, most_sig_mem_value_byte, sign_value)
             }
             Opcode::LH => {
                 let sign_value = 65536;
@@ -250,8 +246,7 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
             };
             executor.record.add_events.push(add_event);
         }
-        Opcode::Jump | Opcode::Jumpi => {
-        }
+        Opcode::Jump | Opcode::Jumpi => {}
         _ => unreachable!(),
     }
 }
@@ -276,7 +271,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
     } else if matches!(event.opcode, Opcode::EXT) {
         let lsb = event.c & 0x1f;
         let msbd = event.c >> 5;
-        let sll_val=  event.b << (31 - lsb - msbd); 
+        let sll_val = event.b << (31 - lsb - msbd);
         let sll_event = AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
@@ -303,7 +298,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
     } else if matches!(event.opcode, Opcode::INS) {
         let lsb = event.c & 0x1f;
         let msb = event.c >> 5;
-        let ror_val=  event.a_record.prev_value.rotate_right(lsb);
+        let ror_val = event.a_record.prev_value.rotate_right(lsb);
         let ror_event = AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,

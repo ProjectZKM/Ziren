@@ -3,7 +3,8 @@ use std::ops::{Add, AddAssign};
 use hashbrown::HashMap;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use zkm_stark::{
-    air::{LookupScope, MachineAir}, shape::OrderedShape,
+    air::{LookupScope, MachineAir},
+    shape::OrderedShape,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
 };
 

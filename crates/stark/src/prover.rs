@@ -21,8 +21,8 @@ use super::{
     VerifierConstraintFolder,
 };
 use crate::{
-    air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord,
-    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
+    air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, Challenger,
+    DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
     ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
 };
 
@@ -411,7 +411,8 @@ where
                                 .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
                                 .to_row_major_matrix();
 
-                            let chip_num_constraints = pk.constraints_map.get(&chips[i].name()).unwrap();
+                            let chip_num_constraints =
+                                pk.constraints_map.get(&chips[i].name()).unwrap();
 
                             // Calculate powers of alpha for constraint evaluation:
                             // 1. Generate sequence [α⁰, α¹, ..., α^(n-1)] where n = chip_num_constraints.

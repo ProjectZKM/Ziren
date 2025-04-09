@@ -9,7 +9,7 @@ pub use word::*;
 use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
 
 /// A trait which contains methods related to memory lookups in an AIR.
-
+///
 pub trait ZKMCoreAirBuilder:
     ZKMAirBuilder + WordAirBuilder + MemoryAirBuilder + ProgramAirBuilder
 {

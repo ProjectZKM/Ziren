@@ -7,6 +7,7 @@ mod sha256_extend;
 mod u256x2048_mul;
 mod uint256;
 
+use super::{MemoryLocalEvent, SyscallEvent};
 use crate::syscalls::SyscallCode;
 pub use ec::*;
 pub use edwards::*;
@@ -19,7 +20,6 @@ pub use sha256_extend::*;
 use strum::{EnumIter, IntoEnumIterator};
 pub use u256x2048_mul::*;
 pub use uint256::*;
-use super::{MemoryLocalEvent, SyscallEvent};
 
 #[derive(Clone, Debug, Serialize, Deserialize, EnumIter)]
 /// Precompile event.  There should be one variant for every precompile syscall.

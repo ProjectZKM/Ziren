@@ -113,7 +113,6 @@ where
                 is_real.clone(),
             );
 
-
             // When we are branching, assert that local.next_pc <==> local.pc + c.
             builder.send_alu(
                 Opcode::ADD.as_field::<AB::F>(),
@@ -163,9 +162,7 @@ where
             builder.when(local.is_bne).when_not(local.is_branching).assert_one(local.a_eq_b);
 
             // When the opcode is BLTZ and we are branching, assert that a_lt_b is true.
-            builder
-                .when(local.is_bltz * local.is_branching)
-                .assert_one(local.a_lt_b);
+            builder.when(local.is_bltz * local.is_branching).assert_one(local.a_lt_b);
 
             // When the opcode is BLTZ and we are not branching, assert that either a_eq_b
             // or a_gt_b is true.
@@ -181,15 +178,10 @@ where
                 .assert_one(local.a_lt_b + local.a_eq_b);
 
             // When the opcode is BLEZ and we are not branching, assert that a_gt_b is true.
-            builder
-                .when(local.is_blez)
-                .when_not(local.is_branching)
-                .assert_one(local.a_gt_b);
+            builder.when(local.is_blez).when_not(local.is_branching).assert_one(local.a_gt_b);
 
             // When the opcode is BGTZ and we are branching, assert that a_gt_b is true.
-            builder
-                .when(local.is_bgtz * local.is_branching)
-                .assert_one(local.a_gt_b);
+            builder.when(local.is_bgtz * local.is_branching).assert_one(local.a_gt_b);
 
             // When the opcode is BGTZ and we are not branching, assert that either a_eq_b
             // or a_lt_b is true.
@@ -198,17 +190,14 @@ where
                 .when_not(local.is_branching)
                 .assert_one(local.a_lt_b + local.a_eq_b);
 
-            // When the opcode is BGEZ and we are branching, assert that either a_eq_b 
+            // When the opcode is BGEZ and we are branching, assert that either a_eq_b
             // or a_gt_b is true.
             builder
                 .when(local.is_bgez * local.is_branching)
                 .assert_one(local.a_gt_b + local.a_eq_b);
 
             // When the opcode is BGEZ and we are not branching, assert that a_lt_b is true.
-            builder
-                .when(local.is_bgez)
-                .when_not(local.is_branching)
-                .assert_one(local.a_lt_b);
+            builder.when(local.is_bgez).when_not(local.is_branching).assert_one(local.a_lt_b);
         }
 
         // When it's a branch instruction and a_eq_b, assert that a == b.
@@ -219,7 +208,7 @@ where
         // Calculate a_lt_b <==> a < b (using appropriate signedness).
         // SAFETY: `use_signed_comparison` is boolean, since at most one selector is turned on.
         builder.send_alu(
-             Opcode::SLT.as_field::<AB::F>(),
+            Opcode::SLT.as_field::<AB::F>(),
             Word::extend_var::<AB>(local.a_lt_b),
             local.op_a_value,
             local.op_b_value,

@@ -4,10 +4,7 @@ use std::fmt::Debug;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_matrix::{
-    dense::RowMajorMatrixView,
-    stack::VerticalPair,
-};
+use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use serde::{Deserialize, Serialize};
 
 use super::{Challenge, Com, OpeningProof, StarkGenericConfig, Val};
@@ -54,6 +51,7 @@ pub struct AirOpenedValues<T> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
 #[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
+#[allow(clippy::type_complexity)]
 pub struct ChipOpenedValues<F, EF> {
     pub preprocessed: AirOpenedValues<EF>,
     pub main: AirOpenedValues<EF>,
@@ -167,12 +165,13 @@ impl From<[u32; 8]> for DeferredDigest {
 impl<SC: StarkGenericConfig> ShardProof<SC> {
     pub fn shape(&self) -> OrderedShape {
         OrderedShape {
-            inner: self.chip_ordering
-            .iter()
-            .sorted_by_key(|(_, idx)| *idx)
-            .zip(self.opened_values.chips.iter())
-            .map(|((name, _), values)| (name.to_owned(), values.log_degree))
-            .collect(),
+            inner: self
+                .chip_ordering
+                .iter()
+                .sorted_by_key(|(_, idx)| *idx)
+                .zip(self.opened_values.chips.iter())
+                .map(|((name, _), values)| (name.to_owned(), values.log_degree))
+                .collect(),
         }
     }
 }

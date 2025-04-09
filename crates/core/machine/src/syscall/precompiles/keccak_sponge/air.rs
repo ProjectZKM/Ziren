@@ -1,14 +1,18 @@
 use crate::air::{MemoryAirBuilder, WordAirBuilder};
 use crate::memory::MemoryCols;
 use crate::operations::XorOperation;
-use crate::syscall::precompiles::keccak_sponge::columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS};
-use crate::syscall::precompiles::keccak_sponge::{KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S};
+use crate::syscall::precompiles::keccak_sponge::columns::{
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+};
+use crate::syscall::precompiles::keccak_sponge::{
+    KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
+};
 
-use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::FieldAlgebra;
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
+use std::borrow::Borrow;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_stark::{LookupScope, SubAirBuilder, ZKMAirBuilder};
 
@@ -97,8 +101,7 @@ where
         // check the input address
         builder.when(local.is_absorbed).assert_eq(
             local.input_address,
-            next.input_address
-                - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
+            next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
         // Eval the plonky3 keccak air
@@ -109,11 +112,7 @@ where
 }
 
 impl KeccakSpongeChip {
-    fn eval_flags<AB: ZKMAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local: &KeccakSpongeCols<AB::Var>,
-    ) {
+    fn eval_flags<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &KeccakSpongeCols<AB::Var>) {
         let first_block = local.is_first_input_block;
         let final_block = local.is_final_input_block;
         let not_final_block = AB::Expr::ONE - final_block;
@@ -130,8 +129,6 @@ impl KeccakSpongeChip {
         // check the absorbed bytes
         builder.assert_eq(local.is_absorbed, final_step * not_final_block * local.is_real);
     }
-
-
 
     fn eval_memory_access<AB: ZKMAirBuilder>(
         &self,

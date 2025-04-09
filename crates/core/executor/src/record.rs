@@ -9,13 +9,13 @@ use zkm_stark::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::{mem::take, sync::Arc, str::FromStr};
+use std::{mem::take, str::FromStr, sync::Arc};
 
 use crate::{
     events::{
-        AluEvent, BranchEvent, JumpEvent, MemInstrEvent, ByteLookupEvent, ByteRecord, CpuEvent,
-        GlobalLookupEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
-        MemoryRecordEnum, PrecompileEvent, PrecompileEvents, SyscallEvent, MiscEvent,
+        AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CpuEvent, GlobalLookupEvent, JumpEvent,
+        MemInstrEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum,
+        MiscEvent, PrecompileEvent, PrecompileEvents, SyscallEvent,
     },
     syscalls::SyscallCode,
     MipsAirId, Opcode, Program,
@@ -25,7 +25,7 @@ use crate::{
 ///
 /// The trace of the execution is represented as a list of "events" that occur every cycle.
 // todo: add logic opcode here, use bitwise_events
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ExecutionRecord {
     /// The program.
     pub program: Arc<Program>,
@@ -77,38 +77,6 @@ pub struct ExecutionRecord {
     pub shape: Option<Shape<MipsAirId>>,
     /// The predicted counts of the proof.
     pub counts: Option<EnumMap<MipsAirId, u64>>,
-}
-
-impl Default for ExecutionRecord {
-    fn default() -> Self {
-        Self {
-            program: Arc::default(),
-            cpu_events: Vec::default(),
-            add_events: Vec::default(),
-            mul_events: Vec::default(),
-            sub_events: Vec::default(),
-            bitwise_events: Vec::default(),
-            shift_left_events: Vec::default(),
-            shift_right_events: Vec::default(),
-            divrem_events: Vec::default(),
-            lt_events: Vec::default(),
-            cloclz_events: Vec::default(),
-            memory_instr_events: Vec::default(),
-            branch_events: Vec::default(),
-            jump_events: Vec::default(),
-            misc_events: Vec::default(),
-            byte_lookups: HashMap::default(),
-            precompile_events: PrecompileEvents::default(),
-            global_memory_initialize_events: Vec::default(),
-            global_memory_finalize_events: Vec::default(),
-            cpu_local_memory_access: Vec::default(),
-            syscall_events: Vec::default(),
-            global_lookup_events: Vec::default(),
-            public_values: PublicValues::default(),
-            shape: None,
-            counts: None,
-        }
-    }
 }
 
 impl ExecutionRecord {
@@ -331,7 +299,6 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("lt_events".to_string(), self.lt_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
 
-
         for (syscall_code, events) in self.precompile_events.iter() {
             stats.insert(format!("syscall {syscall_code:?}"), events.len());
         }
@@ -346,9 +313,7 @@ impl MachineRecord for ExecutionRecord {
         );
         stats.insert("local_memory_access_events".to_string(), self.cpu_local_memory_access.len());
         if !self.cpu_events.is_empty() {
-            stats.insert(
-                "byte_lookups".to_string(), self.byte_lookups.len()
-            );
+            stats.insert("byte_lookups".to_string(), self.byte_lookups.len());
         }
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);

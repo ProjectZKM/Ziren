@@ -14,18 +14,12 @@ impl<F> BaseAir<F> for MiscInstrsChip {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
 
-    use crate::{
-        utils,
-        utils::run_test,
-    };
+    use crate::{utils, utils::run_test};
 
-    use zkm_core_executor::{
-        Instruction, Opcode, Program,
-    };
+    use zkm_core_executor::{Instruction, Opcode, Program};
 
     use zkm_stark::CpuProver;
 

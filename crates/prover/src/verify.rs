@@ -305,7 +305,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             public_values,
         );
 
-        if self.vk_verification && !self.recursion_vk_map.contains_key(&compress_vk.hash_koalabear())
+        if self.vk_verification
+            && !self.recursion_vk_map.contains_key(&compress_vk.hash_koalabear())
         {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }

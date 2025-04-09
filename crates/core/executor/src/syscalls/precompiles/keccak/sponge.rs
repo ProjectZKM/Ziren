@@ -1,9 +1,7 @@
-use crate::{
-    syscalls::{Syscall, SyscallCode, SyscallContext},
-};
+use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 
-use tiny_keccak::keccakf;
 use crate::events::{KeccakSpongeEvent, PrecompileEvent};
+use tiny_keccak::keccakf;
 
 pub(crate) const STATE_SIZE_U64S: usize = 25;
 pub(crate) const GENERAL_BLOCK_SIZE_U32S: usize = 36;
@@ -63,6 +61,7 @@ impl Syscall for KeccakSpongeSyscall {
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         rt.clk += 1;
         let mut values_to_write = Vec::new();
+        #[allow(clippy::needless_range_loop)]
         for i in 0..KECCAK_GENERAL_OUTPUT_U64S {
             let most_sig = ((state[i] >> 32) & 0xFFFFFFFF) as u32;
             let least_sig = (state[i] & 0xFFFFFFFF) as u32;
@@ -89,8 +88,15 @@ impl Syscall for KeccakSpongeSyscall {
             output_addr: result_ptr,
             local_mem_access: rt.postprocess(),
         });
-        let sponge_syscall_event =
-            rt.rt.syscall_event(start_clk, None, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
+        let sponge_syscall_event = rt.rt.syscall_event(
+            start_clk,
+            None,
+            None,
+            rt.next_pc,
+            syscall_code.syscall_id(),
+            arg1,
+            arg2,
+        );
         rt.add_precompile_event(syscall_code, sponge_syscall_event, sponge_event);
         None
     }

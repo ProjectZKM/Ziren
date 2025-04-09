@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
-use zkm_core_executor::{ Opcode, ByteOpcode };
+use zkm_core_executor::{ByteOpcode, Opcode};
 use zkm_stark::{
     air::{BaseAirBuilder, ZKMAirBuilder},
     Word,
@@ -70,14 +70,13 @@ where
         self.eval_maddsub(builder, local);
         self.eval_sext(builder, local);
     }
-
 }
 
 impl MiscInstrsChip {
     pub(crate) fn eval_sext<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>
+        local: &MiscInstrColumns<AB::Var>,
     ) {
         let sext_cols = local.misc_specific_columns.sext();
 
@@ -86,63 +85,48 @@ impl MiscInstrsChip {
             sext_cols.most_sig_bit,
             sext_cols.sig_byte,
             AB::Expr::ZERO,
-            local.is_sext.clone(),
+            local.is_sext,
         );
 
-        builder
-            .when(local.is_sext.clone())
-            .assert_bool(local.op_c_value[0]);
+        builder.when(local.is_sext).assert_bool(local.op_c_value[0]);
+
+        builder.when(local.is_sext).when(sext_cols.is_seb).assert_zero(local.op_c_value[0]);
+
+        builder.when(local.is_sext).when(sext_cols.is_seh).assert_one(local.op_c_value[0]);
 
         builder
-            .when(local.is_sext.clone())
-            .when(sext_cols.is_seb.clone())
-            .assert_zero(local.op_c_value[0]);
-
-        builder
-            .when(local.is_sext.clone())
-            .when(sext_cols.is_seh.clone())
-            .assert_one(local.op_c_value[0]);
-
-        builder
-            .when(local.is_sext.clone())
-            .when(sext_cols.is_seb.clone())
+            .when(local.is_sext)
+            .when(sext_cols.is_seb)
             .assert_eq(local.op_a_value[0], sext_cols.sig_byte);
 
         builder
-            .when(local.is_sext.clone())
-            .when(sext_cols.is_seh.clone())
+            .when(local.is_sext)
+            .when(sext_cols.is_seh)
             .assert_eq(local.op_a_value[1], sext_cols.sig_byte);
 
         let sign_byte = AB::Expr::from_canonical_u8(0xFF) * sext_cols.most_sig_bit;
 
-        builder
-            .when(local.is_sext.clone())
-            .assert_eq(local.op_a_value[0],  local.op_b_value[0]);
+        builder.when(local.is_sext).assert_eq(local.op_a_value[0], local.op_b_value[0]);
 
         builder
-            .when(local.is_sext.clone())
-            .when(sext_cols.is_seb.clone())
-            .assert_eq(local.op_a_value[1],  sign_byte.clone());
+            .when(local.is_sext)
+            .when(sext_cols.is_seb)
+            .assert_eq(local.op_a_value[1], sign_byte.clone());
 
         builder
-            .when(local.is_sext.clone())
-            .when(sext_cols. is_seh.clone())
+            .when(local.is_sext)
+            .when(sext_cols.is_seh)
             .assert_eq(local.op_a_value[1], local.op_b_value[1]);
 
-        builder
-            .when(local.is_sext.clone())
-            .assert_eq(local.op_a_value[2],  sign_byte.clone());
-        
-        builder
-            .when(local.is_sext.clone())
-            .assert_eq(local.op_a_value[3],  sign_byte);
-        
+        builder.when(local.is_sext).assert_eq(local.op_a_value[2], sign_byte.clone());
+
+        builder.when(local.is_sext).assert_eq(local.op_a_value[3], sign_byte);
     }
 
     pub(crate) fn eval_maddsub<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>
+        local: &MiscInstrColumns<AB::Var>,
     ) {
         let maddsub_cols = local.misc_specific_columns.maddsub();
         let is_real = local.is_maddu + local.is_msubu;
@@ -159,7 +143,7 @@ impl MiscInstrsChip {
             builder,
             maddsub_cols.mul_lo,
             maddsub_cols.src2_lo,
-              maddsub_cols.carry,
+            maddsub_cols.carry,
             maddsub_cols.low_add_operation,
             is_real.clone(),
         );
@@ -177,22 +161,18 @@ impl MiscInstrsChip {
     pub(crate) fn eval_movcond<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>
+        local: &MiscInstrColumns<AB::Var>,
     ) {
         let cond_cols = local.misc_specific_columns.movcond();
         let is_real = local.is_meq + local.is_mne + local.is_teq;
-        
+
         builder
             .when(is_real.clone() * cond_cols.a_eq_b)
             .assert_word_eq(local.op_a_value, local.op_b_value);
-        
-        builder
-            .when(is_real.clone() * cond_cols.c_eq_0)
-            .assert_word_zero(local.op_c_value);
-        
-        builder
-            .when(local.is_teq.clone())
-            .assert_zero(cond_cols.a_eq_b);
+
+        builder.when(is_real.clone() * cond_cols.c_eq_0).assert_word_zero(local.op_c_value);
+
+        builder.when(local.is_teq).assert_zero(cond_cols.a_eq_b);
 
         builder
             .when(local.is_meq)
@@ -203,7 +183,7 @@ impl MiscInstrsChip {
             .when(local.is_meq)
             .when_not(cond_cols.c_eq_0)
             .assert_word_eq(local.op_a_value, cond_cols.op_a_access.prev_value);
-        
+
         builder
             .when(local.is_mne)
             .when_not(cond_cols.c_eq_0)
@@ -213,13 +193,12 @@ impl MiscInstrsChip {
             .when(local.is_mne)
             .when(cond_cols.c_eq_0)
             .assert_word_eq(local.op_a_value, cond_cols.op_a_access.prev_value);
-        
     }
 
     pub(crate) fn eval_ins<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>
+        local: &MiscInstrColumns<AB::Var>,
     ) {
         let ins_cols = local.misc_specific_columns.ins();
 
@@ -227,53 +206,72 @@ impl MiscInstrsChip {
             Opcode::ROR.as_field::<AB::F>(),
             ins_cols.ror_val,
             ins_cols.op_a_access.prev_value,
-            Word([AB::Expr::from_canonical_u32(0) + ins_cols.lsb, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            local.is_ins.clone(),
+            Word([
+                AB::Expr::from_canonical_u32(0) + ins_cols.lsb,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ]),
+            local.is_ins,
         );
 
         builder.send_alu(
             Opcode::SRL.as_field::<AB::F>(),
             ins_cols.srl_val,
             ins_cols.ror_val,
-            Word([AB::Expr::from_canonical_u32(1) + ins_cols.msb - ins_cols.lsb, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            local.is_ins.clone(),
+            Word([
+                AB::Expr::from_canonical_u32(1) + ins_cols.msb - ins_cols.lsb,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ]),
+            local.is_ins,
         );
 
         builder.send_alu(
             Opcode::SLL.as_field::<AB::F>(),
             ins_cols.sll_val,
             local.op_b_value,
-            Word([AB::Expr::from_canonical_u32(31) - ins_cols.msb + ins_cols.lsb, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            local.is_ins.clone(),
+            Word([
+                AB::Expr::from_canonical_u32(31) - ins_cols.msb + ins_cols.lsb,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ]),
+            local.is_ins,
         );
-       
+
         builder.send_alu(
             Opcode::ADD.as_field::<AB::F>(),
             ins_cols.add_val,
             ins_cols.srl_val,
             ins_cols.sll_val,
-            local.is_ins.clone(),
+            local.is_ins,
         );
 
         builder.send_alu(
             Opcode::ROR.as_field::<AB::F>(),
             local.op_a_value,
             ins_cols.add_val,
-            Word([AB::Expr::from_canonical_u32(31) - ins_cols.msb, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            local.is_ins.clone(),
+            Word([
+                AB::Expr::from_canonical_u32(31) - ins_cols.msb,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ]),
+            local.is_ins,
         );
 
-        builder
-            .when(local.is_ins)
-            .assert_eq(local.op_c_value[0] + local.op_c_value[1] * AB::Expr::from_canonical_u32(256),
-                     ins_cols.lsb + ins_cols.msb * AB::Expr::from_canonical_u32(32));
-
+        builder.when(local.is_ins).assert_eq(
+            local.op_c_value[0] + local.op_c_value[1] * AB::Expr::from_canonical_u32(256),
+            ins_cols.lsb + ins_cols.msb * AB::Expr::from_canonical_u32(32),
+        );
     }
 
     pub(crate) fn eval_ext<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>
+        local: &MiscInstrColumns<AB::Var>,
     ) {
         let ext_cols = local.misc_specific_columns.ext();
 
@@ -281,43 +279,45 @@ impl MiscInstrsChip {
             Opcode::SLL.as_field::<AB::F>(),
             ext_cols.sll_val,
             local.op_b_value,
-            Word([AB::Expr::from_canonical_u32(31) - ext_cols.lsb - ext_cols.msbd, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            local.is_ext.clone(),
+            Word([
+                AB::Expr::from_canonical_u32(31) - ext_cols.lsb - ext_cols.msbd,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ]),
+            local.is_ext,
         );
 
         builder.send_alu(
             Opcode::SRL.as_field::<AB::F>(),
             local.op_a_value,
             ext_cols.sll_val,
-            Word([AB::Expr::from_canonical_u32(31) - ext_cols.msbd, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            local.is_ext.clone(),
+            Word([
+                AB::Expr::from_canonical_u32(31) - ext_cols.msbd,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ]),
+            local.is_ext,
         );
 
-        builder
-            .when(local.is_ext)
-            .assert_eq(local.op_c_value[0] + local.op_c_value[1] * AB::Expr::from_canonical_u32(256) , 
-                       ext_cols.lsb + ext_cols.msbd * AB::Expr::from_canonical_u32(32));
+        builder.when(local.is_ext).assert_eq(
+            local.op_c_value[0] + local.op_c_value[1] * AB::Expr::from_canonical_u32(256),
+            ext_cols.lsb + ext_cols.msbd * AB::Expr::from_canonical_u32(32),
+        );
     }
 
     pub(crate) fn eval_wsbh<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>
+        local: &MiscInstrColumns<AB::Var>,
     ) {
-        builder
-            .when(local.is_wsbh.clone())
-            .assert_eq(local.op_a_value[0], local.op_b_value[1]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[0], local.op_b_value[1]);
 
-        builder
-            .when(local.is_wsbh.clone())
-            .assert_eq(local.op_a_value[1], local.op_b_value[0]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[1], local.op_b_value[0]);
 
-        builder
-            .when(local.is_wsbh.clone())
-            .assert_eq(local.op_a_value[2], local.op_b_value[3]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[2], local.op_b_value[3]);
 
-        builder
-            .when(local.is_wsbh.clone())
-            .assert_eq(local.op_a_value[3], local.op_b_value[2]);
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[3], local.op_b_value[2]);
     }
 }

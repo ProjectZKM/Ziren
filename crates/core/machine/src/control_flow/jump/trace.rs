@@ -101,13 +101,13 @@ impl JumpChip {
                 cols.target_pc_range_checker.populate(target_pc);
             }
             Opcode::JumpDirect => {
-               let target_pc = event.next_pc.wrapping_add(event.b);
-               cols.op_a_range_checker.populate(event.a);
-               cols.next_pc = Word::from(event.next_pc);
-               cols.next_pc_range_checker.populate(event.next_pc);
-               cols.target_pc = Word::from(target_pc);
-               cols.target_pc_range_checker.populate(target_pc);
-           }
+                let target_pc = event.next_pc.wrapping_add(event.b);
+                cols.op_a_range_checker.populate(event.a);
+                cols.next_pc = Word::from(event.next_pc);
+                cols.next_pc_range_checker.populate(event.next_pc);
+                cols.target_pc = Word::from(target_pc);
+                cols.target_pc_range_checker.populate(target_pc);
+            }
             _ => unreachable!(),
         }
     }

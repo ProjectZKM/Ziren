@@ -2,8 +2,7 @@ use hashbrown::HashMap;
 
 use crate::{
     events::{
-        MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent,
-        SyscallEvent,
+        MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent, SyscallEvent,
     },
     record::ExecutionRecord,
     Executor, ExecutorMode, Register,
@@ -95,6 +94,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
     /// Write a slice of words to memory.
     pub fn mw_slice(&mut self, addr: u32, values: &[u32]) -> Vec<MemoryWriteRecord> {
         let mut records = Vec::new();
+        #[allow(clippy::needless_range_loop)]
         for i in 0..values.len() {
             let record = self.mw(addr + i as u32 * 4, values[i]);
             records.push(record);
