@@ -2,6 +2,10 @@
 name = "zkm-stark"
 version = { workspace = true }
 edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
 
 [dependencies]
 p3-air = { workspace = true  }
