@@ -99,27 +99,27 @@ rand = "0.8.5"
 sha2 = { version = "0.10.8", default-features = false }
 anyhow = "1.0.75"
 
-zkm-recursion-derive = { path = "crates/recursion/derive", version = "1.0.0", default-features = false }
-zkm-recursion-circuit = { path = "crates/recursion/circuit", version = "1.0.0", default-features = false }
-zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", version = "1.0.0", default-features = false }
-zkm-recursion-compiler = { path = "crates/recursion/compiler", version = "1.0.0" }
-zkm-recursion-core = { path = "crates/recursion/core", version = "1.0.0" }
-zkm-core-executor = { path = "crates/core/executor", version = "1.0.0", default-features = false }
-zkm-core-machine = { path = "crates/core/machine", version = "1.0.0", default-features = false }
-zkm-derive = { path = "crates/derive", version = "1.0.0" }
-zkm-primitives = { path = "crates/primitives", version = "1.0.0" }
-zkm-stark = { path = "crates/stark", version = "1.0.0" }
-zkm-prover = { path = "crates/prover", version = "1.0.0" }
-zkm-build = { path = "crates/build", version = "1.0.0" }
-zkm-sdk = { path = "crates/sdk", version = "1.0.0" }
-zkm-verifier = { path = "crates/verifier", version = "1.0.0" }
+zkm-recursion-derive = { path = "crates/recursion/derive", default-features = false }
+zkm-recursion-circuit = { path = "crates/recursion/circuit", default-features = false }
+zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", default-features = false }
+zkm-recursion-compiler = { path = "crates/recursion/compiler" }
+zkm-recursion-core = { path = "crates/recursion/core" }
+zkm-core-executor = { path = "crates/core/executor", default-features = false }
+zkm-core-machine = { path = "crates/core/machine", default-features = false }
+zkm-derive = { path = "crates/derive" }
+zkm-primitives = { path = "crates/primitives" }
+zkm-stark = { path = "crates/stark" }
+zkm-prover = { path = "crates/prover" }
+zkm-build = { path = "crates/build" }
+zkm-sdk = { path = "crates/sdk" }
+zkm-verifier = { path = "crates/verifier" }
 
-zkm-lib = { path = "crates/zkvm/lib", version = "1.0.0", default-features = false }
-zkm-zkvm = { path = "crates/zkvm/entrypoint", version = "1.0.0", default-features = false }
-zkm-curves = { path = "crates/curves", version = "1.0.0" }
+zkm-lib = { path = "crates/zkvm/lib", default-features = false }
+zkm-zkvm = { path = "crates/zkvm/entrypoint", default-features = false }
+zkm-curves = { path = "crates/curves" }
 
 # For testing.
-test-artifacts = { path = "crates/test-artifacts", version = "1.0.0" }
+test-artifacts = { path = "crates/test-artifacts" }
 
 # misc
 hashbrown = "0.14.5"
