@@ -540,7 +540,7 @@ impl Instruction {
                 if sa == 0b010000 {
                     // Ok(Operation::Signext(rd, rt, 8)) // seb
                     Ok(Self::new(Opcode::SEXT, rd, rt, 0, false, true))
-                } else if sa == 0b110000 {
+                } else if sa == 0b011000 {
                     // Ok(Operation::Signext(rd, rt, 16)) // seh
                     Ok(Self::new(Opcode::SEXT, rd, rt, 1, false, true))
                 } else if sa == 0b000010 {

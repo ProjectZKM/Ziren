@@ -1251,6 +1251,7 @@ impl<'a> Executor<'a> {
             }
 
             Opcode::UNIMPL => {
+                log::error!("{:X}: {:X}", self.state.pc, instruction.op_c);
                 return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
             }
         }

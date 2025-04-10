@@ -33,7 +33,7 @@ name = "aggregation"
 version = "1.1.0"
 dependencies = [
  "sha2 0.10.8",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -931,7 +931,7 @@ version = "1.1.0"
 dependencies = [
  "rand 0.8.5",
  "substrate-bn",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -1073,7 +1073,7 @@ name = "chess"
 version = "1.1.0"
 dependencies = [
  "chess 3.2.0",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -1336,7 +1336,7 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
- "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+ "zkm-lib 0.0.1",
 ]
 
 [[package]]
@@ -1367,7 +1367,7 @@ name = "cycle-tracking"
 version = "1.1.0"
 dependencies = [
  "zkm-derive",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -1674,7 +1674,7 @@ dependencies = [
  "rfc6979",
  "signature",
  "spki 0.7.3",
- "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+ "zkm-lib 0.0.1",
 ]
 
 [[package]]
@@ -1919,7 +1919,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 name = "fibonacci"
 version = "1.1.0"
 dependencies = [
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -2158,7 +2158,7 @@ name = "groth16-verifier"
 version = "1.1.0"
 dependencies = [
  "zkm-verifier",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -2723,7 +2723,7 @@ checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
 name = "is-prime"
 version = "1.1.0"
 dependencies = [
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -2832,7 +2832,7 @@ version = "1.1.0"
 dependencies = [
  "json-lib",
  "serde_json",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -2893,7 +2893,7 @@ dependencies = [
 name = "keccak"
 version = "1.1.0"
 dependencies = [
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -3924,7 +3924,7 @@ name = "plonk-verifier"
 version = "1.1.0"
 dependencies = [
  "zkm-verifier",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -4371,7 +4371,7 @@ name = "regex"
 version = "1.1.0"
 dependencies = [
  "regex 1.11.1",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -4578,7 +4578,7 @@ dependencies = [
  "hex",
  "kzg-rs",
  "serde",
- "zkm-zkvm 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+ "zkm-zkvm 0.0.1",
 ]
 
 [[package]]
@@ -4609,7 +4609,7 @@ dependencies = [
  "guest 1.1.0 (git+https://github.com/zkMIPS/revme.git?branch=zkMIPS)",
  "k256",
  "libc",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -4714,7 +4714,7 @@ dependencies = [
  "spki 0.7.3",
  "subtle",
  "zeroize",
- "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+ "zkm-lib 0.0.1",
 ]
 
 [[package]]
@@ -4723,7 +4723,7 @@ version = "1.1.0"
 dependencies = [
  "rsa 0.9.6",
  "sha2 0.10.8",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -5302,7 +5302,7 @@ dependencies = [
  "serde_with",
  "sha2 0.10.8",
  "ssz_rs",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -5397,7 +5397,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+ "zkm-lib 0.0.1",
 ]
 
 [[package]]
@@ -5573,7 +5573,7 @@ version = "1.1.0"
 dependencies = [
  "serde_cbor",
  "tendermint-light-client-verifier",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
@@ -5620,7 +5620,7 @@ dependencies = [
 
 [[package]]
 name = "test-artifacts"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "zkm-build",
 ]
@@ -6805,7 +6805,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-build"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -6816,7 +6816,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-executor"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -6856,7 +6856,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-machine"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -6907,7 +6907,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-curves"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "cfg-if",
  "curve25519-dalek",
@@ -6928,7 +6928,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-derive"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -6937,6 +6937,7 @@ dependencies = [
 [[package]]
 name = "zkm-lib"
 version = "0.0.1"
+source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#416269b7715f902b3b9962d5fe37fc44f3af4898"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -6947,8 +6948,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-lib"
-version = "0.0.1"
-source = "git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS#416269b7715f902b3b9962d5fe37fc44f3af4898"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -6970,7 +6970,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-primitives"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "hex",
@@ -6987,7 +6987,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-prover"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -7025,7 +7025,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-circuit"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "hashbrown 0.14.5",
  "itertools 0.13.0",
@@ -7057,7 +7057,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-compiler"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "backtrace",
  "itertools 0.13.0",
@@ -7077,7 +7077,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-core"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "backtrace",
  "ff 0.13.1",
@@ -7112,7 +7112,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-derive"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -7120,7 +7120,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-gnark-ffi"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -7161,7 +7161,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-sdk"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "alloy-signer",
  "alloy-signer-local",
@@ -7202,7 +7202,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-stark"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "arrayref",
  "hashbrown 0.14.5",
@@ -7238,12 +7238,12 @@ dependencies = [
  "tracing-subscriber",
  "zkm-derive",
  "zkm-primitives",
- "zkm-zkvm 0.0.1",
+ "zkm-zkvm 1.0.0",
 ]
 
 [[package]]
 name = "zkm-verifier"
-version = "0.0.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "hex",
@@ -7251,24 +7251,6 @@ dependencies = [
  "sha2 0.10.8",
  "substrate-bn-succinct",
  "thiserror 2.0.12",
-]
-
-[[package]]
-name = "zkm-zkvm"
-version = "0.0.1"
-dependencies = [
- "bincode",
- "cfg-if",
- "getrandom 0.2.15",
- "lazy_static",
- "libm",
- "p3-field",
- "p3-koala-bear",
- "rand 0.8.5",
- "serde",
- "sha2 0.10.8",
- "zkm-lib 0.0.1",
- "zkm-primitives",
 ]
 
 [[package]]
@@ -7284,7 +7266,25 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2 0.10.8",
- "zkm-lib 0.0.1 (git+https://github.com/zkMIPS/zkMIPS?branch=zkMIPS)",
+ "zkm-lib 0.0.1",
+]
+
+[[package]]
+name = "zkm-zkvm"
+version = "1.0.0"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "getrandom 0.2.15",
+ "lazy_static",
+ "libm",
+ "p3-field",
+ "p3-koala-bear",
+ "rand 0.8.5",
+ "serde",
+ "sha2 0.10.8",
+ "zkm-lib 1.0.0",
+ "zkm-primitives",
 ]
 
 [[patch.unused]]
