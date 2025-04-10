@@ -25,9 +25,13 @@ jobs:
       - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
       - name: Cargo build
         run: source ~/.zkm-toolchain/env && RUSTFLAGS="-C target-cpu=native" cargo build --release
-      - name: Cargo test groth16
+      - name: Cargo test dev groth16
+        run: source ~/.zkm-toolchain/env && RUSTFLAGS="-C target-cpu=native" ZKM_DEV=true cargo test -r test_e2e_prove_groth16
+      - name: Cargo test dev plonk
+        run: source ~/.zkm-toolchain/env && RUSTFLAGS="-C target-cpu=native" ZKM_DEV=true cargo test -r test_e2e_prove_plonk 
+      - name: Cargo test prod groth16
         run: source ~/.zkm-toolchain/env && RUSTFLAGS="-C target-cpu=native" cargo test -r test_verify_groth16 --features ark
-      - name: Cargo test plonk
+      - name: Cargo test prod plonk
         run: source ~/.zkm-toolchain/env && RUSTFLAGS="-C target-cpu=native" cargo test -r test_verify_plonk 
   fmt:
     name: Rustfmt
