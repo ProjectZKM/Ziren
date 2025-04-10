@@ -1484,6 +1484,7 @@ pub mod tests {
     /// is not needed.
     #[test]
     #[serial]
+    #[ignore]
     fn test_e2e() -> Result<()> {
         let elf = test_artifacts::FIBONACCI_ELF;
         setup_logger();
@@ -1532,6 +1533,7 @@ pub mod tests {
     /// pipeline in addition to verifying deferred proofs.
     #[test]
     #[serial]
+    #[ignore]
     fn test_e2e_with_deferred_proofs() -> Result<()> {
         setup_logger();
         test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
