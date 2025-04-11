@@ -29,8 +29,19 @@ impl AffinePoint<N> for Secp256r1Point {
         4263149467, 1340293858,
     ];
 
+    #[allow(deprecated)]
+    const GENERATOR_T: Self = Self(WeierstrassPoint::Affine(Self::GENERATOR));
+
     fn new(limbs: [u32; N]) -> Self {
         Self(WeierstrassPoint::Affine(limbs))
+    }
+
+    fn identity() -> Self {
+        Self::infinity()
+    }
+
+    fn is_identity(&self) -> bool {
+        self.is_infinity()
     }
 
     fn limbs_ref(&self) -> &[u32; N] {

@@ -27,8 +27,22 @@ impl AffinePoint<N> for Bn254Point {
     /// https://github.com/ethereum/py_pairing/blob/5f609da/py_ecc/bn128/bn128_field_elements.py
     const GENERATOR: [u32; N] = [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
 
+    #[allow(deprecated)]
+    /// The generator has been taken from py_pairing python library by the Ethereum Foundation:
+    ///
+    /// https://github.com/ethereum/py_pairing/blob/5f609da/py_ecc/bn128/bn128_field_elements.py
+    const GENERATOR_T: Self = Self(WeierstrassPoint::Affine(Self::GENERATOR));
+
     fn new(limbs: [u32; N]) -> Self {
         Self(WeierstrassPoint::Affine(limbs))
+    }
+
+    fn identity() -> Self {
+        Self::infinity()
+    }
+
+    fn is_identity(&self) -> bool {
+        self.is_infinity()
     }
 
     fn limbs_ref(&self) -> &[u32; N] {

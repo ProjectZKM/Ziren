@@ -6,7 +6,7 @@
 //! Note: When performing curve operations, accelerated crates for zkMIPS use affine arithmetic instead of projective arithmetic for performance.
 
 use super::{
-    ECDSACurve, ECDSAPoint, Field, FieldElement, SP1AffinePointTrait, FIELD_BYTES_SIZE_USIZE,
+    ECDSACurve, ECDSAPoint, Field, FieldElement, ZKMAffinePointTrait, FIELD_BYTES_SIZE_USIZE,
 };
 
 use elliptic_curve::{
@@ -22,7 +22,7 @@ use std::ops::Neg;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AffinePoint<C: ECDSACurve> {
-    pub inner: C::SP1AffinePoint,
+    pub inner: C::ZKMAffinePoint,
 }
 
 impl<C: ECDSACurve> AffinePoint<C> {
@@ -36,7 +36,7 @@ impl<C: ECDSACurve> AffinePoint<C> {
         let y_slice = y_slice.as_mut_slice();
         y_slice.reverse();
 
-        AffinePoint { inner: <C::SP1AffinePoint as ECDSAPoint>::from(x_slice, y_slice) }
+        AffinePoint { inner: <C::ZKMAffinePoint as ECDSAPoint>::from(x_slice, y_slice) }
     }
 
     /// Get the x and y field elements of the point.
@@ -66,12 +66,12 @@ impl<C: ECDSACurve> AffinePoint<C> {
 
     /// Get the generator point.
     pub fn generator() -> Self {
-        AffinePoint { inner: C::SP1AffinePoint::GENERATOR_T }
+        AffinePoint { inner: C::ZKMAffinePoint::GENERATOR_T }
     }
 
     /// Get the identity point.
     pub fn identity() -> Self {
-        AffinePoint { inner: C::SP1AffinePoint::identity() }
+        AffinePoint { inner: C::ZKMAffinePoint::identity() }
     }
 
     /// Check if the point is the identity point.
@@ -172,7 +172,7 @@ impl<C: ECDSACurve> ConditionallySelectable for AffinePoint<C> {
     fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
         // Conditional select is a constant time if-else operation.
         //
-        // In the SP1 vm, there are no attempts made to prevent side channel attacks.
+        // In the ZKM vm, there are no attempts made to prevent side channel attacks.
         if choice.into() {
             *b
         } else {

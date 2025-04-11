@@ -34,8 +34,19 @@ impl AffinePoint<N> for Bls12381Point {
         3819610353, 146011265,
     ];
 
+    #[allow(deprecated)]
+    const GENERATOR_T: Self = Self(WeierstrassPoint::Affine(Self::GENERATOR));
+
     fn new(limbs: [u32; N]) -> Self {
         Self(WeierstrassPoint::Affine(limbs))
+    }
+
+    fn identity() -> Self {
+        Self::infinity()
+    }
+
+    fn is_identity(&self) -> bool {
+        self.is_infinity()
     }
 
     fn limbs_ref(&self) -> &[u32; N] {
