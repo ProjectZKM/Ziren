@@ -850,6 +850,7 @@ impl<'a> Executor<'a> {
 
     /// Emit a jump event.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn emit_jump_event(
         &mut self,
         opcode: Opcode,
