@@ -1,5 +1,5 @@
-use zkm_sdk::{include_elf, ZKMProofWithPublicValues};
 use std::time::Duration;
+use zkm_sdk::{include_elf, ZKMProofWithPublicValues};
 
 use zkm_sdk::{utils, ProverClient, ZKMStdin};
 

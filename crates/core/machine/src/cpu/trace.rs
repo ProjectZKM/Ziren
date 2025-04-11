@@ -190,7 +190,7 @@ impl CpuChip {
         }
 
         cols.is_sequential = F::from_bool(
-            !is_halt && !instruction.is_branch_instruction() && !instruction.is_jump_instruction()
+            !is_halt && !instruction.is_branch_instruction() && !instruction.is_jump_instruction(),
         );
 
         cols.has_hi = F::from_bool(instruction.is_mult_div_instruction());

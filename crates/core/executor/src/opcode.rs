@@ -13,25 +13,25 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum Opcode {
     // ALU
-    ADD = 0,         // ADDSUB
-    SUB = 1,         // ADDSUB
-    MULT = 2,        // MUL
-    MULTU = 3,       // MUL
-    MUL = 4,         // MUL
-    DIV = 5,         // DIVREM
-    DIVU = 6,        // DIVREM
-    SLL = 7,         // SLL
-    SRL = 8,         // SR
-    SRA = 9,         // SR
-    ROR = 10,        // SR
-    SLT = 11,        // LT
-    SLTU = 12,       // LT
-    AND = 13,        // BITWISE
-    OR = 14,         // BITWISE
-    XOR = 15,        // BITWISE
-    NOR = 16,        // BITWISE
-    CLZ = 17,        // CLO_CLZ
-    CLO = 18,        // CLO_CLZ
+    ADD = 0,   // ADDSUB
+    SUB = 1,   // ADDSUB
+    MULT = 2,  // MUL
+    MULTU = 3, // MUL
+    MUL = 4,   // MUL
+    DIV = 5,   // DIVREM
+    DIVU = 6,  // DIVREM
+    SLL = 7,   // SLL
+    SRL = 8,   // SR
+    SRA = 9,   // SR
+    ROR = 10,  // SR
+    SLT = 11,  // LT
+    SLTU = 12, // LT
+    AND = 13,  // BITWISE
+    OR = 14,   // BITWISE
+    XOR = 15,  // BITWISE
+    NOR = 16,  // BITWISE
+    CLZ = 17,  // CLO_CLZ
+    CLO = 18,  // CLO_CLZ
     // Control FLow
     BEQ = 19,        // BRANCH
     BGEZ = 20,       // BRANCH
@@ -43,32 +43,32 @@ pub enum Opcode {
     Jumpi = 26,      // JUMP
     JumpDirect = 27, // JUMP
     // Memory Op
-    LB = 28,         // LOAD
-    LBU = 29,        // LOAD
-    LH = 30,         // LOAD
-    LHU = 31,        // LOAD
-    LW = 32,         // LOAD
-    LWL = 33,        // LOAD
-    LWR = 34,        // LOAD
-    LL = 35,         // LOAD
-    SB = 36,         // STORE
-    SH = 37,         // STORE
-    SW = 38,         // STORE
-    SWL = 39,        // STORE
-    SWR = 40,        // STORE
-    SC = 41,         // STORE
+    LB = 28,  // LOAD
+    LBU = 29, // LOAD
+    LH = 30,  // LOAD
+    LHU = 31, // LOAD
+    LW = 32,  // LOAD
+    LWL = 33, // LOAD
+    LWR = 34, // LOAD
+    LL = 35,  // LOAD
+    SB = 36,  // STORE
+    SH = 37,  // STORE
+    SW = 38,  // STORE
+    SWL = 39, // STORE
+    SWR = 40, // STORE
+    SC = 41,  // STORE
     // Syscall
-    SYSCALL = 42,    // SYSCALL
+    SYSCALL = 42, // SYSCALL
     // Misc
-    MEQ = 43,        // MOVCOND
-    MNE = 44,        // MOVCOND
-    TEQ = 45,        // MOVCOND
-    SEXT = 46,       // SEXT
-    WSBH = 47,       // MISC
-    EXT = 48,        // EXT
-    MADDU = 49,      // MADDSUB
-    MSUBU = 50,      // MADDSUB
-    INS = 51,        // INS
+    MEQ = 43,   // MOVCOND
+    MNE = 44,   // MOVCOND
+    TEQ = 45,   // MOVCOND
+    SEXT = 46,  // SEXT
+    WSBH = 47,  // MISC
+    EXT = 48,   // EXT
+    MADDU = 49, // MADDSUB
+    MSUBU = 50, // MADDSUB
+    INS = 51,   // INS
     UNIMPL = 0xff,
 }
 

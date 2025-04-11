@@ -156,7 +156,11 @@ impl CpuChip {
 
         // Verify the pc, next_pc, and next_next_pc
         builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
-        builder.when_transition().when(next.is_real).when_not(next.is_halt).assert_eq(local.next_next_pc, next.next_pc);
+        builder
+            .when_transition()
+            .when(next.is_real)
+            .when_not(next.is_halt)
+            .assert_eq(local.next_next_pc, next.next_pc);
 
         builder
             .when_transition()

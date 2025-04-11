@@ -5,7 +5,6 @@ zkm_zkvm::entrypoint!(main);
 
 use sha2::{Digest, Sha256};
 
-
 pub fn main() {
     // Read the verification keys.
     let vkeys = zkm_zkvm::io::read::<Vec<[u32; 8]>>();
