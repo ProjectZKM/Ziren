@@ -34,7 +34,7 @@ pub struct CpuCols<T: Copy> {
     /// The program counter value.
     pub pc: T,
 
-    /// The expected next program counter value.
+    /// The next program counter value.
     pub next_pc: T,
 
     /// The expected next_next program counter value.
@@ -49,11 +49,14 @@ pub struct CpuCols<T: Copy> {
     /// Whether this is a memory instruction.
     pub is_memory: T,
 
-    /// Table selectors for opcodes.
+    /// Whether this is a syscall instruction.
     pub is_syscall: T,
 
     /// Whether this is a halt instruction.
     pub is_halt: T,
+
+    /// Whether this is a sequential instruction (not branch or jump or halt).
+    pub is_sequential: T,
 
     /// Operand values, either from registers or immediate values.
     pub op_a_value: Word<T>,
@@ -62,11 +65,13 @@ pub struct CpuCols<T: Copy> {
     pub op_b_access: MemoryReadCols<T>,
     pub op_c_access: MemoryReadCols<T>,
 
+    /// Whether read/write HI register
     pub has_hi: T,
 
     /// Selector to label whether this row is a non padded row.
     pub is_real: T,
 
+    /// Whether op_a is immutable
     pub op_a_immutable: T,
 }
 

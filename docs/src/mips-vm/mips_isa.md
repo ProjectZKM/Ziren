@@ -2,63 +2,63 @@
 The `Opcode` enum organizes MIPS instructions into several functional categories, each serving a specific role in the instruction set:
 ```rust
 pub enum Opcode {
-    // BinaryOperator
-    ADD = 0,
-    SUB = 1,
-    MULT = 2,
-    MULTU = 3,
-    MUL = 4,
-    DIV = 5,
-    DIVU = 6,
-    SLL = 7,
-    SRL = 8,
-    SRA = 9,
-    SLT = 10,
-    SLTU = 11,
-    AND = 12,
-    OR = 13,
-    XOR = 14,
-    NOR = 15,
-    // count leading zeros
-    CLZ = 16,
-    // count leading ones
-    CLO = 17,
-    BEQ = 18,
-    BGEZ = 19,
-    BGTZ = 20,
-    BLEZ = 21,
-    BLTZ = 22,
-    BNE = 23,
-    // MovCond
-    MEQ = 24,
-    MNE = 25,
+    // ALU
+    ADD = 0,         // ADDSUB
+    SUB = 1,         // ADDSUB
+    MULT = 2,        // MUL
+    MULTU = 3,       // MUL
+    MUL = 4,         // MUL
+    DIV = 5,         // DIVREM
+    DIVU = 6,        // DIVREM
+    SLL = 7,         // SLL
+    SRL = 8,         // SR
+    SRA = 9,         // SR
+    ROR = 10,        // SR
+    SLT = 11,        // LT
+    SLTU = 12,       // LT
+    AND = 13,        // BITWISE
+    OR = 14,         // BITWISE
+    XOR = 15,        // BITWISE
+    NOR = 16,        // BITWISE
+    CLZ = 17,        // CLO_CLZ
+    CLO = 18,        // CLO_CLZ
+    // Control FLow
+    BEQ = 19,        // BRANCH
+    BGEZ = 20,       // BRANCH
+    BGTZ = 21,       // BRANCH
+    BLEZ = 22,       // BRANCH
+    BLTZ = 23,       // BRANCH
+    BNE = 24,        // BRANCH
+    Jump = 25,       // JUMP
+    Jumpi = 26,      // JUMP
+    JumpDirect = 27, // JUMP
     // Memory Op
-    LH = 26,
-    LWL = 27,
-    LW = 28,
-    LB = 29,
-    LBU = 30,
-    LHU = 31,
-    LWR = 32,
-    LL = 33,
-    SB = 34,
-    SH = 35,
-    SWL = 36,
-    SW = 37,
-    SWR = 38,
-    SC = 39,
-    Jump = 40,
-    Jumpi = 41,
-    JumpDirect = 42,
-    SYSCALL = 44,
-    TEQ = 45,
-    SEXT = 46,
-    WSBH = 47,
-    EXT = 48,
-    ROR = 49,
-    MADDU = 50,
-    MSUBU = 51,
-    INS = 52,
+    LB = 28,         // LOAD
+    LBU = 29,        // LOAD
+    LH = 30,         // LOAD
+    LHU = 31,        // LOAD
+    LW = 32,         // LOAD
+    LWL = 33,        // LOAD
+    LWR = 34,        // LOAD
+    LL = 35,         // LOAD
+    SB = 36,         // STORE
+    SH = 37,         // STORE
+    SW = 38,         // STORE
+    SWL = 39,        // STORE
+    SWR = 40,        // STORE
+    SC = 41,         // STORE
+    // Syscall
+    SYSCALL = 42,    // SYSCALL
+    // Misc
+    MEQ = 43,        // MOVCOND
+    MNE = 44,        // MOVCOND
+    TEQ = 45,        // MOVCOND
+    SEXT = 46,       // SEXT
+    WSBH = 47,       // MISC
+    EXT = 48,        // EXT
+    MADDU = 49,      // MADDSUB
+    MSUBU = 50,      // MADDSUB
+    INS = 51,        // INS
     UNIMPL = 0xff,
 }
 ```

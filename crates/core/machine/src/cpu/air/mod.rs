@@ -72,6 +72,7 @@ where
             local.is_memory,
             local.is_syscall,
             local.is_halt,
+            local.is_sequential,
             local.is_real,
         );
 
@@ -153,7 +154,15 @@ impl CpuChip {
         // Verify the public value's start pc.
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
 
+        // Verify the pc, next_pc, and next_next_pc
         builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
+        builder.when_transition().when(next.is_real).when_not(next.is_halt).assert_eq(local.next_next_pc, next.next_pc);
+
+        builder
+            .when_transition()
+            .when(local.is_real)
+            .when(local.is_sequential)
+            .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_canonical_u32(4));
 
         // Verify the public value's next pc.  We need to handle two cases:
         // 1. The last real row is a transition row.

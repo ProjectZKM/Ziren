@@ -9,15 +9,19 @@ pub const NUM_JUMP_COLS: usize = size_of::<JumpColumns<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct JumpColumns<T> {
+    /// The current program counter.
     pub pc: T,
 
-    /// The current program counter.
+    /// The next program counter.
     pub next_pc: Word<T>,
     pub next_pc_range_checker: KoalaBearWordRangeChecker<T>,
 
-    /// The next program counter.
+    /// The target program counter.
     pub target_pc: Word<T>,
     pub target_pc_range_checker: KoalaBearWordRangeChecker<T>,
+
+    /// The next program counter.
+    pub next_next_pc: Word<T>,
 
     /// The value of the first operand.
     pub op_a_value: Word<T>,
@@ -29,11 +33,11 @@ pub struct JumpColumns<T> {
     /// Whether the first operand is register 0.
     pub op_a_0: T,
 
-    /// Jump Instructions.
+    /// Jump Instructions Selectors.
     pub is_jump: T,
     pub is_jumpi: T,
     pub is_jumpdirect: T,
 
-    // A range checker for `op_a` which may contain `pc + 4`.
+    // A range checker for `op_a` which may contain `next_pc + 4`.
     pub op_a_range_checker: KoalaBearWordRangeChecker<T>,
 }

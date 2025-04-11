@@ -65,7 +65,7 @@ pub struct ShiftLeft;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftLeftCols<T> {
-    /// The pc number, used for byte lookup table.
+    /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
@@ -397,6 +397,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ONE,
             local.is_real,
         );
     }

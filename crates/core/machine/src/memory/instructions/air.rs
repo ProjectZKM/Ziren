@@ -25,8 +25,8 @@ where
         let local = main.row_slice(0);
         let local: &MemoryInstructionsColumns<AB::Var> = (*local).borrow();
 
-        // SAFETY: All selectors `is_lb`, `is_lbu`, `is_lh`, `is_lhu`, `is_lw`, `is_sb`, `is_sh`, `is_sw` are checked to be boolean.
-        // Each "real" row has exactly one selector turned on, as `is_real`, the sum of the eight selectors, is boolean.
+        // SAFETY: All selectors are checked to be boolean.
+        // Each "real" row has exactly one selector turned on, as `is_real`, the sum of all the selectors, is boolean.
         // Therefore, the `opcode` matches the corresponding opcode.
 
         let is_real = local.is_lb
@@ -71,7 +71,7 @@ where
         // - `shard`, `clk` are correctly received from the CpuChip
         // - `next_pc = pc + 4`
         // - `num_extra_cycles = 0`
-        // - `op_a_immutable = is_sb + is_sh + is_sw`, as store instruction keeps `op_a` immutable
+        // - `op_a_immutable = is_sb + is_sh + is_sw + local.is_swl + local.is_swr`, as these store instructions keep `op_a` immutable
         // - `is_memory = 1`
         // - `is_syscall = 0`
         // - `is_halt = 0`
@@ -92,6 +92,7 @@ where
             AB::Expr::ONE,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ONE,
             is_real,
         );
     }

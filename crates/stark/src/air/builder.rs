@@ -205,6 +205,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         is_memory: impl Into<Self::Expr>,
         is_syscall: impl Into<Self::Expr>,
         is_halt: impl Into<Self::Expr>,
+        is_sequential: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(shard.into())
@@ -222,6 +223,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(once(is_memory.into()))
             .chain(once(is_syscall.into()))
             .chain(once(is_halt.into()))
+            .chain(once(is_sequential.into()))
             .collect();
 
         self.send(
@@ -249,6 +251,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         is_memory: impl Into<Self::Expr>,
         is_syscall: impl Into<Self::Expr>,
         is_halt: impl Into<Self::Expr>,
+        is_sequential: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(shard.into())
@@ -266,6 +269,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(once(is_memory.into()))
             .chain(once(is_syscall.into()))
             .chain(once(is_halt.into()))
+            .chain(once(is_sequential.into()))
             .collect();
 
         self.receive(
@@ -314,6 +318,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             Self::Expr::ZERO,
             Self::Expr::ZERO,
             Self::Expr::ZERO,
+            Self::Expr::ONE,
             multiplicity,
         )
     }

@@ -8,7 +8,9 @@ pub const NUM_MOVCOND_COLS: usize = size_of::<MovcondCols<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MovcondCols<T> {
+    /// Whether a equals b.
     pub a_eq_b: T,
+    /// Whether c equals 0.
     pub c_eq_0: T,
     pub op_a_access: MemoryReadWriteCols<T>,
 }

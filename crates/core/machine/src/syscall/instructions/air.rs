@@ -55,6 +55,7 @@ where
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
         // `op_a_val` is constrained in `eval_syscall`.
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
+        let is_sequantial = AB::Expr::ONE - local.is_halt;
         builder.receive_instruction(
             local.shard,
             local.clk,
@@ -71,6 +72,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ONE,
             local.is_halt,
+            is_sequantial,
             local.is_real,
         );
 
@@ -81,13 +83,6 @@ where
             &local.op_a_access,
             local.is_real,
         );
-
-        // If the syscall is not halt, then next_pc should be pc + 4.
-        // `next_pc` is constrained for the case where `is_halt` is false to be `pc + 4`
-        builder
-            .when(local.is_real)
-            .when(AB::Expr::ONE - local.is_halt)
-            .assert_eq(local.next_pc, local.pc + AB::Expr::from_canonical_u32(4));
 
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`
         builder.assert_eq::<AB::Var, AB::Expr>(

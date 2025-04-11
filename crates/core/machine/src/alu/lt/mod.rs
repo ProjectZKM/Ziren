@@ -32,7 +32,7 @@ pub struct LtChip;
 #[derive(AlignedBorrow, Default, Clone, Copy)]
 #[repr(C)]
 pub struct LtCols<T> {
-    /// The shard number, used for byte lookup table.
+    /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
@@ -51,6 +51,7 @@ pub struct LtCols<T> {
     /// The second input operand.
     pub c: Word<T>,
 
+    /// Whether the first operand is not register 0.
     pub op_a_not_0: T,
 
     /// Boolean flag to indicate which byte pair differs if the operands are not equal.
@@ -454,6 +455,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ONE,
             is_real,
         );
     }

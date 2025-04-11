@@ -9,6 +9,7 @@ use zkm_stark::{
     Word,
 };
 
+use crate::air::WordAirBuilder;
 use crate::operations::KoalaBearWordRangeChecker;
 
 use super::{JumpChip, JumpColumns};
@@ -24,8 +25,8 @@ where
         let local = main.row_slice(0);
         let local: &JumpColumns<AB::Var> = (*local).borrow();
 
-        // SAFETY: All selectors `is_jal`, `is_jalr` are checked to be boolean.
-        // Each "real" row has exactly one selector turned on, as `is_real = is_jal + is_jalr` is boolean.
+        // SAFETY: All selectors `is_jump`, `is_jumpi`, `is_jumpdirect`  are checked to be boolean.
+        // Each "real" row has exactly one selector turned on, as `is_real = is_jump + is_jumpi + is_jumpdirect` is boolean.
         // Therefore, the `opcode` matches the corresponding opcode.
         builder.assert_bool(local.is_jump);
         builder.assert_bool(local.is_jumpi);
@@ -56,6 +57,7 @@ where
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
             local.op_a_0,
+            AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
@@ -96,7 +98,7 @@ where
             builder,
             local.target_pc,
             local.target_pc_range_checker,
-            is_real,
+            is_real.clone(),
         );
 
         // We now constrain `next_pc`.
@@ -110,5 +112,8 @@ where
             local.op_b_value,
             local.is_jumpdirect,
         );
+
+        // Assert that local.next_next_pc <==> local.target_pc.
+        builder.when(is_real.clone()).assert_word_eq(local.target_pc, local.next_next_pc);
     }
 }

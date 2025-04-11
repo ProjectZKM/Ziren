@@ -10,6 +10,7 @@ pub const NUM_BRANCH_COLS: usize = size_of::<BranchColumns<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct BranchColumns<T> {
+    /// The current program counter.
     pub pc: T,
 
     /// The next program counter.
@@ -34,7 +35,7 @@ pub struct BranchColumns<T> {
     /// Whether the first operand is register 0.
     pub op_a_0: T,
 
-    /// Branch Instructions.
+    /// Branch Instructions Selectors.
     pub is_beq: T,
     pub is_bne: T,
     pub is_bltz: T,

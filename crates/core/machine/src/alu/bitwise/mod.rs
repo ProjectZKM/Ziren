@@ -32,7 +32,7 @@ pub struct BitwiseChip;
 #[derive(AlignedBorrow, Default, Clone, Copy)]
 #[repr(C)]
 pub struct BitwiseCols<T> {
-    /// The shard number, used for byte lookup table.
+    /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
@@ -218,6 +218,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ONE,
             local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
 

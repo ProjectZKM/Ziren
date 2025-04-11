@@ -153,6 +153,8 @@ pub struct JumpEvent {
     pub pc: u32,
     /// The next program counter.
     pub next_pc: u32,
+    /// The next next program counter.
+    pub next_next_pc: u32,
     /// The opcode.
     pub opcode: Opcode,
     /// The first operand value.
@@ -172,13 +174,14 @@ impl JumpEvent {
     pub fn new(
         pc: u32,
         next_pc: u32,
+        next_next_pc: u32,
         opcode: Opcode,
         a: u32,
         b: u32,
         c: u32,
         op_a_0: bool,
     ) -> Self {
-        Self { pc, next_pc, opcode, a, b, c, op_a_0 }
+        Self { pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 }
     }
 }
 

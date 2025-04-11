@@ -21,7 +21,7 @@ pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MiscInstrColumns<T: Copy> {
-    /// The program counter of the instruction.
+    /// The current/next program counter of the instruction.
     pub pc: T,
     pub next_pc: T,
 
@@ -33,8 +33,10 @@ pub struct MiscInstrColumns<T: Copy> {
     /// The value of the third operand.
     pub op_c_value: Word<T>,
 
+    /// Columns for specific type of instructions.
     pub misc_specific_columns: MiscSpecificCols<T>,
 
+    /// Misc Instruction Selectors.
     pub is_wsbh: T,
     pub is_sext: T,
     pub is_ins: T,

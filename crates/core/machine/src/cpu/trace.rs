@@ -180,13 +180,18 @@ impl CpuChip {
             cols.op_c_access.populate(record, blu_events);
         }
 
+        let mut is_halt = false;
         if instruction.is_syscall_instruction() {
             let syscall_id = cols.op_a_access.prev_value[0];
             let num_extra_cycles = cols.op_a_access.prev_value[2];
-            cols.is_halt =
-                F::from_bool(syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id()));
+            is_halt = syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id());
+            cols.is_halt = F::from_bool(is_halt);
             cols.num_extra_cycles = num_extra_cycles;
         }
+
+        cols.is_sequential = F::from_bool(
+            !is_halt && !instruction.is_branch_instruction() && !instruction.is_jump_instruction()
+        );
 
         cols.has_hi = F::from_bool(instruction.is_mult_div_instruction());
 

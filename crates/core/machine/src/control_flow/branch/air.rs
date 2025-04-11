@@ -16,7 +16,7 @@ use super::{BranchChip, BranchColumns};
 /// Verifies all the branching related columns.
 ///
 /// It does this in few parts:
-/// 1. It verifies that the next pc is correct based on the branching column.  That column is a
+/// 1. It verifies that the next next pc is correct based on the branching column.  That column is a
 ///    boolean that indicates whether the branch condition is true.
 /// 2. It verifies the correct value of branching based on the helper bool columns (a_eq_b,
 ///    a_gt_b, a_lt_b).
@@ -59,7 +59,7 @@ where
 
         // SAFETY: This checks the following.
         // - `num_extra_cycles = 0`
-        // - `op_a_val` will be constrained in the CpuChip as `op_a_immutable = 1`
+        // - `op_a_val` will be constrained in the BranchChip as `op_a_immutable = 1`
         // - `op_a_immutable = 1`, as this is a branch instruction
         // - `is_memory = 0`
         // - `is_syscall = 0`
@@ -81,17 +81,17 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ZERO,
             is_real.clone(),
         );
 
         // Evaluate program counter constraints.
         {
-            // Range check branch_cols.pc and branch_cols.next_pc.
+            // Range check local.next_pc, local.next_next_pc and local.target_pc, .
             // SAFETY: `is_real` is already checked to be boolean.
             // The `KoalaBearWordRangeChecker` assumes that the value is checked to be a valid word.
             // This is done when the word form is relevant, i.e. when `pc` and `next_pc` are sent to the ADD ALU table.
             // The ADD ALU table checks the inputs are valid words, when it invokes `AddOperation`.
-            // Range check branch_cols.pc and branch_cols.next_pc.
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
                 local.next_pc,
@@ -113,7 +113,7 @@ where
                 is_real.clone(),
             );
 
-            // When we are branching, assert that local.next_pc <==> local.pc + c.
+            // When we are branching, assert that local.target_pc <==> local.next_pc + c.
             builder.send_alu(
                 Opcode::ADD.as_field::<AB::F>(),
                 local.target_pc,
@@ -122,11 +122,17 @@ where
                 local.is_branching,
             );
 
-            // When we are not branching, assert that local.next_pc + 4 <==> next.next_pc.
+            // When we are not branching, assert that local.next_pc + 4 <==> next.next_next_pc.
             builder.when(is_real.clone()).when(local.not_branching).assert_eq(
                 local.next_pc.reduce::<AB>() + AB::Expr::from_canonical_u32(4),
                 local.next_next_pc.reduce::<AB>(),
             );
+
+            // When we are branching, assert that local.next_next_pc <==> next.target_pc.
+            builder
+                .when(is_real.clone())
+                .when(local.is_branching)
+                .assert_word_eq(local.target_pc, local.next_next_pc);
 
             // When local.not_branching is true, assert that local.is_real is true.
             builder.when(local.not_branching).assert_one(is_real.clone());

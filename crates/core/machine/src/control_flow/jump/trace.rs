@@ -90,6 +90,7 @@ impl JumpChip {
         cols.op_b_value = event.b.into();
         cols.op_c_value = event.c.into();
         cols.op_a_0 = F::from_bool(event.op_a_0);
+        cols.next_next_pc = Word::from(event.next_next_pc);
 
         match event.opcode {
             Opcode::Jump | Opcode::Jumpi => {

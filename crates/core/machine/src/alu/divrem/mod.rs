@@ -100,7 +100,7 @@ pub struct DivRemChip;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DivRemCols<T> {
-    /// The pc.
+    /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
@@ -720,6 +720,7 @@ where
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
+                AB::Expr::ONE,
                 local.is_real,
             );
         }

@@ -44,6 +44,17 @@ where
             + local.is_mne
             + local.is_teq;
 
+        builder.assert_bool(local.is_wsbh);
+        builder.assert_bool(local.is_sext);
+        builder.assert_bool(local.is_ins);
+        builder.assert_bool(local.is_ext);
+        builder.assert_bool(local.is_maddu);
+        builder.assert_bool(local.is_msubu);
+        builder.assert_bool(local.is_meq);
+        builder.assert_bool(local.is_mne);
+        builder.assert_bool(local.is_teq);
+        builder.assert_bool(is_real.clone());
+
         builder.receive_instruction(
             AB::Expr::ZERO,
             AB::Expr::ZERO,
@@ -60,6 +71,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ONE,
             is_real,
         );
 
@@ -80,6 +92,7 @@ impl MiscInstrsChip {
     ) {
         let sext_cols = local.misc_specific_columns.sext();
 
+        // most_sig_bit is bit 7 of sig_byte.
         builder.send_byte(
             ByteOpcode::MSB.as_field::<AB::F>(),
             sext_cols.most_sig_bit,
@@ -88,39 +101,47 @@ impl MiscInstrsChip {
             local.is_sext,
         );
 
+        // op_c can be 0 (for seb) and 1(for seh).
         builder.when(local.is_sext).assert_bool(local.op_c_value[0]);
-
         builder.when(local.is_sext).when(sext_cols.is_seb).assert_zero(local.op_c_value[0]);
-
         builder.when(local.is_sext).when(sext_cols.is_seh).assert_one(local.op_c_value[0]);
 
-        builder
-            .when(local.is_sext)
-            .when(sext_cols.is_seb)
-            .assert_eq(local.op_a_value[0], sext_cols.sig_byte);
+        // For seb, sig_byte is byte 0 of op_a.
+        // For seh, sig_byte is byte 1 of op_a.
+        {
+            builder
+                .when(local.is_sext)
+                .when(sext_cols.is_seb)
+                .assert_eq(local.op_a_value[0], sext_cols.sig_byte);
 
-        builder
-            .when(local.is_sext)
-            .when(sext_cols.is_seh)
-            .assert_eq(local.op_a_value[1], sext_cols.sig_byte);
+            builder
+                .when(local.is_sext)
+                .when(sext_cols.is_seh)
+                .assert_eq(local.op_a_value[1], sext_cols.sig_byte);
+        }
 
-        let sign_byte = AB::Expr::from_canonical_u8(0xFF) * sext_cols.most_sig_bit;
+        // Constraints for result value:
+        // For both seb and seh, bytes lower than sig_byte(contain) equal op_b,
+        // bytes upper than sig_byte equal sign byte(0xff when sig_bit is 1, otherwise 0).
+        {
+            let sign_byte = AB::Expr::from_canonical_u8(0xFF) * sext_cols.most_sig_bit;
 
-        builder.when(local.is_sext).assert_eq(local.op_a_value[0], local.op_b_value[0]);
+            builder.when(local.is_sext).assert_eq(local.op_a_value[0], local.op_b_value[0]);
 
-        builder
-            .when(local.is_sext)
-            .when(sext_cols.is_seb)
-            .assert_eq(local.op_a_value[1], sign_byte.clone());
+            builder
+                .when(local.is_sext)
+                .when(sext_cols.is_seb)
+                .assert_eq(local.op_a_value[1], sign_byte.clone());
 
-        builder
-            .when(local.is_sext)
-            .when(sext_cols.is_seh)
-            .assert_eq(local.op_a_value[1], local.op_b_value[1]);
+            builder
+                .when(local.is_sext)
+                .when(sext_cols.is_seh)
+                .assert_eq(local.op_a_value[1], local.op_b_value[1]);
 
-        builder.when(local.is_sext).assert_eq(local.op_a_value[2], sign_byte.clone());
+            builder.when(local.is_sext).assert_eq(local.op_a_value[2], sign_byte.clone());
 
-        builder.when(local.is_sext).assert_eq(local.op_a_value[3], sign_byte);
+            builder.when(local.is_sext).assert_eq(local.op_a_value[3], sign_byte);
+        }
     }
 
     pub(crate) fn eval_maddsub<AB: ZKMAirBuilder>(
@@ -130,6 +151,7 @@ impl MiscInstrsChip {
     ) {
         let maddsub_cols = local.misc_specific_columns.maddsub();
         let is_real = local.is_maddu + local.is_msubu;
+
         builder.send_alu_with_hi(
             Opcode::MULTU.as_field::<AB::F>(),
             maddsub_cols.mul_lo,
@@ -172,27 +194,33 @@ impl MiscInstrsChip {
 
         builder.when(is_real.clone() * cond_cols.c_eq_0).assert_word_zero(local.op_c_value);
 
+        // For teq, a cannot equal b, otherwise trap will be triggered.
         builder.when(local.is_teq).assert_zero(cond_cols.a_eq_b);
 
-        builder
-            .when(local.is_meq)
-            .when(cond_cols.c_eq_0)
-            .assert_word_eq(local.op_a_value, local.op_b_value);
+        // Constraints for condition move result:
+        // op_a = op_b, when condition is true.
+        // Otherwise, op_a remains unchanged.
+        {
+            builder
+                .when(local.is_meq)
+                .when(cond_cols.c_eq_0)
+                .assert_word_eq(local.op_a_value, local.op_b_value);
 
-        builder
-            .when(local.is_meq)
-            .when_not(cond_cols.c_eq_0)
-            .assert_word_eq(local.op_a_value, cond_cols.op_a_access.prev_value);
+            builder
+                .when(local.is_meq)
+                .when_not(cond_cols.c_eq_0)
+                .assert_word_eq(local.op_a_value, cond_cols.op_a_access.prev_value);
 
-        builder
-            .when(local.is_mne)
-            .when_not(cond_cols.c_eq_0)
-            .assert_word_eq(local.op_a_value, local.op_b_value);
+            builder
+                .when(local.is_mne)
+                .when_not(cond_cols.c_eq_0)
+                .assert_word_eq(local.op_a_value, local.op_b_value);
 
-        builder
-            .when(local.is_mne)
-            .when(cond_cols.c_eq_0)
-            .assert_word_eq(local.op_a_value, cond_cols.op_a_access.prev_value);
+            builder
+                .when(local.is_mne)
+                .when(cond_cols.c_eq_0)
+                .assert_word_eq(local.op_a_value, cond_cols.op_a_access.prev_value);
+        }
     }
 
     pub(crate) fn eval_ins<AB: ZKMAirBuilder>(
@@ -202,68 +230,76 @@ impl MiscInstrsChip {
     ) {
         let ins_cols = local.misc_specific_columns.ins();
 
-        builder.send_alu(
-            Opcode::ROR.as_field::<AB::F>(),
-            ins_cols.ror_val,
-            ins_cols.op_a_access.prev_value,
-            Word([
-                AB::Expr::from_canonical_u32(0) + ins_cols.lsb,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-            ]),
-            local.is_ins,
-        );
+        // Ins can be divided into 5 operations:
+        //    ror_val = rotate_right(op_a, lsb)
+        //    srl_val = ror_val >> (msb - lsb + 1)
+        //    sll_val = op_b << (31 - msb + lsb)
+        //    add_val = srl_val + sll_val
+        //    result = rotate_right(op_a, 31 - msb)
+        {
+            builder.send_alu(
+                Opcode::ROR.as_field::<AB::F>(),
+                ins_cols.ror_val,
+                ins_cols.op_a_access.prev_value,
+                Word([
+                    AB::Expr::from_canonical_u32(0) + ins_cols.lsb,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ]),
+                local.is_ins,
+            );
 
-        builder.send_alu(
-            Opcode::SRL.as_field::<AB::F>(),
-            ins_cols.srl_val,
-            ins_cols.ror_val,
-            Word([
-                AB::Expr::from_canonical_u32(1) + ins_cols.msb - ins_cols.lsb,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-            ]),
-            local.is_ins,
-        );
+            builder.send_alu(
+                Opcode::SRL.as_field::<AB::F>(),
+                ins_cols.srl_val,
+                ins_cols.ror_val,
+                Word([
+                    AB::Expr::from_canonical_u32(1) + ins_cols.msb - ins_cols.lsb,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ]),
+                local.is_ins,
+            );
 
-        builder.send_alu(
-            Opcode::SLL.as_field::<AB::F>(),
-            ins_cols.sll_val,
-            local.op_b_value,
-            Word([
-                AB::Expr::from_canonical_u32(31) - ins_cols.msb + ins_cols.lsb,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-            ]),
-            local.is_ins,
-        );
+            builder.send_alu(
+                Opcode::SLL.as_field::<AB::F>(),
+                ins_cols.sll_val,
+                local.op_b_value,
+                Word([
+                    AB::Expr::from_canonical_u32(31) - ins_cols.msb + ins_cols.lsb,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ]),
+                local.is_ins,
+            );
 
-        builder.send_alu(
-            Opcode::ADD.as_field::<AB::F>(),
-            ins_cols.add_val,
-            ins_cols.srl_val,
-            ins_cols.sll_val,
-            local.is_ins,
-        );
+            builder.send_alu(
+                Opcode::ADD.as_field::<AB::F>(),
+                ins_cols.add_val,
+                ins_cols.srl_val,
+                ins_cols.sll_val,
+                local.is_ins,
+            );
 
-        builder.send_alu(
-            Opcode::ROR.as_field::<AB::F>(),
-            local.op_a_value,
-            ins_cols.add_val,
-            Word([
-                AB::Expr::from_canonical_u32(31) - ins_cols.msb,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-            ]),
-            local.is_ins,
-        );
-
+            builder.send_alu(
+                Opcode::ROR.as_field::<AB::F>(),
+                local.op_a_value,
+                ins_cols.add_val,
+                Word([
+                    AB::Expr::from_canonical_u32(31) - ins_cols.msb,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ]),
+                local.is_ins,
+            );
+        }
+        // op_c = (msb << 5) + lsb
         builder.when(local.is_ins).assert_eq(
-            local.op_c_value[0] + local.op_c_value[1] * AB::Expr::from_canonical_u32(256),
+            local.op_c_value.reduce::<AB>(),
             ins_cols.lsb + ins_cols.msb * AB::Expr::from_canonical_u32(32),
         );
     }
@@ -275,34 +311,40 @@ impl MiscInstrsChip {
     ) {
         let ext_cols = local.misc_specific_columns.ext();
 
-        builder.send_alu(
-            Opcode::SLL.as_field::<AB::F>(),
-            ext_cols.sll_val,
-            local.op_b_value,
-            Word([
-                AB::Expr::from_canonical_u32(31) - ext_cols.lsb - ext_cols.msbd,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-            ]),
-            local.is_ext,
-        );
+        // Ext can be divided into 2 operations:
+        //    sll_val = op_b << (31 - lsb - msbd)
+        //    result = sll_val >> (31 - msbd)
+        {
+            builder.send_alu(
+                Opcode::SLL.as_field::<AB::F>(),
+                ext_cols.sll_val,
+                local.op_b_value,
+                Word([
+                    AB::Expr::from_canonical_u32(31) - ext_cols.lsb - ext_cols.msbd,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ]),
+                local.is_ext,
+            );
 
-        builder.send_alu(
-            Opcode::SRL.as_field::<AB::F>(),
-            local.op_a_value,
-            ext_cols.sll_val,
-            Word([
-                AB::Expr::from_canonical_u32(31) - ext_cols.msbd,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-            ]),
-            local.is_ext,
-        );
+            builder.send_alu(
+                Opcode::SRL.as_field::<AB::F>(),
+                local.op_a_value,
+                ext_cols.sll_val,
+                Word([
+                    AB::Expr::from_canonical_u32(31) - ext_cols.msbd,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ]),
+                local.is_ext,
+            );
+        }
 
+        // op_c = (msbd << 5) + lsb
         builder.when(local.is_ext).assert_eq(
-            local.op_c_value[0] + local.op_c_value[1] * AB::Expr::from_canonical_u32(256),
+            local.op_c_value.reduce::<AB>(),
             ext_cols.lsb + ext_cols.msbd * AB::Expr::from_canonical_u32(32),
         );
     }

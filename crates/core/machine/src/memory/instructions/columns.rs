@@ -10,7 +10,7 @@ pub const NUM_MEMORY_INSTRUCTIONS_COLUMNS: usize = size_of::<MemoryInstructionsC
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryInstructionsColumns<T> {
-    /// The program counter of the instruction.
+    /// The current/next program counter of the instruction.
     pub pc: T,
     pub next_pc: T,
 
