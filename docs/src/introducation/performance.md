@@ -1,19 +1,19 @@
 # Performance
 
 ## Metrics
-To measure the performance of a zkVM's performance, `Efficiency` and `Cost` are two important metrics. 
+To evaluate a zkVM’s performance, two primary metrics are considered: `Efficiency` and `Cost`.
 
 **Efficiency** 
 
-The `Efficiency`, or cycles per instruction, means how many cycles the the zkVM can prove in one second. One cycle is usually mapped to `one` MIPS instruction in zkVM. 
+The `Efficiency`, or cycles per instruction, means how many cycles the zkVM can prove in one second. One cycle is usually mapped to `one` MIPS instruction in zkVM. 
 
-For each MIPS instruction in a shard, it goes through two main phases, executing phase and proving phase, to generate the proof. 
+For each MIPS instruction in a shard, it goes through two main phases, execution phase and proving phase, to generate the proof. 
 
-In the executing phase, the MIPS VM(Emulator) reads the instruction at PC from the program image and executes instruction to generate the execution traces(events). The execution traces will be converted to a matrix for later proving phase. This means the number of the traces is related to the instruction sequences of the program, and the shorter the sequences is, more efficient we can achieve to execute and prove.  
+In the execution phase, the MIPS VM (Emulator) reads the instruction at PC from the program image and executes instruction to generate the execution traces (events). The execution traces will be converted to a matrix for later proving phase. This means the number of the traces is related to the instruction sequences of the program, and the shorter the sequences is, more efficient we can achieve to execute and prove.  
 
-In the proving phase, we employ the some PCS(FRI in zkMIPS prover) to commit the execution traces, the proving complexity is determined by the matrix size of the trace table.
+In the proving phase, we employ the PCS (FRI in zkMIPS prover) to commit the execution traces, the proving complexity is determined by the matrix size of the trace table.
 
-Therefore the instruction sequence size and prover's efficiency does matter in terms of the total proving performance. 
+Therefore the instruction sequence size and prover's efficiency do matter in terms of the total proving performance. 
 
 **Cost**
 
@@ -25,12 +25,12 @@ For example, the [ethproofs.org](https://ethproofs.org/) provides a platform for
 
 ## zkVM benchmarks
 
-To achieve a more fair comparison among the different zkVMs, we provides a [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks) to allow that anyone can reproduce the performances data. 
+To achieve a more fair comparison among the different zkVMs, we provides a [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks) to allow that anyone can reproduce the performance data. 
 
 
 ## Performance of zkMIPS
 
-On a AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge), the performances is shown as below. 
+On a AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge), the performance is shown as below. 
 
 
 Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)/zkMIPS`.
