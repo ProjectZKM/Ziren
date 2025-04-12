@@ -1,13 +1,13 @@
 # Flow Control
 
-zkMIPS enforces MIPS32r2 control flow verification via dedicated Branch and Jump Chips, ensuring precise execution of program control instructions.
+zkMIPS enforces MIPS32r2 control flow verification via dedicated Branch and Jump chips, ensuring precise execution of program control instructions.
 
  ## Branch Chip
 
 MIPS branch instructions execute conditional jumps through register comparisons (BEQ/BNE for equality, BGTZ/BLEZ etc. for sign checks). They calculate targets using 16-bit offsets shifted left twice (enabling ±128KB jumps) and feature a mandatory branch delay slot that always executes the next instruction—simplifying pipelining by allowing compiler-controlled optimizations. 
 
 ### Structure Description
-Branch Chip uses columns to record the following information.
+Branch chip uses columns to record the following information.
 - ​Control Flow Management​​
   - Tracks current and future program counter states across sequential and branching execution paths (`pc, next_pc,target_pc,next_next_pc`).
   - Implements 32-bit address validation through dedicated range-checking components(`next_pc_range_checker, target_pc_range_checker, next_next_pc_range_checker`).
@@ -48,7 +48,7 @@ We use the following key constraints to validate the branch chip:
 MIPS jump instructions force unconditional PC changes via absolute or register-based targets. They calculate 256MB-range addresses by combining PC's upper bits with 26-bit immediates or use full 32-bit register values. All jumps enforce a ​mandatory delay slot executing the next instruction—enabling compiler-driven pipeline optimizations without speculative execution. 
 
 ### Structure Description
-Jump Chip uses columns to record the following information:
+Jump chip uses columns to record the following information:
 
 - ​Control Flow Management​​
 
