@@ -1,5 +1,5 @@
 # ALU
-The Arithmetic Logic Unit (ALU) chips comprises ​​specialized verification circuits​​ designed to enforce computational correctness for all arithmetic and bitwise operations. These circuits implement ​​cross-table lookup protocols​​ with the main CPU table, ensuring instruction-execution integrity throughout the processor pipeline.
+The Arithmetic Logic Unit (ALU) chips comprise ​​specialized verification circuits​​ designed to enforce computational correctness for all arithmetic and bitwise operations. These circuits implement ​​cross-table lookup protocols​​ with the main CPU table, ensuring instruction-execution integrity throughout the processor pipeline.
 
 ## Modular Design
 
