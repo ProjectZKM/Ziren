@@ -24,7 +24,7 @@ Key Lookup Relationships:
 
 | Index | Source(F)          | Target(T)           | Verification Purpose                    |
 |-------|--------------------|---------------------|-----------------------------------------|
-| 1     | Global Memory      | Local Memory        | Partial memory consistency              |
+| 1     | Global Memory      | Local Memory        | Overall memory consistency *             |
 | 2     | CPU                | Memory              | Memory access patterns                  |
 | 3     | Memory             | Bytes               | 8-bit range constraints                 |
 | 4     | CPU                | Program             | Instruction validity                    |
@@ -33,6 +33,7 @@ Key Lookup Relationships:
 | 7     | CPU                | Bytes               | Operand range verification              |
 | 8     | Syscall            | Precompiles         | Syscall/precompiled function execution  |
 
+<small>* In the latest implementation, zkMIPS employs multiset-hashing to ensure memory consistency, enhancing proof efficiency and modularity.</small>
 
 
 ## Range Check Implementation Example
