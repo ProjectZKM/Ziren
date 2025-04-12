@@ -13,7 +13,7 @@ zkMIPS processes execution trace proofs for shards through three key phases:
   Converts each shard's execution into constrained polynomial traces and encodes register states, memory operations, and instruction flows.
 - Shard ​Proof 
   
-  Generates STARK proofs for each shard independently using FRI with Merkle-tree based polynomial commitments.
+  Generates STARK proofs for each shard independently using FRI with Merkle tree-based polynomial commitments.
 
 The proving pipeline coordinates multiple parallel proving units to process shards simultaneously, significantly reducing total proof generation time compared to linear processing.
 
@@ -31,7 +31,7 @@ Recursive aggregations are used to recursively compress multiple shard proofs in
 
   Groups proofs for optimal parallel processing.
 
-And the aggregation engine implements a multi-phase composition:
+The aggregation engine implements a multi-phase composition:
 - Base Layer​​
   
   Processes raw shard proofs through initial verification circuits and generates first-layer aggregation certificates.
