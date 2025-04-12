@@ -1,4 +1,4 @@
-zkMIPS verifies the correctness of the execution of an MIPS program by generating a zero-knowledge proof that reflects the CPU states throughout the program’s runtime. In essence, the “computation problem” in zkMIPS is the given program, and its “solution” is the **execution trace** produced when running that program. This trace details every step of the program execution, with each row corresponding to a single step (or a cycle) and each column representing a fixed CPU variable or register state. Verifying a program essentially involves checking that every step in the trace aligns with the corresponding instruction and the expected logic of the MIPS program.
+zkMIPS verifies the correctness of the execution of a MIPS program by generating a zero-knowledge proof that captures the CPU states throughout the program’s runtime. In essence, the “computation problem” in zkMIPS is the given program, and its “solution” is the **execution trace** produced when running that program. This trace details every step of the program execution, with each row corresponding to a single step (or a cycle) and each column representing a fixed CPU variable or register state. Verifying a program essentially involves checking that every step in the trace aligns with the corresponding instruction and the expected logic of the MIPS program.
 
 Below is the workflow of zkMIPS.
 
@@ -9,16 +9,16 @@ Below is the workflow of zkMIPS.
 Referring to the above diagram, zkMIPS follows a structured pipeline composed of the following stages:
 
 1. **Guest Program**  
-   A developer writes code in a high-level language such as in Rust, creating the application logic that needs to be verified.
+   A developer writes code in a high-level language such as Rust, creating the application logic that needs to be verified.
 
 2. **MIPS Compiler**  
-   The high-level program is compiled into an MIPS ELF binary using a dedicated compiler. This step converts the source code into MIPS32-compliant instructions to produce an executable ELF file.
+   The high-level program is compiled into a MIPS ELF binary using a dedicated compiler. This step converts the source code into MIPS32-compliant instructions, producing an executable ELF file.
 
 3. **ELF Loader**  
-   The ELF Loader reads and interprets the ELF file and prepares for execution within the MIPS VM. This includes loading code, initializing memory, and setting up the program’s entry point.
+   The ELF Loader reads and interprets the ELF file and prepares it for execution within the MIPS VM. This includes loading code, initializing memory, and setting up the program’s entry point.
 
 4. **MIPS VM**  
-   The MIPS Virtual Machine simulates an MIPS CPU to run the loaded ELF file. It captures every step of execution—such as register states, memory accesses, and instruction addresses—and generates the **execution trace** (i.e., a detailed record of the entire computation).
+   The MIPS Virtual Machine simulates a MIPS CPU to run the loaded ELF file. It captures every step of execution—including register states, memory accesses, and instruction addresses—and generates the **execution trace** (i.e., a detailed record of the entire computation).
 
 5. **Execution Trace**   
    This trace is the core data structure used to verify the program. Each row represents a single step of execution, and each column corresponds to a particular CPU register or state variable. By ensuring that every step in the trace matches the intended behavior of the MIPS instructions, zkMIPS can prove the program was executed correctly.
