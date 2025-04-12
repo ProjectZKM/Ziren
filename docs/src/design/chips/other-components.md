@@ -1,6 +1,6 @@
 # Other Components
 
-Except for CPU Chip, Memory Chips, and ALU Chips, we also have Program Chip, Bytes Chip, customized Poseidon2 Chip, STARK Compression Chip, STARK-to-SNARK Chip, and Precompiled Chips.
+Except for CPU chip, Memory chips, and ALU chips, we also have Program chip, Bytes chip, customized Poseidon2 chip, STARK Compression chip, STARK-to-SNARK chip, and Precompiled chips.
 
 In addition to the CPU, Memory, and ALU chips, zkMIPS incorporates several specialized components:
 
@@ -14,13 +14,13 @@ In addition to the CPU, Memory, and ALU chips, zkMIPS incorporates several speci
 
 ## Program Chip
 
-Program Chip establishes program execution constraints through preprocessed instruction verification. The CPU chip performs lookups against this verified instruction set.
+Program chip establishes program execution constraints through preprocessed instruction verification. The CPU chip performs lookups against this verified instruction set.
 
 ## Global Chip
-Global Chip in zkMIPS is responsible for processing and verifying global lookup events (such as memory accesses, system calls), ensuring compliance with predefined rules and generating zero-knowledge data commitments.
+Global chip in zkMIPS is responsible for processing and verifying global lookup events (such as memory accesses, system calls), ensuring compliance with predefined rules and generating zero-knowledge data commitments.
 
 ## Bytes Chip
-The Bytes Chip is a preprocessed table that performs 8/16-bit unsigned integer range checks and  byte logic/arithmetic operations.
+The Bytes chip is a preprocessed table that performs 8/16-bit unsigned integer range checks and  byte logic/arithmetic operations.
 
 ## Poseidon2 Hash Chip
 
@@ -41,7 +41,7 @@ After emulating MIPS instructions into STARK circuits, where each circuit proces
 
 ## Precompiled Chips
 
-Another category of chips extensively utilized in zkMIPS is Precompiled Chips. These chips are specifically designed to handle widely used but computationally intensive cryptographic operations, such as hash functions and signature schemes. 
+Another category of chips extensively utilized in zkMIPS is Precompiled chips. These chips are specifically designed to handle widely used but computationally intensive cryptographic operations, such as hash functions and signature schemes. 
 
 Unlike the approach of emulating MIPS instructions, zkMIPS delegates these computations to dedicated precompiled tables. The CPU table then performs lookups to retrieve the appropriate values from these tables (precompiled operations are activated via syscalls). Precompiles have the capability to directly read from and write to memory through the memory argument. They are typically provided with a clock (clk) value and pointers to memory addresses, which specify the locations for reading or writing data during the operation. For a comprehensive list of precompiled tables, refer to [this section](../../../mips-vm/emulator.md).
 
