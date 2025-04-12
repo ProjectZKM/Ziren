@@ -1,6 +1,6 @@
 # Arithmetization
 
-Algebraic Intermediate Representation (AIR) serves as the arithmeticization foundation in the zkMIPS system, bridging computation and succinct cryptographic proofs. AIR provides a structured method to represent computations through polynomial constraints over execution traces.
+Algebraic Intermediate Representation (AIR) serves as the arithmetization foundation in the zkMIPS system, bridging computation and succinct cryptographic proofs. AIR provides a structured method to represent computations through polynomial constraints over execution traces.
 
 ## Key Concepts of AIR
 - Execution Trace
