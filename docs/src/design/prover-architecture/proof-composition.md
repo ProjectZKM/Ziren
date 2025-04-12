@@ -61,7 +61,7 @@ zkMIPS's proofs are packaged into an object called a receipt. Composition allows
 
   Recursively verified proof bundle containing multiple verification layers.
 
-- Fianl Recipt
+- Final Recipt
 
   Final verification artifact with all assumptions resolved. 
   
