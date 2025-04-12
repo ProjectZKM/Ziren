@@ -33,7 +33,7 @@ Key Lookup Relationships:
 | 7     | CPU                | Bytes               | Operand range verification              |
 | 8     | Syscall            | Precompiles         | Syscall/precompiled function execution  |
 
-<small>* In the latest implementation, zkMIPS employs multiset-hashing to ensure memory consistency, enhancing proof efficiency and modularity.</small>
+<small>* In the latest implementation, zkMIPS employs multiset-hashing to ensure memory consistency checking, enhancing proof efficiency and modularity.</small>
 
 
 ## Range Check Implementation Example
