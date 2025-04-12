@@ -1,4 +1,8 @@
-zkMIPS verifies the correctness of the execution of a MIPS program by generating a zero-knowledge proof that captures the CPU states throughout the program’s runtime. In essence, the “computation problem” in zkMIPS is the given program, and its “solution” is the **execution trace** produced when running that program. This trace details every step of the program execution, with each row corresponding to a single step (or a cycle) and each column representing a fixed CPU variable or register state. Verifying a program essentially involves checking that every step in the trace aligns with the corresponding instruction and the expected logic of the MIPS program.
+
+In essence, the “computation problem” in zkMIPS is the given program, and its “solution” is the **execution trace** produced when running that program. 
+This trace details every step of the program execution, with each row corresponding to a single step (or a cycle) and each column representing a fixed CPU variable or register state. 
+
+Proving a program essentially involves checking that every step in the trace aligns with the corresponding instruction and the expected logic of the MIPS program, convert the traces to polynomials and commit the polynomials by proof system.
 
 Below is the workflow of zkMIPS.
 
@@ -9,10 +13,10 @@ Below is the workflow of zkMIPS.
 Referring to the above diagram, zkMIPS follows a structured pipeline composed of the following stages:
 
 1. **Guest Program**  
-   A developer writes code in a high-level language such as Rust, creating the application logic that needs to be verified.
+   A program that written in a high-level language such as Rust, creating the application logic that needs to be proved.
 
 2. **MIPS Compiler**  
-   The high-level program is compiled into a MIPS ELF binary using a dedicated compiler. This step converts the source code into MIPS32-compliant instructions, producing an executable ELF file.
+   The high-level program is compiled into a MIPS ELF binary using a dedicated compiler. This step compiles the program into MIPS32R2 ELF binary.
 
 3. **ELF Loader**  
    The ELF Loader reads and interprets the ELF file and prepares it for execution within the MIPS VM. This includes loading code, initializing memory, and setting up the program’s entry point.
@@ -26,6 +30,8 @@ Referring to the above diagram, zkMIPS follows a structured pipeline composed of
 6. **Prover**  
    The Prover takes the execution trace from the MIPS VM and generates a zero-knowledge proof. This proof shows that the program followed the correct sequence of states without revealing any sensitive internal data.  In addition, the proof is eventually used by a **Verifier Contract** or another verification component, often deployed on-chain, to confirm that the MIPS program executed as claimed.
 
+7. **Verifier**
+   Apart from the native verifier for the generated proof, zkMIPS also offers a solidity verifier for EVM-compatible blockchains.
 
 ## Prover Internal Proof Generation Steps
 
@@ -37,10 +43,11 @@ Within the Prover, zkMIPS employs multiple stages to efficiently process and pro
 2. **Chip**  
    Each instruction in a shard generates one or more events (e.g., CPU and ALU events), where each event corresponds to a specific chip (`CpuChip`, `AddSubChip`, etc.) - with its own set of constraints.
 
-3. **LogUp**  
-   LogUp serves two key purposes:​​
-   - Cross-Chip Communication - The chip needs to send the logic which itself cannot verify to other chips  for verification.
+3. **Lookup**  
+   Lookup serves two key purposes:
+   - Cross-Chip Communication - The chip needs to send the logic which itself cannot verify to other chips for verification.
    - Consistency of memory access (the data read by the memory is the data written before) - Proving that the read and write data are “permuted”.
+   Currently zkMIPS uses [multiset hashing](/design/lookup-arguments.md) to implement the Lookup argument. 
 
 4. **Core Proof**  
    The core proof includes a set of shard proofs.
