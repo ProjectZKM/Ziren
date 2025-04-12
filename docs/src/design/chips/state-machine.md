@@ -5,20 +5,20 @@ The zkMIPS state machine is a ​MIPS-compatible, register-based virtual machine
 Core Components:
 - Program Chip
 
-  Manages program counter (PC) and instruction stream decoding while enforcing strict PC progression aligned with MIPS pipeline stages. The program table is preprocessed and constrains the program counter, instructions and selectors for the program. The CPU Chip looks up its instructions in the Program Chip.
+  Manages program counter (PC) and instruction stream decoding while enforcing strict PC progression aligned with MIPS pipeline stages. The program table is preprocessed and constrains the program counter, instructions and selectors for the program. The CPU chip looks up its instructions in the Program chip.
 
 - ​CPU Chip
 
-  The CPU chip serves as the central processing unit for MIPS instruction execution. Each clock cycle corresponds to a table row, indexed via the pc column from the Program Chip. We constrain the transition of the pc, clk and operands in this table according to the cycle’s instruction. Each MIPS instruction has three operands: a, b, and c, and the CPU table has a separate column for the value of each of these three operands. The CPU table has no constraints for the proper execution of the instruction, nor does the table itself check that operand values originate from (or write to) correct memory addresses. zkMIPS relies on cross-table lookups to verify these constraints.
+  The CPU chip serves as the central processing unit for MIPS instruction execution. Each clock cycle corresponds to a table row, indexed via the pc column from the Program chip. We constrain the transition of the pc, clk and operands in this table according to the cycle’s instruction. Each MIPS instruction has three operands: a, b, and c, and the CPU table has a separate column for the value of each of these three operands. The CPU table has no constraints for the proper execution of the instruction, nor does the table itself check that operand values originate from (or write to) correct memory addresses. zkMIPS relies on cross-table lookups to verify these constraints.
 
 
 - ALU Chips
    
-  The ALU Chips manage common field operations and bitwise operations. These chips are responsible for verifying correctness of arithmetic and bitwise operations and throug corss-table lookups from the main CPU Chip to make sure executing the correct instructions.
+  The ALU chips manage common field operations and bitwise operations. These chips are responsible for verifying correctness of arithmetic and bitwise operations and throug corss-table lookups from the main CPU chip to make sure executing the correct instructions.
 
 - Flow-Control Chips
   
-  Flow control mechanisms are ​fundamental components in modern computer programs, ​enhancing program functionality and execution flexibility by providing structured control mechanisms. In the zkMIPS, ​dedicated modules — ​the Branch Chip and Jump Chip — ​are implemented to handle branch instructions and jump instructions ​respectively within the MIPS Instruction Set Architecture (ISA).
+  Flow control mechanisms are ​fundamental components in modern computer programs, ​enhancing program functionality and execution flexibility by providing structured control mechanisms. In the zkMIPS, ​dedicated modules — ​the Branch chip and Jump chip — ​are implemented to handle branch instructions and jump instructions ​respectively within the MIPS Instruction Set Architecture (ISA).
   
 - ​Memory Chips
   
@@ -26,11 +26,11 @@ Core Components:
 
 - Global Chip
 
-  Global Chip in zkMIPS is responsible for processing and verifying global lookup events (such as memory accesses, system calls), ensuring compliance with predefined rules and generating cryptographic proof data.
+  Global chip in zkMIPS is responsible for processing and verifying global lookup events (such as memory accesses, system calls), ensuring compliance with predefined rules and generating cryptographic proof data.
 
 - Custom Chips
   
-  Several Custom Chips are used to accelecate proving time in zkMIPS's proof system: Poseidon2 hash, STARK compression and STARK-to-SNARK adapter.
+  Several Custom chips are used to accelecate proving time in zkMIPS's proof system: Poseidon2 hash, STARK compression and STARK-to-SNARK adapter.
 
 - Precompiled Chips:
 
