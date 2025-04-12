@@ -22,7 +22,7 @@ Core Components:
   
 - ​Memory Chips
   
-  Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. zkMIPS use multiset hashing based offline memory consistnecy checking in the main operation of its memory argument with several memory tables.  
+  Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. zkMIPS use multiset hashing based offline memory consistency checking in the main operation of its memory argument with several memory tables.  
 
 - Global Chip
 
@@ -30,7 +30,7 @@ Core Components:
 
 - Custom Chips
   
-  Several Custom Chips are used for accelecating proving time in zkMIPS's proof system: Poseidon2 hash, STARK compression and STARK-to-SNARK adapter.
+  Several Custom Chips are used to accelecate proving time in zkMIPS's proof system: Poseidon2 hash, STARK compression and STARK-to-SNARK adapter.
 
 - Precompiled Chips:
 
