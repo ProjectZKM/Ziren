@@ -28,7 +28,7 @@ The zkMIPS proving system implements a hierarchical verification model through f
   
   Converts aggregation proof to Ethereum-compatible format with:
 
-  - BN254 field adaptation, compressed the STARK verifying circuit using Groth16-friendly field expression.
+  - BN254 field adaptation, compressing the STARK verifying circuit using Groth16-friendly field expression.
   - Groth16 circuit wrapping.
 
 The final output is a ​Groth16 proof with corresponding verification key, compatible with Ethereum's Layer 1 verification infrastructure.
