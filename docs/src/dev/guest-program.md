@@ -2,7 +2,7 @@
 
 In zkMIPS, the guest program is the code that will be executed and proven by the zkVM.
 
-Any program written in C, Go, Rust, etc. can be compiled into a MIPS R3000 be ELF executable file using a universal MIPS compiler, meeting the requirements.
+Any program written in C, Go, Rust, etc. can be compiled into a MIPS R3000 big-endian ELF executable file using a universal MIPS compiler, that satisfies the required specification.
 
 zkMIPS provides Rust runtime libraries for guest programs to handle input/output operations:
 - `zkm_zkvm::io::read::<T>` (for reading structured data)
@@ -15,8 +15,8 @@ Note that type `T` must implement both `serde::Serialize` and `serde::Deserializ
 ## Example: [Fibonacci](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/guest/src/main.rs)
 
 ```rust
-//! A simple program that takes a number `n` as input, and writes the `n-1`th and `n`th fibonacci
-//! number as an output.
+//! A simple program that takes a number `n` as input, and writes the `n-1`th and `n`th Fibonacci
+//! number as output.
 
 // These two lines are necessary for the program to properly compile.
 //
