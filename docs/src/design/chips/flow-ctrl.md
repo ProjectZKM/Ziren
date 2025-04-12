@@ -16,7 +16,7 @@ Branch Chip uses columns to record the following information.
   - Contains special flag detection for zero-register operand scenarios (`op_a_0`).
 - ​​Instruction Semantics Encoding​​
 
-  Embeds six mutually exclusive flags corresponding to MIPS branch opcodes (`is_beq, is_bltz, is_blez, is_bgtz, is_bgez`).
+  Embeds five mutually exclusive flags corresponding to MIPS branch opcodes (`is_beq, is_bltz, is_blez, is_bgtz, is_bgez`).
 - ​Execution State Tracking​​
 
   Maintains dual execution path indicators for taken/not-taken branch conditions(`is_branching, not_branching`). 
@@ -56,14 +56,14 @@ Jump Chip uses columns to record the following information:
   - Implements 32-bit address validation via dedicated range checkers (`next_pc_range_checker, target_pc_range_checker, op_a_range_checker`).
 - ​​Operand System​​
   - Stores three operands for jump address calculation (`op_a_value, op_b_value, op_c_value`).
-  - Contains zero-register flag detection for first oprand register (`op_a_0`).
+  - Contains zero-register flag detection for first operand register (`op_a_0`).
 - ​​Instruction Semantics​​
   
   Embeds three mutually exclusive jump-type flags (`is_jump, is_jumpi, is_jumpdirect`).
 
 ### Major Constraints
 
-We use the fllowing key constraints to valid the jump chip:
+We use the fllowing key constraints to validate the jump chip:
 
 - Instruction Validity
   - Exactly one jump instruction flag must be active per row:
