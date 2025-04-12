@@ -4,7 +4,7 @@ zkMIPS is an optimized iteration of the [ZKM](https://docs.zkm.io/introduction) 
 
 ## Architectural Workflow
 
-The workfolw of zkMIPS is as follows:
+The workflow of zkMIPS is as follows:
 - ​Frontend Compilation:
   
   Source code (Rust/Go) → MIPS assembly → Optimized MIPS instructions for algebraic representation.
@@ -13,13 +13,13 @@ The workfolw of zkMIPS is as follows:
   Emulates MIPS instructions while generating execution traces with embedded constraints (ALU, memory consistency, range checks, etc.) and treating columns of execution traces as polynomials.
 - ​STARK Proof Generation:
 
-  Compiles traces into Plonky3 AIR (Algebraic Intermediate Representation), and prove the constraints using the Fast Reed-Solomon Interactive Oracle Proof of Proximity (FRI) technique.
+  Compiles traces into Plonky3 AIR (Algebraic Intermediate Representation), and proves the constraints using the Fast Reed-Solomon Interactive Oracle Proof of Proximity (FRI) technique.
 - STARK Compression and STARK to SNARK:
   
   To produce a constant-size proof, zkMIPS supports first generating a recursive argument to compress STARK proofs and then wrapping the compressed proof into a final, Groth16-compatible proof for ​efficient on-chain verification.
 - Verification:
   
-  On-chain verification of Groth16-compatible proof.
+  On-chain verification of the Groth16-compatible proof.
 
 ## Core Innovations
 Building on ZKM's full functionality, zkMIPS optimizes the entire ​workflow to achieve industry-leading performance: 
@@ -28,13 +28,13 @@ Building on ZKM's full functionality, zkMIPS optimizes the entire ​workflow to
   Converts standard MIPS binaries into constraint systems with deterministic execution traces using proof-system-friendly compilation configuration with existing toolchains (GCC/LLVM).
 - Multiset Hasing for Memory Consistency Checking
 
-  Replaces Merkle-Patricia trees with multiset hashing for memory consistency checks, largely reducing witness data and enabling parallel verification.
+  Replaces Merkle-Patricia trees with multiset hashing for memory consistency checks, significantly reducing witness data and enabling parallel verification.
 - ​KoalaBear Prime Field
 
   Using KoalaBear Prime \\(2^{31} - 2^{24} + 1\\) instead of 64-bit Goldilock Prime, accelerating algebraic operations in proofs.
-- Integrateting Cutting-edge Industry Advancements
+- Integrating Cutting-edge Industry Advancements
 
-  zkMIPS constructs its zero-knowledge verification system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized ​​Fast Reed-Solomon IOP (FRI)​​ protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s ​​RISC-V architceture verification primitives​​—including the recursive compiler, layered circuit builder, and precompilation modules—for the MIPS architecture.
+  zkMIPS constructs its zero-knowledge verification system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized ​​Fast Reed-Solomon IOP (FRI)​​ protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s ​​RISC-V architecture verification primitives​​—including the recursive compiler, layered circuit builder, and precompilation modules—for the MIPS architecture.
 
 ## Target Use Cases
 zkMIPS enables ​universal verifiable computation via STARK proofs, including:
