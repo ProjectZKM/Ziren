@@ -14,10 +14,10 @@ Following [arithmetization]((./arithmetization.md)), the computation is represen
 - Constraint Polynomials
   Encode verification conditions as algebraic relations:
   \\[C_j(x) = R_j(T_1(x),T_2(x), \cdots, T_m(x), T_1(g \cdot x), T_2(g \cdot x), \cdots, T_m(g \cdot x)) = 0,\\]
-  for all \\(x \in H\\), where \\(g\\) is the used generator of H.
+  for all \\(x \in H\\), where \\(g\\) is the generator of H.
 
 ### Constraint Aggregation
-For proof efficiency, we combine constraints via:
+For proof efficiency, we combine constraints using:
 \\[C_{comb}(x) = \sum_j \alpha_j C_j(x),\\]
 where \\( \alpha_j\\) are derived through the Fiat-Shamir transformation.
 
@@ -39,7 +39,7 @@ The "Mixed Matrix Commitment Scheme" (MMCS) is a generalization of a vector comm
 
 - Committing to matrices.
 - Opening rows.
-- Batch operations - committing to multiple matrices simultaneously, even with different dimensions.
+- Batch operations - committing to multiple matrices simultaneously, even when they differ in dimensions.
 
 When opening a particular row index:
 
@@ -80,20 +80,20 @@ The Fast Reed-Solomon Interactive Oracle Proof (FRI) protocol proves the low-deg
   - The prover splits \\(P(x)\\) into two lower-degree polynomials \\(P_0(x)\\), \\(P_1(x)\\), such that: \\(P(x) = P_0(x^2) + x \cdot P_1(x^2)\\).
 
   - The verifier sends a random challenge \\(\alpha \in  \mathbb{F}_{p^4}\\) 
-  - The prover computes a new polynomial: \\(P'(x) = P_0(x) + \alpha \cdot P_1(x)\\), and send the commit of the polynomial to the verifier.
+  - The prover computes a new polynomial: \\(P'(x) = P_0(x) + \alpha \cdot P_1(x)\\), and sends the commitment of the polynomials to the verifier.
 
 - ​Recursive Reduction:
   - Repeat splitting process for \\(P'(x)\\).
   - Halve degree each iteration until constant term or degree ≤ d.
 
 - ​Verification Phase:
-  - Verifier checks consistency between commitmented values at random point \\(z\\) in initial subgroup.
+  - Verifier checks consistency between committed values at random point \\(z\\) in initial subgroup.
 
 ## Verifing 
 
 ### Verification contents
 
-Through merkle opening technique, verifier checks the following relation over a random chosen point at the LDE domain:
+Through merkle opening technique, verifier checks the following relation at a randomly chosen point at the LDE domain:
 
 - Confirm correct folding via Merkle proofs.
 
