@@ -5,7 +5,7 @@ Algebraic Intermediate Representation (AIR) serves as the arithmeticization foun
 ## Key Concepts of AIR
 - Execution Trace
   
-  A tabular structure where each row represents system state at a computation step, with columns corresponding to registers/variables. 
+  A tabular structure where each row represents system's state at a computation step, with columns corresponding to registers/variables. 
 
 - Transition Constraints
   
