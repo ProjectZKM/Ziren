@@ -72,7 +72,6 @@ pub(crate) fn get_rust_compiler_flags(args: &BuildArgs) -> String {
         let library_path = Path::new(l).to_path_buf();
         let library_path: Utf8PathBuf =
             library_path.try_into().expect("Failed to convert PathBuf to Utf8PathBuf");
-        println!("{:?}", library_path);
         let canonicalized_library_path =
             library_path.canonicalize().expect("Failed to canonicalize library path");
         rust_flags.push(format!("link-arg={}", canonicalized_library_path.display()));
