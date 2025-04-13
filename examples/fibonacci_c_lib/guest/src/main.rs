@@ -9,7 +9,7 @@
 #![no_main]
 zkm_zkvm::entrypoint!(main);
 
-// Use add function from Libexample.a 
+// Use add function from Libexample.a
 extern "C" {
     fn add(a: u32, b: u32) -> u32;
     fn modulus(a: u32, b: u32) -> u32;
