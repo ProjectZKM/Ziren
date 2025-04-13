@@ -1,0 +1,8 @@
+[package]
+name = "fibonacci_c_lib"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkm-zkvm = { path = "../../../crates/zkvm/entrypoint" }

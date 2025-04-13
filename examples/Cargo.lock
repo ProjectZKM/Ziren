@@ -1932,6 +1932,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fibonacci_c_lib"
+version = "1.1.0"
+dependencies = [
+ "zkm-zkvm 1.0.0",
+]
+
+[[package]]
+name = "fibonacci_c_lib-host"
+version = "1.1.0"
+dependencies = [
+ "hex",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
 name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

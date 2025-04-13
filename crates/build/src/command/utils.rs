@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
+use cargo_metadata::camino::Utf8PathBuf;
 use std::{
     io::{BufRead, BufReader},
+    path::Path,
     process::{exit, Command, Stdio},
     thread,
 };
@@ -36,6 +38,11 @@ pub(crate) fn get_program_build_args(args: &BuildArgs) -> Vec<String> {
         build_args.push("--no-default-features".to_string());
     }
 
+    if !args.features.is_empty() {
+        build_args.push("--features".to_string());
+        build_args.push(args.features.join(","));
+    }
+
     if args.locked {
         build_args.push("--locked".to_string());
     }
@@ -44,8 +51,8 @@ pub(crate) fn get_program_build_args(args: &BuildArgs) -> Vec<String> {
 }
 
 /// Rust flags for compilation of C libraries.
-pub(crate) fn get_rust_compiler_flags() -> String {
-    let rust_flags = [
+pub(crate) fn get_rust_compiler_flags(args: &BuildArgs) -> String {
+    let mut rust_flags = vec![
         "-C".to_string(),
         "target-cpu=mips32r2".to_string(),
         "-C".to_string(),
@@ -59,6 +66,17 @@ pub(crate) fn get_rust_compiler_flags() -> String {
         "-C".to_string(),
         "link-arg=--entry=main".to_string(),
     ];
+
+    for l in &args.libraries {
+        rust_flags.push("--C".to_string());
+        let library_path = Path::new(l).to_path_buf();
+        let library_path: Utf8PathBuf =
+            library_path.try_into().expect("Failed to convert PathBuf to Utf8PathBuf");
+        println!("{:?}", library_path);
+        let canonicalized_library_path =
+            library_path.canonicalize().expect("Failed to canonicalize library path");
+        rust_flags.push(format!("link-arg={}", canonicalized_library_path.display()));
+    }
     rust_flags.join("\x1f")
 }
 
