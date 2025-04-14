@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[cfg(feature = "e2e-test")]
     fn test_e2e_compressed() {
         utils::setup_logger();
         let client = ProverClient::cpu();
@@ -533,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[cfg(feature = "e2e-test")]
     fn test_e2e_prove_plonk() {
         utils::setup_logger();
         let client = ProverClient::cpu();
@@ -554,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[cfg(feature = "e2e-test")]
     fn test_e2e_prove_groth16() {
         utils::setup_logger();
         let client = ProverClient::cpu();
@@ -568,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[cfg(feature = "e2e-test")]
     fn test_e2e_prove_plonk_mock() {
         utils::setup_logger();
         let client = ProverClient::mock();

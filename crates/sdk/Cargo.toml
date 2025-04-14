@@ -87,6 +87,7 @@ network-v2 = [
 ]
 # cuda = ["zkm-cuda"]
 cuda = []
+e2e-test = []
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = [
