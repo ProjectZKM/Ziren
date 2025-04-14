@@ -40,18 +40,24 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
   Using KoalaBear Prime \\(2^{31} - 2^{24} + 1\\) instead of 64-bit Goldilock Prime, accelerating algebraic operations in proofs.
 
 - Hardware Acceleration
+  zkMIPS supports AVX2/512 and GPU acceleration.
  
 - Integrating Cutting-edge Industry Advancements
 
   zkMIPS constructs its zero-knowledge verification system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized Fast Reed-Solomon IOP (FRI) protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler, and precompiles for the MIPS architecture.
 
 ## Target Use Cases
-zkMIPS enables ​universal verifiable computation via STARK proofs, including:
-- Hybrid Rollups
+zkMIPS enables universal verifiable computation via STARK proofs, including:
+- Bitcoin L2
+ 
+  [GOAT Network](https://www.goat.network/), a Bitcoin L2 built on zkMIPS and BitVM2 to improve the interoperability of Bitcoin.
   
-  Combines optimistic rollup’s cost efficiency with validity proof verifiability, allowing users to choose withdrawal modes (fast/high-cost vs. slow/low-cost) while enhancing cross-chain capital efficiency. [GOAT Network](https://www.goat.network/), a Bitcoin L2 ​built on zkMIPS, leverages Taproot scripts to validate computations, enabling ​non-EVM chains like Bitcoin to achieve Turing completeness while ​maintaining transaction finality via Bitcoin.
+- ZK-OP(HybridRollups) 
+  
+  Combines optimistic rollup’s cost efficiency with validity proof verifiability, allowing users to choose withdrawal modes (fast/high-cost vs. slow/low-cost) while enhancing cross-chain capital efficiency. 
 - Entangled Rollup
 
   Uses entangled rollups for trustless cross-chain communication, with universal L2 extension resolving fragmented liquidity via proof-of-burn mechanisms (e.g., cross-chain asset transfers).
+ 
 - zkML Verification
   Protects sensitive ML model/data privacy (e.g., healthcare), allowing result verification without exposing raw inputs (e.g., doctors validating diagnoses without patient ECG data).

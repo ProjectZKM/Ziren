@@ -17,17 +17,17 @@ zkMIPS is the industry's first zero-knowledge proof virtual machine supporting t
 
 ## Why MIPS?
 
-MIPS32r2 has several advantages over RV32IM.
-
 **MIPS32r2 is more consistent and offers more complex opcodes**
-    - The J/JAL instructions support jump ranges of up to 256MiB, offering greater flexibility for large-scale data processing and complex control flow scenarios.
-    - MIPS32r2 has rich set of bit manipulation instructions and additional conditional move instructions (such as MOVZ and MOVN) that ensure precise data handling.
-    - MIPS32r2 has integer multiply-add/sub instructions, which can improve arithmetic computation efficiency.
-    - MIPS32r2 has SEH and SEB sign extension instructions, which make it very convenient to perform sign extension operations on char and short type data.
+
+* The J/JAL instructions support jump ranges of up to 256MiB, offering greater flexibility for large-scale data processing and complex control flow scenarios.
+* MIPS32r2 has rich set of bit manipulation instructions and additional conditional move instructions (such as MOVZ and MOVN) that ensure precise data handling.
+* MIPS32r2 has integer multiply-add/sub instructions, which can improve arithmetic computation efficiency.
+* MIPS32r2 has SEH and SEB sign extension instructions, which make it very convenient to perform sign extension operations on char and short type data.
 
 **MIPS32r2 has a more established ecosystem**
-    - All instructions in MIPS32r2, as a whole, have been very mature and widely used for more than 20 years. There will be no compatibility issues between ISA modules. And there will be no turmoil caused by manufacturer disputes.
-    - MIPS has been successfully applied to Optimism's Fraud Proof VM
+
+* All instructions in MIPS32r2, as a whole, have been very mature and widely used for more than 20 years. There will be no compatibility issues between ISA modules. And there will be no turmoil caused by manufacturer disputes.
+* MIPS has been successfully applied to Optimism's Fraud Proof VM
 
 ## Acknowledgements
 The zkMIPS draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
