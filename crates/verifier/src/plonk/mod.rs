@@ -18,9 +18,9 @@ pub(crate) use proof::PlonkProof;
 pub(crate) use verify::verify_plonk_algebraic;
 
 use alloc::vec::Vec;
-use substrate_bn::Fr;
 use error::PlonkError;
 use sha2::{Digest, Sha256};
+use substrate_bn::Fr;
 
 use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
 /// A verifier for Plonk zero-knowledge proofs.

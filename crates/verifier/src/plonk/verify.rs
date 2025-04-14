@@ -1,6 +1,6 @@
 use alloc::{string::ToString, vec, vec::Vec};
-use substrate_bn::{arith::U256, AffineG1, Fr};
 use core::hash::Hasher;
+use substrate_bn::{arith::U256, AffineG1, Fr};
 
 use crate::{
     error::Error,

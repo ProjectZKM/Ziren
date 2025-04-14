@@ -1,5 +1,5 @@
-use substrate_bn::Fr;
 use sha2::{Digest, Sha256};
+use substrate_bn::Fr;
 
 use crate::error::Error;
 
