@@ -134,6 +134,10 @@ Where:​​
 - n(x): First byte of op_2,
 - c(x): First byte of result value add_op.value.
 
+###  Preprocessed AIR
+
+For invariant components (e.g., Program/Bytes chips), zkMIPS precomputes universal commitments to invariant data columns and predefines fixed AIR constraints among them during setup to establish the Preprocessed AIR framework. By removing redundant recomputation of preprocessed AIR constraints in proofs, PAIR reduces ZKP proving time.
+
 ### Conclusion
 
 The AIR framework transforms trace constraints into polynomial identities, where increased rows only expand the evaluation domain rather than polynomial complexity. zkMIPS also enhances efficiency through:
