@@ -30,7 +30,7 @@ To achieve a more fair comparison among the different zkVMs, we provides a [zkvm
 
 ## Performance of zkMIPS
 
-On a AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge), the performance is shown as below. 
+On a AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge), which is a CPU server, zkMIPS's performance is shown as below. 
 
 
 Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)/zkMIPS`.
