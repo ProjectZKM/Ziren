@@ -26,6 +26,9 @@ Building on ZKM's full functionality, zkMIPS optimizes the entire ​workflow to
 - ​MIPS-to-Circuit Compiler
   
   Converts standard MIPS binaries into constraint systems with deterministic execution traces using proof-system-friendly compilation configuration with existing toolchains (GCC/LLVM).
+- "Area Minimization" Chip Design
+
+  Uses modular subcomponents to partition sparse, large-scale chips (e.g., CPU chip), reducing chip area without functional loss while slashing polynomial commitment/evaluation overhead—boosting ZKP proof speed.
 - Multiset Hasing for Memory Consistency Checking
 
   Replaces Merkle-Patricia trees with multiset hashing for memory consistency checks, significantly reducing witness data and enabling parallel verification.
