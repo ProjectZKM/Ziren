@@ -7,7 +7,6 @@ use zkm_sdk::{HashableKey, ProverClient, ZKMStdin};
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
-#[cfg(feature = "e2e-test")]
 fn test_verify_groth16() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
@@ -39,7 +38,6 @@ fn test_verify_groth16() {
 }
 
 #[test]
-#[cfg(feature = "e2e-test")]
 fn test_verify_plonk() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
