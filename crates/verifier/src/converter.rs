@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use bn::{AffineG1, AffineG2, Fq, Fq2};
+use substrate_bn::{AffineG1, AffineG2, Fq, Fq2};
 
 use crate::{
     constants::{CompressedPointFlag, MASK},

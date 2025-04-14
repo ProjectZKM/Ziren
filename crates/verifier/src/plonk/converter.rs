@@ -6,7 +6,7 @@ use crate::{
     error::Error,
 };
 use alloc::vec::Vec;
-use bn::{AffineG1, Fr, G2};
+use substrate_bn::{AffineG1, Fr, G2};
 
 use super::{
     error::PlonkError,

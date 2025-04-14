@@ -4842,16 +4842,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sp1-lib"
-version = "3.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a5729da1b05d56c01457e5ecabdc77f1cc941df23f2921163a2f325aec22428"
-dependencies = [
- "bincode",
- "serde",
-]
-
-[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4914,10 +4904,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "substrate-bn-succinct"
+name = "substrate-bn"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "114c855c26ad0594c830129cb868552fb41415603a6133276c2ecdd9e5ef4255"
+source = "git+https://github.com/zkMIPS-patches/bn.git?branch=patch-0.6.0#f7abdf37eda884458b940307a2cde9b97b1f1d92"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -4927,7 +4916,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "sp1-lib",
+ "zkm-lib 1.0.0 (git+https://github.com/zkMIPS/zkMIPS.git)",
 ]
 
 [[package]]
@@ -6352,7 +6341,7 @@ dependencies = [
  "typenum",
  "vec_map",
  "zkm-curves",
- "zkm-lib",
+ "zkm-lib 1.0.0",
  "zkm-primitives",
  "zkm-stark",
  "zkm-zkvm",
@@ -6445,6 +6434,18 @@ dependencies = [
 [[package]]
 name = "zkm-lib"
 version = "1.0.0"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "elliptic-curve",
+ "serde",
+ "sha2",
+]
+
+[[package]]
+name = "zkm-lib"
+version = "1.0.0"
+source = "git+https://github.com/zkMIPS/zkMIPS.git#87a9f7792f61d8dd2974784044e71dd27a256533"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -6741,7 +6742,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "sha2",
- "substrate-bn-succinct",
+ "substrate-bn",
  "test-artifacts",
  "thiserror 2.0.12",
  "zkm-prover",
@@ -6762,6 +6763,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2",
- "zkm-lib",
+ "zkm-lib 1.0.0",
  "zkm-primitives",
 ]

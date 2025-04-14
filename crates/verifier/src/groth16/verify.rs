@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use bn::{pairing_batch, AffineG1, AffineG2, Fr, Gt, G1, G2};
+use substrate_bn::{pairing_batch, AffineG1, AffineG2, Fr, Gt, G1, G2};
 
 use super::error::Groth16Error;
 

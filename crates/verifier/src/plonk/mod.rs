@@ -18,7 +18,7 @@ pub(crate) use proof::PlonkProof;
 pub(crate) use verify::verify_plonk_algebraic;
 
 use alloc::vec::Vec;
-use bn::Fr;
+use substrate_bn::Fr;
 use error::PlonkError;
 use sha2::{Digest, Sha256};
 

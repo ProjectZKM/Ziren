@@ -2,7 +2,7 @@ mod converter;
 pub mod error;
 mod verify;
 
-use bn::Fr;
+use substrate_bn::Fr;
 
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};

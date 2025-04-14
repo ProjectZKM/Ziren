@@ -1,4 +1,4 @@
-use bn::{CurveError, FieldError, GroupError};
+use substrate_bn::{CurveError, FieldError, GroupError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
