@@ -1,7 +1,7 @@
 # Prover
 
 The zkm_sdk crate provides all the necessary tools for proof generation. Key features include the `ProverClient`, enabling you to:
-- Initialize proving/verifying keys via `setup()`. 
+- Initialize proving/verifying keys via `setup()`.
 - Execute your program via `execute()`.
 - Generate proofs with `prove()`.
 - Verify proofs through `verify()`.
@@ -139,9 +139,9 @@ To activate **AVX512** optimization, add these flags to your RUSTFLAGS environme
 RUSTFLAGS="-C target-cpu=native -C target-feature=+avx512f" cargo run --release
 ```
 ## Network Prover
-We support the use of a network prover via the ZKM proof network, accessible through our RESTful API. 
+We support the use of a network prover via the ZKM proof network, accessible through our RESTful API.
 By default, it uses the Groth16 proving mode.
->The proving process consists of several stages: queuing, splitting, proving, aggregating and finalizing. 
+>The proving process consists of several stages: queuing, splitting, proving, aggregating and finalizing.
 Each stage involves a varying duration.
 
 ### Requirements
@@ -153,7 +153,7 @@ Each stage involves a varying duration.
 zkm-sdk = { git = "https://github.com/zkMIPS/zkm-project-template", branch = "main", features = ["snark"] }
 ```
 ### Environment Variable Setup
-Before running your application, make sure to export the required environment variable to enable the network prover. 
+Before running your application, make sure to export the required environment variable to enable the network prover.
 Here's an example:
 
 ```bash
@@ -261,12 +261,25 @@ async fn main() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+fn set_guest_input(prover_input: &mut ProverInput) {
+    // Combine all the inputs into a two-dimensional array
+    let mut private_input: Vec<Vec<u8>> = vec![];
+
+    let goat_withdraw_txid: Vec<u8> =
+        hex::decode(std::env::var("GOAT_WITHDRAW_TXID").unwrap_or("32bc8a6c5b3649f92812c461083bab5e8f3fe4516d792bb9a67054ba040b7988".to_string())).unwrap();
+    write_to_guest_private_input(&mut private_input, &goat_withdraw_txid);
+    
+    // Encode private input into a one-dimensional array and pass it to the proof network.
+    let mut pri_buf = Vec::new();
+    bincode::serialize_into(&mut pri_buf, &private_input).expect("private_input serialization failed");
+    prover_input.private_inputstream = pri_buf;
+}
 ```
 
-
-> [!NOTE] 
-> The proof network uses `stdin.write_vec()` to write private input data to the guest program. 
-> If your guest program uses `zkm_zkvm::io::read();` to read this input, you must serialize 
+> [!NOTE]
+> The proof network uses `stdin.write_vec()` to write private input data to the guest program.
+> If your guest program uses `zkm_zkvm::io::read();` to read this input, you must serialize
 > it before pushing to the private input:
 ```rust
 fn write_to_guest_private_input(private_input: &mut Vec<Vec<u8>>, data: &[u8]) {
@@ -275,7 +288,4 @@ fn write_to_guest_private_input(private_input: &mut Vec<Vec<u8>>, data: &[u8]) {
     private_input.push(tmp);
 }
 ```
- 
-
-
 
