@@ -20,7 +20,7 @@ These constraints utilize low-degree polynomials for efficient proof generation/
 ## AIR Implementation in zkMIPS Chips
 
 Having introduced various chip/table structures in zkMIPS, we note that building a chip involves:
-- ​Matrix Population - Filling values into a matrix structure.
+- Matrix Population - Filling values into a matrix structure.
 - Constraint Construction - Establishing relationships between values, particularly across consecutive rows.
 
 This process aligns with AIR's core functionality by:
@@ -127,19 +127,23 @@ And for sub operation,
 Using operation selectors \\(s(x), t(x)\\),  the derived polynomila constraint is 
 \\[ s(x)\cdot P_{add}(x) + t(x) \cdot P_{sub}(x) = 0.\\]
 
-Where:​​
+Where:
 - s(x): Add operation selector,
 - t(x): Sub operation selector,
 - j(x): First byte of op_1, 
 - n(x): First byte of op_2,
 - c(x): First byte of result value add_op.value.
 
+###  Preprocessed AIR
+
+For invariant components (e.g., Program/Bytes chips), zkMIPS precomputes commitments to invariant data columns and predefines fixed AIR constraints among them during setup to establish the Preprocessed AIR framework. By removing redundant recomputation of preprocessed AIR constraints in proofs, PAIR reduces ZKP proving time.
+
 ### Conclusion
 
 The AIR framework transforms trace constraints into polynomial identities, where increased rows only expand the evaluation domain rather than polynomial complexity. zkMIPS also enhances efficiency through:
-- ​Lookup Tables​​ for range checks.
-- ​Multiset Hashing​​ for memory consistency.
-- ​FRI for polynomial interactive oracle proofs (IOP).
-​
+- Lookup Tables for range checks.
+- Multiset Hashing for memory consistency.
+- FRI for polynomial interactive oracle proofs (IOP).
+
 
 These components constitute the foundational architecture of zkMIPS and will be elaborated in subsequent sections. 

@@ -34,7 +34,7 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
 
 - "Area Minimization" Chip Design
 
-  Uses modular subcomponents to partition sparse, large-scale chips (e.g., CPU chip), reducing chip area without functional loss while slashing polynomial commitment/evaluation overhead—boosting ZKP proof speed.
+  zkMIPS partitions circuit constraints into highly segmented chips, strategically minimizing the total layout area while preserving logical completeness. This fine-grained decomposition enables compact polynomial representations with reduced commitment and evaluation overhead, thereby directly optimizing ZKP proof generation efficiency.
 
 - Multiset Hashing for Memory Consistency Checking
 
