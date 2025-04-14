@@ -40,6 +40,7 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
   Using KoalaBear Prime \\(2^{31} - 2^{24} + 1\\) instead of 64-bit Goldilock Prime, accelerating algebraic operations in proofs.
 
 - Hardware Acceleration
+
   zkMIPS supports AVX2/512 and GPU acceleration.
  
 - Integrating Cutting-edge Industry Advancements
