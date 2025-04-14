@@ -9,7 +9,7 @@
 
 # zkMIPS
 
-zkMIPS is the next generation of zkMIPS for real-time proving, and zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32R2 instruction set architecture(ISA).
+zkMIPS is the next generation of zkMIPS for real-time proving, and zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32R2 instruction set architecture(ISA).
 
 
 zkMIPS is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. zkMIPS is fully open-source and comes equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, built on zkMIPS, is a native asset cross-chain circulation protocol, with typical application cases including Metis Hybrid Rollup and GOAT Network.
@@ -17,13 +17,19 @@ zkMIPS is the industry's first zero-knowledge proof virtual machine supporting t
 
 ## Why MIPS?
 
-* MIPS is stable and comprehensive and has an established ecosystem and a great compatibility, like Optimizm Fraud proof VM
-* MIPS32r2 vs RISCV32IM
-> * J/JAL series instructions have a jump range of up to 256MiB
-> * Rich bit manipulation instructions
-> * More conditional selection instructions, MOVZ, MOVN etc.
+MIPS32r2 has several advantages over RV32IM.
+
+**MIPS32r2 is more consistent and offers more complex opcodes**
+    - The J/JAL instructions support jump ranges of up to 256MiB, offering greater flexibility for large-scale data processing and complex control flow scenarios.
+    - MIPS32r2 has rich set of bit manipulation instructions and additional conditional move instructions (such as MOVZ and MOVN) that ensure precise data handling.
+    - MIPS32r2 has integer multiply-add/sub instructions, which can improve arithmetic computation efficiency.
+    - MIPS32r2 has SEH and SEB sign extension instructions, which make it very convenient to perform sign extension operations on char and short type data.
+
+**MIPS32r2 has a more established ecosystem**
+    - All instructions in MIPS32r2, as a whole, have been very mature and widely used for more than 20 years. There will be no compatibility issues between ISA modules. And there will be no turmoil caused by manufacturer disputes.
+    - MIPS has been successfully applied to Optimism's Fraud Proof VM
 
 ## Acknowledgements
 The zkMIPS draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
 - [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS proving backend is based on Plonky3.
-- [SP1](https://github.com/succinctlabs/sp1): zkMIPS recursion compiler, circuit builder, precompiles originate from SP1.
+- [SP1](https://github.com/succinctlabs/sp1): zkMIPS circuit builder, recursion compiler, and precompiles originate from SP1.
