@@ -51,7 +51,7 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
 zkMIPS enables universal verifiable computation via STARK proofs, including:
 - Bitcoin L2
  
-  [GOAT Network](https://www.goat.network/), a Bitcoin L2 built on zkMIPS and BitVM2 to improve the interoperability of Bitcoin.
+  [GOAT Network](https://www.goat.network/) is a Bitcoin L2 built on zkMIPS and BitVM2 to improve the interoperability of Bitcoin. 
   
 - ZK-OP(HybridRollups) 
   
