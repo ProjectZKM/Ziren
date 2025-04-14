@@ -136,7 +136,7 @@ Where:​​
 
 ###  Preprocessed AIR
 
-For invariant components (e.g., Program/Bytes chips), zkMIPS precomputes universal commitments to invariant data columns and predefines fixed AIR constraints among them during setup to establish the Preprocessed AIR framework. By removing redundant recomputation of preprocessed AIR constraints in proofs, PAIR reduces ZKP proving time.
+For invariant components (e.g., Program/Bytes chips), zkMIPS precomputes commitments to invariant data columns and predefines fixed AIR constraints among them during setup to establish the Preprocessed AIR framework. By removing redundant recomputation of preprocessed AIR constraints in proofs, PAIR reduces ZKP proving time.
 
 ### Conclusion
 
