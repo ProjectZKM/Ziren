@@ -7,23 +7,16 @@ pub use build::{execute_build_program, generate_elf_paths};
 use clap::Parser;
 
 pub const BUILD_TARGET: &str = "mipsel-zkm-zkvm-elf";
-const DEFAULT_TAG: &str = "latest";
 pub const DEFAULT_OUTPUT_DIR: &str = "elf";
 pub const HELPER_TARGET_SUBDIR: &str = "elf-compilation";
 
 /// Compile an zkMIPS program.
 ///
-/// Additional arguments are useful for configuring the build process, including options for using
-/// Docker, specifying binary and ELF names, ignoring Rust version checks, and enabling specific
+/// Additional arguments are useful for configuring the build process, including options for
+/// specifying binary and ELF names, ignoring Rust version checks, and enabling specific
 /// features.
 #[derive(Clone, Parser, Debug)]
 pub struct BuildArgs {
-    #[clap(
-        long,
-        help = "The ghcr.io/zkMIPS/zkMIPS image tag to use when building with Docker.",
-        default_value = DEFAULT_TAG
-    )]
-    pub tag: String,
     #[clap(
         long,
         action,
@@ -70,18 +63,25 @@ pub struct BuildArgs {
         default_value = DEFAULT_OUTPUT_DIR
     )]
     pub output_directory: String,
+    #[clap(
+        long,
+        action,
+        value_delimiter = ',',
+        help = "Space or comma separated list of static C/C++ libraries to be linked"
+    )]
+    pub libraries: Vec<String>,
 }
 
 // Implement default args to match clap defaults.
 impl Default for BuildArgs {
     fn default() -> Self {
         Self {
-            tag: DEFAULT_TAG.to_string(),
             features: vec![],
             rustflags: vec![],
             ignore_rust_version: false,
             packages: vec![],
             binaries: vec![],
+            libraries: vec![],
             elf_name: "".to_string(),
             output_directory: DEFAULT_OUTPUT_DIR.to_string(),
             locked: false,

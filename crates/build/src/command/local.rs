@@ -26,7 +26,7 @@ pub(crate) fn create_local_command(
     //    toolchain.
     command
         .current_dir(canonicalized_program_dir)
-        .env("CARGO_ENCODED_RUSTFLAGS", get_rust_compiler_flags())
+        .env("CARGO_ENCODED_RUSTFLAGS", get_rust_compiler_flags(args))
         .env("CARGO_TARGET_DIR", program_metadata.target_directory.join(HELPER_TARGET_SUBDIR))
         .args(get_program_build_args(args));
     command

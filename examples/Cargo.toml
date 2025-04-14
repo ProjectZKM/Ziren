@@ -10,6 +10,8 @@ members = [
   "cycle-tracking/host",
   "fibonacci/guest",
   "fibonacci/host",
+  "fibonacci_c_lib/guest",
+  "fibonacci_c_lib/host",
   "groth16/guest",
   "groth16/host",
   "is-prime/guest",
