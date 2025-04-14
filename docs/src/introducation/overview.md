@@ -25,12 +25,17 @@ The workflow of zkMIPS is as follows:
 
 ## Core Innovations
 
+
 zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performance with the core innovations as below. 
 
 - zkMIPS Compiler
    
   Implement the first zero-knowledge compiler for [MIPS32r2 instruction set](/mips-vm/mips-vm.md). Converts standard MIPS binaries into constraint systems with deterministic execution traces using proof-system-friendly compilation and PAIR builder.
- 
+
+- "Area Minimization" Chip Design
+
+  Uses modular subcomponents to partition sparse, large-scale chips (e.g., CPU chip), reducing chip area without functional loss while slashing polynomial commitment/evaluation overhead—boosting ZKP proof speed.
+
 - Multiset Hashing for Memory Consistency Checking
 
   Replaces Merkle-Patricia trees with multiset hashing for memory consistency checks, significantly reducing witness data and enabling parallel verification.
