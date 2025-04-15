@@ -30,7 +30,7 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
 
 - zkMIPS Compiler
    
-  Implement the first zero-knowledge compiler for [MIPS32r2](/mips-vm/mips-vm.md). Converts standard MIPS binaries into constraint systems with deterministic execution traces using proof-system-friendly compilation and PAIR builder.
+  Implement the first zero-knowledge compiler for [MIPS32r2](/mips-vm/mips-vm.md). Convert standard MIPS binaries into constraint systems with deterministic execution traces using proof-system-friendly compilation and PAIR builder.
 
 - "Area Minimization" Chip Design
 
@@ -38,11 +38,11 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
 
 - Multiset Hashing for Memory Consistency Checking
 
-  Replaces Merkle-Patricia trees with multiset hashing for memory consistency checks, significantly reducing witness data and enabling parallel verification.
+  Replaces MerkleTree hashing with [Multiset Hashing](/design/memory-checking.md) for memory consistency checks, significantly reducing witness data and enabling parallel verification.
  
 - KoalaBear Prime Field
 
-  Using KoalaBear Prime \\(2^{31} - 2^{24} + 1\\) instead of 64-bit Goldilock Prime, accelerating algebraic operations in proofs.
+  Using KoalaBear Prime \\(2^{31} - 2^{24} + 1\\) instead of 64-bit Goldilocks Prime, accelerating algebraic operations in proofs.
 
 - Hardware Acceleration
 
@@ -50,7 +50,7 @@ zkMIPS is the world first MIPS zkVM, and achieve the industry-leading performanc
  
 - Integrating Cutting-edge Industry Advancements
 
-  zkMIPS constructs its zero-knowledge verification system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized Fast Reed-Solomon IOP (FRI) protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler, and precompiles for the MIPS architecture.
+  zkMIPS constructs its zero-knowledge proof system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized Fast Reed-Solomon IOP (FRI) protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler, and precompiles for the MIPS architecture.
 
 ## Target Use Cases
 zkMIPS enables universal verifiable computation via STARK proofs, including:
