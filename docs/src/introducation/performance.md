@@ -25,13 +25,12 @@ For example, the [ethproofs.org](https://ethproofs.org/) provides a platform for
 
 ## zkVM benchmarks
 
-To achieve a more fair comparison among the different zkVMs, we provides a [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks) to allow that anyone can reproduce the performance data. 
+To facilitate a fairer comparison among different zkVMs, we provide the [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks)  suite, enabling anyone to reproduce the performance data.
 
 
 ## Performance of zkMIPS
 
-On a AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge), which is a CPU server, zkMIPS's performance is shown as below. 
-
+The performance of zkMIPS on an AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge) instance, a CPU-based server, is presented below
 
 Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)/zkMIPS`.
 
