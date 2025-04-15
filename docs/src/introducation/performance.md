@@ -65,7 +65,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 | 1024        | 23481  | 21044  | 3283   | 7612  | 131.8611027           |
 | 2048        | 47278  | 43249  | 4923   | 10087 | 104.895389            |
 
-Implemented via precompiles:
+Proving with precompile:
 
 | Byte Length | zkMIPS | SP1   | Rate |
 |-------------|--------|-------|-----------------------|
@@ -95,7 +95,7 @@ Implemented via precompiles:
 | 230        | 287944  | 718678   | 36205  | 39987  | 10.44607098           |
 | 460        | 574644  | 1358248  | 68488  | 68790  | 0.4409531597          |
 
-Implemented via precompiles:
+Proving with precompile:
 
 | Iterations | zkMIPS   | SP1    | Rate |
 |------------|----------|--------|------------------|
