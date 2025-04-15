@@ -12,10 +12,10 @@
 zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32r2 instruction set architecture(ISA).
 
 
-zkMIPS is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. zkMIPS is fully open-source and comes equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, built on zkMIPS, is a native asset cross-chain circulation protocol, with typical application cases including Metis Hybrid Rollup and GOAT Network.
+zkMIPS is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. zkMIPS is fully open-source, equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, designed specifically to utilize zkMIPS, is a native asset cross-chain circulation protocol, with example application cases including the Metis Hybrid Rollup design and the GOAT Network Bitcoin L2.
 
 
-## Why MIPS?
+## Why MIPS vs other ISA's?
 
 **MIPS32r2 is more consistent and offers more complex opcodes**
 
@@ -26,10 +26,10 @@ zkMIPS is the industry's first zero-knowledge proof virtual machine supporting t
 
 **MIPS32r2 has a more established ecosystem**
 
-* All instructions in MIPS32r2, as a whole, have been very mature and widely used for more than 20 years. There will be no compatibility issues between ISA modules. And there will be no turmoil caused by manufacturer disputes.
-* MIPS has been successfully applied to Optimism's Fraud Proof VM
+* All instructions in MIPS32r2, as a whole, are very mature and widely used for more than 20 years. There will be no compatibility issues between ISA modules, and there will be no turmoil caused by manufacturer disputes.
+* MIPS has been successfully applied to Optimism's Fraud Proof VM.
 
 ## Acknowledgements
-The zkMIPS draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
+zkMIPS draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
 - [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS proving backend is based on Plonky3.
 - [SP1](https://github.com/succinctlabs/sp1): zkMIPS circuit builder, recursion compiler, and precompiles originate from SP1.
