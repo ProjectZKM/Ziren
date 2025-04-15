@@ -26,6 +26,13 @@ $ zkmup list-available
 20250224 20250108 20241217
 ```
 
+Now you can run zkMIPS examples or unit tests.
+
+```
+git clone https://github.com/zkMIPS/zkMIPS
+cd zkMIPS && cargo test -r
+```
+
 ### Troubleshooting
 
 The following error may occur:
