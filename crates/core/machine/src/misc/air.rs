@@ -240,7 +240,7 @@ impl MiscInstrsChip {
             builder.send_alu(
                 Opcode::ROR.as_field::<AB::F>(),
                 ins_cols.ror_val,
-                ins_cols.op_a_access.prev_value,
+                ins_cols.prev_a_value,
                 Word([
                     AB::Expr::from_canonical_u32(0) + ins_cols.lsb,
                     AB::Expr::ZERO,

@@ -1,4 +1,3 @@
-use crate::memory::MemoryReadWriteCols;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;
@@ -9,7 +8,7 @@ pub const NUM_INS_COLS: usize = size_of::<InsCols<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct InsCols<T> {
-    pub op_a_access: MemoryReadWriteCols<T>,
+    pub prev_a_value: Word<T>,
 
     /// Lsb/Msb of insert field.
     pub lsb: T,

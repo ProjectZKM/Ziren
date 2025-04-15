@@ -1,4 +1,3 @@
-use crate::memory::MemoryReadWriteCols;
 use crate::operations::AddCarryOperation;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
@@ -10,10 +9,6 @@ pub const NUM_MADDSUB_COLS: usize = size_of::<MaddsubCols<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MaddsubCols<T> {
-    /// Access for LO/HI register.
-    pub op_a_access: MemoryReadWriteCols<T>,
-    pub op_hi_access: MemoryReadWriteCols<T>,
-
     /// Result value of intermediate mul operation.
     pub mul_lo: Word<T>,
     pub mul_hi: Word<T>,

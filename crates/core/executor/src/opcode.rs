@@ -154,10 +154,6 @@ impl Opcode {
     pub fn only_one_operand(&self) -> bool {
         matches!(self, Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ)
     }
-
-    pub fn signed_compare(&self) -> bool {
-        matches!(self, Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ | Opcode::BLTZ)
-    }
 }
 
 impl Display for Opcode {
