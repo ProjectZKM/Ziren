@@ -6,6 +6,8 @@ The zkm_sdk crate provides all the necessary tools for proof generation. Key fea
 - Generate proofs with `prove()`.
 - Verify proofs through `verify()`.
 
+When generating Groth16 or PLONK proofs, the `ProverClient` automatically downloads the pre-generated proving key (pk) from a trusted setup by calling `try_install_circuit_artifacts()`.
+
 ## Example: [Fibonacci](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/src/main.rs)
 
 The following code is an example of using zkm_sdk in host.
