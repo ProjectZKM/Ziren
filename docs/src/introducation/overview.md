@@ -13,15 +13,15 @@ The workflow of zkMIPS is as follows:
 - Arithmetization
 
   Emulates MIPS instructions while generating execution traces with embedded constraints (ALU, memory consistency, range checks, etc.) and treating columns of execution traces as polynomials.
-- STARK Proof Generation:
+- STARK Proof Generation
 
   Compiles traces into Plonky3 AIR (Algebraic Intermediate Representation), and proves the constraints using the Fast Reed-Solomon Interactive Oracle Proof of Proximity (FRI) technique.
-- STARK Compression and STARK to SNARK
+- STARK Compression and STARK-to-SNARK Proof Recursion
   
   To produce a constant-size proof, zkMIPS supports first generating a recursive argument to compress STARK proofs and then wrapping the compressed proof into a SNARK proof for efficient on-chain verification.
-- Verification:
+- Verification
   
-  On-chain verification of the SNARK proof.
+  For SNARK proof, it's available to do on-chain verification. And for the STARK proof, it's can used to verify on any verification layer for a faster optimistic finalization.
 
 ## Core Innovations
 

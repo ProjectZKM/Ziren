@@ -1,5 +1,5 @@
 # STARK to SNARK 
-zkMIPS's STARK-to-SNARK conversion enables efficient on-chain verification by transforming STARK proofs into SNARK-compatible formats through a two-stage cryptographic transformation pipeline. This process reduces proof size​ while achieving constant-time verification \\(O(1)\\) independent of circuit complexity.
+zkMIPS's STARK-to-SNARK proof recursion enables efficient on-chain verification by transforming STARK proofs into SNARK-compatible formats through a two-stage cryptographic transformation pipeline. This process reduces proof size​ while achieving constant-time verification \\(O(1)\\) independent of circuit complexity.
 
 
 ## Field Adaptation and Circuit Shrinkage
