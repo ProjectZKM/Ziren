@@ -1,8 +1,8 @@
 # Summary
 
-- [Introducation](./introducation/overview.md)
-    - [Installation](./introducation/installation.md)
-    - [Performance](./introducation/performance.md)
+- [Introduction](./introduction/overview.md)
+    - [Installation](./introduction/installation.md)
+    - [Performance](./introduction/performance.md)
 - [MIPS VM](./mips-vm/mips-vm.md)
     - [MIPS ISA](./mips-vm/mips-isa.md)
 - [Developer Tutorial](./dev/overview.md)
