@@ -154,7 +154,8 @@ impl<F: Field> AddDoubleOperation<F> {
             builder.slice_range_check_u8(&a_hi.0, is_real.clone());
             builder.slice_range_check_u8(&b.0, is_real.clone());
             builder.slice_range_check_u8(&b_hi.0, is_real.clone());
-            builder.slice_range_check_u8(&cols.value.0, is_real);
+            builder.slice_range_check_u8(&cols.value.0, is_real.clone());
+            builder.slice_range_check_u8(&cols.value_hi.0, is_real);
         }
     }
 }

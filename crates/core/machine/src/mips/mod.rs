@@ -384,6 +384,15 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(syscall_instrs.name(), syscall_instrs.cost());
         chips.push(syscall_instrs);
 
+        let memory_instructions =
+            Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
+        costs.insert(memory_instructions.name(), memory_instructions.cost());
+        chips.push(memory_instructions);
+
+        let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
+        costs.insert(misc_instrs.name(), misc_instrs.cost());
+        chips.push(misc_instrs);
+
         let memory_global_init =
             Chip::new(MipsAir::MemoryGlobalInit(MemoryGlobalChip::new(MemoryChipType::Initialize)));
         costs.insert(memory_global_init.name(), memory_global_init.cost());
@@ -405,15 +414,6 @@ impl<F: PrimeField32> MipsAir<F> {
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
-
-        let memory_instructions =
-            Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
-        costs.insert(memory_instructions.name(), memory_instructions.cost());
-        chips.push(memory_instructions);
-
-        let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
-        costs.insert(misc_instrs.name(), misc_instrs.cost());
-        chips.push(misc_instrs);
 
         (chips, costs)
     }
