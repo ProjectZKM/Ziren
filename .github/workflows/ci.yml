@@ -14,42 +14,38 @@ env:
 jobs:
   fmt:
     name: Rustfmt
+    concurrency: 
+      group: ci-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+          components: rustfmt
+      - run: cargo fmt --all -- --check
   clippy:
     name: Clippy
+    concurrency:
+      group: ci-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
       - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
       - run: source ~/.zkm-toolchain/env && cd crates/test-artifacts && cargo build && cd ../..
       - run: rustup component add clippy
       - run: cargo clippy --all-targets -- -D warnings
   test_github_hosted:
     name: Cargo Test
+    concurrency:
+      group: ci-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        toolchain:
-          - nightly
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
       - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
       - run: |
           set -e
@@ -63,13 +59,13 @@ jobs:
           RUSTFLAGS: "-C target-cpu=native"
   test_self_hosted:
     name: Cargo Test
+    concurrency:
+      group: ci-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
     runs-on: self-hosted
-    strategy:
-      matrix:
-        toolchain:
-          - nightly
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
       - run: |
           set -e
           for pkg in zkm-core-machine zkm-sdk zkm-verifier; do
