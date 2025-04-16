@@ -1,4 +1,4 @@
-use crate::operations::AddCarryOperation;
+use crate::operations::AddDoubleOperation;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;
@@ -17,10 +17,6 @@ pub struct MaddsubCols<T> {
     pub src2_lo: Word<T>,
     pub src2_hi: Word<T>,
 
-    /// Carry value of the low half add operation.
-    pub carry: T,
-
     /// Add operations of low/high word.
-    pub low_add_operation: AddCarryOperation<T>,
-    pub hi_add_operation: AddCarryOperation<T>,
+    pub add_operation: AddDoubleOperation<T>,
 }

@@ -164,15 +164,17 @@ impl MiscInstrsChip {
         let mul_lo = multiply as u32;
         maddsub_cols.mul_hi = Word::from(mul_hi);
         maddsub_cols.mul_lo = Word::from(mul_lo);
-        maddsub_cols.carry = F::ZERO;
 
         let is_add = event.opcode == Opcode::MADDU;
         let src2_lo = if is_add { event.a_record.prev_value } else { event.a_record.value };
         let src2_hi = if is_add { event.hi_record.prev_value } else { event.hi_record.value };
         maddsub_cols.src2_lo = Word::from(src2_lo);
         maddsub_cols.src2_hi = Word::from(src2_hi);
-        let (_, carry) = maddsub_cols.low_add_operation.populate(blu, mul_lo, src2_lo, 0);
-        maddsub_cols.hi_add_operation.populate(blu, mul_hi, src2_hi, carry);
+        let _ = maddsub_cols.add_operation.populate(
+            blu,
+            multiply,
+            ((src2_hi as u64) << 32) + (src2_lo as u64),
+        );
     }
 
     fn populate_ext<F: PrimeField32>(

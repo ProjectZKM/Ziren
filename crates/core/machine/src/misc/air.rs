@@ -9,7 +9,7 @@ use zkm_stark::{
     Word,
 };
 
-use crate::{air::WordAirBuilder, operations::AddCarryOperation};
+use crate::{air::WordAirBuilder, operations::AddDoubleOperation};
 
 use super::{columns::MiscInstrColumns, MiscInstrsChip};
 
@@ -161,22 +161,14 @@ impl MiscInstrsChip {
             is_real.clone(),
         );
 
-        AddCarryOperation::<AB::F>::eval(
+        AddDoubleOperation::<AB::F>::eval(
             builder,
             maddsub_cols.mul_lo,
-            maddsub_cols.src2_lo,
-            maddsub_cols.carry,
-            maddsub_cols.low_add_operation,
-            is_real.clone(),
-        );
-
-        AddCarryOperation::<AB::F>::eval(
-            builder,
             maddsub_cols.mul_hi,
+            maddsub_cols.src2_lo,
             maddsub_cols.src2_hi,
-            maddsub_cols.low_add_operation.carry[3],
-            maddsub_cols.hi_add_operation,
-            is_real,
+            maddsub_cols.add_operation,
+            is_real.clone(),
         );
     }
 

@@ -120,7 +120,8 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::ShiftLeft] = opcode_counts[Opcode::SLL];
 
     // Compute the number of events in the shift right chip.
-    events_counts[MipsAirId::ShiftRight] = opcode_counts[Opcode::SRL] + opcode_counts[Opcode::SRA];
+    events_counts[MipsAirId::ShiftRight] =
+        opcode_counts[Opcode::SRL] + opcode_counts[Opcode::SRA] + opcode_counts[Opcode::ROR];
 
     // Compute the number of events in the divrem chip.
     events_counts[MipsAirId::DivRem] = opcode_counts[Opcode::DIV] + opcode_counts[Opcode::DIVU];
@@ -132,18 +133,45 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::MemoryLocal] =
         touched_addresses.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64);
 
-    // // Compute the number of events in the branch chip.
-    // events_counts[MipsAirId::Branch] = opcode_counts[Opcode::BEQ]
-    //     + opcode_counts[Opcode::BNE]
-    //     + opcode_counts[Opcode::BGTZ]
-    //     + opcode_counts[Opcode::BGEZ]
-    //     + opcode_counts[Opcode::BLTZ]
-    //     + opcode_counts[Opcode::BLEZ];
+    // Compute the number of events in the branch chip.
+    events_counts[MipsAirId::Branch] = opcode_counts[Opcode::BEQ]
+        + opcode_counts[Opcode::BNE]
+        + opcode_counts[Opcode::BGTZ]
+        + opcode_counts[Opcode::BGEZ]
+        + opcode_counts[Opcode::BLTZ]
+        + opcode_counts[Opcode::BLEZ];
 
-    // // Compute the number of events in the jump chip.
-    // events_counts[MipsAirId::Jump] = opcode_counts[Opcode::Jump]
-    //     + opcode_counts[Opcode::Jumpi]
-    //     + opcode_counts[Opcode::JumpDirect];
+    // Compute the number of events in the jump chip.
+    events_counts[MipsAirId::Jump] = opcode_counts[Opcode::Jump]
+        + opcode_counts[Opcode::Jumpi]
+        + opcode_counts[Opcode::JumpDirect];
+
+    // Compute the number of events in the MemoryInstrs chip.
+    events_counts[MipsAirId::MemoryInstrs] = opcode_counts[Opcode::LB]
+        + opcode_counts[Opcode::LH]
+        + opcode_counts[Opcode::LW]
+        + opcode_counts[Opcode::LBU]
+        + opcode_counts[Opcode::LHU]
+        + opcode_counts[Opcode::SB]
+        + opcode_counts[Opcode::SH]
+        + opcode_counts[Opcode::SW]
+        + opcode_counts[Opcode::LWL]
+        + opcode_counts[Opcode::LWR]
+        + opcode_counts[Opcode::LL]
+        + opcode_counts[Opcode::SWL]
+        + opcode_counts[Opcode::SWR]
+        + opcode_counts[Opcode::SC];
+
+    // Compute the number of events in the MiscInstrs chip.
+    events_counts[MipsAirId::MiscInstrs] = opcode_counts[Opcode::INS]
+        + opcode_counts[Opcode::EXT]
+        + opcode_counts[Opcode::SEXT]
+        + opcode_counts[Opcode::MADDU]
+        + opcode_counts[Opcode::MSUBU]
+        + opcode_counts[Opcode::WSBH]
+        + opcode_counts[Opcode::TEQ]
+        + opcode_counts[Opcode::MEQ]
+        + opcode_counts[Opcode::MNE];
 
     // Compute the number of events in the auipc chip.
     events_counts[MipsAirId::CloClz] = opcode_counts[Opcode::CLO] + opcode_counts[Opcode::CLZ];
@@ -181,9 +209,12 @@ pub fn pad_mips_event_counts(
         MipsAirId::DivRem => *v += 4 * num_cycles,
         MipsAirId::Lt => *v += 2 * num_cycles,
         MipsAirId::MemoryLocal => *v += 64 * num_cycles,
-        // MipsAirId::Branch => *v += 8 * num_cycles,
-        // MipsAirId::Jump => *v += 2 * num_cycles,
-        MipsAirId::CloClz => *v += 3 * num_cycles, // TODO: Check this value.
+        MipsAirId::Branch => *v += 8 * num_cycles,
+        MipsAirId::Jump => *v += 2 * num_cycles,
+        MipsAirId::SyscallInstrs => *v += num_cycles,
+        MipsAirId::MemoryInstrs => *v += 8 * num_cycles,
+        MipsAirId::MiscInstrs => *v += 8 * num_cycles, // TODO: Check this value.
+        MipsAirId::CloClz => *v += 3 * num_cycles,     // TODO: Check this value.
         MipsAirId::SyscallCore => *v += 2 * num_cycles,
         MipsAirId::Global => *v += 64 * num_cycles,
         _ => (),
