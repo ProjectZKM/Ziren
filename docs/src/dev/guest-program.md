@@ -61,7 +61,7 @@ pub fn main() {
 
 ### C/C++ Example: [Fibonacci_C](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci_c_lib/guest/src/main.rs)
 
-For non-Rust languages, zkMIPS does not need to provide direct support. Instead, it compiles them to static libraries and links them in Rust. For [example](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci_c_lib/lib/add.cpp):
+For non-Rust languages, you can compile them to static libraries and link them in Rust by FFI. For [example](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci_c_lib/lib/add.cpp):
 
 ```C
 extern "C" {
