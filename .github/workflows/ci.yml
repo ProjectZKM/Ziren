@@ -14,6 +14,9 @@ env:
 jobs:
   fmt:
     name: Rustfmt
+    concurrency:
+      group: ci-${{ github.head_ref || github.ref_name }}-fmt
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +26,9 @@ jobs:
       - run: cargo fmt --all -- --check
   clippy:
     name: Clippy
+    concurrency:
+      group: ${{ github.head_ref || github.ref_name }}-clippy
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +38,10 @@ jobs:
       - run: rustup component add clippy
       - run: cargo clippy --all-targets -- -D warnings
   test_github_hosted:
-    name: Cargo Test (ghithub hosted)
+    name: Cargo Test (github hosted)
+    concurrency:
+      group: ${{ github.head_ref || github.ref_name }}-test-git-hosted
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +60,7 @@ jobs:
   test_self_hosted:
     name: Cargo Test (self hosted)
     concurrency:
-      group: ci-${{ github.head_ref || github.ref_name }}
+      group: ${{ github.head_ref || github.ref_name }}-test-self-hosted
       cancel-in-progress: true
     runs-on: self-hosted
     steps:
