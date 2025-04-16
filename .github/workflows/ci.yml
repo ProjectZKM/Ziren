@@ -43,7 +43,7 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
   test_github_hosted:
     name: Cargo Test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         toolchain:
