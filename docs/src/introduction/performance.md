@@ -37,16 +37,16 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 
 **Fibonacci**
 
-| n      | RISC0  | ZKM    | zkMIPS | SP1     | Rate   |
+| n      | RISC0  | zkMIPS 0.3.0 | zkMIPS 1.0.0 | SP1     | Rate   |
 |--------|--------|--------|--------|---------|--------|
-| 100    | 3004   | 6478   | 1947   | 5828    | 199.33 |
-| 1000   | 5854   | 8037   | 1933   | 5728    | 196.32 |
-| 10000  | 23648  | 44239  | 2972   | 7932    | 166.89 |
-| 58218  | 59905  | 223534 | 14985  | 31063   | 107.29 |
+| 100    | 1691   | 6478   | 1947   | 5828    | 199.33 |
+| 1000   | 3291   | 8037   | 1933   | 5728    | 196.32 |
+| 10000  | 12881  | 44239  | 2972   | 7932    | 166.89 |
+| 58218  | 64648  | 223534 | 14985  | 31063   | 107.29 |
 
 **sha2**
 
-| Byte Length | RISC0  | ZKM    | zkMIPS | SP1   | Rate   |
+| Byte Length | RISC0  | zkMIPS 0.3.0 | zkMIPS 1.0.0 | SP1   | Rate   |
 |-------------|--------|--------|--------|-------|--------|
 | 32          | 5982   | 7866   | 1927   | 5931  | 207.78 |
 | 256         | 5939   | 8318   | 1913   | 5872  | 206.95 |
@@ -56,7 +56,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 
 **sha3**
 
-| Byte Length | RISC0  | ZKM    | zkMIPS | SP1   | Rate   |
+| Byte Length | RISC0  | zkMIPS 0.3.0 | zkMIPS 1.0.0 | SP1   | Rate   |
 |-------------|--------|--------|--------|-------|--------|
 | 32          | 5934   | 7891   | 1972   | 5942  | 201.31 |
 | 256         | 11663  | 10636  | 2267   | 5909  | 160.65 |
@@ -66,7 +66,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 
 Proving with precompile:
 
-| Byte Length | zkMIPS | SP1   | Rate  |
+| Byte Length | zkMIPS 1.0.0 | SP1   | Rate  |
 |-------------|--------|-------|-------|
 | 32          | 646    | 980   | 51.70 |
 | 256         | 634    | 990   | 56.15 |
@@ -76,27 +76,27 @@ Proving with precompile:
 
 **big-memory**
 
-| Value | RISC0   | ZKM     | zkMIPS | SP1    | Rate  |
+| Value | RISC0   | zkMIPS 0.3.0 | zkMIPS 1.0.0 | SP1    | Rate  |
 |-------|---------|---------|--------|--------|-------|
 | 5     | 191125  | 199344  | 21218  | 36927  | 74.03 |
 
 **sha2-chain**
 
-| Iterations | RISC0  | ZKM     | zkMIPS | SP1    | Rate  |
+| Iterations | RISC0  | zkMIPS 0.3.0 | zkMIPS 1.0.0 | SP1    | Rate  |
 |------------|--------|---------|--------|--------|-------|
 | 230        | 95827  | 141451  | 8756   | 15850  | 81.01 |
 | 460        | 155192 | 321358  | 17789  | 31799  | 78.75 |
 
 **sha3-chain**
 
-| Iterations | RISC0   | ZKM      | zkMIPS | SP1    | Rate  |
+| Iterations | RISC0   | zkMIPS 0.3.0 | zkMIPS 1.0.0 | SP1    | Rate  |
 |------------|---------|----------|--------|--------|-------|
 | 230        | 287944  | 718678   | 36205  | 39987  | 10.44 |
 | 460        | 574644  | 1358248  | 68488  | 68790  | 0.44  |
 
 Proving with precompile:
 
-| Iterations | zkMIPS   | SP1    | Rate  |
+| Iterations | zkMIPS 1.0.0 | SP1    | Rate  |
 |------------|----------|--------|-------|
 | 230        | 3491     | 4277   | 22.51 |
 | 460        | 6471     | 7924   | 22.45 |
