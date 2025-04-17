@@ -8,7 +8,7 @@ The zkm_sdk crate provides all the necessary tools for proof generation. Key fea
 
 When generating Groth16 or PLONK proofs, the `ProverClient` automatically downloads the pre-generated proving key (pk) from a trusted setup by calling `try_install_circuit_artifacts()`.
 
-## Example: [Fibonacci](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/src/main.rs)
+## Example: [Fibonacci](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/src/main.rs)
 
 The following code is an example of using zkm_sdk in host.
 
@@ -81,7 +81,7 @@ pub enum ZKMProof {
 }
 ```
 
-### [Core Proof (Default)](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/src/main.rs)
+### [Core Proof (Default)](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/src/main.rs)
 
 The default prover mode generates a sequence of STARK proofs whose cumulative proof size scales linearly with the execution trace length.
 
@@ -90,7 +90,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).run().unwrap();
 ```
 
-### [Compressed Proof](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/bin/compressed.rs)
+### [Compressed Proof](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/bin/compressed.rs)
 
 The compressed proving mode generates constant-sized STARK proofs, but not suitable for on-chain verification.
 
@@ -99,7 +99,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).compressed().run().unwrap();
 ```
 
-### [Groth16 Proof (Recommended)](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/bin/groth16_bn254.rs)
+### [Groth16 Proof (Recommended)](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/bin/groth16_bn254.rs)
 
 The Groth16 proving mode ​generates succinct SNARK proofs with a compact size of approximately 260 bytes, ​and features on-chain verification.
 
@@ -108,7 +108,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).groth16().run().unwrap();
 ```
 
-### [PLONK Proof](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/host/bin/plonk_bn254.rs)
+### [PLONK Proof](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/bin/plonk_bn254.rs)
 
 The PLONK proving mode generates succinct SNARK proofs with a compact size of approximately 868 bytes, while maintaining on-chain verifiability. In contrast to Groth16, PLONK removes the dependency on trusted setup ceremonies.
 
