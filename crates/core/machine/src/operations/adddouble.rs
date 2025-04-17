@@ -16,7 +16,7 @@ pub struct AddDoubleOperation<T> {
     pub value_hi: Word<T>,
 
     /// Trace.
-    pub carry: [T; 8],
+    pub carry: [T; 7],
 }
 
 impl<F: Field> AddDoubleOperation<F> {
@@ -60,10 +60,6 @@ impl<F: Field> AddDoubleOperation<F> {
         if (a[6] as u32) + (b[6] as u32) + (carry[5] as u32) > 255 {
             carry[6] = 1;
             self.carry[6] = F::ONE;
-        }
-        if (a[7] as u32) + (b[7] as u32) + (carry[6] as u32) > 255 {
-            carry[7] = 1;
-            self.carry[7] = F::ONE;
         }
 
         let base = 256u32;
@@ -129,13 +125,11 @@ impl<F: Field> AddDoubleOperation<F> {
         builder_is_real.assert_zero(cols.carry[4] * (overflow_0.clone() - base));
         builder_is_real.assert_zero(cols.carry[5] * (overflow_1.clone() - base));
         builder_is_real.assert_zero(cols.carry[6] * (overflow_2.clone() - base));
-        builder_is_real.assert_zero(cols.carry[7] * (overflow_3.clone() - base));
 
         // If the carry is not one, then the overflow must be zero.
         builder_is_real.assert_zero((cols.carry[4] - one.clone()) * overflow_0.clone());
         builder_is_real.assert_zero((cols.carry[5] - one.clone()) * overflow_1.clone());
         builder_is_real.assert_zero((cols.carry[6] - one.clone()) * overflow_2.clone());
-        builder_is_real.assert_zero((cols.carry[7] - one.clone()) * overflow_3.clone());
 
         // Assert that the carry is either zero or one.
         builder_is_real.assert_bool(cols.carry[0]);
@@ -145,7 +139,6 @@ impl<F: Field> AddDoubleOperation<F> {
         builder_is_real.assert_bool(cols.carry[4]);
         builder_is_real.assert_bool(cols.carry[5]);
         builder_is_real.assert_bool(cols.carry[6]);
-        builder_is_real.assert_bool(cols.carry[7]);
         builder_is_real.assert_bool(is_real.clone());
 
         // Range check each byte.

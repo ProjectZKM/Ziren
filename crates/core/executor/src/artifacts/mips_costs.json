@@ -20,7 +20,7 @@
 	"Branch": 99,
 	"MemoryInstrs": 120,
 	"SyscallInstrs": 89,
-	"MiscInstrs": 112,
+	"MiscInstrs": 115,
 	"Bn254FpOpAssign": 704,
 	"Mul": 87,
 	"ShaExtend": 15936,
