@@ -5,32 +5,31 @@ To evaluate a zkVM’s performance, two primary metrics are considered: `Efficie
 
 **Efficiency** 
 
-The `Efficiency`, or cycles per instruction, means how many cycles the zkVM can prove in one second. One cycle is usually mapped to `one` MIPS instruction in zkVM. 
+The `Efficiency`, or cycles per instruction, means how many cycles the zkVM can prove in one second. One cycle is usually mapped to `one` MIPS instruction in the zkVM. 
 
-For each MIPS instruction in a shard, it goes through two main phases, execution phase and proving phase, to generate the proof. 
+For each MIPS instruction in a shard, it goes through two main phases: the execution phase and the proving phase (to generate the proof). 
 
-In the execution phase, the MIPS VM (Emulator) reads the instruction at PC from the program image and executes instruction to generate the execution traces (events). The execution traces will be converted to a matrix for later proving phase. This means the number of the traces is related to the instruction sequences of the program, and the shorter the sequences is, more efficient we can achieve to execute and prove.  
+In the execution phase, the MIPS VM (Emulator) reads the instruction at the program counter (PC) from the program image and executes it to generate execution traces (events). These traces are converted into a matrix for the proving phase. The number of traces depends on the program's instruction sequence - the shorter the sequence, the more efficient the execution and proving.
 
-In the proving phase, we employ the PCS (FRI in zkMIPS prover) to commit the execution traces, the proving complexity is determined by the matrix size of the trace table.
+In the proving phase, the zkMIPS prover uses a Polynomial Commitment Scheme (PCS) — specifically FRI — to commit the execution traces. The proving complexity is determined by the matrix size of the trace table.
 
-Therefore the instruction sequence size and prover's efficiency do matter in terms of the total proving performance. 
+Therefore, the instruction sequence size and prover efficiency directly impact overall proving performance.
 
 **Cost**
 
-The proving cost is more comprehensive metrics, which means how much money we spend to prove a specific program. it simply equals to the `Efficiency * Unit`, where Unit is the price of the server shipping the prover in a second. 
- 
+Proving cost is a more comprehensive metric that measures the total expense of proving a specific program. It can be approximated as: `Prover Efficiency * Unit`, Where Prover Efficiency reflects execution performance, and Unit Price refers to the cost per second of the server running the prover. 
 
-For example, the [ethproofs.org](https://ethproofs.org/) provides a platform for all zkVMs to submit their Ethereum mainnet block proofs, which includes the proof size, proving time and proving cost per Mgas (`Efficiency * Unit / GasUsed`, where the GasUsed is of unit Mgas).
+For example, [ethproofs.org](https://ethproofs.org/) provides a platform for all zkVMs to submit their Ethereum mainnet block proofs, which includes the proof size, proving time and proving cost per Mgas (`Efficiency * Unit / GasUsed`, where the GasUsed is of unit Mgas).
 
 
 ## zkVM benchmarks
 
-To facilitate a fairer comparison among different zkVMs, we provide the [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks)  suite, enabling anyone to reproduce the performance data.
+To facilitate the fairest possible comparison among different zkVMs, we provide the [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks)  suite, enabling anyone to reproduce the performance data.
 
 
 ## Performance of zkMIPS
 
-The performance of zkMIPS on an AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge) instance, a CPU-based server, is presented below
+The performance of zkMIPS on an AWS [r6a.8xlarge](https://instances.vantage.sh/aws/ec2/r6a.8xlarge) instance, a CPU-based server, is presented below:
 
 Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)/zkMIPS`. 
 
