@@ -36,7 +36,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 
 **Fibonacci**
 
-| n      | RISC0 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
+| n      | ROVM 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
 |--------|-------------|--------|--------|-----------|--------|
 | 100    | 1691        | 6478   | 1947   | 5828      | 199.33 |
 | 1000   | 3291        | 8037   | 1933   | 5728      | 196.32 |
@@ -45,7 +45,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 
 **sha2**
 
-| Byte Length | RISC0 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
+| Byte Length | ROVM 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
 |-------------|-------------|--------|--------|-----------|--------|
 | 32          | 3307        | 7866   | 1927   | 5931      | 207.78 |
 | 256         | 6540        | 8318   | 1913   | 5872      | 206.95 |
@@ -55,7 +55,7 @@ Note that all the time is of unit millisecond. Define `Rate = 100*(SP1 - zkMIPS)
 
 **sha3**
 
-| Byte Length | RISC0 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
+| Byte Length | ROVM 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
 |-------------|-------------|--------|--------|-----------|--------|
 | 32          | 3303        | 7891   | 1972   | 5942      | 201.31 |
 | 256         | 6487        | 10636  | 2267   | 5909      | 160.65 |
@@ -75,20 +75,20 @@ Proving with precompile:
 
 **big-memory**
 
-| Value | RISC0 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
+| Value | ROVM 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
 |-------|-------------|---------|--------|-----------|-------|
 | 5     | 78486       | 199344  | 21218  | 36927     | 74.03 |
 
 **sha2-chain**
 
-| Iterations | RISC0 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
+| Iterations | ROVM 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
 |------------|-------------|---------|--------|-----------|-------|
 | 230        | 53979       | 141451  | 8756   | 15850     | 81.01 |
 | 460        | 104584      | 321358  | 17789  | 31799     | 78.75 |
 
 **sha3-chain**
 
-| Iterations | RISC0 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
+| Iterations | ROVM 2.0.1 | zkMIPS 0.3 | zkMIPS 1.0 | SP1 4.1.1 | Rate  |
 |------------|-------------|----------|--------|-----------|-------|
 | 230        | 208734      | 718678   | 36205  | 39987     | 10.44 |
 | 460        | 417773      | 1358248  | 68488  | 68790     | 0.44  |
