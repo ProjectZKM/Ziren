@@ -190,45 +190,23 @@ impl Instruction {
         log::trace!("decode: insn {:X}, opcode {:X}, func {:X}", insn, opcode, func);
 
         match (opcode, func) {
-            // (0b000000, 0b001010) => Ok(Operation::CondMov(MovCond::EQ, rs, rt, rd)), // MOVZ: rd = rs if rt == 0
+            // MOVZ: rd = rs if rt == 0
             (0b000000, 0b001010) => Ok(Self::new(Opcode::MEQ, rd, rs, rt, false, false)), // MOVZ: rd = rs if rt == 0
-            // (0b000000, 0b001011) => Ok(Operation::CondMov(MovCond::NE, rs, rt, rd)), // MOVN: rd = rs if rt != 0
+            // MOVN: rd = rs if rt != 0
             (0b000000, 0b001011) => Ok(Self::new(Opcode::MNE, rd, rs, rt, false, false)), // MOVN: rd = rs if rt != 0
-            // (0b000000, 0b100000) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::ADD, rs, rt, rd))
-            // } // ADD: rd = rs+rt
+            // ADD: rd = rs + rt
             (0b000000, 0b100000) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)), // ADD: rd = rs+rt
-            // (0b000000, 0b100001) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::ADDU,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // ADDU: rd = rs+rt
+            // ADDU: rd = rs + rt
             (0b000000, 0b100001) => Ok(Self::new(Opcode::ADD, rd, rs, rt, false, false)), // ADDU: rd = rs+rt
-            // (0b000000, 0b100010) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::SUB, rs, rt, rd))
-            // } // SUB: rd = rs-rt
+            // SUB: rd = rs - rt
             (0b000000, 0b100010) => {
                 Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)) // SUB: rd = rs-rt
             }
-            // (0b000000, 0b100011) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::SUBU,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // SUBU: rd = rs-rt
+            // SUBU: rd = rs - rt
             (0b000000, 0b100011) => Ok(Self::new(Opcode::SUB, rd, rs, rt, false, false)), // SUBU: rd = rs-rt
-            // (0b000000, 0b000000) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::SLL, sa, rt, rd))
-            // } // SLL: rd = rt << sa
+            // SLL: rd = rt << sa
             (0b000000, 0b000000) => Ok(Self::new(Opcode::SLL, rd, rt, sa, false, true)), // SLL: rd = rt << sa
-            // (0b000000, 0b000010) => {
-            //     if rs == 1 {
-            //         Ok(Operation::Ror(rd, rt, sa))
-            //     } else {
-            //         Ok(Operation::BinaryArithmetic(BinaryOperator::SRL, sa, rt, rd))
-            //     }
-            // } // SRL: rd = rt >> sa
+            // SRL: rd = rt >> sa
             (0b000000, 0b000010) => {
                 if rs == 1 {
                     Ok(Self::new(Opcode::ROR, rd, rt, sa, false, true)) // ROTR
@@ -236,23 +214,11 @@ impl Instruction {
                     Ok(Self::new(Opcode::SRL, rd, rt, sa, false, true)) // SRL: rd = rt >> sa
                 }
             }
-            // (0b000000, 0b000011) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::SRA, sa, rt, rd))
-            // } // SRA: rd = rt >> sa
+            // SRA: rd = rt >> sa
             (0b000000, 0b000011) => Ok(Self::new(Opcode::SRA, rd, rt, sa, false, true)), // SRA: rd = rt >> sa
-            // (0b000000, 0b000100) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::SLLV,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // SLLV: rd = rt << rs[4:0]
+            // SLLV: rd = rt << rs[4:0]
             (0b000000, 0b000100) => Ok(Self::new(Opcode::SLL, rd, rt, rs, false, false)), // SLLV: rd = rt << rs[4:0]
-            // (0b000000, 0b000110) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::SRLV,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // SRLV: rd = rt >> rs[4:0]
+            // SRLV: rd = rt >> rs[4:0]
             (0b000000, 0b000110) => {
                 if sa == 1 {
                     Ok(Self::new(Opcode::ROR, rd, rt, rs, false, false)) // ROTRV
@@ -260,71 +226,39 @@ impl Instruction {
                     Ok(Self::new(Opcode::SRL, rd, rt, rs, false, false)) // SRLV: rd = rt >> rs[4:0]
                 }
             }
-            // (0b000000, 0b000111) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::SRAV,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // SRAV: rd = rt >> rs[4:0]
+            // SRAV: rd = rt >> rs[4:0]
             (0b000000, 0b000111) => Ok(Self::new(Opcode::SRA, rd, rt, rs, false, false)), // SRAV: rd = rt >> rs[4:0]
-            // (0b011100, 0b000010) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::MUL, rs, rt, rd))
-            // } // MUL: rd = rt * rs
+            // MUL: rd = rt * rs
             (0b011100, 0b000010) => Ok(Self::new(Opcode::MUL, rd, rt, rs, false, false)), // MUL: rd = rt * rs
-            // (0b000000, 0b011000) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::MULT,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // MULT: (hi, lo) = rt * rs
+            // MULT: (hi, lo) = rt * rs
             (0b000000, 0b011000) => Ok(Self::new(Opcode::MULT, 32, rt, rs, false, false)), // MULT: (hi, lo) = rt * rs
-            // (0b000000, 0b011001) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::MULTU,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // MULTU: (hi, lo) = rt * rs
+            // MULTU: (hi, lo) = rt * rs
             (0b000000, 0b011001) => Ok(Self::new(Opcode::MULTU, 32, rt, rs, false, false)), // MULTU: (hi, lo) = rt * rs
-            // (0b000000, 0b011010) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::DIV, rs, rt, rd))
-            // } // DIV: (hi, lo) = rt / rs
+            // DIV: hi = rt % rs, lo = rt / rs, signed
             (0b000000, 0b011010) => Ok(Self::new(Opcode::DIV, 32, rs, rt, false, false)), // DIV: (hi, lo) = rs / rt
-            // (0b000000, 0b011011) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::DIVU,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // DIVU: (hi, lo) = rt / rs
+            // DIVU: hi = rt % rs, lo = rt / rs, unsigned
             (0b000000, 0b011011) => Ok(Self::new(Opcode::DIVU, 32, rs, rt, false, false)), // DIVU: (hi, lo) = rs / rt
-            // (0b000000, 0b010000) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::MFHI, 33, 0, rd))
-            // } // MFHI: rd = hi
+            // MFHI: rd = hi
             (0b000000, 0b010000) => Ok(Self::new(Opcode::ADD, rd, 33, 0, false, true)), // MFHI: rd = hi
-            // (0b000000, 0b010001) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::MTHI, rs, 0, 33))
-            // } // MTHI: hi = rs
+            // MTHI: hi = rs
             (0b000000, 0b010001) => Ok(Self::new(Opcode::ADD, 33, rs, 0, false, true)), // MTHI: hi = rs
-            // (0b000000, 0b010010) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::MFLO, 32, 0, rd))
-            // } // MFLO: rd = lo
+            // MFLO: rd = lo
             (0b000000, 0b010010) => Ok(Self::new(Opcode::ADD, rd, 32, 0, false, true)), // MFLO: rd = lo
-            // (0b000000, 0b010011) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::MTLO, rs, 0, 32))
-            // } // MTLO: lo = rs
+            // MTLO: lo = rs
             (0b000000, 0b010011) => Ok(Self::new(Opcode::ADD, 32, rs, 0, false, true)), // MTLO: lo = rs
-            // (0b000000, 0b001111) => Ok(Operation::Nop),                                  // SYNC
+            // SYNC (nop)
             (0b000000, 0b001111) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // SYNC
-            // (0b011100, 0b100000) => Ok(Operation::Count(false, rs, rd)), // CLZ: rd = count_leading_zeros(rs)
+            // CLZ: rd = count_leading_zeros(rs)
             (0b011100, 0b100000) => Ok(Self::new(Opcode::CLZ, rd, rs, 0, false, true)), // CLZ: rd = count_leading_zeros(rs)
-            // (0b011100, 0b100001) => Ok(Operation::Count(true, rs, rd)), // CLO: rd = count_leading_ones(rs)
+            // CLO: rd = count_leading_ones(rs)
             (0b011100, 0b100001) => Ok(Self::new(Opcode::CLO, rd, rs, 0, false, true)), // CLO: rd = count_leading_ones(rs)
-            // (0x00, 0x08) => Ok(Operation::Jump(0u8, rs)), // JR
+            // JR
             (0x00, 0x08) => Ok(Self::new(Opcode::Jump, 0u8, rs, 0, false, true)), // JR
-            // (0x00, 0x09) => Ok(Operation::Jump(rd, rs)), // JALR
+            // JALR
             (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)), // JALR
             (0x01, _) => {
                 if rt == 1 {
-                    // Ok(Operation::Branch(BranchCond::GE, rs, 0u8, offset)) // BGEZ
+                    // BGEZ
                     Ok(Self::new(
                         Opcode::BGEZ,
                         rs as u8,
@@ -334,7 +268,7 @@ impl Instruction {
                         true,
                     ))
                 } else if rt == 0 {
-                    // Ok(Operation::Branch(BranchCond::LT, rs, 0u8, offset)) // BLTZ
+                    // BLTZ
                     Ok(Self::new(
                         Opcode::BLTZ,
                         rs as u8,
@@ -344,7 +278,7 @@ impl Instruction {
                         true,
                     ))
                 } else if rt == 0x11 && rs == 0 {
-                    // Ok(Operation::JumpDirect(31, offset)) // BAL
+                    // BAL
                     Ok(Self::new(
                         Opcode::JumpDirect,
                         31,
@@ -354,21 +288,22 @@ impl Instruction {
                         true,
                     ))
                 } else if rt == 0x1f {
-                    //SYNCI
+                    // SYNCI
                     Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
-            // (0x02, _) => Ok(Operation::Jumpi(0u8, target)), // J
+            // J
             (0x02, _) => {
+                // Ignore the upper 4 most significant bits，since they are always 0 currently.
                 Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true))
-            } // J
-            // (0x03, _) => Ok(Operation::Jumpi(31u8, target)), // JAL
+            }
+            // JAL
             (0x03, _) => {
                 Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true))
-            } // JAL
-            // (0x04, _) => Ok(Operation::Branch(BranchCond::EQ, rs, rt, offset)),     // BEQ
+            }
+            // BEQ
             (0x04, _) => Ok(Self::new(
                 Opcode::BEQ,
                 rs as u8,
@@ -376,8 +311,8 @@ impl Instruction {
                 offset_ext16.overflowing_shl(2).0,
                 false,
                 true,
-            )), // BEQ
-            // (0x05, _) => Ok(Operation::Branch(BranchCond::NE, rs, rt, offset)),         // BNE
+            )),
+            // BNE
             (0x05, _) => Ok(Self::new(
                 Opcode::BNE,
                 rs as u8,
@@ -385,8 +320,8 @@ impl Instruction {
                 offset_ext16.overflowing_shl(2).0,
                 false,
                 true,
-            )), // BNE
-            // (0x06, _) => Ok(Operation::Branch(BranchCond::LE, rs, 0u8, offset)),        // BLEZ
+            )),
+            // BLEZ
             (0x06, _) => Ok(Self::new(
                 Opcode::BLEZ,
                 rs as u8,
@@ -394,8 +329,8 @@ impl Instruction {
                 offset_ext16.overflowing_shl(2).0,
                 true,
                 true,
-            )), // BLEZ
-            // (0x07, _) => Ok(Operation::Branch(BranchCond::GT, rs, 0u8, offset)),         // BGTZ
+            )),
+            // BGTZ
             (0x07, _) => Ok(Self::new(
                 Opcode::BGTZ,
                 rs as u8,
@@ -403,163 +338,101 @@ impl Instruction {
                 offset_ext16.overflowing_shl(2).0,
                 true,
                 true,
-            )), // BGTZ
+            )),
 
-            // (0b100000, _) => Ok(Operation::MloadGeneral(MemOp::LB, rs, rt, offset)),
+            // LB
             (0b100000, _) => Ok(Self::new(Opcode::LB, rt as u8, rs, offset_ext16, false, true)),
-            // (0b100001, _) => Ok(Operation::MloadGeneral(MemOp::LH, rs, rt, offset)),
+            // LH
             (0b100001, _) => Ok(Self::new(Opcode::LH, rt as u8, rs, offset_ext16, false, true)),
-            // (0b100010, _) => Ok(Operation::MloadGeneral(MemOp::LWL, rs, rt, offset)),
+            // LWL
             (0b100010, _) => Ok(Self::new(Opcode::LWL, rt as u8, rs, offset_ext16, false, true)),
-            // (0b100011, _) => Ok(Operation::MloadGeneral(MemOp::LW, rs, rt, offset)),
+            // LW
             (0b100011, _) => Ok(Self::new(Opcode::LW, rt as u8, rs, offset_ext16, false, true)),
-            // (0b100100, _) => Ok(Operation::MloadGeneral(MemOp::LBU, rs, rt, offset)),
+            // LBU
             (0b100100, _) => Ok(Self::new(Opcode::LBU, rt as u8, rs, offset_ext16, false, true)),
-            // (0b100101, _) => Ok(Operation::MloadGeneral(MemOp::LHU, rs, rt, offset)),
+            // LHU
             (0b100101, _) => Ok(Self::new(Opcode::LHU, rt as u8, rs, offset_ext16, false, true)),
-            // (0b100110, _) => Ok(Operation::MloadGeneral(MemOp::LWR, rs, rt, offset)),
+            // LWR
             (0b100110, _) => Ok(Self::new(Opcode::LWR, rt as u8, rs, offset_ext16, false, true)),
-            // (0b110000, _) => Ok(Operation::MloadGeneral(MemOp::LL, rs, rt, offset)),
+            // LL
             (0b110000, _) => Ok(Self::new(Opcode::LL, rt as u8, rs, offset_ext16, false, true)),
-            // (0b101000, _) => Ok(Operation::MstoreGeneral(MemOp::SB, rs, rt, offset)),
+            // SB
             (0b101000, _) => Ok(Self::new(Opcode::SB, rt as u8, rs, offset_ext16, false, true)),
-            // (0b101001, _) => Ok(Operation::MstoreGeneral(MemOp::SH, rs, rt, offset)),
+            // SH
             (0b101001, _) => Ok(Self::new(Opcode::SH, rt as u8, rs, offset_ext16, false, true)),
-            // (0b101010, _) => Ok(Operation::MstoreGeneral(MemOp::SWL, rs, rt, offset)),
+            // SWL
             (0b101010, _) => Ok(Self::new(Opcode::SWL, rt as u8, rs, offset_ext16, false, true)),
-            // (0b101011, _) => Ok(Operation::MstoreGeneral(MemOp::SW, rs, rt, offset)),
+            // SW
             (0b101011, _) => Ok(Self::new(Opcode::SW, rt as u8, rs, offset_ext16, false, true)),
-            // (0b101110, _) => Ok(Operation::MstoreGeneral(MemOp::SWR, rs, rt, offset)),
+            // SWR
             (0b101110, _) => Ok(Self::new(Opcode::SWR, rt as u8, rs, offset_ext16, false, true)),
-            // (0b111000, _) => Ok(Operation::MstoreGeneral(MemOp::SC, rs, rt, offset)),
+            // SC
             (0b111000, _) => Ok(Self::new(Opcode::SC, rt as u8, rs, offset_ext16, false, true)),
-            // (0b111101, _) => Ok(Operation::MstoreGeneral(MemOp::SDC1, rs, rt, offset)),
-            // (0b111101, _) => Ok(Self::new(
-            //    Opcode::SDC1,
-            //    rs as u8,
-            //    rt,
-            //    offset_ext16,
-            //    false,
-            //    true,
-            // )),
-            // (0b001000, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::ADDI,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // ADDI: rt = rs + sext(imm)
+            // ADDI: rt = rs + sext(imm)
             (0b001000, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)), // ADDI: rt = rs + sext(imm)
 
-            // (0b001001, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::ADDIU,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // ADDIU: rt = rs + sext(imm)
+            // ADDIU: rt = rs + sext(imm)
             (0b001001, _) => Ok(Self::new(Opcode::ADD, rt as u8, rs, offset_ext16, false, true)), // ADDIU: rt = rs + sext(imm)
 
-            // (0b001010, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::SLTI,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // SLTI: rt = rs < sext(imm)
+            // SLTI: rt = rs < sext(imm)
             (0b001010, _) => Ok(Self::new(Opcode::SLT, rt as u8, rs, offset_ext16, false, true)), // SLTI: rt = rs < sext(imm)
 
-            // (0b001011, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::SLTIU,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // SLTIU: rt = rs < sext(imm)
+            // SLTIU: rt = rs < sext(imm)
             (0b001011, _) => Ok(Self::new(Opcode::SLTU, rt as u8, rs, offset_ext16, false, true)), // SLTIU: rt = rs < sext(imm)
 
-            // (0b000000, 0b101010) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::SLT, rs, rt, rd))
-            // } // SLT: rd = rs < rt
+            // SLT: rd = rs < rt
             (0b000000, 0b101010) => Ok(Self::new(Opcode::SLT, rd, rs, rt, false, false)), // SLT: rd = rs < rt
 
-            // (0b000000, 0b101011) => Ok(Operation::BinaryArithmetic(
-            //     BinaryOperator::SLTU,
-            //     rs,
-            //     rt,
-            //     rd,
-            // )), // SLTU: rd = rs < rt
+            // SLTU: rd = rs < rt
             (0b000000, 0b101011) => Ok(Self::new(Opcode::SLTU, rd, rs, rt, false, false)), // SLTU: rd = rs < rt
 
-            // (0b001111, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::LUI,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // LUI: rt = imm << 16
+            // LUI: rt = imm << 16
             (0b001111, _) => Ok(Self::new(Opcode::SLL, rt as u8, offset_ext16, 16, true, true)), // LUI: rt = imm << 16
-            // (0b000000, 0b100100) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::AND, rs, rt, rd))
-            // } // AND: rd = rs & rt
+            // AND: rd = rs & rt
             (0b000000, 0b100100) => Ok(Self::new(Opcode::AND, rd, rs, rt, false, false)), // AND: rd = rs & rt
-            // (0b000000, 0b100101) => Ok(Operation::BinaryArithmetic(BinaryOperator::OR, rs, rt, rd)), // OR: rd = rs | rt
+            // OR: rd = rs | rt
             (0b000000, 0b100101) => Ok(Self::new(Opcode::OR, rd, rs, rt, false, false)), // OR: rd = rs | rt
-            // (0b000000, 0b100110) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::XOR, rs, rt, rd))
-            // } // XOR: rd = rs ^ rt
+            // XOR: rd = rs ^ rt
             (0b000000, 0b100110) => Ok(Self::new(Opcode::XOR, rd, rs, rt, false, false)), // XOR: rd = rs ^ rt
-            // (0b000000, 0b100111) => {
-            //     Ok(Operation::BinaryArithmetic(BinaryOperator::NOR, rs, rt, rd))
-            // } // NOR: rd = ! rs | rt
+            // NOR: rd = ! rs | rt
             (0b000000, 0b100111) => Ok(Self::new(Opcode::NOR, rd, rs, rt, false, false)), // NOR: rd = ! rs | rt
-
-            // (0b001100, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::AND,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // ANDI: rt = rs + zext(imm)
+            // ANDI: rt = rs + zext(imm)
             (0b001100, _) => Ok(Self::new(Opcode::AND, rt as u8, rs, offset, false, true)), // ANDI: rt = rs + zext(imm)
-            // (0b001101, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::OR,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // ORI: rt = rs + zext(imm)
+            // ORI: rt = rs + zext(imm)
             (0b001101, _) => Ok(Self::new(Opcode::OR, rt as u8, rs, offset, false, true)), // ORI: rt = rs + zext(imm)
-            // (0b001110, _) => Ok(Operation::BinaryArithmeticImm(
-            //     BinaryOperator::XOR,
-            //     rs,
-            //     rt,
-            //     offset,
-            // )), // XORI: rt = rs + zext(imm)
+            // XORI: rt = rs + zext(imm)
             (0b001110, _) => Ok(Self::new(Opcode::XOR, rt as u8, rs, offset, false, true)), // XORI: rt = rs + zext(imm)
-            // (0b000000, 0b001100) => Ok(Operation::Syscall), // Syscall
+            // SYSCALL
             (0b000000, 0b001100) => Ok(Self::new(Opcode::SYSCALL, 2, 4, 5, false, false)), // Syscall
-            // (0b110011, _) => Ok(Operation::Nop),            // Pref
+            // PREF (nop)
             (0b110011, _) => Ok(Self::new(Opcode::ADD, 0, 0, 0, true, true)), // Pref
-            // (0b000000, 0b110100) => Ok(Operation::Teq(rs, rt)), // teq
+            // TEQ
             (0b000000, 0b110100) => Ok(Self::new(Opcode::TEQ, rs as u8, rt, 0, false, true)), // teq
             (0b011111, 0b100000) => {
                 if sa == 0b010000 {
-                    // Ok(Operation::Signext(rd, rt, 8)) // seb
+                    // SEB
                     Ok(Self::new(Opcode::SEXT, rd, rt, 0, false, true))
                 } else if sa == 0b011000 {
-                    // Ok(Operation::Signext(rd, rt, 16)) // seh
+                    // SEH
                     Ok(Self::new(Opcode::SEXT, rd, rt, 1, false, true))
                 } else if sa == 0b000010 {
-                    // Ok(Operation::SwapHalf(rd, rt)) // wsbh
+                    // WSBH
                     Ok(Self::new(Opcode::WSBH, rd, rt, 0, false, true))
                 } else {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
-            // (0b011111, 0b000000, _) => Ok(Operation::Ext(rt, rs, rd, sa)), // ext
+            // EXT
             (0b011111, 0b000000) => {
                 Ok(Self::new(Opcode::EXT, rt as u8, rs, (rd as u32) << 5 | sa, false, true))
             }
-            // (0b011111, 0b000100, _) => Ok(Operation::Ins(rt, rs, rd, sa)), // ins
+            // INS
             (0b011111, 0b000100) => {
                 Ok(Self::new(Opcode::INS, rt as u8, rs, (rd as u32) << 5 | sa, false, true))
             }
-            // (0b011100, 0b000001, _) => Ok(Operation::Maddu(rt, rs)),
+            // MADDU
             (0b011100, 0b000001) => Ok(Self::new(Opcode::MADDU, 32, rt, rs, false, false)),
+            // MSUBU
             (0b011100, 0b000101) => Ok(Self::new(Opcode::MSUBU, 32, rt, rs, false, false)),
             _ => {
                 log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
