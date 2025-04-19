@@ -55,7 +55,7 @@ where
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
         // `op_a_val` is constrained in `eval_syscall`.
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
-        let is_sequantial = AB::Expr::ONE - local.is_halt;
+        let is_sequential = AB::Expr::ONE - local.is_halt;
         builder.receive_instruction(
             local.shard,
             local.clk,
@@ -72,7 +72,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ONE,
             local.is_halt,
-            is_sequantial,
+            is_sequential,
             local.is_real,
         );
 
