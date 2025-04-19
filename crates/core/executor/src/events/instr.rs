@@ -153,7 +153,7 @@ pub struct JumpEvent {
     pub pc: u32,
     /// The next program counter.
     pub next_pc: u32,
-    /// The next next program counter.
+    /// The next program counter.
     pub next_next_pc: u32,
     /// The opcode.
     pub opcode: Opcode,
