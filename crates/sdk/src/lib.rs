@@ -453,10 +453,10 @@ pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
 
 #[cfg(test)]
 mod tests {
-
-    use zkm_primitives::io::ZKMPublicValues;
-
+    use crate::utils::compute_groth16_public_values;
+    use crate::ZKMProof::Groth16;
     use crate::{utils, ProverClient, ZKMStdin};
+    use zkm_primitives::io::ZKMPublicValues;
 
     #[test]
     fn test_execute() {
@@ -574,5 +574,35 @@ mod tests {
         stdin.write(&10usize);
         let proof = client.prove(&pk, stdin).plonk().run().unwrap();
         client.verify(&proof, &vk).unwrap();
+    }
+
+    #[test]
+    fn test_groth16_public_values() {
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_ELF;
+        let (pk, vk) = client.setup(elf);
+
+        let string_input = b"hello world".to_vec();
+        let length = (string_input.len() as u64).to_le_bytes();
+        let guest_committed_values: Vec<u8> = length.into_iter().chain(string_input).collect();
+        let computed_public_inputs = compute_groth16_public_values(&guest_committed_values, &vk);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let proof = client.prove(&pk, stdin).groth16().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+
+        let inner_proof = match proof.proof.clone() {
+            Groth16(proof) => proof,
+            _ => panic!("expected a compressed proof"),
+        };
+        assert_eq!(
+            computed_public_inputs[0], inner_proof.public_inputs[0],
+            "First public input does not match"
+        );
+        assert_eq!(
+            computed_public_inputs[1], inner_proof.public_inputs[1],
+            "Second public input does not match"
+        );
     }
 }
