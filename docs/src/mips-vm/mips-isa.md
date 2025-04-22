@@ -22,7 +22,7 @@ pub enum Opcode {
     NOR = 16,        // BITWISE
     CLZ = 17,        // CLO_CLZ
     CLO = 18,        // CLO_CLZ
-    // Control FLow
+    // Control Flow
     BEQ = 19,        // BRANCH
     BGEZ = 20,       // BRANCH
     BGTZ = 21,       // BRANCH
@@ -81,7 +81,7 @@ Jump-related instructions, including Jump, Jumpi, and JumpDirect, are responsibl
 SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompiles computation, such as do sha extend operation by `SHA_EXTEND` precompile. it also can be input/output operation such as `SYSHINTREADYSHINTREAD` and `WRITE`.
 
 **Misc Instructions**  
-This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply acccumulation. SEB/SEH is for data sign extended. EXT/INS is for bits extraction and insertion.
+This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply accumulation. SEB/SEH is for data sign extended. EXT/INS is for bits extraction and insertion.
 
 
 ## Supported instructions
