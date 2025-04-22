@@ -12,9 +12,9 @@ pub mod install;
 // pub mod network_v2;
 
 use std::env;
-
-// #[cfg(feature = "network")]
-// pub use crate::network::prover::NetworkProver as NetworkProverV1;
+use cfg_if::cfg_if;
+#[cfg(feature = "network")]
+pub use crate::network::prover::NetworkProver;
 // #[cfg(feature = "network-v2")]
 // pub use crate::network_v2::prover::NetworkProver as NetworkProverV2;
 // #[cfg(feature = "cuda")]
@@ -23,6 +23,7 @@ use std::env;
 pub mod proof;
 pub mod provers;
 pub mod utils;
+pub mod network;
 
 pub use proof::*;
 pub use provers::ZKMVerificationError;
@@ -44,6 +45,7 @@ pub use zkm_prover::{
 
 // Re-export the utilities.
 pub use utils::setup_logger;
+use crate::network::NetworkClientCfg;
 
 /// A client for interacting with zkMIPS.
 pub struct ProverClient {
@@ -83,27 +85,35 @@ impl ProverClient {
                 }
             }
             // TODO: Anyone can implement it when a network prover is needed.
-            // "network" => {
-            //     let private_key = env::var("ZKM_PRIVATE_KEY")
-            //         .expect("ZKM_PRIVATE_KEY must be set for remote proving");
-            //     let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
-            //     let skip_simulation =
-            //         env::var("SKIP_SIMULATION").map(|val| val == "true").unwrap_or_default();
+            "network" => {
+                let endpoint = env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string());
+                let ca_cert_path = env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving");
+                let cert_path = env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving");
+                let key_path = env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving");
+                let proof_network_privkey = env::var("ZKM_PRIVATE_KEY")
+                    .expect("ZKM_PRIVATE_KEY must be set for remote proving");
+                let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
+                // let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
+                let network_cfg = NetworkClientCfg {
+                    endpoint,
+                    ca_cert_path,
+                    cert_path,
+                    key_path,
+                    domain_name,
+                    proof_network_privkey
+                };
 
-            //     cfg_if! {
-            //         if #[cfg(feature = "network-v2")] {
-            //             Self {
-            //                 prover: Box::new(NetworkProverV2::new(&private_key, rpc_url, skip_simulation)),
-            //             }
-            //         } else if #[cfg(feature = "network")] {
-            //             Self {
-            //                 prover: Box::new(NetworkProverV1::new(&private_key, rpc_url, skip_simulation)),
-            //             }
-            //         } else {
-            //             panic!("network feature is not enabled")
-            //         }
-            //     }
-            // }
+                cfg_if! {
+                   if #[cfg(feature = "network")] {
+                        Self {
+                            // prover: Box::new(NetworkProver::new(&network_cfg)),
+                            prover: Box::new(tokio::runtime::Runtime::new().unwrap().block_on(NetworkProver::new(&network_cfg)).unwrap()),
+                        }
+                    } else {
+                        panic!("network feature is not enabled")
+                    }
+                }
+            }
             _ => panic!(
                 "invalid value for ZKM_PROVER environment variable: expected 'local', 'mock', or 'network'"
             ),
@@ -173,32 +183,29 @@ impl ProverClient {
     ///
     /// ### Examples
     ///
-    /// ```no_run
-    /// use zkm_sdk::ProverClient;
-    ///
-    /// let private_key = std::env::var("ZKM_PRIVATE_KEY").unwrap();
-    /// let rpc_url = std::env::var("PROVER_NETWORK_RPC").ok();
-    /// let skip_simulation =
-    ///     std::env::var("SKIP_SIMULATION").map(|val| val == "true").unwrap_or_default();
-    ///
-    /// let client = ProverClient::network(private_key, rpc_url, skip_simulation);
-    /// ```
+//     ```no_run
+//     use zkm_sdk::ProverClient;
+//
+//     let private_key = std::env::var("ZKM_PRIVATE_KEY").unwrap();
+//     let rpc_url = std::env::var("PROVER_NETWORK_RPC").ok();
+//     let skip_simulation =
+//         std::env::var("SKIP_SIMULATION").map(|val| val == "true").unwrap_or_default();
+//
+//     let client = ProverClient::network(private_key, rpc_url, skip_simulation);
+//     ```
     #[cfg(any(feature = "network", feature = "network-v2"))]
-    pub fn network(_private_key: String, _rpc_url: Option<String>, _skip_simulation: bool) -> Self {
-        todo!();
-        // cfg_if! {
-        //     if #[cfg(feature = "network-v2")] {
-        //         Self {
-        //             prover: Box::new(NetworkProverV2::new(&private_key, rpc_url, skip_simulation)),
-        //         }
-        //     } else if #[cfg(feature = "network")] {
-        //         Self {
-        //             prover: Box::new(NetworkProverV1::new(&private_key, rpc_url, skip_simulation)),
-        //         }
-        //     } else {
-        //         panic!("network feature is not enabled")
-        //     }
-        // }
+    pub fn network(client_config: &NetworkClientCfg) -> Self {
+        // todo!()
+        cfg_if! {
+            if #[cfg(feature = "network")] {
+                Self {
+                    // prover: Box::new(NetworkProver::new(client_config)),
+                    prover: Box::new(tokio::runtime::Runtime::new().unwrap().block_on(NetworkProver::new(&client_config)).unwrap()),
+                }
+            } else {
+                panic!("network feature is not enabled")
+            }
+        }
     }
 
     /// Prepare to execute the given program on the given input (without generating a proof).
