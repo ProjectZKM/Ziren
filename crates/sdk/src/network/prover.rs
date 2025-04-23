@@ -1,3 +1,4 @@
+use std::env;
 use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
@@ -14,11 +15,12 @@ use tokio::time::Duration;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use twirp::tower::ServiceExt;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::{ZKMProver, ZKMProvingKey, ZKMVerifyingKey};
-use crate::{CpuProver, Prover, ZKMProofKind, ZKMProofWithPublicValues};
+use crate::{block_on, CpuProver, Prover, ZKMProofKind, ZKMProofWithPublicValues};
 use crate::network::{NetworkClientCfg, ProverInput, ProverResult};
 
 #[derive(Clone)]
@@ -51,6 +53,7 @@ impl NetworkProver {
             .await?;
             Some(Config { ca_cert, identity })
         };
+
         let endpoint_para = client_config.endpoint.clone();
         let endpoint = match ssl_config {
             Some(config) => {
@@ -72,8 +75,9 @@ impl NetworkProver {
         if private_key.is_empty() {
             panic!("Please set the PRIVATE_KEY");
         }
+        println!("Connecting to gRPC endpoint: {}", endpoint_para);
         let stage_client = StageServiceClient::connect(endpoint).await?;
-        let wallet = private_key.parse::<LocalWallet>().unwrap();
+        let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
         Ok(NetworkProver { stage_client, wallet, local_prover})
     }
@@ -102,22 +106,26 @@ impl NetworkProver {
         let mut request = GenerateProofRequest {
             proof_id: proof_id.clone(),
             elf_data: input.elf.clone(),
-            seg_size: input.seg_size,
+            seg_size: input.shard_size,
             public_input_stream: input.public_inputstream.clone(),
             private_input_stream: input.private_inputstream.clone(),
             execute_only: input.execute_only,
-            composite_proof: input.composite_proof,
+            // composite_proof: input.composite_proof,
+            precompile: input.composite_proof,
             ..Default::default()
         };
         for receipt in input.receipts.iter() {
-            request.receipts.push(receipt.clone());
+            // request.receipts.push(receipt.clone());
+            request.receipt.push(receipt.clone());
         }
         for receipt_input in input.receipt_inputs.iter() {
-            request.receipt_inputs.push(receipt_input.clone());
+            // request.receipt_inputs.push(receipt_input.clone());
+            request.receipt_input.push(receipt_input.clone());
         }
         self.sign_ecdsa(&mut request).await;
         let mut client = self.stage_client.clone();
         let response = client.generate_proof(request).await?.into_inner();
+
         Ok(response.proof_id)
     }
 
@@ -125,7 +133,7 @@ impl NetworkProver {
         &self,
         proof_id: &'a str,
         timeout: Option<Duration>,
-    ) -> Result<Option<ProverResult>> {
+    ) -> Result<ZKMProofWithPublicValues> {
         let start_time = Instant::now();
         let mut split_start_time = Instant::now();
         let mut split_end_time = Instant::now();
@@ -141,56 +149,37 @@ impl NetworkProver {
             let get_status_request = GetStatusRequest { proof_id: proof_id.to_string() };
             let get_status_response = client.get_status(get_status_request).await?.into_inner();
             
-            match Status::try_from(get_status_response.status) {
-                Ok(Status::Computing) => {
-                    match Step::try_from(get_status_response.step) {
-                        Ok(Step::Init) => log::info!("generate_proof : queuing the task."),
-                        Ok(Step::InSplit) => {
+            match Status::from_i32(get_status_response.status as i32) {
+                Some(Status::Computing) => {
+                    match Step::from_i32(get_status_response.step) {
+                        Some(Step::Init) => log::info!("generate_proof : queuing the task."),
+                        Some(Step::InSplit) => {
                             if last_step == 0 {
                                 split_start_time = Instant::now();
                             }
                             log::info!("generate_proof : splitting the task.");
                         }
-                        Ok(Step::InProve) => {
+                        Some(Step::InProve) => {
                             if last_step == 1 {
                                 split_end_time = Instant::now();
                             }
                             log::info!("generate_proof : proving the task.");
                         }
-                        Ok(Step::InAgg) => log::info!("generate_proof : aggregating the proof."),
-                        Ok(Step::InAggAll) => {
+                        Some(Step::InAgg) => log::info!("generate_proof : aggregating the proof."),
+                        Some(Step::InAggAll) => {
                             log::info!("generate_proof : aggregating the proof.")
                         }
-                        Ok(Step::InSnark) => log::info!("generate_proof : snark-wrapping the proof."),
-                        Ok(Step::End) => log::info!("generate_proof : completing the proof."),
-                        Err(_) => todo!(),
+                        Some(Step::InFinal) => log::info!("generate_proof : snark-wrapping the proof."),
+                        Some(Step::End) => log::info!("generate_proof : completing the proof."),
+                        None => todo!(),
                     }
                     last_step = get_status_response.step;
                     sleep(Duration::from_secs(30)).await;
                 }
-                Ok(Status::Success) => {
-                    let mut proof_result = ProverResult {
-                        output_stream: get_status_response.output_stream,
-                        proof_with_public_inputs: get_status_response.proof_with_public_inputs,
-                        stark_proof: vec![],
-                        public_values: vec![],
-                        total_steps: get_status_response.total_steps,
-                        split_cost: split_end_time.duration_since(split_start_time).as_millis()
-                            as u64,
-                        receipt: get_status_response.receipt,
-                        elf_id: get_status_response.elf_id,
-                    };
-                    if !get_status_response.stark_proof_url.is_empty() {
-                        proof_result.stark_proof =
-                            NetworkProver::download_file(&get_status_response.stark_proof_url)
-                                .await?;
-                    }
-                    if !get_status_response.public_values_url.is_empty() {
-                        proof_result.public_values =
-                            NetworkProver::download_file(&get_status_response.public_values_url)
-                                .await?;
-                    }
-                    return Ok(Some(proof_result));
+                Some(Status::Success) => {
+                    let proof = bincode::deserialize::<ZKMProofWithPublicValues>(&get_status_response.proof_with_public_inputs).expect("Failed to deserialize proof");
+                    return Ok(proof);
+
                 }
                 _ => {
                     log::error!("generate_proof failed status: {}", get_status_response.status);
@@ -204,7 +193,7 @@ impl NetworkProver {
         &self,
         input: &'a ProverInput,
         timeout: Option<Duration>,
-    ) -> Result<Option<ProverResult>> {
+    ) -> Result<ZKMProofWithPublicValues> {
         log::info!("calling request_proof.");
         let proof_id = self.request_proof(input).await?;
         log::info!("calling wait_proof, proof_id={}", proof_id);
@@ -227,14 +216,43 @@ impl Prover<DefaultProverComponents> for NetworkProver {
     }
 
     fn prove<'a>(&'a self, pk: &ZKMProvingKey, stdin: ZKMStdin, opts: ProofOpts, context: ZKMContext<'a>, kind: ZKMProofKind) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove(&pk.elf, stdin, kind.into(), opts.timeout))
+        let execute_only =
+            env::var("EXECUTE_ONLY").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
+
+        let composite_proof = env::var("COMPOSITE_PROOF").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
+
+        let shard_size = env::var("SHARD_SIZE").ok().and_then(|seg| seg.parse::<usize>().ok()).unwrap_or(65536) as u32;
+
+        let proof_results_path =
+            env::var("PROOF_RESULTS_PATH").unwrap_or("./proofs".to_string());
+
+        let elf = pk.elf.clone();
+        let private_input = stdin.buffer.clone();
+        let mut pri_buf = Vec::new();
+        bincode::serialize_into(&mut pri_buf, &private_input).expect("private_input serialization failed");
+
+        let mut receipts = Vec::new();
+        let proofs = stdin.proofs.clone();
+        // todo: adapt to proof network after its updating
+        for proof in proofs {
+            let mut receipt = Vec::new();
+            bincode::serialize_into(&mut receipt, &proof).expect("private_input serialization failed");
+            receipts.push(receipt);
+        }
+
+        let prover_input = ProverInput {
+            elf,
+            shard_size,
+            execute_only,
+            composite_proof,
+            proof_results_path,
+            private_inputstream: pri_buf,
+            receipts,
+            ..Default::default()
+        };
+        block_on(self.prove(&prover_input, opts.timeout))
     }
 }
-
-// #[async_trait]
-// impl Prover for NetworkProver {
-
-// }
 
 async fn get_cert_and_identity(
     ca_cert_path: &str,
@@ -244,9 +262,9 @@ async fn get_cert_and_identity(
     let ca_cert_path = Path::new(ca_cert_path);
     let cert_path = Path::new(cert_path);
     let key_path = Path::new(key_path);
-    // if !ca_cert_path.is_file() || !cert_path.is_file() || !key_path.is_file() {
-    //     bail!("both ca_cert_path, cert_path and key_path should be valid file")
-    // }
+    if !ca_cert_path.is_file() || !cert_path.is_file() || !key_path.is_file() {
+        bail!("both ca_cert_path, cert_path and key_path should be valid file")
+    }
     let mut ca: Option<Certificate> = None;
     let mut identity: Option<Identity> = None;
     if ca_cert_path.is_file() {

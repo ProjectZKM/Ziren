@@ -17,7 +17,7 @@ enum Status {
     SPLIT_ERROR = 5;
     PROVE_ERROR = 6;
     AGG_ERROR = 7;
-    SNARK_ERROR = 8;
+    FINAL_ERROR = 8;
 }
 
 enum Step {
@@ -26,7 +26,7 @@ enum Step {
     InProve = 2;
     InAgg = 3;
     InAggAll = 4;
-    InSnark = 5;
+    InFinal = 5;
     End = 6;
 }
 
@@ -46,17 +46,18 @@ message GenerateProofRequest {
     bytes public_input_stream = 8;
     bytes private_input_stream = 9;
     bool execute_only = 10;
-    bool composite_proof = 11;
-    repeated bytes receipt_inputs = 12;
-    repeated bytes receipts = 13;
+    bool precompile = 11;
+    repeated bytes receipt_input = 12;
+    repeated bytes receipt = 13;
 }
 
 message GenerateProofResponse {
-    Status status = 1;
+    uint32 status = 1;
     string error_message = 2;
     string proof_id = 3;
-    string snark_proof_url = 4;
+    string proof_url = 4;
     string stark_proof_url = 5;
+    string solidity_verifier_url = 6;
     bytes output_stream = 7;
     string public_values_url = 8;
 }
@@ -67,10 +68,11 @@ message GetStatusRequest {
 
 message GetStatusResponse {
     string proof_id = 1;
-    Status status = 2;
+    uint32 status = 2;
     bytes proof_with_public_inputs = 3;
-    string snark_proof_url = 4;
+    string proof_url = 4;
     string stark_proof_url = 5;
+    string solidity_verifier_url = 6;
     bytes output_stream = 7;
     Step step = 8; // Step
     string public_values_url = 9;

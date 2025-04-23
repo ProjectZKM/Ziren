@@ -195,12 +195,11 @@ impl ProverClient {
 //     ```
     #[cfg(any(feature = "network", feature = "network-v2"))]
     pub fn network(client_config: &NetworkClientCfg) -> Self {
-        // todo!()
         cfg_if! {
             if #[cfg(feature = "network")] {
                 Self {
                     // prover: Box::new(NetworkProver::new(client_config)),
-                    prover: Box::new(tokio::runtime::Runtime::new().unwrap().block_on(NetworkProver::new(&client_config)).unwrap()),
+                    prover: Box::new(block_on(NetworkProver::new(&client_config)).unwrap()),
                 }
             } else {
                 panic!("network feature is not enabled")
@@ -373,23 +372,35 @@ impl ProverClientBuilder {
             //         }
             //     }
             // }
-            // ProverMode::Network => {
-            //     let private_key = self.private_key.expect("The private key is required");
+            ProverMode::Network => {
+                let endpoint = env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string());
+                let ca_cert_path = env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving");
+                let cert_path = env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving");
+                let key_path = env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving");
+                let proof_network_privkey = env::var("ZKM_PRIVATE_KEY")
+                    .expect("ZKM_PRIVATE_KEY must be set for remote proving");
+                let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
+                // let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
+                let network_cfg = NetworkClientCfg {
+                    endpoint,
+                    ca_cert_path,
+                    cert_path,
+                    key_path,
+                    domain_name,
+                    proof_network_privkey
+                };
 
-            //     cfg_if! {
-            //         if #[cfg(feature = "network-v2")] {
-            //             ProverClient {
-            //                 prover: Box::new(NetworkProverV2::new(&private_key, self.rpc_url, self.skip_simulation)),
-            //             }
-            //         } else if #[cfg(feature = "network")] {
-            //             ProverClient {
-            //                 prover: Box::new(NetworkProverV1::new(&private_key, self.rpc_url, self.skip_simulation)),
-            //             }
-            //         } else {
-            //             panic!("network feature is not enabled")
-            //         }
-            //     }
-            // }
+                cfg_if! {
+                   if #[cfg(feature = "network")] {
+                        ProverClient {
+                            // prover: Box::new(NetworkProver::new(&network_cfg).await.unwrap()),
+                            prover: Box::new(block_on(NetworkProver::new(&network_cfg)).unwrap()),
+                        }
+                    } else {
+                        panic!("network feature is not enabled")
+                    }
+                }
+            }
             ProverMode::Mock => ProverClient::mock(),
             _ => unimplemented!("other provers not supported for now"),
         }
