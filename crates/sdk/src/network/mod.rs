@@ -45,11 +45,10 @@ pub struct ProverResult {
     pub elf_id: Vec<u8>,
 }
 
-#[tokio::test]
-async fn test_proof_network_fib() {
+#[test]
+fn test_proof_network_fib() {
     utils::setup_logger();
     let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
-    // let endpoint = Some("http://localhost:50000".to_string());
     let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
     let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
         .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
@@ -67,26 +66,18 @@ async fn test_proof_network_fib() {
         proof_network_privkey,
     };
 
-    // let client = ProverClient::network(&network_cfg);
-    // let (pk, vk) = client.setup(elf);
-    // let mut proof = client.prove(&pk, stdin).run().unwrap();
-    // client.verify(&proof, &vk).unwrap();
-    //
-    // // Test invalid public values.
-    // proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
-    // if client.verify(&proof, &vk).is_ok() {
-    //     panic!("verified proof with invalid public values")
-    // }
-
-    let cpu_client = ProverClient::cpu();
-    let elf = test_artifacts::FIBONACCI_ELF;
-    let (pk, vk) = cpu_client.setup(elf);
-
-    let network_client = NetworkProver::new(&network_cfg).await.unwrap();
-
     let mut stdin = ZKMStdin::new();
     stdin.write(&10usize);
-
-    // Generate proof & verify.
-    let mut proof = network_client.prove(&pk.elf, stdin, None).await.unwrap();
+    let elf = test_artifacts::FIBONACCI_ELF;
+    
+    let client = ProverClient::network(&network_cfg);
+    let (pk, vk) = client.setup(elf);
+    let mut proof = client.prove(&pk, stdin).run().unwrap();
+    client.verify(&proof, &vk).unwrap();
+    
+    // Test invalid public values.
+    proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
+    if client.verify(&proof, &vk).is_ok() {
+        panic!("verified proof with invalid public values")
+    }
 }

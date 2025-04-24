@@ -42,7 +42,7 @@ use crate::network::prover::stage_service::{Status, Step};
 use crate::provers::{ProofOpts, ProverType};
 
 pub struct NetworkProver {
-    pub stage_client: StageServiceClient<Channel>,
+    pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
 }
@@ -83,10 +83,10 @@ impl NetworkProver {
         if private_key.is_empty() {
             panic!("Please set the PRIVATE_KEY");
         }
-        let stage_client = StageServiceClient::connect(endpoint).await?;
+        // let stage_client = StageServiceClient::connect(endpoint).await?;
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
-        Ok(NetworkProver { stage_client, wallet, local_prover})
+        Ok(NetworkProver { endpoint, wallet, local_prover})
     }
 
     pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) {
@@ -106,6 +106,12 @@ impl NetworkProver {
         let response = reqwest::get(url).await?;
         let content = response.bytes().await?;
         Ok(content.to_vec())
+    }
+
+    pub async fn connect(&self) -> StageServiceClient<Channel> {
+        StageServiceClient::connect(self.endpoint.clone())
+            .await
+            .expect("connect: {self.endpoint:?}")
     }
 
     async fn request_proof<'a>(&self, input: &'a ProverInput) -> Result<String> {
@@ -130,7 +136,7 @@ impl NetworkProver {
             request.receipt_input.push(receipt_input.clone());
         }
         self.sign_ecdsa(&mut request).await;
-        let mut client = self.stage_client.clone();
+        let mut client = self.connect().await;
         let response = client.generate_proof(request).await?.into_inner();
 
         Ok(response.proof_id)
@@ -144,7 +150,7 @@ impl NetworkProver {
         let start_time = Instant::now();
         let mut split_start_time = Instant::now();
         let mut split_end_time = Instant::now();
-        let mut client = self.stage_client.clone();
+        let mut client = self.connect().await;
         let mut last_step = 0;
         loop {
             if let Some(timeout) = timeout {
@@ -184,20 +190,10 @@ impl NetworkProver {
                     sleep(Duration::from_secs(30)).await;
                 }
                 Some(Status::Success) => {
-                    // let public_values_bytes = NetworkProver::download_file(&get_status_response.public_values_url).await?;
-                    // let public_values = bincode::deserialize::<ZKMPublicValues>(&public_values_bytes).expect("Failed to deserialize public values");
-
-                    let public_values = ZKMPublicValues::new();
-
-                    // let stark_proof_bytes = NetworkProver::download_file(&get_status_response.stark_proof_url).await?;
-                    // let stark_proof: ZKMProof = serde_json::from_slice(&stark_proof_bytes)
-                    //     .expect("Failed to deserialize proof");
-                    // log::info!("stark_proof: {:?}", stark_proof);
-                    // 
-                    // let proof_bytes = NetworkProver::download_file(&get_status_response.proof_url).await?;
-                    // let temp_proof: ZKMProof = serde_json::from_slice(&proof_bytes)
-                    //     .expect("Failed to deserialize proof");
-                    // log::info!("temp_proof: {:?}", temp_proof);
+                    let public_values_bytes = NetworkProver::download_file(&get_status_response.public_values_url).await?;
+                    let public_values: ZKMPublicValues = ZKMPublicValues::from(&public_values_bytes);
+                    println!("public_values: {:?}", public_values);
+                    println!("output: {:?}", get_status_response.output_stream);
 
                     let proof: ZKMProof = serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                         .expect("Failed to deserialize proof");

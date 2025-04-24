@@ -94,7 +94,6 @@ impl ProverClient {
                 let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
                     .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
                 let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-                // let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
                 let network_cfg = NetworkClientCfg {
                     endpoint,
                     ca_cert_path,
@@ -107,7 +106,6 @@ impl ProverClient {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         Self {
-                            // prover: Box::new(NetworkProver::new(&network_cfg)),
                             prover: Box::new(block_on(NetworkProver::new(&network_cfg)).unwrap()),
                         }
                     } else {
@@ -194,12 +192,11 @@ impl ProverClient {
 //
 //     let client = ProverClient::network(private_key, rpc_url, skip_simulation);
 //     ```
-    #[cfg(any(feature = "network", feature = "network-v2"))]
+    #[cfg(any(feature = "network"))]
     pub fn network(client_config: &NetworkClientCfg) -> Self {
         cfg_if! {
             if #[cfg(feature = "network")] {
                 Self {
-                    // prover: Box::new(NetworkProver::new(client_config)),
                     prover: Box::new(block_on(NetworkProver::new(&client_config)).unwrap()),
                 }
             } else {
@@ -381,7 +378,6 @@ impl ProverClientBuilder {
                 let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
                     .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
                 let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-                // let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
                 let network_cfg = NetworkClientCfg {
                     endpoint,
                     ca_cert_path,
@@ -394,7 +390,6 @@ impl ProverClientBuilder {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         ProverClient {
-                            // prover: Box::new(NetworkProver::new(&network_cfg).await.unwrap()),
                             prover: Box::new(block_on(NetworkProver::new(&network_cfg)).unwrap()),
                         }
                     } else {
