@@ -46,6 +46,7 @@ pub use zkm_prover::{
 // Re-export the utilities.
 pub use utils::setup_logger;
 use crate::network::NetworkClientCfg;
+use crate::utils::block_on;
 
 /// A client for interacting with zkMIPS.
 pub struct ProverClient {
@@ -86,13 +87,13 @@ impl ProverClient {
             }
             // TODO: Anyone can implement it when a network prover is needed.
             "network" => {
-                let endpoint = env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string());
-                let ca_cert_path = env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving");
-                let cert_path = env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving");
-                let key_path = env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving");
-                let proof_network_privkey = env::var("ZKM_PRIVATE_KEY")
-                    .expect("ZKM_PRIVATE_KEY must be set for remote proving");
-                let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
+                let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
+                let ca_cert_path = Some(env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving"));
+                let cert_path = Some(env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving"));
+                let key_path = Some(env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving"));
+                let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
+                    .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
+                let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
                 // let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
                 let network_cfg = NetworkClientCfg {
                     endpoint,
@@ -107,7 +108,7 @@ impl ProverClient {
                    if #[cfg(feature = "network")] {
                         Self {
                             // prover: Box::new(NetworkProver::new(&network_cfg)),
-                            prover: Box::new(tokio::runtime::Runtime::new().unwrap().block_on(NetworkProver::new(&network_cfg)).unwrap()),
+                            prover: Box::new(block_on(NetworkProver::new(&network_cfg)).unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
@@ -373,13 +374,13 @@ impl ProverClientBuilder {
             //     }
             // }
             ProverMode::Network => {
-                let endpoint = env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string());
-                let ca_cert_path = env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving");
-                let cert_path = env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving");
-                let key_path = env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving");
-                let proof_network_privkey = env::var("ZKM_PRIVATE_KEY")
-                    .expect("ZKM_PRIVATE_KEY must be set for remote proving");
-                let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
+                let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
+                let ca_cert_path = Some(env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving"));
+                let cert_path = Some(env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving"));
+                let key_path = Some(env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving"));
+                let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
+                    .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
+                let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
                 // let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
                 let network_cfg = NetworkClientCfg {
                     endpoint,
@@ -450,22 +451,6 @@ impl NetworkProverBuilder {
         let private_key = self.private_key.expect("The private key is required");
 
         NetworkProverV2::new(&private_key, self.rpc_url, self.skip_simulation)
-    }
-}
-
-/// Utility method for blocking on an async function.
-///
-/// If we're already in a tokio runtime, we'll block in place. Otherwise, we'll create a new
-/// runtime.
-#[cfg(any(feature = "network", feature = "network-v2"))]
-pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
-    // Handle case if we're already in an tokio runtime.
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        block_in_place(|| handle.block_on(fut))
-    } else {
-        // Otherwise create a new runtime.
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create a new runtime");
-        rt.block_on(fut)
     }
 }
 

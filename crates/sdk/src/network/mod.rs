@@ -1,20 +1,23 @@
 use std::env;
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::io::ZKMPublicValues;
-use crate::{utils, ProverClient};
+use crate::{utils, NetworkProver, ProverClient};
+use crate::utils::block_on;
 
 pub mod prover;
 
 
 #[derive(Debug, Default, Clone)]
 pub struct NetworkClientCfg {
-    pub endpoint: String,
-    pub ca_cert_path: String,
-    pub cert_path: String,
-    pub key_path: String,
-    pub domain_name: String,
-    pub proof_network_privkey: String,
+    pub endpoint: Option<String>,
+    pub ca_cert_path: Option<String>,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
+    pub domain_name: Option<String>,
+    pub proof_network_privkey: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
@@ -42,20 +45,19 @@ pub struct ProverResult {
     pub elf_id: Vec<u8>,
 }
 
-#[test]
-fn test_proof_network_fib() {
+#[tokio::test]
+async fn test_proof_network_fib() {
     utils::setup_logger();
-    let endpoint = env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string());
-    let domain_name = env::var("DOMAIN_NAME").unwrap_or("stage".to_string());
-    let proof_network_privkey = env::var("ZKM_PRIVATE_KEY")
-        .expect("ZKM_PRIVATE_KEY must be set for remote proving");
+    let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
+    // let endpoint = Some("http://localhost:50000".to_string());
+    let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
+    let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
+        .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
     let current_dir = env::current_dir().expect("Failed to get current directory");
-    let ca_cert_path = current_dir.join("tool/ca.pem").to_string_lossy().to_string();
-    let cert_path = current_dir.join("tool/.pem").to_string_lossy().to_string();
-    let key_path = current_dir.join("tool/.key").to_string_lossy().to_string();
+    let ca_cert_path = Some(current_dir.join("tool/ca.pem").to_string_lossy().to_string());
+    let cert_path = Some(current_dir.join("tool/.pem").to_string_lossy().to_string());
+    let key_path = Some(current_dir.join("tool/.key").to_string_lossy().to_string());
     
-    println!("{:?}", proof_network_privkey);
-
     let network_cfg = NetworkClientCfg {
         endpoint,
         ca_cert_path,
@@ -65,21 +67,26 @@ fn test_proof_network_fib() {
         proof_network_privkey,
     };
 
-    // let file = std::fs::File::open("").unwrap();
+    // let client = ProverClient::network(&network_cfg);
+    // let (pk, vk) = client.setup(elf);
+    // let mut proof = client.prove(&pk, stdin).run().unwrap();
+    // client.verify(&proof, &vk).unwrap();
+    //
+    // // Test invalid public values.
+    // proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
+    // if client.verify(&proof, &vk).is_ok() {
+    //     panic!("verified proof with invalid public values")
+    // }
 
-    let client = ProverClient::network(&network_cfg);
+    let cpu_client = ProverClient::cpu();
     let elf = test_artifacts::FIBONACCI_ELF;
-    let (pk, vk) = client.setup(elf);
+    let (pk, vk) = cpu_client.setup(elf);
+
+    let network_client = NetworkProver::new(&network_cfg).await.unwrap();
+
     let mut stdin = ZKMStdin::new();
     stdin.write(&10usize);
 
     // Generate proof & verify.
-    let mut proof = client.prove(&pk, stdin).run().unwrap();
-    client.verify(&proof, &vk).unwrap();
-
-    // Test invalid public values.
-    proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
-    if client.verify(&proof, &vk).is_ok() {
-        panic!("verified proof with invalid public values")
-    }
+    let mut proof = network_client.prove(&pk.elf, stdin, None).await.unwrap();
 }

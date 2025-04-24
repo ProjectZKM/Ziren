@@ -1,4 +1,6 @@
-use std::env;
+use std::{env, fs};
+use std::fs::File;
+use std::io::Write;
 use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
@@ -15,12 +17,15 @@ use tokio::time::Duration;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use tonic::{IntoRequest, Request};
 use twirp::tower::ServiceExt;
-use zkm_core_executor::ZKMContext;
+use zkm_core_executor::{ZKMContext, ZKMReduceProof};
 use zkm_core_machine::io::ZKMStdin;
+use zkm_core_machine::ZKM_CIRCUIT_VERSION;
+use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::components::DefaultProverComponents;
-use zkm_prover::{ZKMProver, ZKMProvingKey, ZKMVerifyingKey};
-use crate::{block_on, CpuProver, Prover, ZKMProofKind, ZKMProofWithPublicValues};
+use zkm_prover::{InnerSC, ZKMProver, ZKMProvingKey, ZKMVerifyingKey};
+use crate::{block_on, CpuProver, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 use crate::network::{NetworkClientCfg, ProverInput, ProverResult};
 
 #[derive(Clone)]
@@ -44,21 +49,23 @@ pub struct NetworkProver {
 
 impl NetworkProver {
     pub async fn new(client_config: &NetworkClientCfg) -> anyhow::Result<NetworkProver> {
-        let ssl_config = {
+        let ssl_config = if client_config.ca_cert_path.as_ref().is_none() {
+            None
+        } else {
             let (ca_cert, identity) = get_cert_and_identity(
-                &client_config.ca_cert_path,
-                &client_config.cert_path,
-                &client_config.key_path,
+                client_config.ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
+                client_config.cert_path.as_ref().expect("CERT_PATH not set"),
+                client_config.key_path.as_ref().expect("KEY_PATH not set"),
             )
-            .await?;
+                .await?;
             Some(Config { ca_cert, identity })
         };
 
-        let endpoint_para = client_config.endpoint.clone();
+        let endpoint_para = client_config.endpoint.to_owned().expect("ENDPOINT must be set");
         let endpoint = match ssl_config {
             Some(config) => {
                 let mut tls_config = ClientTlsConfig::new().domain_name(
-                    client_config.domain_name.clone(),
+                    client_config.domain_name.to_owned().expect("DOMAIN_NAME must be set"),
                 );
                 if let Some(ca_cert) = config.ca_cert {
                     tls_config = tls_config.ca_certificate(ca_cert);
@@ -70,12 +77,12 @@ impl NetworkProver {
             }
             None => Endpoint::new(endpoint_para.to_owned())?,
         };
+
         let private_key =
-            client_config.proof_network_privkey.to_owned();
+            client_config.proof_network_privkey.to_owned().expect("PRIVATE_KEY must be set");
         if private_key.is_empty() {
             panic!("Please set the PRIVATE_KEY");
         }
-        println!("Connecting to gRPC endpoint: {}", endpoint_para);
         let stage_client = StageServiceClient::connect(endpoint).await?;
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
@@ -133,7 +140,7 @@ impl NetworkProver {
         &self,
         proof_id: &'a str,
         timeout: Option<Duration>,
-    ) -> Result<ZKMProofWithPublicValues> {
+    ) -> Result<(ZKMProof, ZKMPublicValues)> {
         let start_time = Instant::now();
         let mut split_start_time = Instant::now();
         let mut split_end_time = Instant::now();
@@ -177,8 +184,24 @@ impl NetworkProver {
                     sleep(Duration::from_secs(30)).await;
                 }
                 Some(Status::Success) => {
-                    let proof = bincode::deserialize::<ZKMProofWithPublicValues>(&get_status_response.proof_with_public_inputs).expect("Failed to deserialize proof");
-                    return Ok(proof);
+                    // let public_values_bytes = NetworkProver::download_file(&get_status_response.public_values_url).await?;
+                    // let public_values = bincode::deserialize::<ZKMPublicValues>(&public_values_bytes).expect("Failed to deserialize public values");
+
+                    let public_values = ZKMPublicValues::new();
+
+                    // let stark_proof_bytes = NetworkProver::download_file(&get_status_response.stark_proof_url).await?;
+                    // let stark_proof: ZKMProof = serde_json::from_slice(&stark_proof_bytes)
+                    //     .expect("Failed to deserialize proof");
+                    // log::info!("stark_proof: {:?}", stark_proof);
+                    // 
+                    // let proof_bytes = NetworkProver::download_file(&get_status_response.proof_url).await?;
+                    // let temp_proof: ZKMProof = serde_json::from_slice(&proof_bytes)
+                    //     .expect("Failed to deserialize proof");
+                    // log::info!("temp_proof: {:?}", temp_proof);
+
+                    let proof: ZKMProof = serde_json::from_slice(&get_status_response.proof_with_public_inputs)
+                        .expect("Failed to deserialize proof");
+                    return Ok((proof, public_values));
 
                 }
                 _ => {
@@ -189,15 +212,53 @@ impl NetworkProver {
         }
     }
 
-    async fn prove<'a>(
+    pub(crate) async fn prove<'a>(
         &self,
-        input: &'a ProverInput,
+        elf: &[u8],
+        stdin: ZKMStdin,
         timeout: Option<Duration>,
     ) -> Result<ZKMProofWithPublicValues> {
+        let execute_only =
+            env::var("EXECUTE_ONLY").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
+        let composite_proof = env::var("COMPOSITE_PROOF").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
+        let shard_size = env::var("SHARD_SIZE").ok().and_then(|seg| seg.parse::<usize>().ok()).unwrap_or(65536) as u32;
+        let proof_results_path =
+            env::var("PROOF_RESULTS_PATH").unwrap_or("./proofs".to_string());
+
+        let private_input = stdin.buffer.clone();
+        let mut pri_buf = Vec::new();
+        bincode::serialize_into(&mut pri_buf, &private_input).expect("private_input serialization failed");
+        let mut receipts = Vec::new();
+        let proofs = stdin.proofs.clone();
+        // todo: adapt to proof network after its updating
+        for proof in proofs {
+            let mut receipt = Vec::new();
+            bincode::serialize_into(&mut receipt, &proof).expect("private_input serialization failed");
+            receipts.push(receipt);
+        }
+
+        let prover_input = ProverInput {
+            elf: elf.to_vec(),
+            shard_size,
+            execute_only,
+            composite_proof,
+            proof_results_path,
+            private_inputstream: pri_buf,
+            receipts,
+            ..Default::default()
+        };
+
         log::info!("calling request_proof.");
-        let proof_id = self.request_proof(input).await?;
+        let proof_id = self.request_proof(&prover_input).await?;
+
         log::info!("calling wait_proof, proof_id={}", proof_id);
-        self.wait_proof(&proof_id, timeout).await
+        let (proof, public_values) =  self.wait_proof(&proof_id, timeout).await?;
+        Ok(ZKMProofWithPublicValues {
+            proof,
+            public_values,
+            stdin,
+            zkm_version: ZKM_CIRCUIT_VERSION.to_string(),
+        })
     }
 }
 
@@ -215,42 +276,8 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         self.local_prover.setup(elf)
     }
 
-    fn prove<'a>(&'a self, pk: &ZKMProvingKey, stdin: ZKMStdin, opts: ProofOpts, context: ZKMContext<'a>, kind: ZKMProofKind) -> Result<ZKMProofWithPublicValues> {
-        let execute_only =
-            env::var("EXECUTE_ONLY").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
-
-        let composite_proof = env::var("COMPOSITE_PROOF").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
-
-        let shard_size = env::var("SHARD_SIZE").ok().and_then(|seg| seg.parse::<usize>().ok()).unwrap_or(65536) as u32;
-
-        let proof_results_path =
-            env::var("PROOF_RESULTS_PATH").unwrap_or("./proofs".to_string());
-
-        let elf = pk.elf.clone();
-        let private_input = stdin.buffer.clone();
-        let mut pri_buf = Vec::new();
-        bincode::serialize_into(&mut pri_buf, &private_input).expect("private_input serialization failed");
-
-        let mut receipts = Vec::new();
-        let proofs = stdin.proofs.clone();
-        // todo: adapt to proof network after its updating
-        for proof in proofs {
-            let mut receipt = Vec::new();
-            bincode::serialize_into(&mut receipt, &proof).expect("private_input serialization failed");
-            receipts.push(receipt);
-        }
-
-        let prover_input = ProverInput {
-            elf,
-            shard_size,
-            execute_only,
-            composite_proof,
-            proof_results_path,
-            private_inputstream: pri_buf,
-            receipts,
-            ..Default::default()
-        };
-        block_on(self.prove(&prover_input, opts.timeout))
+    fn prove<'a>(&'a self, pk: &ZKMProvingKey, stdin: ZKMStdin, _opts: ProofOpts, _context: ZKMContext<'a>, _kind: ZKMProofKind) -> Result<ZKMProofWithPublicValues> {
+        block_on(self.prove(&pk.elf, stdin, None))
     }
 }
 
@@ -284,4 +311,27 @@ async fn get_cert_and_identity(
         identity = Some(Identity::from_pem(cert, key));
     }
     Ok((ca, identity))
+}
+
+pub fn save_data_to_file<P: AsRef<Path>, D: AsRef<[u8]>>(
+    output_dir: P,
+    file_name: &str,
+    data: D,
+) -> anyhow::Result<()> {
+    // Create the output directory
+    let output_dir = output_dir.as_ref();
+    log::info!("create dir: {}", output_dir.display());
+    fs::create_dir_all(output_dir)?;
+
+    // Build the full file path
+    let output_path = output_dir.join(file_name);
+
+    // Open the file and write the data
+    let mut file = File::create(&output_path)?;
+    file.write_all(data.as_ref())?;
+
+    let bytes_written = data.as_ref().len();
+    log::info!("Successfully written {} bytes.", bytes_written);
+
+    Ok(())
 }
