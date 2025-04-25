@@ -89,6 +89,10 @@ where
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_b);
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_c);
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.is_syscall);
+
+        /// Check that the skip_next_nop_slot, is_halt and is_sequential flags are correct.
+        /// skip_next_nop_slot is only set when the next instruction of a branch or jump instruction is nop.
+        /// is_sequential is only set when the instruction is not halt syscall or branch/jump instruction.
         builder
             .when(local.is_real)
             .when(local.skip_next_nop_slot)
@@ -159,7 +163,9 @@ impl CpuChip {
         // Verify the public value's start pc.
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
 
-        // Verify the pc, next_pc, and next_next_pc
+        /// Verify the pc, next_pc, and next_next_pc
+        /// next.pc is always equal to local.next_pc ifif the next instruction is not skipped.
+        /// Otherwise，it's equal to local.next_next_pc.
         builder
             .when_transition()
             .when(next.is_real)
@@ -172,12 +178,15 @@ impl CpuChip {
             .when(local.skip_next_nop_slot)
             .assert_eq(local.next_next_pc, next.pc);
 
+        /// next.next_pc is equal to local.next_next_pc when the current instruction is not halt,
+        /// and the next instruction is not skipped.
         builder
             .when_transition()
             .when(next.is_real)
             .when_not(next.is_halt + local.skip_next_nop_slot)
             .assert_eq(local.next_next_pc, next.next_pc);
 
+        // next_next_pc is equal to next_pc + 4 If the current instruction is not halt or jump/branch instruction.
         builder
             .when_transition()
             .when(local.is_real)
