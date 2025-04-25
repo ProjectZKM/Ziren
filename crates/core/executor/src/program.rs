@@ -145,7 +145,7 @@ impl Program {
 
         // decode each instruction
         let instructions: Vec<_> =
-            instructions.par_iter().map(|inst| Instruction::decode_from(*inst).unwrap()).collect();
+            instructions.windows(2).map(|window| Instruction::decode_from(window[0], window[1]).unwrap()).collect();
 
         Ok(Program {
             instructions,

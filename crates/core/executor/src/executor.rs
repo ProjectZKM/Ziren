@@ -1086,6 +1086,7 @@ impl<'a> Executor<'a> {
             };
         }
 
+        let  mut is_slot = false;
         match instruction.opcode {
             // syscall.
             Opcode::SYSCALL => {
@@ -1208,17 +1209,21 @@ impl<'a> Executor<'a> {
             | Opcode::BGTZ
             | Opcode::BLTZ => {
                 (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
+                is_slot = true;
             }
 
             // Jump instructions.
             Opcode::Jump => {
                 (a, b, c, next_next_pc) = self.execute_jump(instruction);
+                is_slot = true;
             }
             Opcode::Jumpi => {
                 (a, b, c, next_next_pc) = self.execute_jumpi(instruction);
+                is_slot = true;
             }
             Opcode::JumpDirect => {
                 (a, b, c, next_next_pc) = self.execute_jump_direct(instruction);
+                is_slot = true;
             }
 
             // Misc instructions.
@@ -1276,6 +1281,10 @@ impl<'a> Executor<'a> {
         // Update the program counter.
         self.state.pc = next_pc;
         self.state.next_pc = next_next_pc;
+        if is_slot && instruction.raw == 0 { // ignore nop slot
+            self.state.pc = self.state.next_pc;
+            self.state.next_pc = self.state.next_pc.wrapping_add(4);
+        }
 
         // Update the clk to the next cycle.
         self.state.clk += 5;

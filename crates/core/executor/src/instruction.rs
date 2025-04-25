@@ -22,7 +22,7 @@ pub struct Instruction {
     /// Whether the third operand is an immediate value.
     pub imm_c: bool,
     // raw instruction, for some special instructions
-    pub raw: Option<u32>,
+    pub raw: u32,
 }
 
 impl Instruction {
@@ -35,7 +35,7 @@ impl Instruction {
         imm_b: bool,
         imm_c: bool,
     ) -> Self {
-        Self { opcode, op_a, op_b, op_c, imm_b, imm_c, raw: None }
+        Self { opcode, op_a, op_b, op_c, imm_b, imm_c, raw: 0xFFFF_FFFF }
     }
 
     pub const fn new_with_raw(
@@ -47,7 +47,7 @@ impl Instruction {
         imm_c: bool,
         raw: u32,
     ) -> Self {
-        Self { opcode, op_a, op_b, op_c, imm_b, imm_c, raw: Some(raw) }
+        Self { opcode, op_a, op_b, op_c, imm_b, imm_c, raw }
     }
 
     /// Returns if the instruction is an ALU instruction.
@@ -175,7 +175,7 @@ impl Instruction {
         matches!(self.opcode, Opcode::Jump | Opcode::Jumpi | Opcode::JumpDirect)
     }
 
-    pub fn decode_from(insn: u32) -> anyhow::Result<Self> {
+    pub fn decode_from(insn: u32, next_insn: u32) -> anyhow::Result<Self> {
         let opcode = ((insn >> 26) & 0x3F).to_le_bytes()[0];
         let func = (insn & 0x3F).to_le_bytes()[0];
         let rt = ((insn >> 16) & 0x1F).to_le_bytes()[0] as u32;
@@ -253,39 +253,42 @@ impl Instruction {
             // CLO: rd = count_leading_ones(rs)
             (0b011100, 0b100001) => Ok(Self::new(Opcode::CLO, rd, rs, 0, false, true)), // CLO: rd = count_leading_ones(rs)
             // JR
-            (0x00, 0x08) => Ok(Self::new(Opcode::Jump, 0u8, rs, 0, false, true)), // JR
+            (0x00, 0x08) => Ok(Self::new_with_raw(Opcode::Jump, 0u8, rs, 0, false, true, next_insn)), // JR
             // JALR
-            (0x00, 0x09) => Ok(Self::new(Opcode::Jump, rd, rs, 0, false, true)), // JALR
+            (0x00, 0x09) => Ok(Self::new_with_raw(Opcode::Jump, rd, rs, 0, false, true, next_insn)), // JALR
             (0x01, _) => {
                 if rt == 1 {
                     // BGEZ
-                    Ok(Self::new(
+                    Ok(Self::new_with_raw(
                         Opcode::BGEZ,
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
                         true,
                         true,
+                        next_insn
                     ))
                 } else if rt == 0 {
                     // BLTZ
-                    Ok(Self::new(
+                    Ok(Self::new_with_raw(
                         Opcode::BLTZ,
                         rs as u8,
                         0u32,
                         offset_ext16.overflowing_shl(2).0,
                         true,
                         true,
+                        next_insn,
                     ))
                 } else if rt == 0x11 && rs == 0 {
                     // BAL
-                    Ok(Self::new(
+                    Ok(Self::new_with_raw(
                         Opcode::JumpDirect,
                         31,
                         offset_ext16.overflowing_shl(2).0,
                         0,
                         true,
                         true,
+                        next_insn,
                     ))
                 } else if rt == 0x1f {
                     // SYNCI
@@ -297,47 +300,51 @@ impl Instruction {
             // J
             (0x02, _) => {
                 // Ignore the upper 4 most significant bits，since they are always 0 currently.
-                Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true))
+                Ok(Self::new_with_raw(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true, next_insn))
             }
             // JAL
             (0x03, _) => {
-                Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true))
+                Ok(Self::new_with_raw(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true, next_insn))
             }
             // BEQ
-            (0x04, _) => Ok(Self::new(
+            (0x04, _) => Ok(Self::new_with_raw(
                 Opcode::BEQ,
                 rs as u8,
                 rt,
                 offset_ext16.overflowing_shl(2).0,
                 false,
                 true,
+                next_insn,
             )),
             // BNE
-            (0x05, _) => Ok(Self::new(
+            (0x05, _) => Ok(Self::new_with_raw(
                 Opcode::BNE,
                 rs as u8,
                 rt,
                 offset_ext16.overflowing_shl(2).0,
                 false,
                 true,
+                next_insn,
             )),
             // BLEZ
-            (0x06, _) => Ok(Self::new(
+            (0x06, _) => Ok(Self::new_with_raw(
                 Opcode::BLEZ,
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
                 true,
                 true,
+                next_insn,
             )),
             // BGTZ
-            (0x07, _) => Ok(Self::new(
+            (0x07, _) => Ok(Self::new_with_raw(
                 Opcode::BGTZ,
                 rs as u8,
                 0u32,
                 offset_ext16.overflowing_shl(2).0,
                 true,
                 true,
+                next_insn,
             )),
 
             // LB
