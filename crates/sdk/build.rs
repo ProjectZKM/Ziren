@@ -1,4 +1,4 @@
-fn main() -> Result<(), Box<dyn std::error::Error>>{
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     vergen::EmitBuilder::builder().build_timestamp().git_sha(true).emit()?;
 
     tonic_build::configure()
