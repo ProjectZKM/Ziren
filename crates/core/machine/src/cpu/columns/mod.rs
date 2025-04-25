@@ -73,6 +73,9 @@ pub struct CpuCols<T: Copy> {
 
     /// Whether op_a is immutable
     pub op_a_immutable: T,
+
+    /// Skip the next instruction if it's a nop slot
+    pub skip_next_nop_slot: T,
 }
 
 impl<T: Copy> CpuCols<T> {

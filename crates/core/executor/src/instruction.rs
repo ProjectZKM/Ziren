@@ -253,7 +253,9 @@ impl Instruction {
             // CLO: rd = count_leading_ones(rs)
             (0b011100, 0b100001) => Ok(Self::new(Opcode::CLO, rd, rs, 0, false, true)), // CLO: rd = count_leading_ones(rs)
             // JR
-            (0x00, 0x08) => Ok(Self::new_with_raw(Opcode::Jump, 0u8, rs, 0, false, true, next_insn)), // JR
+            (0x00, 0x08) => {
+                Ok(Self::new_with_raw(Opcode::Jump, 0u8, rs, 0, false, true, next_insn))
+            } // JR
             // JALR
             (0x00, 0x09) => Ok(Self::new_with_raw(Opcode::Jump, rd, rs, 0, false, true, next_insn)), // JALR
             (0x01, _) => {
@@ -266,7 +268,7 @@ impl Instruction {
                         offset_ext16.overflowing_shl(2).0,
                         true,
                         true,
-                        next_insn
+                        next_insn,
                     ))
                 } else if rt == 0 {
                     // BLTZ
@@ -300,12 +302,26 @@ impl Instruction {
             // J
             (0x02, _) => {
                 // Ignore the upper 4 most significant bits，since they are always 0 currently.
-                Ok(Self::new_with_raw(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true, next_insn))
+                Ok(Self::new_with_raw(
+                    Opcode::Jumpi,
+                    0u8,
+                    target_ext.overflowing_shl(2).0,
+                    0,
+                    true,
+                    true,
+                    next_insn,
+                ))
             }
             // JAL
-            (0x03, _) => {
-                Ok(Self::new_with_raw(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true, next_insn))
-            }
+            (0x03, _) => Ok(Self::new_with_raw(
+                Opcode::Jumpi,
+                31u8,
+                target_ext.overflowing_shl(2).0,
+                0,
+                true,
+                true,
+                next_insn,
+            )),
             // BEQ
             (0x04, _) => Ok(Self::new_with_raw(
                 Opcode::BEQ,

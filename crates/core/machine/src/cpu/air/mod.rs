@@ -89,6 +89,11 @@ where
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_b);
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_c);
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.is_syscall);
+        builder
+            .when(local.is_real)
+            .when(local.skip_next_nop_slot)
+            .assert_zero(local.is_halt + local.is_sequential);
+        builder.when(local.is_real).when(local.is_halt).assert_zero(local.is_sequential);
     }
 }
 
@@ -155,11 +160,22 @@ impl CpuChip {
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
 
         // Verify the pc, next_pc, and next_next_pc
-        builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
         builder
             .when_transition()
             .when(next.is_real)
-            .when_not(next.is_halt)
+            .when_not(local.skip_next_nop_slot)
+            .assert_eq(local.next_pc, next.pc);
+
+        builder
+            .when_transition()
+            .when(next.is_real)
+            .when(local.skip_next_nop_slot)
+            .assert_eq(local.next_next_pc, next.pc);
+
+        builder
+            .when_transition()
+            .when(next.is_real)
+            .when_not(next.is_halt + local.skip_next_nop_slot)
             .assert_eq(local.next_next_pc, next.next_pc);
 
         builder

@@ -755,7 +755,10 @@ pub mod tests {
         let instructions = vec![
             Instruction::new(Opcode::ADD, 29, 0, 0, false, true),
             Instruction::new(Opcode::ADD, 30, 0, 0, false, true),
-            Instruction::new(Opcode::BNE, 29, 30, 100, false, true),
+            Instruction::new_with_raw(Opcode::BNE, 29, 30, 100, false, true, 0),
+            Instruction::new_with_raw(Opcode::SLL, 0, 0, 0, false, true, 0),
+            Instruction::new_with_raw(Opcode::BNE, 29, 30, 100, false, true, 1),
+            Instruction::new(Opcode::ADD, 29, 0, 0, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();

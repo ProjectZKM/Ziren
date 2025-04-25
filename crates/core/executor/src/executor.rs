@@ -1086,7 +1086,7 @@ impl<'a> Executor<'a> {
             };
         }
 
-        let  mut is_slot = false;
+        let mut is_slot = false;
         match instruction.opcode {
             // syscall.
             Opcode::SYSCALL => {
@@ -1281,7 +1281,8 @@ impl<'a> Executor<'a> {
         // Update the program counter.
         self.state.pc = next_pc;
         self.state.next_pc = next_next_pc;
-        if is_slot && instruction.raw == 0 { // ignore nop slot
+        if is_slot && instruction.raw == 0 {
+            // ignore nop slot
             self.state.pc = self.state.next_pc;
             self.state.next_pc = self.state.next_pc.wrapping_add(4);
         }

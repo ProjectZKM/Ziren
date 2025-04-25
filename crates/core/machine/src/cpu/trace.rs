@@ -132,6 +132,11 @@ impl CpuChip {
 
         cols.op_a_value = event.a.into();
 
+        cols.skip_next_nop_slot = F::from_bool(
+            (instruction.is_branch_instruction() || instruction.is_jump_instruction())
+                && (instruction.raw == 0),
+        );
+
         if let Some(hi) = event.hi {
             *cols.op_hi_access.value_mut() = hi.into();
         }
