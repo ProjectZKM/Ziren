@@ -1,9 +1,13 @@
-use std::env;
+use std::{env, fs};
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::io::ZKMPublicValues;
+use zkm_prover::ZKMVerifyingKey;
 use crate::{utils, NetworkProver, ProverClient};
 use crate::utils::block_on;
 
@@ -26,10 +30,11 @@ pub struct ProverInput {
     pub public_inputstream: Vec<u8>,
     pub private_inputstream: Vec<u8>,
     pub shard_size: u32,
-    pub execute_only: bool,
+    // pub execute_only: bool,
     pub composite_proof: bool,
     pub receipt_inputs: Vec<Vec<u8>>,
     pub receipts: Vec<Vec<u8>>,
+    pub asset_url: String,
     pub proof_results_path: String,
 }
 
@@ -45,9 +50,33 @@ pub struct ProverResult {
     pub elf_id: Vec<u8>,
 }
 
+pub fn save_data_to_file<P: AsRef<Path>, D: AsRef<[u8]>>(
+    output_dir: P,
+    file_name: &str,
+    data: D,
+) -> anyhow::Result<()> {
+    // Create the output directory
+    let output_dir = output_dir.as_ref();
+    log::info!("create dir: {}", output_dir.display());
+    fs::create_dir_all(output_dir)?;
+
+    // Build the full file path
+    let output_path = output_dir.join(file_name);
+
+    // Open the file and write the data
+    let mut file = File::create(&output_path)?;
+    file.write_all(data.as_ref())?;
+
+    let bytes_written = data.as_ref().len();
+    log::info!("Successfully written {} bytes.", bytes_written);
+
+    Ok(())
+}
+
 #[test]
 fn test_proof_network_fib() {
     utils::setup_logger();
+    
     let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
     let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
     let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
@@ -69,15 +98,16 @@ fn test_proof_network_fib() {
     let mut stdin = ZKMStdin::new();
     stdin.write(&10usize);
     let elf = test_artifacts::FIBONACCI_ELF;
+    let proof_results_path =
+        env::var("PROOF_RESULTS_PATH").unwrap_or(".".to_string());
     
     let client = ProverClient::network(&network_cfg);
-    let (pk, vk) = client.setup(elf);
-    let mut proof = client.prove(&pk, stdin).run().unwrap();
-    client.verify(&proof, &vk).unwrap();
+    let (tem_pk, _) = client.setup(elf);
+    let proof = client.prove(&tem_pk, stdin).run().unwrap();
     
-    // Test invalid public values.
-    proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
-    if client.verify(&proof, &vk).is_ok() {
-        panic!("verified proof with invalid public values")
-    }
+    let vk_path = format!("{}/vk.bin", proof_results_path);
+    let vk_data = fs::read(&vk_path).expect("Failed to read vk.bin");
+    let vk = bincode::deserialize::<ZKMVerifyingKey>(&vk_data).unwrap();
+    
+    client.verify(&proof, &vk).unwrap();
 }

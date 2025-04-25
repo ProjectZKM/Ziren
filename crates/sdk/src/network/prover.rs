@@ -122,7 +122,7 @@ impl NetworkProver {
             seg_size: input.shard_size,
             public_input_stream: input.public_inputstream.clone(),
             private_input_stream: input.private_inputstream.clone(),
-            execute_only: input.execute_only,
+            // execute_only: input.execute_only,
             // composite_proof: input.composite_proof,
             precompile: input.composite_proof,
             ..Default::default()
@@ -146,6 +146,7 @@ impl NetworkProver {
         &self,
         proof_id: &'a str,
         timeout: Option<Duration>,
+        prover_input: &ProverInput,
     ) -> Result<(ZKMProof, ZKMPublicValues)> {
         let start_time = Instant::now();
         let mut split_start_time = Instant::now();
@@ -192,13 +193,17 @@ impl NetworkProver {
                 Some(Status::Success) => {
                     let public_values_bytes = NetworkProver::download_file(&get_status_response.public_values_url).await?;
                     let public_values: ZKMPublicValues = ZKMPublicValues::from(&public_values_bytes);
-                    println!("public_values: {:?}", public_values);
-                    println!("output: {:?}", get_status_response.output_stream);
+                    
+                    // save vk to file
+                    let proof_id = get_status_response.proof_id.clone();
+                    let elf_vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
+                    log::info!("elf vk url : {:?}", elf_vk_url);
+                    let elf_vk = NetworkProver::download_file(&elf_vk_url).await?;
+                    save_data_to_file(&prover_input.proof_results_path, "vk.bin", &elf_vk)?;
 
                     let proof: ZKMProof = serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                         .expect("Failed to deserialize proof");
                     return Ok((proof, public_values));
-
                 }
                 _ => {
                     log::error!("generate_proof failed status: {}", get_status_response.status);
@@ -214,12 +219,13 @@ impl NetworkProver {
         stdin: ZKMStdin,
         timeout: Option<Duration>,
     ) -> Result<ZKMProofWithPublicValues> {
-        let execute_only =
-            env::var("EXECUTE_ONLY").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
+        // let execute_only =
+        //     env::var("EXECUTE_ONLY").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
         let composite_proof = env::var("COMPOSITE_PROOF").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
         let shard_size = env::var("SHARD_SIZE").ok().and_then(|seg| seg.parse::<usize>().ok()).unwrap_or(65536) as u32;
         let proof_results_path =
-            env::var("PROOF_RESULTS_PATH").unwrap_or("./proofs".to_string());
+            env::var("PROOF_RESULTS_PATH").unwrap_or(".".to_string());
+        let asset_url = env::var("ASSET_URL").unwrap_or("http://152.32.186.45:20001".to_string());
 
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
@@ -236,11 +242,12 @@ impl NetworkProver {
         let prover_input = ProverInput {
             elf: elf.to_vec(),
             shard_size,
-            execute_only,
+            // execute_only,
             composite_proof,
             proof_results_path,
             private_inputstream: pri_buf,
             receipts,
+            asset_url,
             ..Default::default()
         };
 
@@ -248,7 +255,7 @@ impl NetworkProver {
         let proof_id = self.request_proof(&prover_input).await?;
 
         log::info!("calling wait_proof, proof_id={}", proof_id);
-        let (proof, public_values) =  self.wait_proof(&proof_id, timeout).await?;
+        let (proof, public_values) =  self.wait_proof(&proof_id, timeout, &prover_input).await?;
         Ok(ZKMProofWithPublicValues {
             proof,
             public_values,
