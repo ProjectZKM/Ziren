@@ -174,27 +174,29 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
-    ///     use zkm_sdk::ProverClient;
+    /// use std::env;
+    /// use zkm_sdk::network::NetworkClientCfg;
+    /// use zkm_sdk::ProverClient;
     ///
-    ///     let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
-    ///     let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-    ///     let proof_network_privkey =
-    ///         Some(env::var("ZKM_PRIVATE_KEY").expect("ZKM_PRIVATE_KEY must be set for remote proving"));
-    ///     let current_dir = env::current_dir().expect("Failed to get current directory");
-    ///     let ca_cert_path = Some(current_dir.join("tool/ca.pem").to_string_lossy().to_string());
-    ///     let cert_path = Some(current_dir.join("tool/.pem").to_string_lossy().to_string());
-    ///     let key_path = Some(current_dir.join("tool/.key").to_string_lossy().to_string());
+    ///  let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
+    ///  let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
+    ///  let proof_network_privkey =
+    ///     Some(env::var("ZKM_PRIVATE_KEY").expect("ZKM_PRIVATE_KEY must be set for remote proving"));
+    ///  let current_dir = env::current_dir().expect("Failed to get current directory");
+    ///  let ca_cert_path = Some(current_dir.join("tool/ca.pem").to_string_lossy().to_string());
+    ///  let cert_path = Some(current_dir.join("tool/.pem").to_string_lossy().to_string());
+    ///  let key_path = Some(current_dir.join("tool/.key").to_string_lossy().to_string());
     ///     
-    ///    let network_cfg = NetworkClientCfg {
-    ///         endpoint,
-    ///         ca_cert_path,
-    ///         cert_path,
-    ///        key_path,
-    ///        domain_name,
-    ///         proof_network_privkey,
-    ///     };
+    ///  let network_cfg = NetworkClientCfg {
+    ///     endpoint,
+    ///     ca_cert_path,
+    ///     cert_path,
+    ///     key_path,
+    ///     domain_name,
+    ///     proof_network_privkey,
+    ///  };
     ///
-    ///     let client = ProverClient::network(&network_cfg);
+    ///  let client = ProverClient::network(&network_cfg);
     /// ```
     #[cfg(feature = "network")]
     pub fn network(client_config: &NetworkClientCfg) -> Self {

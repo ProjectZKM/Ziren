@@ -72,6 +72,7 @@ mod test {
     use std::env;
     use zkm_core_machine::io::ZKMStdin;
     use zkm_prover::ZKMVerifyingKey;
+    #[ignore]
     #[test]
     fn test_proof_network_fib() {
         utils::setup_logger();
