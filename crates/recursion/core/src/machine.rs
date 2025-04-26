@@ -299,7 +299,7 @@ pub mod tests {
         let (pk, vk) = machine.setup(&program);
         let result = run_test_machine(vec![runtime.record.clone()], machine, pk, vk);
         if let Err(e) = result {
-            panic!("Verification failed: {:?}", e);
+            panic!("Verification failed: {e:?}");
         }
 
         // Run with the poseidon2 skinny chip.
@@ -308,7 +308,7 @@ pub mod tests {
         let (pk, vk) = skinny_machine.setup(&program);
         let result = run_test_machine(vec![runtime.record], skinny_machine, pk, vk);
         if let Err(e) = result {
-            panic!("Verification failed: {:?}", e);
+            panic!("Verification failed: {e:?}");
         }
     }
 

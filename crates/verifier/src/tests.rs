@@ -78,7 +78,7 @@ fn test_e2e_verify_groth16() {
 
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
-    println!("vk hash: {:?}", vkey_hash);
+    println!("vk hash: {vkey_hash:?}");
 
     let mut groth16_vk_bytes = Vec::new();
     let groth16_vk_path =

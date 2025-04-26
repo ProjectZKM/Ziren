@@ -185,7 +185,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 let panic_tx = panic_tx.clone();
                 s.spawn(move || {
                     while let Ok((i, shape)) = shape_rx.lock().unwrap().recv() {
-                        println!("shape {} is {:?}", i, shape);
+                        println!("shape {i} is {shape:?}");
                         let program = catch_unwind(AssertUnwindSafe(|| {
                             prover.program_from_shape(shape.clone(), None)
                         }));
@@ -194,10 +194,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                             Ok(program) => program_tx.send((i, program, is_shrink)).unwrap(),
                             Err(e) => {
                                 tracing::warn!(
-                                    "Program generation failed for shape {} {:?}, with error: {:?}",
-                                    i,
-                                    shape,
-                                    e
+                                    "Program generation failed for shape {i} {shape:?}, with error: {e:?}",
                                 );
                                 panic_tx.send(i).unwrap();
                             }
@@ -214,7 +211,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 s.spawn(move || {
                     let mut done = 0;
                     while let Ok((i, program, is_shrink)) = program_rx.lock().unwrap().recv() {
-                        let vk = tracing::debug_span!("setup for program {}", i).in_scope(|| {
+                        let vk = tracing::debug_span!("setup for program {i}").in_scope(|| {
                             if is_shrink {
                                 prover.shrink_prover.setup(&program).1
                             } else {

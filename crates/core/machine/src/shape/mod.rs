@@ -665,9 +665,9 @@ pub mod tests {
         let num_shapes = shape_config.all_shapes().collect::<HashSet<_>>().len();
         assert!(num_shapes < 1 << 24);
         for shape in shape_config.all_shapes() {
-            println!("{:?}", shape);
+            println!("{shape:?}");
         }
-        println!("There are {} core shapes", num_shapes);
+        println!("There are {num_shapes} core shapes");
     }
 
     #[test]

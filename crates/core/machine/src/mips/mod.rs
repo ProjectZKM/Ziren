@@ -687,7 +687,7 @@ pub mod tests {
         let costs: HashMap<String, u64> = serde_json::from_reader(file).unwrap();
         // Compare with costs computed by machine
         let machine_costs = MipsAir::<KoalaBear>::costs();
-        log::info!("{:?}", machine_costs);
+        log::info!("{machine_costs:?}");
         assert_eq!(costs, machine_costs);
     }
 
@@ -695,7 +695,7 @@ pub mod tests {
     #[ignore]
     fn write_core_air_costs() {
         let costs = MipsAir::<KoalaBear>::costs();
-        println!("{:?}", costs);
+        println!("{costs:?}");
         // write to file
         // Create directory if it doesn't exist
         let dir = std::path::Path::new("../executor/src/artifacts");

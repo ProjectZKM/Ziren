@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         for op in [FieldOperation::Add, FieldOperation::Mul, FieldOperation::Sub].iter() {
-            println!("op: {:?}", op);
+            println!("op: {op:?}");
             let chip: FieldOpChip<Ed25519BaseField> = FieldOpChip::new(*op);
             let shard = ExecutionRecord::default();
             let _: RowMajorMatrix<KoalaBear> =
@@ -524,7 +524,7 @@ mod tests {
             [FieldOperation::Add, FieldOperation::Sub, FieldOperation::Mul, FieldOperation::Div]
                 .iter()
         {
-            println!("op: {:?}", op);
+            println!("op: {op:?}");
 
             let mut challenger = config.challenger();
 

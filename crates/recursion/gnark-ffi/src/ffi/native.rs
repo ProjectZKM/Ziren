@@ -264,7 +264,7 @@ mod tests {
         let perm = inner_perm();
         let zeros = [KoalaBear::ZERO; 16];
         let result = perm.permute(zeros);
-        println!("{:?}", result);
+        println!("{result:?}");
         super::test_koalabear_poseidon2();
     }
 }

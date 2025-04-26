@@ -178,7 +178,7 @@ mod tests {
         let (pk, vk) = machine.setup(&program);
         let result = run_test_machine(vec![runtime.record], machine, pk, vk);
         if let Err(e) = result {
-            panic!("Verification failed: {:?}", e);
+            panic!("Verification failed: {e:?}");
         }
     }
 

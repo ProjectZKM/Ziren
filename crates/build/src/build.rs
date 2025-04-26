@@ -105,7 +105,7 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
         execute_build_program(&BuildArgs::default(), Some(program_dir.to_path_buf()))
     };
     if let Err(err) = path_output {
-        panic!("Failed to build zkMIPS program: {}.", err);
+        panic!("Failed to build zkMIPS program: {err}.");
     }
 
     println!("cargo:warning={} built at {}", root_package_name, current_datetime());
@@ -169,6 +169,6 @@ pub fn generate_elf_paths(
 /// Prints cargo directives setting relevant `ZKM_ELF_` environment variables.
 fn print_elf_paths_cargo_directives(target_elf_paths: &[(String, Utf8PathBuf)]) {
     for (target_name, elf_path) in target_elf_paths.iter() {
-        println!("cargo:rustc-env=ZKM_ELF_{}={}", target_name, elf_path);
+        println!("cargo:rustc-env=ZKM_ELF_{target_name}={elf_path}");
     }
 }

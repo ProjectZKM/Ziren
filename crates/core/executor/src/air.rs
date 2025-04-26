@@ -193,7 +193,7 @@ impl FromStr for MipsAirId {
         let air = Self::iter().find(|chip| chip.as_str() == s);
         match air {
             Some(air) => Ok(air),
-            None => Err(format!("Invalid MIPS Air: {}", s)),
+            None => Err(format!("Invalid MIPS Air: {s}")),
         }
     }
 }

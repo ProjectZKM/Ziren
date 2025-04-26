@@ -38,7 +38,7 @@ fn main() {
             for shape in shapes.iter() {
                 let lde_size = shape.estimate_lde_size(&costs);
                 if lde_size > args.lde_threshold_bytes {
-                    println!("maximal shape: {:?}, lde_size: {}", shape, lde_size);
+                    println!("maximal shape: {shape:?}, lde_size: {lde_size}");
                 }
             }
         }
@@ -55,7 +55,7 @@ fn main() {
         for shape in small_shapes.iter() {
             let lde_size = shape.estimate_lde_size(&costs);
             if lde_size > args.lde_threshold_bytes {
-                println!("small shape: {:?}, lde_size: {}", shape, lde_size);
+                println!("small shape: {shape:?}, lde_size: {lde_size}");
             }
         }
     }

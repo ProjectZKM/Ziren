@@ -186,8 +186,8 @@ impl Instruction {
         let offset_ext16 = sign_extend::<16>(offset);
         let target = insn & 0x3ffffff;
         let target_ext = sign_extend::<26>(target);
-        log::trace!("op {}, func {}, rt {}, rs {}, rd {}", opcode, func, rt, rs, rd);
-        log::trace!("decode: insn {:X}, opcode {:X}, func {:X}", insn, opcode, func);
+        log::trace!("op {opcode}, func {func}, rt {rt}, rs {rs}, rd {rd}");
+        log::trace!("decode: insn {insn:X}, opcode {opcode:X}, func {func:X}");
 
         match (opcode, func) {
             // MOVZ: rd = rs if rt == 0
@@ -458,7 +458,7 @@ impl Instruction {
             // MSUBU
             (0b011100, 0b000101) => Ok(Self::new(Opcode::MSUBU, 32, rt, rs, false, false)),
             _ => {
-                log::warn!("decode: invalid opcode {:#08b} {:#08b}", opcode, func);
+                log::warn!("decode: invalid opcode {opcode:#08b} {func:#08b}");
                 Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
             }
         }

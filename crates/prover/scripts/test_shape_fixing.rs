@@ -107,7 +107,7 @@ fn test_shape_fixing(
         for mut record in records {
             let _ = record.defer();
             let heights = MipsAir::<KoalaBear>::core_heights(&record);
-            println!("heights: {:?}", heights);
+            println!("heights: {heights:?}");
 
             shape_config.fix_shape(&mut record).unwrap();
 
