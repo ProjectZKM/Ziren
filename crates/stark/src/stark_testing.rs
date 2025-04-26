@@ -80,7 +80,7 @@ pub fn generate_trace_rows<F: PrimeField64>(a: u64, b: u64, n: usize) -> RowMajo
     trace
 }
 
-const NUM_FIBONACCI_COLS: usize =  size_of::<FibonacciRow<u8>>();
+const NUM_FIBONACCI_COLS: usize = size_of::<FibonacciRow<u8>>();
 
 pub struct FibonacciRow<F> {
     pub left: F,

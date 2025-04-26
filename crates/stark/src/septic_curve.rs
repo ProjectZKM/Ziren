@@ -274,7 +274,7 @@ mod tests {
         ]);
         let (curve_point, _, _, _) = SepticCurve::<KoalaBear>::lift_x(x);
         assert!(curve_point.check_on_point());
-        println!("{curve_point:?}", );
+        println!("{curve_point:?}",);
     }
 
     #[test]
