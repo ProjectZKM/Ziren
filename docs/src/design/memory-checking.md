@@ -59,3 +59,65 @@ In zkMIPS, the following parameters are used.
 - Septic extension field: Defined under irreducible polynomial \\( u^7 + 2u -8\\).
 - Elliptic curve: Defined with \\(A = 3*u , B= -3\\) (provides ≥102-bit security).
 - Hash algorithm: Poseidon2 is used as the hash algorithm.
+
+
+## Elliptic Curve Selection over KoalaBear Prime Extension Field
+
+**Objective**
+
+Construct an elliptic curve over the 7th-degree extension field of KoalaBear Prime \\(P = 2^{31} - 2^{24} +1\\), achieving >100-bit security against known attacks while maintaining computational efficiency.
+
+**Code Location**
+
+Implementation available [here](
+https://github.com/zkMIPS/septic-curve-over-koalabear). It is a fork from [Cheetah](https://github.com/toposware/cheetah) that finds secure curve over a sextic extension of Goldilock Prime \\(2^{64} - 2^{32} + 1\\).
+
+**Construction Workflow**
+
+- Step 1: Sparse Irreducible Polynomial Selection
+  - Requirements​​:
+    - Minimal non-zero coefficients in polynomial
+    - Small absolute values of non-zero coefficients
+    - Irreducibility over base field
+  - Implementation​​ (septic_search.sage):
+    - `poly = find_sparse_irreducible_poly(Fpx, extension_degree, use_root=True)`
+    - The selected polynomial: \\(x^7 + 2x - 8\\). This sparse form minimizes arithmetic complexity while ensuring irreducibility.
+
+- Step 2: Candidate Curve Filtering
+  - ​Curve Form​​: \\(y^2 = x^3 + ax + b\\), with small |a| and |b| to optimize arithmetic operations.
+  - ​Parameter Search​ in septic_search.sage​:
+    ```
+    for i in range(wid, 1000000000, processes):
+        coeff_a = 3 * a  # Fixed coefficient scaling
+        coeff_b = i - 3
+        E = EllipticCurve(extension, [coeff_a, coeff_b])
+    ```
+  - Final parameters chosen: \\(a = 3u, b = -3\\) (with \\(u\\) as extension field generator).
+
+- Step 3: Security Validation
+  - Pollard-Rho Resistance​​
+
+    Verify prime subgroup order > 210 bits:
+    ```
+    prime_order = list(ecm.factor(n))[-1]
+    assert prime_order.nbits() > 210
+    ```
+  - ​​Embedding Degree Check​​:
+    ```
+    embedding_degree = calculate_embedding_degree(E)
+    assert embedding_degree.nbits() > EMBEDDING_DEGREE_SECURITY
+    ```
+  - ​Twist Security​​:
+    - Pollard-Rho Resistance​​
+    - ​Embedding Degree Check​​
+
+- Step 4: Complex Discriminant Verification
+
+  Check discriminant condition for secure parameterization: \\( D=(P^7 + 1 − n)^ 2 - 4P^7 \\), where \\(n\\) is the full order of the original curve. Where \\(\text{D}\\) must satisfies:
+  - Large negative integer (absolute value > 100 bits)  
+  - ​​Square-free part​​ > 100 bits ​​
+  
+  ​​Validation command​​:
+  `sage verify.sage`
+
+The selected curve achieves ​​>100-bit security​​. This construction follows NIST-recommended practices while optimizing for zkSNARK arithmetic circuits through ​​sparse polynomial selection​​ and ​​small curve coefficients​​.
