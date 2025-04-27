@@ -20,13 +20,14 @@ use zkm_core_executor::ExecutionReport;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
 use zkm_prover::{
-    components::ZKMProverComponents, CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey,
-    ZKMVerifyingKey,
+    components::{DefaultProverComponents, ZKMProverComponents}, CoreSC, InnerSC, ZKMCoreProofData,
+    ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
 };
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::install::try_install_circuit_artifacts;
+use crate::ProverClient;
 use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 
 /// The type of prover.
@@ -179,5 +180,37 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                 )
                 .map_err(ZKMVerificationError::Groth16),
         }
+    }
+}
+
+
+impl Prover<DefaultProverComponents> for ProverClient {
+    fn id(&self) -> ProverType { todo!() }
+
+    fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
+        self.prover.zkm_prover()
+    }
+
+    fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
+        self.prover.setup(elf)
+    }
+
+    fn prove<'a>(
+        &'a self,
+        pk: &ZKMProvingKey,
+        stdin: ZKMStdin,
+        opts: ProofOpts,
+        context: ZKMContext<'a>,
+        kind: ZKMProofKind,
+    ) -> Result<ZKMProofWithPublicValues>{
+        self.prover.prove(pk, stdin, opts, context, kind)
+    }
+
+    fn verify(
+        &self,
+        bundle: &ZKMProofWithPublicValues,
+        vkey: &ZKMVerifyingKey,
+    ) -> Result<(), ZKMVerificationError> {
+        self.prover.verify(bundle, vkey)
     }
 }
