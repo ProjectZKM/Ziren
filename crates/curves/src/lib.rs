@@ -32,7 +32,7 @@ use std::{
 use typenum::Unsigned;
 use zkm_primitives::consts::WORD_SIZE;
 
-use num::BigUint;
+pub use num::{BigUint, Integer, One, Zero};
 use serde::{de::DeserializeOwned, Serialize};
 
 pub const NUM_WORDS_FIELD_ELEMENT: usize = 8;

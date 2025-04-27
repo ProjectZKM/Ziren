@@ -4,6 +4,57 @@ pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
 /// The size of a word in bytes.
 pub const WORD_SIZE: usize = 4;
 
+pub mod fd {
+    /// The minimum file descriptor.
+    ///
+    /// Any file descriptor must be greater than this value, otherwise the executor will panic.
+    ///
+    /// This is useful for deprecating file descriptors.
+    pub const LOWEST_ALLOWED_FD: u32 = 10;
+
+    /// Creates a file descriptor constant, with respect to the minimum file descriptor.
+    macro_rules! create_fd {
+        ($(
+            #[$attr:meta]
+            pub const $name:ident: u32 = $value:expr;
+        )*) => {
+            $(
+                #[$attr]
+                pub const $name: u32 = $value + $crate::consts::fd::LOWEST_ALLOWED_FD;
+            )*
+        }
+    }
+
+    create_fd! {
+        /// The file descriptor for stdout.
+        pub const FD_STDOUT: u32 = 1;
+
+        /// The file descriptor for stderr.
+        pub const FD_STDERR: u32 = 2;
+
+        /// The file descriptor for public values.
+        pub const FD_PUBLIC_VALUES: u32 = 3;
+
+        /// The file descriptor for hints.
+        pub const FD_HINT: u32 = 4;
+
+        /// The file descriptor for the `ecrecover` hook.
+        pub const K1_ECRECOVER_HOOK: u32 = 5;
+
+        /// The file descriptor for the `ecrecover` hook.
+        pub const R1_ECRECOVER_HOOK: u32 = 6;
+
+        /// The file descriptor through which to access `hook_ed_decompress`.
+        pub const FD_EDDECOMPRESS: u32 = 7;
+
+        /// The file descriptor through which to access `hook_fp_sqrt`.
+        pub const FD_FP_SQRT: u32 = 8;
+
+        /// The file descriptor through which to access `hook_fp_inverse`.
+        pub const FD_FP_INV: u32 = 9;
+    }
+}
+
 /// Converts a slice of words to a byte vector in little endian.
 pub fn words_to_bytes_le_vec(words: &[u32]) -> Vec<u8> {
     words.iter().flat_map(|word| word.to_le_bytes().into_iter()).collect::<Vec<_>>()
