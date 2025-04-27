@@ -25,7 +25,7 @@ use zkm_prover::{
 use zkm_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::install::try_install_circuit_artifacts;
-use crate::{ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
+use crate::{ZKMProof, ZKMProofMode, ZKMProofWithPublicValues};
 
 /// The type of prover.
 #[derive(Debug, PartialEq, EnumString)]
@@ -80,7 +80,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         stdin: ZKMStdin,
         opts: ProofOpts,
         context: ZKMContext<'a>,
-        kind: ZKMProofKind,
+        kind: ZKMProofMode,
     ) -> Result<ZKMProofWithPublicValues>;
 
     /// Verify that an zkMIPS proof is valid given its vkey and metadata.

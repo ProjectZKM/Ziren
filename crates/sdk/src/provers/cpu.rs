@@ -1,11 +1,11 @@
 use anyhow::Result;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
-use zkm_prover::{components::DefaultProverComponents, ZKMProver};
+use zkm_prover::{components::CpuProverComponents, ZKMProver};
 
 use crate::install::try_install_circuit_artifacts;
 use crate::{
-    provers::ProofOpts, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey,
+    provers::ProofOpts, Prover, ZKMProof, ZKMProofMode, ZKMProofWithPublicValues, ZKMProvingKey,
     ZKMVerifyingKey,
 };
 
@@ -13,7 +13,7 @@ use super::ProverType;
 
 /// An implementation of [crate::ProverClient] that can generate end-to-end proofs locally.
 pub struct CpuProver {
-    prover: ZKMProver<DefaultProverComponents>,
+    prover: ZKMProver<CpuProverComponents>,
 }
 
 impl CpuProver {
@@ -24,12 +24,12 @@ impl CpuProver {
     }
 
     /// Creates a new [LocalProver] from an existing [ZKMProver].
-    pub fn from_prover(prover: ZKMProver<DefaultProverComponents>) -> Self {
+    pub fn from_prover(prover: ZKMProver<CpuProverComponents>) -> Self {
         Self { prover }
     }
 }
 
-impl Prover<DefaultProverComponents> for CpuProver {
+impl Prover<CpuProverComponents> for CpuProver {
     fn id(&self) -> ProverType {
         ProverType::Cpu
     }
@@ -38,7 +38,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         self.prover.setup(elf)
     }
 
-    fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
+    fn zkm_prover(&self) -> &ZKMProver<CpuProverComponents> {
         &self.prover
     }
 
@@ -48,12 +48,12 @@ impl Prover<DefaultProverComponents> for CpuProver {
         stdin: ZKMStdin,
         opts: ProofOpts,
         context: ZKMContext<'a>,
-        kind: ZKMProofKind,
+        kind: ZKMProofMode,
     ) -> Result<ZKMProofWithPublicValues> {
         // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
             self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
-        if kind == ZKMProofKind::Core {
+        if kind == ZKMProofMode::Core {
             return Ok(ZKMProofWithPublicValues {
                 proof: ZKMProof::Core(proof.proof.0),
                 stdin: proof.stdin,
@@ -69,7 +69,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         // Generate the compressed proof.
         let reduce_proof =
             self.prover.compress(&pk.vk, proof, deferred_proofs, opts.zkm_prover_opts)?;
-        if kind == ZKMProofKind::Compressed {
+        if kind == ZKMProofMode::Compressed {
             return Ok(ZKMProofWithPublicValues {
                 proof: ZKMProof::Compressed(Box::new(reduce_proof)),
                 stdin,
@@ -84,7 +84,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         // Genenerate the wrap proof.
         let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
 
-        if kind == ZKMProofKind::Plonk {
+        if kind == ZKMProofMode::Plonk {
             let plonk_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
                 zkm_prover::build::try_build_plonk_bn254_artifacts_dev(
                     &outer_proof.vk,
@@ -101,7 +101,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                 public_values,
                 zkm_version: self.version().to_string(),
             });
-        } else if kind == ZKMProofKind::Groth16 {
+        } else if kind == ZKMProofMode::Groth16 {
             let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
                 zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
                     &outer_proof.vk,
