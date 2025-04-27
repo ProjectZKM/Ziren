@@ -5,7 +5,7 @@ use std::{
     alloc::Layout,
     io::{Result, Write},
 };
-use zkm_primitives::consts::fd::*;
+pub use zkm_primitives::consts::fd::*;
 
 /// A writer that writes to a file descriptor inside the zkVM.
 struct SyscallWriter {
