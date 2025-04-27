@@ -97,7 +97,7 @@ impl ProverClient {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         Self {
-                            prover: Box::new(block_on(NetworkProver::new(&network_cfg)).unwrap()),
+                            prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
@@ -203,7 +203,7 @@ impl ProverClient {
         cfg_if! {
             if #[cfg(feature = "network")] {
                 Self {
-                    prover: Box::new(block_on(NetworkProver::new(client_config)).unwrap()),
+                    prover: Box::new(NetworkProver::new(client_config).unwrap()),
                 }
             } else {
                 panic!("network feature is not enabled")
@@ -403,7 +403,7 @@ impl ProverClientBuilder {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         ProverClient {
-                            prover: Box::new(block_on(NetworkProver::new(&network_cfg)).unwrap()),
+                            prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
@@ -417,7 +417,7 @@ impl ProverClientBuilder {
 }
 
 /// Builder type for network prover.
-#[cfg(any(feature = "network", feature = "network-v2"))]
+#[cfg(feature = "network")]
 #[derive(Debug, Default)]
 pub struct NetworkProverBuilder {
     private_key: Option<String>,
@@ -425,7 +425,7 @@ pub struct NetworkProverBuilder {
     skip_simulation: bool,
 }
 
-#[cfg(any(feature = "network", feature = "network-v2"))]
+#[cfg(feature = "network")]
 impl NetworkProverBuilder {
     ///  Sets the private key.
     pub fn private_key(mut self, private_key: String) -> Self {

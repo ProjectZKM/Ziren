@@ -45,7 +45,7 @@ pub struct NetworkProver {
 }
 
 impl NetworkProver {
-    pub async fn new(client_config: &NetworkClientCfg) -> anyhow::Result<NetworkProver> {
+    pub fn new(client_config: &NetworkClientCfg) -> anyhow::Result<NetworkProver> {
         let ssl_config = if client_config.ca_cert_path.as_ref().is_none() {
             None
         } else {
@@ -53,8 +53,7 @@ impl NetworkProver {
                 client_config.ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
                 client_config.cert_path.as_ref().expect("CERT_PATH not set"),
                 client_config.key_path.as_ref().expect("KEY_PATH not set"),
-            )
-            .await?;
+            )?;
             Some(Config { ca_cert, identity })
         };
 
@@ -80,7 +79,6 @@ impl NetworkProver {
         if private_key.is_empty() {
             panic!("Please set the PRIVATE_KEY");
         }
-        // let stage_client = StageServiceClient::connect(endpoint).await?;
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
         Ok(NetworkProver { endpoint, wallet, local_prover })
@@ -123,11 +121,11 @@ impl NetworkProver {
             composite_proof: input.composite_proof,
             ..Default::default()
         };
-        for receipt in input.receipts.iter() {
-            // request.receipts.push(receipt.clone());
-            request.receipts.push(receipt.clone());
-        }
-        for receipt_input in input.receipt_inputs.iter() {
+        // for receipt in input.receipts.iter() {
+        //     // request.receipts.push(receipt.clone());
+        //     request.receipts.push(receipt.clone());
+        // }
+        for receipt_input in input.receipts.iter() {
             // request.receipt_inputs.push(receipt_input.clone());
             request.receipt_inputs.push(receipt_input.clone());
         }
@@ -289,7 +287,7 @@ impl Prover<DefaultProverComponents> for NetworkProver {
     }
 }
 
-async fn get_cert_and_identity(
+fn get_cert_and_identity(
     ca_cert_path: &str,
     cert_path: &str,
     key_path: &str,
@@ -303,18 +301,15 @@ async fn get_cert_and_identity(
     let mut ca: Option<Certificate> = None;
     let mut identity: Option<Identity> = None;
     if ca_cert_path.is_file() {
-        let ca_cert = tokio::fs::read(ca_cert_path)
-            .await
+        let ca_cert = fs::read(ca_cert_path)
             .unwrap_or_else(|err| panic!("Failed to read {ca_cert_path:?}, err: {err:?}"));
         ca = Some(Certificate::from_pem(ca_cert));
     }
 
     if cert_path.is_file() && key_path.is_file() {
-        let cert = tokio::fs::read(cert_path)
-            .await
+        let cert = fs::read(cert_path)
             .unwrap_or_else(|err| panic!("Failed to read {cert_path:?}, err: {err:?}"));
-        let key = tokio::fs::read(key_path)
-            .await
+        let key = fs::read(key_path)
             .unwrap_or_else(|err| panic!("Failed to read {key_path:?}, err: {err:?}"));
         identity = Some(Identity::from_pem(cert, key));
     }
