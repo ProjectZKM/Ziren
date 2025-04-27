@@ -188,9 +188,9 @@ impl NetworkProver {
                     // save vk to file
                     let proof_id = get_status_response.proof_id.clone();
                     let elf_vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
-                    log::info!("elf vk url : {:?}", elf_vk_url);
                     let elf_vk = NetworkProver::download_file(&elf_vk_url).await?;
                     save_data_to_file(&prover_input.proof_results_path, "vk.bin", &elf_vk)?;
+                    log::info!("vk is saved to file: {elf_vk_url}");
 
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
@@ -252,7 +252,7 @@ impl NetworkProver {
         log::info!("calling request_proof.");
         let proof_id = self.request_proof(&prover_input).await?;
 
-        log::info!("calling wait_proof, proof_id={}", proof_id);
+        log::info!("calling wait_proof, proof_id={proof_id}");
         let (proof, public_values) = self.wait_proof(&proof_id, timeout, &prover_input).await?;
         Ok(ZKMProofWithPublicValues {
             proof,
@@ -305,17 +305,17 @@ async fn get_cert_and_identity(
     if ca_cert_path.is_file() {
         let ca_cert = tokio::fs::read(ca_cert_path)
             .await
-            .unwrap_or_else(|err| panic!("Failed to read {:?}, err: {:?}", ca_cert_path, err));
+            .unwrap_or_else(|err| panic!("Failed to read {ca_cert_path:?}, err: {err:?}"));
         ca = Some(Certificate::from_pem(ca_cert));
     }
 
     if cert_path.is_file() && key_path.is_file() {
         let cert = tokio::fs::read(cert_path)
             .await
-            .unwrap_or_else(|err| panic!("Failed to read {:?}, err: {:?}", cert_path, err));
+            .unwrap_or_else(|err| panic!("Failed to read {cert_path:?}, err: {err:?}"));
         let key = tokio::fs::read(key_path)
             .await
-            .unwrap_or_else(|err| panic!("Failed to read {:?}, err: {:?}", key_path, err));
+            .unwrap_or_else(|err| panic!("Failed to read {key_path:?}, err: {err:?}"));
         identity = Some(Identity::from_pem(cert, key));
     }
     Ok((ca, identity))
@@ -339,7 +339,7 @@ pub fn save_data_to_file<P: AsRef<Path>, D: AsRef<[u8]>>(
     file.write_all(data.as_ref())?;
 
     let bytes_written = data.as_ref().len();
-    log::info!("Successfully written {} bytes.", bytes_written);
+    log::info!("Successfully written {bytes_written} bytes.");
 
     Ok(())
 }
