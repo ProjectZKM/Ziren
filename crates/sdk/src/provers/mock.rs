@@ -5,7 +5,7 @@ use zkm_core_machine::io::ZKMStdin;
 use zkm_stark::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
 
 use crate::{
-    Prover, ZKMProof, ZKMProofMode, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
+    Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
     ZKMVerifyingKey,
 };
 use anyhow::Result;
@@ -13,7 +13,7 @@ use p3_field::{FieldAlgebra, PrimeField};
 use p3_fri::FriProof;
 use p3_koala_bear::KoalaBear;
 use zkm_prover::{
-    components::CpuProverComponents,
+    components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
     Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
@@ -34,7 +34,7 @@ impl MockProver {
     }
 }
 
-impl Prover<CpuProverComponents> for MockProver {
+impl Prover<DefaultProverComponents> for MockProver {
     fn id(&self) -> ProverType {
         ProverType::Mock
     }
@@ -53,10 +53,10 @@ impl Prover<CpuProverComponents> for MockProver {
         stdin: ZKMStdin,
         opts: ProofOpts,
         context: ZKMContext<'a>,
-        kind: ZKMProofMode,
+        kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
         match kind {
-            ZKMProofMode::Core => {
+            ZKMProofKind::Core => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
                 Ok(ZKMProofWithPublicValues {
                     proof: ZKMProof::Core(vec![]),
@@ -65,7 +65,7 @@ impl Prover<CpuProverComponents> for MockProver {
                     zkm_version: self.version().to_string(),
                 })
             }
-            ZKMProofMode::Compressed => {
+            ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
                 let shard_proof = ShardProof {
@@ -105,7 +105,7 @@ impl Prover<CpuProverComponents> for MockProver {
                     zkm_version: self.version().to_string(),
                 })
             }
-            ZKMProofMode::Plonk => {
+            ZKMProofKind::Plonk => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
                 Ok(ZKMProofWithPublicValues {
                     proof: ZKMProof::Plonk(PlonkBn254Proof {
@@ -122,7 +122,7 @@ impl Prover<CpuProverComponents> for MockProver {
                     zkm_version: self.version().to_string(),
                 })
             }
-            ZKMProofMode::Groth16 => {
+            ZKMProofKind::Groth16 => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
                 Ok(ZKMProofWithPublicValues {
                     proof: ZKMProof::Groth16(Groth16Bn254Proof {

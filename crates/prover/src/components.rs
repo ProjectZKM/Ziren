@@ -25,9 +25,9 @@ pub trait ZKMProverComponents: Send + Sync {
         + Sync;
 }
 
-pub struct CpuProverComponents;
+pub struct DefaultProverComponents;
 
-impl ZKMProverComponents for CpuProverComponents {
+impl ZKMProverComponents for DefaultProverComponents {
     type CoreProver = CpuProver<CoreSC, MipsAir<<CoreSC as StarkGenericConfig>::Val>>;
     type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
     type ShrinkProver = CpuProver<InnerSC, ShrinkAir<<InnerSC as StarkGenericConfig>::Val>>;

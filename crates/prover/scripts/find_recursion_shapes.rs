@@ -4,7 +4,7 @@ use clap::Parser;
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::utils::setup_logger;
 use zkm_prover::{
-    components::CpuProverComponents,
+    components::DefaultProverComponents,
     shapes::{check_shapes, ZKMProofShape},
     ShrinkAir, ZKMProver, REDUCE_BATCH_SIZE,
 };
@@ -36,7 +36,7 @@ fn main() {
     let args = Args::parse();
 
     // Initialize the prover.
-    let mut prover = ZKMProver::<CpuProverComponents>::new();
+    let mut prover = ZKMProver::<DefaultProverComponents>::new();
 
     // Set whether to verify verification keys.
     prover.vk_verification = !args.dummy;

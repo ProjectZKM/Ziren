@@ -26,7 +26,7 @@ pub mod utils;
 
 pub use proof::*;
 pub use provers::ZKMVerificationError;
-use zkm_prover::components::CpuProverComponents;
+use zkm_prover::components::DefaultProverComponents;
 
 #[cfg(any(feature = "network", feature = "network-v2"))]
 use {std::future::Future, tokio::task::block_in_place};
@@ -48,7 +48,7 @@ pub use utils::setup_logger;
 /// A client for interacting with zkMIPS.
 pub struct ProverClient {
     /// The underlying prover implementation.
-    pub prover: Box<dyn Prover<CpuProverComponents>>,
+    pub prover: Box<dyn Prover<DefaultProverComponents>>,
 }
 
 impl ProverClient {

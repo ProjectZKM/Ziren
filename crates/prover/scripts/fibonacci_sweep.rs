@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{fmt::format::FmtSpan, util::SubscriberInitExt};
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
-use zkm_prover::components::CpuProverComponents;
+use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::ZKMProver;
 use zkm_stark::ZKMProverOpts;
 
@@ -37,7 +37,7 @@ fn main() {
     std::env::set_var("RECONSTRUCT_COMMITMENTS", "false");
 
     // Initialize prover.
-    let prover = ZKMProver::<CpuProverComponents>::new();
+    let prover = ZKMProver::<DefaultProverComponents>::new();
 
     // Setup sweep.
     let iterations = [480000u32];

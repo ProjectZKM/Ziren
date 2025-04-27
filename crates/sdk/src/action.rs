@@ -1,18 +1,18 @@
 use zkm_core_executor::{ExecutionReport, HookEnv, ZKMContextBuilder};
 use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::io::ZKMPublicValues;
-use zkm_prover::{components::CpuProverComponents, ZKMProvingKey};
+use zkm_prover::{components::DefaultProverComponents, ZKMProvingKey};
 
 use anyhow::{Ok, Result};
 use std::time::Duration;
 use zkm_stark::{ZKMCoreOpts, ZKMProverOpts};
 
-use crate::{provers::ProofOpts, Prover, ZKMProofMode, ZKMProofWithPublicValues};
+use crate::{provers::ProofOpts, Prover, ZKMProofKind, ZKMProofWithPublicValues};
 
 /// Builder to prepare and configure execution of a program on an input.
 /// May be run with [Self::run].
 pub struct Execute<'a> {
-    prover: &'a dyn Prover<CpuProverComponents>,
+    prover: &'a dyn Prover<DefaultProverComponents>,
     context_builder: ZKMContextBuilder<'a>,
     elf: &'a [u8],
     stdin: ZKMStdin,
@@ -24,7 +24,7 @@ impl<'a> Execute<'a> {
     /// Prefer using [ProverClient::execute](super::ProverClient::execute).
     /// See there for more documentation.
     pub fn new(
-        prover: &'a dyn Prover<CpuProverComponents>,
+        prover: &'a dyn Prover<DefaultProverComponents>,
         elf: &'a [u8],
         stdin: ZKMStdin,
     ) -> Self {
@@ -80,8 +80,8 @@ impl<'a> Execute<'a> {
 /// Builder to prepare and configure proving execution of a program on an input.
 /// May be run with [Self::run].
 pub struct Prove<'a> {
-    prover: &'a dyn Prover<CpuProverComponents>,
-    kind: ZKMProofMode,
+    prover: &'a dyn Prover<DefaultProverComponents>,
+    kind: ZKMProofKind,
     context_builder: ZKMContextBuilder<'a>,
     pk: &'a ZKMProvingKey,
     stdin: ZKMStdin,
@@ -96,7 +96,7 @@ impl<'a> Prove<'a> {
     /// Prefer using [ProverClient::prove](super::ProverClient::prove).
     /// See there for more documentation.
     pub fn new(
-        prover: &'a dyn Prover<CpuProverComponents>,
+        prover: &'a dyn Prover<DefaultProverComponents>,
         pk: &'a ZKMProvingKey,
         stdin: ZKMStdin,
     ) -> Self {
@@ -136,25 +136,25 @@ impl<'a> Prove<'a> {
 
     /// Set the proof kind to the core mode. This is the default.
     pub fn core(mut self) -> Self {
-        self.kind = ZKMProofMode::Core;
+        self.kind = ZKMProofKind::Core;
         self
     }
 
     /// Set the proof kind to the compressed mode.
     pub fn compressed(mut self) -> Self {
-        self.kind = ZKMProofMode::Compressed;
+        self.kind = ZKMProofKind::Compressed;
         self
     }
 
     /// Set the proof mode to the plonk bn254 mode.
     pub fn plonk(mut self) -> Self {
-        self.kind = ZKMProofMode::Plonk;
+        self.kind = ZKMProofKind::Plonk;
         self
     }
 
     /// Set the proof mode to the groth16 bn254 mode.
     pub fn groth16(mut self) -> Self {
-        self.kind = ZKMProofMode::Groth16;
+        self.kind = ZKMProofKind::Groth16;
         self
     }
 

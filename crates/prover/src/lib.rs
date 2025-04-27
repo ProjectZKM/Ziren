@@ -85,7 +85,7 @@ use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 pub use types::*;
 use utils::{words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254};
 
-use components::{CpuProverComponents, ZKMProverComponents};
+use components::{DefaultProverComponents, ZKMProverComponents};
 
 pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 
@@ -118,7 +118,7 @@ pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
 
 /// A end-to-end prover implementation for the zkMIPS zkVM.
-pub struct ZKMProver<C: ZKMProverComponents = CpuProverComponents> {
+pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the core step.
     pub core_prover: C::CoreProver,
 
@@ -1492,8 +1492,8 @@ pub mod tests {
         // TODO(mattstam): We should Test::Plonk here, but this uses the existing
         // docker image which has a different API than the current. So we need to wait until the
         // next release (v1.2.0+), and then switch it back.
-        let prover = ZKMProver::<CpuProverComponents>::new();
-        test_e2e_prover::<CpuProverComponents>(
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
             ZKMStdin::default(),
@@ -1519,8 +1519,8 @@ pub mod tests {
         // TODO(mattstam): We should Test::Plonk here, but this uses the existing
         // docker image which has a different API than the current. So we need to wait until the
         // next release (v1.2.0+), and then switch it back.
-        let prover = ZKMProver::<CpuProverComponents>::new();
-        test_e2e_prover::<CpuProverComponents>(
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
             &prover,
             elf,
             ZKMStdin::default(),
@@ -1536,6 +1536,6 @@ pub mod tests {
     #[ignore]
     fn test_e2e_with_deferred_proofs() -> Result<()> {
         setup_logger();
-        test_e2e_with_deferred_proofs_prover::<CpuProverComponents>(ZKMProverOpts::default())
+        test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
     }
 }
