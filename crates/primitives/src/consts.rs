@@ -10,7 +10,7 @@ pub mod fd {
     /// Any file descriptor must be greater than this value, otherwise the executor will panic.
     ///
     /// This is useful for deprecating file descriptors.
-    pub const LOWEST_ALLOWED_FD: u32 = 10;
+    pub const LOWEST_ALLOWED_FD: u32 = 0;
 
     /// Creates a file descriptor constant, with respect to the minimum file descriptor.
     macro_rules! create_fd {
