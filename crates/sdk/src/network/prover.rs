@@ -1,11 +1,11 @@
 use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
+use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
-use std::{env, fs};
 
 use ethers::signers::{LocalWallet, Signer};
 use tokio::time::sleep;
@@ -183,13 +183,20 @@ impl NetworkProver {
                     let public_values: ZKMPublicValues =
                         ZKMPublicValues::from(&public_values_bytes);
 
-                    // save vk to file
-                    let proof_id = get_status_response.proof_id.clone();
-                    let elf_vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
-                    let elf_vk = NetworkProver::download_file(&elf_vk_url).await?;
-                    save_data_to_file(&prover_input.proof_results_path, "vk.bin", &elf_vk)?;
-                    log::info!("vk is saved to file: {elf_vk_url}");
-
+                    // save vk to file if USE_NETWORK_VK = true
+                    if prover_input.use_network_vk {
+                        let proof_id = get_status_response.proof_id.clone();
+                        let vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
+                        let vk = NetworkProver::download_file(&vk_url).await?;
+                        save_data_to_file(&prover_input.proof_results_path, "vk.bin", &vk)
+                            .unwrap_or_else(|_| {
+                                panic!(
+                                    "Failed to save vk.bin in {}",
+                                    prover_input.proof_results_path
+                                )
+                            });
+                        log::info!("vk is saved to file: {}", prover_input.proof_results_path);
+                    }
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                             .expect("Failed to deserialize proof");
@@ -209,18 +216,6 @@ impl NetworkProver {
         stdin: ZKMStdin,
         timeout: Option<Duration>,
     ) -> Result<ZKMProofWithPublicValues> {
-        // let execute_only =
-        //     env::var("EXECUTE_ONLY").ok().and_then(|seg| seg.parse::<bool>().ok()).unwrap_or(false);
-        let composite_proof = env::var("COMPOSITE_PROOF")
-            .ok()
-            .and_then(|seg| seg.parse::<bool>().ok())
-            .unwrap_or(false);
-        let shard_size =
-            env::var("SHARD_SIZE").ok().and_then(|seg| seg.parse::<usize>().ok()).unwrap_or(65536)
-                as u32;
-        let proof_results_path = env::var("PROOF_RESULTS_PATH").unwrap_or(".".to_string());
-        let asset_url = env::var("ASSET_URL").unwrap_or("http://152.32.186.45:20001".to_string());
-
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
         bincode::serialize_into(&mut pri_buf, &private_input)
@@ -234,16 +229,10 @@ impl NetworkProver {
                 .expect("private_input serialization failed");
             receipts.push(receipt);
         }
-
         let prover_input = ProverInput {
             elf: elf.to_vec(),
-            shard_size,
-            // execute_only,
-            composite_proof,
-            proof_results_path,
             private_inputstream: pri_buf,
             receipts,
-            asset_url,
             ..Default::default()
         };
 
