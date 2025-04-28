@@ -5,12 +5,18 @@ pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
 pub const WORD_SIZE: usize = 4;
 
 pub mod fd {
+    /// The file descriptor for stdout.
+    pub const FD_STDOUT: u32 = 1;
+
+    /// The file descriptor for stderr.
+    pub const FD_STDERR: u32 = 2;
+
     /// The minimum file descriptor.
     ///
     /// Any file descriptor must be greater than this value, otherwise the executor will panic.
     ///
     /// This is useful for deprecating file descriptors.
-    pub const LOWEST_ALLOWED_FD: u32 = 0;
+    pub const LOWEST_ALLOWED_FD: u32 = 10;
 
     /// Creates a file descriptor constant, with respect to the minimum file descriptor.
     macro_rules! create_fd {
@@ -26,12 +32,6 @@ pub mod fd {
     }
 
     create_fd! {
-        /// The file descriptor for stdout.
-        pub const FD_STDOUT: u32 = 1;
-
-        /// The file descriptor for stderr.
-        pub const FD_STDERR: u32 = 2;
-
         /// The file descriptor for public values.
         pub const FD_PUBLIC_VALUES: u32 = 3;
 
