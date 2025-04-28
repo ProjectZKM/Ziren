@@ -60,9 +60,6 @@ impl<V: Copy> PagedMemory<V> {
     /// Get a reference to the memory value at the given address, if it exists.
     pub fn get(&self, addr: u32) -> Option<&V> {
         let (upper, lower) = Self::indices(addr);
-        if upper >= self.index.len() {
-            panic!("addr: {addr:?}, upper: {upper:?}, lower: {lower:?}");
-        }
         let index = self.index[upper];
         if index == NO_PAGE {
             None
@@ -111,6 +108,9 @@ impl<V: Copy> PagedMemory<V> {
         let index = self.index[upper];
         if index == NO_PAGE {
             let index = self.page_table.len();
+            if upper >= self.index.len() {
+                panic!("addr: {addr:?}, upper: {upper:?}, lower: {lower:?}");
+            }
             self.index[upper] = index as u16;
             self.page_table.push(NewPage::new());
             Entry::Vacant(VacantEntry { entry: &mut self.page_table[index].0[lower] })
