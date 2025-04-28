@@ -76,26 +76,10 @@ impl ProverClient {
                     prover: Box::new(CudaProver::new(ZKMProver::new())),
                 }
             }
-            // TODO: Anyone can implement it when a network prover is needed.
             "network" => {
-                let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
-                let ca_cert_path = Some(env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving"));
-                let cert_path = Some(env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving"));
-                let key_path = Some(env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving"));
-                let proof_network_privkey = Some(env::var("ZKM_PRIVATE_KEY")
-                    .expect("ZKM_PRIVATE_KEY must be set for remote proving"));
-                let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-                let network_cfg = NetworkClientCfg {
-                    endpoint,
-                    ca_cert_path,
-                    cert_path,
-                    key_path,
-                    domain_name,
-                    proof_network_privkey
-                };
-
                 cfg_if! {
                    if #[cfg(feature = "network")] {
+                        let network_cfg = NetworkClientCfg::from_env();
                         Self {
                             prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
                         }
@@ -178,32 +162,15 @@ impl ProverClient {
     /// use zkm_sdk::network::NetworkClientCfg;
     /// use zkm_sdk::ProverClient;
     ///
-    ///  let endpoint = Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
-    ///  let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-    ///  let proof_network_privkey =
-    ///     Some(env::var("ZKM_PRIVATE_KEY").expect("ZKM_PRIVATE_KEY must be set for remote proving"));
-    ///  let current_dir = env::current_dir().expect("Failed to get current directory");
-    ///  let ca_cert_path = Some(current_dir.join("tool/ca.pem").to_string_lossy().to_string());
-    ///  let cert_path = Some(current_dir.join("tool/.pem").to_string_lossy().to_string());
-    ///  let key_path = Some(current_dir.join("tool/.key").to_string_lossy().to_string());
-    ///     
-    ///  let network_cfg = NetworkClientCfg {
-    ///     endpoint,
-    ///     ca_cert_path,
-    ///     cert_path,
-    ///     key_path,
-    ///     domain_name,
-    ///     proof_network_privkey,
-    ///  };
-    ///
-    ///  let client = ProverClient::network(&network_cfg);
+    /// let client = ProverClient::network();
     /// ```
     #[cfg(feature = "network")]
-    pub fn network(client_config: &NetworkClientCfg) -> Self {
+    pub fn network() -> Self {
         cfg_if! {
             if #[cfg(feature = "network")] {
+                let network_cfg = NetworkClientCfg::from_env();
                 Self {
-                    prover: Box::new(NetworkProver::new(client_config).unwrap()),
+                    prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
                 }
             } else {
                 panic!("network feature is not enabled")
@@ -377,31 +344,9 @@ impl ProverClientBuilder {
             //     }
             // }
             ProverMode::Network => {
-                let endpoint =
-                    Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
-                let ca_cert_path = Some(
-                    env::var("CA_CERT_PATH").expect("CA_CERT_PATH must be set for remote proving"),
-                );
-                let cert_path =
-                    Some(env::var("CERT_PATH").expect("CERT_PATH must be set for remote proving"));
-                let key_path =
-                    Some(env::var("KEY_PATH").expect("KEY_PATH must be set for remote proving"));
-                let proof_network_privkey = Some(
-                    env::var("ZKM_PRIVATE_KEY")
-                        .expect("ZKM_PRIVATE_KEY must be set for remote proving"),
-                );
-                let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-                let network_cfg = NetworkClientCfg {
-                    endpoint,
-                    ca_cert_path,
-                    cert_path,
-                    key_path,
-                    domain_name,
-                    proof_network_privkey,
-                };
-
                 cfg_if! {
                    if #[cfg(feature = "network")] {
+                        let network_cfg = NetworkClientCfg::from_env();
                         ProverClient {
                             prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
                         }

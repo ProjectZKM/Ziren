@@ -25,7 +25,7 @@ enum Step {
     InSplit = 1;
     InProve = 2;
     InAgg = 3;
-    InAggAll = 4;
+    // !!!del!!! InAggAll = 4;
     InSnark = 5;
     End = 6;
 }

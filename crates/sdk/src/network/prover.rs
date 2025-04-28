@@ -75,9 +75,9 @@ impl NetworkProver {
         };
 
         let private_key =
-            client_config.proof_network_privkey.to_owned().expect("PRIVATE_KEY must be set");
+            client_config.proof_network_privkey.to_owned().expect("ZKM_PRIVATE_KEY must be set");
         if private_key.is_empty() {
-            panic!("Please set the PRIVATE_KEY");
+            panic!("Please set the ZKM_PRIVATE_KEY");
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
@@ -114,19 +114,12 @@ impl NetworkProver {
         let mut request = GenerateProofRequest {
             proof_id: proof_id.clone(),
             elf_data: input.elf.clone(),
-            seg_size: input.shard_size,
-            public_input_stream: input.public_inputstream.clone(),
+            // public_input_stream: input.public_inputstream.clone(),
             private_input_stream: input.private_inputstream.clone(),
             // execute_only: input.execute_only,
-            composite_proof: input.composite_proof,
             ..Default::default()
         };
-        // for receipt in input.receipts.iter() {
-        //     // request.receipts.push(receipt.clone());
-        //     request.receipts.push(receipt.clone());
-        // }
         for receipt_input in input.receipts.iter() {
-            // request.receipt_inputs.push(receipt_input.clone());
             request.receipt_inputs.push(receipt_input.clone());
         }
         self.sign_ecdsa(&mut request).await;
@@ -165,9 +158,6 @@ impl NetworkProver {
                             log::info!("generate_proof : proving the task.");
                         }
                         Some(Step::InAgg) => log::info!("generate_proof : aggregating the proof."),
-                        Some(Step::InAggAll) => {
-                            log::info!("generate_proof : aggregating the proof.")
-                        }
                         Some(Step::InSnark) => {
                             log::info!("generate_proof : snark-wrapping the proof.")
                         }
@@ -184,18 +174,14 @@ impl NetworkProver {
                         ZKMPublicValues::from(&public_values_bytes);
 
                     // save vk to file if USE_NETWORK_VK = true
-                    if prover_input.use_network_vk {
+                    if prover_input.vk_dir.is_some() {
                         let proof_id = get_status_response.proof_id.clone();
                         let vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
                         let vk = NetworkProver::download_file(&vk_url).await?;
-                        save_data_to_file(&prover_input.proof_results_path, "vk.bin", &vk)
-                            .unwrap_or_else(|_| {
-                                panic!(
-                                    "Failed to save vk.bin in {}",
-                                    prover_input.proof_results_path
-                                )
-                            });
-                        log::info!("vk is saved to file: {}", prover_input.proof_results_path);
+                        let vk_path = prover_input.vk_dir.clone().unwrap();
+                        save_data_to_file(&vk_path, "vk.bin", &vk)
+                            .unwrap_or_else(|_| panic!("Failed to save vk.bin in {}", vk_path));
+                        log::info!("vk is saved to file: {}", vk_path);
                     }
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
@@ -264,6 +250,7 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         self.local_prover.setup(elf)
     }
 
+    /// The proof network only generates the Groth16 proof.
     fn prove<'a>(
         &'a self,
         pk: &ZKMProvingKey,
@@ -326,4 +313,10 @@ pub fn save_data_to_file<P: AsRef<Path>, D: AsRef<[u8]>>(
     log::info!("Successfully written {bytes_written} bytes.");
 
     Ok(())
+}
+
+pub fn read_verifying_key_from_file(file_name: &str) -> anyhow::Result<ZKMVerifyingKey> {
+    let file = File::open(file_name)?;
+    let vk: ZKMVerifyingKey = bincode::deserialize_from(file)?;
+    Ok(vk)
 }
