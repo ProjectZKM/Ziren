@@ -180,8 +180,8 @@ impl NetworkProver {
                         let vk = NetworkProver::download_file(&vk_url).await?;
                         let vk_path = prover_input.vk_dir.clone().unwrap();
                         save_data_to_file(&vk_path, "vk.bin", &vk)
-                            .unwrap_or_else(|_| panic!("Failed to save vk.bin in {}", vk_path));
-                        log::info!("vk is saved to file: {}", vk_path);
+                            .unwrap_or_else(|_| panic!("Failed to save vk.bin in {vk_path}"));
+                        log::info!("vk is saved to file: {vk_path}");
                     }
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
