@@ -38,20 +38,17 @@ pub mod fd {
         /// The file descriptor for hints.
         pub const FD_HINT: u32 = 4;
 
-        /// The file descriptor for the `ecrecover` hook.
-        pub const K1_ECRECOVER_HOOK: u32 = 5;
-
-        /// The file descriptor for the `ecrecover` hook.
-        pub const R1_ECRECOVER_HOOK: u32 = 6;
+        /// The file descriptor through which to access `hook_ecrecover`.
+        pub const FD_ECRECOVER_HOOK: u32 = 5;
 
         /// The file descriptor through which to access `hook_ed_decompress`.
-        pub const FD_EDDECOMPRESS: u32 = 7;
+        pub const FD_EDDECOMPRESS: u32 = 6;
 
         /// The file descriptor through which to access `hook_fp_sqrt`.
-        pub const FD_FP_SQRT: u32 = 8;
+        pub const FD_FP_SQRT: u32 = 7;
 
         /// The file descriptor through which to access `hook_fp_inverse`.
-        pub const FD_FP_INV: u32 = 9;
+        pub const FD_FP_INV: u32 = 8;
     }
 }
 

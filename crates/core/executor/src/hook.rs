@@ -3,8 +3,6 @@ use core::fmt::Debug;
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 use hashbrown::HashMap;
-use zkm_curves::k256::{Invert, RecoveryId, Signature, VerifyingKey};
-use zkm_curves::p256::Signature as p256Signature;
 use zkm_curves::{BigUint, One, Zero};
 
 use crate::Executor;
@@ -76,8 +74,7 @@ impl Default for HookRegistry<'_> {
         let table = HashMap::from([
             // Note: To ensure any `fd` value is synced with `zkvm/precompiles/src/io.rs`,
             // add an assertion to the test `hook_fds_match` below.
-            (K1_ECRECOVER_HOOK, hookify(hook_k1_ecrecover)),
-            (R1_ECRECOVER_HOOK, hookify(hook_r1_ecrecover)),
+            (FD_ECRECOVER_HOOK, hookify(hook_ecrecover)),
             (FD_FP_SQRT, hookify(fp_ops::hook_fp_sqrt)),
             (FD_FP_INV, hookify(fp_ops::hook_fp_inverse)),
         ]);
@@ -105,87 +102,104 @@ pub struct HookEnv<'a, 'b: 'a> {
     pub runtime: &'a Executor<'b>,
 }
 
-/// Recovers the public key from the signature and message hash using the k256 crate.
+/// The hook for the `ecrecover` patches.
 ///
-/// # Arguments
+/// The input should be of the form [(`curve_id_u8` | `r_is_y_odd_u8` << 7) || `r` || `alpha`]
+/// where:
+/// * `curve_id` is 1 for secp256k1 and 2 for secp256r1
+/// * `r_is_y_odd` is 0 if r is even and 1 if r is is odd
+/// * r is the x-coordinate of the point, which should be 32 bytes,
+/// * alpha := r * r * r * (a * r) + b, which should be 32 bytes.
 ///
-/// * `env` - The environment in which the hook is invoked.
-/// * `buf` - The buffer containing the signature and message hash.
-///     - The signature is 65 bytes, the first 64 bytes are the signature and the last byte is the
-///       recovery ID.
-///     - The message hash is 32 bytes.
-///
-/// The result is returned as a pair of bytes, where the first 32 bytes are the X coordinate
-/// and the second 32 bytes are the Y coordinate of the decompressed point.
-///
-/// WARNING: This function is used to recover the public key outside of the zkVM context. These
-/// values must be constrained by the zkVM for correctness.
+/// Returns vec![vec![1], `y`, `r_inv`] if the point is decompressable
+/// and vec![vec![0],`nqr_hint`] if not.
 #[must_use]
-pub fn hook_k1_ecrecover(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
-    assert_eq!(buf.len(), 65 + 32, "ecrecover input should have length 65 + 32");
-    let (sig, msg_hash) = buf.split_at(65);
-    let sig: &[u8; 65] = sig.try_into().unwrap();
-    let msg_hash: &[u8; 32] = msg_hash.try_into().unwrap();
+pub fn hook_ecrecover(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
+    assert!(buf.len() == 64 + 1, "ecrecover should have length 65");
 
-    let mut recovery_id = sig[64];
-    let mut sig = Signature::from_slice(&sig[..64]).unwrap();
+    let curve_id = buf[0] & 0b0111_1111;
+    let r_is_y_odd = buf[0] & 0b1000_0000 != 0;
 
-    if let Some(sig_normalized) = sig.normalize_s() {
-        sig = sig_normalized;
-        recovery_id ^= 1;
+    let r_bytes: [u8; 32] = buf[1..33].try_into().unwrap();
+    let alpha_bytes: [u8; 32] = buf[33..65].try_into().unwrap();
+
+    match curve_id {
+        1 => ecrecover::handle_secp256k1(r_bytes, alpha_bytes, r_is_y_odd),
+        2 => ecrecover::handle_secp256r1(r_bytes, alpha_bytes, r_is_y_odd),
+        _ => unimplemented!("Unsupported curve id: {}", curve_id),
+    }
+}
+
+mod ecrecover {
+    use zkm_curves::{k256, p256};
+
+    /// The non-quadratic residue for the curve for secp256k1 and secp256r1.
+    const NQR: [u8; 32] = {
+        let mut nqr = [0; 32];
+        nqr[31] = 3;
+        nqr
     };
-    let recid = RecoveryId::from_byte(recovery_id).expect("Computed recovery ID is invalid!");
 
-    let recovered_key = VerifyingKey::recover_from_prehash(&msg_hash[..], &sig, recid).unwrap();
-    let bytes = recovered_key.to_sec1_bytes();
+    pub(super) fn handle_secp256k1(r: [u8; 32], alpha: [u8; 32], r_y_is_odd: bool) -> Vec<Vec<u8>> {
+        use k256::{
+            elliptic_curve::ff::PrimeField, FieldBytes as K256FieldBytes,
+            FieldElement as K256FieldElement, Scalar as K256Scalar,
+        };
 
-    let (_, s) = sig.split_scalars();
-    let s_inverse = s.invert();
+        let r = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&r)).unwrap();
+        debug_assert!(!bool::from(r.is_zero()), "r should not be zero");
 
-    vec![bytes.to_vec(), s_inverse.to_bytes().to_vec()]
-}
+        let alpha = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&alpha)).unwrap();
+        assert!(!bool::from(alpha.is_zero()), "alpha should not be zero");
 
-/// Recovers s inverse from the signature using the secp256r1 crate.
-///
-/// # Arguments
-///
-/// * `env` - The environment in which the hook is invoked.
-/// * `buf` - The buffer containing the signature.
-///     - The signature is 64 bytes.
-///
-/// The result is a single 32 byte vector containing s inverse.
-#[must_use]
-pub fn hook_r1_ecrecover(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
-    assert_eq!(buf.len(), 64, "ecrecover input should have length 64");
-    let sig: &[u8; 64] = buf.try_into().unwrap();
-    let sig = p256Signature::from_slice(sig).unwrap();
+        // nomralize the y-coordinate always to be consistent.
+        if let Some(mut y_coord) = alpha.sqrt().into_option().map(|y| y.normalize()) {
+            let r = K256Scalar::from_repr(r.to_bytes()).unwrap();
+            let r_inv = r.invert().expect("Non zero r scalar");
 
-    let (_, s) = sig.split_scalars();
-    let s_inverse = s.invert();
+            if r_y_is_odd != bool::from(y_coord.is_odd()) {
+                y_coord = y_coord.negate(1);
+                y_coord = y_coord.normalize();
+            }
 
-    vec![s_inverse.to_bytes().to_vec()]
-}
+            vec![vec![1], y_coord.to_bytes().to_vec(), r_inv.to_bytes().to_vec()]
+        } else {
+            let nqr_field = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&NQR)).unwrap();
+            let qr = alpha * nqr_field;
+            let root = qr.sqrt().expect("if alpha is not a square, then qr should be a square");
 
-#[cfg(test)]
-pub mod tests {
-    use super::*;
-
-    // #[test]
-    // pub fn hook_fds_match() {
-    //     use zkm_zkvm::io;
-    //     assert_eq!(K1_ECRECOVER_HOOK, io::K1_ECRECOVER_HOOK);
-    //     assert_eq!(R1_ECRECOVER_HOOK, io::R1_ECRECOVER_HOOK);
-    // }
-
-    #[test]
-    pub fn registry_new_is_inhabited() {
-        assert_ne!(HookRegistry::new().table.len(), 0);
-        println!("{:?}", HookRegistry::new());
+            vec![vec![0], root.to_bytes().to_vec()]
+        }
     }
 
-    #[test]
-    pub fn registry_empty_is_empty() {
-        assert_eq!(HookRegistry::empty().table.len(), 0);
+    pub(super) fn handle_secp256r1(r: [u8; 32], alpha: [u8; 32], r_y_is_odd: bool) -> Vec<Vec<u8>> {
+        use p256::{
+            elliptic_curve::ff::PrimeField, FieldBytes as P256FieldBytes,
+            FieldElement as P256FieldElement, Scalar as P256Scalar,
+        };
+
+        let r = P256FieldElement::from_bytes(P256FieldBytes::from_slice(&r)).unwrap();
+        debug_assert!(!bool::from(r.is_zero()), "r should not be zero");
+
+        let alpha = P256FieldElement::from_bytes(P256FieldBytes::from_slice(&alpha)).unwrap();
+        debug_assert!(!bool::from(alpha.is_zero()), "alpha should not be zero");
+
+        if let Some(mut y_coord) = alpha.sqrt().into_option() {
+            let r = P256Scalar::from_repr(r.to_bytes()).unwrap();
+            let r_inv = r.invert().expect("Non zero r scalar");
+
+            if r_y_is_odd != bool::from(y_coord.is_odd()) {
+                y_coord = -y_coord;
+            }
+
+            vec![vec![1], y_coord.to_bytes().to_vec(), r_inv.to_bytes().to_vec()]
+        } else {
+            let nqr_field = P256FieldElement::from_bytes(P256FieldBytes::from_slice(&NQR)).unwrap();
+            let qr = alpha * nqr_field;
+            let root = qr.sqrt().expect("if alpha is not a square, then qr should be a square");
+
+            vec![vec![0], root.to_bytes().to_vec()]
+        }
     }
 }
 
@@ -441,5 +455,21 @@ mod fp_ops {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    #[test]
+    pub fn registry_new_is_inhabited() {
+        assert_ne!(HookRegistry::new().table.len(), 0);
+        println!("{:?}", HookRegistry::new());
+    }
+
+    #[test]
+    pub fn registry_empty_is_empty() {
+        assert_eq!(HookRegistry::empty().table.len(), 0);
     }
 }

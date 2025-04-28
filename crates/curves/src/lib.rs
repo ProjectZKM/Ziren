@@ -10,19 +10,8 @@ pub mod curve25519_dalek {
     pub use curve25519_dalek::edwards::CompressedEdwardsY;
 }
 
-pub mod k256 {
-    pub use k256::{
-        ecdsa::{RecoveryId, Signature, VerifyingKey},
-        elliptic_curve::ops::Invert,
-    };
-}
-
-pub mod p256 {
-    pub use p256::{
-        ecdsa::{Signature, VerifyingKey},
-        elliptic_curve::ops::Invert,
-    };
-}
+pub use k256;
+pub use p256;
 
 use params::{FieldParameters, NumWords};
 use std::{
