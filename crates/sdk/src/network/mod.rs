@@ -35,25 +35,28 @@ impl NetworkClientCfg {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ProverInput {
     pub elf: Vec<u8>,
+    pub program_name: Option<String>,
     // pub public_inputstream: Vec<u8>,
     pub private_inputstream: Vec<u8>,
     // pub execute_only: bool,
     pub receipts: Vec<Vec<u8>>,
     pub asset_url: String,
-    pub vk_dir: Option<String>,
+    pub vk_base_dir: Option<String>,
 }
 
 impl Default for ProverInput {
     fn default() -> Self {
-        let vk_dir = env::var("VK_DIR").ok();
+        let vk_dir = env::var("VK_BASE_DIR").ok();
+        let program_name = env::var("PROGRAM_NAME").ok();
         let asset_url = env::var("ASSET_URL").unwrap_or("http://152.32.186.45:20001".to_string());
         Self {
             elf: vec![],
+            program_name,
             // public_inputstream: vec![],
             private_inputstream: vec![],
             receipts: vec![],
             asset_url,
-            vk_dir,
+            vk_base_dir: vk_dir,
         }
     }
 }
@@ -76,6 +79,7 @@ mod test {
     use crate::{utils, ProverClient};
     use std::env;
     use zkm_core_machine::io::ZKMStdin;
+
     #[ignore]
     #[test]
     fn test_proof_network_fib() {
@@ -84,13 +88,14 @@ mod test {
         let mut stdin = ZKMStdin::new();
         stdin.write(&10usize);
         let elf = test_artifacts::FIBONACCI_ELF;
-        let vk_dir = env::var("VK_DIR").unwrap_or(".".to_string());
+        let vk_base_dir = env::var("VK_BASE_DIR").unwrap_or(".".to_string());
+        let program_name = env::var("PROGRAM_NAME").unwrap();
 
         let client = ProverClient::network();
         let (tem_pk, _) = client.setup(elf);
         let proof = client.prove(&tem_pk, stdin).run().unwrap();
 
-        let vk_path = format!("{vk_dir}/vk.bin");
+        let vk_path = format!("{vk_base_dir}/vk/{program_name}/vk.bin");
         let vk = read_verifying_key_from_file(vk_path.as_str()).unwrap();
         client.verify(&proof, &vk).unwrap();
     }

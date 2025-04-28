@@ -173,15 +173,26 @@ impl NetworkProver {
                     let public_values: ZKMPublicValues =
                         ZKMPublicValues::from(&public_values_bytes);
 
-                    // save vk to file if USE_NETWORK_VK = true
-                    if prover_input.vk_dir.is_some() {
+                    // save vk to file if user want to.
+                    if prover_input.vk_base_dir.is_some() && prover_input.program_name.is_some() {
                         let proof_id = get_status_response.proof_id.clone();
-                        let vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
-                        let vk = NetworkProver::download_file(&vk_url).await?;
-                        let vk_path = prover_input.vk_dir.clone().unwrap();
-                        save_data_to_file(&vk_path, "vk.bin", &vk)
-                            .unwrap_or_else(|_| panic!("Failed to save vk.bin in {vk_path}"));
-                        log::info!("vk is saved to file: {vk_path}");
+                        let vk_path = format!(
+                            "{}/vk/{}",
+                            prover_input.vk_base_dir.as_ref().unwrap(),
+                            prover_input.program_name.as_ref().unwrap()
+                        );
+                        let vk_bin = Path::new(&vk_path).join("vk.bin");
+                        if vk_bin.exists() && vk_bin.is_file() {
+                            log::info!("vk already exists, skip downloading.");
+                        } else {
+                            // download vk
+                            let vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
+                            let vk = NetworkProver::download_file(&vk_url).await?;
+                            // save to file
+                            save_data_to_file(&vk_path, "vk.bin", &vk)
+                                .unwrap_or_else(|_| panic!("Failed to save vk.bin in {vk_path}"));
+                            log::info!("vk is saved to file: {vk_path}");
+                        }
                     }
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
