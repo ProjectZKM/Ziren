@@ -60,6 +60,9 @@ impl<V: Copy> PagedMemory<V> {
     /// Get a reference to the memory value at the given address, if it exists.
     pub fn get(&self, addr: u32) -> Option<&V> {
         let (upper, lower) = Self::indices(addr);
+        if upper >= self.index.len() {
+            panic!("addr: {addr:?}, upper: {upper:?}, lower: {lower:?}");
+        }
         let index = self.index[upper];
         if index == NO_PAGE {
             None
