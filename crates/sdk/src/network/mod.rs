@@ -1,4 +1,7 @@
+use crate::network::prover::stage_service::Step;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
 pub mod prover;
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
@@ -8,6 +11,20 @@ pub struct ProverInput {
     pub private_inputstream: Vec<u8>,
     // pub execute_only: bool,
     pub receipts: Vec<Vec<u8>>,
+}
+
+impl fmt::Display for Step {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Step::Init => "Generate_proof : queuing the task.",
+            Step::InSplit => "Generate_proof : splitting the task.",
+            Step::InProve => "Generate_proof : proving the task.",
+            Step::InAgg => "Generate_proof : aggregating the proof.",
+            Step::InSnark => "Generate_proof : snark-wrapping the proof.",
+            Step::End => "Generate_proof : completed.",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[cfg(test)]

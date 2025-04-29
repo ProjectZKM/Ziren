@@ -94,7 +94,7 @@ impl NetworkProver {
         Ok(NetworkProver { endpoint, wallet, local_prover })
     }
 
-    pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) {
+    pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) -> Result<()> {
         let sign_data = match request.block_no {
             Some(block_no) => {
                 format!("{}&{}&{}", request.proof_id, block_no, request.seg_size)
@@ -103,8 +103,9 @@ impl NetworkProver {
                 format!("{}&{}", request.proof_id, request.seg_size)
             }
         };
-        let signature = self.wallet.sign_message(sign_data).await.unwrap();
+        let signature = self.wallet.sign_message(sign_data).await?;
         request.signature = signature.to_string();
+        Ok(())
     }
 
     pub async fn download_file(url: &str) -> Result<Vec<u8>> {
@@ -132,7 +133,7 @@ impl NetworkProver {
         for receipt_input in input.receipts.iter() {
             request.receipt_inputs.push(receipt_input.clone());
         }
-        self.sign_ecdsa(&mut request).await;
+        self.sign_ecdsa(&mut request).await?;
         let mut client = self.connect().await;
         let response = client.generate_proof(request).await?.into_inner();
 
@@ -159,18 +160,7 @@ impl NetworkProver {
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
                     match Step::from_i32(get_status_response.step) {
-                        Some(Step::Init) => log::info!("generate_proof : queuing the task."),
-                        Some(Step::InSplit) => {
-                            log::info!("generate_proof : splitting the task.");
-                        }
-                        Some(Step::InProve) => {
-                            log::info!("generate_proof : proving the task.");
-                        }
-                        Some(Step::InAgg) => log::info!("generate_proof : aggregating the proof."),
-                        Some(Step::InSnark) => {
-                            log::info!("generate_proof : snark-wrapping the proof.")
-                        }
-                        Some(Step::End) => log::info!("generate_proof : completing the proof."),
+                        Some(step) => log::info!("{step}"),
                         None => todo!(),
                     }
                     sleep(Duration::from_secs(30)).await;
@@ -203,15 +193,13 @@ impl NetworkProver {
     ) -> Result<ZKMProofWithPublicValues> {
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
-        bincode::serialize_into(&mut pri_buf, &private_input)
-            .expect("private_input serialization failed");
+        bincode::serialize_into(&mut pri_buf, &private_input)?;
         let mut receipts = Vec::new();
         let proofs = stdin.proofs.clone();
         // todo: adapt to proof network after its updating
         for proof in proofs {
             let mut receipt = Vec::new();
-            bincode::serialize_into(&mut receipt, &proof)
-                .expect("private_input serialization failed");
+            bincode::serialize_into(&mut receipt, &proof)?;
             receipts.push(receipt);
         }
         let prover_input =
