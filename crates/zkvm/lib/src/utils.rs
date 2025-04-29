@@ -64,32 +64,22 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
     fn double(&mut self);
 
     /// Multiplies `self` by the given scalar.
-    fn mul_assign(&mut self, scalar: &[u32]) -> Result<(), MulAssignError> {
+    fn mul_assign(&mut self, scalar: &[u32]) {
         debug_assert!(scalar.len() == N / 2);
 
-        let mut res: Option<Self> = None;
+        let mut res: Self = Self::identity();
         let mut temp = self.clone();
-
-        let scalar_is_zero = scalar.iter().all(|&words| words == 0);
-        if scalar_is_zero {
-            return Err(MulAssignError::ScalarIsZero);
-        }
 
         for &words in scalar.iter() {
             for i in 0..32 {
                 if (words >> i) & 1 == 1 {
-                    match res.as_mut() {
-                        Some(res) => res.add_assign(&temp),
-                        None => res = Some(temp.clone()),
-                    };
+                    res.complete_add_assign(&temp);
                 }
-
                 temp.double();
             }
         }
 
-        *self = res.unwrap();
-        Ok(())
+        *self = res;
     }
 
     /// Performs multi-scalar multiplication (MSM) on slices of bit vectors and points. Note:

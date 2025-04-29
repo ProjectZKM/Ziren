@@ -148,7 +148,7 @@ impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for ProjectivePoint<C> {
 
     fn mul(mut self, rhs: T) -> Self::Output {
         let zkm_point = self.as_mut_zkvm_point();
-        zkm_point.mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr())).unwrap();
+        zkm_point.mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
 
         self
     }
@@ -156,7 +156,7 @@ impl<C: ECDSACurve, T: Borrow<C::Scalar>> Mul<T> for ProjectivePoint<C> {
 
 impl<C: ECDSACurve, T: Borrow<C::Scalar>> MulAssign<T> for ProjectivePoint<C> {
     fn mul_assign(&mut self, rhs: T) {
-        self.as_mut_zkvm_point().mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr())).unwrap();
+        self.as_mut_zkvm_point().mul_assign(&be_bytes_to_le_words(rhs.borrow().to_repr()));
     }
 }
 
