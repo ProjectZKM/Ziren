@@ -2042,7 +2042,7 @@ impl<'a> Executor<'a> {
         many proofs in or forget to call verify_zkm_proof?"
             );
         }
-        if self.state.input_stream_ptr != self.state.input_stream.len() {
+        if self.state.input_stream.is_empty() {
             tracing::warn!("Not all input bytes were read.");
         }
 
