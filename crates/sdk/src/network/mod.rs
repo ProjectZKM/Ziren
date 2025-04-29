@@ -16,12 +16,12 @@ pub struct ProverInput {
 impl fmt::Display for Step {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Step::Init => "Generate_proof : queuing the task.",
-            Step::InSplit => "Generate_proof : splitting the task.",
-            Step::InProve => "Generate_proof : proving the task.",
-            Step::InAgg => "Generate_proof : aggregating the proof.",
-            Step::InSnark => "Generate_proof : snark-wrapping the proof.",
-            Step::End => "Generate_proof : completed.",
+            Step::Init => "Queuing the task.",
+            Step::InSplit => "Splitting the task.",
+            Step::InProve => "Proving the task.",
+            Step::InAgg => "Aggregating the proof.",
+            Step::InSnark => "Snark-wrapping the proof.",
+            Step::End => "Completed.",
         };
         write!(f, "{s}")
     }

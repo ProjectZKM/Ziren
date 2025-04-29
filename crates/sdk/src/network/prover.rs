@@ -160,7 +160,7 @@ impl NetworkProver {
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
                     match Step::from_i32(get_status_response.step) {
-                        Some(step) => log::info!("{step}"),
+                        Some(step) => log::info!("Generate_proof: {step}"),
                         None => todo!(),
                     }
                     sleep(Duration::from_secs(30)).await;
