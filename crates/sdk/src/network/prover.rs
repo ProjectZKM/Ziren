@@ -2,8 +2,6 @@ use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
 use std::fs;
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
@@ -45,7 +43,9 @@ pub struct NetworkProver {
 }
 
 impl NetworkProver {
-    pub fn new(client_config: &NetworkClientCfg) -> anyhow::Result<NetworkProver> {
+    pub fn new() -> anyhow::Result<NetworkProver> {
+        let client_config = NetworkClientCfg::from_env();
+
         let ssl_config = if client_config.ca_cert_path.as_ref().is_none() {
             None
         } else {
@@ -133,7 +133,6 @@ impl NetworkProver {
         &self,
         proof_id: &str,
         timeout: Option<Duration>,
-        prover_input: &ProverInput,
     ) -> Result<(ZKMProof, ZKMPublicValues)> {
         let start_time = Instant::now();
         let mut client = self.connect().await;
@@ -172,28 +171,7 @@ impl NetworkProver {
                             .await?;
                     let public_values: ZKMPublicValues =
                         ZKMPublicValues::from(&public_values_bytes);
-
-                    // save vk to file if user want to.
-                    if prover_input.vk_base_dir.is_some() && prover_input.program_name.is_some() {
-                        let proof_id = get_status_response.proof_id.clone();
-                        let vk_path = format!(
-                            "{}/vk/{}",
-                            prover_input.vk_base_dir.as_ref().unwrap(),
-                            prover_input.program_name.as_ref().unwrap()
-                        );
-                        let vk_bin = Path::new(&vk_path).join("vk.bin");
-                        if vk_bin.exists() && vk_bin.is_file() {
-                            log::info!("vk already exists, skip downloading.");
-                        } else {
-                            // download vk
-                            let vk_url = format!("{}/{}/vk.bin", prover_input.asset_url, proof_id);
-                            let vk = NetworkProver::download_file(&vk_url).await?;
-                            // save to file
-                            save_data_to_file(&vk_path, "vk.bin", &vk)
-                                .unwrap_or_else(|_| panic!("Failed to save vk.bin in {vk_path}"));
-                            log::info!("vk is saved to file: {vk_path}");
-                        }
-                    }
+                    // proof
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                             .expect("Failed to deserialize proof");
@@ -226,18 +204,14 @@ impl NetworkProver {
                 .expect("private_input serialization failed");
             receipts.push(receipt);
         }
-        let prover_input = ProverInput {
-            elf: elf.to_vec(),
-            private_inputstream: pri_buf,
-            receipts,
-            ..Default::default()
-        };
+        let prover_input =
+            ProverInput { elf: elf.to_vec(), private_inputstream: pri_buf, receipts };
 
         log::info!("calling request_proof.");
         let proof_id = self.request_proof(&prover_input).await?;
 
         log::info!("calling wait_proof, proof_id={proof_id}");
-        let (proof, public_values) = self.wait_proof(&proof_id, timeout, &prover_input).await?;
+        let (proof, public_values) = self.wait_proof(&proof_id, timeout).await?;
         Ok(ZKMProofWithPublicValues {
             proof,
             public_values,
@@ -301,33 +275,4 @@ fn get_cert_and_identity(
         identity = Some(Identity::from_pem(cert, key));
     }
     Ok((ca, identity))
-}
-
-pub fn save_data_to_file<P: AsRef<Path>, D: AsRef<[u8]>>(
-    output_dir: P,
-    file_name: &str,
-    data: D,
-) -> anyhow::Result<()> {
-    // Create the output directory
-    let output_dir = output_dir.as_ref();
-    log::info!("create dir: {}", output_dir.display());
-    fs::create_dir_all(output_dir)?;
-
-    // Build the full file path
-    let output_path = output_dir.join(file_name);
-
-    // Open the file and write the data
-    let mut file = File::create(&output_path)?;
-    file.write_all(data.as_ref())?;
-
-    let bytes_written = data.as_ref().len();
-    log::info!("Successfully written {bytes_written} bytes.");
-
-    Ok(())
-}
-
-pub fn read_verifying_key_from_file(file_name: &str) -> anyhow::Result<ZKMVerifyingKey> {
-    let file = File::open(file_name)?;
-    let vk: ZKMVerifyingKey = bincode::deserialize_from(file)?;
-    Ok(vk)
 }

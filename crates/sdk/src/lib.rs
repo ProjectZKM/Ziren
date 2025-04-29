@@ -35,7 +35,6 @@ pub use zkm_prover::{
 };
 
 // Re-export the utilities.
-use crate::network::NetworkClientCfg;
 use crate::utils::block_on;
 pub use utils::setup_logger;
 
@@ -79,9 +78,8 @@ impl ProverClient {
             "network" => {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
-                        let network_cfg = NetworkClientCfg::from_env();
                         Self {
-                            prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
+                            prover: Box::new(NetworkProver::new().unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
@@ -168,9 +166,8 @@ impl ProverClient {
     pub fn network() -> Self {
         cfg_if! {
             if #[cfg(feature = "network")] {
-                let network_cfg = NetworkClientCfg::from_env();
                 Self {
-                    prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
+                    prover: Box::new(NetworkProver::new().unwrap()),
                 }
             } else {
                 panic!("network feature is not enabled")
@@ -346,9 +343,8 @@ impl ProverClientBuilder {
             ProverMode::Network => {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
-                        let network_cfg = NetworkClientCfg::from_env();
                         ProverClient {
-                            prover: Box::new(NetworkProver::new(&network_cfg).unwrap()),
+                            prover: Box::new(NetworkProver::new().unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
