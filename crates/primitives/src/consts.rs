@@ -49,6 +49,13 @@ pub mod fd {
 
         /// The file descriptor through which to access `hook_fp_inverse`.
         pub const FD_FP_INV: u32 = 8;
+
+        /// The file descriptor through which to access `hook_bls12_381_sqrt`.
+        pub const FD_BLS12_381_SQRT: u32 = 9;
+
+        /// The file descriptor through which to access `hook_bls12_381_inverse`.
+        pub const FD_BLS12_381_INVERSE: u32 = 10;
+
     }
 }
 
