@@ -21,7 +21,7 @@ use self::{
 use crate::{bytes::trace::NUM_ROWS, utils::zeroed_f_vec};
 
 /// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 10;
+pub const NUM_BYTE_OPS: usize = 11;
 
 /// A chip for computing byte operations.
 ///
