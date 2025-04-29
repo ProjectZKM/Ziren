@@ -23,7 +23,7 @@ impl fmt::Display for Step {
             Step::InSnark => "Generate_proof : snark-wrapping the proof.",
             Step::End => "Generate_proof : completed.",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
