@@ -25,8 +25,7 @@ use zkm_core_executor::{
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::operations::{FixedShiftRightOperation, IsEqualWordOperation, IsZeroOperation};
-use crate::{air::ZKMCoreAirBuilder, operations::IsZeroWordOperation, utils::pad_rows_fixed};
+use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed};
 
 /// The number of main trace columns for `CloClzChip`.
 pub const NUM_CLOCLZ_COLS: usize = size_of::<CloClzCols<u8>>();
@@ -60,24 +59,14 @@ pub struct CloClzCols<T> {
     /// if clz, bb == 0xffffffff - b
     pub bb: Word<T>,
 
-    /// whether the result is 32.
-    pub is_result_32: IsZeroOperation<T>,
+    /// whether the half half word of bb is zero.
+    pub is_high_half_zero: T,
 
-    /// whether the `bb` is zero.
-    pub is_bb_zero: IsZeroWordOperation<T>,
+    /// Leading zero number of low half word of bb.
+    pub low_half_clo: T,
 
-    /// bb shift right by `32 - result`.
-    /// Use right-shifting sr1 by 1 to obtain sr0.
-    pub sr0: FixedShiftRightOperation<T>,
-
-    /// bb shift right by `32 - (result + 1)`.
-    pub sr1: Word<T>,
-
-    /// sr0 == 0
-    pub is_sr0_zero: IsZeroWordOperation<T>,
-
-    /// sr1 == 1
-    pub is_sr1_one: IsEqualWordOperation<T>,
+    /// Leading zero number of high half word of bb.
+    pub high_half_clo: T,
 
     /// Flag to indicate whether the opcode is CLZ.
     pub is_clz: T,
@@ -123,27 +112,32 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
 
-            // if bb == 0, then result is 32.
-            cols.is_result_32.populate(32 - event.a);
-            cols.is_bb_zero.populate(bb);
+            let low_half_clo = (bb as u16).leading_zeros();
+            let high_half = (bb >> 16) as u16;
+            let high_half_clo = high_half.leading_zeros();
 
-            if bb != 0 {
-                let sr1_val = bb >> (31 - event.a);
-                cols.sr1 = Word::from(sr1_val);
-                cols.sr0.populate(output, sr1_val, 1);
-
-                cols.is_sr0_zero.populate(sr1_val >> 1);
-                cols.is_sr1_one.populate(sr1_val, 1);
-            }
+            cols.low_half_clo = F::from_canonical_u32(low_half_clo);
+            cols.high_half_clo = F::from_canonical_u32(high_half_clo);
+            cols.is_high_half_zero = F::from_bool(high_half == 0);
 
             // Range check.
-            output.add_u8_range_checks(&bb.to_le_bytes());
+            let bytes = bb.to_le_bytes();
+            output.add_u8_range_checks(&bytes);
+
             output.add_byte_lookup_event(ByteLookupEvent {
-                opcode: ByteOpcode::LTU,
-                a1: 1,
+                opcode: ByteOpcode::CLZ,
+                a1: low_half_clo as u16,
                 a2: 0,
-                b: event.a as u8,
-                c: 33,
+                b: bytes[1],
+                c: bytes[0],
+            });
+
+            output.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::CLZ,
+                a1: high_half_clo as u16,
+                a2: 0,
+                b: bytes[3],
+                c: bytes[2],
             });
 
             rows.push(row);
@@ -168,8 +162,9 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             // clz(0) = 32
             cols.a = Word::from(32);
             cols.is_clz = F::ONE;
-            cols.is_bb_zero.populate(0);
-            cols.is_result_32.populate(0);
+            cols.is_high_half_zero = F::ONE;
+            cols.low_half_clo = F::from_canonical_u32(16);
+            cols.high_half_clo = F::from_canonical_u32(16);
 
             row
         };
@@ -204,8 +199,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &CloClzCols<AB::Var> = (*local).borrow();
-        let one: AB::Expr = AB::F::ONE.into();
-        let zero: AB::Expr = AB::F::ZERO.into();
 
         // if clz, bb == b, else bb = !b
         {
@@ -217,13 +210,19 @@ where
             builder.slice_range_check_u8(&local.bb.0, local.is_real);
         }
 
-        // ensure result < 33
-        // Send the comparison lookup.
+        // Send the clo lookup to verify the clo result for low/high half word of bb.
         builder.send_byte(
-            ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::F::ONE,
-            local.a[0],
-            AB::Expr::from_canonical_u8(33),
+            ByteOpcode::CLZ.as_field::<AB::F>(),
+            local.low_half_clo,
+            local.bb[1],
+            local.bb[0],
+            local.is_real,
+        );
+        builder.send_byte(
+            ByteOpcode::CLZ.as_field::<AB::F>(),
+            local.high_half_clo,
+            local.bb[3],
+            local.bb[2],
             local.is_real,
         );
 
@@ -251,63 +250,35 @@ where
             local.is_real,
         );
 
-        // if bb == 0, result is 32
-        let is_bb_zero: AB::Expr = local.is_bb_zero.result.into();
+        // Check the result of the operation.
         {
-            IsZeroWordOperation::<AB::F>::eval(
-                builder,
-                local.bb.map(|x| x.into()),
-                local.is_bb_zero,
-                local.is_real.into(),
-            );
-
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                AB::Expr::from_canonical_u32(32) - local.a[0],
-                local.is_result_32,
-                local.is_real.into(),
-            );
-
-            builder.when(is_bb_zero.clone()).assert_one(local.is_result_32.result);
-        }
-
-        {
-            // Use the SRL table to compute bb >> (31 - result).
-            builder.send_alu(
-                Opcode::SRL.as_field::<AB::F>(),
-                local.sr1,
-                local.bb,
-                Word([
-                    AB::Expr::from_canonical_u32(31) - local.a[0],
-                    zero.clone(),
-                    zero.clone(),
-                    zero.clone(),
-                ]),
-                one.clone() - is_bb_zero.clone(),
-            );
-
-            FixedShiftRightOperation::<AB::F>::eval(
-                builder,
-                local.sr1,
-                1,
-                local.sr0,
-                one.clone() - is_bb_zero.clone(),
+            builder.when(local.is_real).assert_eq(
+                local.a.reduce::<AB>(),
+                local.low_half_clo * local.is_high_half_zero + local.high_half_clo,
             );
         }
 
-        // if bb!=0, check sr == 0 and sr1 == 1
+        // Check the effect when the high half word is one.
         {
-            builder.when_not(is_bb_zero.clone()).assert_one(local.sr1[0]);
-            local
-                .sr0
-                .value
-                .into_iter()
-                .chain(local.sr1.into_iter().skip(1))
-                .for_each(|x| builder.when_not(is_bb_zero.clone()).assert_zero(x));
+            builder
+                .when(local.is_real)
+                .when(local.is_high_half_zero)
+                .assert_eq(local.high_half_clo, AB::Expr::from_canonical_u32(16));
+
+            builder
+                .when(local.is_real)
+                .when(local.is_high_half_zero)
+                .assert_eq(local.bb[3], AB::Expr::from_canonical_u32(0));
+
+            builder
+                .when(local.is_real)
+                .when(local.is_high_half_zero)
+                .assert_eq(local.bb[2], AB::Expr::from_canonical_u32(0));
         }
 
         builder.assert_bool(local.is_clo);
         builder.assert_bool(local.is_clz);
+        builder.assert_bool(local.is_high_half_zero);
         builder.assert_one(local.is_clo + local.is_clz);
         builder.assert_zero(local.a[1]);
         builder.assert_zero(local.a[2]);

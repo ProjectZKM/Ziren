@@ -104,6 +104,12 @@ impl<F: Field> ByteChip<F> {
                         col.value_u16 = F::from_canonical_u32(v);
                         ByteLookupEvent::new(*opcode, v as u16, 0, 0, 0)
                     }
+                    ByteOpcode::CLZ => {
+                        let v = ((b as u32) << 8) + c as u32;
+                        let clz = v.leading_zeros() - 16;
+                        col.clz = F::from_canonical_u32(clz);
+                        ByteLookupEvent::new(*opcode, clz as u16, 0, b, c)
+                    }
                 };
             }
         }

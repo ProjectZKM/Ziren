@@ -14,8 +14,8 @@ use zkm_stark::{shape::Shape, ZKMCoreOpts};
 use crate::{
     context::ZKMContext,
     dependencies::{
-        emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies,
-        emit_jump_dependencies, emit_memory_dependencies, emit_misc_dependencies,
+        emit_branch_dependencies, emit_divrem_dependencies, emit_jump_dependencies,
+        emit_memory_dependencies, emit_misc_dependencies,
     },
     estimate_mips_event_counts, estimate_mips_lde_size,
     events::{
@@ -798,7 +798,6 @@ impl<'a> Executor<'a> {
             }
             Opcode::CLZ | Opcode::CLO => {
                 self.record.cloclz_events.push(event);
-                emit_cloclz_dependencies(self, event);
             }
             _ => {}
         }

@@ -90,26 +90,10 @@ impl JumpChip {
         cols.op_b_value = event.b.into();
         cols.op_c_value = event.c.into();
         cols.op_a_0 = F::from_bool(event.op_a_0);
+        cols.op_a_range_checker.populate(event.a);
+        cols.next_pc = Word::from(event.next_pc);
+        cols.next_pc_range_checker.populate(event.next_pc);
         cols.next_next_pc = Word::from(event.next_next_pc);
-
-        match event.opcode {
-            Opcode::Jump | Opcode::Jumpi => {
-                let target_pc = event.b;
-                cols.op_a_range_checker.populate(event.a);
-                cols.target_pc = Word::from(target_pc);
-                cols.next_pc = Word::from(event.next_pc);
-                cols.next_pc_range_checker.populate(event.next_pc);
-                cols.target_pc_range_checker.populate(target_pc);
-            }
-            Opcode::JumpDirect => {
-                let target_pc = event.next_pc.wrapping_add(event.b);
-                cols.op_a_range_checker.populate(event.a);
-                cols.next_pc = Word::from(event.next_pc);
-                cols.next_pc_range_checker.populate(event.next_pc);
-                cols.target_pc = Word::from(target_pc);
-                cols.target_pc_range_checker.populate(target_pc);
-            }
-            _ => unreachable!(),
-        }
+        cols.next_next_pc_range_checker.populate(event.next_next_pc);
     }
 }

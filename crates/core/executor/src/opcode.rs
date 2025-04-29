@@ -190,4 +190,6 @@ pub enum ByteOpcode {
     U16Range = 8,
     /// Bitwise NOR.
     NOR = 9,
+    /// Leading Zeros.
+    CLZ = 10,
 }

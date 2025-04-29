@@ -65,6 +65,9 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                 ByteOpcode::U16Range => {
                     builder.receive_byte(field_op, local.value_u16, AB::F::ZERO, AB::F::ZERO, mult)
                 }
+                ByteOpcode::CLZ => {
+                    builder.receive_byte(field_op, local.clz, local.b, local.c, mult)
+                }
             }
         }
     }

@@ -99,26 +99,6 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     }
 }
 
-/// Emits the dependencies for clo and clz operations.
-#[allow(clippy::too_many_lines)]
-pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
-    let b = if event.opcode == Opcode::CLZ { event.b } else { !event.b };
-    if b != 0 {
-        let srl_event = AluEvent {
-            pc: UNUSED_PC,
-            next_pc: UNUSED_PC + DEFAULT_PC_INC,
-            opcode: Opcode::SRL,
-            hi: 0,
-            a: b >> (31 - event.a),
-            b,
-            c: 31 - event.a,
-            op_a_0: false,
-        };
-
-        executor.record.shift_right_events.push(srl_event);
-    }
-}
-
 /// Emit the dependencies for memory instructions.
 pub fn emit_memory_dependencies(
     executor: &mut Executor,
