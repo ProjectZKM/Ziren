@@ -1,9 +1,9 @@
 use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
-use std::fs;
 use std::path::Path;
 use std::time::Instant;
+use std::{env, fs};
 
 use ethers::signers::{LocalWallet, Signer};
 use tokio::time::sleep;
@@ -12,7 +12,7 @@ use tonic::transport::Endpoint;
 use tonic::transport::{Certificate, Identity};
 use tonic::transport::{Channel, ClientTlsConfig};
 
-use crate::network::{NetworkClientCfg, ProverInput};
+use crate::network::ProverInput;
 use crate::{block_on, CpuProver, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues};
 use anyhow::{bail, Result};
 use async_trait::async_trait;
@@ -43,26 +43,37 @@ pub struct NetworkProver {
 }
 
 impl NetworkProver {
-    pub fn new() -> anyhow::Result<NetworkProver> {
-        let client_config = NetworkClientCfg::from_env();
-
-        let ssl_config = if client_config.ca_cert_path.as_ref().is_none() {
+    pub fn from_env() -> anyhow::Result<NetworkProver> {
+        let proof_network_privkey = Some(
+            env::var("ZKM_PRIVATE_KEY").expect("ZKM_PRIVATE_KEY must be set for remote proving"),
+        );
+        let endpoint =
+            Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
+        let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
+        // Default ca cert directory
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let ca_cert_path = Some(
+            env::var("CA_CERT_PATH")
+                .unwrap_or(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string()),
+        );
+        let cert_path = env::var("CERT_PATH").ok();
+        let key_path = env::var("KEY_PATH").ok();
+        let ssl_config = if ca_cert_path.as_ref().is_none() {
             None
         } else {
             let (ca_cert, identity) = get_cert_and_identity(
-                client_config.ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
-                client_config.cert_path.as_ref().expect("CERT_PATH not set"),
-                client_config.key_path.as_ref().expect("KEY_PATH not set"),
+                ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
+                cert_path.as_ref().expect("CERT_PATH not set"),
+                key_path.as_ref().expect("KEY_PATH not set"),
             )?;
             Some(Config { ca_cert, identity })
         };
 
-        let endpoint_para = client_config.endpoint.to_owned().expect("ENDPOINT must be set");
+        let endpoint_para = endpoint.to_owned().expect("ENDPOINT must be set");
         let endpoint = match ssl_config {
             Some(config) => {
-                let mut tls_config = ClientTlsConfig::new().domain_name(
-                    client_config.domain_name.to_owned().expect("DOMAIN_NAME must be set"),
-                );
+                let mut tls_config = ClientTlsConfig::new()
+                    .domain_name(domain_name.to_owned().expect("DOMAIN_NAME must be set"));
                 if let Some(ca_cert) = config.ca_cert {
                     tls_config = tls_config.ca_certificate(ca_cert);
                 }
@@ -74,8 +85,7 @@ impl NetworkProver {
             None => Endpoint::new(endpoint_para.to_owned())?,
         };
 
-        let private_key =
-            client_config.proof_network_privkey.to_owned().expect("ZKM_PRIVATE_KEY must be set");
+        let private_key = proof_network_privkey.to_owned().expect("ZKM_PRIVATE_KEY must be set");
         if private_key.is_empty() {
             panic!("Please set the ZKM_PRIVATE_KEY");
         }

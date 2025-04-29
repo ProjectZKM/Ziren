@@ -79,7 +79,7 @@ impl ProverClient {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         Self {
-                            prover: Box::new(NetworkProver::new().unwrap()),
+                            prover: Box::new(NetworkProver::from_env().unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
@@ -157,7 +157,6 @@ impl ProverClient {
     ///
     /// ```no_run
     /// use std::env;
-    /// use zkm_sdk::network::NetworkClientCfg;
     /// use zkm_sdk::ProverClient;
     ///
     /// let client = ProverClient::network();
@@ -167,7 +166,7 @@ impl ProverClient {
         cfg_if! {
             if #[cfg(feature = "network")] {
                 Self {
-                    prover: Box::new(NetworkProver::new().unwrap()),
+                    prover: Box::new(NetworkProver::from_env().unwrap()),
                 }
             } else {
                 panic!("network feature is not enabled")
@@ -344,7 +343,7 @@ impl ProverClientBuilder {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
                         ProverClient {
-                            prover: Box::new(NetworkProver::new().unwrap()),
+                            prover: Box::new(NetworkProver::from_env().unwrap()),
                         }
                     } else {
                         panic!("network feature is not enabled")
