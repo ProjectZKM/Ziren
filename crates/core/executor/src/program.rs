@@ -10,8 +10,7 @@ use std::str::FromStr;
 use p3_field::Field;
 use p3_field::FieldExtensionAlgebra;
 use p3_field::PrimeField32;
-use p3_maybe_rayon::prelude::IntoParallelIterator;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use zkm_stark::air::{MachineAir, MachineProgram};
 use zkm_stark::septic_curve::{SepticCurve, SepticCurveComplete};
@@ -142,10 +141,17 @@ impl Program {
             }
         }
 
-        // decode each instruction
         let instructions: Vec<_> = instructions
-            .windows(2)
-            .map(|window| Instruction::decode_from(window[0], window[1]).unwrap())
+            .par_iter()
+            .enumerate()
+            .filter_map(|(i, a)| {
+                if i + 1 < instructions.len() {
+                    let b = instructions.get(i + 1)?;
+                    Some(Instruction::decode_from(*a, *b).unwrap())
+                } else {
+                    Some(Instruction::decode_from(*a, 0).unwrap())
+                }
+            })
             .collect();
 
         Ok(Program {

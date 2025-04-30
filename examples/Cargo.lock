@@ -6824,6 +6824,7 @@ dependencies = [
  "p3-koala-bear",
  "p3-maybe-rayon",
  "rand 0.8.5",
+ "rayon",
  "rayon-scan",
  "rrs-succinct",
  "serde",

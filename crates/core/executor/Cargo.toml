@@ -13,7 +13,7 @@ categories = { workspace = true }
 zkm-primitives = { workspace = true }
 zkm-curves = { workspace = true }
 zkm-stark = { workspace = true }
-
+rayon = "1.7.0"
 rayon-scan = "0.1.1"
 
 # p3
