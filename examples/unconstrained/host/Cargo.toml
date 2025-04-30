@@ -1,0 +1,10 @@
+[package]
+version = "0.1.0"
+name = "unconstrained-host"
+edition = "2021"
+
+[dependencies]
+zkm-sdk = { path = "../../../crates/sdk" }
+
+[build-dependencies]
+zkm-build = { path = "../../../crates/build" }
