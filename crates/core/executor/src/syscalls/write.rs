@@ -45,17 +45,12 @@ impl Syscall for WriteSyscall {
         } else if fd == FD_PUBLIC_VALUES {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == FD_HINT {
-            rt.state.input_stream.push_front(slice.to_vec());
+            rt.state.input_stream.push(slice.to_vec());
         } else if let Some(mut hook) = rt.hook_registry.get(fd) {
             let res = hook.invoke_hook(rt.hook_env(), slice);
-
-            // Write the result back to the input stream.
-            //
-            // Note: The result is written in reverse order to the input stream to maintain the
-            // order.
-            for val in res.into_iter().rev() {
-                rt.state.input_stream.push_front(val);
-            }
+            // Add result vectors to the beginning of the stream.
+            let ptr = rt.state.input_stream_ptr;
+            rt.state.input_stream.splice(ptr..ptr, res);
         } else {
             tracing::warn!("tried to write to unknown file descriptor {fd}");
         }

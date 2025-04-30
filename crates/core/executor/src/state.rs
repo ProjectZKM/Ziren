@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     fs::File,
     io::{Seek, Write},
 };
@@ -48,7 +47,10 @@ pub struct ExecutionState {
     pub uninitialized_memory: PagedMemory<u32>,
 
     /// A stream of input values (global to the entire program).
-    pub input_stream: VecDeque<Vec<u8>>,
+    pub input_stream: Vec<Vec<u8>>,
+
+    /// A ptr to the current position in the input stream incremented by `HINT_READ` opcode.
+    pub input_stream_ptr: usize,
 
     /// A stream of proofs (reduce vk, proof, verifying key) inputted to the program.
     pub proof_stream:
@@ -81,7 +83,8 @@ impl ExecutionState {
             exited: false,
             memory: PagedMemory::new_preallocated(),
             uninitialized_memory: PagedMemory::default(),
-            input_stream: VecDeque::new(),
+            input_stream: Vec::new(),
+            input_stream_ptr: 0,
             public_values_stream: Vec::new(),
             public_values_stream_ptr: 0,
             proof_stream: Vec::new(),
