@@ -1,10 +1,7 @@
 #![allow(unused_unsafe)]
-use crate::{syscall_hint_len, syscall_hint_read, syscall_write};
+use crate::{read_vec_raw, syscall_write, ReadVecResult};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    alloc::Layout,
-    io::{Result, Write},
-};
+use std::io::{Result, Write};
 pub use zkm_primitives::consts::fd::*;
 
 /// A writer that writes to a file descriptor inside the zkVM.
@@ -27,36 +24,30 @@ impl Write for SyscallWriter {
     }
 }
 
-/// Read a buffer from the input stream.
+/// Read a buffer from the input stream. The buffer is read into uninitialized memory.
+///
+/// When the `bump` feature is enabled, the buffer is read into a new buffer allocated by the
+/// program.
+///
+/// When there is no allocator selected, the program will fail to compile.
 ///
 /// ### Examples
 /// ```ignore
-/// let data: Vec<u8> = zkm_zkvm::io::read_vec();
+/// let data: Vec<u8> = sp1_zkvm::io::read_vec();
 /// ```
+#[track_caller]
 pub fn read_vec() -> Vec<u8> {
-    // Round up to the nearest multiple of 4 so that the memory allocated is in whole words
-    let len = unsafe { syscall_hint_len() };
-    let capacity = len.div_ceil(4) * 4;
+    let ReadVecResult { ptr, len, capacity } = unsafe { read_vec_raw() };
 
-    // Allocate a buffer of the required length that is 4 byte aligned
-    let layout = Layout::from_size_align(capacity, 4).expect("vec is too large");
-    let ptr = unsafe { std::alloc::alloc(layout) };
-
-    // SAFETY:
-    // 1. `ptr` was allocated using alloc
-    // 2. We assuume that the VM global allocator doesn't dealloc
-    // 3/6. Size is correct from above
-    // 4/5. Length is 0
-    // 7. Layout::from_size_align already checks this
-    let mut vec = unsafe { Vec::from_raw_parts(ptr, 0, capacity) };
-
-    // Read the vec into uninitialized memory. The syscall assumes the memory is uninitialized,
-    // which should be true because the allocator does not dealloc, so a new alloc should be fresh.
-    unsafe {
-        syscall_hint_read(ptr, len);
-        vec.set_len(len);
+    if ptr.is_null() {
+        panic!(
+            "Tried to read from the input stream, but it was empty @ {} \n
+            Was the correct data written into SP1Stdin?",
+            std::panic::Location::caller()
+        )
     }
-    vec
+
+    unsafe { Vec::from_raw_parts(ptr, len, capacity) }
 }
 
 /// Read a deserializable object from the input stream.
@@ -71,10 +62,25 @@ pub fn read_vec() -> Vec<u8> {
 ///     b: u32,
 /// }
 ///
-/// let data: MyStruct = zkm_zkvm::io::read();
+/// let data: MyStruct = sp1_zkvm::io::read();
 /// ```
+#[track_caller]
 pub fn read<T: DeserializeOwned>() -> T {
-    let vec = read_vec();
+    let ReadVecResult { ptr, len, capacity } = unsafe { read_vec_raw() };
+
+    if ptr.is_null() {
+        panic!(
+            "Tried to read from the input stream, but it was empty @ {} \n
+            Was the correct data written into SP1Stdin?",
+            std::panic::Location::caller()
+        )
+    }
+
+    // 1. `ptr` was allocated using alloc
+    // 2. Assume that the allocator in the VM doesn't deallocate in the input space.
+    // 3. Size and length are correct from above. Length is <= capacity.
+    let vec = unsafe { Vec::from_raw_parts(ptr, len, capacity) };
+
     bincode::deserialize(&vec).expect("deserialization failed")
 }
 

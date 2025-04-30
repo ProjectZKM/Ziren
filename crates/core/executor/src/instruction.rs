@@ -458,7 +458,7 @@ impl Instruction {
             // MSUBU
             (0b011100, 0b000101) => Ok(Self::new(Opcode::MSUBU, 32, rt, rs, false, false)),
             _ => {
-                log::debug!("decode: invalid opcode {opcode:#08b} {func:#08b}");
+                log::warn!("decode: invalid opcode {opcode:#08b} {func:#08b}");
                 Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
             }
         }

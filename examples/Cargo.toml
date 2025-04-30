@@ -25,14 +25,16 @@ members = [
   "plonk/host",
   "regex/guest",
   "regex/host",
-  "revme/guest",
-  "revme/host",
+  # "revme/guest",
+  # "revme/host",
   "rsa/guest",
   "rsa/host",
   "ssz-withdrawals/guest",
   "ssz-withdrawals/host",
   "tendermint/guest",
   "tendermint/host",
+  "unconstrained/guest",
+  "unconstrained/host",
 ]
 resolver = "2"
 
