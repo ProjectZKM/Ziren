@@ -271,8 +271,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                         MipsAir::<F>::Global(GlobalChip).name(),
                         ((2 * num_local_mem_events
                             + (1 << allowed_log2_height).div_ceil(&air.rows_per_event(record)))
-                            .next_power_of_two()
-                            .ilog2() as usize)
+                        .next_power_of_two()
+                        .ilog2() as usize)
                             .max(4),
                     ),
                 ]

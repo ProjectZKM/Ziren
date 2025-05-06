@@ -19,11 +19,11 @@ use thiserror::Error;
 use zkm_core_executor::ExecutionReport;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};
-use zkm_prover::{
-    components::{DefaultProverComponents, ZKMProverComponents}, CoreSC, InnerSC, ZKMCoreProofData,
-    ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
-};
 use zkm_primitives::io::ZKMPublicValues;
+use zkm_prover::{
+    components::{DefaultProverComponents, ZKMProverComponents},
+    CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
+};
 use zkm_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::install::try_install_circuit_artifacts;
@@ -183,9 +183,10 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
     }
 }
 
-
 impl Prover<DefaultProverComponents> for ProverClient {
-    fn id(&self) -> ProverType { todo!() }
+    fn id(&self) -> ProverType {
+        todo!()
+    }
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
         self.prover.zkm_prover()
@@ -202,7 +203,7 @@ impl Prover<DefaultProverComponents> for ProverClient {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues>{
+    ) -> Result<ZKMProofWithPublicValues> {
         self.prover.prove(pk, stdin, opts, context, kind)
     }
 

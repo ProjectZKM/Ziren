@@ -106,7 +106,10 @@ impl<V: Copy> PagedMemory<V> {
     pub fn entry(&mut self, addr: u32) -> Entry<'_, V> {
         let (upper, lower) = Self::indices(addr);
         if upper >= self.index.len() {
-            log::error!("addr: {addr:?}, upper: {upper:?}, self.index.len(): {:?}", self.index.len());
+            log::error!(
+                "addr: {addr:?}, upper: {upper:?}, self.index.len(): {:?}",
+                self.index.len()
+            );
         }
         let index = self.index[upper];
         if index == NO_PAGE {
