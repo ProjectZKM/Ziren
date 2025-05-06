@@ -207,6 +207,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                             air,
                             *memory_events_per_row,
                             *allowed_log2_height,
+                            Some(record),
                         ) {
                             let mem_events_height = shape[2].1;
                             let global_events_height = shape[3].1;
@@ -240,9 +241,10 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         air: &MipsAir<F>,
         memory_events_per_row: usize,
         allowed_log2_height: usize,
+        record: Option<&ExecutionRecord>,
     ) -> Vec<[(String, usize); 4]> {
         // TODO: This is a temporary fix to the shape, concretely fix this
-        (1..=4 * air.rows_per_event())
+        (1..=4 * air.rows_per_event(record))
             .rev()
             .map(|rows_per_event| {
                 let num_local_mem_events =
@@ -252,7 +254,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                     (
                         MipsAir::<F>::SyscallPrecompile(SyscallChip::precompile()).name(),
                         ((1 << allowed_log2_height)
-                            .div_ceil(&air.rows_per_event())
+                            .div_ceil(&air.rows_per_event(record))
                             .next_power_of_two()
                             .ilog2() as usize)
                             .max(4),
@@ -268,9 +270,9 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                     (
                         MipsAir::<F>::Global(GlobalChip).name(),
                         ((2 * num_local_mem_events
-                            + (1 << allowed_log2_height).div_ceil(&air.rows_per_event()))
-                        .next_power_of_two()
-                        .ilog2() as usize)
+                            + (1 << allowed_log2_height).div_ceil(&air.rows_per_event(record)))
+                            .next_power_of_two()
+                            .ilog2() as usize)
                             .max(4),
                     ),
                 ]
@@ -312,7 +314,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let precompile_only_shapes = self.partial_precompile_shapes.iter().flat_map(
             move |(air, (mem_events_per_row, allowed_log_heights))| {
                 allowed_log_heights.iter().flat_map(move |allowed_log_height| {
-                    self.get_precompile_shapes(air, *mem_events_per_row, *allowed_log_height)
+                    self.get_precompile_shapes(air, *mem_events_per_row, *allowed_log_height, None)
                 })
             },
         );
@@ -399,6 +401,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                     air,
                     *mem_events_per_row,
                     *allowed_log_heights.last().unwrap(),
+                    None,
                 )
             },
         );
