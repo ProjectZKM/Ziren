@@ -523,14 +523,7 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
             let tallest_log2_height = std::cmp::max(maximal_log2_height, min_log2_height_threshold);
             let shortest_log2_height = tallest_log2_height.saturating_sub(min_offset);
 
-            let mut range =
-                (shortest_log2_height..=tallest_log2_height).map(Some).collect::<Vec<_>>();
-
-            if shortest_log2_height > maximal_log2_height {
-                range.insert(0, Some(shortest_log2_height));
-            }
-
-            range
+            (shortest_log2_height..=tallest_log2_height).map(Some).collect::<Vec<_>>()
         } else {
             vec![None, Some(log2_height_buffer)]
         }
