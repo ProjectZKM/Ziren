@@ -73,3 +73,5 @@ rsa = { git = "https://github.com/zkMIPS-patches/RustCrypto-RSA.git", branch = "
 secp256k1 = { git = "https://github.com/zkMIPS-patches/rust-secp256k1", branch = "patch-0.29.1" }
 sha2-v0-10-8 = { git = "https://github.com/zkMIPS-patches/RustCrypto-hashes", package = "sha2", branch = "patch-sha2-0.10.8" }
 substrate-bn = { git = "https://github.com/zkMIPS-patches/bn", branch = "patch-0.6.0" }
+k256 = { git = "https://github.com/zkMIPS-patches/elliptic-curves", branch = "patch-k256-0.13.4" }
+p256 = { git = "https://github.com/zkMIPS-patches/elliptic-curves", branch = "patch-p256-0.13.2" }
