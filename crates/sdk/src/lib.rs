@@ -5,21 +5,15 @@
 pub mod action;
 // pub mod artifacts;
 pub mod install;
-// #[cfg(feature = "network")]
-// pub mod network;
-// #[cfg(feature = "network-v2")]
-// #[path = "network-v2/mod.rs"]
-// pub mod network_v2;
 
+#[cfg(feature = "network")]
+pub use crate::network::prover::NetworkProver;
+use cfg_if::cfg_if;
 use std::env;
-
-// #[cfg(feature = "network")]
-// pub use crate::network::prover::NetworkProver as NetworkProverV1;
-// #[cfg(feature = "network-v2")]
-// pub use crate::network_v2::prover::NetworkProver as NetworkProverV2;
 // #[cfg(feature = "cuda")]
 // pub use crate::provers::CudaProver;
 
+pub mod network;
 pub mod proof;
 pub mod provers;
 pub mod utils;
@@ -28,9 +22,7 @@ pub use proof::*;
 pub use provers::ZKMVerificationError;
 use zkm_prover::components::DefaultProverComponents;
 
-#[cfg(any(feature = "network", feature = "network-v2"))]
-use {std::future::Future, tokio::task::block_in_place};
-
+#[cfg(feature = "network")]
 pub use provers::{CpuProver, MockProver, Prover};
 
 pub use zkm_build::include_elf;
@@ -43,6 +35,7 @@ pub use zkm_prover::{
 };
 
 // Re-export the utilities.
+use crate::utils::block_on;
 pub use utils::setup_logger;
 
 /// A client for interacting with zkMIPS.
@@ -82,28 +75,17 @@ impl ProverClient {
                     prover: Box::new(CudaProver::new(ZKMProver::new())),
                 }
             }
-            // TODO: Anyone can implement it when a network prover is needed.
-            // "network" => {
-            //     let private_key = env::var("ZKM_PRIVATE_KEY")
-            //         .expect("ZKM_PRIVATE_KEY must be set for remote proving");
-            //     let rpc_url = env::var("PROVER_NETWORK_RPC").ok();
-            //     let skip_simulation =
-            //         env::var("SKIP_SIMULATION").map(|val| val == "true").unwrap_or_default();
-
-            //     cfg_if! {
-            //         if #[cfg(feature = "network-v2")] {
-            //             Self {
-            //                 prover: Box::new(NetworkProverV2::new(&private_key, rpc_url, skip_simulation)),
-            //             }
-            //         } else if #[cfg(feature = "network")] {
-            //             Self {
-            //                 prover: Box::new(NetworkProverV1::new(&private_key, rpc_url, skip_simulation)),
-            //             }
-            //         } else {
-            //             panic!("network feature is not enabled")
-            //         }
-            //     }
-            // }
+            "network" => {
+                cfg_if! {
+                   if #[cfg(feature = "network")] {
+                        Self {
+                            prover: Box::new(NetworkProver::from_env().unwrap()),
+                        }
+                    } else {
+                        panic!("network feature is not enabled")
+                    }
+                }
+            }
             _ => panic!(
                 "invalid value for ZKM_PROVER environment variable: expected 'local', 'mock', or 'network'"
             ),
@@ -174,31 +156,22 @@ impl ProverClient {
     /// ### Examples
     ///
     /// ```no_run
+    /// use std::env;
     /// use zkm_sdk::ProverClient;
     ///
-    /// let private_key = std::env::var("ZKM_PRIVATE_KEY").unwrap();
-    /// let rpc_url = std::env::var("PROVER_NETWORK_RPC").ok();
-    /// let skip_simulation =
-    ///     std::env::var("SKIP_SIMULATION").map(|val| val == "true").unwrap_or_default();
-    ///
-    /// let client = ProverClient::network(private_key, rpc_url, skip_simulation);
+    /// let client = ProverClient::network();
     /// ```
-    #[cfg(any(feature = "network", feature = "network-v2"))]
-    pub fn network(_private_key: String, _rpc_url: Option<String>, _skip_simulation: bool) -> Self {
-        todo!();
-        // cfg_if! {
-        //     if #[cfg(feature = "network-v2")] {
-        //         Self {
-        //             prover: Box::new(NetworkProverV2::new(&private_key, rpc_url, skip_simulation)),
-        //         }
-        //     } else if #[cfg(feature = "network")] {
-        //         Self {
-        //             prover: Box::new(NetworkProverV1::new(&private_key, rpc_url, skip_simulation)),
-        //         }
-        //     } else {
-        //         panic!("network feature is not enabled")
-        //     }
-        // }
+    #[cfg(feature = "network")]
+    pub fn network() -> Self {
+        cfg_if! {
+            if #[cfg(feature = "network")] {
+                Self {
+                    prover: Box::new(NetworkProver::from_env().unwrap()),
+                }
+            } else {
+                panic!("network feature is not enabled")
+            }
+        }
     }
 
     /// Prepare to execute the given program on the given input (without generating a proof).
@@ -366,23 +339,17 @@ impl ProverClientBuilder {
             //         }
             //     }
             // }
-            // ProverMode::Network => {
-            //     let private_key = self.private_key.expect("The private key is required");
-
-            //     cfg_if! {
-            //         if #[cfg(feature = "network-v2")] {
-            //             ProverClient {
-            //                 prover: Box::new(NetworkProverV2::new(&private_key, self.rpc_url, self.skip_simulation)),
-            //             }
-            //         } else if #[cfg(feature = "network")] {
-            //             ProverClient {
-            //                 prover: Box::new(NetworkProverV1::new(&private_key, self.rpc_url, self.skip_simulation)),
-            //             }
-            //         } else {
-            //             panic!("network feature is not enabled")
-            //         }
-            //     }
-            // }
+            ProverMode::Network => {
+                cfg_if! {
+                   if #[cfg(feature = "network")] {
+                        ProverClient {
+                            prover: Box::new(NetworkProver::from_env().unwrap()),
+                        }
+                    } else {
+                        panic!("network feature is not enabled")
+                    }
+                }
+            }
             ProverMode::Mock => ProverClient::mock(),
             _ => unimplemented!("other provers not supported for now"),
         }
@@ -390,7 +357,7 @@ impl ProverClientBuilder {
 }
 
 /// Builder type for network prover.
-#[cfg(any(feature = "network", feature = "network-v2"))]
+#[cfg(feature = "network")]
 #[derive(Debug, Default)]
 pub struct NetworkProverBuilder {
     private_key: Option<String>,
@@ -398,7 +365,7 @@ pub struct NetworkProverBuilder {
     skip_simulation: bool,
 }
 
-#[cfg(any(feature = "network", feature = "network-v2"))]
+#[cfg(feature = "network")]
 impl NetworkProverBuilder {
     ///  Sets the private key.
     pub fn private_key(mut self, private_key: String) -> Self {
@@ -432,22 +399,6 @@ impl NetworkProverBuilder {
         let private_key = self.private_key.expect("The private key is required");
 
         NetworkProverV2::new(&private_key, self.rpc_url, self.skip_simulation)
-    }
-}
-
-/// Utility method for blocking on an async function.
-///
-/// If we're already in a tokio runtime, we'll block in place. Otherwise, we'll create a new
-/// runtime.
-#[cfg(any(feature = "network", feature = "network-v2"))]
-pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
-    // Handle case if we're already in an tokio runtime.
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        block_in_place(|| handle.block_on(fut))
-    } else {
-        // Otherwise create a new runtime.
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create a new runtime");
-        rt.block_on(fut)
     }
 }
 

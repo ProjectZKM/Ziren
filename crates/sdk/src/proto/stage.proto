@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package stage.v1;
+
+
+service StageService {
+    rpc GenerateProof(GenerateProofRequest) returns (GenerateProofResponse) {}
+    rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {}
+}
+
+enum Status {
+    SUCCESS = 0;
+    UNSPECIFIED = 1;
+    COMPUTING = 2;
+    INVALID_PARAMETER = 3;
+    INTERNAL_ERROR = 4;
+    SPLIT_ERROR = 5;
+    PROVE_ERROR = 6;
+    AGG_ERROR = 7;
+    SNARK_ERROR = 8;
+}
+
+enum Step {
+    Init = 0;
+    InSplit = 1;
+    InProve = 2;
+    InAgg = 3;
+    // !!!del!!! InAggAll = 4;
+    InSnark = 5;
+    End = 6;
+}
+
+message BlockFileItem {
+    string file_name = 1;
+    bytes file_content = 2;
+}
+
+message GenerateProofRequest {
+    string proof_id = 1;
+    bytes elf_data = 2;
+    repeated BlockFileItem block_data = 3;
+    optional uint64 block_no = 4;
+    uint32 seg_size = 5;
+    // !!!del!!! string args = 6;
+    string signature = 7;
+    bytes public_input_stream = 8;
+    bytes private_input_stream = 9;
+    bool execute_only = 10;
+    bool composite_proof = 11;
+    repeated bytes receipt_inputs = 12;
+    repeated bytes receipts = 13;
+}
+
+message GenerateProofResponse {
+    Status status = 1;
+    string error_message = 2;
+    string proof_id = 3;
+    string snark_proof_url = 4;
+    string stark_proof_url = 5;
+    bytes output_stream = 7;
+    string public_values_url = 8;
+}
+
+message GetStatusRequest {
+    string proof_id = 1;
+}
+
+message GetStatusResponse {
+    string proof_id = 1;
+    Status status = 2;
+    bytes proof_with_public_inputs = 3;
+    string snark_proof_url = 4;
+    string stark_proof_url = 5;
+    bytes output_stream = 7;
+    Step step = 8; // Step
+    string public_values_url = 9;
+    uint64 total_steps = 10;
+    bytes receipt = 11;
+    bytes elf_id = 12;
+}

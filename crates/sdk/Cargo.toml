@@ -10,12 +10,12 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-prost = { version = "0.13", optional = true }
+prost = { version = "0.11.0", optional = true }
 serde = { workspace = true, features = ["derive"] }
 twirp = { package = "twirp-rs", version = "0.13.0-succinct", optional = true }
 async-trait = "0.1.81"
 reqwest-middleware = { version = "0.3.2", optional = true }
-reqwest = { version = "0.12.4", default-features = false, features = [
+reqwest = { version = "0.11", default-features = false, features = [
   "rustls-tls",
   "trust-dns",
   "stream",
@@ -27,7 +27,9 @@ zkm-core-machine = { workspace = true }
 zkm-build = { workspace = true }
 futures = "0.3.30"
 bincode = "1.3.3"
-tokio = { version = "1.39.2", features = ["full"], optional = true }
+ethers = "2.0.14"
+tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"], optional = true }
+uuid = { version = "1.2", features = ["v4", "fast-rng", "macro-diagnostics"] }
 p3-field = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-fri = { workspace = true }
@@ -46,13 +48,14 @@ zkm-core-executor = { workspace = true }
 zkm-stark = { workspace = true }
 zkm-primitives = { workspace = true }
 itertools = { workspace = true }
-tonic = { version = "0.12", features = ["tls", "tls-roots"], optional = true }
+tonic = { version = "0.8.1", features = ["tls", "tls-roots"], optional = true }
 alloy-sol-types = { version = "1.0", optional = true }
 alloy-signer = { version = "0.14", optional = true }
 alloy-signer-local = { version = "0.14", optional = true }
 alloy-primitives = { version = "1.0", optional = true }
 backoff = { version = "0.4", features = ["tokio"], optional = true }
 num-bigint = "0.4.6"
+serde_json = "1.0.140"
 [dev-dependencies]
 test-artifacts = { workspace = true }
 
@@ -69,7 +72,8 @@ network = [
   "dep:alloy-signer-local",
   "dep:reqwest",
   "dep:twirp",
-  "dep:reqwest-middleware",
+  "dep:tonic",
+#  "dep:reqwest-middleware",
 ]
 network-v2 = [
   "dep:prost",
@@ -94,3 +98,5 @@ vergen = { version = "8", default-features = false, features = [
   "git",
   "git2",
 ] }
+tonic-build = "0.8.0"
+

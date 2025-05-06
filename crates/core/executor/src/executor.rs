@@ -165,6 +165,9 @@ pub struct Executor<'a> {
 
     /// The maximum LDE size to allow.
     pub lde_size_threshold: u64,
+
+    /// Indicate the next instruction is skipped.
+    pub skip_next: bool,
 }
 
 /// The different modes the executor can run in.
@@ -312,6 +315,7 @@ impl<'a> Executor<'a> {
             shape_check_frequency: 16,
             lde_size_check: false,
             lde_size_threshold: 0,
+            skip_next: false,
         }
     }
 
@@ -1086,6 +1090,8 @@ impl<'a> Executor<'a> {
             };
         }
 
+        self.skip_next = false;
+
         // Delay slot is the instruction after a branch or jump instruction.
         let mut next_is_delay_slot = false;
         match instruction.opcode {
@@ -1287,6 +1293,7 @@ impl<'a> Executor<'a> {
         if next_is_delay_slot && instruction.raw == 0 {
             self.state.pc = self.state.next_pc;
             self.state.next_pc = self.state.next_pc.wrapping_add(4);
+            self.skip_next = true;
         }
 
         // Update the clk to the next cycle.
@@ -1772,7 +1779,7 @@ impl<'a> Executor<'a> {
                 }
             }
 
-            if cpu_exit || !shape_match_found {
+            if (cpu_exit || !shape_match_found) && !self.skip_next {
                 self.state.current_shard += 1;
                 self.state.clk = 0;
                 self.bump_record();
