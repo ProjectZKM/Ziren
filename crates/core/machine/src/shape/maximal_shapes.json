@@ -549,8 +549,8 @@
       "inner": {
         "Cpu": 17,
         "MemoryLocal": 12,
-        "Lt": 15,
-        "MemoryInstrs": 16,
+        "Lt": 14,
+        "MemoryInstrs": 17,
         "DivRem": 0,
         "ShiftLeft": 12,
         "Bitwise": 13,
@@ -561,14 +561,14 @@
         "Branch": 13,
         "Jump": 13,
         "AddSub": 17,
-        "CloClz": 2
+        "CloClz": 0
       }
     },
     {
       "inner": {
         "Bitwise": 13,
         "ShiftRight": 9,
-        "Mul": 6,
+        "Mul": 7,
         "Global": 15,
         "Cpu": 17,
         "MiscInstrs": 10,
@@ -586,25 +586,7 @@
       "inner": {
         "Bitwise": 13,
         "ShiftRight": 9,
-        "Mul": 7,
-        "Global": 15,
-        "Cpu": 17,
-        "MiscInstrs": 10,
-        "Branch": 13,
-        "Lt": 15,
-        "Jump": 13,
-        "MemoryInstrs": 16,
-        "AddSub": 17,
-        "MemoryLocal": 12,
-        "CloClz": 4,
-        "ShiftLeft": 12
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 13,
-        "ShiftRight": 9,
-        "Mul": 7,
+        "Mul": 8,
         "Global": 14,
         "Cpu": 17,
         "MiscInstrs": 10,
@@ -616,6 +598,25 @@
         "MemoryLocal": 11,
         "CloClz": 4,
         "ShiftLeft": 12
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 12,
+        "Lt": 14,
+        "MemoryInstrs": 16,
+        "DivRem": 0,
+        "ShiftLeft": 12,
+        "Bitwise": 14,
+        "ShiftRight": 12,
+        "Mul": 10,
+        "Global": 15,
+        "MiscInstrs": 12,
+        "Branch": 13,
+        "Jump": 12,
+        "AddSub": 17,
+        "CloClz": 6
       }
     },
     {
@@ -632,29 +633,8 @@
         "MemoryInstrs": 16,
         "AddSub": 17,
         "MemoryLocal": 13,
-        "CloClz": 6,
+        "CloClz": 7,
         "ShiftLeft": 11
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 17,
-        "MemoryLocal": 13,
-        "Lt": 16,
-        "MemoryInstrs": 16,
-        "DivRem": 4,
-        "SyscallInstrs": 3,
-        "ShiftLeft": 13,
-        "Bitwise": 10,
-        "ShiftRight": 6,
-        "Mul": 7,
-        "Global": 16,
-        "MiscInstrs": 7,
-        "Branch": 15,
-        "Jump": 9,
-        "AddSub": 17,
-        "CloClz": 4,
-        "SyscallCore": 3
       }
     },
     {
@@ -825,7 +805,7 @@
     {
       "inner": {
         "Bitwise": 13,
-        "ShiftRight": 11,
+        "ShiftRight": 12,
         "Mul": 11,
         "Global": 11,
         "Cpu": 17,
@@ -1055,27 +1035,6 @@
     },
     {
       "inner": {
-        "Cpu": 17,
-        "MemoryLocal": 10,
-        "Lt": 15,
-        "MemoryInstrs": 16,
-        "DivRem": 3,
-        "SyscallInstrs": 10,
-        "ShiftLeft": 12,
-        "Bitwise": 15,
-        "ShiftRight": 12,
-        "Mul": 10,
-        "Global": 13,
-        "MiscInstrs": 11,
-        "Branch": 13,
-        "Jump": 13,
-        "AddSub": 17,
-        "CloClz": 3,
-        "SyscallCore": 10
-      }
-    },
-    {
-      "inner": {
         "Bitwise": 14,
         "ShiftRight": 11,
         "Mul": 10,
@@ -1183,7 +1142,7 @@
         "Lt": 15,
         "MemoryInstrs": 16,
         "DivRem": 3,
-        "ShiftLeft": 11,
+        "ShiftLeft": 12,
         "Bitwise": 14,
         "ShiftRight": 10,
         "Mul": 12,
@@ -1201,14 +1160,14 @@
         "MemoryLocal": 12,
         "Lt": 15,
         "MemoryInstrs": 16,
-        "DivRem": 1,
+        "DivRem": 3,
         "SyscallInstrs": 2,
         "ShiftLeft": 12,
-        "Bitwise": 13,
+        "Bitwise": 14,
         "ShiftRight": 10,
-        "Mul": 10,
+        "Mul": 11,
         "Global": 15,
-        "MiscInstrs": 8,
+        "MiscInstrs": 9,
         "Branch": 14,
         "Jump": 12,
         "AddSub": 17,
@@ -1255,27 +1214,6 @@
         "AddSub": 17,
         "CloClz": 8,
         "SyscallCore": 7
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 17,
-        "MemoryLocal": 12,
-        "Lt": 15,
-        "MemoryInstrs": 16,
-        "DivRem": 4,
-        "SyscallInstrs": 3,
-        "ShiftLeft": 12,
-        "Bitwise": 13,
-        "ShiftRight": 10,
-        "Mul": 7,
-        "Global": 15,
-        "MiscInstrs": 10,
-        "Branch": 14,
-        "Jump": 12,
-        "AddSub": 17,
-        "CloClz": 9,
-        "SyscallCore": 3
       }
     },
     {
@@ -1365,48 +1303,6 @@
     {
       "inner": {
         "Cpu": 17,
-        "MemoryLocal": 11,
-        "Lt": 15,
-        "MemoryInstrs": 16,
-        "DivRem": 6,
-        "SyscallInstrs": 5,
-        "ShiftLeft": 13,
-        "Bitwise": 14,
-        "ShiftRight": 13,
-        "Mul": 10,
-        "Global": 14,
-        "MiscInstrs": 9,
-        "Branch": 13,
-        "Jump": 11,
-        "AddSub": 17,
-        "CloClz": 7,
-        "SyscallCore": 5
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 17,
-        "MemoryLocal": 12,
-        "Lt": 16,
-        "MemoryInstrs": 16,
-        "DivRem": 7,
-        "SyscallInstrs": 6,
-        "ShiftLeft": 12,
-        "Bitwise": 13,
-        "ShiftRight": 11,
-        "Mul": 8,
-        "Global": 15,
-        "MiscInstrs": 10,
-        "Branch": 15,
-        "Jump": 12,
-        "AddSub": 17,
-        "CloClz": 8,
-        "SyscallCore": 6
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 17,
         "MemoryLocal": 12,
         "Lt": 16,
         "MemoryInstrs": 16,
@@ -1418,7 +1314,7 @@
         "Mul": 9,
         "Global": 15,
         "MiscInstrs": 10,
-        "Branch": 14,
+        "Branch": 15,
         "Jump": 12,
         "AddSub": 17,
         "CloClz": 8,
@@ -1473,6 +1369,148 @@
         "AddSub": 17,
         "CloClz": 6,
         "ShiftLeft": 8
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 12,
+        "Lt": 15,
+        "MemoryInstrs": 16,
+        "DivRem": 0,
+        "ShiftLeft": 12,
+        "Bitwise": 13,
+        "ShiftRight": 9,
+        "Mul": 7,
+        "Global": 15,
+        "MiscInstrs": 10,
+        "Branch": 13,
+        "Jump": 13,
+        "AddSub": 17,
+        "CloClz": 2
+      }
+    },
+    {
+      "inner": {
+        "Bitwise": 13,
+        "ShiftRight": 9,
+        "Mul": 7,
+        "Global": 15,
+        "Cpu": 17,
+        "MiscInstrs": 10,
+        "Branch": 13,
+        "Lt": 15,
+        "Jump": 13,
+        "MemoryInstrs": 16,
+        "AddSub": 17,
+        "MemoryLocal": 12,
+        "CloClz": 4,
+        "ShiftLeft": 12
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 13,
+        "Lt": 16,
+        "MemoryInstrs": 16,
+        "DivRem": 4,
+        "SyscallInstrs": 3,
+        "ShiftLeft": 13,
+        "Bitwise": 10,
+        "ShiftRight": 6,
+        "Mul": 7,
+        "Global": 16,
+        "MiscInstrs": 7,
+        "Branch": 15,
+        "Jump": 9,
+        "AddSub": 17,
+        "CloClz": 4,
+        "SyscallCore": 3
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 10,
+        "Lt": 15,
+        "MemoryInstrs": 16,
+        "DivRem": 3,
+        "SyscallInstrs": 10,
+        "ShiftLeft": 12,
+        "Bitwise": 15,
+        "ShiftRight": 12,
+        "Mul": 10,
+        "Global": 13,
+        "MiscInstrs": 11,
+        "Branch": 13,
+        "Jump": 13,
+        "AddSub": 17,
+        "CloClz": 3,
+        "SyscallCore": 10
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 12,
+        "Lt": 15,
+        "MemoryInstrs": 16,
+        "DivRem": 4,
+        "SyscallInstrs": 3,
+        "ShiftLeft": 12,
+        "Bitwise": 13,
+        "ShiftRight": 10,
+        "Mul": 7,
+        "Global": 15,
+        "MiscInstrs": 10,
+        "Branch": 14,
+        "Jump": 12,
+        "AddSub": 17,
+        "CloClz": 9,
+        "SyscallCore": 3
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 11,
+        "Lt": 15,
+        "MemoryInstrs": 16,
+        "DivRem": 6,
+        "SyscallInstrs": 5,
+        "ShiftLeft": 13,
+        "Bitwise": 14,
+        "ShiftRight": 13,
+        "Mul": 10,
+        "Global": 14,
+        "MiscInstrs": 9,
+        "Branch": 13,
+        "Jump": 11,
+        "AddSub": 17,
+        "CloClz": 7,
+        "SyscallCore": 5
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 17,
+        "MemoryLocal": 12,
+        "Lt": 16,
+        "MemoryInstrs": 16,
+        "DivRem": 7,
+        "SyscallInstrs": 6,
+        "ShiftLeft": 12,
+        "Bitwise": 13,
+        "ShiftRight": 11,
+        "Mul": 8,
+        "Global": 15,
+        "MiscInstrs": 10,
+        "Branch": 15,
+        "Jump": 12,
+        "AddSub": 17,
+        "CloClz": 8,
+        "SyscallCore": 6
       }
     },
     {
@@ -1935,15 +1973,17 @@
       "inner": {
         "Bitwise": 14,
         "ShiftRight": 10,
+        "Mul": 8,
         "Global": 16,
         "Cpu": 18,
         "MiscInstrs": 11,
         "Branch": 14,
-        "Lt": 15,
+        "Lt": 16,
         "Jump": 14,
-        "MemoryInstrs": 18,
+        "MemoryInstrs": 17,
         "AddSub": 18,
         "MemoryLocal": 13,
+        "CloClz": 4,
         "ShiftLeft": 13
       }
     },
@@ -1956,68 +1996,14 @@
         "DivRem": 0,
         "ShiftLeft": 13,
         "Bitwise": 14,
-        "ShiftRight": 10,
-        "Mul": 7,
-        "Global": 16,
-        "MiscInstrs": 11,
-        "Branch": 14,
-        "Jump": 14,
-        "AddSub": 18,
-        "CloClz": 2
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 14,
-        "ShiftRight": 10,
-        "Mul": 8,
-        "Global": 16,
-        "Cpu": 18,
-        "MiscInstrs": 11,
-        "Branch": 14,
-        "Lt": 15,
-        "Jump": 14,
-        "MemoryInstrs": 18,
-        "AddSub": 18,
-        "MemoryLocal": 13,
-        "CloClz": 4,
-        "ShiftLeft": 13
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 14,
-        "ShiftRight": 10,
-        "Mul": 8,
-        "Global": 16,
-        "Cpu": 18,
-        "MiscInstrs": 11,
-        "Branch": 14,
-        "Lt": 16,
-        "Jump": 14,
-        "MemoryInstrs": 17,
-        "AddSub": 18,
-        "MemoryLocal": 13,
-        "CloClz": 4,
-        "ShiftLeft": 13
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 13,
-        "ShiftRight": 11,
+        "ShiftRight": 12,
         "Mul": 10,
-        "Global": 17,
-        "Cpu": 18,
-        "MiscInstrs": 11,
-        "Branch": 15,
-        "Lt": 16,
-        "Jump": 11,
-        "MemoryInstrs": 17,
+        "Global": 16,
+        "MiscInstrs": 12,
+        "Branch": 14,
+        "Jump": 14,
         "AddSub": 18,
-        "MemoryLocal": 14,
-        "CloClz": 6,
-        "ShiftLeft": 11
+        "CloClz": 6
       }
     },
     {
@@ -2034,27 +2020,6 @@
         "AddSub": 18,
         "MemoryLocal": 14,
         "ShiftLeft": 9
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 18,
-        "MemoryLocal": 14,
-        "Lt": 17,
-        "MemoryInstrs": 17,
-        "DivRem": 5,
-        "SyscallInstrs": 3,
-        "ShiftLeft": 14,
-        "Bitwise": 10,
-        "ShiftRight": 6,
-        "Mul": 7,
-        "Global": 17,
-        "MiscInstrs": 7,
-        "Branch": 16,
-        "Jump": 9,
-        "AddSub": 18,
-        "CloClz": 4,
-        "SyscallCore": 3
       }
     },
     {
@@ -2207,27 +2172,6 @@
     {
       "inner": {
         "Cpu": 18,
-        "MemoryLocal": 11,
-        "Lt": 16,
-        "MemoryInstrs": 17,
-        "DivRem": 6,
-        "SyscallInstrs": 4,
-        "ShiftLeft": 13,
-        "Bitwise": 14,
-        "ShiftRight": 12,
-        "Mul": 13,
-        "Global": 14,
-        "MiscInstrs": 12,
-        "Branch": 15,
-        "Jump": 13,
-        "AddSub": 18,
-        "CloClz": 8,
-        "SyscallCore": 4
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 18,
         "MemoryLocal": 12,
         "Lt": 16,
         "MemoryInstrs": 17,
@@ -2349,27 +2293,6 @@
         "MemoryLocal": 13,
         "Lt": 16,
         "MemoryInstrs": 17,
-        "DivRem": 5,
-        "SyscallInstrs": 3,
-        "ShiftLeft": 12,
-        "Bitwise": 15,
-        "ShiftRight": 11,
-        "Mul": 12,
-        "Global": 16,
-        "MiscInstrs": 9,
-        "Branch": 15,
-        "Jump": 12,
-        "AddSub": 18,
-        "CloClz": 9,
-        "SyscallCore": 3
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 18,
-        "MemoryLocal": 13,
-        "Lt": 16,
-        "MemoryInstrs": 17,
         "DivRem": 8,
         "SyscallInstrs": 7,
         "ShiftLeft": 13,
@@ -2435,7 +2358,7 @@
         "MemoryInstrs": 17,
         "DivRem": 9,
         "SyscallInstrs": 8,
-        "ShiftLeft": 13,
+        "ShiftLeft": 14,
         "Bitwise": 15,
         "ShiftRight": 10,
         "Mul": 10,
@@ -2450,7 +2373,7 @@
     {
       "inner": {
         "Cpu": 18,
-        "MemoryLocal": 12,
+        "MemoryLocal": 13,
         "Lt": 16,
         "MemoryInstrs": 17,
         "DivRem": 8,
@@ -2500,31 +2423,10 @@
         "ShiftLeft": 13,
         "Bitwise": 14,
         "ShiftRight": 12,
-        "Mul": 9,
-        "Global": 16,
-        "MiscInstrs": 11,
-        "Branch": 16,
-        "Jump": 13,
-        "AddSub": 18,
-        "CloClz": 9,
-        "SyscallCore": 6
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 18,
-        "MemoryLocal": 13,
-        "Lt": 17,
-        "MemoryInstrs": 17,
-        "DivRem": 7,
-        "SyscallInstrs": 6,
-        "ShiftLeft": 13,
-        "Bitwise": 14,
-        "ShiftRight": 11,
         "Mul": 10,
         "Global": 16,
         "MiscInstrs": 11,
-        "Branch": 15,
+        "Branch": 16,
         "Jump": 13,
         "AddSub": 18,
         "CloClz": 9,
@@ -2554,6 +2456,108 @@
     },
     {
       "inner": {
+        "Cpu": 18,
+        "MemoryLocal": 13,
+        "Lt": 16,
+        "MemoryInstrs": 17,
+        "DivRem": 1,
+        "SyscallInstrs": 5,
+        "ShiftLeft": 10,
+        "Bitwise": 13,
+        "ShiftRight": 8,
+        "Mul": 5,
+        "Global": 16,
+        "MiscInstrs": 7,
+        "Branch": 15,
+        "Jump": 15,
+        "AddSub": 17,
+        "CloClz": 7,
+        "SyscallCore": 5
+      }
+    },
+    {
+      "inner": {
+        "Bitwise": 13,
+        "ShiftRight": 11,
+        "Mul": 10,
+        "Global": 17,
+        "Cpu": 18,
+        "MiscInstrs": 11,
+        "Branch": 15,
+        "Lt": 16,
+        "Jump": 11,
+        "MemoryInstrs": 17,
+        "AddSub": 18,
+        "MemoryLocal": 14,
+        "CloClz": 6,
+        "ShiftLeft": 11
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 18,
+        "MemoryLocal": 14,
+        "Lt": 17,
+        "MemoryInstrs": 17,
+        "DivRem": 5,
+        "SyscallInstrs": 3,
+        "ShiftLeft": 14,
+        "Bitwise": 10,
+        "ShiftRight": 6,
+        "Mul": 7,
+        "Global": 17,
+        "MiscInstrs": 7,
+        "Branch": 16,
+        "Jump": 9,
+        "AddSub": 18,
+        "CloClz": 4,
+        "SyscallCore": 3
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 18,
+        "MemoryLocal": 11,
+        "Lt": 16,
+        "MemoryInstrs": 17,
+        "DivRem": 6,
+        "SyscallInstrs": 4,
+        "ShiftLeft": 13,
+        "Bitwise": 14,
+        "ShiftRight": 12,
+        "Mul": 13,
+        "Global": 14,
+        "MiscInstrs": 12,
+        "Branch": 15,
+        "Jump": 13,
+        "AddSub": 18,
+        "CloClz": 8,
+        "SyscallCore": 4
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 18,
+        "MemoryLocal": 13,
+        "Lt": 16,
+        "MemoryInstrs": 17,
+        "DivRem": 5,
+        "SyscallInstrs": 3,
+        "ShiftLeft": 12,
+        "Bitwise": 15,
+        "ShiftRight": 11,
+        "Mul": 12,
+        "Global": 16,
+        "MiscInstrs": 9,
+        "Branch": 15,
+        "Jump": 12,
+        "AddSub": 18,
+        "CloClz": 9,
+        "SyscallCore": 3
+      }
+    },
+    {
+      "inner": {
         "Bitwise": 14,
         "ShiftRight": 7,
         "Global": 16,
@@ -2566,27 +2570,6 @@
         "AddSub": 18,
         "CloClz": 6,
         "ShiftLeft": 8
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 18,
-        "MemoryLocal": 13,
-        "Lt": 16,
-        "MemoryInstrs": 17,
-        "DivRem": 1,
-        "SyscallInstrs": 5,
-        "ShiftLeft": 9,
-        "Bitwise": 13,
-        "ShiftRight": 8,
-        "Mul": 5,
-        "Global": 16,
-        "MiscInstrs": 7,
-        "Branch": 15,
-        "Jump": 15,
-        "AddSub": 17,
-        "CloClz": 7,
-        "SyscallCore": 5
       }
     }
   ],
@@ -2702,6 +2685,44 @@
         "AddSub": 18,
         "CloClz": 6,
         "SyscallCore": 9
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 19,
+        "MemoryLocal": 7,
+        "Lt": 13,
+        "MemoryInstrs": 18,
+        "SyscallInstrs": 2,
+        "ShiftLeft": 15,
+        "Bitwise": 18,
+        "ShiftRight": 15,
+        "Mul": 7,
+        "Global": 10,
+        "MiscInstrs": 2,
+        "Branch": 12,
+        "Jump": 9,
+        "AddSub": 18,
+        "SyscallCore": 2
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 19,
+        "MemoryLocal": 7,
+        "Lt": 13,
+        "MemoryInstrs": 17,
+        "SyscallInstrs": 6,
+        "ShiftLeft": 15,
+        "Bitwise": 17,
+        "ShiftRight": 15,
+        "Mul": 6,
+        "Global": 10,
+        "MiscInstrs": 5,
+        "Branch": 11,
+        "Jump": 9,
+        "AddSub": 17,
+        "SyscallCore": 6
       }
     },
     {
@@ -2952,44 +2973,6 @@
     {
       "inner": {
         "Cpu": 19,
-        "MemoryLocal": 7,
-        "Lt": 13,
-        "MemoryInstrs": 18,
-        "SyscallInstrs": 2,
-        "ShiftLeft": 15,
-        "Bitwise": 18,
-        "ShiftRight": 15,
-        "Mul": 7,
-        "Global": 10,
-        "MiscInstrs": 2,
-        "Branch": 12,
-        "Jump": 9,
-        "AddSub": 18,
-        "SyscallCore": 2
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 19,
-        "MemoryLocal": 7,
-        "Lt": 13,
-        "MemoryInstrs": 17,
-        "SyscallInstrs": 6,
-        "ShiftLeft": 15,
-        "Bitwise": 17,
-        "ShiftRight": 15,
-        "Mul": 6,
-        "Global": 10,
-        "MiscInstrs": 5,
-        "Branch": 11,
-        "Jump": 9,
-        "AddSub": 17,
-        "SyscallCore": 6
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 19,
         "MemoryLocal": 14,
         "Lt": 17,
         "MemoryInstrs": 19,
@@ -3025,25 +3008,6 @@
     },
     {
       "inner": {
-        "Cpu": 19,
-        "MemoryLocal": 14,
-        "Lt": 16,
-        "MemoryInstrs": 18,
-        "DivRem": 0,
-        "ShiftLeft": 14,
-        "Bitwise": 15,
-        "ShiftRight": 11,
-        "Mul": 8,
-        "Global": 17,
-        "MiscInstrs": 12,
-        "Branch": 15,
-        "Jump": 15,
-        "AddSub": 19,
-        "CloClz": 4
-      }
-    },
-    {
-      "inner": {
         "Bitwise": 15,
         "ShiftRight": 11,
         "Mul": 8,
@@ -3057,24 +3021,6 @@
         "AddSub": 19,
         "MemoryLocal": 14,
         "CloClz": 5,
-        "ShiftLeft": 14
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 15,
-        "ShiftRight": 11,
-        "Mul": 8,
-        "Global": 17,
-        "Cpu": 19,
-        "MiscInstrs": 12,
-        "Branch": 15,
-        "Lt": 17,
-        "Jump": 15,
-        "MemoryInstrs": 18,
-        "AddSub": 19,
-        "MemoryLocal": 14,
-        "CloClz": 4,
         "ShiftLeft": 14
       }
     },
@@ -3424,27 +3370,6 @@
     {
       "inner": {
         "Cpu": 19,
-        "MemoryLocal": 13,
-        "Lt": 17,
-        "MemoryInstrs": 18,
-        "DivRem": 8,
-        "SyscallInstrs": 7,
-        "ShiftLeft": 14,
-        "Bitwise": 16,
-        "ShiftRight": 14,
-        "Mul": 11,
-        "Global": 16,
-        "MiscInstrs": 11,
-        "Branch": 16,
-        "Jump": 13,
-        "AddSub": 19,
-        "CloClz": 10,
-        "SyscallCore": 7
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 19,
         "MemoryLocal": 14,
         "Lt": 18,
         "MemoryInstrs": 18,
@@ -3503,6 +3428,104 @@
         "AddSub": 18,
         "CloClz": 8,
         "SyscallCore": 5
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 19,
+        "MemoryLocal": 14,
+        "Lt": 16,
+        "MemoryInstrs": 19,
+        "DivRem": 0,
+        "ShiftLeft": 14,
+        "Bitwise": 15,
+        "ShiftRight": 11,
+        "Mul": 8,
+        "Global": 17,
+        "MiscInstrs": 12,
+        "Branch": 15,
+        "Jump": 15,
+        "AddSub": 19,
+        "CloClz": 4
+      }
+    },
+    {
+      "inner": {
+        "Bitwise": 15,
+        "ShiftRight": 11,
+        "Mul": 9,
+        "Global": 17,
+        "Cpu": 19,
+        "MiscInstrs": 12,
+        "Branch": 15,
+        "Lt": 17,
+        "Jump": 15,
+        "MemoryInstrs": 18,
+        "AddSub": 19,
+        "MemoryLocal": 14,
+        "CloClz": 5,
+        "ShiftLeft": 14
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 19,
+        "MemoryLocal": 14,
+        "Lt": 17,
+        "MemoryInstrs": 18,
+        "DivRem": 0,
+        "ShiftLeft": 13,
+        "Bitwise": 15,
+        "ShiftRight": 12,
+        "Mul": 11,
+        "Global": 17,
+        "MiscInstrs": 13,
+        "Branch": 16,
+        "Jump": 14,
+        "AddSub": 19,
+        "CloClz": 7
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 19,
+        "MemoryLocal": 14,
+        "Lt": 17,
+        "MemoryInstrs": 18,
+        "DivRem": 8,
+        "SyscallInstrs": 7,
+        "ShiftLeft": 14,
+        "Bitwise": 16,
+        "ShiftRight": 14,
+        "Mul": 11,
+        "Global": 17,
+        "MiscInstrs": 11,
+        "Branch": 16,
+        "Jump": 13,
+        "AddSub": 19,
+        "CloClz": 10,
+        "SyscallCore": 7
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 19,
+        "MemoryLocal": 14,
+        "Lt": 18,
+        "MemoryInstrs": 18,
+        "DivRem": 8,
+        "SyscallInstrs": 7,
+        "ShiftLeft": 14,
+        "Bitwise": 14,
+        "ShiftRight": 10,
+        "Mul": 10,
+        "Global": 17,
+        "MiscInstrs": 11,
+        "Branch": 17,
+        "Jump": 15,
+        "AddSub": 19,
+        "CloClz": 9,
+        "SyscallCore": 7
       }
     }
   ],
@@ -4205,6 +4228,24 @@
     },
     {
       "inner": {
+        "Bitwise": 16,
+        "ShiftRight": 12,
+        "Mul": 9,
+        "Global": 18,
+        "Cpu": 20,
+        "MiscInstrs": 13,
+        "Branch": 16,
+        "Lt": 18,
+        "Jump": 16,
+        "MemoryInstrs": 19,
+        "AddSub": 20,
+        "MemoryLocal": 15,
+        "CloClz": 5,
+        "ShiftLeft": 15
+      }
+    },
+    {
+      "inner": {
         "Cpu": 20,
         "MemoryLocal": 15,
         "Lt": 19,
@@ -4213,14 +4254,14 @@
         "SyscallInstrs": 8,
         "ShiftLeft": 15,
         "Bitwise": 16,
-        "ShiftRight": 13,
+        "ShiftRight": 14,
         "Mul": 11,
         "Global": 18,
         "MiscInstrs": 12,
         "Branch": 18,
         "Jump": 15,
         "AddSub": 20,
-        "CloClz": 10,
+        "CloClz": 11,
         "SyscallCore": 8
       }
     }
@@ -4304,123 +4345,6 @@
     {
       "inner": {
         "Cpu": 21,
-        "MemoryLocal": 13,
-        "Lt": 19,
-        "MemoryInstrs": 19,
-        "DivRem": 8,
-        "SyscallInstrs": 4,
-        "ShiftLeft": 17,
-        "Bitwise": 19,
-        "ShiftRight": 17,
-        "Mul": 13,
-        "Global": 16,
-        "MiscInstrs": 15,
-        "Branch": 18,
-        "Jump": 16,
-        "AddSub": 20,
-        "CloClz": 8,
-        "SyscallCore": 4
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 21,
-        "MemoryLocal": 13,
-        "Lt": 18,
-        "MemoryInstrs": 19,
-        "DivRem": 2,
-        "SyscallInstrs": 4,
-        "ShiftLeft": 16,
-        "Bitwise": 19,
-        "ShiftRight": 18,
-        "Mul": 9,
-        "Global": 16,
-        "MiscInstrs": 15,
-        "Branch": 17,
-        "Jump": 15,
-        "AddSub": 20,
-        "CloClz": 10,
-        "SyscallCore": 4
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 21,
-        "MemoryLocal": 11,
-        "Lt": 16,
-        "MemoryInstrs": 19,
-        "DivRem": 3,
-        "SyscallInstrs": 1,
-        "ShiftLeft": 16,
-        "Bitwise": 20,
-        "ShiftRight": 19,
-        "Mul": 9,
-        "Global": 14,
-        "MiscInstrs": 14,
-        "Branch": 15,
-        "Jump": 14,
-        "AddSub": 20,
-        "CloClz": 11,
-        "SyscallCore": 1
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 21,
-        "MemoryLocal": 11,
-        "Lt": 18,
-        "MemoryInstrs": 19,
-        "DivRem": 4,
-        "ShiftLeft": 16,
-        "Bitwise": 19,
-        "ShiftRight": 18,
-        "Mul": 16,
-        "Global": 14,
-        "MiscInstrs": 15,
-        "Branch": 15,
-        "Jump": 14,
-        "AddSub": 20,
-        "CloClz": 7
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 17,
-        "ShiftRight": 16,
-        "Mul": 17,
-        "Global": 13,
-        "Cpu": 21,
-        "MiscInstrs": 15,
-        "Branch": 12,
-        "Lt": 18,
-        "Jump": 12,
-        "MemoryInstrs": 20,
-        "AddSub": 21,
-        "MemoryLocal": 10,
-        "ShiftLeft": 16
-      }
-    },
-    {
-      "inner": {
-        "Bitwise": 17,
-        "ShiftRight": 16,
-        "Mul": 17,
-        "Global": 13,
-        "Cpu": 21,
-        "MiscInstrs": 15,
-        "Branch": 12,
-        "Lt": 18,
-        "Jump": 12,
-        "MemoryInstrs": 20,
-        "AddSub": 21,
-        "MemoryLocal": 10,
-        "CloClz": 5,
-        "ShiftLeft": 16
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 21,
         "MemoryLocal": 16,
         "Lt": 18,
         "MemoryInstrs": 21,
@@ -4491,27 +4415,6 @@
         "MiscInstrs": 11,
         "Branch": 18,
         "Jump": 14,
-        "AddSub": 21,
-        "CloClz": 8,
-        "SyscallCore": 7
-      }
-    },
-    {
-      "inner": {
-        "Cpu": 21,
-        "MemoryLocal": 17,
-        "Lt": 20,
-        "MemoryInstrs": 20,
-        "DivRem": 8,
-        "SyscallInstrs": 7,
-        "ShiftLeft": 17,
-        "Bitwise": 14,
-        "ShiftRight": 11,
-        "Mul": 10,
-        "Global": 20,
-        "MiscInstrs": 11,
-        "Branch": 19,
-        "Jump": 13,
         "AddSub": 21,
         "CloClz": 8,
         "SyscallCore": 7
@@ -4668,6 +4571,48 @@
       "inner": {
         "Cpu": 21,
         "MemoryLocal": 16,
+        "Lt": 19,
+        "MemoryInstrs": 20,
+        "DivRem": 9,
+        "SyscallInstrs": 8,
+        "ShiftLeft": 15,
+        "Bitwise": 16,
+        "ShiftRight": 11,
+        "Mul": 11,
+        "Global": 19,
+        "MiscInstrs": 12,
+        "Branch": 18,
+        "Jump": 17,
+        "AddSub": 20,
+        "CloClz": 10,
+        "SyscallCore": 8
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 21,
+        "MemoryLocal": 17,
+        "Lt": 20,
+        "MemoryInstrs": 20,
+        "DivRem": 8,
+        "SyscallInstrs": 7,
+        "ShiftLeft": 17,
+        "Bitwise": 14,
+        "ShiftRight": 11,
+        "Mul": 10,
+        "Global": 20,
+        "MiscInstrs": 11,
+        "Branch": 19,
+        "Jump": 13,
+        "AddSub": 21,
+        "CloClz": 8,
+        "SyscallCore": 7
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 21,
+        "MemoryLocal": 16,
         "Lt": 20,
         "MemoryInstrs": 20,
         "DivRem": 10,
@@ -4688,22 +4633,118 @@
     {
       "inner": {
         "Cpu": 21,
-        "MemoryLocal": 16,
+        "MemoryLocal": 13,
         "Lt": 19,
-        "MemoryInstrs": 20,
-        "DivRem": 9,
-        "SyscallInstrs": 8,
-        "ShiftLeft": 15,
-        "Bitwise": 16,
-        "ShiftRight": 11,
-        "Mul": 11,
-        "Global": 19,
-        "MiscInstrs": 12,
+        "MemoryInstrs": 19,
+        "DivRem": 8,
+        "SyscallInstrs": 4,
+        "ShiftLeft": 17,
+        "Bitwise": 19,
+        "ShiftRight": 17,
+        "Mul": 13,
+        "Global": 16,
+        "MiscInstrs": 15,
         "Branch": 18,
-        "Jump": 17,
+        "Jump": 16,
+        "AddSub": 20,
+        "CloClz": 8,
+        "SyscallCore": 4
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 21,
+        "MemoryLocal": 13,
+        "Lt": 18,
+        "MemoryInstrs": 19,
+        "DivRem": 2,
+        "SyscallInstrs": 4,
+        "ShiftLeft": 16,
+        "Bitwise": 19,
+        "ShiftRight": 18,
+        "Mul": 9,
+        "Global": 16,
+        "MiscInstrs": 15,
+        "Branch": 17,
+        "Jump": 15,
         "AddSub": 20,
         "CloClz": 10,
-        "SyscallCore": 8
+        "SyscallCore": 4
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 21,
+        "MemoryLocal": 11,
+        "Lt": 16,
+        "MemoryInstrs": 19,
+        "DivRem": 3,
+        "SyscallInstrs": 1,
+        "ShiftLeft": 16,
+        "Bitwise": 20,
+        "ShiftRight": 19,
+        "Mul": 9,
+        "Global": 14,
+        "MiscInstrs": 14,
+        "Branch": 15,
+        "Jump": 14,
+        "AddSub": 20,
+        "CloClz": 11,
+        "SyscallCore": 1
+      }
+    },
+    {
+      "inner": {
+        "Cpu": 21,
+        "MemoryLocal": 11,
+        "Lt": 18,
+        "MemoryInstrs": 19,
+        "DivRem": 4,
+        "ShiftLeft": 16,
+        "Bitwise": 19,
+        "ShiftRight": 18,
+        "Mul": 16,
+        "Global": 14,
+        "MiscInstrs": 15,
+        "Branch": 15,
+        "Jump": 14,
+        "AddSub": 20,
+        "CloClz": 7
+      }
+    },
+    {
+      "inner": {
+        "Bitwise": 17,
+        "ShiftRight": 16,
+        "Mul": 17,
+        "Global": 13,
+        "Cpu": 21,
+        "MiscInstrs": 15,
+        "Branch": 12,
+        "Lt": 18,
+        "Jump": 12,
+        "MemoryInstrs": 20,
+        "AddSub": 21,
+        "MemoryLocal": 10,
+        "ShiftLeft": 16
+      }
+    },
+    {
+      "inner": {
+        "Bitwise": 17,
+        "ShiftRight": 16,
+        "Mul": 17,
+        "Global": 13,
+        "Cpu": 21,
+        "MiscInstrs": 15,
+        "Branch": 12,
+        "Lt": 18,
+        "Jump": 12,
+        "MemoryInstrs": 20,
+        "AddSub": 21,
+        "MemoryLocal": 10,
+        "CloClz": 5,
+        "ShiftLeft": 16
       }
     }
   ]
