@@ -1041,7 +1041,6 @@ impl<'a> Executor<'a> {
             self.memory_accesses = MemoryAccessRecord::default();
         }
 
-        log::info!("Executing instruction: {:X}", pc);
         if !self.unconstrained {
             self.report.opcode_counts[instruction.opcode] += 1;
             self.local_counts.event_counts[instruction.opcode] += 1;
