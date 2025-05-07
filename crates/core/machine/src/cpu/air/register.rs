@@ -54,7 +54,7 @@ impl CpuChip {
             AB::Expr::ONE - local.is_syscall,
         );
 
-        // Write the HI register
+        // Write the HI register, the register can only be Register::HI（33）.
         builder.eval_memory_access(
             local.shard,
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
