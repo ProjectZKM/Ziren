@@ -568,6 +568,9 @@ impl<F: PrimeField32> MipsAir<F> {
 
     fn keccak_rows_per_event(&self, record: &ExecutionRecord) -> usize {
         let all = self.keccak_rows_per_record(record);
+        if all == 0 {
+            return 0;
+        }
 
         let count = record
             .precompile_events
