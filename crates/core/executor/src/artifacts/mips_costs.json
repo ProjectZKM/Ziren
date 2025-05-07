@@ -12,7 +12,7 @@
 	"Bn254AddAssign": 4013,
 	"ShiftLeft": 69,
 	"MemoryLocal": 100,
-	"Program": 38,
+	"Program": 31,
 	"Global": 428,
 	"Secp256k1AddAssign": 4013,
 	"AddSub": 48,
@@ -42,7 +42,7 @@
 	"SyscallCore": 22,
 	"Bn254Fp2AddSubAssign": 1382,
 	"Bls12381FpOpAssign": 1048,
-	"Cpu": 145,
+	"Cpu": 138,
 	"ShaCompress": 40480,
 	"Secp256k1DoubleAssign": 4492
 }
