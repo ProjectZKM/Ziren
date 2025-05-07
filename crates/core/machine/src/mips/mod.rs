@@ -870,7 +870,7 @@ pub mod tests {
     #[test]
     fn test_mul_prove() {
         utils::setup_logger();
-        let mul_ops = [Opcode::MUL, Opcode::MULT, Opcode::MULTU];
+        let mul_ops = [Opcode::MUL];
         let operands =
             [(1, 1), (1234, 5678), (8765, 4321), (0xffff, 0xffff - 1), (u32::MAX - 1, u32::MAX)];
         for mul_op in mul_ops.iter() {
@@ -879,6 +879,25 @@ pub mod tests {
                     Instruction::new(Opcode::ADD, 29, 0, operand.0, false, true),
                     Instruction::new(Opcode::ADD, 30, 0, operand.1, false, true),
                     Instruction::new(*mul_op, 31, 30, 29, false, false),
+                ];
+                let program = Program::new(instructions, 0, 0);
+                run_test::<CpuProver<_, _>>(program).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_mult_prove() {
+        utils::setup_logger();
+        let mul_ops = [Opcode::MULT, Opcode::MULTU];
+        let operands =
+            [(1, 1), (1234, 5678), (8765, 4321), (0xffff, 0xffff - 1), (u32::MAX - 1, u32::MAX)];
+        for mul_op in mul_ops.iter() {
+            for operand in operands.iter() {
+                let instructions = vec![
+                    Instruction::new(Opcode::ADD, 29, 0, operand.0, false, true),
+                    Instruction::new(Opcode::ADD, 30, 0, operand.1, false, true),
+                    Instruction::new(*mul_op, 32, 30, 29, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();
@@ -933,7 +952,7 @@ pub mod tests {
                 let instructions = vec![
                     Instruction::new(Opcode::ADD, 29, 0, op.0, false, true),
                     Instruction::new(Opcode::ADD, 30, 0, op.1, false, true),
-                    Instruction::new(*div_rem_op, 31, 29, 30, false, false),
+                    Instruction::new(*div_rem_op, 32, 29, 30, false, false),
                 ];
                 let program = Program::new(instructions, 0, 0);
                 run_test::<CpuProver<_, _>>(program).unwrap();
