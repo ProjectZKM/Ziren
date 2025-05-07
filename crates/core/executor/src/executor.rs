@@ -1041,6 +1041,7 @@ impl<'a> Executor<'a> {
             self.memory_accesses = MemoryAccessRecord::default();
         }
 
+        log::info!("Executing instruction: {:X}", pc);
         if !self.unconstrained {
             self.report.opcode_counts[instruction.opcode] += 1;
             self.local_counts.event_counts[instruction.opcode] += 1;
@@ -1164,6 +1165,7 @@ impl<'a> Executor<'a> {
 
                 self.rw(Register::V0, a, MemoryAccessPosition::A);
                 next_pc = precompile_next_pc;
+                next_next_pc = precompile_next_pc + 4;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
             }
