@@ -56,15 +56,15 @@ impl NetworkProver {
             env::var("CA_CERT_PATH")
                 .unwrap_or(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string()),
         );
-        let cert_path = env::var("CERT_PATH").ok();
-        let key_path = env::var("KEY_PATH").ok();
+        let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
+        let ssl_key_path = env::var("SSL_KEY_PATH").ok();
         let ssl_config = if ca_cert_path.as_ref().is_none() {
             None
         } else {
             let (ca_cert, identity) = get_cert_and_identity(
                 ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
-                cert_path.as_ref().expect("CERT_PATH not set"),
-                key_path.as_ref().expect("KEY_PATH not set"),
+                ssl_cert_path.as_ref().expect("SSL_CERT_PATH not set"),
+                ssl_key_path.as_ref().expect("SSL_KEY_PATH not set"),
             )?;
             Some(Config { ca_cert, identity })
         };
@@ -248,14 +248,14 @@ impl Prover<DefaultProverComponents> for NetworkProver {
 
 fn get_cert_and_identity(
     ca_cert_path: &str,
-    cert_path: &str,
-    key_path: &str,
+    ssl_cert_path: &str,
+    ssl_key_path: &str,
 ) -> anyhow::Result<(Option<Certificate>, Option<Identity>)> {
     let ca_cert_path = Path::new(ca_cert_path);
-    let cert_path = Path::new(cert_path);
-    let key_path = Path::new(key_path);
+    let cert_path = Path::new(ssl_cert_path);
+    let key_path = Path::new(ssl_key_path);
     if !ca_cert_path.is_file() || !cert_path.is_file() || !key_path.is_file() {
-        bail!("both ca_cert_path, cert_path and key_path should be valid file")
+        bail!("both ca_cert_path, ssl_cert_path and ssl_key_path should be valid file")
     }
     let mut ca: Option<Certificate> = None;
     let mut identity: Option<Identity> = None;

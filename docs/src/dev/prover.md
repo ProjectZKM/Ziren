@@ -156,11 +156,11 @@ zkm-sdk = { git = "https://github.com/zkMIPS/zkMIPS", branch = "main" }
 ### Environment Variable Setup
 Before running your application, export the following environment variables to enable the network prover:
 ```bash
-export ZKM_PRIVATE_KEY=<your_private_key>            # Private key corresponding to your registered public key
-export CERT_PATH=<path_to_client_certificate>        # Path to client certificate
-export KEY_PATH=<path_to_client_key>                 # Path to client key
+export ZKM_PRIVATE_KEY=<your_private_key>       # Private key corresponding to your registered public key
+export SSL_CERT_PATH=<path_to_ssl_certificate>  # Path to the SSL client certificate (e.g., ssl.pem)
+export SSL_KEY_PATH=<path_to_ssl_key>           # Path to the SSL client private key (e.g., ssl.key)
 ```
-You can generate the client certificate and key by running the [`certgen.sh`](https://github.com/VanhGer/zkMIPS/blob/feat/network-prover/crates/sdk/tool/certgen.sh) script.
+You can generate the SSL certificate and key by running the [`certgen.sh`](https://github.com/zkMIPS/zkMIPS/blob/main/crates/sdk/tool/certgen.sh) script.
 
 To host your own network prover, export the following variables to configure your endpoint:
 ```bash

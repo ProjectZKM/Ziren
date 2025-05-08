@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-CN=''
+CN='ssl'
 SSL_IP=''
 SSL_DNS=''
 
