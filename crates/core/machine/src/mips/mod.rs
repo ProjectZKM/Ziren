@@ -694,7 +694,7 @@ pub mod tests {
     use zkm_core_executor::{
         programs::tests::{
             fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
-            simple_program, ssz_withdrawals_program,
+            simple_program, ssz_withdrawals_program, unconstrained_program,
         },
         Instruction, MipsAirId, Opcode, Program,
     };
@@ -1117,6 +1117,13 @@ pub mod tests {
     fn test_ssz_withdrawal() {
         setup_logger();
         let program = ssz_withdrawals_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    #[test]
+    fn test_unconstrained() {
+        setup_logger();
+        let program = unconstrained_program();
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
 

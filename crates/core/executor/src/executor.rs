@@ -1029,7 +1029,7 @@ impl<'a> Executor<'a> {
         let mut next_pc = self.state.next_pc;
         let mut next_next_pc = self.state.next_pc.wrapping_add(4);
 
-        let (a, b, c): (u32, u32, u32);
+        let (a, mut b, mut c): (u32, u32, u32);
         let mut hi = None;
         let mut syscall_code = 0u32;
 
@@ -1148,6 +1148,14 @@ impl<'a> Executor<'a> {
 
                 if syscall == SyscallCode::HALT && returned_exit_code == 0 {
                     self.state.exited = true;
+                }
+
+                // If the syscall is `EXIT_UNCONSTRAINED`, the memory was restored to pre-unconstrained code
+                // in the execute function, so we need to re-read from A0 and A1.  Just do a peek on the
+                // registers.
+                if syscall == SyscallCode::EXIT_UNCONSTRAINED {
+                    b = self.register(Register::A0);
+                    c = self.register(Register::A1);
                 }
 
                 // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)

@@ -28,8 +28,7 @@ fn call_sqrt_hook(x: &[u8], modulus: &'static str, nqr: &[u8]) -> (u8, Vec<u8>) 
         );
     }
 
-    let status: u8 =
-        zkm_lib::io::read_vec().first().copied().expect("sqrt hook should have a status");
+    let status: u8 = zkm_lib::io::read_vec().first().copied().expect("sqrt hook should have a status");
     let result = zkm_lib::io::read_vec();
 
     (status, result)

@@ -7,7 +7,7 @@ pub mod tests {
 
     use test_artifacts::{
         FIBONACCI_ELF, HELLO_WORLD_ELF, KECCAK_SPONGE_ELF, PANIC_ELF, SECP256R1_ADD_ELF,
-        SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF,
+        SECP256R1_DOUBLE_ELF, SHA3_CHAIN_ELF, U256XU2048_MUL_ELF, UNCONSTRAINED_ELF,
     };
 
     #[must_use]
@@ -88,6 +88,16 @@ pub mod tests {
     #[must_use]
     pub fn ssz_withdrawals_program() -> Program {
         Program::from(KECCAK_SPONGE_ELF).unwrap()
+    }
+
+    /// Get the unconstrained program.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the program fails to load.
+    #[must_use]
+    pub fn unconstrained_program() -> Program {
+        Program::from(UNCONSTRAINED_ELF).unwrap()
     }
 
     /// Get the panic program.

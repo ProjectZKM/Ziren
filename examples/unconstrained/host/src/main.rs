@@ -7,12 +7,13 @@ fn main() {
     let stdin = ZKMStdin::new();
 
     let client = ProverClient::new();
-    let (public_values, report) = client.execute(ELF, stdin.clone()).run().expect("failed to prove");
+    let (public_values, report) =
+        client.execute(ELF, stdin.clone()).run().expect("failed to prove");
 
     println!("report: {}", report);
     println!("public_values: {:?}", public_values);
 
-    // let (pk, vk) = client.setup(ELF);
-    // let proof = client.prove(&pk, stdin).run().unwrap();
-    // client.verify(&proof, &vk).expect("verification failed");
+    let (pk, vk) = client.setup(ELF);
+    let proof = client.prove(&pk, stdin).run().unwrap();
+    client.verify(&proof, &vk).expect("verification failed");
 }
