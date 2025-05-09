@@ -1152,7 +1152,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     fn check_for_high_cycles(cycles: u64) {
         if cycles > 100_000_000 {
             tracing::warn!(
-                "high cycle count, consider using the prover network for proof generation: https://docs.succinct.xyz/generating-proofs/prover-network"
+                "high cycle count, consider using the prover network for proof generation"
             );
         }
     }
