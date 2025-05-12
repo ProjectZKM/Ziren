@@ -5,7 +5,7 @@ import {IZKMVerifier, IZKMVerifierWithHash} from "../IZKMVerifier.sol";
 import {Groth16Verifier} from "./Groth16Verifier.sol";
 
 /// @title zkMIPS Verifier
-/// @author Succinct Labs
+/// @author ZKM Labs
 /// @notice This contracts implements a solidity verifier for zkMIPS.
 contract ZKMVerifier is Groth16Verifier, IZKMVerifierWithHash {
     /// @notice Thrown when the verifier selector from this proof does not match the one in this

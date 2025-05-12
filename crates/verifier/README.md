@@ -6,8 +6,7 @@ to be generated using the [zkMIPS SDK](../sdk).
 ## Features
 
 Groth16 and Plonk proof verification are supported in `no-std` environments. Verification in the
-zkMIPS zkVM context is patched, in order to make use of the
-[bn254 precompiles](https://blog.succinct.xyz/succinctshipsprecompiles/).
+zkMIPS zkVM context is patched, in order to make use of the bn254 precompiles.
 
 ### Pre-generated verification keys
 

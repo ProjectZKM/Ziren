@@ -73,10 +73,6 @@ impl EdwardsParameters for Ed25519Parameters {
 /// This function always returns the nonnegative square root, in the sense that the least
 /// significant bit of the result is always 0.
 pub fn ed25519_sqrt(a: &BigUint) -> BigUint {
-    // Here is a description of how to calculate sqrt in the Curve25519 base field:
-    // ssh://git@github.com/succinctlabs/curve25519-dalek/blob/
-    // e2d1bd10d6d772af07cac5c8161cd7655016af6d/curve25519-dalek/src/field.rs#L256
-
     let modulus = Ed25519BaseField::modulus();
     // The exponent is (modulus+3)/8;
     let mut beta = a.modpow(
@@ -88,10 +84,6 @@ pub fn ed25519_sqrt(a: &BigUint) -> BigUint {
     );
 
     // The square root of -1 in the field.
-    // Take from here:
-    // ssh://git@github.com/succinctlabs/curve25519-dalek/blob/
-    // e2d1bd10d6d772af07cac5c8161cd7655016af6d/curve25519-dalek/src/backend/serial/u64/constants.
-    // rs#L89
     let sqrt_m1 = BigUint::from_str(
         "19681161376707505956807079304988542015446066515923890162744021073123829784752",
     )

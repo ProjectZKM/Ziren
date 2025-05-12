@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 /// @title zkMIPS Verifier Interface
-/// @author Succinct Labs
+/// @author ZKM Labs
 /// @notice This contract is the interface for the zkMIPS Verifier.
 interface IZKMVerifier {
     /// @notice Verifies a proof with given public values and vkey.
