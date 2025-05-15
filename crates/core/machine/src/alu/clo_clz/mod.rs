@@ -233,13 +233,11 @@ where
 
         // if is_bb_zero == 1, bb == 0, and result is 32
         {
-            builder.assert_bool(local.is_bb_zero.clone());
+            builder.assert_bool(local.is_bb_zero);
 
-            builder.when(local.is_bb_zero.clone()).assert_zero(local.bb.reduce::<AB>());
+            builder.when(local.is_bb_zero).assert_zero(local.bb.reduce::<AB>());
 
-            builder
-                .when(local.is_bb_zero.clone())
-                .assert_eq(local.a[0], AB::Expr::from_canonical_u32(32));
+            builder.when(local.is_bb_zero).assert_eq(local.a[0], AB::Expr::from_canonical_u32(32));
         }
 
         {
@@ -254,13 +252,13 @@ where
                     zero.clone(),
                     zero.clone(),
                 ]),
-                one.clone() - local.is_bb_zero.clone(),
+                one.clone() - local.is_bb_zero,
             );
         }
 
         // if bb!=0, check sr1 == 1
         {
-            builder.when_not(local.is_bb_zero.clone()).assert_one(local.sr1.reduce::<AB>());
+            builder.when_not(local.is_bb_zero).assert_one(local.sr1.reduce::<AB>());
         }
 
         builder.assert_bool(local.is_clo);
