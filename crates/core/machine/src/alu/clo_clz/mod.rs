@@ -25,7 +25,7 @@ use zkm_core_executor::{
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::{air::ZKMCoreAirBuilder, operations::IsZeroWordOperation, utils::pad_rows_fixed};
+use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed};
 
 /// The number of main trace columns for `CloClzChip`.
 pub const NUM_CLOCLZ_COLS: usize = size_of::<CloClzCols<u8>>();
@@ -60,7 +60,7 @@ pub struct CloClzCols<T> {
     pub bb: Word<T>,
 
     /// whether the `bb` is zero.
-    pub is_bb_zero: IsZeroWordOperation<T>,
+    pub is_bb_zero: T,
 
     /// bb shift right by `32 - (result + 1)`.
     pub sr1: Word<T>,
@@ -110,7 +110,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.bb = Word::from(bb);
 
             // if bb == 0, then result is 32.
-            cols.is_bb_zero.populate(bb);
+            cols.is_bb_zero = F::from_bool(bb == 0);
 
             if bb != 0 {
                 let sr1_val = bb >> (31 - event.a);
@@ -149,7 +149,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             // clz(0) = 32
             cols.a = Word::from(32);
             cols.is_clz = F::ONE;
-            cols.is_bb_zero.populate(0);
+            cols.is_bb_zero = F::ONE;
 
             row
         };
@@ -231,18 +231,16 @@ where
             local.is_real,
         );
 
-        // if bb == 0, result is 32
-        let is_bb_zero: AB::Expr = local.is_bb_zero.result.into();
+        // if is_bb_zero == 1, bb == 0, and result is 32
         {
-            IsZeroWordOperation::<AB::F>::eval(
-                builder,
-                local.bb.map(|x| x.into()),
-                local.is_bb_zero,
-                local.is_real.into(),
-            );
+            builder.assert_bool(local.is_bb_zero.clone());
 
             builder
-                .when(is_bb_zero.clone())
+                .when(local.is_bb_zero.clone())
+                .assert_zero(local.bb.reduce::<AB>());
+
+            builder
+                .when(local.is_bb_zero.clone())
                 .assert_eq(local.a[0], AB::Expr::from_canonical_u32(32));
         }
 
@@ -258,13 +256,13 @@ where
                     zero.clone(),
                     zero.clone(),
                 ]),
-                one.clone() - is_bb_zero.clone(),
+                one.clone() - local.is_bb_zero.clone(),
             );
         }
 
         // if bb!=0, check sr1 == 1
         {
-            builder.when_not(is_bb_zero.clone()).assert_one(local.sr1.reduce::<AB>());
+            builder.when_not(local.is_bb_zero.clone()).assert_one(local.sr1.reduce::<AB>());
         }
 
         builder.assert_bool(local.is_clo);

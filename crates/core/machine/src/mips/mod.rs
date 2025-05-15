@@ -723,7 +723,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore]
     fn write_core_air_costs() {
         let costs = MipsAir::<KoalaBear>::costs();
         println!("{costs:?}");
