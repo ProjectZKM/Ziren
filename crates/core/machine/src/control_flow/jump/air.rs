@@ -9,7 +9,6 @@ use zkm_stark::{
     Word,
 };
 
-use crate::air::WordAirBuilder;
 use crate::operations::KoalaBearWordRangeChecker;
 
 use super::{JumpChip, JumpColumns};
@@ -96,8 +95,8 @@ where
         );
         KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
-            local.target_pc,
-            local.target_pc_range_checker,
+            local.next_next_pc,
+            local.next_next_pc_range_checker,
             is_real.clone(),
         );
 
@@ -107,13 +106,10 @@ where
         // SAFETY: `is_jal` is boolean, and zero for padding rows.
         builder.send_alu(
             AB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            local.target_pc,
+            local.next_next_pc,
             local.next_pc,
             local.op_b_value,
             local.is_jumpdirect,
         );
-
-        // Assert that local.next_next_pc <==> local.target_pc.
-        builder.when(is_real.clone()).assert_word_eq(local.target_pc, local.next_next_pc);
     }
 }

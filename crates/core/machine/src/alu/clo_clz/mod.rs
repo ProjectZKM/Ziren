@@ -25,7 +25,6 @@ use zkm_core_executor::{
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::operations::{FixedShiftRightOperation, IsEqualWordOperation, IsZeroOperation};
 use crate::{air::ZKMCoreAirBuilder, operations::IsZeroWordOperation, utils::pad_rows_fixed};
 
 /// The number of main trace columns for `CloClzChip`.
@@ -60,24 +59,11 @@ pub struct CloClzCols<T> {
     /// if clz, bb == 0xffffffff - b
     pub bb: Word<T>,
 
-    /// whether the result is 32.
-    pub is_result_32: IsZeroOperation<T>,
-
     /// whether the `bb` is zero.
     pub is_bb_zero: IsZeroWordOperation<T>,
 
-    /// bb shift right by `32 - result`.
-    /// Use right-shifting sr1 by 1 to obtain sr0.
-    pub sr0: FixedShiftRightOperation<T>,
-
     /// bb shift right by `32 - (result + 1)`.
     pub sr1: Word<T>,
-
-    /// sr0 == 0
-    pub is_sr0_zero: IsZeroWordOperation<T>,
-
-    /// sr1 == 1
-    pub is_sr1_one: IsEqualWordOperation<T>,
 
     /// Flag to indicate whether the opcode is CLZ.
     pub is_clz: T,
@@ -124,16 +110,11 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.bb = Word::from(bb);
 
             // if bb == 0, then result is 32.
-            cols.is_result_32.populate(32 - event.a);
             cols.is_bb_zero.populate(bb);
 
             if bb != 0 {
                 let sr1_val = bb >> (31 - event.a);
                 cols.sr1 = Word::from(sr1_val);
-                cols.sr0.populate(output, sr1_val, 1);
-
-                cols.is_sr0_zero.populate(sr1_val >> 1);
-                cols.is_sr1_one.populate(sr1_val, 1);
             }
 
             // Range check.
@@ -169,7 +150,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.a = Word::from(32);
             cols.is_clz = F::ONE;
             cols.is_bb_zero.populate(0);
-            cols.is_result_32.populate(0);
 
             row
         };
@@ -222,7 +202,7 @@ where
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,
-            local.a[0],
+            local.a.reduce::<AB>(),
             AB::Expr::from_canonical_u8(33),
             local.is_real,
         );
@@ -261,14 +241,9 @@ where
                 local.is_real.into(),
             );
 
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                AB::Expr::from_canonical_u32(32) - local.a[0],
-                local.is_result_32,
-                local.is_real.into(),
-            );
-
-            builder.when(is_bb_zero.clone()).assert_one(local.is_result_32.result);
+            builder
+                .when(is_bb_zero.clone())
+                .assert_eq(local.a[0], AB::Expr::from_canonical_u32(32));
         }
 
         {
@@ -285,33 +260,16 @@ where
                 ]),
                 one.clone() - is_bb_zero.clone(),
             );
-
-            FixedShiftRightOperation::<AB::F>::eval(
-                builder,
-                local.sr1,
-                1,
-                local.sr0,
-                one.clone() - is_bb_zero.clone(),
-            );
         }
 
-        // if bb!=0, check sr == 0 and sr1 == 1
+        // if bb!=0, check sr1 == 1
         {
-            builder.when_not(is_bb_zero.clone()).assert_one(local.sr1[0]);
-            local
-                .sr0
-                .value
-                .into_iter()
-                .chain(local.sr1.into_iter().skip(1))
-                .for_each(|x| builder.when_not(is_bb_zero.clone()).assert_zero(x));
+            builder.when_not(is_bb_zero.clone()).assert_one(local.sr1.reduce::<AB>());
         }
 
         builder.assert_bool(local.is_clo);
         builder.assert_bool(local.is_clz);
         builder.assert_one(local.is_clo + local.is_clz);
-        builder.assert_zero(local.a[1]);
-        builder.assert_zero(local.a[2]);
-        builder.assert_zero(local.a[3]);
     }
 }
 

@@ -1061,8 +1061,13 @@ impl<'a> Executor<'a> {
                     self.local_counts.event_counts[Opcode::ADD] += 1;
                     self.local_counts.event_counts[Opcode::SLT] += 2;
                 }
-                Opcode::DIVU | Opcode::DIV => {
-                    self.local_counts.event_counts[Opcode::MUL] += 2;
+                Opcode::DIV => {
+                    self.local_counts.event_counts[Opcode::MULT] += 2;
+                    self.local_counts.event_counts[Opcode::ADD] += 2;
+                    self.local_counts.event_counts[Opcode::SLTU] += 1;
+                }
+                Opcode::DIVU => {
+                    self.local_counts.event_counts[Opcode::MULTU] += 2;
                     self.local_counts.event_counts[Opcode::ADD] += 2;
                     self.local_counts.event_counts[Opcode::SLTU] += 1;
                 }
@@ -1070,7 +1075,7 @@ impl<'a> Executor<'a> {
                     self.local_counts.event_counts[Opcode::SRL] += 1;
                 }
                 Opcode::MADDU | Opcode::MSUBU => {
-                    self.local_counts.event_counts[Opcode::MULT] += 1;
+                    self.local_counts.event_counts[Opcode::MULTU] += 1;
                 }
                 Opcode::EXT => {
                     self.local_counts.event_counts[Opcode::SLL] += 1;
