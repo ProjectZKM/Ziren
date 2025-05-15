@@ -235,9 +235,7 @@ where
         {
             builder.assert_bool(local.is_bb_zero.clone());
 
-            builder
-                .when(local.is_bb_zero.clone())
-                .assert_zero(local.bb.reduce::<AB>());
+            builder.when(local.is_bb_zero.clone()).assert_zero(local.bb.reduce::<AB>());
 
             builder
                 .when(local.is_bb_zero.clone())
