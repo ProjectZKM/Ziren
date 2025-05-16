@@ -20,7 +20,7 @@ fn main() {
         panic!("Failed to compile add.cpp");
     }
 
-    let libadd_status = Command::new("mipsel-linux-gnu-ar")
+    let status = Command::new("mipsel-linux-gnu-ar")
         .arg("rcs")
         .arg("../lib/libadd.a")
         .arg("add.o")
