@@ -2,7 +2,7 @@
 
 ## Polynomial Constraint System Architecture
 
-Following [arithmetization]((./arithmetization.md)), the computation is represented through a structured polynomial system.
+Following [arithmetization](./arithmetization.md), the computation is represented through a structured polynomial system.
 
 ### Core Components
 - ​Execution Trace Polynomials
