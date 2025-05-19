@@ -104,12 +104,6 @@ pub struct DivRemCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// The quotient operand.
-    pub lo: Word<T>,
-
-    /// The remainder operand.
-    pub hi: Word<T>,
-
     /// The first input operand.
     pub b: Word<T>,
 
@@ -217,8 +211,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
             // Initialize cols with basic operands and flags derived from the current event.
             {
-                cols.lo = Word::from(event.a);
-                cols.hi = Word::from(event.hi);
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
                 cols.pc = F::from_canonical_u32(event.pc);
@@ -521,12 +513,6 @@ where
             }
         }
 
-        // lo must equal quotient, and hi must equal remainder
-        for i in 0..WORD_SIZE {
-            builder.assert_eq(local.quotient[i], local.lo[i]);
-            builder.assert_eq(local.remainder[i], local.hi[i]);
-        }
-
         // remainder and b must have the same sign. Due to the intricate nature of sign logic in ZK,
         // we will check a slightly stronger condition:
         //
@@ -711,10 +697,10 @@ where
                 local.next_pc,
                 AB::Expr::ZERO,
                 opcode,
-                local.lo,
+                local.quotient,
                 local.b,
                 local.c,
-                local.hi,
+                local.remainder,
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
