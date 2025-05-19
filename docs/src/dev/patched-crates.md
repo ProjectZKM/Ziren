@@ -68,4 +68,4 @@ pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> B256 {
 }
 ```
 
-Finally, we can use the new `keccak256` in the [revme guest lib](https://github.com/zkMIPS/revme/blob/cbor-zkm/guest/src/lib.rs), which the [revme guest](https://github.com/zkMIPS/zkm/tree/dev/init/examples/revme/guest) depends on.
+Finally, we can use the new `keccak256` in the [revme guest lib](https://github.com/zkMIPS/revme/blob/cbor-zkm/guest/src/lib.rs), which the [revme guest](https://github.com/zkMIPS/zkm/tree/main/prover/examples/revme/guest) depends on.
