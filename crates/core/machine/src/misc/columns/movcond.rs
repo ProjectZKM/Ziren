@@ -1,6 +1,7 @@
 use crate::memory::MemoryReadWriteCols;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
+use zkm_stark::Word;
 
 pub const NUM_MOVCOND_COLS: usize = size_of::<MovcondCols<u8>>();
 
@@ -12,5 +13,5 @@ pub struct MovcondCols<T> {
     pub a_eq_b: T,
     /// Whether c equals 0.
     pub c_eq_0: T,
-    pub op_a_access: MemoryReadWriteCols<T>,
+    pub prev_a_value: Word<T>,
 }

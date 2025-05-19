@@ -119,7 +119,6 @@ impl BranchChip {
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_pc_range_checker.populate(event.next_pc);
         cols.target_pc_range_checker.populate(target_pc);
-        cols.next_next_pc_range_checker.populate(event.next_next_pc);
 
         if branching {
             cols.is_branching = F::ONE;

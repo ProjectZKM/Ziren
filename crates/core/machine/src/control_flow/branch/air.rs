@@ -106,13 +106,6 @@ where
                 is_real.clone(),
             );
 
-            KoalaBearWordRangeChecker::<AB::F>::range_check(
-                builder,
-                local.next_next_pc,
-                local.next_next_pc_range_checker,
-                is_real.clone(),
-            );
-
             // When we are branching, assert that local.target_pc <==> local.next_pc + c.
             builder.send_alu(
                 Opcode::ADD.as_field::<AB::F>(),

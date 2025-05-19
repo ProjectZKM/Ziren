@@ -146,7 +146,7 @@ impl MiscInstrsChip {
         let movcond_cols = cols.misc_specific_columns.movcond_mut();
         movcond_cols.a_eq_b = F::from_bool(event.b == event.a);
         movcond_cols.c_eq_0 = F::from_bool(event.c == 0);
-        movcond_cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), &mut Vec::new());
+        movcond_cols.prev_a_value = Word::from(event.a_record.prev_value);
     }
 
     fn populate_maddsub<F: PrimeField32>(
@@ -168,8 +168,8 @@ impl MiscInstrsChip {
         let is_add = event.opcode == Opcode::MADDU;
         let src2_lo = if is_add { event.a_record.prev_value } else { event.a_record.value };
         let src2_hi = if is_add { event.hi_record.prev_value } else { event.hi_record.value };
-        maddsub_cols.src2_lo = Word::from(src2_lo);
-        maddsub_cols.src2_hi = Word::from(src2_hi);
+        maddsub_cols.prev_hi = Word::from(event.hi_record.prev_value);
+        maddsub_cols.prev_lo = Word::from(event.a_record.prev_value);
         let _ = maddsub_cols.add_operation.populate(
             blu,
             multiply,
