@@ -8,7 +8,7 @@ A receipt gives the results of your program along with proof that they were prod
 
 You can verify other receipts in the guest use `zkm_zkvm::lib::verify::verify_zkm_proof()`
 
-## Example: [Aggregation](https://github.com/zkMIPS/zkm/tree/dev/init/examples/aggregation)
+## Example: [Aggregation](https://github.com/zkMIPS/zkMIPS/tree/main/examples/aggregation)
 
 ### Host
 

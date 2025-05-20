@@ -16,7 +16,7 @@ Note that type `T` must implement both `serde::Serialize` and `serde::Deserializ
 
 zkMIPS supports multiple programming languages. Below are examples of guest programs written in Rust and C/C++.
 
-### Rust Example: [Fibonacci](https://github.com/zkMIPS/zkm/blob/dev/init/examples/fibonacci/guest/src/main.rs)
+### Rust Example: [Fibonacci](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/guest/src/main.rs)
 
 ```rust
 //! A simple program that takes a number `n` as input, and writes the `n-1`th and `n`th Fibonacci

@@ -189,7 +189,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 ## Write Unit Tests for the New Precompile
 ### Create a New zkMIPS Test Package
 Create a new zkMIPS crate for your custom precompile test package inside the directory
-`zkm/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
+`zkMIPS/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
 ```toml
 [package]
 name = "custom-precompile-test"

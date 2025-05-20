@@ -49,23 +49,13 @@ ed25519-dalek = { git = "https://github.com/zkMIPS-patches/curve25519-dalek", br
 
 First, implement the target precompile in zkVM (e.g., `syscall_keccak_sponge`) with full circuit logic. Given the implementation complexity, we recommend submitting an issue for requested precompiles.
 
-Then replace the target crate's existing implementation with the zkVM precompile (e.g., `syscall_keccak_sponge`). For example, we have reimplemented [keccak256](https://github.com/zkMIPS/zkm/blob/dev/init/crates/zkvm/lib/src/keccak256.rs) by `syscall_keccak_sponge`, and use this implementation to replace `keccak256` in the revm crate.
+Then replace the target crate's existing implementation with the zkVM precompile (e.g., `syscall_keccak_sponge`). For example, we have reimplemented [keccak256](https://github.com/zkMIPS/zkMIPS/blob/main/crates/zkvm/lib/src/keccak256.rs) by `syscall_keccak_sponge`, and use this implementation to replace `keccak256` in the [core](https://github.com/alloy-rs/core/compare/main...zkMIPS-patches:core:patch-alloy-primitives-1.0.0) crate.
 
 ```rust
-use zkm_zkvm::lib::keccak256::keccak256 as keccak256_zkvm;
-
-// Define the keccak256 function
-#[inline]
-pub fn keccak256<T: AsRef<[u8]>>(bytes: T) -> B256 {
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "zkvm")] {
-            let output = keccak256_zkvm(bytes.as_ref());
-            B256::from(output)
-        } else {
-            keccak256_alloy(bytes)
-        }
-    }
+if #[cfg(target_os = "zkvm")] {
+    let output = zkm_zkvm::lib::keccak256::keccak256(bytes);
+    B256::from(output)
 }
 ```
 
-Finally, we can use the new `keccak256` in the [revme guest lib](https://github.com/zkMIPS/revme/blob/cbor-zkm/guest/src/lib.rs), which the [revme guest](https://github.com/zkMIPS/zkm/tree/main/prover/examples/revme/guest) depends on.
+Finally, we can use the patched crate [core](https://github.com/zkMIPS-patches/core/tree/patch-alloy-primitives-1.0.0) in the [reth-processor](https://github.com/zkMIPS/reth-processor/blob/main/bin/guest/Cargo.toml#L27).

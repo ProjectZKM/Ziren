@@ -8,7 +8,7 @@ Within the zkVM, precompiles are made available as system calls executed through
 
 For advanced users, it's possible to directly interact with the precompiles through external system calls.
 
-Here is a list of all available [system calls & precompiles](https://github.com/zkMIPS/zkm/blob/dev/init/crates/zkvm/lib/src/lib.rs).
+Here is a list of all available [system calls & precompiles](https://github.com/zkMIPS/zkMIPS/blob/main/crates/zkvm/lib/src/lib.rs).
 
 ```rust
 //! Syscalls for the zkMIPS zkVM.
@@ -162,7 +162,7 @@ extern "C" {
 }
 ```
 
-## Guest Example: [syscall_sha256_extend](https://github.com/zkMIPS/zkm/tree/dev/init/crates/test-artifacts/guests/sha-extend)
+## Guest Example: [syscall_sha256_extend](https://github.com/zkMIPS/zkMIPS/tree/main/crates/test-artifacts/guests/sha-extend)
 
 In the guest program, you can call the precompile `syscall_sha256_extend()` in the following way:
 
