@@ -147,7 +147,7 @@ Each stage may take a different amount of time.
 
 ### Requirements
 
-- **CA certificate:** `ca.pem`, `ca.key`. These keys are stored [here](github.com/VanhGer/zkMIPS/tree/feat/network-prover/crates/sdk/tool)
+- **CA certificate:** `ca.pem`, `ca.key`. These keys are stored [here](https://github.com/zkMIPS/zkMIPS/tree/main/crates/sdk/tool)
 - [Register](https://www.zkm.io/apply) your address to gain access.
 - **SDK dependency**: add `zkm_sdk` from the zkMIPS SDK to your `Cargo.toml`:
 ```toml
