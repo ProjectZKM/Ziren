@@ -246,7 +246,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                     debug_lookups_with_all_chips::<SC, A>(
                         self,
                         pk,
-                        &[shard.clone()],
+                        std::slice::from_ref(shard),
                         LookupKind::all_kinds(),
                         LookupScope::Local,
                     )
