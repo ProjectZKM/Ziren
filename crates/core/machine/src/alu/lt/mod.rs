@@ -81,7 +81,7 @@ pub struct LtCols<T> {
     pub is_sign_eq: T,
     /// The comparison bytes to be looked up.
     pub comparison_bytes: [T; 2],
-    /// Boolean fags to indicate which byte differs between the perands `b_comp`, `c_comp`.
+    /// Boolean fags to indicate which byte differs between the operands `b_comp`, `c_comp`.
     pub byte_equality_check: [T; 4],
 }
 
@@ -402,13 +402,13 @@ where
         // We need to verify that the comparison bytes are set correctly. This is only relevant in
         // the case where the bytes are not equal.
 
-        // Constrain the row comparison byte values to be equal to the calciulated ones.
+        // Constrain the row comparison byte values to be equal to the calculated ones.
         let (b_comp_byte, c_comp_byte) = (local.comparison_bytes[0], local.comparison_bytes[1]);
         builder.assert_eq(b_comp_byte, b_comparison_byte);
         builder.assert_eq(c_comp_byte, c_comparison_byte);
 
         // Using the values above, we can constrain the `local.is_comp_eq` flag. We already asserted
-        // in the loop that when `local.is_comp_eq == 1` then all bytes are euqal. It is left to
+        // in the loop that when `local.is_comp_eq == 1` then all bytes are equal. It is left to
         // verify that when `local.is_comp_eq == 0` the comparison bytes are indeed not equal.
         // This is done using the inverse hint `not_eq_inv`.
         builder
