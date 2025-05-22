@@ -154,7 +154,7 @@ mod ecrecover {
         let alpha = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&alpha)).unwrap();
         assert!(!bool::from(alpha.is_zero()), "alpha should not be zero");
 
-        // nomralize the y-coordinate always to be consistent.
+        // normalize the y-coordinate always to be consistent.
         if let Some(mut y_coord) = alpha.sqrt().into_option().map(|y| y.normalize()) {
             let r = K256Scalar::from_repr(r.to_bytes()).unwrap();
             let r_inv = r.invert().expect("Non zero r scalar");
