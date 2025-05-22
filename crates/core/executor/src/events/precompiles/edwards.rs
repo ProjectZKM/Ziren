@@ -19,7 +19,7 @@ pub struct EdDecompressEvent {
     pub ptr: u32,
     /// The sign bit of the point.
     pub sign: bool,
-    /// The comprssed y coordinate as a list of bytes.
+    /// The compressed y coordinate as a list of bytes.
     pub y_bytes: [u8; COMPRESSED_POINT_BYTES],
     /// The decompressed x coordinate as a list of bytes.
     pub decompressed_x_bytes: [u8; NUM_BYTES_FIELD_ELEMENT],
