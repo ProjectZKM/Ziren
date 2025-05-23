@@ -99,7 +99,6 @@ impl BranchChip {
         let a_lt_b = (event.a as i32) < (event.b as i32);
         let a_gt_b = (event.a as i32) > (event.b as i32);
 
-        cols.a_eq_b = F::from_bool(a_eq_b);
         cols.a_lt_b = F::from_bool(a_lt_b);
         cols.a_gt_b = F::from_bool(a_gt_b);
 
@@ -120,10 +119,6 @@ impl BranchChip {
         cols.next_pc_range_checker.populate(event.next_pc);
         cols.target_pc_range_checker.populate(target_pc);
 
-        if branching {
-            cols.is_branching = F::ONE;
-        } else {
-            cols.not_branching = F::ONE;
-        }
+        cols.is_branching = F::from_bool(branching);
     }
 }

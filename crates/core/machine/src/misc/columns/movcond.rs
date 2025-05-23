@@ -1,4 +1,3 @@
-use crate::memory::MemoryReadWriteCols;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;

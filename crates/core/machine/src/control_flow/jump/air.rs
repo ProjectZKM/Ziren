@@ -9,6 +9,8 @@ use zkm_stark::{
     Word,
 };
 
+use crate::air::WordAirBuilder;
+
 use crate::operations::KoalaBearWordRangeChecker;
 
 use super::{JumpChip, JumpColumns};
@@ -84,7 +86,7 @@ where
             is_real.clone(),
         );
         // SAFETY: `is_real` is already checked to be boolean.
-        // `local.pc`, `local.next_pc` are checked to a valid word when relevant.
+        // `local.next_pc`, `local.next_next_pc` are checked to a valid word when relevant.
         // This is due to the ADD ALU table checking all inputs and outputs are valid words.
         // This is done when the `AddOperation` is invoked in the ADD ALU table.
         KoalaBearWordRangeChecker::<AB::F>::range_check(
@@ -100,10 +102,14 @@ where
             is_real.clone(),
         );
 
-        // We now constrain `next_pc`.
+        // We now constrain `next_next_pc` for J/JR/JALR.
+        builder.when(local.is_jump + local.is_jumpi).assert_word_eq(
+            local.next_next_pc,
+            local.op_b_value,
+        );
 
-        // Verify that the new pc is calculated correctly for JAL instructions.
-        // SAFETY: `is_jal` is boolean, and zero for padding rows.
+        // Verify that the next_next_pc is calculated correctly for BAL instructions.
+        // SAFETY: `is_jumpdirect` is boolean, and zero for padding rows.
         builder.send_alu(
             AB::Expr::from_canonical_u32(Opcode::ADD as u32),
             local.next_next_pc,

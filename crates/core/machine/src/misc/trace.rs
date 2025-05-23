@@ -6,7 +6,7 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, MemoryRecordEnum, MiscEvent},
+    events::{ByteLookupEvent, ByteRecord, MiscEvent},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_stark::{air::MachineAir, Word};
@@ -175,6 +175,8 @@ impl MiscInstrsChip {
             multiply,
             ((src2_hi as u64) << 32) + (src2_lo as u64),
         );
+        maddsub_cols.src2_lo = Word::from(src2_lo);
+        maddsub_cols.src2_hi = Word::from(src2_hi);
     }
 
     fn populate_ext<F: PrimeField32>(

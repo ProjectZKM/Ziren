@@ -9,6 +9,8 @@ use zkm_stark::{
     Word,
 };
 
+use zkm_primitives::consts::WORD_SIZE;
+
 use crate::{air::WordAirBuilder, operations::AddDoubleOperation};
 
 use super::{columns::MiscInstrColumns, MiscInstrsChip};
@@ -161,41 +163,42 @@ impl MiscInstrsChip {
             is_real.clone(),
         );
 
-        AddDoubleOperation::<AB::F>::eval(
-            builder,
-            maddsub_cols.mul_lo,
-            maddsub_cols.mul_hi,
-            maddsub_cols.prev_lo,
-            maddsub_cols.prev_hi,
-            maddsub_cols.add_operation,
-            local.is_maddu.into(),
-        );
-
-        builder
-                .when(local.is_maddu)
-                .assert_word_eq(local.op_a_value, maddsub_cols.add_operation.value);
-        
-        builder
-                .when(local.is_maddu)
-                .assert_word_eq(local.op_hi_value, maddsub_cols.add_operation.value_hi);
+        for i in 0..WORD_SIZE {
+            builder.when(is_real.clone()).assert_eq(
+                maddsub_cols.src2_hi[i],
+                maddsub_cols.prev_hi[i] * local.is_maddu + local.op_hi_value[i] * local.is_msubu,
+            );
+            builder.when(is_real.clone()).assert_eq(
+                maddsub_cols.src2_lo[i],
+                maddsub_cols.prev_lo[i] * local.is_maddu + local.op_a_value[i] * local.is_msubu,
+            );
+        }
 
         AddDoubleOperation::<AB::F>::eval(
             builder,
             maddsub_cols.mul_lo,
             maddsub_cols.mul_hi,
-            local.op_a_value,
-            local.op_hi_value,
+            maddsub_cols.src2_lo,
+            maddsub_cols.src2_hi,
             maddsub_cols.add_operation,
-            local.is_msubu.into(),
+            is_real,
         );
 
         builder
-                .when(local.is_msubu)
-                .assert_word_eq(maddsub_cols.prev_lo, maddsub_cols.add_operation.value);
-        
+            .when(local.is_maddu)
+            .assert_word_eq(local.op_a_value, maddsub_cols.add_operation.value);
+
         builder
-                .when(local.is_msubu)
-                .assert_word_eq(maddsub_cols.prev_hi, maddsub_cols.add_operation.value_hi);
+            .when(local.is_maddu)
+            .assert_word_eq(local.op_hi_value, maddsub_cols.add_operation.value_hi);
+
+        builder
+            .when(local.is_msubu)
+            .assert_word_eq(maddsub_cols.prev_lo, maddsub_cols.add_operation.value);
+
+        builder
+            .when(local.is_msubu)
+            .assert_word_eq(maddsub_cols.prev_hi, maddsub_cols.add_operation.value_hi);
     }
 
     pub(crate) fn eval_movcond<AB: ZKMAirBuilder>(

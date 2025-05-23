@@ -19,4 +19,6 @@ pub struct MaddsubCols<T> {
 
     /// Add operations of low/high word.
     pub add_operation: AddDoubleOperation<T>,
+    pub src2_hi: Word<T>,
+    pub src2_lo: Word<T>,
 }
