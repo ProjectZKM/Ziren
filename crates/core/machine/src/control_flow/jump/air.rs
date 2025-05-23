@@ -103,10 +103,9 @@ where
         );
 
         // We now constrain `next_next_pc` for J/JR/JALR.
-        builder.when(local.is_jump + local.is_jumpi).assert_word_eq(
-            local.next_next_pc,
-            local.op_b_value,
-        );
+        builder
+            .when(local.is_jump + local.is_jumpi)
+            .assert_word_eq(local.next_next_pc, local.op_b_value);
 
         // Verify that the next_next_pc is calculated correctly for BAL instructions.
         // SAFETY: `is_jumpdirect` is boolean, and zero for padding rows.

@@ -7,7 +7,9 @@ fn prove_keccak_rust() {
     let mut stdin = ZKMStdin::new();
 
     // load input
-    let args = env::var("ARGS").unwrap_or("a2279f61f227e186fe9a3b9ba199d8747ddfe637153fc3bd0151def164a925ad data-to-hash".to_string());
+    let args = env::var("ARGS").unwrap_or(
+        "a2279f61f227e186fe9a3b9ba199d8747ddfe637153fc3bd0151def164a925ad data-to-hash".to_string(),
+    );
     // assume the first arg is the hash output(which is a public input), and the second is the input.
     let args: Vec<&str> = args.split_whitespace().collect();
     assert_eq!(args.len(), 2);
