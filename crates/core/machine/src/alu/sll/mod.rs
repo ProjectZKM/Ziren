@@ -69,9 +69,6 @@ pub struct ShiftLeftCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// Whether the first operand is not register 0.
-    pub op_a_not_0: T,
-
     /// The output operand.
     pub a: Word<T>,
 
@@ -207,7 +204,6 @@ impl ShiftLeft {
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
-        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
         cols.is_real = F::ONE;
         for i in 0..BYTE_SIZE {
             cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
@@ -392,7 +388,6 @@ where
             local.b,
             local.c,
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ONE - local.op_a_not_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

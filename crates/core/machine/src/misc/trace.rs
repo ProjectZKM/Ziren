@@ -86,7 +86,6 @@ impl MiscInstrsChip {
         cols.op_b_value = event.b.into();
         cols.op_c_value = event.c.into();
         cols.op_hi_value = event.hi.into();
-        cols.op_a_0 = F::from_bool(event.op_a_0);
 
         cols.is_wsbh = F::from_bool(matches!(event.opcode, Opcode::WSBH));
         cols.is_sext = F::from_bool(matches!(event.opcode, Opcode::SEXT));

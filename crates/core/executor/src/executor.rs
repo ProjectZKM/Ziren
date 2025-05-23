@@ -680,7 +680,6 @@ impl<'a> Executor<'a> {
         b: u32,
         c: u32,
         hi: Option<u32>,
-        op_a_0: bool,
         record: MemoryAccessRecord,
         exit_code: u32,
         syscall_code: u32,
@@ -688,28 +687,19 @@ impl<'a> Executor<'a> {
         self.emit_cpu(clk, pc, next_pc, next_next_pc, a, b, c, hi, record, exit_code);
 
         if instruction.is_alu_instruction() {
-            self.emit_alu_event(instruction.opcode, hi, a, b, c, op_a_0);
+            self.emit_alu_event(instruction.opcode, hi, a, b, c);
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
-            self.emit_mem_instr_event(instruction.opcode, a, b, c, op_a_0);
+            self.emit_mem_instr_event(instruction.opcode, a, b, c);
         } else if instruction.is_branch_instruction() {
-            self.emit_branch_event(instruction.opcode, a, b, c, op_a_0, next_pc, next_next_pc);
+            self.emit_branch_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
         } else if instruction.is_jump_instruction() {
-            self.emit_jump_event(instruction.opcode, a, b, c, op_a_0, next_pc, next_next_pc);
+            self.emit_jump_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
         } else if instruction.is_syscall_instruction() {
-            self.emit_syscall_event(clk, record.a, op_a_0, syscall_code, b, c, next_pc);
+            self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
         } else if instruction.is_misc_instruction() {
-            self.emit_misc_event(
-                instruction.opcode,
-                a,
-                b,
-                c,
-                hi.unwrap_or(0),
-                record.a,
-                record.hi,
-                op_a_0,
-            );
+            self.emit_misc_event(instruction.opcode, a, b, c, hi.unwrap_or(0), record.a, record.hi);
         } else {
             log::info!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -751,15 +741,7 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit an ALU event.
-    fn emit_alu_event(
-        &mut self,
-        opcode: Opcode,
-        hi: Option<u32>,
-        a: u32,
-        b: u32,
-        c: u32,
-        op_a_0: bool,
-    ) {
+    fn emit_alu_event(&mut self, opcode: Opcode, hi: Option<u32>, a: u32, b: u32, c: u32) {
         let event = AluEvent {
             pc: self.state.pc,
             next_pc: self.state.next_pc,
@@ -768,7 +750,6 @@ impl<'a> Executor<'a> {
             a,
             b,
             c,
-            op_a_0,
         };
         match opcode {
             Opcode::ADD => {
@@ -806,7 +787,7 @@ impl<'a> Executor<'a> {
 
     /// Emit a memory instruction event.
     #[inline]
-    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32, op_a_0: bool) {
+    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32) {
         let event = MemInstrEvent {
             shard: self.shard(),
             clk: self.state.clk,
@@ -816,7 +797,6 @@ impl<'a> Executor<'a> {
             a,
             b,
             c,
-            op_a_0,
             mem_access: self.memory_accesses.memory.expect("Must have memory access"),
             op_a_access: self.memory_accesses.a.expect("Must have memory access"),
         };
@@ -838,12 +818,10 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        op_a_0: bool,
         next_pc: u32,
         next_next_pc: u32,
     ) {
-        let event =
-            BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 };
+        let event = BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c };
         self.record.branch_events.push(event);
         emit_branch_dependencies(self, event);
     }
@@ -857,11 +835,10 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        op_a_0: bool,
         next_pc: u32,
         next_next_pc: u32,
     ) {
-        let event = JumpEvent::new(self.state.pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0);
+        let event = JumpEvent::new(self.state.pc, next_pc, next_next_pc, opcode, a, b, c);
         self.record.jump_events.push(event);
         emit_jump_dependencies(self, event);
     }
@@ -878,7 +855,6 @@ impl<'a> Executor<'a> {
         hi: u32,
         a_record: Option<MemoryRecordEnum>,
         hi_record: Option<MemoryRecordEnum>,
-        op_a_0: bool,
     ) {
         let a_access = match a_record {
             Some(MemoryRecordEnum::Write(record)) => record,
@@ -900,7 +876,6 @@ impl<'a> Executor<'a> {
             hi,
             a_access,
             hi_access,
-            op_a_0,
         );
         self.record.misc_events.push(event);
         emit_misc_dependencies(self, event);
@@ -912,7 +887,6 @@ impl<'a> Executor<'a> {
         &self,
         clk: u32,
         a_record: Option<MemoryRecordEnum>,
-        op_a_0: Option<bool>,
         next_pc: u32,
         syscall_id: u32,
         arg1: u32,
@@ -923,8 +897,6 @@ impl<'a> Executor<'a> {
             _ => (MemoryWriteRecord::default(), false),
         };
 
-        let op_a_0 = op_a_0.unwrap_or(false);
-
         SyscallEvent {
             pc: self.state.pc,
             next_pc,
@@ -932,7 +904,6 @@ impl<'a> Executor<'a> {
             clk,
             a_record: write,
             a_record_is_real: is_real,
-            op_a_0,
             syscall_id,
             arg1,
             arg2,
@@ -944,14 +915,12 @@ impl<'a> Executor<'a> {
         &mut self,
         clk: u32,
         a_record: Option<MemoryRecordEnum>,
-        op_a_0: bool,
         syscall_id: u32,
         arg1: u32,
         arg2: u32,
         next_pc: u32,
     ) {
-        let syscall_event =
-            self.syscall_event(clk, a_record, Some(op_a_0), next_pc, syscall_id, arg1, arg2);
+        let syscall_event = self.syscall_event(clk, a_record, next_pc, syscall_id, arg1, arg2);
 
         self.record.syscall_events.push(syscall_event);
     }
@@ -1267,7 +1236,6 @@ impl<'a> Executor<'a> {
             }
         }
 
-        let op_a_0 = instruction.op_a == Register::ZERO as u8;
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
             self.emit_events(
@@ -1280,7 +1248,6 @@ impl<'a> Executor<'a> {
                 b,
                 c,
                 hi,
-                op_a_0,
                 self.memory_accesses,
                 exit_code,
                 syscall_code,

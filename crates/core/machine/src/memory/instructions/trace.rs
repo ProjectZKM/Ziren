@@ -94,7 +94,6 @@ impl MemoryInstructionsChip {
         cols.op_a_value = event.a.into();
         cols.op_b_value = event.b.into();
         cols.op_c_value = event.c.into();
-        cols.op_a_0 = F::from_bool(event.op_a_0);
 
         // Populate memory accesses for reading from memory.
         cols.memory_access.populate(event.mem_access, blu);
@@ -191,7 +190,7 @@ impl MemoryInstructionsChip {
 
                 let most_sig_mem_value_bit = most_sig_mem_value_byte >> 7;
                 if most_sig_mem_value_bit == 1 {
-                    cols.mem_value_is_neg_not_x0 = F::from_bool(!event.op_a_0);
+                    cols.mem_value_is_neg = F::ONE;
                 }
 
                 cols.most_sig_byte = F::from_canonical_u8(most_sig_mem_value_byte);
@@ -206,12 +205,11 @@ impl MemoryInstructionsChip {
                 });
             }
 
-            // Set the `mem_value_is_pos_not_x0` composite flag.
-            cols.mem_value_is_pos_not_x0 = F::from_bool(
-                ((matches!(event.opcode, Opcode::LB | Opcode::LH)
+            // Set the `mem_value_is_pos` composite flag.
+            cols.mem_value_is_pos = F::from_bool(
+                (matches!(event.opcode, Opcode::LB | Opcode::LH)
                     && (cols.most_sig_bit == F::ZERO))
-                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LL))
-                    && !event.op_a_0,
+                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LL)
             )
         }
 

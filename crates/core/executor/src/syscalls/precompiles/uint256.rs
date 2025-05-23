@@ -79,7 +79,7 @@ impl Syscall for Uint256MulSyscall {
             local_mem_access: rt.postprocess(),
         });
         let sycall_event =
-            rt.rt.syscall_event(clk, None, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
+            rt.rt.syscall_event(clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, sycall_event, event);
 
         None

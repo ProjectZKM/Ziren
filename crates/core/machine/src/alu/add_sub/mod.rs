@@ -54,9 +54,6 @@ pub struct AddSubCols<T> {
     /// The second input operand.  This will be `c` for both operations.
     pub operand_2: Word<T>,
 
-    /// Whether the first operand is not register 0.
-    pub op_a_not_0: T,
-
     /// Flag indicating whether the opcode is `ADD`.
     pub is_add: T,
 
@@ -164,7 +161,6 @@ impl AddSubChip {
         cols.add_operation.populate(blu, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
-        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
     }
 }
 
@@ -203,7 +199,6 @@ where
             local.operand_1,
             local.operand_2,
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ONE - local.op_a_not_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
@@ -224,7 +219,6 @@ where
             local.add_operation.value,
             local.operand_2,
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ONE - local.op_a_not_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

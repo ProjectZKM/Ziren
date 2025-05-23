@@ -5,7 +5,7 @@ use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 use zkm_core_executor::Opcode;
 use zkm_stark::{
-    air::{BaseAirBuilder, ZKMAirBuilder},
+    air::ZKMAirBuilder,
     Word,
 };
 
@@ -57,7 +57,6 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
-            local.op_a_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
@@ -69,7 +68,7 @@ where
         // When op_a is set to register X0, the MIPS spec states that the jump instruction will
         // not have a return destination address (it is effectively a GOTO command).  In this case,
         // we shouldn't verify the return address.
-        builder.when(is_real.clone()).when_not(local.op_a_0).assert_eq(
+        builder.when(is_real.clone()).assert_eq(
             local.op_a_value.reduce::<AB>(),
             local.next_pc.reduce::<AB>() + AB::F::from_canonical_u32(4),
         );

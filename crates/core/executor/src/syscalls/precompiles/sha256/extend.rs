@@ -76,7 +76,6 @@ impl Syscall for Sha256ExtendSyscall {
         let syscall_event = rt.rt.syscall_event(
             clk_init,
             None,
-            None,
             rt.next_pc,
             syscall_code.syscall_id(),
             arg1,

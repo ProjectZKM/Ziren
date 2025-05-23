@@ -68,7 +68,6 @@ where
             local.op_b_value,
             local.op_c_value,
             local.op_hi_value,
-            local.op_a_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

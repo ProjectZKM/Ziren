@@ -128,13 +128,15 @@ impl CpuChip {
         cols.is_memory = F::from_bool(
             instruction.is_memory_load_instruction() || instruction.is_memory_store_instruction(),
         );
+
         cols.is_syscall = F::from_bool(instruction.is_syscall_instruction());
 
         cols.op_a_value = event.a.into();
-
         if let Some(hi) = event.hi {
             *cols.op_hi_access.value_mut() = hi.into();
+            cols.op_hi_value = hi.into();
         }
+
         *cols.op_a_access.value_mut() = event.a.into();
         *cols.op_b_access.value_mut() = event.b.into();
         *cols.op_c_access.value_mut() = event.c.into();

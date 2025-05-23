@@ -705,7 +705,6 @@ where
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
-                AB::Expr::ZERO,
                 AB::Expr::ONE,
                 local.is_real,
             );

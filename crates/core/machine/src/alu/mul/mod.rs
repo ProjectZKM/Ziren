@@ -79,9 +79,6 @@ pub struct MulCols<T> {
     pub pc: T,
     pub next_pc: T,
 
-    /// Whether the first operand is not register 0.
-    pub op_a_not_0: T,
-
     /// The upper bits of the output operand.
     pub hi: Word<T>,
 
@@ -282,7 +279,6 @@ impl MulChip {
         cols.a = Word(a_word.map(F::from_canonical_u8));
         cols.b = Word(b_word.map(F::from_canonical_u8));
         cols.c = Word(c_word.map(F::from_canonical_u8));
-        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
@@ -443,7 +439,6 @@ where
             local.b,
             local.c,
             local.hi,
-            AB::Expr::ONE - local.op_a_not_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

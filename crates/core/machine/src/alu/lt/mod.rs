@@ -51,9 +51,6 @@ pub struct LtCols<T> {
     /// The second input operand.
     pub c: Word<T>,
 
-    /// Whether the first operand is not register 0.
-    pub op_a_not_0: T,
-
     /// Boolean flag to indicate which byte pair differs if the operands are not equal.
     pub byte_flags: [T; 4],
 
@@ -184,7 +181,6 @@ impl LtChip {
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
-        cols.op_a_not_0 = F::from_bool(!event.op_a_0);
 
         // If this is SLT, mask the MSB of b & c before computing cols.bits.
         let masked_b = b[3] & 0x7f;
@@ -450,7 +446,6 @@ where
             local.b,
             local.c,
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ONE - local.op_a_not_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

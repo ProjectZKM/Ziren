@@ -92,7 +92,6 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
                 let syscall_event = rt.rt.syscall_event(
                     clk,
                     None,
-                    None,
                     rt.next_pc,
                     syscall_code.syscall_id(),
                     arg1,
@@ -114,7 +113,6 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
 
                 let syscall_event = rt.rt.syscall_event(
                     clk,
-                    None,
                     None,
                     rt.next_pc,
                     syscall_code.syscall_id(),

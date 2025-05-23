@@ -59,7 +59,6 @@ where
         builder.assert_bool(local.is_swr);
         builder.assert_bool(local.is_sc);
         builder.assert_bool(is_real.clone());
-        builder.assert_bool(local.op_a_0);
 
         self.eval_memory_address_and_access::<AB>(builder, local, is_real.clone());
         self.eval_memory_load::<AB>(builder, local);
@@ -87,7 +86,6 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
-            local.op_a_0,
             local.is_sb + local.is_sh + local.is_sw + local.is_swl + local.is_swr,
             AB::Expr::ONE,
             AB::Expr::ZERO,
@@ -207,13 +205,12 @@ impl MemoryInstructionsChip {
         // Verify the unsigned_mem_value column.
         self.eval_unsigned_mem_value(builder, local);
 
-        // Assert that correct value of `mem_value_is_neg_not_x0`.
-        // SAFETY: If the opcode is not `lb` or `lh`, then `is_lb + is_lh = 0`, so `mem_value_is_neg_not_x0 = 0`.
+        // Assert that correct value of `mem_value_is_neg`.
+        // SAFETY: If the opcode is not `lb` or `lh`, then `is_lb + is_lh = 0`, so `mem_value_is_neg = 0`.
         // In the other case, `is_lb + is_lh = 1` (at most one selector is on), so `most_sig_byte` and `most_sig_bit` are correct.
-        // Since `op_a_0` is known to be correct, we can conclude that `mem_value_is_neg_not_x0` is correct for all cases, including padding rows.
         builder.assert_eq(
-            local.mem_value_is_neg_not_x0,
-            (local.is_lb + local.is_lh) * local.most_sig_bit * (AB::Expr::ONE - local.op_a_0),
+            local.mem_value_is_neg,
+            (local.is_lb + local.is_lh) * local.most_sig_bit,
         );
 
         // SAFETY: `is_lb + is_lh` is already constrained to be boolean.
@@ -239,16 +236,16 @@ impl MemoryInstructionsChip {
             AB::Expr::ZERO,
         ]);
 
-        // SAFETY: As we mentioned before, `mem_value_is_neg_not_x0` is correct in all cases and boolean in all cases.
+        // SAFETY: As we mentioned before, `mem_value_is_neg` is correct in all cases and boolean in all cases.
         builder.send_alu(
             Opcode::SUB.as_field::<AB::F>(),
             local.op_a_value,
             local.unsigned_mem_val,
             signed_value,
-            local.mem_value_is_neg_not_x0,
+            local.mem_value_is_neg,
         );
 
-        // Assert that correct value of `mem_value_is_pos_not_x0`.
+        // Assert that correct value of `mem_value_is_pos`.
         // SAFETY: If it's a store instruction or a padding row, `mem_value_is_pos = 0`.
         // If it's an unsigned instruction (LBU, LHU, LW), then `mem_value_is_pos = 1`.
         // If it's signed instruction (LB, LH), then `most_sig_bit` will be constrained correctly, and same for `mem_value_is_pos`.
@@ -258,14 +255,14 @@ impl MemoryInstructionsChip {
             + local.is_lw
             + local.is_ll;
         builder.assert_eq(
-            local.mem_value_is_pos_not_x0,
-            mem_value_is_pos * (AB::Expr::ONE - local.op_a_0),
+            local.mem_value_is_pos,
+            mem_value_is_pos,
         );
 
         // When the memory value is not positive and not writing to x0, assert that op_a value is
         // equal to the unsigned memory value.
         builder
-            .when(local.mem_value_is_pos_not_x0)
+            .when(local.mem_value_is_pos)
             .assert_word_eq(local.unsigned_mem_val, local.op_a_value);
     }
 

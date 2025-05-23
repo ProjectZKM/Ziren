@@ -45,7 +45,6 @@ where
 
         // SAFETY: This checks the following.
         // - `shard`, `clk` are correctly received from the CpuChip
-        // - `op_a_0 = 0` enforced, as `op_a = X5` for all SYSCALL
         // - `op_a_immutable = 0`
         // - `is_memory = 0`
         // - `is_syscall = 1`
@@ -67,7 +66,6 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO, // op_a is always register 2 for syscall instructions.
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,

@@ -76,7 +76,6 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
-            local.op_a_0,
             AB::Expr::ONE,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

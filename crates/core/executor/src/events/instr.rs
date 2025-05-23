@@ -22,32 +22,21 @@ pub struct AluEvent {
     pub b: u32,
     /// The second input operand.
     pub c: u32,
-
-    /// Whether the first operand is register 0.
-    pub op_a_0: bool,
 }
 
 impl AluEvent {
     /// Create a new [`AluEvent`].
     #[must_use]
-    pub fn new(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, op_a_0: bool) -> Self {
-        Self { pc, next_pc: pc + 4, opcode, a, b, c, op_a_0, hi: 0 }
+    pub fn new(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
+        Self { pc, next_pc: pc + 4, opcode, a, b, c, hi: 0 }
     }
 
     /// Create a new [`AluEvent`].
     /// Used for opcode with LO and HI registers
     /// DIV DIVU MULT MULLTU
     #[must_use]
-    pub fn new_with_hi(
-        pc: u32,
-        opcode: Opcode,
-        a: u32,
-        b: u32,
-        c: u32,
-        op_a_0: bool,
-        hi: u32,
-    ) -> Self {
-        Self { pc, next_pc: pc + 4, opcode, a, b, c, op_a_0, hi }
+    pub fn new_with_hi(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, hi: u32) -> Self {
+        Self { pc, next_pc: pc + 4, opcode, a, b, c, hi }
     }
 }
 
@@ -72,8 +61,6 @@ pub struct MemInstrEvent {
     pub b: u32,
     /// The third operand value.
     pub c: u32,
-    /// Whether the first operand is register 0.
-    pub op_a_0: bool,
     /// The memory access record for memory operations.
     pub mem_access: MemoryRecordEnum,
     /// The memory access record for memory operations.
@@ -93,11 +80,10 @@ impl MemInstrEvent {
         a: u32,
         b: u32,
         c: u32,
-        op_a_0: bool,
         mem_access: MemoryRecordEnum,
         op_a_access: MemoryRecordEnum,
     ) -> Self {
-        Self { shard, clk, pc, next_pc, opcode, a, b, c, op_a_0, mem_access, op_a_access }
+        Self { shard, clk, pc, next_pc, opcode, a, b, c, mem_access, op_a_access }
     }
 }
 
@@ -121,8 +107,6 @@ pub struct BranchEvent {
     pub b: u32,
     /// The third operand value.
     pub c: u32,
-    /// Whether the first operand is register 0.
-    pub op_a_0: bool,
 }
 
 impl BranchEvent {
@@ -137,9 +121,8 @@ impl BranchEvent {
         a: u32,
         b: u32,
         c: u32,
-        op_a_0: bool,
     ) -> Self {
-        Self { pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 }
+        Self { pc, next_pc, next_next_pc, opcode, a, b, c }
     }
 }
 
@@ -163,8 +146,6 @@ pub struct JumpEvent {
     pub b: u32,
     /// The third operand value.
     pub c: u32,
-    /// Whether the first operand is register 0.
-    pub op_a_0: bool,
 }
 
 impl JumpEvent {
@@ -179,9 +160,8 @@ impl JumpEvent {
         a: u32,
         b: u32,
         c: u32,
-        op_a_0: bool,
     ) -> Self {
-        Self { pc, next_pc, next_next_pc, opcode, a, b, c, op_a_0 }
+        Self { pc, next_pc, next_next_pc, opcode, a, b, c }
     }
 }
 
@@ -208,8 +188,6 @@ pub struct MiscEvent {
     pub a_record: MemoryWriteRecord,
     /// The hi operand memory record.
     pub hi_record: MemoryWriteRecord,
-    /// Whether the first operand is register 0.
-    pub op_a_0: bool,
 }
 
 impl MiscEvent {
@@ -226,8 +204,7 @@ impl MiscEvent {
         hi: u32,
         a_record: MemoryWriteRecord,
         hi_record: MemoryWriteRecord,
-        op_a_0: bool,
     ) -> Self {
-        Self { pc, next_pc, opcode, a, b, c, hi, a_record, hi_record, op_a_0 }
+        Self { pc, next_pc, opcode, a, b, c, hi, a_record, hi_record }
     }
 }

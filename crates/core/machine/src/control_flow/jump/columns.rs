@@ -27,9 +27,6 @@ pub struct JumpColumns<T> {
     /// The value of the third operand.
     pub op_c_value: Word<T>,
 
-    /// Whether the first operand is register 0.
-    pub op_a_0: T,
-
     /// Jump Instructions Selectors.
     pub is_jump: T,
     pub is_jumpi: T,

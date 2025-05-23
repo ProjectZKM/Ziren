@@ -49,9 +49,6 @@ pub struct CloClzCols<T> {
     /// The result
     pub a: Word<T>,
 
-    /// Whether the first operand is not register 0.
-    pub op_a_not_0: T,
-
     /// The input operand.
     pub b: Word<T>,
 
@@ -104,7 +101,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.is_real = F::ONE;
             cols.is_clo = F::from_bool(event.opcode == Opcode::CLO);
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
-            cols.op_a_not_0 = F::from_bool(!event.op_a_0);
 
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
@@ -222,7 +218,6 @@ where
             local.b,
             Word([AB::Expr::ZERO; 4]),
             Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ONE - local.op_a_not_0,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

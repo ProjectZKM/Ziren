@@ -99,6 +99,11 @@ impl Instruction {
         self.opcode == Opcode::SYSCALL
     }
 
+    #[must_use]
+    pub fn is_rw_a_instruction(&self) -> bool {
+        matches!(self.opcode, Opcode::SYSCALL | Opcode::INS | Opcode::MADDU | Opcode::MSUBU)
+    }
+
     /// Returns if the instruction is a memory instruction.
     #[must_use]
     pub const fn is_memory_instruction(&self) -> bool {

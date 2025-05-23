@@ -25,8 +25,6 @@ pub struct MemoryInstructionsColumns<T> {
     pub op_b_value: Word<T>,
     /// The value of the third operand.
     pub op_c_value: Word<T>,
-    /// Whether the first operand is register zero.
-    pub op_a_0: T,
 
     /// Whether this is a load byte instruction.
     pub is_lb: T,
@@ -93,9 +91,9 @@ pub struct MemoryInstructionsColumns<T> {
     pub most_sig_byte: T,
 
     /// Flag for load memory instructions that contains bool value of
-    /// (memory value is neg) && (op_a != registor 0).
-    pub mem_value_is_neg_not_x0: T,
+    /// (memory value is neg).
+    pub mem_value_is_neg: T,
     /// Flag for load memory instructions that contains bool value of
-    /// (memory value is pos) && (op_a != registor 0).
-    pub mem_value_is_pos_not_x0: T,
+    /// (memory value is pos).
+    pub mem_value_is_pos: T,
 }
