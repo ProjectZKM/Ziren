@@ -52,7 +52,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
                     if idx >= input.cpu_events.len() {
                         cols.instruction.imm_b = F::ONE;
                         cols.instruction.imm_c = F::ONE;
-                        cols.is_syscall = F::ONE;
+                        cols.is_rw_a = F::ONE;
                     } else {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.cpu_events[idx];
@@ -129,11 +129,11 @@ impl CpuChip {
             instruction.is_memory_load_instruction() || instruction.is_memory_store_instruction(),
         );
 
-        cols.is_syscall = F::from_bool(instruction.is_syscall_instruction());
+        cols.is_rw_a = F::from_bool(instruction.is_rw_a_instruction());
+        cols.is_write_hi = F::from_bool(instruction.is_mult_div_instruction());
 
         cols.op_a_value = event.a.into();
         if let Some(hi) = event.hi {
-            *cols.op_hi_access.value_mut() = hi.into();
             cols.op_hi_value = hi.into();
         }
 
@@ -144,6 +144,7 @@ impl CpuChip {
         cols.shard_to_send = if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
             || instruction.is_syscall_instruction()
+            || instruction.is_mult_div_instruction()
         {
             cols.shard
         } else {
@@ -152,22 +153,18 @@ impl CpuChip {
         cols.clk_to_send = if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
             || instruction.is_syscall_instruction()
+            || instruction.is_mult_div_instruction()
         {
             F::from_canonical_u32(event.clk)
         } else {
             F::ZERO
         };
 
-        // Populate memory accesses for hi, a, b, and c.
-        if let Some(record) = event.hi_record {
-            cols.op_hi_access.populate(record, blu_events);
-        }
-
         // Populate memory accesses for a, b, and c.
         if let Some(record) = event.a_record {
-            if instruction.is_syscall_instruction() {
-                // For syscall instructions, pass in a dummy byte lookup vector.  This syscall instruction
-                // chip also has a op_a_access field that will be populated and that will contribute
+            if instruction.is_rw_a_instruction() {
+                // For syscall/maddu/msubu/ins instructions, pass in a dummy byte lookup vector.  These instruction
+                // chips also has a op_a_access fields that will be populated and that will contribute
                 // to the byte lookup dependencies.
                 cols.op_a_access.populate(record, &mut Vec::new());
             } else {
@@ -194,8 +191,6 @@ impl CpuChip {
         cols.is_sequential = F::from_bool(
             !is_halt && !instruction.is_branch_instruction() && !instruction.is_jump_instruction(),
         );
-
-        cols.has_hi = F::from_bool(instruction.is_mult_div_instruction());
 
         // Populate range checks for a.
         let a_bytes = cols

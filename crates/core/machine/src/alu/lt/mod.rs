@@ -450,6 +450,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ZERO,
             AB::Expr::ONE,
             is_real,
         );
@@ -472,7 +473,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.lt_events = vec![AluEvent::new(0, Opcode::SLT, 0, 3, 2, false)];
+        shard.lt_events = vec![AluEvent::new(0, Opcode::SLT, 0, 3, 2)];
         let chip = LtChip::default();
         let generate_trace = chip.generate_trace(&shard, &mut ExecutionRecord::default());
         let trace: RowMajorMatrix<KoalaBear> = generate_trace;
@@ -500,21 +501,21 @@ mod tests {
         const NEG_4: u32 = 0b11111111111111111111111111111100;
         shard.lt_events = vec![
             // 0 == 3 < 2
-            AluEvent::new(0, Opcode::SLT, 0, 3, 2, false),
+            AluEvent::new(0, Opcode::SLT, 0, 3, 2),
             // 1 == 2 < 3
-            AluEvent::new(0, Opcode::SLT, 1, 2, 3, false),
+            AluEvent::new(0, Opcode::SLT, 1, 2, 3),
             // 0 == 5 < -3
-            AluEvent::new(0, Opcode::SLT, 0, 5, NEG_3, false),
+            AluEvent::new(0, Opcode::SLT, 0, 5, NEG_3),
             // 1 == -3 < 5
-            AluEvent::new(0, Opcode::SLT, 1, NEG_3, 5, false),
+            AluEvent::new(0, Opcode::SLT, 1, NEG_3, 5),
             // 0 == -3 < -4
-            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_4, false),
+            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_4),
             // 1 == -4 < -3
-            AluEvent::new(0, Opcode::SLT, 1, NEG_4, NEG_3, false),
+            AluEvent::new(0, Opcode::SLT, 1, NEG_4, NEG_3),
             // 0 == 3 < 3
-            AluEvent::new(0, Opcode::SLT, 0, 3, 3, false),
+            AluEvent::new(0, Opcode::SLT, 0, 3, 3),
             // 0 == -3 < -3
-            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_3, false),
+            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_3),
         ];
 
         prove_koalabear_template(&mut shard);
@@ -527,17 +528,17 @@ mod tests {
         const LARGE: u32 = 0b11111111111111111111111111111101;
         shard.lt_events = vec![
             // 0 == 3 < 2
-            AluEvent::new(0, Opcode::SLTU, 0, 3, 2, false),
+            AluEvent::new(0, Opcode::SLTU, 0, 3, 2),
             // 1 == 2 < 3
-            AluEvent::new(0, Opcode::SLTU, 1, 2, 3, false),
+            AluEvent::new(0, Opcode::SLTU, 1, 2, 3),
             // 0 == LARGE < 5
-            AluEvent::new(0, Opcode::SLTU, 0, LARGE, 5, false),
+            AluEvent::new(0, Opcode::SLTU, 0, LARGE, 5),
             // 1 == 5 < LARGE
-            AluEvent::new(0, Opcode::SLTU, 1, 5, LARGE, false),
+            AluEvent::new(0, Opcode::SLTU, 1, 5, LARGE),
             // 0 == 0 < 0
-            AluEvent::new(0, Opcode::SLTU, 0, 0, 0, false),
+            AluEvent::new(0, Opcode::SLTU, 0, 0, 0),
             // 0 == LARGE < LARGE
-            AluEvent::new(0, Opcode::SLTU, 0, LARGE, LARGE, false),
+            AluEvent::new(0, Opcode::SLTU, 0, LARGE, LARGE),
         ];
 
         prove_koalabear_template(&mut shard);

@@ -213,6 +213,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ZERO,
             AB::Expr::ONE,
             local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
@@ -243,10 +244,10 @@ mod tests {
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
         shard.bitwise_events = vec![
-            AluEvent::new(0, Opcode::XOR, 25, 10, 19, false),
-            AluEvent::new(0, Opcode::OR, 27, 10, 19, false),
-            AluEvent::new(0, Opcode::AND, 2, 10, 19, false),
-            AluEvent::new(0, Opcode::NOR, 228, 10, 19, false),
+            AluEvent::new(0, Opcode::XOR, 25, 10, 19),
+            AluEvent::new(0, Opcode::OR, 27, 10, 19),
+            AluEvent::new(0, Opcode::AND, 2, 10, 19),
+            AluEvent::new(0, Opcode::NOR, 228, 10, 19),
         ];
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -261,10 +262,10 @@ mod tests {
 
         let mut shard = ExecutionRecord::default();
         shard.bitwise_events = [
-            AluEvent::new(0, Opcode::XOR, 25, 10, 19, false),
-            AluEvent::new(0, Opcode::OR, 27, 10, 19, false),
-            AluEvent::new(0, Opcode::AND, 2, 10, 19, false),
-            AluEvent::new(0, Opcode::NOR, 228, 10, 19, false),
+            AluEvent::new(0, Opcode::XOR, 25, 10, 19),
+            AluEvent::new(0, Opcode::OR, 27, 10, 19),
+            AluEvent::new(0, Opcode::AND, 2, 10, 19),
+            AluEvent::new(0, Opcode::NOR, 228, 10, 19),
         ]
         .repeat(1000);
         let chip = BitwiseChip::default();

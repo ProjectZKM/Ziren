@@ -392,6 +392,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ZERO,
             AB::Expr::ONE,
             local.is_real,
         );
@@ -414,7 +415,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.shift_left_events = vec![AluEvent::new(0, Opcode::SLL, 16, 8, 1, false)];
+        shard.shift_left_events = vec![AluEvent::new(0, Opcode::SLL, 16, 8, 1)];
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -449,12 +450,12 @@ mod tests {
             (Opcode::SLL, 0x00000000, 0x21212120, 0xffffffff),
         ];
         for t in shift_instructions.iter() {
-            shift_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3, false));
+            shift_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - shift_instructions.len()) {
-            shift_events.push(AluEvent::new(0, Opcode::SLL, 1, 1, 0, false));
+            shift_events.push(AluEvent::new(0, Opcode::SLL, 1, 1, 0));
         }
 
         let mut shard = ExecutionRecord::default();

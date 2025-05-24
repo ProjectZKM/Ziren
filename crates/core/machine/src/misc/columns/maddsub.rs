@@ -1,3 +1,4 @@
+use crate::memory::MemoryReadWriteCols;
 use crate::operations::AddDoubleOperation;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
@@ -13,12 +14,17 @@ pub struct MaddsubCols<T> {
     pub mul_lo: Word<T>,
     pub mul_hi: Word<T>,
 
-    /// Hi/Lo word of addend operand.
-    pub prev_hi: Word<T>,
-    pub prev_lo: Word<T>,
-
     /// Add operations of low/high word.
     pub add_operation: AddDoubleOperation<T>,
     pub src2_hi: Word<T>,
     pub src2_lo: Word<T>,
+
+    /// Access to hi regiter
+    pub op_hi_access: MemoryReadWriteCols<T>,
+    pub op_a_access: MemoryReadWriteCols<T>,
+
+    /// The shard number.
+    pub shard: T,
+    /// The clock cycle number.
+    pub clk: T,
 }

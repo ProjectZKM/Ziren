@@ -46,4 +46,9 @@ pub struct MiscInstrColumns<T: Copy> {
     pub is_meq: T,
     pub is_mne: T,
     pub is_teq: T,
+
+    /// The shard number.
+    pub shard: T,
+    /// The clock cycle number.
+    pub clk: T,
 }

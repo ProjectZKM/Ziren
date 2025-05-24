@@ -40,6 +40,72 @@ impl AluEvent {
     }
 }
 
+/// Complicated Arithmetic Logic Unit (ALU) Event.
+///
+/// This object encapsulated the information needed to prove an ALU operation. This includes its
+/// shard, opcode, operands, and other relevant information.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct CompAluEvent {
+    /// The shard number.
+    pub shard: u32,
+    /// The clock cycle.
+    pub clk: u32,
+
+    pub pc: u32,
+    pub next_pc: u32,
+    /// The opcode.
+    pub opcode: Opcode,
+    /// The upper bits of the output operand.
+    /// This is used for the MULT, MULTU, DIV and DIVU opcodes.
+    pub hi: u32,
+    /// The output operand.
+    pub a: u32,
+    /// The first input operand.
+    pub b: u32,
+    /// The second input operand.
+    pub c: u32,
+
+    /// The `op_hi` memory write record.
+    pub hi_record: MemoryWriteRecord,
+    pub hi_record_is_real: bool,
+}
+
+impl CompAluEvent {
+    /// Create a new [`AluEvent`].
+    #[must_use]
+    pub fn new(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
+        Self {
+            clk: 0,
+            shard: 0,
+            pc,
+            next_pc: pc + 4,
+            opcode,
+            hi: 0,
+            a,
+            b,
+            c,
+            hi_record_is_real: false,
+            hi_record: MemoryWriteRecord::default(),
+        }
+    }
+
+    pub fn new_with_hi(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, hi: u32) -> Self {
+        Self {
+            clk: 0,
+            shard: 0,
+            pc,
+            next_pc: pc + 4,
+            opcode,
+            hi,
+            a,
+            b,
+            c,
+            hi_record_is_real: false,
+            hi_record: MemoryWriteRecord::default(),
+        }
+    }
+}
+
 /// Memory Instruction Event.
 ///
 /// This object encapsulated the information needed to prove a MIPS memory operation.
@@ -171,11 +237,17 @@ impl JumpEvent {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct MiscEvent {
+    /// The shard number.
+    pub shard: u32,
+    /// The clock cycle.
+    pub clk: u32,
     /// The program counter.
     pub pc: u32,
     pub next_pc: u32,
     /// The opcode.
     pub opcode: Opcode,
+    /// The register id for first operand value.
+    pub op_a: u8,
     /// The first operand value.
     pub a: u32,
     /// The second operand value.
@@ -195,9 +267,12 @@ impl MiscEvent {
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        clk: u32,
+        shard: u32,
         pc: u32,
         next_pc: u32,
         opcode: Opcode,
+        op_a: u8,
         a: u32,
         b: u32,
         c: u32,
@@ -205,6 +280,6 @@ impl MiscEvent {
         a_record: MemoryWriteRecord,
         hi_record: MemoryWriteRecord,
     ) -> Self {
-        Self { pc, next_pc, opcode, a, b, c, hi, a_record, hi_record }
+        Self { clk, shard, pc, next_pc, opcode, op_a, a, b, c, hi, a_record, hi_record }
     }
 }

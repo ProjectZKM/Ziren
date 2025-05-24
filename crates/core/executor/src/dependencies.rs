@@ -1,8 +1,12 @@
 use crate::{
-    events::{AluEvent, BranchEvent, JumpEvent, MemInstrEvent, MemoryRecord, MiscEvent},
+    events::{
+        AluEvent, BranchEvent, CompAluEvent, JumpEvent, MemInstrEvent, MemoryRecord,
+        MemoryWriteRecord, MiscEvent,
+    },
     utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
     Executor, Opcode, DEFAULT_PC_INC, UNUSED_PC,
 };
+
 /// Emits the dependencies for division and remainder operations.
 #[allow(clippy::too_many_lines)]
 pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
@@ -50,7 +54,9 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     let lower_word = u32::from_le_bytes(c_times_quotient[0..4].try_into().unwrap());
     let upper_word = u32::from_le_bytes(c_times_quotient[4..8].try_into().unwrap());
 
-    let multiplication = AluEvent {
+    let multiplication = CompAluEvent {
+        clk: 0,
+        shard: 0,
         pc: UNUSED_PC,
         next_pc: UNUSED_PC + DEFAULT_PC_INC,
         opcode: {
@@ -64,6 +70,8 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         c: event.c,
         b: quotient,
         hi: upper_word,
+        hi_record_is_real: false,
+        hi_record: MemoryWriteRecord::default(),
     };
     executor.record.mul_events.push(multiplication);
 
@@ -245,7 +253,9 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
         let multiply = event.b as u64 * event.c as u64;
         let mul_hi = (multiply >> 32) as u32;
         let mul_lo = multiply as u32;
-        let mul_event = AluEvent {
+        let mul_event = CompAluEvent {
+            clk: 0,
+            shard: 0,
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::MULTU,
@@ -253,6 +263,8 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: mul_lo,
             b: event.b,
             c: event.c,
+            hi_record_is_real: false,
+            hi_record: MemoryWriteRecord::default(),
         };
         executor.record.add_mul_event(mul_event);
     } else if matches!(event.opcode, Opcode::EXT) {

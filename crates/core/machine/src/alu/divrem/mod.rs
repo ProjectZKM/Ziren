@@ -69,10 +69,12 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord},
+    events::{ByteLookupEvent, ByteRecord, MemoryAccessPosition, MemoryRecordEnum},
     get_msb, get_quotient_and_remainder, is_signed_operation, ByteOpcode, ExecutionRecord, Opcode,
     Program,
 };
+
+use crate::memory::MemoryReadWriteCols;
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, Word};
@@ -185,6 +187,17 @@ pub struct DivRemCols<T> {
 
     /// Column to modify multiplicity for remainder range check event.
     pub remainder_check_multiplicity: T,
+
+    /// Access to hi regiter
+    pub op_hi_access: MemoryReadWriteCols<T>,
+
+    /// Flag indicating whether the hi_access record is real.
+    pub hi_record_is_real: T,
+
+    /// The shard number.
+    pub shard: T,
+    /// The clock cycle number.
+    pub clk: T,
 }
 
 impl<F: PrimeField32> MachineAir<F> for DivRemChip {
@@ -219,6 +232,14 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_div = F::from_bool(event.opcode == Opcode::DIV);
                 cols.is_c_0.populate(event.c);
+
+                // DivRem Chip is only used for DIV and DIVU instruction currrently.
+                let mut blu_events: Vec<ByteLookupEvent> = vec![];
+                cols.op_hi_access
+                    .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
+                output.add_byte_lookup_events(blu_events);
+                cols.shard = F::from_canonical_u32(event.shard);
+                cols.clk = F::from_canonical_u32(event.clk);
             }
 
             let (quotient, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
@@ -671,6 +692,7 @@ where
                 local.is_real,
                 local.abs_c_alu_event,
                 local.abs_rem_alu_event,
+                local.hi_record_is_real,
             ];
 
             for flag in bool_flags.into_iter() {
@@ -690,9 +712,10 @@ where
                 local.is_divu * divu + local.is_div * div
             };
 
+            // DivRem Chip is only used for DIV and DIVU instruction currrently. So is_write_hi will always be ture.
             builder.receive_instruction(
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
+                local.shard,
+                local.clk,
                 local.pc,
                 local.next_pc,
                 AB::Expr::ZERO,
@@ -704,9 +727,19 @@ where
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
+                AB::Expr::ONE,
                 AB::Expr::ZERO,
                 AB::Expr::ONE,
                 local.is_real,
+            );
+
+            // Write the HI register, the register can only be Register::HI（33）.
+            builder.eval_memory_access(
+                local.shard,
+                local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
+                AB::F::from_canonical_u32(33),
+                &local.op_hi_access,
+                AB::F::from_canonical_u32(1),
             );
         }
     }
@@ -717,7 +750,7 @@ mod tests {
     use crate::utils::{uni_stark_prove, uni_stark_verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
     use zkm_stark::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
@@ -727,7 +760,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.divrem_events = vec![AluEvent::new(0, Opcode::DIVU, 2, 17, 3, false)];
+        shard.divrem_events = vec![CompAluEvent::new(0, Opcode::DIVU, 2, 17, 3)];
         let chip = DivRemChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -743,7 +776,7 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut divrem_events: Vec<AluEvent> = Vec::new();
+        let mut divrem_events: Vec<CompAluEvent> = Vec::new();
 
         let divrems: Vec<(Opcode, u32, u32, u32, u32)> = vec![
             (Opcode::DIVU, 3, 20, 6, 2),
@@ -762,12 +795,12 @@ mod tests {
             (Opcode::DIV, 1 << 31, 1 << 31, neg(1), 0),
         ];
         for t in divrems.iter() {
-            divrem_events.push(AluEvent::new_with_hi(0, t.0, t.1, t.2, t.3, false, t.4));
+            divrem_events.push(CompAluEvent::new_with_hi(0, t.0, t.1, t.2, t.3, t.4));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - divrems.len()) {
-            divrem_events.push(AluEvent::new_with_hi(0, Opcode::DIVU, 1, 1, 1, false, 0));
+            divrem_events.push(CompAluEvent::new_with_hi(0, Opcode::DIVU, 1, 1, 1, 0));
         }
 
         let mut shard = ExecutionRecord::default();

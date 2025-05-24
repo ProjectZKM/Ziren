@@ -69,6 +69,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,
+            AB::Expr::ZERO,
             local.is_halt,
             is_sequential,
             local.is_real,

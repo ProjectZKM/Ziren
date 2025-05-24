@@ -73,14 +73,8 @@ impl Syscall for Sha256ExtendSyscall {
             w_i_writes,
             local_mem_access: rt.postprocess(),
         });
-        let syscall_event = rt.rt.syscall_event(
-            clk_init,
-            None,
-            rt.next_pc,
-            syscall_code.syscall_id(),
-            arg1,
-            arg2,
-        );
+        let syscall_event =
+            rt.rt.syscall_event(clk_init, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, syscall_event, event);
 
         None

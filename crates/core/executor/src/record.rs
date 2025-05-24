@@ -13,12 +13,13 @@ use std::{mem::take, str::FromStr, sync::Arc};
 
 use crate::{
     events::{
-        AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CpuEvent, GlobalLookupEvent, JumpEvent,
-        MemInstrEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum,
-        MiscEvent, PrecompileEvent, PrecompileEvents, SyscallEvent,
+        AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, CpuEvent,
+        GlobalLookupEvent, JumpEvent, MemInstrEvent, MemoryInitializeFinalizeEvent,
+        MemoryLocalEvent, MemoryRecordEnum, MiscEvent, PrecompileEvent, PrecompileEvents,
+        SyscallEvent,
     },
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
-    MipsAirId, Opcode, Program,
+    MipsAirId, Program,
 };
 
 /// A record of the execution of a program.
@@ -34,7 +35,7 @@ pub struct ExecutionRecord {
     /// A trace of the ADD, ADDU, ADDI and ADDIU events.
     pub add_events: Vec<AluEvent>,
     /// A trace of the MUL, MULT and MULTU events.
-    pub mul_events: Vec<AluEvent>,
+    pub mul_events: Vec<CompAluEvent>,
     /// A trace of the SUB and SUBU events.
     pub sub_events: Vec<AluEvent>,
     /// A trace of the XOR, OR, AND and NOR events.
@@ -44,7 +45,7 @@ pub struct ExecutionRecord {
     /// A trace of the SRL, SRLV, SRA, and SRAV events.
     pub shift_right_events: Vec<AluEvent>,
     /// A trace of the DIV, DIVU events.
-    pub divrem_events: Vec<AluEvent>,
+    pub divrem_events: Vec<CompAluEvent>,
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
     pub lt_events: Vec<AluEvent>,
     /// A trace of the CLO and CLZ events.
@@ -87,45 +88,13 @@ impl ExecutionRecord {
     }
 
     /// Add a mul event to the execution record.
-    pub fn add_mul_event(&mut self, mul_event: AluEvent) {
+    pub fn add_mul_event(&mut self, mul_event: CompAluEvent) {
         self.mul_events.push(mul_event);
     }
 
     /// Add a lt event to the execution record.
     pub fn add_lt_event(&mut self, lt_event: AluEvent) {
         self.lt_events.push(lt_event);
-    }
-
-    /// Add a batch of alu events to the execution record.
-    pub fn add_alu_events(&mut self, mut alu_events: HashMap<Opcode, Vec<AluEvent>>) {
-        for (opcode, value) in &mut alu_events {
-            match opcode {
-                Opcode::ADD => {
-                    self.add_events.append(value);
-                }
-                Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
-                    self.mul_events.append(value);
-                }
-                Opcode::SUB => {
-                    self.sub_events.append(value);
-                }
-                Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
-                    self.bitwise_events.append(value);
-                }
-                Opcode::SLL => {
-                    self.shift_left_events.append(value);
-                }
-                Opcode::SRL | Opcode::SRA | Opcode::ROR => {
-                    self.shift_right_events.append(value);
-                }
-                Opcode::SLT | Opcode::SLTU => {
-                    self.lt_events.append(value);
-                }
-                _ => {
-                    panic!("Invalid opcode: {opcode:?}");
-                }
-            }
-        }
     }
 
     /// Take out events from the [`ExecutionRecord`] that should be deferred to a separate shard.

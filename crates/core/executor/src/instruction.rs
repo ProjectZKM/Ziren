@@ -163,15 +163,7 @@ impl Instruction {
     /// Returns if the instruction is a mult/div instruction.
     #[must_use]
     pub fn is_mult_div_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::MULT
-                | Opcode::MULTU
-                | Opcode::DIV
-                | Opcode::DIVU
-                | Opcode::MADDU
-                | Opcode::MSUBU
-        )
+        matches!(self.opcode, Opcode::MULT | Opcode::MULTU | Opcode::DIV | Opcode::DIVU)
     }
 
     /// Returns if the instruction is a jump instruction.

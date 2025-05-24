@@ -37,16 +37,18 @@ use core::{
 
 use hashbrown::HashMap;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
+    events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, Word};
+
+use crate::memory::MemoryReadWriteCols;
 
 use crate::{
     air::ZKMCoreAirBuilder,
@@ -120,6 +122,17 @@ pub struct MulCols<T> {
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
+
+    /// Access to hi regiter
+    pub op_hi_access: MemoryReadWriteCols<T>,
+
+    /// Flag indicating whether the hi_access record is real.
+    pub hi_record_is_real: T,
+
+    /// The shard number.
+    pub shard: T,
+    /// The clock cycle number.
+    pub clk: T,
 }
 
 impl<F: PrimeField32> MachineAir<F> for MulChip {
@@ -198,14 +211,24 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
 
 impl MulChip {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
-        event: &AluEvent,
+        event: &CompAluEvent,
         cols: &mut MulCols<F>,
         blu: &mut impl ByteRecord,
     ) {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
+
+        cols.hi_record_is_real = F::from_bool(event.hi_record_is_real);
+        if event.hi_record_is_real {
+            // For maddu/msubu instructions, pass in a dummy byte lookup vector.  This maddu/msubu instruction
+            // chip also has a op_hi_access field that will be populated and that will contribute
+            // to the byte lookup dependencies.
+            cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
+            cols.shard = F::from_canonical_u32(event.shard);
+            cols.clk = F::from_canonical_u32(event.clk);
+        }
 
         let hi_word = event.hi.to_le_bytes();
         let a_word = event.a.to_le_bytes();
@@ -396,6 +419,7 @@ where
                 local.is_mult,
                 local.is_multu,
                 local.is_real,
+                local.hi_record_is_real,
             ];
             for boolean in booleans.iter() {
                 builder.assert_bool(*boolean);
@@ -429,8 +453,8 @@ where
 
         // Receive the arguments.
         builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            local.shard,
+            local.clk,
             local.pc,
             local.next_pc,
             AB::Expr::ZERO,
@@ -442,10 +466,27 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            local.hi_record_is_real,
             AB::Expr::ZERO,
             AB::Expr::ONE,
             local.is_real,
         );
+
+        // Write the HI register, the register can only be Register::HI（33）.
+        builder.eval_memory_access(
+            local.shard,
+            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
+            AB::F::from_canonical_u32(33),
+            &local.op_hi_access,
+            local.hi_record_is_real,
+        );
+
+        // Check hi_record_is_real.
+        // hi_record_is_real can only be set for MULT and MULTU instruction.
+        // if hi_record_is_real = 0, both clk and shard should be zero.
+        builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
+        builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
+        builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
     }
 }
 
@@ -455,7 +496,7 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
     use zkm_stark::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
@@ -467,16 +508,9 @@ mod tests {
         let mut shard = ExecutionRecord::default();
 
         // Fill mul_events with 10 MUL events.
-        let mut mul_events: Vec<AluEvent> = Vec::new();
+        let mut mul_events: Vec<CompAluEvent> = Vec::new();
         for _ in 0..10 {
-            mul_events.push(AluEvent::new(
-                0,
-                Opcode::MUL,
-                0x80004000,
-                0x80000000,
-                0xffff8000,
-                false,
-            ));
+            mul_events.push(CompAluEvent::new(0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000));
         }
         shard.mul_events = mul_events;
         let chip = MulChip::default();
@@ -490,7 +524,7 @@ mod tests {
         let mut challenger = config.challenger();
 
         let mut shard = ExecutionRecord::default();
-        let mut mul_events: Vec<AluEvent> = Vec::new();
+        let mut mul_events: Vec<CompAluEvent> = Vec::new();
 
         let mul_instructions: Vec<(Opcode, u32, u32, u32)> = vec![
             (Opcode::MUL, 0x00001200, 0x00007e00, 0xb6db6db7),
@@ -509,12 +543,12 @@ mod tests {
             (Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff),
         ];
         for t in mul_instructions.iter() {
-            mul_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3, false));
+            mul_events.push(CompAluEvent::new(0, t.0, t.1, t.2, t.3));
         }
 
         // Append more events until we have 1000 tests.
         for _ in 0..(1000 - mul_instructions.len()) {
-            mul_events.push(AluEvent::new(0, Opcode::MUL, 1, 1, 1, false));
+            mul_events.push(CompAluEvent::new(0, Opcode::MUL, 1, 1, 1));
         }
 
         shard.mul_events = mul_events;

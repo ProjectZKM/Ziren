@@ -207,9 +207,8 @@ impl MemoryInstructionsChip {
 
             // Set the `mem_value_is_pos` composite flag.
             cols.mem_value_is_pos = F::from_bool(
-                (matches!(event.opcode, Opcode::LB | Opcode::LH)
-                    && (cols.most_sig_bit == F::ZERO))
-                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LL)
+                (matches!(event.opcode, Opcode::LB | Opcode::LH) && (cols.most_sig_bit == F::ZERO))
+                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LL),
             )
         }
 

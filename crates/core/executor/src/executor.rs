@@ -19,9 +19,9 @@ use crate::{
     },
     estimate_mips_event_counts, estimate_mips_lde_size,
     events::{
-        AluEvent, BranchEvent, CpuEvent, JumpEvent, MemInstrEvent, MemoryAccessPosition,
-        MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord, MemoryRecord,
-        MemoryRecordEnum, MemoryWriteRecord, MiscEvent, SyscallEvent,
+        AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
+        MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,
+        MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent, SyscallEvent,
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, PagedMemory},
@@ -687,7 +687,7 @@ impl<'a> Executor<'a> {
         self.emit_cpu(clk, pc, next_pc, next_next_pc, a, b, c, hi, record, exit_code);
 
         if instruction.is_alu_instruction() {
-            self.emit_alu_event(instruction.opcode, hi, a, b, c);
+            self.emit_alu_event(clk, instruction.opcode, hi, a, b, c, record.hi);
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
@@ -699,7 +699,17 @@ impl<'a> Executor<'a> {
         } else if instruction.is_syscall_instruction() {
             self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
         } else if instruction.is_misc_instruction() {
-            self.emit_misc_event(instruction.opcode, a, b, c, hi.unwrap_or(0), record.a, record.hi);
+            self.emit_misc_event(
+                clk,
+                instruction.opcode,
+                instruction.op_a,
+                a,
+                b,
+                c,
+                hi.unwrap_or(0),
+                record.a,
+                record.hi,
+            );
         } else {
             log::info!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -741,7 +751,16 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit an ALU event.
-    fn emit_alu_event(&mut self, opcode: Opcode, hi: Option<u32>, a: u32, b: u32, c: u32) {
+    fn emit_alu_event(
+        &mut self,
+        clk: u32,
+        opcode: Opcode,
+        hi: Option<u32>,
+        a: u32,
+        b: u32,
+        c: u32,
+        hi_record: Option<MemoryRecordEnum>,
+    ) {
         let event = AluEvent {
             pc: self.state.pc,
             next_pc: self.state.next_pc,
@@ -751,6 +770,26 @@ impl<'a> Executor<'a> {
             b,
             c,
         };
+
+        let (hi_access, hi_record_is_real) = match hi_record {
+            Some(MemoryRecordEnum::Write(record)) => (record, true),
+            _ => (MemoryWriteRecord::default(), false),
+        };
+
+        let event_comp = CompAluEvent {
+            clk,
+            shard: self.shard(),
+            pc: self.state.pc,
+            next_pc: self.state.next_pc,
+            opcode,
+            hi: hi.unwrap_or(0),
+            a,
+            b,
+            c,
+            hi_record: hi_access,
+            hi_record_is_real,
+        };
+
         match opcode {
             Opcode::ADD => {
                 self.record.add_events.push(event);
@@ -771,10 +810,10 @@ impl<'a> Executor<'a> {
                 self.record.lt_events.push(event);
             }
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
-                self.record.mul_events.push(event);
+                self.record.mul_events.push(event_comp);
             }
             Opcode::DIV | Opcode::DIVU => {
-                self.record.divrem_events.push(event);
+                self.record.divrem_events.push(event_comp);
                 emit_divrem_dependencies(self, event);
             }
             Opcode::CLZ | Opcode::CLO => {
@@ -848,7 +887,9 @@ impl<'a> Executor<'a> {
     #[allow(clippy::too_many_arguments)]
     fn emit_misc_event(
         &mut self,
+        clk: u32,
         opcode: Opcode,
+        op_a: u8,
         a: u32,
         b: u32,
         c: u32,
@@ -867,9 +908,12 @@ impl<'a> Executor<'a> {
         };
 
         let event = MiscEvent::new(
+            clk,
+            self.shard(),
             self.state.pc,
             self.state.next_pc,
             opcode,
+            op_a,
             a,
             b,
             c,

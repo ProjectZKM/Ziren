@@ -4,10 +4,7 @@ use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 use zkm_core_executor::Opcode;
-use zkm_stark::{
-    air::ZKMAirBuilder,
-    Word,
-};
+use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::air::WordAirBuilder;
 
@@ -57,6 +54,7 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::ZERO; 4]),
+            AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

@@ -88,14 +88,8 @@ impl Syscall for KeccakSpongeSyscall {
             output_addr: result_ptr,
             local_mem_access: rt.postprocess(),
         });
-        let sponge_syscall_event = rt.rt.syscall_event(
-            start_clk,
-            None,
-            rt.next_pc,
-            syscall_code.syscall_id(),
-            arg1,
-            arg2,
-        );
+        let sponge_syscall_event =
+            rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, sponge_syscall_event, sponge_event);
         None
     }

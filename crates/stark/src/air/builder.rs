@@ -202,7 +202,8 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         hi: Word<impl Into<Self::Expr>>,
         op_a_immutable: impl Into<Self::Expr>,
         is_memory: impl Into<Self::Expr>,
-        is_syscall: impl Into<Self::Expr>,
+        is_rw_a: impl Into<Self::Expr>,
+        is_write_hi: impl Into<Self::Expr>,
         is_halt: impl Into<Self::Expr>,
         is_sequential: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
@@ -219,7 +220,8 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(hi.0.into_iter().map(Into::into))
             .chain(once(op_a_immutable.into()))
             .chain(once(is_memory.into()))
-            .chain(once(is_syscall.into()))
+            .chain(once(is_rw_a.into()))
+            .chain(once(is_write_hi.into()))
             .chain(once(is_halt.into()))
             .chain(once(is_sequential.into()))
             .collect();
@@ -246,7 +248,8 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         hi: Word<impl Into<Self::Expr>>,
         op_a_immutable: impl Into<Self::Expr>,
         is_memory: impl Into<Self::Expr>,
-        is_syscall: impl Into<Self::Expr>,
+        is_rw_a: impl Into<Self::Expr>,
+        is_write_hi: impl Into<Self::Expr>,
         is_halt: impl Into<Self::Expr>,
         is_sequential: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
@@ -263,7 +266,8 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(hi.0.into_iter().map(Into::into))
             .chain(once(op_a_immutable.into()))
             .chain(once(is_memory.into()))
-            .chain(once(is_syscall.into()))
+            .chain(once(is_rw_a.into()))
+            .chain(once(is_write_hi.into()))
             .chain(once(is_halt.into()))
             .chain(once(is_sequential.into()))
             .collect();
@@ -309,6 +313,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             b,
             c,
             hi,
+            Self::Expr::ZERO,
             Self::Expr::ZERO,
             Self::Expr::ZERO,
             Self::Expr::ZERO,

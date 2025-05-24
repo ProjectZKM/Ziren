@@ -90,6 +90,7 @@ where
             AB::Expr::ONE,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
+            AB::Expr::ZERO,
             AB::Expr::ONE,
             is_real,
         );
@@ -208,10 +209,7 @@ impl MemoryInstructionsChip {
         // Assert that correct value of `mem_value_is_neg`.
         // SAFETY: If the opcode is not `lb` or `lh`, then `is_lb + is_lh = 0`, so `mem_value_is_neg = 0`.
         // In the other case, `is_lb + is_lh = 1` (at most one selector is on), so `most_sig_byte` and `most_sig_bit` are correct.
-        builder.assert_eq(
-            local.mem_value_is_neg,
-            (local.is_lb + local.is_lh) * local.most_sig_bit,
-        );
+        builder.assert_eq(local.mem_value_is_neg, (local.is_lb + local.is_lh) * local.most_sig_bit);
 
         // SAFETY: `is_lb + is_lh` is already constrained to be boolean.
         // This is because at most one opcode selector can be turned on.
@@ -254,10 +252,7 @@ impl MemoryInstructionsChip {
             + local.is_lhu
             + local.is_lw
             + local.is_ll;
-        builder.assert_eq(
-            local.mem_value_is_pos,
-            mem_value_is_pos,
-        );
+        builder.assert_eq(local.mem_value_is_pos, mem_value_is_pos);
 
         // When the memory value is not positive and not writing to x0, assert that op_a value is
         // equal to the unsigned memory value.

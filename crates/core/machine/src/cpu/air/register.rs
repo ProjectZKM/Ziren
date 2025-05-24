@@ -56,16 +56,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
             local.instruction.op_a,
             &local.op_a_access,
-            AB::Expr::ONE - local.is_syscall,
-        );
-
-        // Write the HI register, the register can only be Register::HI（33）.
-        builder.eval_memory_access(
-            local.shard,
-            clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
-            AB::F::from_canonical_u32(33),
-            &local.op_hi_access,
-            local.has_hi,
+            AB::Expr::ONE - local.is_rw_a,
         );
 
         // Always range check the word value in `op_a`, as JUMP instructions may witness

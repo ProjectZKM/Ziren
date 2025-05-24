@@ -49,8 +49,11 @@ pub struct CpuCols<T: Copy> {
     /// Whether this is a memory instruction.
     pub is_memory: T,
 
-    /// Whether this is a syscall instruction.
-    pub is_syscall: T,
+    /// Whether the instruction will read and write a register.
+    pub is_rw_a: T,
+
+    /// Whether the instruction will write (not read) HI register.
+    pub is_write_hi: T,
 
     /// Whether this is a halt instruction.
     pub is_halt: T,
@@ -61,13 +64,9 @@ pub struct CpuCols<T: Copy> {
     /// Operand values, either from registers or immediate values.
     pub op_a_value: Word<T>,
     pub op_hi_value: Word<T>,
-    pub op_hi_access: MemoryReadWriteCols<T>,
     pub op_a_access: MemoryReadWriteCols<T>,
     pub op_b_access: MemoryReadCols<T>,
     pub op_c_access: MemoryReadCols<T>,
-
-    /// Whether read/write HI register
-    pub has_hi: T,
 
     /// Selector to label whether this row is a non padded row.
     pub is_real: T,
@@ -77,11 +76,6 @@ pub struct CpuCols<T: Copy> {
 }
 
 impl<T: Copy> CpuCols<T> {
-    /// Gets the value of the upper bits of the output operand.
-    pub fn op_hi_val(&self) -> Word<T> {
-        *self.op_hi_access.value()
-    }
-
     /// Gets the value of the first operand.
     pub fn op_a_val(&self) -> Word<T> {
         *self.op_a_access.value()
