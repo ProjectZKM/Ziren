@@ -2,10 +2,7 @@ use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
 
-use crate::{
-    memory::MemoryReadWriteCols,
-    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
-};
+use crate::operations::{IsZeroOperation, KoalaBearWordRangeChecker};
 
 pub const NUM_SYSCALL_INSTR_COLS: usize = size_of::<SyscallInstrColumns<u8>>();
 
@@ -30,11 +27,13 @@ pub struct SyscallInstrColumns<T> {
     pub is_halt: T,
 
     /// The access columns for the first operand.
-    pub op_a_access: MemoryReadWriteCols<T>,
+    pub op_a_value: Word<T>,
     /// The value of the second operand.
     pub op_b_value: Word<T>,
     /// The value of the third operand.
     pub op_c_value: Word<T>,
+    /// The access columns for prev value of the first operand.
+    pub prev_a_value: Word<T>,
 
     /// Whether the current syscall is ENTER_UNCONSTRAINED.
     pub is_enter_unconstrained: IsZeroOperation<T>,

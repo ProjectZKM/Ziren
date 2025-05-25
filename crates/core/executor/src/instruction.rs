@@ -101,7 +101,15 @@ impl Instruction {
 
     #[must_use]
     pub fn is_rw_a_instruction(&self) -> bool {
-        matches!(self.opcode, Opcode::SYSCALL | Opcode::INS | Opcode::MADDU | Opcode::MSUBU)
+        matches!(
+            self.opcode,
+            Opcode::SYSCALL
+                | Opcode::INS
+                | Opcode::MADDU
+                | Opcode::MSUBU
+                | Opcode::MEQ
+                | Opcode::MNE
+        )
     }
 
     /// Returns if the instruction is a memory instruction.

@@ -6,7 +6,7 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, MemoryRecordEnum, SyscallEvent},
+    events::{ByteLookupEvent, ByteRecord, SyscallEvent},
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
@@ -78,7 +78,7 @@ impl SyscallInstrsChip {
         &self,
         event: &SyscallEvent,
         cols: &mut SyscallInstrColumns<F>,
-        blu: &mut impl ByteRecord,
+        _blu: &mut impl ByteRecord,
     ) {
         cols.is_real = F::ONE;
         cols.pc = F::from_canonical_u32(event.pc);
@@ -86,12 +86,13 @@ impl SyscallInstrsChip {
         cols.shard = F::from_canonical_u32(event.shard);
         cols.clk = F::from_canonical_u32(event.clk);
 
-        cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), blu);
+        cols.op_a_value = event.a_record.value.into();
         cols.op_b_value = event.arg1.into();
         cols.op_c_value = event.arg2.into();
+        cols.prev_a_value = event.a_record.prev_value.into();
 
-        let syscall_id = cols.op_a_access.prev_value[0];
-        let num_cycles = cols.op_a_access.prev_value[2];
+        let syscall_id = cols.prev_a_value[0];
+        let num_cycles = cols.prev_a_value[2];
 
         cols.num_extra_cycles = num_cycles;
         cols.is_halt =

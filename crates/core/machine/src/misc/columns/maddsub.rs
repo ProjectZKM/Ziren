@@ -21,10 +21,4 @@ pub struct MaddsubCols<T> {
 
     /// Access to hi regiter
     pub op_hi_access: MemoryReadWriteCols<T>,
-    pub op_a_access: MemoryReadWriteCols<T>,
-
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
 }

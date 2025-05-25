@@ -255,9 +255,7 @@ pub struct MiscEvent {
     /// The third operand value.
     pub c: u32,
     /// The third operand value.
-    pub hi: u32,
-    /// The first operand memory record.
-    pub a_record: MemoryWriteRecord,
+    pub prev_a: u32,
     /// The hi operand memory record.
     pub hi_record: MemoryWriteRecord,
 }
@@ -276,10 +274,9 @@ impl MiscEvent {
         a: u32,
         b: u32,
         c: u32,
-        hi: u32,
-        a_record: MemoryWriteRecord,
+        prev_a: u32,
         hi_record: MemoryWriteRecord,
     ) -> Self {
-        Self { clk, shard, pc, next_pc, opcode, op_a, a, b, c, hi, a_record, hi_record }
+        Self { clk, shard, pc, next_pc, opcode, op_a, a, b, c, prev_a, hi_record }
     }
 }

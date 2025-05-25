@@ -7,6 +7,7 @@ use crate::{
     memory::MemoryCols,
 };
 use zkm_core_executor::events::MemoryAccessPosition;
+use zkm_stark::BaseAirBuilder;
 
 impl CpuChip {
     /// Computes whether the opcode is a branch instruction.
@@ -49,6 +50,12 @@ impl CpuChip {
             .when_not(local.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.op_a_access.value());
 
+        // If we are maddu，msubu，ins，syscall, then the hi_or_prev_a should equal to op_a_access.prev_value.
+        builder
+            .when(local.is_rw_a)
+            .when_not(local.instruction.op_a_0)
+            .assert_word_eq(local.hi_or_prev_a, local.op_a_access.prev_value);
+
         // Write the `a` or the result to the first register described in the instruction unless
         // we are performing a branch or a store.
         builder.eval_memory_access(
@@ -56,7 +63,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
             local.instruction.op_a,
             &local.op_a_access,
-            AB::Expr::ONE - local.is_rw_a,
+            local.is_real,
         );
 
         // Always range check the word value in `op_a`, as JUMP instructions may witness

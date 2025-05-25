@@ -72,7 +72,7 @@ where
             local.op_a_value,
             local.op_b_val(),
             local.op_c_val(),
-            local.op_hi_value,
+            local.hi_or_prev_a,
             local.op_a_immutable,
             local.is_memory,
             local.is_rw_a,

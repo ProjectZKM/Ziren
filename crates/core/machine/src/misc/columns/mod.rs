@@ -21,13 +21,17 @@ pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MiscInstrColumns<T: Copy> {
-    /// The current/next program counter of the instruction.
+    /// The shard number.
+    pub shard: T,
+    /// The clock cycle number.
+    pub clk: T,
+    /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
 
     /// The value of the second operand.
     pub op_a_value: Word<T>,
-    pub op_hi_value: Word<T>,
+    pub prev_a_value: Word<T>,
     /// The value of the second operand.
     pub op_b_value: Word<T>,
     /// The value of the third operand.
@@ -46,9 +50,4 @@ pub struct MiscInstrColumns<T: Copy> {
     pub is_meq: T,
     pub is_mne: T,
     pub is_teq: T,
-
-    /// The shard number.
-    pub shard: T,
-    /// The clock cycle number.
-    pub clk: T,
 }

@@ -85,7 +85,7 @@ impl MiscInstrsChip {
         cols.op_a_value = event.a.into();
         cols.op_b_value = event.b.into();
         cols.op_c_value = event.c.into();
-        cols.op_hi_value = event.hi.into();
+        cols.prev_a_value = event.prev_a.into();
         cols.shard = F::from_canonical_u32(event.shard);
         cols.clk = F::from_canonical_u32(event.clk);
 
@@ -98,8 +98,6 @@ impl MiscInstrsChip {
         cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
         cols.is_teq = F::from_bool(matches!(event.opcode, Opcode::TEQ));
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
 
         self.populate_sext(cols, event, blu);
         self.populate_movcond(cols, event, blu);
@@ -149,7 +147,6 @@ impl MiscInstrsChip {
         let movcond_cols = cols.misc_specific_columns.movcond_mut();
         movcond_cols.a_eq_b = F::from_bool(event.b == event.a);
         movcond_cols.c_eq_0 = F::from_bool(event.c == 0);
-        movcond_cols.prev_a_value = Word::from(event.a_record.prev_value);
     }
 
     fn populate_maddsub<F: PrimeField32>(
@@ -169,7 +166,7 @@ impl MiscInstrsChip {
         maddsub_cols.mul_lo = Word::from(mul_lo);
 
         let is_add = event.opcode == Opcode::MADDU;
-        let src2_lo = if is_add { event.a_record.prev_value } else { event.a_record.value };
+        let src2_lo = if is_add { event.prev_a } else { event.a };
         let src2_hi = if is_add { event.hi_record.prev_value } else { event.hi_record.value };
         let _ = maddsub_cols.add_operation.populate(
             blu,
@@ -182,7 +179,6 @@ impl MiscInstrsChip {
         // For maddu/msubu instructions, pass in a dummy byte lookup vector.
         // This maddu/msubu instruction chip also has a op_hi_access field that will be
         // populated and that will contribute to the byte lookup dependencies.
-        maddsub_cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), blu);
         maddsub_cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
     }
 
@@ -208,7 +204,7 @@ impl MiscInstrsChip {
         &self,
         cols: &mut MiscInstrColumns<F>,
         event: &MiscEvent,
-        blu: &mut impl ByteRecord,
+        _blu: &mut impl ByteRecord,
     ) {
         if !matches!(event.opcode, Opcode::INS) {
             return;
@@ -216,7 +212,7 @@ impl MiscInstrsChip {
         let ins_cols = cols.misc_specific_columns.ins_mut();
         let lsb = event.c & 0x1f;
         let msb = event.c >> 5;
-        let ror_val = event.a_record.prev_value.rotate_right(lsb);
+        let ror_val = event.prev_a.rotate_right(lsb);
         let srl_val = ror_val >> (msb - lsb + 1);
         let sll_val = event.b << (31 - msb + lsb);
         let add_val = srl_val + sll_val;
@@ -226,7 +222,5 @@ impl MiscInstrsChip {
         ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);
         ins_cols.add_val = Word::from(add_val);
-        ins_cols.op_a = F::from_canonical_u8(event.op_a);
-        ins_cols.op_a_access.populate(MemoryRecordEnum::Write(event.a_record), blu);
     }
 }

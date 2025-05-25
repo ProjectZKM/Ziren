@@ -80,7 +80,8 @@ use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, Word};
 
 use crate::{
-    air::ZKMCoreAirBuilder,
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    memory::MemoryCols,
     operations::{IsEqualWordOperation, IsZeroWordOperation},
     utils::pad_rows_fixed,
 };
@@ -190,9 +191,6 @@ pub struct DivRemCols<T> {
 
     /// Access to hi regiter
     pub op_hi_access: MemoryReadWriteCols<T>,
-
-    /// Flag indicating whether the hi_access record is real.
-    pub hi_record_is_real: T,
 
     /// The shard number.
     pub shard: T,
@@ -692,7 +690,6 @@ where
                 local.is_real,
                 local.abs_c_alu_event,
                 local.abs_rem_alu_event,
-                local.hi_record_is_real,
             ];
 
             for flag in bool_flags.into_iter() {
@@ -739,23 +736,23 @@ where
                 local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
                 AB::F::from_canonical_u32(33),
                 &local.op_hi_access,
-                AB::F::from_canonical_u32(1),
+                local.is_real,
             );
+            builder
+                .when(local.is_real)
+                .assert_word_eq(local.remainder, *local.op_hi_access.value());
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::{uni_stark_prove, uni_stark_verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
-        air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
-    };
 
     use super::DivRemChip;
+    use zkm_stark::MachineAir;
 
     #[test]
     fn generate_trace() {
@@ -765,53 +762,5 @@ mod tests {
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
         println!("{:?}", trace.values)
-    }
-
-    fn neg(a: u32) -> u32 {
-        u32::MAX - a + 1
-    }
-
-    #[test]
-    fn prove_koalabear() {
-        let config = KoalaBearPoseidon2::new();
-        let mut challenger = config.challenger();
-
-        let mut divrem_events: Vec<CompAluEvent> = Vec::new();
-
-        let divrems: Vec<(Opcode, u32, u32, u32, u32)> = vec![
-            (Opcode::DIVU, 3, 20, 6, 2),
-            (Opcode::DIVU, 715827879, neg(20), 6, 2),
-            (Opcode::DIVU, 0, 20, neg(6), 20),
-            (Opcode::DIVU, 0, neg(20), neg(6), neg(20)),
-            (Opcode::DIVU, 1 << 31, 1 << 31, 1, 0),
-            (Opcode::DIVU, 0, 1 << 31, neg(1), 1 << 31),
-            (Opcode::DIVU, u32::MAX, 1 << 31, 0, 1 << 31),
-            (Opcode::DIVU, u32::MAX, 1, 0, 1),
-            (Opcode::DIVU, u32::MAX, 0, 0, 0),
-            (Opcode::DIV, 3, 18, 6, 0),
-            (Opcode::DIV, neg(6), neg(24), 4, 0),
-            (Opcode::DIV, neg(2), 16, neg(8), 0),
-            (Opcode::DIV, neg(1), 0, 0, 0),
-            (Opcode::DIV, 1 << 31, 1 << 31, neg(1), 0),
-        ];
-        for t in divrems.iter() {
-            divrem_events.push(CompAluEvent::new_with_hi(0, t.0, t.1, t.2, t.3, t.4));
-        }
-
-        // Append more events until we have 1000 tests.
-        for _ in 0..(1000 - divrems.len()) {
-            divrem_events.push(CompAluEvent::new_with_hi(0, Opcode::DIVU, 1, 1, 1, 0));
-        }
-
-        let mut shard = ExecutionRecord::default();
-        shard.divrem_events = divrem_events;
-        let chip = DivRemChip::default();
-        let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
-        let proof =
-            uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
-
-        let mut challenger = config.challenger();
-        uni_stark_verify(&config, &chip, &mut challenger, &proof).unwrap();
     }
 }

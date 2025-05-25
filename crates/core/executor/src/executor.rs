@@ -679,15 +679,15 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        hi: Option<u32>,
+        hi_or_prev_a: Option<u32>,
         record: MemoryAccessRecord,
         exit_code: u32,
         syscall_code: u32,
     ) {
-        self.emit_cpu(clk, pc, next_pc, next_next_pc, a, b, c, hi, record, exit_code);
+        self.emit_cpu(clk, pc, next_pc, next_next_pc, a, b, c, hi_or_prev_a, record, exit_code);
 
         if instruction.is_alu_instruction() {
-            self.emit_alu_event(clk, instruction.opcode, hi, a, b, c, record.hi);
+            self.emit_alu_event(clk, instruction.opcode, hi_or_prev_a, a, b, c, record.hi);
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
@@ -706,8 +706,7 @@ impl<'a> Executor<'a> {
                 a,
                 b,
                 c,
-                hi.unwrap_or(0),
-                record.a,
+                hi_or_prev_a.unwrap_or(0),
                 record.hi,
             );
         } else {
@@ -728,7 +727,7 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        hi: Option<u32>,
+        hi_or_prev_a: Option<u32>,
         record: MemoryAccessRecord,
         exit_code: u32,
     ) {
@@ -743,7 +742,7 @@ impl<'a> Executor<'a> {
             b_record: record.b,
             c,
             c_record: record.c,
-            hi,
+            hi: hi_or_prev_a,
             hi_record: record.hi,
             memory_record: record.memory,
             exit_code,
@@ -755,7 +754,7 @@ impl<'a> Executor<'a> {
         &mut self,
         clk: u32,
         opcode: Opcode,
-        hi: Option<u32>,
+        hi_or_prev_a: Option<u32>,
         a: u32,
         b: u32,
         c: u32,
@@ -765,7 +764,7 @@ impl<'a> Executor<'a> {
             pc: self.state.pc,
             next_pc: self.state.next_pc,
             opcode,
-            hi: hi.unwrap_or(0),
+            hi: hi_or_prev_a.unwrap_or(0),
             a,
             b,
             c,
@@ -782,7 +781,7 @@ impl<'a> Executor<'a> {
             pc: self.state.pc,
             next_pc: self.state.next_pc,
             opcode,
-            hi: hi.unwrap_or(0),
+            hi: hi_or_prev_a.unwrap_or(0),
             a,
             b,
             c,
@@ -893,15 +892,9 @@ impl<'a> Executor<'a> {
         a: u32,
         b: u32,
         c: u32,
-        hi: u32,
-        a_record: Option<MemoryRecordEnum>,
+        prev_a: u32,
         hi_record: Option<MemoryRecordEnum>,
     ) {
-        let a_access = match a_record {
-            Some(MemoryRecordEnum::Write(record)) => record,
-            _ => MemoryWriteRecord::default(),
-        };
-
         let hi_access = match hi_record {
             Some(MemoryRecordEnum::Write(record)) => record,
             _ => MemoryWriteRecord::default(),
@@ -917,8 +910,7 @@ impl<'a> Executor<'a> {
             a,
             b,
             c,
-            hi,
-            a_access,
+            prev_a,
             hi_access,
         );
         self.record.misc_events.push(event);
@@ -1043,7 +1035,7 @@ impl<'a> Executor<'a> {
         let mut next_next_pc = self.state.next_pc.wrapping_add(4);
 
         let (a, mut b, mut c): (u32, u32, u32);
-        let mut hi = None;
+        let mut hi_or_prev_a = None;
         let mut syscall_code = 0u32;
 
         if self.executor_mode == ExecutorMode::Trace {
@@ -1185,6 +1177,7 @@ impl<'a> Executor<'a> {
                 next_next_pc = precompile_next_pc + 4;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
+                hi_or_prev_a = Some(syscall_id);
             }
 
             // Arithmetic instructions
@@ -1207,7 +1200,7 @@ impl<'a> Executor<'a> {
             | Opcode::NOR
             | Opcode::CLZ
             | Opcode::CLO => {
-                (hi, a, b, c) = self.execute_alu(instruction);
+                (hi_or_prev_a, a, b, c) = self.execute_alu(instruction);
             }
 
             // Load instructions.
@@ -1250,13 +1243,13 @@ impl<'a> Executor<'a> {
 
             // Misc instructions.
             Opcode::MEQ | Opcode::MNE => {
-                (a, b, c) = self.execute_condmov(instruction);
+                (hi_or_prev_a, a, b, c) = self.execute_condmov(instruction);
             }
             Opcode::MADDU => {
-                (hi, a, b, c) = self.execute_maddu(instruction);
+                (hi_or_prev_a, a, b, c) = self.execute_maddu(instruction);
             }
             Opcode::MSUBU => {
-                (hi, a, b, c) = self.execute_msubu(instruction);
+                (hi_or_prev_a, a, b, c) = self.execute_msubu(instruction);
             }
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
@@ -1271,7 +1264,7 @@ impl<'a> Executor<'a> {
                 (a, b, c) = self.execute_ext(instruction);
             }
             Opcode::INS => {
-                (a, b, c) = self.execute_ins(instruction);
+                (hi_or_prev_a, a, b, c) = self.execute_ins(instruction);
             }
 
             Opcode::UNIMPL => {
@@ -1291,7 +1284,7 @@ impl<'a> Executor<'a> {
                 a,
                 b,
                 c,
-                hi,
+                hi_or_prev_a,
                 self.memory_accesses,
                 exit_code,
                 syscall_code,
@@ -1324,7 +1317,7 @@ impl<'a> Executor<'a> {
         let out_hi = (out >> 32) as u32;
         self.rw(lo, out_lo, MemoryAccessPosition::A);
         self.rw(Register::HI, out_hi, MemoryAccessPosition::HI);
-        (Some(out_hi), out_lo, b, c)
+        (Some(lo_val), out_lo, b, c)
     }
 
     fn execute_msubu(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
@@ -1344,7 +1337,7 @@ impl<'a> Executor<'a> {
         let out_hi = (out >> 32) as u32;
         self.rw(lo, out_lo, MemoryAccessPosition::A);
         self.rw(Register::HI, out_hi, MemoryAccessPosition::HI);
-        (Some(out_hi), out_lo, b, c)
+        (Some(lo_val), out_lo, b, c)
     }
 
     fn execute_sext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
@@ -1380,18 +1373,19 @@ impl<'a> Executor<'a> {
         (a, b, c)
     }
 
-    fn execute_ins(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+    fn execute_ins(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
         let (rd, rt, c) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let b = self.rr(rt, MemoryAccessPosition::B);
         let a = self.register(rd);
+        let prev_a = a;
         let msb = c >> 5;
         let lsb = c & 0x1f;
         let mask = (1 << (msb - lsb + 1)) - 1;
         let mask_field = mask << lsb;
         let a = (a & !mask_field) | ((b << lsb) & mask_field);
         self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, c)
+        (Some(prev_a), a, b, c)
     }
 
     fn execute_teq(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
@@ -1406,13 +1400,14 @@ impl<'a> Executor<'a> {
         (src1, src2, 0)
     }
 
-    fn execute_condmov(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+    fn execute_condmov(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
         let (rd, rs, rt) = (
             instruction.op_a.into(),
             (instruction.op_b as u8).into(),
             (instruction.op_c as u8).into(),
         );
         let a = self.register(rd);
+        let prev_a = a;
         let c = self.rr(rt, MemoryAccessPosition::C);
         let b = self.rr(rs, MemoryAccessPosition::B);
         let mov = match instruction.opcode {
@@ -1425,7 +1420,7 @@ impl<'a> Executor<'a> {
 
         let a = if mov { b } else { a };
         self.rw(rd, a, MemoryAccessPosition::A);
-        (a, b, c)
+        (Some(prev_a), a, b, c)
     }
 
     fn execute_alu(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {

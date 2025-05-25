@@ -48,11 +48,10 @@ use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::memory::MemoryReadWriteCols;
-
 use crate::{
-    air::ZKMCoreAirBuilder,
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::mul::utils::get_msb,
+    memory::{MemoryCols, MemoryReadWriteCols},
     utils::{next_power_of_two, zeroed_f_vec},
 };
 
@@ -485,6 +484,7 @@ where
         // hi_record_is_real can only be set for MULT and MULTU instruction.
         // if hi_record_is_real = 0, both clk and shard should be zero.
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
+        builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
     }

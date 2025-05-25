@@ -134,7 +134,7 @@ impl CpuChip {
 
         cols.op_a_value = event.a.into();
         if let Some(hi) = event.hi {
-            cols.op_hi_value = hi.into();
+            cols.hi_or_prev_a = hi.into();
         }
 
         *cols.op_a_access.value_mut() = event.a.into();
@@ -143,7 +143,7 @@ impl CpuChip {
 
         cols.shard_to_send = if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
-            || instruction.is_syscall_instruction()
+            || instruction.is_rw_a_instruction()
             || instruction.is_mult_div_instruction()
         {
             cols.shard
@@ -152,7 +152,7 @@ impl CpuChip {
         };
         cols.clk_to_send = if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
-            || instruction.is_syscall_instruction()
+            || instruction.is_rw_a_instruction()
             || instruction.is_mult_div_instruction()
         {
             F::from_canonical_u32(event.clk)
@@ -162,14 +162,7 @@ impl CpuChip {
 
         // Populate memory accesses for a, b, and c.
         if let Some(record) = event.a_record {
-            if instruction.is_rw_a_instruction() {
-                // For syscall/maddu/msubu/ins instructions, pass in a dummy byte lookup vector.  These instruction
-                // chips also has a op_a_access fields that will be populated and that will contribute
-                // to the byte lookup dependencies.
-                cols.op_a_access.populate(record, &mut Vec::new());
-            } else {
-                cols.op_a_access.populate(record, blu_events);
-            }
+            cols.op_a_access.populate(record, blu_events);
         }
 
         if let Some(MemoryRecordEnum::Read(record)) = event.b_record {

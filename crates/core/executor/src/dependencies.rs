@@ -295,14 +295,14 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
     } else if matches!(event.opcode, Opcode::INS) {
         let lsb = event.c & 0x1f;
         let msb = event.c >> 5;
-        let ror_val = event.a_record.prev_value.rotate_right(lsb);
+        let ror_val = event.prev_a.rotate_right(lsb);
         let ror_event = AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::ROR,
             hi: 0,
             a: ror_val,
-            b: event.a_record.prev_value,
+            b: event.prev_a,
             c: lsb,
         };
         executor.record.shift_right_events.push(ror_event);
