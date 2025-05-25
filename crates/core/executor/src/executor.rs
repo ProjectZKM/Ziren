@@ -1104,6 +1104,7 @@ impl<'a> Executor<'a> {
                 c = self.rr(Register::A1, MemoryAccessPosition::C);
                 b = self.rr(Register::A0, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
+                let mut prev_a = syscall_id;
 
                 if self.print_report && !self.unconstrained {
                     self.report.syscall_counts[syscall] += 1;
@@ -1167,6 +1168,7 @@ impl<'a> Executor<'a> {
                 if syscall == SyscallCode::EXIT_UNCONSTRAINED {
                     b = self.register(Register::A0);
                     c = self.register(Register::A1);
+                    prev_a = self.register(Register::V0);
                 }
 
                 // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)
@@ -1178,7 +1180,7 @@ impl<'a> Executor<'a> {
                 next_next_pc = precompile_next_pc + 4;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
-                hi_or_prev_a = Some(syscall_id);
+                hi_or_prev_a = Some(prev_a);
             }
 
             // Arithmetic instructions
