@@ -750,6 +750,7 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit an ALU event.
+    #[allow(clippy::too_many_arguments)]
     fn emit_alu_event(
         &mut self,
         clk: u32,
