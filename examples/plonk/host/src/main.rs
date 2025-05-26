@@ -25,10 +25,10 @@ fn generate_fibonacci_proof() -> (Vec<u8>, Vec<u8>, String) {
     // Create a `ProverClient`.
     let client = ProverClient::new();
 
-    // Generate the groth16 proof for the Fibonacci program.
+    // Generate the plonk proof for the Fibonacci program.
     let (pk, vk) = client.setup(FIBONACCI_ELF);
     println!("vk: {:?}", vk.bytes32());
-    let proof = client.prove(&pk, stdin).groth16().run().unwrap();
+    let proof = client.prove(&pk, stdin).plonk().run().unwrap();
     (proof.bytes(), proof.public_values.to_vec(), vk.bytes32())
 }
 
@@ -50,6 +50,6 @@ fn main() {
 
     // Execute the program using the `ProverClient.execute` method, without generating a proof.
     let (_, report) = client.execute(PLONK_ELF, stdin).run().unwrap();
-    println!("executed groth16 program with {} cycles", report.total_instruction_count());
+    println!("executed plonk program with {} cycles", report.total_instruction_count());
     println!("{}", report);
 }
