@@ -56,8 +56,9 @@
 //!    assert 0 <= remainder < c
 //!
 //! if is_c_0:
-//!    # if division by 0, then quotient = 0xffffffff per MIPS spec. This needs special care since
-//!    # b = 0 * quotient + b is satisfied by any quotient.
+//!    # if division by 0, then quotient is UNPREDICTABLE per MIPS spec.
+//!    We restrict the quotient = 0xffffffff and remainder = b.
+//!    This needs special care since # b = 0 * quotient + b is satisfied by any quotient.
 //!    assert quotient = 0xffffffff
 
 use core::{
@@ -558,7 +559,7 @@ where
                 .assert_zero(local.b_neg); // b is not negative.
         }
 
-        // When division by 0, quotient must be 0xffffffff per MIPS spec.
+        // When division by 0, quotient is UNPREDICTABLE per MIPS spec. We restrict the quotient = 0xffffffff
         {
             // Calculate whether c is 0.
             IsZeroWordOperation::<AB::F>::eval(
