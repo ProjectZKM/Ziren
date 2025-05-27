@@ -116,7 +116,7 @@ impl BranchChip {
         cols.target_pc = Word::from(target_pc);
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_pc_range_checker.populate(event.next_pc);
-        cols.target_pc_range_checker.populate(target_pc);
+        cols.next_next_pc_range_checker.populate(event.next_next_pc);
 
         cols.is_branching = F::from_bool(branching);
     }

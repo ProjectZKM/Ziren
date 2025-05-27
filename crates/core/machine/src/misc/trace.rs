@@ -186,7 +186,7 @@ impl MiscInstrsChip {
         &self,
         cols: &mut MiscInstrColumns<F>,
         event: &MiscEvent,
-        _blu: &mut impl ByteRecord,
+        blu: &mut impl ByteRecord,
     ) {
         if !matches!(event.opcode, Opcode::EXT) {
             return;
@@ -198,13 +198,34 @@ impl MiscInstrsChip {
         ext_cols.lsb = F::from_canonical_u32(lsb);
         ext_cols.msbd = F::from_canonical_u32(msbd);
         ext_cols.sll_val = Word::from(shift_left);
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::LTU,
+            a1: 1,
+            a2: 0,
+            b: 0,
+            c: msbd as u8,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::LTU,
+            a1: 1,
+            a2: 0,
+            b: msbd as u8,
+            c: 33,
+        });
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::LTU,
+            a1: 1,
+            a2: 0,
+            b: (lsb + msbd) as u8,
+            c: 33,
+        });
     }
 
     fn populate_ins<F: PrimeField32>(
         &self,
         cols: &mut MiscInstrColumns<F>,
         event: &MiscEvent,
-        _blu: &mut impl ByteRecord,
+        blu: &mut impl ByteRecord,
     ) {
         if !matches!(event.opcode, Opcode::INS) {
             return;
@@ -222,5 +243,20 @@ impl MiscInstrsChip {
         ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);
         ins_cols.add_val = Word::from(add_val);
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::LTU,
+            a1: 1,
+            a2: 0,
+            b: lsb as u8,
+            c: (msb + 1) as u8,
+        });
+
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::LTU,
+            a1: 1,
+            a2: 0,
+            b: msb as u8,
+            c: 32,
+        });
     }
 }

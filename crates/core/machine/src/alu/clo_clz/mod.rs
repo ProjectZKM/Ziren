@@ -198,10 +198,14 @@ where
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,
-            local.a.reduce::<AB>(),
+            local.a[0],
             AB::Expr::from_canonical_u8(33),
             local.is_real,
         );
+
+        builder.when(local.is_real).assert_zero(local.a[1]);
+        builder.when(local.is_real).assert_zero(local.a[2]);
+        builder.when(local.is_real).assert_zero(local.a[3]);
 
         // Get the opcode for the operation.
         let cpu_opcode = local.is_clo * Opcode::CLO.as_field::<AB::F>()

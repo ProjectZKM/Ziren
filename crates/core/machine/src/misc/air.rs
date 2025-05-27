@@ -107,6 +107,9 @@ where
         self.eval_movcond(builder, local);
         self.eval_maddsub(builder, local);
         self.eval_sext(builder, local);
+
+        builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[2]);
+        builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[3]);
     }
 }
 
@@ -358,6 +361,23 @@ impl MiscInstrsChip {
             local.op_c_value.reduce::<AB>(),
             ins_cols.lsb + ins_cols.msb * AB::Expr::from_canonical_u32(32),
         );
+
+        // 32 > msb >= lsb >=0.
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::ONE,
+            ins_cols.lsb,
+            ins_cols.msb + AB::Expr::ONE,
+            local.is_ins,
+        );
+
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::ONE,
+            ins_cols.msb,
+            AB::Expr::from_canonical_u32(32),
+            local.is_ext,
+        );
     }
 
     pub(crate) fn eval_ext<AB: ZKMAirBuilder>(
@@ -402,6 +422,31 @@ impl MiscInstrsChip {
         builder.when(local.is_ext).assert_eq(
             local.op_c_value.reduce::<AB>(),
             ext_cols.lsb + ext_cols.msbd * AB::Expr::from_canonical_u32(32),
+        );
+
+        // 32 >= msbd > 0, lsb + msbd <= 32.
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::ONE,
+            AB::Expr::ZERO,
+            ext_cols.msbd,
+            local.is_ext,
+        );
+
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::ONE,
+            ext_cols.msbd,
+            AB::Expr::from_canonical_u32(33),
+            local.is_ext,
+        );
+
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::ONE,
+            ext_cols.lsb + ext_cols.msbd,
+            AB::Expr::from_canonical_u32(33),
+            local.is_ext,
         );
     }
 

@@ -101,8 +101,8 @@ where
 
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
-                local.target_pc,
-                local.target_pc_range_checker,
+                local.next_next_pc,
+                local.next_next_pc_range_checker,
                 is_real.clone(),
             );
 
