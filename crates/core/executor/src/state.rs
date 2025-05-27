@@ -31,6 +31,9 @@ pub struct ExecutionState {
     /// if exit
     pub exited: bool,
 
+    /// if the next instruction is in delay slot for branch and jump.
+    pub next_is_delayslot: bool,
+
     /// The memory which instructions operate over. Values contain the memory value and last shard
     /// + timestamp that each memory address was accessed.
     pub memory: PagedMemory<MemoryRecord>,
@@ -81,6 +84,7 @@ impl ExecutionState {
             pc: pc_start,
             next_pc,
             exited: false,
+            next_is_delayslot: false,
             memory: PagedMemory::new_preallocated(),
             uninitialized_memory: PagedMemory::default(),
             input_stream: Vec::new(),

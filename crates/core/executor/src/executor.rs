@@ -1039,6 +1039,8 @@ impl<'a> Executor<'a> {
         let mut hi_or_prev_a = None;
         let mut syscall_code = 0u32;
 
+        self.state.next_is_delayslot = false;
+
         if self.executor_mode == ExecutorMode::Trace {
             self.memory_accesses = MemoryAccessRecord::default();
         }
@@ -1231,11 +1233,13 @@ impl<'a> Executor<'a> {
             | Opcode::BGTZ
             | Opcode::BLTZ => {
                 (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
+                self.state.next_is_delayslot = true;
             }
 
             // Jump instructions.
             Opcode::Jump => {
                 (a, b, c, next_next_pc) = self.execute_jump(instruction);
+                self.state.next_is_delayslot = true;
             }
             Opcode::Jumpi => {
                 (a, b, c, next_next_pc) = self.execute_jumpi(instruction);
@@ -1692,7 +1696,8 @@ impl<'a> Executor<'a> {
         // Increment the clock.
         self.state.global_clk += 1;
 
-        if !self.unconstrained {
+        // We restrict the execution of branch/jump and its delay slot to be in the same shard.
+        if !self.unconstrained && !self.state.next_is_delayslot {
             // If there's not enough cycles left for another instruction, move to the next shard.
             let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
             // println!("cpu exit {cpu_exit}, {} {}, {}", self.max_syscall_cycles, self.state.clk, self.shard_size);

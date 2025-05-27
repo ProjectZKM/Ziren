@@ -160,6 +160,11 @@ impl CpuChip {
         // Verify the public value's start pc.
         builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
 
+        // Verify the relationship between initial start pc and initial next pc.
+        builder
+            .when_first_row()
+            .assert_eq(local.pc + AB::Expr::from_canonical_u32(4), local.next_pc);
+
         // Verify the pc, next_pc, and next_next_pc
         builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
         builder

@@ -7,7 +7,6 @@ use crate::{
     memory::MemoryCols,
 };
 use zkm_core_executor::events::MemoryAccessPosition;
-use zkm_stark::BaseAirBuilder;
 
 impl CpuChip {
     /// Computes whether the opcode is a branch instruction.
