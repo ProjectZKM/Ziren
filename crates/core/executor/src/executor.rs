@@ -1243,9 +1243,11 @@ impl<'a> Executor<'a> {
             }
             Opcode::Jumpi => {
                 (a, b, c, next_next_pc) = self.execute_jumpi(instruction);
+                self.state.next_is_delayslot = true;
             }
             Opcode::JumpDirect => {
                 (a, b, c, next_next_pc) = self.execute_jump_direct(instruction);
+                self.state.next_is_delayslot = true;
             }
 
             // Misc instructions.

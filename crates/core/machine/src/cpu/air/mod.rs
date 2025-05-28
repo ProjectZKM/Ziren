@@ -163,6 +163,7 @@ impl CpuChip {
         // Verify the relationship between initial start pc and initial next pc.
         builder
             .when_first_row()
+            .when_not(local.is_halt)
             .assert_eq(local.pc + AB::Expr::from_canonical_u32(4), local.next_pc);
 
         // Verify the pc, next_pc, and next_next_pc
