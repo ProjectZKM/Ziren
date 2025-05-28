@@ -376,7 +376,7 @@ impl MiscInstrsChip {
             AB::Expr::ONE,
             ins_cols.msb,
             AB::Expr::from_canonical_u32(32),
-            local.is_ext,
+            local.is_ins,
         );
     }
 
