@@ -364,6 +364,14 @@ impl MiscInstrsChip {
 
         // 32 > msb >= lsb >=0.
         builder.send_byte(
+            ByteOpcode::U8Range.as_field::<AB::F>(),
+            AB::Expr::ZERO,
+            ins_cols.lsb,
+            ins_cols.msb,
+            local.is_ins,
+        );
+
+        builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::Expr::ONE,
             ins_cols.lsb,
@@ -424,20 +432,12 @@ impl MiscInstrsChip {
             ext_cols.lsb + ext_cols.msbd * AB::Expr::from_canonical_u32(32),
         );
 
-        // 32 >= msbd > 0, lsb + msbd <= 32.
+        // 0=< lsb/msbd < 32 , lsb + msbd < 32.
         builder.send_byte(
-            ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::ONE,
+            ByteOpcode::U8Range.as_field::<AB::F>(),
             AB::Expr::ZERO,
+            ext_cols.lsb,
             ext_cols.msbd,
-            local.is_ext,
-        );
-
-        builder.send_byte(
-            ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::ONE,
-            ext_cols.msbd,
-            AB::Expr::from_canonical_u32(33),
             local.is_ext,
         );
 
@@ -445,7 +445,7 @@ impl MiscInstrsChip {
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::Expr::ONE,
             ext_cols.lsb + ext_cols.msbd,
-            AB::Expr::from_canonical_u32(33),
+            AB::Expr::from_canonical_u32(32),
             local.is_ext,
         );
     }

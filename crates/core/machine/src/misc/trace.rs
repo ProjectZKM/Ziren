@@ -199,25 +199,18 @@ impl MiscInstrsChip {
         ext_cols.msbd = F::from_canonical_u32(msbd);
         ext_cols.sll_val = Word::from(shift_left);
         blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::LTU,
-            a1: 1,
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
             a2: 0,
-            b: 0,
+            b: lsb as u8,
             c: msbd as u8,
         });
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::LTU,
             a1: 1,
             a2: 0,
-            b: msbd as u8,
-            c: 33,
-        });
-        blu.add_byte_lookup_event(ByteLookupEvent {
-            opcode: ByteOpcode::LTU,
-            a1: 1,
-            a2: 0,
             b: (lsb + msbd) as u8,
-            c: 33,
+            c: 32,
         });
     }
 
@@ -243,6 +236,14 @@ impl MiscInstrsChip {
         ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);
         ins_cols.add_val = Word::from(add_val);
+        blu.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::U8Range,
+            a1: 0,
+            a2: 0,
+            b: lsb as u8,
+            c: msb as u8,
+        });
+
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::LTU,
             a1: 1,
