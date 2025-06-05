@@ -377,14 +377,6 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(clo_clz.name(), clo_clz.cost());
         chips.push(clo_clz);
 
-        let wsbh = Chip::new(MipsAir::Wsbh(WsbhChip::default()));
-        costs.insert(wsbh.name(), wsbh.cost());
-        chips.push(wsbh);
-
-        let movcond = Chip::new(MipsAir::MovCond(MovCondChip::default()));
-        costs.insert(movcond.name(), movcond.cost());
-        chips.push(movcond);
-
         let branch = Chip::new(MipsAir::Branch(BranchChip::default()));
         costs.insert(branch.name(), branch.cost());
         chips.push(branch);
@@ -427,6 +419,14 @@ impl<F: PrimeField32> MipsAir<F> {
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
+
+        let wsbh = Chip::new(MipsAir::Wsbh(WsbhChip::default()));
+        costs.insert(wsbh.name(), wsbh.cost());
+        chips.push(wsbh);
+
+        let movcond = Chip::new(MipsAir::MovCond(MovCondChip::default()));
+        costs.insert(movcond.name(), movcond.cost());
+        chips.push(movcond);
 
         (chips, costs)
     }
