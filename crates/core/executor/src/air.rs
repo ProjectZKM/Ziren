@@ -107,6 +107,10 @@ pub enum MipsAirId {
     Global = 44,
     /// The byte chip.
     Byte = 45,
+    /// The wsbh chip.
+    Wsbh = 46,
+    /// The movcond chip.
+    MovCond = 47,
 }
 
 impl MipsAirId {
@@ -121,6 +125,8 @@ impl MipsAirId {
             MipsAirId::ShiftLeft,
             MipsAirId::ShiftRight,
             MipsAirId::DivRem,
+            MipsAirId::Wsbh,
+            MipsAirId::MovCond,
             MipsAirId::MemoryLocal,
             MipsAirId::Branch,
             MipsAirId::Jump,
@@ -172,6 +178,8 @@ impl MipsAirId {
             Self::ShiftLeft => "ShiftLeft",
             Self::Lt => "Lt",
             Self::CloClz => "CloClz",
+            Self::Wsbh => "Wsbh",
+            Self::MovCond => "MovCond",
             Self::Branch => "Branch",
             Self::Jump => "Jump",
             Self::SyscallInstrs => "SyscallInstrs",

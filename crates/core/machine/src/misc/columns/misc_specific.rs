@@ -1,4 +1,4 @@
-use crate::misc::columns::{ExtCols, InsCols, MaddsubCols, MovcondCols, SextCols};
+use crate::misc::columns::{ExtCols, InsCols, MaddsubCols, SextCols};
 use std::{
     fmt::{Debug, Formatter},
     mem::{size_of, transmute},
@@ -13,7 +13,6 @@ pub const NUM_MISC_SPECIFIC_COLS: usize = size_of::<MiscSpecificCols<u8>>();
 #[repr(C)]
 pub union MiscSpecificCols<T: Copy> {
     maddsub: MaddsubCols<T>,
-    movcond: MovcondCols<T>,
     sext: SextCols<T>,
     ext: ExtCols<T>,
     ins: InsCols<T>,
@@ -43,12 +42,6 @@ impl<T: Copy> MiscSpecificCols<T> {
     }
     pub fn maddsub_mut(&mut self) -> &mut MaddsubCols<T> {
         unsafe { &mut self.maddsub }
-    }
-    pub fn movcond(&self) -> &MovcondCols<T> {
-        unsafe { &self.movcond }
-    }
-    pub fn movcond_mut(&mut self) -> &mut MovcondCols<T> {
-        unsafe { &mut self.movcond }
     }
     pub fn sext(&self) -> &SextCols<T> {
         unsafe { &self.sext }

@@ -812,6 +812,12 @@ impl<'a> Executor<'a> {
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
                 self.record.mul_events.push(event_comp);
             }
+            Opcode::MNE | Opcode::MEQ => {
+                self.record.movcond_events.push(event);
+            }
+            Opcode::WSBH => {
+                self.record.wsbh_events.push(event);
+            }
             Opcode::DIV | Opcode::DIVU => {
                 self.record.divrem_events.push(event_comp);
                 emit_divrem_dependencies(self, event);
@@ -820,6 +826,7 @@ impl<'a> Executor<'a> {
                 self.record.cloclz_events.push(event);
                 emit_cloclz_dependencies(self, event);
             }
+
             _ => {}
         }
     }

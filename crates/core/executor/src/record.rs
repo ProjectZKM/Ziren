@@ -50,6 +50,10 @@ pub struct ExecutionRecord {
     pub lt_events: Vec<AluEvent>,
     /// A trace of the CLO and CLZ events.
     pub cloclz_events: Vec<AluEvent>,
+    /// A trace of the WSBH events.
+    pub wsbh_events: Vec<AluEvent>,
+    /// A trace of the MNE and MEQ events.
+    pub movcond_events: Vec<AluEvent>,
     /// A trace of the memory instructions.
     pub memory_instr_events: Vec<MemInstrEvent>,
     /// A trace of the branch events.
@@ -294,6 +298,8 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
         stats.insert("lt_events".to_string(), self.lt_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
+        stats.insert("wsbh_events".to_string(), self.wsbh_events.len());
+        stats.insert("movcond_events".to_string(), self.movcond_events.len());
         stats.insert("memory_instr_events".to_string(), self.memory_instr_events.len());
         stats.insert("branch_events".to_string(), self.branch_events.len());
         stats.insert("jump_events".to_string(), self.jump_events.len());
@@ -331,6 +337,8 @@ impl MachineRecord for ExecutionRecord {
         self.divrem_events.append(&mut other.divrem_events);
         self.lt_events.append(&mut other.lt_events);
         self.cloclz_events.append(&mut other.cloclz_events);
+        self.wsbh_events.append(&mut other.wsbh_events);
+        self.movcond_events.append(&mut other.movcond_events);
         self.memory_instr_events.append(&mut other.memory_instr_events);
         self.branch_events.append(&mut other.branch_events);
         self.jump_events.append(&mut other.jump_events);

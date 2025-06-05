@@ -89,18 +89,14 @@ impl MiscInstrsChip {
         cols.shard = F::from_canonical_u32(event.shard);
         cols.clk = F::from_canonical_u32(event.clk);
 
-        cols.is_wsbh = F::from_bool(matches!(event.opcode, Opcode::WSBH));
         cols.is_sext = F::from_bool(matches!(event.opcode, Opcode::SEXT));
         cols.is_ext = F::from_bool(matches!(event.opcode, Opcode::EXT));
         cols.is_ins = F::from_bool(matches!(event.opcode, Opcode::INS));
         cols.is_maddu = F::from_bool(matches!(event.opcode, Opcode::MADDU));
         cols.is_msubu = F::from_bool(matches!(event.opcode, Opcode::MSUBU));
-        cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
-        cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
         cols.is_teq = F::from_bool(matches!(event.opcode, Opcode::TEQ));
 
         self.populate_sext(cols, event, blu);
-        self.populate_movcond(cols, event, blu);
         self.populate_maddsub(cols, event, blu);
         self.populate_ext(cols, event, blu);
         self.populate_ins(cols, event, blu);
@@ -126,6 +122,7 @@ impl MiscInstrsChip {
         };
         sext_cols.most_sig_bit = F::from_canonical_u16(sig_bit);
         sext_cols.sig_byte = F::from_canonical_u8(sig_byte);
+        sext_cols.a_eq_b = F::from_bool(event.b == event.a);
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::MSB,
             a1: sig_bit,
@@ -133,20 +130,6 @@ impl MiscInstrsChip {
             b: sig_byte,
             c: 0,
         });
-    }
-
-    fn populate_movcond<F: PrimeField32>(
-        &self,
-        cols: &mut MiscInstrColumns<F>,
-        event: &MiscEvent,
-        _blu: &mut impl ByteRecord,
-    ) {
-        if !matches!(event.opcode, Opcode::MNE | Opcode::MEQ | Opcode::TEQ) {
-            return;
-        }
-        let movcond_cols = cols.misc_specific_columns.movcond_mut();
-        movcond_cols.a_eq_b = F::from_bool(event.b == event.a);
-        movcond_cols.c_eq_0 = F::from_bool(event.c == 0);
     }
 
     fn populate_maddsub<F: PrimeField32>(
