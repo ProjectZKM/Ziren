@@ -190,7 +190,7 @@ pub struct DivRemCols<T> {
     /// Column to modify multiplicity for remainder range check event.
     pub remainder_check_multiplicity: T,
 
-    /// Access to hi regiter
+    /// Access to hi register
     pub op_hi_access: MemoryReadWriteCols<T>,
 
     /// The shard number.
@@ -232,7 +232,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_div = F::from_bool(event.opcode == Opcode::DIV);
                 cols.is_c_0.populate(event.c);
 
-                // DivRem Chip is only used for DIV and DIVU instruction currrently.
+                // DivRem Chip is only used for DIV and DIVU instruction currently.
                 let mut blu_events: Vec<ByteLookupEvent> = vec![];
                 cols.op_hi_access
                     .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
@@ -710,7 +710,7 @@ where
                 local.is_divu * divu + local.is_div * div
             };
 
-            // DivRem Chip is only used for DIV and DIVU instruction currrently. So is_write_hi will always be ture.
+            // DivRem Chip is only used for DIV and DIVU instruction currently. So is_write_hi will always be ture.
             builder.receive_instruction(
                 local.shard,
                 local.clk,
