@@ -97,7 +97,7 @@ To ensure the correctness of the folding process in a FRI-based proof system, th
 1. The verifier randomly selects a point $t \in \Omega$.
 2. The prover returns the evaluation $p(t)$ along with the corresponding Merkle proof to verify its inclusion in the committed polynomial.
 
-Then, for each folding round $i = 1$ to $\log d$ (d: polynomial degree):
+Then, for each folding round $i = 1$ to $\log d$ (d: polynomial degree): 
 
 1. The verifier updates the query point using the rule $t \leftarrow t^2$, simulating the recursive domain reduction of FRI.
 2. The prover returns the folded evaluation $P_{\text{fold}}(t)$ and the corresponding Merkle path.
