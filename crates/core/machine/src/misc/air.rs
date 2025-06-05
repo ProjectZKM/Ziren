@@ -6,10 +6,7 @@ use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{
-    air:: ZKMAirBuilder,
-    Word,
-};
+use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},

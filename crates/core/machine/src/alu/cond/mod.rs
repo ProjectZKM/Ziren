@@ -13,9 +13,15 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{ExecutionRecord, Opcode, Program};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::{BaseAirBuilder, MachineAir}, Word};
+use zkm_stark::{
+    air::{BaseAirBuilder, MachineAir},
+    Word,
+};
 
-use crate::{air::{ZKMCoreAirBuilder, WordAirBuilder}, utils::pad_rows_fixed};
+use crate::{
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    utils::pad_rows_fixed,
+};
 
 /// The number of main trace columns for `MovCondChip`.
 pub const NUM_MOVCOND_COLS: usize = size_of::<MovCondCols<u8>>();
@@ -135,10 +141,7 @@ where
         {
             builder.when(local.is_meq).when(local.c_eq_0).assert_word_eq(local.a, local.b);
 
-            builder
-                .when(local.is_meq)
-                .when_not(local.c_eq_0)
-                .assert_word_eq(local.a, local.prev_a);
+            builder.when(local.is_meq).when_not(local.c_eq_0).assert_word_eq(local.a, local.prev_a);
 
             builder.when(local.is_mne).when_not(local.c_eq_0).assert_word_eq(local.a, local.b);
 
