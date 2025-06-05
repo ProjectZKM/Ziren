@@ -55,8 +55,8 @@ where
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
         let is_sequential = AB::Expr::ONE - local.is_halt;
         builder.receive_instruction(
-            local.shard,
-            local.clk,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc,
             local.num_extra_cycles,
