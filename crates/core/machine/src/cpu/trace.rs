@@ -143,7 +143,6 @@ impl CpuChip {
 
         cols.shard_to_send = if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
-            || instruction.is_rw_a_instruction()
             || instruction.is_mult_div_instruction()
         {
             cols.shard
@@ -152,7 +151,6 @@ impl CpuChip {
         };
         cols.clk_to_send = if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
-            || instruction.is_rw_a_instruction()
             || instruction.is_mult_div_instruction()
         {
             F::from_canonical_u32(event.clk)

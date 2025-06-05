@@ -16,4 +16,7 @@ pub struct SextCols<T> {
     /// SEB/SEH Instruction Selectors.
     pub is_seb: T,
     pub is_seh: T,
+
+    /// Check for teq
+    pub a_eq_b: T,
 }

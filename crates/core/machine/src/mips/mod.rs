@@ -23,8 +23,8 @@ use zkm_stark::{
 pub(crate) mod mips_chips {
     pub use crate::{
         alu::{
-            AddSubChip, BitwiseChip, CloClzChip, DivRemChip, LtChip, MulChip, ShiftLeft,
-            ShiftRightChip,
+            AddSubChip, BitwiseChip, CloClzChip, DivRemChip, LtChip, MovCondChip, MulChip,
+            ShiftLeft, ShiftRightChip, WsbhChip,
         },
         bytes::ByteChip,
         control_flow::{BranchChip, JumpChip},
@@ -89,6 +89,10 @@ pub enum MipsAir<F: PrimeField32> {
     Lt(LtChip),
     /// An AIR for MIPS CLO and CLZ instruction.
     CloClz(CloClzChip),
+    /// An AIR for MIPS WSBH instruction.
+    Wsbh(WsbhChip),
+    /// An AIR for MIPS MNE and MEQ instruction.
+    MovCond(MovCondChip),
     /// An AIR for MIPS SLL instruction.
     ShiftLeft(ShiftLeft),
     /// An AIR for MIPS SRL and SRA instruction.
@@ -373,6 +377,14 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(clo_clz.name(), clo_clz.cost());
         chips.push(clo_clz);
 
+        let wsbh = Chip::new(MipsAir::Wsbh(WsbhChip::default()));
+        costs.insert(wsbh.name(), wsbh.cost());
+        chips.push(wsbh);
+
+        let movcond = Chip::new(MipsAir::MovCond(MovCondChip::default()));
+        costs.insert(movcond.name(), movcond.cost());
+        chips.push(movcond);
+
         let branch = Chip::new(MipsAir::Branch(BranchChip::default()));
         costs.insert(branch.name(), branch.cost());
         chips.push(branch);
@@ -453,6 +465,8 @@ impl<F: PrimeField32> MipsAir<F> {
                 MipsAirId::Global,
                 2 * record.get_local_mem_events().count() + record.syscall_events.len(),
             ),
+            (MipsAirId::Wsbh, record.wsbh_events.len()),
+            (MipsAirId::MovCond, record.movcond_events.len()),
             (MipsAirId::SyscallCore, record.syscall_events.len()),
         ]
     }
@@ -496,6 +510,8 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::DivRem(DivRemChip::default()),
             MipsAir::Lt(LtChip::default()),
             MipsAir::CloClz(CloClzChip::default()),
+            MipsAir::Wsbh(WsbhChip::default()),
+            MipsAir::MovCond(MovCondChip::default()),
             MipsAir::ShiftLeft(ShiftLeft::default()),
             MipsAir::ShiftRight(ShiftRightChip::default()),
             MipsAir::Branch(BranchChip::default()),
@@ -641,6 +657,8 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Mul(_) => unreachable!("Invalid for core chip"),
             Self::Lt(_) => unreachable!("Invalid for core chip"),
             Self::CloClz(_) => unreachable!("Invalid for core chip"),
+            Self::Wsbh(_) => unreachable!("Invalid for core chip"),
+            Self::MovCond(_) => unreachable!("Invalid for core chip"),
             Self::ShiftRight(_) => unreachable!("Invalid for core chip"),
             Self::ShiftLeft(_) => unreachable!("Invalid for core chip"),
             Self::ByteLookup(_) => unreachable!("Invalid for core chip"),

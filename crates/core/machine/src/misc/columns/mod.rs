@@ -2,14 +2,12 @@ mod ext;
 mod ins;
 mod maddsub;
 mod misc_specific;
-mod movcond;
 mod sext;
 
 pub use ext::*;
 pub use ins::*;
 pub use maddsub::*;
 pub use misc_specific::*;
-pub use movcond::*;
 pub use sext::*;
 
 use std::mem::size_of;
@@ -41,13 +39,10 @@ pub struct MiscInstrColumns<T: Copy> {
     pub misc_specific_columns: MiscSpecificCols<T>,
 
     /// Misc Instruction Selectors.
-    pub is_wsbh: T,
     pub is_sext: T,
     pub is_ins: T,
     pub is_ext: T,
     pub is_maddu: T,
     pub is_msubu: T,
-    pub is_meq: T,
-    pub is_mne: T,
     pub is_teq: T,
 }

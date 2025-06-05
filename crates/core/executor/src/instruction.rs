@@ -74,6 +74,9 @@ impl Instruction {
                 | Opcode::NOR
                 | Opcode::CLZ
                 | Opcode::CLO
+                | Opcode::MEQ
+                | Opcode::MNE
+                | Opcode::WSBH
         )
     }
 
@@ -82,15 +85,7 @@ impl Instruction {
     pub const fn is_misc_instruction(&self) -> bool {
         matches!(
             self.opcode,
-            Opcode::WSBH
-                | Opcode::SEXT
-                | Opcode::EXT
-                | Opcode::INS
-                | Opcode::MADDU
-                | Opcode::MSUBU
-                | Opcode::MEQ
-                | Opcode::MNE
-                | Opcode::TEQ
+            Opcode::SEXT | Opcode::EXT | Opcode::INS | Opcode::MADDU | Opcode::MSUBU | Opcode::TEQ
         )
     }
     /// Returns if the instruction is a syscall instruction.
@@ -171,7 +166,15 @@ impl Instruction {
     /// Returns if the instruction is a mult/div instruction.
     #[must_use]
     pub fn is_mult_div_instruction(&self) -> bool {
-        matches!(self.opcode, Opcode::MULT | Opcode::MULTU | Opcode::DIV | Opcode::DIVU)
+        matches!(
+            self.opcode,
+            Opcode::MULT
+                | Opcode::MULTU
+                | Opcode::DIV
+                | Opcode::DIVU
+                | Opcode::MADDU
+                | Opcode::MSUBU
+        )
     }
 
     /// Returns if the instruction is a jump instruction.
