@@ -102,16 +102,7 @@ Then, for each folding round $i = 1$ to $\log d$ (d: polynomial degree):
 1. The verifier updates the query point using the rule $t \leftarrow t^2$, simulating the recursive domain reduction of FRI.
 2. The prover returns the folded evaluation $P_{\text{fold}}(t)$ and the corresponding Merkle path.
 3. The verifier checks whether the folding constraint holds: $P_{\text{fold}}(t) = P_e(t) + t \cdot P_o(t)$, where $P_e(t)$ and $P_o(t)$ are the even and odd parts of the polynomial at the given layer.
-
-Through merkle opening technique, verifier checks the following relation at a randomly chosen point at the LDE domain:
-
-- Confirm correct folding via Merkle proofs.
-
-- Ensure the final polynomial is a constant (or has degree no more than d).
-
-- Proper computation of
-  - Constraint polynomials  \\(C_j(x)\\).
-  -  Combined constraint \\(c_{comb}(x)\\).
+4. This phase will end until a predefined threshold or the polynomial is reduced to a constant.
 
 ### Grinding Factor & Repeating Factor
 
