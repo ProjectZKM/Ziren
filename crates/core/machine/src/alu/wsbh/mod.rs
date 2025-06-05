@@ -137,6 +137,8 @@ where
             AB::Expr::ONE,
             local.is_wsbh,
         );
+
+        builder.assert_bool(local.is_wsbh);
     }
 }
 

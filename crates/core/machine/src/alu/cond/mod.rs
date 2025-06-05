@@ -168,6 +168,10 @@ where
             AB::Expr::ONE,
             local.is_mne + local.is_meq,
         );
+
+        builder.assert_bool(local.is_mne);
+        builder.assert_bool(local.is_meq);
+        builder.assert_bool(local.c_eq_0);
     }
 }
 
