@@ -94,14 +94,14 @@ The Fast Reed-Solomon Interactive Oracle Proof (FRI) protocol proves the low-deg
 ### Verification contents
 To ensure the correctness of the folding process in a FRI-based proof system, the verifier performs checks over multiple rounds using randomly chosen points from the evaluation domain. In each round, the verifier essentially re-executes a step of the folding process and verifies that the values provided by the prover are consistent with the committed Merkle root. The detailed interaction for a single round is as follows:
 
-1. The verifier randomly selects a point $t \in \Omega$.
-2. The prover returns the evaluation $p(t)$ along with the corresponding Merkle proof to verify its inclusion in the committed polynomial.
+1. The verifier randomly selects a point \\(t \in \Omega\\).
+2. The prover returns the evaluation \\(p(t)\\) along with the corresponding Merkle proof to verify its inclusion in the committed polynomial.
 
-Then, for each folding round $i = 1$ to $\log d$ (d: polynomial degree): 
+Then, for each folding round \\(i = 1\\) to \\(\log d\\) (d: polynomial degree): 
 
-1. The verifier updates the query point using the rule $t \leftarrow t^2$, simulating the recursive domain reduction of FRI.
-2. The prover returns the folded evaluation $P_{\text{fold}}(t)$ and the corresponding Merkle path.
-3. The verifier checks whether the folding constraint holds: $P_{\text{fold}}(t) = P_e(t) + t \cdot P_o(t)$, where $P_e(t)$ and $P_o(t)$ are the even and odd parts of the polynomial at the given layer.
+1. The verifier updates the query point using the rule \\(t \leftarrow t^2\\), simulating the recursive domain reduction of FRI.
+2. The prover returns the folded evaluation \\(P_{\text{fold}}(t)\\) and the corresponding Merkle path.
+3. The verifier checks whether the folding constraint holds: \\(P_{\text{fold}}(t) = P_e(t) + t \cdot P_o(t)\\), where \\(P_e(t)\\) and \\(P_o(t)\\) are the even and odd parts of the polynomial at the given layer.
 4. This phase will end until a predefined threshold or the polynomial is reduced to a constant.
 
 ### Grinding Factor & Repeating Factor
