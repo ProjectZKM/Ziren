@@ -74,6 +74,8 @@ impl Instruction {
                 | Opcode::NOR
                 | Opcode::CLZ
                 | Opcode::CLO
+                | Opcode::MOD
+                | Opcode::MODU
         )
     }
 
@@ -240,9 +242,21 @@ impl Instruction {
             // MULTU: (hi, lo) = rt * rs
             (0b000000, 0b011001) => Ok(Self::new(Opcode::MULTU, 32, rt, rs, false, false)), // MULTU: (hi, lo) = rt * rs
             // DIV: hi = rt % rs, lo = rt / rs, signed
-            (0b000000, 0b011010) => Ok(Self::new(Opcode::DIV, 32, rs, rt, false, false)), // DIV: (hi, lo) = rs / rt
+            (0b000000, 0b011010) => {
+                if sa == 3 {
+                    Ok(Self::new(Opcode::MOD, rd, rs, rt, false, false)) // MOD: rd = rs % rt
+                } else {
+                    Ok(Self::new(Opcode::DIV, 32, rs, rt, false, false)) // DIV: (hi, lo) = rs / rt
+                }
+            }
             // DIVU: hi = rt % rs, lo = rt / rs, unsigned
-            (0b000000, 0b011011) => Ok(Self::new(Opcode::DIVU, 32, rs, rt, false, false)), // DIVU: (hi, lo) = rs / rt
+            (0b000000, 0b011011) => {
+                if sa == 3 {
+                    Ok(Self::new(Opcode::MODU, rd, rs, rt, false, false)) // MODU: rd = rs % rt
+                } else {
+                    Ok(Self::new(Opcode::DIVU, 32, rs, rt, false, false)) // DIVU: (hi, lo) = rs / rt
+                }
+            }
             // MFHI: rd = hi
             (0b000000, 0b010000) => Ok(Self::new(Opcode::ADD, rd, 33, 0, false, true)), // MFHI: rd = hi
             // MTHI: hi = rs
