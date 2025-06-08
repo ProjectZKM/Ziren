@@ -436,7 +436,7 @@ where
                 local.b.map(|x| x.into()),
                 Word::from(i32::MIN as u32).map(|x: AB::F| x.into()),
                 local.is_overflow_b,
-                is_real.clone().into(),
+                is_real.clone(),
             );
 
             IsEqualWordOperation::<AB::F>::eval(
@@ -444,7 +444,7 @@ where
                 local.c.map(|x| x.into()),
                 Word::from(-1i32 as u32).map(|x: AB::F| x.into()),
                 local.is_overflow_c,
-                is_real.clone().into(),
+                is_real.clone(),
             );
 
             builder.assert_eq(
@@ -544,7 +544,7 @@ where
                 builder,
                 local.c.map(|x| x.into()),
                 local.is_c_0,
-                is_real.clone().into(),
+                is_real.clone(),
             );
 
             // If is_c_0 is true, then quotient must be 0xffffffff = u32::MAX.
