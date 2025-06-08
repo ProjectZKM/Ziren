@@ -144,6 +144,12 @@ pub struct DivRemCols<T> {
     /// Flag to indicate whether the opcode is DIVU.
     pub is_divu: T,
 
+    /// Flag to indicate whether the opcode is MOD.
+    pub is_mod: T,
+
+    /// Flag to indicate whether the opcode is MODU.
+    pub is_modu: T,
+
     /// Flag to indicate whether the division operation overflows.
     ///
     /// Overflow occurs in a specific case of signed 32-bit integer division: when `b` is the
@@ -178,15 +184,6 @@ pub struct DivRemCols<T> {
     /// Flag to indicate whether `c` is negative.
     pub c_neg: T,
 
-    /// Selector to determine whether an ALU Event is sent for absolute value computation of `c`.
-    pub abs_c_alu_event: T,
-
-    /// Selector to determine whether an ALU Event is sent for absolute value computation of `rem`.
-    pub abs_rem_alu_event: T,
-
-    /// Selector to know whether this row is enabled.
-    pub is_real: T,
-
     /// Column to modify multiplicity for remainder range check event.
     pub remainder_check_multiplicity: T,
 
@@ -217,7 +214,12 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         let mut rows: Vec<[F; NUM_DIVREM_COLS]> = vec![];
         let divrem_events = input.divrem_events.clone();
         for event in divrem_events.iter() {
-            assert!(event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV);
+            assert!(
+                event.opcode == Opcode::DIVU
+                    || event.opcode == Opcode::DIV
+                    || event.opcode == Opcode::MODU
+                    || event.opcode == Opcode::MOD
+            );
             let mut row = [F::ZERO; NUM_DIVREM_COLS];
             let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
 
@@ -227,18 +229,21 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.c = Word::from(event.c);
                 cols.pc = F::from_canonical_u32(event.pc);
                 cols.next_pc = F::from_canonical_u32(event.next_pc);
-                cols.is_real = F::ONE;
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_div = F::from_bool(event.opcode == Opcode::DIV);
+                cols.is_modu = F::from_bool(event.opcode == Opcode::MODU);
+                cols.is_mod = F::from_bool(event.opcode == Opcode::MOD);
                 cols.is_c_0.populate(event.c);
 
-                // DivRem Chip is only used for DIV and DIVU instruction currently.
-                let mut blu_events: Vec<ByteLookupEvent> = vec![];
-                cols.op_hi_access
-                    .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
-                output.add_byte_lookup_events(blu_events);
-                cols.shard = F::from_canonical_u32(event.shard);
-                cols.clk = F::from_canonical_u32(event.clk);
+                if event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV {
+                    // DivRem Chip is only used for DIV and DIVU instruction currently.
+                    let mut blu_events: Vec<ByteLookupEvent> = vec![];
+                    cols.op_hi_access
+                        .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
+                    output.add_byte_lookup_events(blu_events);
+                    cols.shard = F::from_canonical_u32(event.shard);
+                    cols.clk = F::from_canonical_u32(event.clk);
+                }
             }
 
             let (quotient, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
@@ -267,10 +272,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     cols.max_abs_c_or_1 = Word::from(u32::max(1, event.c));
                 }
 
-                // Set the `alu_event` flags.
-                cols.abs_c_alu_event = cols.c_neg * cols.is_real;
-                cols.abs_rem_alu_event = cols.rem_neg * cols.is_real;
-
                 // Insert the MSB lookup events.
                 {
                     let words = [event.b, event.c, remainder];
@@ -291,7 +292,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
             // Calculate the modified multiplicity
             {
-                cols.remainder_check_multiplicity = cols.is_real * (F::ONE - cols.is_c_0.result);
+                cols.remainder_check_multiplicity = F::ONE - cols.is_c_0.result;
             }
 
             // Calculate c * quotient + remainder.
@@ -342,32 +343,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             || [F::ZERO; NUM_DIVREM_COLS],
             input.fixed_log2_rows::<F, _>(self),
         );
-
         // Convert the trace to a row major matrix.
-        let mut trace =
-            RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS);
-
-        // Create the template for the padded rows. These are fake rows that don't fail on some
-        // sanity checks.
-        let padded_row_template = {
-            let mut row = [F::ZERO; NUM_DIVREM_COLS];
-            let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
-            // 0 divided by 1. quotient = remainder = 0.
-            cols.is_divu = F::ONE;
-            cols.c[0] = F::ONE;
-            cols.abs_c[0] = F::ONE;
-            cols.max_abs_c_or_1[0] = F::ONE;
-
-            cols.is_c_0.populate(1);
-
-            row
-        };
-        debug_assert!(padded_row_template.len() == NUM_DIVREM_COLS);
-        for i in input.divrem_events.len() * NUM_DIVREM_COLS..trace.values.len() {
-            trace.values[i] = padded_row_template[i % NUM_DIVREM_COLS];
-        }
-
-        trace
+        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS)
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -401,6 +378,7 @@ where
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
 
+        let is_real = local.is_div + local.is_divu + local.is_mod + local.is_modu;
         // Calculate whether b, remainder, and c are negative.
         {
             // Negative if and only if op code is signed & MSB = 1.
@@ -413,7 +391,7 @@ where
             for msb_sign_pair in msb_sign_pairs.iter() {
                 let msb = msb_sign_pair.0;
                 let is_negative = msb_sign_pair.1;
-                builder.assert_eq(msb * local.is_div, is_negative);
+                builder.assert_eq(msb * (local.is_div + local.is_mod), is_negative);
             }
         }
 
@@ -436,7 +414,7 @@ where
             let opcode = {
                 let mult = AB::Expr::from_canonical_u32(Opcode::MULT as u32);
                 let multu = AB::Expr::from_canonical_u32(Opcode::MULTU as u32);
-                local.is_div * mult + local.is_divu * multu
+                (local.is_div + local.is_mod) * mult + (local.is_divu + local.is_modu) * multu
             };
 
             // The lower 4 bytes of c_times_quotient must match the LO in (c * quotient).
@@ -447,7 +425,7 @@ where
                 local.quotient,
                 local.c,
                 Word(upper_half),
-                local.is_real,
+                is_real.clone(),
             );
         }
 
@@ -458,7 +436,7 @@ where
                 local.b.map(|x| x.into()),
                 Word::from(i32::MIN as u32).map(|x: AB::F| x.into()),
                 local.is_overflow_b,
-                local.is_real.into(),
+                is_real.clone().into(),
             );
 
             IsEqualWordOperation::<AB::F>::eval(
@@ -466,14 +444,14 @@ where
                 local.c.map(|x| x.into()),
                 Word::from(-1i32 as u32).map(|x: AB::F| x.into()),
                 local.is_overflow_c,
-                local.is_real.into(),
+                is_real.clone().into(),
             );
 
             builder.assert_eq(
                 local.is_overflow,
                 local.is_overflow_b.is_diff_zero.result
                     * local.is_overflow_c.is_diff_zero.result
-                    * local.is_div,
+                    * (local.is_div + local.is_mod),
             );
         }
 
@@ -566,7 +544,7 @@ where
                 builder,
                 local.c.map(|x| x.into()),
                 local.is_c_0,
-                local.is_real.into(),
+                is_real.clone().into(),
             );
 
             // If is_c_0 is true, then quotient must be 0xffffffff = u32::MAX.
@@ -594,14 +572,14 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.c,
                 local.abs_c,
-                local.abs_c_alu_event,
+                local.c_neg,
             );
             builder.send_alu(
                 AB::Expr::from_canonical_u32(Opcode::ADD as u32),
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.remainder,
                 local.abs_remainder,
-                local.abs_rem_alu_event,
+                local.rem_neg,
             );
 
             // max(abs(c), 1) = abs(c) * (1 - is_c_0) + 1 * is_c_0
@@ -619,7 +597,9 @@ where
                 Word(v.try_into().unwrap_or_else(|_| panic!("Incorrect length")))
             };
             for i in 0..WORD_SIZE {
-                builder.assert_eq(local.max_abs_c_or_1[i], max_abs_c_or_1[i].clone());
+                builder
+                    .when(is_real.clone())
+                    .assert_eq(local.max_abs_c_or_1[i], max_abs_c_or_1[i].clone());
             }
 
             // Handle cases:
@@ -627,16 +607,9 @@ where
             // - If is_real == 1 then is_c_0_result must be the expected one, so
             //   remainder_check_multiplicity = (1 - is_c_0_result) * is_real.
             builder.assert_eq(
-                (AB::Expr::ONE - local.is_c_0.result) * local.is_real,
+                (AB::Expr::ONE - local.is_c_0.result) * is_real.clone(),
                 local.remainder_check_multiplicity,
             );
-
-            // the cleaner idea is simply remainder_check_multiplicity == (1 - is_c_0_result) *
-            // is_real
-
-            // Check that the absolute value selector columns are computed correctly.
-            builder.assert_eq(local.abs_c_alu_event, local.c_neg * local.is_real);
-            builder.assert_eq(local.abs_rem_alu_event, local.rem_neg * local.is_real);
 
             // Dispatch abs(remainder) < max(abs(c), 1), this is equivalent to abs(remainder) <
             // abs(c) if not division by 0.
@@ -660,20 +633,20 @@ where
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
-                builder.send_byte(opcode, msb, byte, zero.clone(), local.is_real);
+                builder.send_byte(opcode, msb, byte, zero.clone(), is_real.clone());
             }
         }
 
         // Range check all the bytes.
         {
-            builder.slice_range_check_u8(&local.quotient.0, local.is_real);
-            builder.slice_range_check_u8(&local.remainder.0, local.is_real);
+            builder.slice_range_check_u8(&local.quotient.0, is_real.clone());
+            builder.slice_range_check_u8(&local.remainder.0, is_real.clone());
 
             local.carry.iter().for_each(|carry| {
                 builder.assert_bool(*carry);
             });
 
-            builder.slice_range_check_u8(&local.c_times_quotient, local.is_real);
+            builder.slice_range_check_u8(&local.c_times_quotient, is_real.clone());
         }
 
         // Check that the flags are boolean.
@@ -681,6 +654,8 @@ where
             let bool_flags = [
                 local.is_div,
                 local.is_divu,
+                local.is_mod,
+                local.is_modu,
                 local.is_overflow,
                 local.b_msb,
                 local.rem_msb,
@@ -688,9 +663,6 @@ where
                 local.b_neg,
                 local.rem_neg,
                 local.c_neg,
-                local.is_real,
-                local.abs_c_alu_event,
-                local.abs_rem_alu_event,
             ];
 
             for flag in bool_flags.into_iter() {
@@ -701,13 +673,21 @@ where
         // Receive the arguments.
         {
             // Exactly one of the opcode flags must be on.
-            builder.assert_eq(one.clone(), local.is_divu + local.is_div);
+            builder.when(is_real.clone()).assert_eq(
+                one.clone(),
+                local.is_divu + local.is_div + local.is_mod + local.is_modu,
+            );
 
             let opcode = {
                 let divu: AB::Expr = AB::F::from_canonical_u32(Opcode::DIVU as u32).into();
                 let div: AB::Expr = AB::F::from_canonical_u32(Opcode::DIV as u32).into();
+                let modi: AB::Expr = AB::F::from_canonical_u32(Opcode::MOD as u32).into();
+                let modu: AB::Expr = AB::F::from_canonical_u32(Opcode::MODU as u32).into();
 
-                local.is_divu * divu + local.is_div * div
+                local.is_divu * divu
+                    + local.is_div * div
+                    + local.is_mod * modi
+                    + local.is_modu * modu
             };
 
             // DivRem Chip is only used for DIV and DIVU instruction currently. So is_write_hi will always be ture.
@@ -717,7 +697,7 @@ where
                 local.pc,
                 local.next_pc,
                 AB::Expr::ZERO,
-                opcode,
+                opcode.clone(),
                 local.quotient,
                 local.b,
                 local.c,
@@ -728,7 +708,27 @@ where
                 AB::Expr::ONE,
                 AB::Expr::ZERO,
                 AB::Expr::ONE,
-                local.is_real,
+                local.is_div + local.is_divu,
+            );
+
+            builder.receive_instruction(
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                local.pc,
+                local.next_pc,
+                AB::Expr::ZERO,
+                opcode,
+                local.remainder,
+                local.b,
+                local.c,
+                Word([AB::Expr::ZERO; 4]),
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ONE,
+                local.is_mod + local.is_modu,
             );
 
             // Write the HI register, the register can only be Register::HI（33）.
@@ -737,10 +737,10 @@ where
                 local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
                 AB::F::from_canonical_u32(33),
                 &local.op_hi_access,
-                local.is_real,
+                local.is_div + local.is_divu,
             );
             builder
-                .when(local.is_real)
+                .when(local.is_div + local.is_divu)
                 .assert_word_eq(local.remainder, *local.op_hi_access.value());
         }
     }

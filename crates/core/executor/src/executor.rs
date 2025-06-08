@@ -812,7 +812,7 @@ impl<'a> Executor<'a> {
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
                 self.record.mul_events.push(event_comp);
             }
-            Opcode::DIV | Opcode::DIVU => {
+            Opcode::DIV | Opcode::DIVU | Opcode::MOD | Opcode::MODU => {
                 self.record.divrem_events.push(event_comp);
                 emit_divrem_dependencies(self, event);
             }
@@ -2685,7 +2685,6 @@ mod tests {
         simple_op_code_test(Opcode::MOD, 0xffffffff, 0xffffffff, 0xfffffffe);
         simple_op_code_test(Opcode::MOD, 0x00000001, 0x00000102, 0x00000101);
         simple_op_code_test(Opcode::MOD, 0x00000100, 0x00000100, 0x00000101);
-        
     }
 
     #[test]

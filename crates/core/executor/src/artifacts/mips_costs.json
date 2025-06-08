@@ -4,7 +4,7 @@
   "CloClz": 46,
   "Bls12831Fp2AddSubAssign": 2070,
   "SyscallInstrs": 76,
-  "DivRem": 159,
+  "DivRem": 162,
   "ShiftRight": 135,
   "Secp256r1Decompress": 2686,
   "Secp256k1Decompress": 2686,

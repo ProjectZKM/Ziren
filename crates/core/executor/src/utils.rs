@@ -25,7 +25,7 @@ pub fn deserialize_hashmap_as_vec<'de, V: Deserialize<'de>, D: Deserializer<'de>
 #[must_use]
 pub fn is_signed_operation(opcode: Opcode) -> bool {
     // todo: add more signed operations
-    opcode == Opcode::DIV
+    opcode == Opcode::DIV || opcode == Opcode::MOD
 }
 
 /// Calculate the correct `quotient` and `remainder` for the given `b` and `c` per MIPS spec.
