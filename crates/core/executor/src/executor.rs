@@ -812,7 +812,7 @@ impl<'a> Executor<'a> {
             Opcode::MUL | Opcode::MULT | Opcode::MULTU => {
                 self.record.mul_events.push(event_comp);
             }
-            Opcode::DIV | Opcode::DIVU => {
+            Opcode::DIV | Opcode::DIVU | Opcode::MOD | Opcode::MODU => {
                 self.record.divrem_events.push(event_comp);
                 emit_divrem_dependencies(self, event);
             }
@@ -1204,7 +1204,9 @@ impl<'a> Executor<'a> {
             | Opcode::XOR
             | Opcode::NOR
             | Opcode::CLZ
-            | Opcode::CLO => {
+            | Opcode::CLO
+            | Opcode::MOD
+            | Opcode::MODU => {
                 (hi_or_prev_a, a, b, c) = self.execute_alu(instruction);
             }
 
@@ -1480,6 +1482,8 @@ impl<'a> Executor<'a> {
                 ((b as i32) % (c as i32)) as u32, // hi
             ),
             Opcode::DIVU => (b / c, b % c), //lo,hi
+            Opcode::MOD => (((b as i32) % (c as i32)) as u32, 0),
+            Opcode::MODU => (b % c, 0), //lo,hi
             Opcode::AND => (b & c, 0),
             Opcode::OR => (b | c, 0),
             Opcode::XOR => (b ^ c, 0),
@@ -2675,6 +2679,12 @@ mod tests {
         simple_op_code_test(Opcode::MUL, 0x00000001, 0xffffffff, 0xffffffff);
         simple_op_code_test(Opcode::MUL, 0xffffffff, 0xffffffff, 0x00000001);
         simple_op_code_test(Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff);
+        simple_op_code_test(Opcode::MODU, 0x00000001, 0xffffffff, 0xfffffffe);
+        simple_op_code_test(Opcode::MODU, 0x00000001, 0x00000102, 0x00000101);
+        simple_op_code_test(Opcode::MODU, 0x00000100, 0x00000100, 0x00000101);
+        simple_op_code_test(Opcode::MOD, 0xffffffff, 0xffffffff, 0xfffffffe);
+        simple_op_code_test(Opcode::MOD, 0x00000001, 0x00000102, 0x00000101);
+        simple_op_code_test(Opcode::MOD, 0x00000100, 0x00000100, 0x00000101);
     }
 
     #[test]

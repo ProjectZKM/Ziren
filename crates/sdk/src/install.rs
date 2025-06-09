@@ -50,7 +50,7 @@ pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
         );
     } else {
         cfg_if! {
-            if #[cfg(any(feature = "network", feature = "network"))] {
+            if #[cfg(feature = "network")] {
                 println!(
                     "[zkm] {} circuit artifacts for version {} do not exist at {}. downloading...",
                     artifacts_type,
@@ -68,7 +68,7 @@ pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
 ///
 /// This function will download the latest circuit artifacts from the S3 bucket and extract them
 /// to the directory specified by [`groth16_bn254_artifacts_dir()`].
-#[cfg(any(feature = "network", feature = "network"))]
+#[cfg(feature = "network")]
 #[allow(clippy::needless_pass_by_value)]
 pub fn install_circuit_artifacts(build_dir: PathBuf, artifacts_type: &str) {
     // Create the build directory.

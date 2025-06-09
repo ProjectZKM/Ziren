@@ -5,7 +5,7 @@ set -e
 VERSION=$1
 
 # Specify the S3 bucket name
-S3_BUCKET="zkm-circuits"
+S3_BUCKET="zkm-toolchain"
 
 # Check for unstaged changes in the Git repository
 if ! git diff --quiet; then
@@ -30,7 +30,7 @@ TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup.tar.gz"
 
 # Create Groth16 archive
 cd ./build/groth16
-tar --exclude='srs.bin' --exclude='srs_lagrange.bin' -czvf "../../$GROTH16_ARCHIVE" .
+tar -czvf "../../$GROTH16_ARCHIVE" .
 cd ../..
 if [ $? -ne 0 ]; then
     echo "Failed to create Groth16 archive."
@@ -77,8 +77,8 @@ if [ $? -ne 0 ]; then
 fi
 
 # Copy Groth16 and Plonk vks to verifier crate
-cp ./build/groth16/$VERSION/groth16_vk.bin ../verifier/bn254-vk/groth16_vk.bin
-cp ./build/plonk/$VERSION/plonk_vk.bin ../verifier/bn254-vk/plonk_vk.bin
+cp ./build/groth16/groth16_vk.bin ../verifier/bn254-vk/groth16_vk.bin
+cp ./build/plonk/plonk_vk.bin ../verifier/bn254-vk/plonk_vk.bin
 
 echo "Successfully uploaded build artifacts to S3:"
 echo "- s3://$S3_BUCKET/$GROTH16_ARCHIVE"

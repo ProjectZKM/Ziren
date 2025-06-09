@@ -864,9 +864,9 @@ pub mod tests {
     }
 
     #[test]
-    fn test_mul_prove() {
+    fn test_mul_mod_prove() {
         utils::setup_logger();
-        let mul_ops = [Opcode::MUL];
+        let mul_ops = [Opcode::MUL, Opcode::MOD, Opcode::MODU];
         let operands =
             [(1, 1), (1234, 5678), (8765, 4321), (0xffff, 0xffff - 1), (u32::MAX - 1, u32::MAX)];
         for mul_op in mul_ops.iter() {
@@ -883,9 +883,9 @@ pub mod tests {
     }
 
     #[test]
-    fn test_mult_prove() {
+    fn test_mult_div_prove() {
         utils::setup_logger();
-        let mul_ops = [Opcode::MULT, Opcode::MULTU];
+        let mul_ops = [Opcode::MULT, Opcode::MULTU, Opcode::DIV, Opcode::DIVU];
         let operands =
             [(1, 1), (1234, 5678), (8765, 4321), (0xffff, 0xffff - 1), (u32::MAX - 1, u32::MAX)];
         for mul_op in mul_ops.iter() {

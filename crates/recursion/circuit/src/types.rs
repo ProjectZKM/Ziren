@@ -49,6 +49,7 @@ pub struct FriQueryProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
 pub struct FriChallenges<C: CircuitConfig> {
     pub query_indices: Vec<Vec<C::Bit>>,
     pub betas: Vec<Ext<C::F, C::EF>>,
+    pub betas_squared: Vec<Ext<C::F, C::EF>>,
 }
 
 //#[derive(Clone)]

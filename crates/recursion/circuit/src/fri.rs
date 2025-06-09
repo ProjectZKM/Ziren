@@ -40,7 +40,7 @@ pub fn verify_shape_and_sample_challenges<
     proof: &FriProofVariable<C, SC>,
     challenger: &mut SC::FriChallengerVariable,
 ) -> FriChallenges<C> {
-    let betas = proof
+    let betas: Vec<_> = proof
         .commit_phase_commits
         .iter()
         .map(|commitment| {
@@ -48,6 +48,7 @@ pub fn verify_shape_and_sample_challenges<
             challenger.sample_ext(builder)
         })
         .collect();
+    let betas_squared = betas.iter().map(|beta| builder.eval(*beta * *beta)).collect();
 
     // Observe the final polynomial.
     let final_poly_felts = C::ext2felt(builder, proof.final_poly);
@@ -64,7 +65,7 @@ pub fn verify_shape_and_sample_challenges<
             .take(config.num_queries)
             .collect();
 
-    FriChallenges { query_indices, betas }
+    FriChallenges { query_indices, betas, betas_squared }
 }
 
 pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
@@ -202,6 +203,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfig
                     }
                 }
             }
+            builder.assert_ext_eq(ro[config.log_blowup], SymbolicExt::ZERO);
             ro
         })
         .collect::<Vec<_>>();
@@ -232,6 +234,7 @@ pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVa
             index_bits,
             &query_proof.commit_phase_openings,
             &challenges.betas,
+            &challenges.betas_squared,
             ro,
             log_max_height,
         );
@@ -240,16 +243,18 @@ pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVa
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
     builder: &mut Builder<C>,
     commit_phase_commits: &[SC::DigestVariable],
     index_bits: &[C::Bit],
     commit_phase_openings: &Vec<FriCommitPhaseProofStepVariable<C, SC>>,
     betas: &[Ext<C::F, C::EF>],
+    betas_squared: &[Ext<C::F, C::EF>],
     reduced_openings: [Ext<C::F, C::EF>; 32],
     log_max_height: usize,
 ) -> Ext<C::F, C::EF> {
-    let mut folded_eval: Ext<_, _> = builder.constant(C::EF::ZERO);
+    let mut folded_eval: Ext<_, _> = reduced_openings[log_max_height];
     let two_adic_generator: Felt<_> = builder.constant(C::F::two_adic_generator(log_max_height));
 
     // TODO: fix expreversebits address bug to avoid needing to allocate a new variable.
@@ -261,10 +266,15 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariabl
     // let mut x = builder.eval(x + C::F::ZERO);
     // let mut x: Ext<_, _> = builder.eval(SymbolicExt::ONE * SymbolicFelt::from(x_felt));
 
-    for (offset, log_folded_height, commit, step, beta) in
-        izip!(0.., (0..log_max_height).rev(), commit_phase_commits, commit_phase_openings, betas,)
-    {
-        folded_eval = builder.eval(folded_eval + reduced_openings[log_folded_height + 1]);
+    for (offset, log_folded_height, commit, step, beta, beta_squared) in izip!(
+        0..,
+        (0..log_max_height).rev(),
+        commit_phase_commits,
+        commit_phase_openings,
+        betas,
+        betas_squared,
+    ) {
+        // folded_eval = builder.eval(folded_eval + reduced_openings[log_folded_height + 1]);
 
         let index_sibling_complement: C::Bit = index_bits[offset];
         let index_pair = &index_bits[(offset + 1)..];
@@ -301,7 +311,9 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariabl
         // Unroll the `folded_eval` calculation to avoid symbolic expression overhead.
         // folded_eval = builder
         //     .eval(evals_ext[0] + (beta - xs[0]) * (evals_ext[1] - evals_ext[0]) / (xs[1] -
-        // xs[0])); x = builder.eval(x * x);
+        // xs[0]));
+        // folded_eval += beta_squared * reduced_openings[log_folded_height]
+        // x = builder.eval(x * x);
 
         // let temp_1 = xs[1] - xs[0];
         let temp_1: Felt<_> = builder.uninit();
@@ -323,17 +335,26 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariabl
         let temp_5: Ext<_, _> = builder.uninit();
         builder.push_op(DslIr::MulE(temp_5, temp_4, temp_3));
 
-        // let temp65 = evals_ext[0] + temp_5;
+        // let temp6 = evals_ext[0] + temp_5;
         let temp_6: Ext<_, _> = builder.uninit();
         builder.push_op(DslIr::AddE(temp_6, evals_ext[0], temp_5));
-        // folded_eval = temp_6;
-        folded_eval = temp_6;
 
-        // let temp_7 = x * x;
-        let temp_7: Felt<_> = builder.uninit();
-        builder.push_op(DslIr::MulF(temp_7, x, x));
-        // x = temp_7;
-        x = temp_7;
+        // let temp_7 = beta_squared * reduced_openings[log_folded_height]
+        let temp_7: Ext<_, _> = builder.uninit();
+        builder.push_op(DslIr::MulE(temp_7, *beta_squared, reduced_openings[log_folded_height]));
+
+        // let temp_8 = temp_6 + temp_7;
+        let temp_8: Ext<_, _> = builder.uninit();
+        builder.push_op(DslIr::AddE(temp_8, temp_6, temp_7));
+
+        // folded_eval = temp_8;
+        folded_eval = temp_8;
+
+        // let temp_9 = x * x;
+        let temp_9: Felt<_> = builder.uninit();
+        builder.push_op(DslIr::MulF(temp_9, x, x));
+        // x = temp_9;
+        x = temp_9;
     }
 
     folded_eval
