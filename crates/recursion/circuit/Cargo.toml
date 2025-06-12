@@ -38,7 +38,6 @@ tracing = { workspace = true }
 hashbrown = { workspace = true, features = ["serde", "inline-more"] }
 num-traits = "0.2.19"
 rayon = "1.10.0"
-test-artifacts = { workspace = true, optional = true }
 
 [dev-dependencies]
 #zkm-core-executor = { workspace = true, features = ["programs"] }
@@ -56,5 +55,4 @@ test-artifacts = { workspace = true }
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
-export-tests = ["dep:test-artifacts"]
 debug = ["zkm-core-machine/debug"]

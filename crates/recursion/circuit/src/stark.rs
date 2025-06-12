@@ -488,7 +488,7 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> ShardProo
 }
 
 #[allow(unused_imports)]
-#[cfg(any(test, feature = "export-tests"))]
+#[cfg(test)]
 pub mod tests {
     use std::collections::VecDeque;
     use std::fmt::Debug;

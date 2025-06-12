@@ -46,15 +46,13 @@ vec_map = { version = "0.8.2", features = ["serde"] }
 enum-map = { version = "2.7.3", features = ["serde"] }
 sha2 = { workspace = true }
 anyhow = { workspace = true }
-test-artifacts = { workspace = true, optional = true }
 tracing-subscriber = "0.3.19"
 env_logger = "0.11.6"
 
 [dev-dependencies]
 zkm-zkvm = { workspace = true }
 zkm-lib = { workspace = true }
+test-artifacts = { path = "../../test-artifacts" }
 
 [features]
-default = ["programs"]
-programs = ["dep:test-artifacts"]
 bigint-rug = ["zkm-curves/bigint-rug"]

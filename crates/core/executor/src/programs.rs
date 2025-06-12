@@ -2,6 +2,7 @@
 
 #[allow(dead_code)]
 #[allow(missing_docs)]
+#[cfg(test)]
 pub mod tests {
     use crate::{Instruction, Opcode, Program};
 

@@ -42,7 +42,6 @@ thiserror = "1.0.63"
 rayon = "1.10.0"
 lru = "0.12.4"
 eyre = "0.6.12"
-test-artifacts = { workspace = true, optional = true }
 
 [dev-dependencies]
 test-artifacts = { workspace = true }
@@ -68,21 +67,6 @@ name = "e2e"
 path = "scripts/e2e.rs"
 
 [[bin]]
-name = "fibonacci_groth16"
-path = "scripts/fibonacci_groth16.rs"
-required-features = ["export-tests"]
-
-[[bin]]
-name = "fibonacci_sweep"
-path = "scripts/fibonacci_sweep.rs"
-required-features = ["export-tests"]
-
-[[bin]]
-name = "tendermint_sweep"
-path = "scripts/tendermint_sweep.rs"
-required-features = ["export-tests"]
-
-[[bin]]
 name = "find_maximal_shapes"
 path = "scripts/find_maximal_shapes.rs"
 
@@ -105,5 +89,4 @@ path = "scripts/test_shape_fixing.rs"
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
-export-tests = ["dep:test-artifacts"]
 debug = ["zkm-core-machine/debug"]
