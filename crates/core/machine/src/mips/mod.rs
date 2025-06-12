@@ -678,6 +678,11 @@ impl<F: PrimeField32> core::hash::Hash for MipsAir<F> {
 #[cfg(test)]
 #[allow(non_snake_case)]
 pub mod tests {
+    use crate::programs::tests::other_memory_program;
+    use crate::programs::tests::{
+        fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
+        simple_program, ssz_withdrawals_program, unconstrained_program,
+    };
     use crate::{
         io::ZKMStdin,
         mips::MipsAir,
@@ -690,14 +695,7 @@ pub mod tests {
     use p3_koala_bear::KoalaBear;
     use strum::IntoEnumIterator;
 
-    use zkm_core_executor::programs::tests::other_memory_program;
-    use zkm_core_executor::{
-        programs::tests::{
-            fibonacci_program, hello_world_program, sha3_chain_program, simple_memory_program,
-            simple_program, ssz_withdrawals_program, unconstrained_program,
-        },
-        Instruction, MipsAirId, Opcode, Program,
-    };
+    use zkm_core_executor::{Instruction, MipsAirId, Opcode, Program};
     use zkm_stark::air::MachineAir;
     use zkm_stark::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkProvingKey, StarkVerifyingKey,

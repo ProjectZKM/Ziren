@@ -260,9 +260,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::programs::tests::simple_program;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{programs::tests::simple_program, ExecutionRecord, Executor};
+    use zkm_core_executor::{ExecutionRecord, Executor};
     use zkm_stark::{
         air::{LookupScope, MachineAir},
         debug_lookups_with_all_chips,

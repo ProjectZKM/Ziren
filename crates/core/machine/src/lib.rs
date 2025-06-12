@@ -26,6 +26,8 @@ pub mod mips;
 pub mod misc;
 pub mod operations;
 pub mod program;
+#[cfg(test)]
+pub mod programs;
 pub mod shape;
 pub mod syscall;
 pub mod utils;

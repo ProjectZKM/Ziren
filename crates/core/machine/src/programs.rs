@@ -3,7 +3,7 @@
 #[allow(dead_code)]
 #[allow(missing_docs)]
 pub mod tests {
-    use crate::{Instruction, Opcode, Program};
+    use zkm_core_executor::{Instruction, Opcode, Program};
 
     use test_artifacts::{
         FIBONACCI_ELF, HELLO_WORLD_ELF, KECCAK_SPONGE_ELF, PANIC_ELF, SECP256R1_ADD_ELF,

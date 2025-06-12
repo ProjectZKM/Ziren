@@ -10,6 +10,7 @@ mod io;
 pub mod memory;
 mod opcode;
 mod program;
+#[cfg(test)]
 pub mod programs;
 mod record;
 pub mod reduce;
