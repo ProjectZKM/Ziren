@@ -47,7 +47,7 @@ impl Prover<DefaultProverComponents> for MockProver {
         &self.prover
     }
 
-    fn prove<'a>(
+    fn prove_impl<'a>(
         &'a self,
         pk: &ZKMProvingKey,
         stdin: ZKMStdin,

@@ -42,7 +42,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         &self.prover
     }
 
-    fn prove<'a>(
+    fn prove_impl<'a>(
         &'a self,
         pk: &ZKMProvingKey,
         stdin: ZKMStdin,

@@ -246,7 +246,7 @@ impl Prover<DefaultProverComponents> for NetworkProver {
     }
 
     /// The proof network can generate Compressed or Groth16 proof.
-    fn prove<'a>(
+    fn prove_impl<'a>(
         &'a self,
         pk: &ZKMProvingKey,
         stdin: ZKMStdin,
