@@ -19,6 +19,6 @@ pub struct MaddsubCols<T> {
     pub src2_hi: Word<T>,
     pub src2_lo: Word<T>,
 
-    /// Access to hi regiter
+    /// Access to hi register
     pub op_hi_access: MemoryReadWriteCols<T>,
 }
