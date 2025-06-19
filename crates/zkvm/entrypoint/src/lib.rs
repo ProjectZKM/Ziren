@@ -1,5 +1,4 @@
 //! Ported from Entrypoint for zkMIPS zkVM.
-#![feature(asm_experimental_arch)]
 pub mod heap;
 pub mod syscalls;
 pub mod io {
