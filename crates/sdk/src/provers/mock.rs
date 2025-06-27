@@ -143,8 +143,8 @@ impl Prover<DefaultProverComponents> for MockProver {
         }
     }
 
-    fn convert<'a>(
-        &'a self,
+    fn convert(
+        &self,
         stdin: ZKMStdin,
         opts: ProofOpts,
         kind: ZKMProofKind,

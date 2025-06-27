@@ -239,19 +239,32 @@ impl ProverClient {
     ///
     /// ### Examples
     /// ```no_run
-    /// use zkm_sdk::{ProverClient, ZKMContext, ZKMStdin};
+    /// use zkm_sdk::{utils, ProverClient, ZKMStdin};
+    /// use zkm_primitives::io::ZKMPublicValues;
     ///
-    /// // Initialize the prover client.
+    /// let client = ProverClient::new();
+    /// let elf = test_artifacts::HELLO_WORLD_ELF;
+    /// let (pk, vk) = client.setup(elf);
+    /// let stdin = ZKMStdin::new();
+    ///
+    /// // Generate proof & verify.
+    ///  let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
+    /// client.verify(&proof, &vk).unwrap();
+    ///
+    /// //--------------------------------------------
+    ///
     /// let client = ProverClient::new();
     ///
-    /// // Setup the inputs.
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write::<ZKMProof>(&proof);
+    /// stdin.write::<ZKMPublicValues>(&proof.public_values);
     ///
-    /// // Generate the proof.
+    /// let ZKMProof::Compressed(proof) = proof.proof else { panic!() };
+    /// stdin.write_proof(*proof, vk.vk.clone());
+    ///
     /// let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
+    /// client.verify(&proof, &vk).unwrap();
     /// ```
-    pub fn convert<'a>(&'a self, stdin: ZKMStdin) -> action::Prove<'a> {
+    pub fn convert(&self, stdin: ZKMStdin) -> action::Prove<'_> {
         action::Prove::new_for_convert(self.prover.as_ref(), stdin)
     }
 
@@ -590,8 +603,15 @@ mod tests {
         let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
+        //--------------------------------------------
+
+        let client = ProverClient::new();
+
         let mut stdin = ZKMStdin::new();
-        stdin.write::<ZKMProof>(&proof.proof);
+        stdin.write::<ZKMPublicValues>(&proof.public_values);
+
+        let ZKMProof::Compressed(proof) = proof.proof else { panic!() };
+        stdin.write_proof(*proof, vk.vk.clone());
 
         let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();

@@ -67,6 +67,7 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
 }
 
 #[derive(Clone, Debug, Default)]
+#[allow(dead_code)]
 pub struct MemVec<F>(pub Vec<Option<MemoryEntry<F>>>);
 
 impl<F: PrimeField64> Memory<F> for MemVec<F> {

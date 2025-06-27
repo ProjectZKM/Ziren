@@ -102,8 +102,8 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues>;
 
-    fn convert<'a>(
-        &'a self,
+    fn convert(
+        &self,
         stdin: ZKMStdin,
         opts: ProofOpts,
         kind: ZKMProofKind,
@@ -225,8 +225,8 @@ impl Prover<DefaultProverComponents> for ProverClient {
         self.prover.prove_impl(pk, stdin, opts, context, kind)
     }
 
-    fn convert<'a>(
-        &'a self,
+    fn convert(
+        &self,
         stdin: ZKMStdin,
         opts: ProofOpts,
         kind: ZKMProofKind,
