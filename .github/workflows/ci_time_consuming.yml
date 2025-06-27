@@ -15,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+      - run: source ~/.zkm-toolchain/env
       - run: |
           set -e
           for pkg in zkm-core-machine zkm-sdk zkm-verifier; do
