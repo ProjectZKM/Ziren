@@ -50,6 +50,10 @@ impl Prover<DefaultProverComponents> for CpuProver {
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
+        if kind == ZKMProofKind::CompressedToGroth16 {
+            return self.convert(stdin, opts, kind);
+        }
+
         // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
             self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
@@ -121,6 +125,43 @@ impl Prover<DefaultProverComponents> for CpuProver {
         }
 
         unreachable!()
+    }
+
+    fn convert<'a>(
+        &'a self,
+        mut stdin: ZKMStdin,
+        opts: ProofOpts,
+        kind: ZKMProofKind,
+    ) -> Result<ZKMProofWithPublicValues> {
+        if kind != ZKMProofKind::CompressedToGroth16 {
+            unimplemented!("Only compressed-proof-to-Groth16 conversion is supported currently.");
+        }
+
+        let proof = stdin.read::<ZKMProof>();
+
+        let ZKMProof::Compressed(proof) = proof else { panic!() };
+
+        let compress_proof = self.prover.shrink(*proof, opts.zkm_prover_opts)?;
+
+        // Genenerate the wrap proof.
+        let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
+
+        let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+            zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
+                &outer_proof.vk,
+                &outer_proof.proof,
+            )
+        } else {
+            try_install_circuit_artifacts("groth16")
+        };
+
+        let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+        return Ok(ZKMProofWithPublicValues {
+            proof: ZKMProof::Groth16(proof),
+            stdin,
+            public_values: Default::default(),
+            zkm_version: self.version().to_string(),
+        });
     }
 }
 

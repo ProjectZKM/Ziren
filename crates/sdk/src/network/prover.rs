@@ -123,9 +123,13 @@ impl NetworkProver {
     async fn request_proof(&self, input: &ProverInput, kind: ZKMProofKind) -> Result<String> {
         let seg_size =
             env::var("SHARD_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or_default();
+
+        let from_step =
+            if kind == ZKMProofKind::CompressedToGroth16 { Some(Step::InAgg.into()) } else { None };
+
         let target_step = if kind == ZKMProofKind::Compressed {
             Step::InAgg
-        } else if kind == ZKMProofKind::Groth16 {
+        } else if kind == ZKMProofKind::Groth16 || kind == ZKMProofKind::CompressedToGroth16 {
             Step::InSnark
         } else {
             unimplemented!("unsupported ZKMProofKind")
@@ -135,10 +139,10 @@ impl NetworkProver {
         let mut request = GenerateProofRequest {
             proof_id: proof_id.clone(),
             elf_data: input.elf.clone(),
-            // public_input_stream: input.public_inputstream.clone(),
             private_input_stream: input.private_inputstream.clone(),
             seg_size,
             target_step: Some(target_step.into()),
+            from_step,
             ..Default::default()
         };
         for receipt_input in input.receipts.iter() {
@@ -255,6 +259,15 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
         block_on(self.prove(&pk.elf, stdin, kind, None))
+    }
+
+    fn convert<'a>(
+        &'a self,
+        stdin: ZKMStdin,
+        _opts: ProofOpts,
+        kind: ZKMProofKind,
+    ) -> Result<ZKMProofWithPublicValues> {
+        block_on(self.prove(Default::default(), stdin, kind, None))
     }
 }
 

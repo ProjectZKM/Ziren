@@ -235,6 +235,26 @@ impl ProverClient {
         action::Prove::new(self.prover.as_ref(), pk, stdin)
     }
 
+    /// Proof converter
+    ///
+    /// ### Examples
+    /// ```no_run
+    /// use zkm_sdk::{ProverClient, ZKMContext, ZKMStdin};
+    ///
+    /// // Initialize the prover client.
+    /// let client = ProverClient::new();
+    ///
+    /// // Setup the inputs.
+    /// let mut stdin = ZKMStdin::new();
+    /// stdin.write::<ZKMProof>(&proof);
+    ///
+    /// // Generate the proof.
+    /// let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
+    /// ```
+    pub fn convert<'a>(&'a self, stdin: ZKMStdin) -> action::Prove<'a> {
+        action::Prove::new_for_convert(self.prover.as_ref(), stdin)
+    }
+
     /// Verifies that the given proof is valid and matches the given verification key produced by
     /// [Self::setup].
     ///
@@ -405,6 +425,7 @@ impl NetworkProverBuilder {
 #[cfg(test)]
 mod tests {
     use crate::utils::compute_groth16_public_values;
+    use crate::ZKMProof;
     use crate::ZKMProof::Groth16;
     use crate::{utils, ProverClient, ZKMStdin};
     use zkm_primitives::io::ZKMPublicValues;
@@ -555,5 +576,24 @@ mod tests {
             computed_public_inputs[1], inner_proof.public_inputs[1],
             "Second public input does not match"
         );
+    }
+
+    #[test]
+    fn test_compressed_to_groth16() {
+        utils::setup_logger();
+        let client = ProverClient::new();
+        let elf = test_artifacts::HELLO_WORLD_ELF;
+        let (pk, vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+
+        let mut stdin = ZKMStdin::new();
+        stdin.write::<ZKMProof>(&proof.proof);
+
+        let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
     }
 }

@@ -41,7 +41,6 @@ message GenerateProofRequest {
   repeated BlockFileItem block_data = 3;
   optional uint64 block_no = 4;
   uint32 seg_size = 5;
-  // !!!del!!! string args = 6;
   string signature = 7;
   bytes public_input_stream = 8;
   bytes private_input_stream = 9;
@@ -49,6 +48,7 @@ message GenerateProofRequest {
   bool composite_proof = 11;
   repeated bytes receipt_inputs = 12;
   repeated bytes receipts = 13;
+  optional Step from_step = 14;
 }
 
 message GenerateProofResponse {

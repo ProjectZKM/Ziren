@@ -102,6 +102,13 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues>;
 
+    fn convert<'a>(
+        &'a self,
+        stdin: ZKMStdin,
+        opts: ProofOpts,
+        kind: ZKMProofKind,
+    ) -> Result<ZKMProofWithPublicValues>;
+
     /// Verify that an zkMIPS proof is valid given its vkey and metadata.
     /// For Plonk proofs, verifies that the public inputs of the PlonkBn254 proof match
     /// the hash of the VK and the committed public values of the ZKMProofWithPublicValues.
@@ -189,6 +196,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),
+            ZKMProof::CompressedToGroth16 => unreachable!(),
         }
     }
 }
@@ -215,6 +223,15 @@ impl Prover<DefaultProverComponents> for ProverClient {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
         self.prover.prove_impl(pk, stdin, opts, context, kind)
+    }
+
+    fn convert<'a>(
+        &'a self,
+        stdin: ZKMStdin,
+        opts: ProofOpts,
+        kind: ZKMProofKind,
+    ) -> Result<ZKMProofWithPublicValues> {
+        self.prover.convert(stdin, opts, kind)
     }
 
     fn verify(

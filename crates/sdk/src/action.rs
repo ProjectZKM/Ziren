@@ -83,7 +83,7 @@ pub struct Prove<'a> {
     prover: &'a dyn Prover<DefaultProverComponents>,
     kind: ZKMProofKind,
     context_builder: ZKMContextBuilder<'a>,
-    pk: &'a ZKMProvingKey,
+    pk: Option<&'a ZKMProvingKey>,
     stdin: ZKMStdin,
     core_opts: ZKMCoreOpts,
     recursion_opts: ZKMCoreOpts,
@@ -103,7 +103,23 @@ impl<'a> Prove<'a> {
         Self {
             prover,
             kind: Default::default(),
-            pk,
+            pk: Some(pk),
+            stdin,
+            context_builder: Default::default(),
+            core_opts: ZKMCoreOpts::default(),
+            recursion_opts: ZKMCoreOpts::recursion(),
+            timeout: None,
+        }
+    }
+
+    pub fn new_for_convert(
+        prover: &'a dyn Prover<DefaultProverComponents>,
+        stdin: ZKMStdin,
+    ) -> Self {
+        Self {
+            prover,
+            kind: Default::default(),
+            pk: None,
             stdin,
             context_builder: Default::default(),
             core_opts: ZKMCoreOpts::default(),
@@ -114,6 +130,10 @@ impl<'a> Prove<'a> {
 
     /// Prove the execution of the program on the input, consuming the built action `self`.
     pub fn run(self) -> Result<ZKMProofWithPublicValues> {
+        if self.kind == ZKMProofKind::CompressedToGroth16 {
+            return self.convert();
+        }
+
         let Self {
             prover,
             kind,
@@ -129,9 +149,26 @@ impl<'a> Prove<'a> {
         let context = context_builder.build();
 
         // Dump the program and stdin to files for debugging if `ZKM_DUMP` is set.
-        crate::utils::zkm_dump(&pk.elf, &stdin);
+        crate::utils::zkm_dump(&pk.unwrap().elf, &stdin);
 
-        prover.prove_impl(pk, stdin, proof_opts, context, kind)
+        prover.prove_impl(pk.unwrap(), stdin, proof_opts, context, kind)
+    }
+
+    fn convert(self) -> Result<ZKMProofWithPublicValues> {
+        let Self {
+            prover,
+            kind,
+            pk: _,
+            stdin,
+            context_builder: _,
+            core_opts,
+            recursion_opts,
+            timeout,
+        } = self;
+        let opts = ZKMProverOpts { core_opts, recursion_opts };
+        let proof_opts = ProofOpts { zkm_prover_opts: opts, timeout };
+
+        prover.convert(stdin, proof_opts, kind)
     }
 
     /// Set the proof kind to the core mode. This is the default.
@@ -155,6 +192,12 @@ impl<'a> Prove<'a> {
     /// Set the proof mode to the groth16 bn254 mode.
     pub fn groth16(mut self) -> Self {
         self.kind = ZKMProofKind::Groth16;
+        self
+    }
+
+    /// Set the proof mode to the compressed-proof-to-groth16 mode.
+    pub fn compressed_to_groth16(mut self) -> Self {
+        self.kind = ZKMProofKind::CompressedToGroth16;
         self
     }
 
