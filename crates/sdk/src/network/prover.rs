@@ -41,7 +41,7 @@ pub struct NetworkProver {
     pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
-    compressed_to_groth16: AtomicBool,
+    compress_to_groth16: AtomicBool,
 }
 
 impl NetworkProver {
@@ -97,7 +97,7 @@ impl NetworkProver {
             endpoint,
             wallet,
             local_prover,
-            compressed_to_groth16: Default::default(),
+            compress_to_groth16: Default::default(),
         })
     }
 
@@ -132,11 +132,11 @@ impl NetworkProver {
             env::var("SHARD_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or_default();
 
         let from_step =
-            if kind == ZKMProofKind::CompressedToGroth16 { Some(Step::InAgg.into()) } else { None };
+            if kind == ZKMProofKind::CompressToGroth16 { Some(Step::InAgg.into()) } else { None };
 
         let target_step = if kind == ZKMProofKind::Compressed {
             Step::InAgg
-        } else if kind == ZKMProofKind::Groth16 || kind == ZKMProofKind::CompressedToGroth16 {
+        } else if kind == ZKMProofKind::Groth16 || kind == ZKMProofKind::CompressToGroth16 {
             Step::InSnark
         } else {
             unimplemented!("unsupported ZKMProofKind")
@@ -188,7 +188,7 @@ impl NetworkProver {
                     sleep(Duration::from_secs(5)).await;
                 }
                 Some(Status::Success) => {
-                    let public_values = if self.compressed_to_groth16.load(Ordering::Relaxed) {
+                    let public_values = if self.compress_to_groth16.load(Ordering::Relaxed) {
                         ZKMPublicValues::default()
                     } else {
                         let public_values_bytes =
@@ -218,8 +218,8 @@ impl NetworkProver {
         kind: ZKMProofKind,
         timeout: Option<Duration>,
     ) -> Result<ZKMProofWithPublicValues> {
-        if kind == ZKMProofKind::CompressedToGroth16 {
-            self.compressed_to_groth16.store(true, Ordering::Relaxed);
+        if kind == ZKMProofKind::CompressToGroth16 {
+            self.compress_to_groth16.store(true, Ordering::Relaxed);
         }
 
         let private_input = stdin.buffer.clone();
@@ -242,8 +242,8 @@ impl NetworkProver {
         log::info!("calling wait_proof, proof_id={proof_id}");
         let (proof, mut public_values) = self.wait_proof(&proof_id, timeout).await?;
 
-        if kind == ZKMProofKind::CompressedToGroth16 {
-            assert_eq(private_input.len(), 1);
+        if kind == ZKMProofKind::CompressToGroth16 {
+            assert_eq!(private_input.len(), 1);
             public_values = bincode::deserialize(&private_input.last().unwrap())?;
         }
 
@@ -280,15 +280,6 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
         block_on(self.prove(&pk.elf, stdin, kind, None))
-    }
-
-    fn convert(
-        &self,
-        stdin: ZKMStdin,
-        _opts: ProofOpts,
-        kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove(Default::default(), stdin, kind, None))
     }
 }
 

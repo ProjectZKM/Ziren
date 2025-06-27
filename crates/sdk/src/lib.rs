@@ -235,39 +235,6 @@ impl ProverClient {
         action::Prove::new(self.prover.as_ref(), pk, stdin)
     }
 
-    /// Proof converter
-    ///
-    /// ### Examples
-    /// ```no_run
-    /// use zkm_sdk::{utils, ProverClient, ZKMStdin};
-    /// use zkm_primitives::io::ZKMPublicValues;
-    ///
-    /// let client = ProverClient::new();
-    /// let elf = test_artifacts::HELLO_WORLD_ELF;
-    /// let (pk, vk) = client.setup(elf);
-    /// let stdin = ZKMStdin::new();
-    ///
-    /// // Generate proof & verify.
-    ///  let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
-    /// client.verify(&proof, &vk).unwrap();
-    ///
-    /// //--------------------------------------------
-    ///
-    /// let client = ProverClient::new();
-    ///
-    /// let mut stdin = ZKMStdin::new();
-    /// stdin.write::<ZKMPublicValues>(&proof.public_values);
-    ///
-    /// let ZKMProof::Compressed(proof) = proof.proof else { panic!() };
-    /// stdin.write_proof(*proof, vk.vk.clone());
-    ///
-    /// let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
-    /// client.verify(&proof, &vk).unwrap();
-    /// ```
-    pub fn convert(&self, stdin: ZKMStdin) -> action::Prove<'_> {
-        action::Prove::new_for_convert(self.prover.as_ref(), stdin)
-    }
-
     /// Verifies that the given proof is valid and matches the given verification key produced by
     /// [Self::setup].
     ///
@@ -592,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressed_to_groth16() {
+    fn test_compress_to_groth16() {
         utils::setup_logger();
         let client = ProverClient::new();
         let elf = test_artifacts::HELLO_WORLD_ELF;
@@ -613,7 +580,7 @@ mod tests {
         let ZKMProof::Compressed(proof) = proof.proof else { panic!() };
         stdin.write_proof(*proof, vk.vk.clone());
 
-        let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
+        let proof = client.prove(&pk, stdin).compress_to_groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();
     }
 }

@@ -139,17 +139,8 @@ impl Prover<DefaultProverComponents> for MockProver {
                     zkm_version: self.version().to_string(),
                 })
             }
-            ZKMProofKind::CompressedToGroth16 => unreachable!(),
+            ZKMProofKind::CompressToGroth16 => unreachable!(),
         }
-    }
-
-    fn convert(
-        &self,
-        stdin: ZKMStdin,
-        opts: ProofOpts,
-        kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues> {
-        todo!()
     }
 
     fn verify(

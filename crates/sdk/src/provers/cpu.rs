@@ -27,6 +27,42 @@ impl CpuProver {
     pub fn from_prover(prover: ZKMProver<DefaultProverComponents>) -> Self {
         Self { prover }
     }
+
+    fn compress_to_groth16(
+        &self,
+        mut stdin: ZKMStdin,
+        opts: ProofOpts,
+    ) -> Result<ZKMProofWithPublicValues> {
+        assert_eq!(stdin.buffer.len(), 1);
+        let public_values = bincode::deserialize(&stdin.buffer.last().unwrap())?;
+
+        assert_eq!(stdin.proofs.len(), 1);
+        let (proof, _) = stdin.proofs.pop().unwrap();
+
+        // Generate the shrink proof.
+        let shrink_proof = self.prover.shrink(proof, opts.zkm_prover_opts)?;
+
+        // Genenerate the wrap proof.
+        let outer_proof = self.prover.wrap_bn254(shrink_proof, opts.zkm_prover_opts)?;
+
+        let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+            zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
+                &outer_proof.vk,
+                &outer_proof.proof,
+            )
+        } else {
+            try_install_circuit_artifacts("groth16")
+        };
+
+        // Generate the groth16 proof.
+        let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+        Ok(ZKMProofWithPublicValues {
+            proof: ZKMProof::Groth16(proof),
+            stdin,
+            public_values,
+            zkm_version: self.version().to_string(),
+        })
+    }
 }
 
 impl Prover<DefaultProverComponents> for CpuProver {
@@ -50,6 +86,10 @@ impl Prover<DefaultProverComponents> for CpuProver {
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
+        if kind == ZKMProofKind::CompressToGroth16 {
+            return self.compress_to_groth16(stdin, opts);
+        }
+
         // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
             self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
@@ -121,45 +161,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
         }
 
         unreachable!()
-    }
-
-    fn convert(
-        &self,
-        mut stdin: ZKMStdin,
-        opts: ProofOpts,
-        kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues> {
-        if kind != ZKMProofKind::CompressedToGroth16 {
-            unimplemented!("Only compressed-proof-to-Groth16 conversion is supported currently.");
-        }
-
-        assert_eq!(stdin.buffer.len(), 1);
-        let public_values = bincode::deserialize(&stdin.buffer.last().unwrap())?;
-
-        assert_eq!(stdin.proofs.len(), 1);
-        let (proof, _) = stdin.proofs.pop().unwrap();
-
-        let compress_proof = self.prover.shrink(proof, opts.zkm_prover_opts)?;
-
-        // Genenerate the wrap proof.
-        let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
-
-        let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
-            zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
-                &outer_proof.vk,
-                &outer_proof.proof,
-            )
-        } else {
-            try_install_circuit_artifacts("groth16")
-        };
-
-        let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-        Ok(ZKMProofWithPublicValues {
-            proof: ZKMProof::Groth16(proof),
-            stdin,
-            public_values,
-            zkm_version: self.version().to_string(),
-        })
     }
 }
 
