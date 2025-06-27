@@ -127,8 +127,8 @@ impl Prover<DefaultProverComponents> for CpuProver {
         unreachable!()
     }
 
-    fn convert<'a>(
-        &'a self,
+    fn convert(
+        &self,
         mut stdin: ZKMStdin,
         opts: ProofOpts,
         kind: ZKMProofKind,
@@ -137,9 +137,9 @@ impl Prover<DefaultProverComponents> for CpuProver {
             unimplemented!("Only compressed-proof-to-Groth16 conversion is supported currently.");
         }
 
-        let proof = stdin.read::<ZKMProof>();
+        let input = stdin.read::<ZKMProofWithPublicValues>();
 
-        let ZKMProof::Compressed(proof) = proof else { panic!() };
+        let ZKMProof::Compressed(proof) = input.proof else { panic!() };
 
         let compress_proof = self.prover.shrink(*proof, opts.zkm_prover_opts)?;
 
@@ -156,12 +156,12 @@ impl Prover<DefaultProverComponents> for CpuProver {
         };
 
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-        return Ok(ZKMProofWithPublicValues {
+        Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
             stdin,
-            public_values: Default::default(),
+            public_values: input.public_values,
             zkm_version: self.version().to_string(),
-        });
+        })
     }
 }
 

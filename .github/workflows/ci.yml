@@ -43,7 +43,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-      - run: source ~/.zkm-toolchain/env
       - run: |
           for pkg in zkm-core-executor zkm-curves zkm-derive zkm-primitives zkm-prover \
               zkm-recursion-circuit zkm-recursion-compiler zkm-recursion-core \

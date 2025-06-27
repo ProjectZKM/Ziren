@@ -246,12 +246,12 @@ impl ProverClient {
     ///
     /// // Setup the inputs.
     /// let mut stdin = ZKMStdin::new();
-    /// stdin.write::<ZKMProof>(&proof);
+    /// stdin.write::<ZKMProofWithPublicValues>(&proof);
     ///
     /// // Generate the proof.
     /// let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
     /// ```
-    pub fn convert<'a>(&'a self, stdin: ZKMStdin) -> action::Prove<'a> {
+    pub fn convert(&self, stdin: ZKMStdin) -> action::Prove {
         action::Prove::new_for_convert(self.prover.as_ref(), stdin)
     }
 
@@ -425,8 +425,8 @@ impl NetworkProverBuilder {
 #[cfg(test)]
 mod tests {
     use crate::utils::compute_groth16_public_values;
-    use crate::ZKMProof;
     use crate::ZKMProof::Groth16;
+    use crate::ZKMProofWithPublicValues;
     use crate::{utils, ProverClient, ZKMStdin};
     use zkm_primitives::io::ZKMPublicValues;
 
@@ -590,8 +590,12 @@ mod tests {
         let proof = client.prove(&pk, stdin.clone()).compressed().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
+        //--------------------------------------------
+
+        let client = ProverClient::new();
+
         let mut stdin = ZKMStdin::new();
-        stdin.write::<ZKMProof>(&proof.proof);
+        stdin.write::<ZKMProofWithPublicValues>(&proof);
 
         let proof = client.convert(stdin).compressed_to_groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();

@@ -261,8 +261,8 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         block_on(self.prove(&pk.elf, stdin, kind, None))
     }
 
-    fn convert<'a>(
-        &'a self,
+    fn convert(
+        &self,
         stdin: ZKMStdin,
         _opts: ProofOpts,
         kind: ZKMProofKind,
