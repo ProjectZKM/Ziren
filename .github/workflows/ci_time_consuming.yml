@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2025-06-30
+          components: clippy
       - run: source ~/.zkm-toolchain/env
       - run: |
           set -e
