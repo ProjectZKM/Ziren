@@ -159,7 +159,7 @@ impl ShaCompressChip {
         // Performs the compress operation.
         let mut h_array = event.h;
         for j in 0..64 {
-            if j % 8 == 0 {
+            if (j as u32).is_multiple_of(8) {
                 octet_num_idx += 1;
             }
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];

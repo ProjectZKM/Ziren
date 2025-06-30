@@ -34,7 +34,7 @@ impl CpuProver {
         opts: ProofOpts,
     ) -> Result<ZKMProofWithPublicValues> {
         assert_eq!(stdin.buffer.len(), 1);
-        let public_values = bincode::deserialize(&stdin.buffer.last().unwrap())?;
+        let public_values = bincode::deserialize(stdin.buffer.last().unwrap())?;
 
         assert_eq!(stdin.proofs.len(), 1);
         let (proof, _) = stdin.proofs.pop().unwrap();
@@ -54,7 +54,6 @@ impl CpuProver {
             try_install_circuit_artifacts("groth16")
         };
 
-        // Generate the groth16 proof.
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),

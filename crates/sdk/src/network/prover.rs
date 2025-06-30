@@ -244,7 +244,7 @@ impl NetworkProver {
 
         if kind == ZKMProofKind::CompressToGroth16 {
             assert_eq!(private_input.len(), 1);
-            public_values = bincode::deserialize(&private_input.last().unwrap())?;
+            public_values = bincode::deserialize(private_input.last().unwrap())?;
         }
 
         Ok(ZKMProofWithPublicValues {

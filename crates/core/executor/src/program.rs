@@ -69,7 +69,7 @@ impl Program {
             .e_entry
             .try_into()
             .map_err(|err| anyhow!("e_entry was larger than 32 bits. {err}"))?;
-        if entry >= max_mem || entry % WORD_SIZE as u32 != 0 {
+        if entry >= max_mem || !entry.is_multiple_of(WORD_SIZE as u32) {
             bail!("Invalid entrypoint");
         }
         let segments = elf.segments().ok_or(anyhow!("Missing segment table"))?;
@@ -101,7 +101,7 @@ impl Program {
                 .p_vaddr
                 .try_into()
                 .map_err(|err| anyhow!("vaddr is larger than 32 bits. {err}"))?;
-            if vaddr % WORD_SIZE as u32 != 0 {
+            if !vaddr.is_multiple_of(WORD_SIZE as u32) {
                 bail!("vaddr {vaddr:08x} is unaligned");
             }
             if (segment.p_flags & elf::abi::PF_X) != 0 && base_address > vaddr {
