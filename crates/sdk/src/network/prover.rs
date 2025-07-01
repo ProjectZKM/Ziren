@@ -2,7 +2,6 @@ use stage_service::stage_service_client::StageServiceClient;
 use stage_service::{GenerateProofRequest, GetStatusRequest};
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use std::{env, fs};
 
@@ -41,7 +40,6 @@ pub struct NetworkProver {
     pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
-    compress_to_groth16: AtomicBool,
 }
 
 impl NetworkProver {
@@ -93,12 +91,7 @@ impl NetworkProver {
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
-        Ok(NetworkProver {
-            endpoint,
-            wallet,
-            local_prover,
-            compress_to_groth16: Default::default(),
-        })
+        Ok(NetworkProver { endpoint, wallet, local_prover })
     }
 
     pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) -> Result<()> {
@@ -165,6 +158,7 @@ impl NetworkProver {
     async fn wait_proof(
         &self,
         proof_id: &str,
+        kind: ZKMProofKind,
         timeout: Option<Duration>,
     ) -> Result<(ZKMProof, ZKMPublicValues)> {
         let start_time = Instant::now();
@@ -188,7 +182,7 @@ impl NetworkProver {
                     sleep(Duration::from_secs(5)).await;
                 }
                 Some(Status::Success) => {
-                    let public_values = if self.compress_to_groth16.load(Ordering::Relaxed) {
+                    let public_values = if kind == ZKMProofKind::CompressToGroth16 {
                         ZKMPublicValues::default()
                     } else {
                         let public_values_bytes =
@@ -218,10 +212,6 @@ impl NetworkProver {
         kind: ZKMProofKind,
         timeout: Option<Duration>,
     ) -> Result<ZKMProofWithPublicValues> {
-        if kind == ZKMProofKind::CompressToGroth16 {
-            self.compress_to_groth16.store(true, Ordering::Relaxed);
-        }
-
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
         bincode::serialize_into(&mut pri_buf, &private_input)?;
@@ -240,7 +230,7 @@ impl NetworkProver {
         let proof_id = self.request_proof(&prover_input, kind).await?;
 
         log::info!("calling wait_proof, proof_id={proof_id}");
-        let (proof, mut public_values) = self.wait_proof(&proof_id, timeout).await?;
+        let (proof, mut public_values) = self.wait_proof(&proof_id, kind, timeout).await?;
 
         if kind == ZKMProofKind::CompressToGroth16 {
             assert_eq!(private_input.len(), 1);
