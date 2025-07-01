@@ -89,7 +89,7 @@ The Fast Reed-Solomon Interactive Oracle Proof (FRI) protocol proves the low-deg
 - ​Verification Phase:
   - Verifier checks consistency between committed values at random point \\(z\\) in initial subgroup.
 
-## Verifing 
+## Verifying 
 
 ### Verification contents
 To ensure the correctness of the folding process in a FRI-based proof system, the verifier performs checks over multiple rounds using randomly chosen points from the evaluation domain. In each round, the verifier essentially re-executes a step of the folding process and verifies that the values provided by the prover are consistent with the committed Merkle root. The detailed interaction for a single round is as follows:
