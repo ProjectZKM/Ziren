@@ -63,7 +63,7 @@ Jump chip uses columns to record the following information:
 
 ### Major Constraints
 
-We use the fllowing key constraints to validate the jump chip:
+We use the following key constraints to validate the jump chip:
 
 - Instruction Validity
   - Exactly one jump instruction flag must be active per row:
