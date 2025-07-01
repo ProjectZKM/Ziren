@@ -10,7 +10,7 @@ zkMIPS implements an advanced continuation framework within its zkVM architectur
 
 - ​State Continuity
 
-  Overall [memory consistency checking](../offline_memory_consistency_checking.md) and consecutive program counter verifying ensures protocol-level execution integrity beyond individual shards.
+  Overall [memory consistency checking](../memory_checking.md) and consecutive program counter verifying ensures protocol-level execution integrity beyond individual shards.
 
 ## Session-Shard Structure
 
