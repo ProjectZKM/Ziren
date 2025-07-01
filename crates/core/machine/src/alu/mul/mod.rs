@@ -122,7 +122,7 @@ pub struct MulCols<T> {
     /// Selector to know whether this row is enabled.
     pub is_real: T,
 
-    /// Access to hi regiter
+    /// Access to hi register
     pub op_hi_access: MemoryReadWriteCols<T>,
 
     /// Flag indicating whether the hi_access record is real.
