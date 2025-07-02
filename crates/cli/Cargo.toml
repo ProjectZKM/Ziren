@@ -1,0 +1,26 @@
+[package]
+name = "zkm-cli"
+description = "The CLI is used for various tasks related to zkMIPS."
+readme = "README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[build-dependencies]
+vergen = { version = "8", default-features = false, features = [
+  "build",
+  "git",
+  "git2",
+] }
+
+[dependencies]
+anyhow = { version = "1.0.83", features = ["backtrace"] }
+clap = { version = "4.5.9", features = ["derive", "env"] }
+zkm-build = { workspace = true }
+zkm-sdk = { workspace = true }
+zkm-core-machine = { workspace = true }
+yansi = "1.0.1"
+cargo_metadata = "0.18.1"

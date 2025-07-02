@@ -528,6 +528,9 @@ name = "anyhow"
 version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
+dependencies = [
+ "backtrace",
+]
 
 [[package]]
 name = "arbitrary"
@@ -2641,7 +2644,7 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
- "yansi",
+ "yansi 0.5.1",
 ]
 
 [[package]]
@@ -7929,6 +7932,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
 
 [[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
+
+[[package]]
 name = "yoke"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8111,6 +8120,20 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+]
+
+[[package]]
+name = "zkm-cli"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "cargo_metadata",
+ "clap",
+ "vergen",
+ "yansi 1.0.1",
+ "zkm-build",
+ "zkm-core-machine",
+ "zkm-sdk",
 ]
 
 [[package]]
