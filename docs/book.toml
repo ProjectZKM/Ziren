@@ -6,3 +6,4 @@ src = "src"
 
 [output.html]
 mathjax-support = true
+oidc-audience = "https://github.com/ProjectZKM"
