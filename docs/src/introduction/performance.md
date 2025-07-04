@@ -24,7 +24,7 @@ For example, [ethproofs.org](https://ethproofs.org/) provides a platform for all
 
 ## zkVM benchmarks
 
-To facilitate the fairest possible comparison among different zkVMs, we provide the [zkvm-benchmarks](https://github.com/zkMIPS/zkvm-benchmarks)  suite, enabling anyone to reproduce the performance data.
+To facilitate the fairest possible comparison among different zkVMs, we provide the [zkvm-benchmarks](https://github.com/ProjectZKM/zkvm-benchmarks)  suite, enabling anyone to reproduce the performance data.
 
 
 ## Performance of zkMIPS

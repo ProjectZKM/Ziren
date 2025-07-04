@@ -29,7 +29,7 @@ $ zkmup list-available
 Now you can run zkMIPS examples or unit tests.
 
 ```
-git clone https://github.com/zkMIPS/zkMIPS
+git clone https://github.com/ProjectZKM/Ziren
 cd zkMIPS && cargo test -r
 ```
 
@@ -48,4 +48,4 @@ Currently, our prebuilt binaries are built for Ubuntu 22.04 and macOS. Systems r
 
 ## Option 2: Building from Source
 
-For more details, please refer to document [toolchain](https://github.com/zkMIPS/toolchain.git).
+For more details, please refer to document [toolchain](https://github.com/ProjectZKM/toolchain.git).

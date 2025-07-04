@@ -16,7 +16,7 @@ Note that type `T` must implement both `serde::Serialize` and `serde::Deserializ
 
 zkMIPS supports multiple programming languages. Below are examples of guest programs written in Rust and C/C++.
 
-### Rust Example: [Fibonacci](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/guest/src/main.rs)
+### Rust Example: [Fibonacci](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/guest/src/main.rs)
 
 ```rust
 //! A simple program that takes a number `n` as input, and writes the `n-1`th and `n`th Fibonacci
@@ -59,9 +59,9 @@ pub fn main() {
 }
 ```
 
-### C/C++ Example: [Fibonacci_C](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci_c_lib/guest/src/main.rs)
+### C/C++ Example: [Fibonacci_C](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci_c_lib/guest/src/main.rs)
 
-For non-Rust languages, you can compile them to static libraries and link them in Rust by FFI. For [example](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci_c_lib/lib/add.cpp):
+For non-Rust languages, you can compile them to static libraries and link them in Rust by FFI. For [example](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci_c_lib/lib/add.cpp):
 
 ```C
 extern "C" {

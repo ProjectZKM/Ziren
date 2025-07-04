@@ -1,6 +1,6 @@
 # Overview
 
-[zkMIPS](https://github.com/zkMIPS/zkMIPS) is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32r2 instruction set architecture(ISA).
+[zkMIPS](https://github.com/ProjectZKM/Ziren) is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32r2 instruction set architecture(ISA).
 
 zkMIPS is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. zkMIPS is fully open-source and comes equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, designed specifically to utilize zkMIPS, is a native asset cross-chain circulation protocol, with typical application cases including the Metis Hybrid Rollup design and the GOAT Network Bitcoin L2.
 

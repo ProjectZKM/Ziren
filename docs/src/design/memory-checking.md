@@ -70,7 +70,7 @@ Construct an elliptic curve over the 7th-degree extension field of KoalaBear Pri
 **Code Location**
 
 Implementation available [here](
-https://github.com/zkMIPS/septic-curve-over-koalabear). It is a fork from [Cheetah](https://github.com/toposware/cheetah) that finds secure curve over a sextic extension of Goldilock Prime \\(2^{64} - 2^{32} + 1\\).
+https://github.com/ProjectZKM/septic-curve-over-koalabear). It is a fork from [Cheetah](https://github.com/toposware/cheetah) that finds secure curve over a sextic extension of Goldilock Prime \\(2^{64} - 2^{32} + 1\\).
 
 **Construction Workflow**
 
