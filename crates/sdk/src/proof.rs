@@ -10,7 +10,7 @@ use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
 use zkm_stark::{MachineVerificationError, ShardProof};
 
-/// A proof generated with zkMIPS of a particular proof mode.
+/// A proof generated with Ziren of a particular proof mode.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
@@ -32,7 +32,7 @@ pub enum ZKMProof {
     CompressToGroth16,
 }
 
-/// A proof generated with ZKM, bundled together with stdin, public values, and the zkMIPS version.
+/// A proof generated with ZKM, bundled together with stdin, public values, and the Ziren version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZKMProofWithPublicValues {
     pub proof: ZKMProof,
@@ -70,7 +70,7 @@ impl ZKMProofWithPublicValues {
         match &self.proof {
             ZKMProof::Plonk(plonk_proof) => {
                 if plonk_proof.encoded_proof.is_empty() {
-                    // If the proof is empty, then this is a mock proof. The mock zkMIPS verifier
+                    // If the proof is empty, then this is a mock proof. The mock Ziren verifier
                     // expects an empty byte array for verification, so return an empty byte array.
                     return Vec::new();
                 }
@@ -81,7 +81,7 @@ impl ZKMProofWithPublicValues {
             }
             ZKMProof::Groth16(groth16_proof) => {
                 if groth16_proof.encoded_proof.is_empty() {
-                    // If the proof is empty, then this is a mock proof. The mock zkMIPS verifier
+                    // If the proof is empty, then this is a mock proof. The mock Ziren verifier
                     // expects an empty byte array for verification, so return an empty byte array.
                     return Vec::new();
                 }

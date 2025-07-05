@@ -1,6 +1,6 @@
 # Program
 
-The setting of zkMIPS is that Prover runs a public program on private inputs
+The setting of Ziren is that Prover runs a public program on private inputs
 and wants to convince Verifier that the program has executed correctly and produces an
 asserted output, without revealing anything about the computation’s input or intermediate
 state.

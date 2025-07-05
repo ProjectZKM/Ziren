@@ -34,10 +34,10 @@ pub mod utils;
 pub use cpu::*;
 pub use mips::*;
 
-/// The global version for all components of zkMIPS.
+/// The global version for all components of Ziren.
 ///
-/// This string should be updated whenever any step in verifying an zkMIPS proof changes, including
-/// core, recursion, and plonk-bn254. This string is used to download zkMIPS artifacts and the gnark
+/// This string should be updated whenever any step in verifying a Ziren proof changes, including
+/// core, recursion, and plonk-bn254. This string is used to download Ziren artifacts and the gnark
 /// docker image.
 pub const ZKM_CIRCUIT_VERSION: &str = "v1.1.0";
 

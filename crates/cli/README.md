@@ -1,6 +1,6 @@
 # CLI
 
-The `cargo prove` CLI is useful for various tasks related to the zkMIPS project. Typically users will not need to interact with the CLI directly, but rather use the `zkmup` script to install the CLI.
+The `cargo prove` CLI is useful for various tasks related to the Ziren project. Typically users will not need to interact with the CLI directly, but rather use the `zkmup` script to install the CLI.
 
 ## Development
 

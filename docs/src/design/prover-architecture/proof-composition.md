@@ -1,6 +1,6 @@
 # Proof Composition
 
-zkMIPS enables developers to implement recursive proof verification through its innovative proof composition system, allowing cryptographic proofs to be nested within zkVM programs. This architecture supports aggregation of multiple proofs while maintaining compatibility with zkMIPS's verification framework.
+Ziren enables developers to implement recursive proof verification through its innovative proof composition system, allowing cryptographic proofs to be nested within zkVM programs. This architecture supports aggregation of multiple proofs while maintaining compatibility with Ziren's verification framework.
 
 ## Key Use Cases
 
@@ -38,7 +38,7 @@ Proof composition enables developers to verify existing proofs within new ones.T
 
 ## Core Components
 
-zkMIPS's proofs are packaged into an object called a receipt. Composition allows users to verify a receipt inside a zkVM program. The result is a proof that a given receipt was verified. Key components include:
+Ziren's proofs are packaged into an object called a receipt. Composition allows users to verify a receipt inside a zkVM program. The result is a proof that a given receipt was verified. Key components include:
 
 - Assumption
   

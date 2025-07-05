@@ -57,10 +57,10 @@ fn main() {
 
 ## Proof Types
 
-zkMIPS provides customizable proof generation options:
+Ziren provides customizable proof generation options:
 
 ```rust
-/// A proof generated with zkMIPS of a particular proof mode.
+/// A proof generated with Ziren of a particular proof mode.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
@@ -119,7 +119,7 @@ client.prove(&pk, stdin).plonk().run().unwrap();
 
 ## Hardware Acceleration
 
-zkMIPS provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
+Ziren provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
 
 You can check your CPU's AVX compatibility by running:
 
@@ -149,7 +149,7 @@ Each stage may take a different amount of time.
 
 - **CA certificate:** `ca.pem`, `ca.key`. These keys are stored [here](https://github.com/ProjectZKM/Ziren/tree/main/crates/sdk/tool)
 - [Register](https://www.zkm.io/apply) your address to gain access.
-- **SDK dependency**: add `zkm_sdk` from the zkMIPS SDK to your `Cargo.toml`:
+- **SDK dependency**: add `zkm_sdk` from the Ziren SDK to your `Cargo.toml`:
 ```toml
 zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", branch = "main" }
 ```

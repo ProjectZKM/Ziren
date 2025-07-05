@@ -1,4 +1,4 @@
-//! Syscalls for the zkMIPS zkVM.
+//! Syscalls for the Ziren zkVM.
 //!
 //! Documentation for these syscalls can be found in the zkVM entrypoint
 //! `zkm_zkvm::syscalls` module.
@@ -90,7 +90,7 @@ extern "C" {
     /// Exits unconstrained mode.
     pub fn syscall_exit_unconstrained();
 
-    /// Defers the verification of a valid zkMIPS zkVM proof.
+    /// Defers the verification of a valid Ziren zkVM proof.
     pub fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]);
 
     /// Returns the length of the next element in the hint stream.

@@ -9,7 +9,7 @@ import (
 	plonk "github.com/consensys/gnark/backend/plonk"
 	plonk_bn254 "github.com/consensys/gnark/backend/plonk/bn254"
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
 )
 
 func NewZKMPlonkBn254Proof(proof *plonk.Proof, witnessInput WitnessInput) Proof {

@@ -1,6 +1,6 @@
-//! # zkMIPS Install
+//! # Ziren Install
 //!
-//! A library for installing the zkMIPS circuit artifacts.
+//! A library for installing the Ziren circuit artifacts.
 
 use cfg_if::cfg_if;
 use std::path::PathBuf;

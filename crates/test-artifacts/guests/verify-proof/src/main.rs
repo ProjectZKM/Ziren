@@ -1,5 +1,5 @@
 //! This is a test program that takes in a zkm_core vkey and a list of inputs, and then verifies the
-//! zkMIPS proof for each input.
+//! Ziren proof for each input.
 #![no_std]
 #![no_main]
 zkm_zkvm::entrypoint!(main);

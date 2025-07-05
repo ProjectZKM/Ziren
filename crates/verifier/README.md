@@ -1,17 +1,17 @@
-# zkMIPS Verifier
+# Ziren Verifier
 
-This crate provides verifiers for zkMIPS Groth16 and Plonk zero-knowledge proofs. These proofs are expected
-to be generated using the [zkMIPS SDK](../sdk).
+This crate provides verifiers for Ziren Groth16 and Plonk zero-knowledge proofs. These proofs are expected
+to be generated using the [Ziren SDK](../sdk).
 
 ## Features
 
 Groth16 and Plonk proof verification are supported in `no-std` environments. Verification in the
-zkMIPS zkVM context is patched, in order to make use of the bn254 precompiles.
+Ziren zkVM context is patched, in order to make use of the bn254 precompiles.
 
 ### Pre-generated verification keys
 
 Verification keys for Groth16 and Plonk are stored in the [`bn254-vk`](./bn254-vk/) directory. These
-vkeys are used to verify all zkMIPS proofs.
+vkeys are used to verify all Ziren proofs.
 
 These vkeys are the same as those found locally in
 `~/.zkm/circuits/<circuit_name>/<version>/<circuit_name>_vk.bin`, and should be automatically

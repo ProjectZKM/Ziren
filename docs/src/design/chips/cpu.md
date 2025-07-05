@@ -6,7 +6,7 @@ The CPU architecture employs a structured column-based design to manage instruct
 
 ## Column Classification 
 
-The CPU columns in zkMIPS encapsulate the core execution context of MIPS instructions within the zkVM. Key components include:
+The CPU columns in Ziren encapsulate the core execution context of MIPS instructions within the zkVM. Key components include:
 - ​Shard Management​​: Tracks execution shards for cross-shard operations like syscalls and memory access.
 - Clock System​​: Tracks the global clock cycles.
 - ​Program Counter​​: Sequential validation via pc, next_pc, and next_next_pc for instruction flow correctness.
@@ -17,7 +17,7 @@ The CPU columns in zkMIPS encapsulate the core execution context of MIPS instruc
 
 ## ​Constraint Categories​​
 
-zkMIPS's CPU constraints ensure instruction integrity across four key dimensions:
+Ziren's CPU constraints ensure instruction integrity across four key dimensions:
 
 - Flow Constraints​​
 
@@ -38,4 +38,4 @@ zkMIPS's CPU constraints ensure instruction integrity across four key dimensions
   Instruction exclusivity: Maintains instruction type exclusivity.
   Real-row validation: Enforces operational validity flags for non-padded execution.
 
-These constraints are implemented through AIR polynomial identities, cross-table lookup arguments, boolean assertions, and multi-set hashing ensuring verifiable MIPS execution within zkMIPS's zkVM framework.
+These constraints are implemented through AIR polynomial identities, cross-table lookup arguments, boolean assertions, and multi-set hashing ensuring verifiable MIPS execution within Ziren's zkVM framework.

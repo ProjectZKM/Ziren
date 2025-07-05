@@ -67,8 +67,8 @@ const KECCAK_ROWS_PER_BLOCK: usize = 24;
 
 /// An AIR for encoding MIPS execution.
 ///
-/// This enum contains all the different AIRs that are used in the zkMIPS IOP. Each variant is
-/// a different AIR that is used to encode a different part of the zkMIPS execution, and the
+/// This enum contains all the different AIRs that are used in the Ziren IOP. Each variant is
+/// a different AIR that is used to encode a different part of the Ziren execution, and the
 /// different AIR variants have a joint lookup argument.
 #[derive(zkm_derive::MachineAir, EnumDiscriminants)]
 #[strum_discriminants(derive(Hash, EnumIter))]

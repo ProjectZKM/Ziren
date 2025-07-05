@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Word, PROOF_MAX_NUM_PVS};
 
-/// The number of non padded elements in the zkMIPS proofs public values vec.
+/// The number of non padded elements in the Ziren proofs public values vec.
 pub const ZKM_PROOF_NUM_PV_ELTS: usize = size_of::<PublicValues<Word<u8>, u8>>();
 
-/// The number of 32 bit words in the zkMIPS proof's committed value digest.
+/// The number of 32 bit words in the Ziren proof's committed value digest.
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
 /// The number of field elements in the poseidon2 digest.

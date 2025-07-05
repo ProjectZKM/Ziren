@@ -1,5 +1,5 @@
 # MIPS VM
-zkMIPS is a verifiable computation infrastructure based on the MIPS32, specifically designed to provide zero-knowledge proof generation for programs written in Rust. This enhances project auditing and the efficiency of security verification. Focusing on the extensive design experience of MIPS, zkMIPS adopts the MIPS32r2 instruction set. MIPS VM, one of the core components of zkMIPS, is the execution framework of MIPS32r2 instructions. Below we will briefly introduce the advantages of MIPS32r2 over RV32IM and the execution flow of MIPS VM.
+Ziren is a verifiable computation infrastructure based on the MIPS32, specifically designed to provide zero-knowledge proof generation for programs written in Rust. This enhances project auditing and the efficiency of security verification. Focusing on the extensive design experience of MIPS, Ziren adopts the MIPS32r2 instruction set. MIPS VM, one of the core components of Ziren, is the execution framework of MIPS32r2 instructions. Below we will briefly introduce the advantages of MIPS32r2 over RV32IM and the execution flow of MIPS VM.
 
 
 ## Advantages of MIPS32r2 over RV32IM
@@ -18,7 +18,7 @@ zkMIPS is a verifiable computation infrastructure based on the MIPS32, specifica
 ## Execution Flow of MIPS VM
 
 The execution flow of MIPS VM is as follows:
-![zkMIPS MIPS VM execution flow](mips_vm_execution.png)
+![Ziren MIPS VM execution flow](mips_vm_execution.png)
 Before the execution process of MIPS VM, a Rust program written by the developer is first transformed by a dedicated compiler into the MIPS instruction set, generating a corresponding ELF binary file. This process accurately maps the high-level logic of the program to low-level instructions, laying a solid foundation for subsequent verification. 
 
 MIPS VM employs a specially designed executor to simulate the execution of the ELF file:

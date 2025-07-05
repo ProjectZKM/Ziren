@@ -42,7 +42,7 @@ pub enum ProverType {
 /// Options to configure proof generation.
 #[derive(Clone, Default)]
 pub struct ProofOpts {
-    /// Options to configure the zkMIPS prover.
+    /// Options to configure the Ziren prover.
     pub zkm_prover_opts: ZKMProverOpts,
     /// Optional timeout duration for proof generation.
     pub timeout: Option<Duration>,
@@ -102,7 +102,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues>;
 
-    /// Verify that an zkMIPS proof is valid given its vkey and metadata.
+    /// Verify that a Ziren proof is valid given its vkey and metadata.
     /// For Plonk proofs, verifies that the public inputs of the PlonkBn254 proof match
     /// the hash of the VK and the committed public values of the ZKMProofWithPublicValues.
     fn verify(

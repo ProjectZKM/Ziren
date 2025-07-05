@@ -30,7 +30,7 @@ pub struct FriProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub pow_witness: Felt<C::F>,
 }
 
-/// Reference: https://github.com/zkMIPS/Plonky3/blob/main/fri/src/proof.rs#L35
+/// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/fri/src/proof.rs#L35
 #[derive(Clone)]
 pub struct FriCommitPhaseProofStepVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub sibling_value: Ext<C::F, C::EF>,

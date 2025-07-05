@@ -11,7 +11,7 @@ use super::{
     RangeCheckOpcode,
 };
 
-/// A trait which contains all helper methods for building zkMIPS recursion machine AIRs.
+/// A trait which contains all helper methods for building Ziren recursion machine AIRs.
 pub trait ZKMRecursionAirBuilder:
     MachineAirBuilder + RecursionMemoryAirBuilder + RecursionLookupAirBuilder
 {

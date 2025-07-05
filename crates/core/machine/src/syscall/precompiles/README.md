@@ -1,6 +1,6 @@
-# Guide to Adding Precompiles in zkMIPS
+# Guide to Adding Precompiles in Ziren
 
-Precompiles are specialized chips that allow you to extend the functionality of vanilla zkMIPS to execute custom logic more efficiently.
+Precompiles are specialized chips that allow you to extend the functionality of vanilla Ziren to execute custom logic more efficiently.
 
 ## Create the Chip
 Create a new rust Rust file for your chip in the `core/src/syscall/precompiles` directory. 
@@ -38,7 +38,7 @@ pub struct CustomOpCols<T> {
 Adjust these fields according to your chip.
 
 ### Implement the Chip Logic
-The Syscall trait is where the core execution logic of your chip will reside. This involves defining how the chip interacts with the zkMIPS runtime during execution time.
+The Syscall trait is where the core execution logic of your chip will reside. This involves defining how the chip interacts with the Ziren runtime during execution time.
 
 ```rust
 impl Syscall for Uint256MulChip {
@@ -54,7 +54,7 @@ impl Syscall for Uint256MulChip {
 ```
 
 ### Implement the `MachineAir` Trait
-The `MachineAir` trait integrates your chip with zkMIPS’s Algebraic Intermediate Representation (AIR). This involves generating and evaluating traces that represent the chip's operations.
+The `MachineAir` trait integrates your chip with Ziren’s Algebraic Intermediate Representation (AIR). This involves generating and evaluating traces that represent the chip's operations.
 
 ```rust
 impl<F: PrimeField32> MachineAir<F> for CustomOpChip {
@@ -117,7 +117,7 @@ fn get_local_mem_events(&self) -> impl IntoIterator<Item = &MemoryLocalEvent> {
 ```
 
 ### Implement the `Air` and `BaseAir` traits
-To fully integrate your chip with the zkMIPS AIR framework, implement the `Air` and `BaseAir` traits. These traits define how your chip’s operations are evaluated within the AIR system.
+To fully integrate your chip with the Ziren AIR framework, implement the `Air` and `BaseAir` traits. These traits define how your chip’s operations are evaluated within the AIR system.
 
 ```rust
 impl<F> BaseAir<F> for CustomOpChip {
@@ -187,9 +187,9 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 ```
 
 ## Write Unit Tests for the New Precompile
-### Create a New zkMIPS Test Package
-Create a new zkMIPS crate for your custom precompile test package inside the directory
-`zkMIPS/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
+### Create a New Ziren Test Package
+Create a new Ziren crate for your custom precompile test package inside the directory
+`Ziren/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
 ```toml
 [package]
 name = "custom-precompile-test"
@@ -206,14 +206,14 @@ rand = "0.8.5"
 Don't forget to include your crate to the workspace at `crates/test-artifacts/programs/Cargo.toml`. Then implement the tests and run `cargo prove build` to generate an ELF file. 
 
 ### Include the ELF File in `test-artifacts` crate `lib.rs`
-In your main zkMIPS project, include the generated ELF file by updating `crates/test-artifacts/src/lib.rs`. 
+In your main Ziren project, include the generated ELF file by updating `crates/test-artifacts/src/lib.rs`. 
 ```rust
 pub const CUSTOM_PRECOMPILE_ELF: &[u8] = include_elf!("your-test-crate-name");
 // Other ELF files...
 ```
 
 ### Write Tests for Your Custom Precompile
-Add tests that use this ELF file in your local zkMIPS project.
+Add tests that use this ELF file in your local Ziren project.
 ```rust
 // /path/to/your/precompile/mod.rs
 

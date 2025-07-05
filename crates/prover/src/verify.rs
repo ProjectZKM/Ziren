@@ -33,7 +33,7 @@ pub enum PlonkVerificationError {
     )]
     InvalidVerificationKey,
     #[error(
-        "the public values in the zkMIPS proof do not match the public values in the inner plonk bn254 proof"
+        "the public values in the Ziren proof do not match the public values in the inner plonk bn254 proof"
     )]
     InvalidPublicValues,
 }
@@ -45,7 +45,7 @@ pub enum Groth16VerificationError {
     )]
     InvalidVerificationKey,
     #[error(
-        "the public values in the zkMIPS proof do not match the public values in the inner groth16 bn254 proof"
+        "the public values in the Ziren proof do not match the public values in the inner groth16 bn254 proof"
     )]
     InvalidPublicValues,
 }
@@ -327,10 +327,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidPublicValues("is_complete is not 1"));
         }
 
-        // Verify that the proof is for the zkMIPS vkey we are expecting.
+        // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("zkMIPS vk hash mismatch"));
+            return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
 
         Ok(())
@@ -364,10 +364,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             return Err(MachineVerificationError::InvalidVerificationKey);
         }
 
-        // Verify that the proof is for the zkMIPS vkey we are expecting.
+        // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if public_values.zkm_vk_digest != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("zkMIPS vk hash mismatch"));
+            return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
 
         Ok(())
@@ -392,10 +392,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 "root public values are invalid",
             ));
         }
-        // Verify that the proof is for the zkMIPS vkey we are expecting.
+        // Verify that the proof is for the Ziren vkey we are expecting.
         let vkey_hash = vk.hash_koalabear();
         if *public_values.zkm_vk_digest() != vkey_hash {
-            return Err(MachineVerificationError::InvalidPublicValues("zkMIPS vk hash mismatch"));
+            return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
         }
 
         Ok(())

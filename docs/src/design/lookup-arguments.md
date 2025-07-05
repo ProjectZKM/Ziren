@@ -6,7 +6,7 @@ Lookup arguments allow generating cryptographic proofs showing that elements fro
 
 The protocol proves  \\(F \subseteq T \\), ensuring all witness values adhere to permissible table entries. 
 
-Since its inception, lookup protocols have evolved through continuous [optimizations](https://link.springer.com/chapter/10.1007/978-3-030-03326-2_20). zkMIPS implements the [​LogUp](https://eprint.iacr.org/2023/1518) protocol to enable efficient proof generation.
+Since its inception, lookup protocols have evolved through continuous [optimizations](https://link.springer.com/chapter/10.1007/978-3-030-03326-2_20). Ziren implements the [​LogUp](https://eprint.iacr.org/2023/1518) protocol to enable efficient proof generation.
 
 ## LogUp
 
@@ -14,10 +14,10 @@ LogUp employs logarithmic derivatives for linear-complexity verification. For a 
 \\[ \sum_{i=0}^{M-1} \frac{1}{f_i - \alpha} = \sum_{i=0}^{N-1} \frac{m_i}{t_i - \alpha} \\]
 , where \\(m_i\\) denotes the multiplicity of \\(t_i\\) in \\(F\\). See [full protocol details](https://eprint.iacr.org/2022/1530.pdf).
 
-## LogUp Implementation in zkMIPS
+## LogUp Implementation in Ziren
 
-Cross-chip verification in zkMIPS utilizes LogUp for consistency checks, as shown in the dependency diagram:
-![zkMIPS chips lookup scheme](zkmips-chips-lookup.png)
+Cross-chip verification in Ziren utilizes LogUp for consistency checks, as shown in the dependency diagram:
+![Ziren chips lookup scheme](zkmips-chips-lookup.png)
 <!-- source: [zkMIPS-chips.drawio](https://drive.google.com/file/d/1loR3llVMTm9gw97kgsu72NEGARau1ReX/view?usp=sharing) -->
 
 Key Lookup Relationships:
@@ -33,14 +33,14 @@ Key Lookup Relationships:
 | 7     | CPU                | Bytes               | Operand range verification              |
 | 8     | Syscall            | Precompiles         | Syscall/precompiled function execution  |
 
-<small>* In the latest implementation, zkMIPS employs multiset-hashing to ensure memory consistency checking, enhancing proof efficiency and modularity.</small>
+<small>* In the latest implementation, Ziren employs multiset-hashing to ensure memory consistency checking, enhancing proof efficiency and modularity.</small>
 
 
 ## Range Check Implementation Example
 
 **8-bit Range Check Design**
 
-In zkMIPS's architecture, 32-bit values undergo byte-wise decomposition into four 8-bit components, with each byte occupying a dedicated memory column. This structural approach enables native support for 8-bit range constraints (0 ≤ value < 255) during critical operations including arithmetic logic unit (ALU) computations and memory address verification.
+In Ziren's architecture, 32-bit values undergo byte-wise decomposition into four 8-bit components, with each byte occupying a dedicated memory column. This structural approach enables native support for 8-bit range constraints (0 ≤ value < 255) during critical operations including arithmetic logic unit (ALU) computations and memory address verification.
 
 - Starting Lookup Table (T)
 

@@ -1,6 +1,6 @@
 # Host Program
 
-In a zkMIPS application, the host is the machine that is running the zkVM. The host is an untrusted agent that sets up the zkVM environment and handles inputs/outputs during execution for guest.
+In a Ziren application, the host is the machine that is running the zkVM. The host is an untrusted agent that sets up the zkVM environment and handles inputs/outputs during execution for guest.
 
 ## Example: [Fibonacci](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/src/main.rs)
 

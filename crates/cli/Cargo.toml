@@ -1,6 +1,6 @@
 [package]
 name = "zkm-cli"
-description = "The CLI is used for various tasks related to zkMIPS."
+description = "The CLI is used for various tasks related to Ziren."
 readme = "README.md"
 version = { workspace = true }
 edition = { workspace = true }

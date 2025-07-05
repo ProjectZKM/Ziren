@@ -1,10 +1,10 @@
 # STARK Aggregation
 
-zkMIPS's STARK aggregation system decomposes complex program proofs into parallelizable shard proofs and recursively compresses them into a single STARK proof. 
+'s STARK aggregation system decomposes complex program proofs into parallelizable shard proofs and recursively compresses them into a single STARK proof. 
 
 ## Shard Proof Generation
 
-zkMIPS processes execution trace proofs for shards through three key phases:
+Ziren processes execution trace proofs for shards through three key phases:
 - ​Execution Shard
 
   Splits program execution (compiled ELF binaries) into fixed-size batches and maintains execution context continuity across shards.

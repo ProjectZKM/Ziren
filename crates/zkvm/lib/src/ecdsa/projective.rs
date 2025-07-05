@@ -1,8 +1,8 @@
-//! Implementation of the zkMIPS accelerated projective point. The projective point wraps the affine point.
+//! Implementation of the Ziren accelerated projective point. The projective point wraps the affine point.
 //!
 //! This type is mainly used in the `ecdsa-core` algorithms.
 //!
-//! Note: When performing curve operations, accelerated crates for zkMIPS use affine arithmetic instead of projective arithmetic for performance.
+//! Note: When performing curve operations, accelerated crates for Ziren use affine arithmetic instead of projective arithmetic for performance.
 
 use super::{AffinePoint, ECDSACurve, ZKMAffinePointTrait};
 
@@ -27,12 +27,12 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use std::borrow::Borrow;
 
-/// The zkMIPS accelerated projective point.
+/// The Ziren accelerated projective point.
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectivePoint<C: ECDSACurve> {
     /// The inner affine point.
     ///
-    /// zkMIPS uses affine arithmetic for all operations.
+    /// Ziren uses affine arithmetic for all operations.
     pub inner: AffinePoint<C>,
 }
 

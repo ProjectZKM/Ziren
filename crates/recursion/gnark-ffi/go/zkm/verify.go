@@ -9,7 +9,7 @@ import (
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
 )
 
 func VerifyPlonk(verifyCmdDataDir string, verifyCmdProof string, verifyCmdVkeyHash string, verifyCmdCommittedValuesDigest string) error {

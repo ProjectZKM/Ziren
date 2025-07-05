@@ -1,6 +1,6 @@
 [package]
 name = "zkm-recursion-circuit"
-description = "zkMIPS recursion circuit"
+description = "Ziren recursion circuit"
 readme = "../../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

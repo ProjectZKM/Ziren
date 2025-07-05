@@ -25,7 +25,7 @@ pub enum Error {
     #[error("BN254 Curve Error")]
     Curve(CurveError),
 
-    // zkMIPS Errors
+    // Ziren Errors
     #[error("Invalid program vkey hash")]
     InvalidProgramVkeyHash,
 }

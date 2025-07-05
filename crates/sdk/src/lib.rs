@@ -1,6 +1,6 @@
-//! # zkMIPS SDK
+//! # Ziren SDK
 //!
-//! A library for interacting with the zkMIPS zkVM.
+//! A library for interacting with the Ziren zkVM.
 
 pub mod action;
 // pub mod artifacts;
@@ -38,7 +38,7 @@ pub use zkm_prover::{
 use crate::utils::block_on;
 pub use utils::setup_logger;
 
-/// A client for interacting with zkMIPS.
+/// A client for interacting with Ziren.
 pub struct ProverClient {
     /// The underlying prover implementation.
     pub prover: Box<dyn Prover<DefaultProverComponents>>,
@@ -258,14 +258,14 @@ impl ProverClient {
         self.prover.verify(proof, vk)
     }
 
-    /// Gets the current version of the zkMIPS zkVM.
+    /// Gets the current version of the Ziren zkVM.
     ///
-    /// Note: This is not the same as the version of the zkMIPS SDK.
+    /// Note: This is not the same as the version of the Ziren SDK.
     pub fn version(&self) -> String {
         ZKM_CIRCUIT_VERSION.to_string()
     }
 
-    /// Setup a program to be proven and verified by the zkMIPS MIPS zkVM by computing the proving
+    /// Setup a program to be proven and verified by the Ziren MIPS zkVM by computing the proving
     /// and verifying keys.
     ///
     /// The proving key and verifying key essentially embed the program, as well as other auxiliary
