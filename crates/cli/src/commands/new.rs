@@ -20,7 +20,7 @@ struct TemplateType {
 }
 
 #[derive(Parser)]
-#[command(name = "new", about = "Setup a new project that runs inside the zkMIPS.")]
+#[command(name = "new", about = "Setup a new project that runs inside the Ziren.")]
 pub struct NewCmd {
     /// The name of the project.
     name: String,
@@ -34,7 +34,7 @@ pub struct NewCmd {
     version: String,
 }
 
-const TEMPLATE_REPOSITORY_URL: &str = "https://github.com/zkMIPS/zkm-project-template";
+const TEMPLATE_REPOSITORY_URL: &str = "https://github.com/ProjectZKM/zkm-project-template";
 
 impl NewCmd {
     pub fn run(&self) -> Result<()> {

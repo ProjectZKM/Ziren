@@ -1,6 +1,6 @@
 # Flow Control
 
-zkMIPS enforces MIPS32r2 control flow verification via dedicated Branch and Jump chips, ensuring precise execution of program control instructions.
+Ziren enforces MIPS32r2 control flow verification via dedicated Branch and Jump chips, ensuring precise execution of program control instructions.
 
  ## Branch Chip
 

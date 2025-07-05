@@ -10,7 +10,7 @@ pub const BUILD_TARGET: &str = "mipsel-zkm-zkvm-elf";
 pub const DEFAULT_OUTPUT_DIR: &str = "elf";
 pub const HELPER_TARGET_SUBDIR: &str = "elf-compilation";
 
-/// Compile an zkMIPS program.
+/// Compile a Ziren program.
 ///
 /// Additional arguments are useful for configuring the build process, including options for
 /// specifying binary and ELF names, ignoring Rust version checks, and enabling specific

@@ -4,12 +4,12 @@ use zkm_stark::{CpuProver, MachineProver, StarkGenericConfig};
 use crate::{CompressAir, CoreSC, InnerSC, OuterSC, ShrinkAir, WrapAir};
 
 pub trait ZKMProverComponents: Send + Sync {
-    /// The prover for making zkMIPS core proofs.
+    /// The prover for making Ziren core proofs.
     type CoreProver: MachineProver<CoreSC, MipsAir<<CoreSC as StarkGenericConfig>::Val>>
         + Send
         + Sync;
 
-    /// The prover for making zkMIPS recursive proofs.
+    /// The prover for making Ziren recursive proofs.
     type CompressProver: MachineProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>
         + Send
         + Sync;

@@ -82,7 +82,7 @@ where
     /// Verify a batch of recursive proofs and aggregate their public values.
     ///
     /// The compression verifier can aggregate proofs of different kinds:
-    /// - Core proofs: proofs which are recursive proof of a batch of zkMIPS shard proofs. The
+    /// - Core proofs: proofs which are recursive proof of a batch of Ziren shard proofs. The
     ///   implementation in this function assumes a fixed recursive verifier specified by
     ///   `recursive_vk`.
     /// - Deferred proofs: proofs which are recursive proof of a batch of deferred proofs. The

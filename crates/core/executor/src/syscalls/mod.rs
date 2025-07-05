@@ -49,7 +49,7 @@ use zkm_curves::{
 use crate::events::FieldOperation;
 use crate::syscalls::precompiles::keccak::sponge::KeccakSpongeSyscall;
 
-/// A system call in the zkMIPS zkVM.
+/// A system call in the Ziren zkVM.
 ///
 /// This trait implements methods needed to execute a system call inside the [`crate::Executor`].
 pub trait Syscall: Send + Sync {

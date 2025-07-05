@@ -1,6 +1,6 @@
 [package]
 name = "zkm-derive"
-description = "zkMIPS derive"
+description = "Ziren derive"
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

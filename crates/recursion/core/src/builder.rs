@@ -9,7 +9,7 @@ use zkm_stark::{
 
 use crate::{air::Block, Address};
 
-/// A trait which contains all helper methods for building zkMIPS recursion machine AIRs.
+/// A trait which contains all helper methods for building Ziren recursion machine AIRs.
 pub trait ZKMRecursionAirBuilder: MachineAirBuilder + RecursionAirBuilder {}
 
 impl<AB: AirBuilderWithPublicValues + RecursionAirBuilder> ZKMRecursionAirBuilder for AB {}

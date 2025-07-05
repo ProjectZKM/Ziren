@@ -69,7 +69,7 @@ fn main() {
         // Write the proofs.
         //
         // Note: this data will not actually be read by the aggregation program, instead it will be
-        // witnessed by the prover during the recursive aggregation process inside zkMIPS itself.
+        // witnessed by the prover during the recursive aggregation process inside Ziren itself.
         for input in inputs {
             let ZKMProof::Compressed(proof) = input.proof.proof else { panic!() };
             stdin.write_proof(*proof, input.vk.vk);

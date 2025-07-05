@@ -19,11 +19,10 @@ pub(crate) fn create_local_command(
     // 1. Set the target directory to a subdirectory of the program's target directory to avoid
     //    build
     // conflicts with the parent process. Source: https://github.com/rust-lang/cargo/issues/6412
-    // 2. Set the rustup toolchain to zkMIPS.
+    // 2. Set the rustup toolchain to Ziren.
     // 3. Set the encoded rust flags.
     // 4. Remove the rustc configuration, otherwise in a build script it will attempt to compile the
-    //    program with the toolchain of the normal build process, rather than the zkMIPS
-    //    toolchain.
+    //    program with the toolchain of the normal build process, rather than the Ziren toolchain.
     command
         .current_dir(canonicalized_program_dir)
         .env("CARGO_ENCODED_RUSTFLAGS", get_rust_compiler_flags(args))

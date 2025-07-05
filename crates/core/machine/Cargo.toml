@@ -1,6 +1,6 @@
 [package]
 name = "zkm-core-machine"
-description = "zkMIPS machine"
+description = "Ziren machine"
 readme = "../../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

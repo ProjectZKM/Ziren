@@ -1,6 +1,6 @@
 [package]
 name = "zkm-build"
-description = "Build a zkMIPS program."
+description = "Build a Ziren program."
 readme = "README.md"
 version = { workspace = true }
 edition = { workspace = true }

@@ -1,9 +1,9 @@
-//! Implementation of an affine point, with acceleration for operations in the context of zkMIPS.
+//! Implementation of an affine point, with acceleration for operations in the context of Ziren.
 //!
 //! The [`crate::ecdsa::ProjectivePoint`] type is mainly used in the `ecdsa-core` algorithms,
 //! however, in some cases, the affine point is required.
 //!
-//! Note: When performing curve operations, accelerated crates for zkMIPS use affine arithmetic instead of projective arithmetic for performance.
+//! Note: When performing curve operations, accelerated crates for Ziren use affine arithmetic instead of projective arithmetic for performance.
 
 use super::{
     ECDSACurve, ECDSAPoint, Field, FieldElement, ZKMAffinePointTrait, FIELD_BYTES_SIZE_USIZE,

@@ -1,4 +1,4 @@
-//! An end-to-end-prover implementation for the zkMIPS zkVM.
+//! An end-to-end-prover implementation for the Ziren zkVM.
 //!
 //! Separates the proof generation process into multiple stages:
 //!
@@ -117,7 +117,7 @@ pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 pub type ShrinkAir<F> = RecursionAir<F, SHRINK_DEGREE>;
 pub type WrapAir<F> = RecursionAir<F, WRAP_DEGREE>;
 
-/// A end-to-end prover implementation for the zkMIPS zkVM.
+/// A end-to-end prover implementation for the Ziren zkVM.
 pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the core step.
     pub core_prover: C::CoreProver,
@@ -292,7 +292,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(program)
     }
 
-    /// Generate a proof of an zkMIPS program with the specified inputs.
+    /// Generate a proof of a Ziren program with the specified inputs.
     #[instrument(name = "execute", level = "info", skip_all)]
     pub fn execute<'a>(
         &'a self,

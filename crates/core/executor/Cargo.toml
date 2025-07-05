@@ -1,6 +1,6 @@
 [package]
 name = "zkm-core-executor"
-description = "zkMIPS executor"
+description = "Ziren executor"
 readme = "../../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

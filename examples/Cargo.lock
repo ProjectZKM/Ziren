@@ -1649,7 +1649,7 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
-source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#b812e455b9f59949c4cd9cdded2c9c7b4a2e1671"
+source = "git+https://github.com/ziren-patches/curve25519-dalek?branch=patch-4.1.3#b812e455b9f59949c4cd9cdded2c9c7b4a2e1671"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -1659,13 +1659,13 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
- "zkm-lib 1.0.0 (git+https://github.com/zkMIPS/zkMIPS)",
+ "zkm-lib 1.0.0 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
 name = "curve25519-dalek-derive"
 version = "0.1.1"
-source = "git+https://github.com/zkMIPS-patches/curve25519-dalek?branch=patch-4.1.3#b812e455b9f59949c4cd9cdded2c9c7b4a2e1671"
+source = "git+https://github.com/ziren-patches/curve25519-dalek?branch=patch-4.1.3#b812e455b9f59949c4cd9cdded2c9c7b4a2e1671"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2017,7 +2017,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "ecdsa"
 version = "0.16.9"
-source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#fed1f3bbd4207450cebcc6d601c226f2cccccb3b"
+source = "git+https://github.com/ziren-patches/signatures?branch=patch-ecdsa-0.16.9#fed1f3bbd4207450cebcc6d601c226f2cccccb3b"
 dependencies = [
  "der 0.7.10",
  "digest 0.10.7",
@@ -3831,7 +3831,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/zkMIPS-patches/elliptic-curves?branch=patch-k256-0.13.4#8b20cc93790f3a3e3d7bc2bf6dca2ce75c9dbdb2"
+source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-k256-0.13.4#8b20cc93790f3a3e3d7bc2bf6dca2ce75c9dbdb2"
 dependencies = [
  "cfg-if",
  "ecdsa",
@@ -3841,7 +3841,7 @@ dependencies = [
  "serdect",
  "sha2 0.10.8",
  "signature",
- "zkm-lib 1.0.0 (git+https://github.com/zkMIPS/zkMIPS)",
+ "zkm-lib 1.0.0 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -4461,14 +4461,14 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 [[package]]
 name = "p256"
 version = "0.13.2"
-source = "git+https://github.com/zkMIPS-patches/elliptic-curves?branch=patch-p256-0.13.2#2f750c6eb2445127ef38c8ebb3e91ed720cee03e"
+source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-p256-0.13.2#2f750c6eb2445127ef38c8ebb3e91ed720cee03e"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
  "hex",
  "primeorder",
  "sha2 0.10.8",
- "zkm-lib 1.0.0 (git+https://github.com/zkMIPS/zkMIPS)",
+ "zkm-lib 1.0.0 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -5192,7 +5192,7 @@ dependencies = [
 [[package]]
 name = "primeorder"
 version = "0.13.1"
-source = "git+https://github.com/zkMIPS-patches/elliptic-curves?branch=patch-p256-0.13.2#2f750c6eb2445127ef38c8ebb3e91ed720cee03e"
+source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-p256-0.13.2#2f750c6eb2445127ef38c8ebb3e91ed720cee03e"
 dependencies = [
  "elliptic-curve",
 ]
@@ -5732,7 +5732,7 @@ checksum = "fc7c8f7f733062b66dc1c63f9db168ac0b97a9210e247fa90fdc9ad08f51b302"
 [[package]]
 name = "rfc6979"
 version = "0.4.0"
-source = "git+https://github.com/zkMIPS-patches/signatures?branch=patch-ecdsa-0.16.9#fed1f3bbd4207450cebcc6d601c226f2cccccb3b"
+source = "git+https://github.com/ziren-patches/signatures?branch=patch-ecdsa-0.16.9#fed1f3bbd4207450cebcc6d601c226f2cccccb3b"
 dependencies = [
  "hmac",
  "subtle",
@@ -5832,7 +5832,7 @@ dependencies = [
 [[package]]
 name = "rsa"
 version = "0.9.6"
-source = "git+https://github.com/zkMIPS-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#ddbfba5a2a0789384d34a4820644c28b4531ef21"
+source = "git+https://github.com/ziren-patches/RustCrypto-RSA.git?branch=patch-rsa-0.9.6#ddbfba5a2a0789384d34a4820644c28b4531ef21"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -5849,7 +5849,7 @@ dependencies = [
  "spki 0.7.3",
  "subtle",
  "zeroize",
- "zkm-lib 1.0.0 (git+https://github.com/zkMIPS/zkMIPS)",
+ "zkm-lib 1.0.0 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -6415,7 +6415,7 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.8"
-source = "git+https://github.com/zkMIPS-patches/RustCrypto-hashes?branch=patch-sha2-0.10.8#62d9223ba171ef6d5b637b275c4b982f56d0a949"
+source = "git+https://github.com/ziren-patches/RustCrypto-hashes?branch=patch-sha2-0.10.8#62d9223ba171ef6d5b637b275c4b982f56d0a949"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -6692,7 +6692,7 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/zkMIPS-patches/bn?branch=patch-0.6.0#f7abdf37eda884458b940307a2cde9b97b1f1d92"
+source = "git+https://github.com/ziren-patches/bn?branch=patch-0.6.0#f7abdf37eda884458b940307a2cde9b97b1f1d92"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -6702,7 +6702,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "zkm-lib 1.0.0 (git+https://github.com/zkMIPS/zkMIPS)",
+ "zkm-lib 1.0.0 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -8619,14 +8619,14 @@ dependencies = [
 [[package]]
 name = "zkm-lib"
 version = "1.0.0"
-source = "git+https://github.com/zkMIPS/zkMIPS#9941c55a03607e4075dbd37f4cb22348811a7014"
+source = "git+https://github.com/ProjectZKM/Ziren#9941c55a03607e4075dbd37f4cb22348811a7014"
 dependencies = [
  "bincode",
  "cfg-if",
  "elliptic-curve",
  "serde",
  "sha2 0.10.8",
- "zkm-primitives 1.0.0 (git+https://github.com/zkMIPS/zkMIPS)",
+ "zkm-primitives 1.0.0 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -8649,7 +8649,7 @@ dependencies = [
 [[package]]
 name = "zkm-primitives"
 version = "1.0.0"
-source = "git+https://github.com/zkMIPS/zkMIPS#9941c55a03607e4075dbd37f4cb22348811a7014"
+source = "git+https://github.com/ProjectZKM/Ziren#9941c55a03607e4075dbd37f4cb22348811a7014"
 dependencies = [
  "bincode",
  "hex",
@@ -8970,4 +8970,4 @@ dependencies = [
 [[patch.unused]]
 name = "secp256k1"
 version = "0.29.1"
-source = "git+https://github.com/zkMIPS-patches/rust-secp256k1?branch=patch-0.29.1#c7e39ee0732d0e6b5c33721038f8f1b789f77c36"
+source = "git+https://github.com/ziren-patches/rust-secp256k1?branch=patch-0.29.1#c7e39ee0732d0e6b5c33721038f8f1b789f77c36"

@@ -74,7 +74,7 @@ pub struct ZKMRecursionShape {
     pub is_complete: bool,
 }
 
-/// A program for recursively verifying a batch of zkMIPS proofs.
+/// A program for recursively verifying a batch of Ziren proofs.
 #[derive(Debug, Clone, Copy)]
 pub struct ZKMRecursiveVerifier<C: Config, SC: KoalaBearFriConfig> {
     _phantom: PhantomData<(C, SC)>,
@@ -90,9 +90,9 @@ where
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
     <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
 {
-    /// Verify a batch of zkMIPS shard proofs and aggregate their public values.
+    /// Verify a batch of Ziren shard proofs and aggregate their public values.
     ///
-    /// This program represents a first recursive step in the verification of an zkMIPS proof
+    /// This program represents a first recursive step in the verification of a Ziren proof
     /// consisting of one or more shards. Each shard proof is verified and its public values are
     /// aggregated into a single set representing the start and end state of the program execution
     /// across all shards.
@@ -104,7 +104,7 @@ where
     /// of verifying the FRI proof for openings and verifying the constraints.
     ///
     /// ## Aggregating the shard public values.
-    /// See [ZKMProver::verify] for the verification algorithm of a complete zkMIPS proof. In this
+    /// See [ZKMProver::verify] for the verification algorithm of a complete Ziren proof. In this
     /// function, we are aggregating several shard proofs and attesting to an aggregated state which
     /// represents all the shards.
     ///

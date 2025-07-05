@@ -1,6 +1,6 @@
 [package]
 name = "zkm-curves"
-description = "zkMIPS"
+description = "Ziren curves"
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

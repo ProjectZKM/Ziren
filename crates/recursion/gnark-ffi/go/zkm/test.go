@@ -2,8 +2,8 @@ package zkm
 
 import (
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/poseidon2"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/poseidon2"
 )
 
 type TestPoseidon2KoalaBearCircuit struct {

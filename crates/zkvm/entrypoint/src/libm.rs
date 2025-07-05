@@ -1,4 +1,4 @@
-//! Ported from Entrypoint for zkMIPS zkVM.
+//! Ported from Entrypoint for Ziren zkVM.
 //!
 #[no_mangle]
 pub extern "C" fn acos(x: f64) -> f64 {

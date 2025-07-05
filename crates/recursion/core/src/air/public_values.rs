@@ -119,7 +119,7 @@ pub struct RecursionPublicValues<T> {
     /// End state of reconstruct_deferred_digest.
     pub end_reconstruct_deferred_digest: [T; POSEIDON_NUM_WORDS],
 
-    /// The commitment to the zkMIPS program being proven.
+    /// The commitment to the Ziren program being proven.
     pub zkm_vk_digest: [T; DIGEST_SIZE],
 
     /// The root of the vk merkle tree.

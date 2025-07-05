@@ -4,15 +4,15 @@
 <p align="center">
     <a href="https://discord.gg/zkm"><img src="https://img.shields.io/discord/700454073459015690?logo=discord"/></a>
     <a href="https://x.com/ProjectZKM"><img src="https://img.shields.io/twitter/follow/ProjectZKM?style=social"/></a>
-    <a href="https://GitHub.com/zkMIPS"><img src="https://img.shields.io/badge/contributors-22-ee8449"/></a>
+    <a href="https://GitHub.com/ProjectZKM"><img src="https://img.shields.io/badge/contributors-22-ee8449"/></a>
 </p>
 
-# zkMIPS
+# Ziren
 
-zkMIPS is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32r2 instruction set architecture(ISA).
+Ziren(formerly zkMIPS) is an open-source, simple, stable, and universal zero-knowledge virtual machine on MIPS32r2 instruction set architecture(ISA).
 
 
-zkMIPS is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. zkMIPS is fully open-source, equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, designed specifically to utilize zkMIPS, is a native asset cross-chain circulation protocol, with example application cases including the Metis Hybrid Rollup design and the GOAT Network Bitcoin L2.
+Ziren is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. Ziren is fully open-source, equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, designed specifically to utilize Ziren, is a native asset cross-chain circulation protocol, with example application cases including the Metis Hybrid Rollup design and the GOAT Network Bitcoin L2.
 
 
 ## Why MIPS vs other ISA's?
@@ -30,6 +30,6 @@ zkMIPS is the industry's first zero-knowledge proof virtual machine supporting t
 * MIPS has been successfully applied to Optimism's Fraud Proof VM.
 
 ## Acknowledgements
-zkMIPS draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
-- [Plonky3](https://github.com/Plonky3/Plonky3): zkMIPS proving backend is based on Plonky3.
-- [SP1](https://github.com/succinctlabs/sp1): zkMIPS circuit builder, recursion compiler, and precompiles originate from SP1.
+Ziren draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
+- [Plonky3](https://github.com/Plonky3/Plonky3): Ziren proving backend is based on Plonky3.
+- [SP1](https://github.com/succinctlabs/sp1): Ziren circuit builder, recursion compiler, and precompiles originate from SP1.

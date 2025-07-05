@@ -1,6 +1,6 @@
 [package]
 name = "zkm-prover"
-description = "zkMIPS prover"
+description = "Ziren prover"
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

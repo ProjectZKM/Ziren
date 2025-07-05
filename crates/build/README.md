@@ -1,7 +1,7 @@
 # zkm-build
-Lightweight crate used to build zkMIPS programs.
+Lightweight crate used to build a Ziren programs.
 
-Exposes `build_program`, which builds an zkMIPS program in the local environment or in a docker container with the specified parameters from `BuildArgs`.
+Exposes `build_program`, which builds a Ziren program in the local environment or in a docker container with the specified parameters from `BuildArgs`.
 
 ## Usage
 

@@ -21,7 +21,7 @@ use zkm_stark::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 
 use crate::{InnerSC, ZKMCoreProofData};
 
-/// Get the zkMIPS vkey KoalaBear Poseidon2 digest this reduce proof is representing.
+/// Get the Ziren vkey KoalaBear Poseidon2 digest this reduce proof is representing.
 pub fn zkm_vkey_digest_koalabear(
     proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>,
 ) -> [KoalaBear; 8] {
@@ -30,7 +30,7 @@ pub fn zkm_vkey_digest_koalabear(
     pv.zkm_vk_digest
 }
 
-/// Get the zkMIPS vkey Bn Poseidon2 digest this reduce proof is representing.
+/// Get the Ziren vkey Bn Poseidon2 digest this reduce proof is representing.
 pub fn zkm_vkey_digest_bn254(proof: &ZKMReduceProof<KoalaBearPoseidon2Outer>) -> Bn254Fr {
     koalabears_to_bn254(&zkm_vkey_digest_koalabear(proof))
 }

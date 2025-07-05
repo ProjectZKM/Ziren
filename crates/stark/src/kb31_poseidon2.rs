@@ -49,7 +49,7 @@ pub fn inner_perm() -> InnerPerm {
     poseidon2_init()
 }
 
-/// The FRI config for zkMIPS proofs.
+/// The FRI config for Ziren proofs.
 #[must_use]
 pub fn zkm_fri_config() -> FriConfig<InnerChallengeMmcs> {
     let perm = inner_perm();

@@ -1,6 +1,6 @@
-//! # zkMIPS SDK Utilities
+//! # Ziren SDK Utilities
 //!
-//! A collection of utilities for the zkMIPS SDK.
+//! A collection of utilities for the Ziren SDK.
 
 use alloy_signer::k256::sha2::{Digest, Sha256};
 use num_bigint::BigUint;

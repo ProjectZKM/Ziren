@@ -3,8 +3,8 @@ package poseidon2
 import (
 	"math/big"
 
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
 	"github.com/consensys/gnark/frontend"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
 )
 
 const KOALABEAR_WIDTH = 16
@@ -115,7 +115,7 @@ func (p *Poseidon2KoalaBearChip) externalLinearLayer(state *[KOALABEAR_WIDTH]koa
 
 // todo: update
 func (p *Poseidon2KoalaBearChip) diffusionPermuteMut(state *[KOALABEAR_WIDTH]koalabear.Variable) {
-	// Reference: https://github.com/zkMIPS/Plonky3/blob/main/koala-bear/src/poseidon2.rs#L10
+	// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/koala-bear/src/poseidon2.rs#L10
 	// V = [-2, 1, 2, 1/2, 3, 4, -1/2, -3, -4, 1/2^8, 1/8, 1/2^24, -1/2^8, -1/8, -1/16, -1/2^24]
 	matInternalDiagM1 := [KOALABEAR_WIDTH]koalabear.Variable{
 		koalabear.NewFConst("2130706431"),

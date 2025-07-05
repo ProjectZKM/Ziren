@@ -46,7 +46,7 @@ fn main() {
     stdin.write(&signature);
 
     // Instead of generating and verifying the proof each time while developing,
-    // execute the program with the zkMIPS runtime and read stdout.
+    // execute the program with the Ziren runtime and read stdout.
     //
     // let mut stdout = ZKMProver::execute(REGEX_IO_ELF, stdin).expect("proving failed");
     // let verified = stdout.read::<bool>();

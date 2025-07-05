@@ -93,7 +93,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfig
     // The powers of alpha, where the ith element is alpha^i.
     let mut alpha_pows: Vec<Ext<C::F, C::EF>> = vec![builder.eval(SymbolicExt::from_f(C::EF::ONE))];
 
-    // input_proof handler: https://github.com/zkMIPS/Plonky3/blob/main/fri/src/two_adic_pcs.rs#L375
+    // input_proof handler: https://github.com/ProjectZKM/Plonky3/blob/main/fri/src/two_adic_pcs.rs#L375
     let reduced_openings = fri_proof
         .query_proofs
         .iter()

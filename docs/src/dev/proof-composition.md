@@ -8,7 +8,7 @@ A receipt gives the results of your program along with proof that they were prod
 
 You can verify other receipts in the guest use `zkm_zkvm::lib::verify::verify_zkm_proof()`
 
-## Example: [Aggregation](https://github.com/zkMIPS/zkMIPS/tree/main/examples/aggregation)
+## Example: [Aggregation](https://github.com/ProjectZKM/Ziren/tree/main/examples/aggregation)
 
 ### Host
 
@@ -84,7 +84,7 @@ fn main() {
         // Write the proofs.
         //
         // Note: this data will not actually be read by the aggregation program, instead it will be
-        // witnessed by the prover during the recursive aggregation process inside zkMIPS itself.
+        // witnessed by the prover during the recursive aggregation process inside Ziren itself.
         for input in inputs {
             let ZKMProof::Compressed(proof) = input.proof.proof else { panic!() };
             stdin.write_proof(*proof, input.vk.vk);

@@ -1,4 +1,4 @@
-//! Ported from Entrypoint for zkMIPS zkVM.
+//! Ported from Entrypoint for Ziren zkVM.
 #![feature(asm_experimental_arch)]
 pub mod heap;
 pub mod syscalls;

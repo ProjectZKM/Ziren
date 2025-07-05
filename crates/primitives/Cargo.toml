@@ -1,6 +1,6 @@
 [package]
 name = "zkm-primitives"
-description = "zkMIPS primitives"
+description = "Ziren primitives"
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

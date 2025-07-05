@@ -31,9 +31,9 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
 	"github.com/consensys/gnark/test/unsafekzg"
-	zkm "github.com/zkMIPS/zkm-recursion-gnark/zkm"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/koalabear"
-	"github.com/zkMIPS/zkm-recursion-gnark/zkm/poseidon2"
+	zkm "github.com/ProjectZKM/zkm-recursion-gnark/zkm"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/poseidon2"
 )
 
 func main() {}

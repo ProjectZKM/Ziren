@@ -1,6 +1,6 @@
 [package]
 name = "zkm-sdk"
-description = "zkMIPS is a performant, 100% open-source, contributor-friendly zkVM."
+description = "Ziren is a performant, 100% open-source, contributor-friendly zkVM."
 readme = "../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

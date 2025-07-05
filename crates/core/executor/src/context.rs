@@ -7,10 +7,10 @@ use crate::{
     subproof::SubproofVerifier,
 };
 
-/// Context to run a program inside zkMIPS.
+/// Context to run a program inside Ziren.
 #[derive(Clone, Default)]
 pub struct ZKMContext<'a> {
-    /// The registry of hooks invocable from inside zkMIPS.
+    /// The registry of hooks invocable from inside Ziren.
     ///
     /// Note: `None` denotes the default list of hooks.
     pub hook_registry: Option<HookRegistry<'a>>,
@@ -82,7 +82,7 @@ impl<'a> ZKMContextBuilder<'a> {
 
     /// Add a runtime [Hook](super::Hook) into the context.
     ///
-    /// Hooks may be invoked from within zkMIPS by writing to the specified file descriptor `fd`
+    /// Hooks may be invoked from within Ziren by writing to the specified file descriptor `fd`
     /// with [`zkm_zkvm::io::write`], returning a list of arbitrary data that may be read
     /// with successive calls to [`zkm_zkvm::io::read`].
     pub fn hook(

@@ -1,6 +1,6 @@
 # Precompiles
 
-Precompiles are built into the zkMIPS to optimize the performance of zero-knowledge proofs (ZKPs) and related cryptographic operations. The goal is to enable more efficient handling of complex cryptographic tasks that would otherwise be computationally expensive if implemented in smart contracts.
+Precompiles are built into the Ziren to optimize the performance of zero-knowledge proofs (ZKPs) and related cryptographic operations. The goal is to enable more efficient handling of complex cryptographic tasks that would otherwise be computationally expensive if implemented in smart contracts.
 
 Within the zkVM, precompiles are made available as system calls executed through the `syscall` MIPS instruction. Each precompile is identified by a distinct system call number and provides a specific computational interface.
 
@@ -8,10 +8,10 @@ Within the zkVM, precompiles are made available as system calls executed through
 
 For advanced users, it's possible to directly interact with the precompiles through external system calls.
 
-Here is a list of all available [system calls & precompiles](https://github.com/zkMIPS/zkMIPS/blob/main/crates/zkvm/lib/src/lib.rs).
+Here is a list of all available [system calls & precompiles](https://github.com/ProjectZKM/Ziren/blob/main/crates/zkvm/lib/src/lib.rs).
 
 ```rust
-//! Syscalls for the zkMIPS zkVM.
+//! Syscalls for the Ziren zkVM.
 //!
 //! Documentation for these syscalls can be found in the zkVM entrypoint
 //! `zkm_zkvm::syscalls` module.
@@ -99,7 +99,7 @@ extern "C" {
     /// Exits unconstrained mode.
     pub fn syscall_exit_unconstrained();
 
-    /// Defers the verification of a valid zkMIPS zkVM proof.
+    /// Defers the verification of a valid Ziren zkVM proof.
     pub fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]);
 
     /// Returns the length of the next element in the hint stream.
@@ -162,7 +162,7 @@ extern "C" {
 }
 ```
 
-## Guest Example: [syscall_sha256_extend](https://github.com/zkMIPS/zkMIPS/tree/main/crates/test-artifacts/guests/sha-extend)
+## Guest Example: [syscall_sha256_extend](https://github.com/ProjectZKM/Ziren/tree/main/crates/test-artifacts/guests/sha-extend)
 
 In the guest program, you can call the precompile `syscall_sha256_extend()` in the following way:
 

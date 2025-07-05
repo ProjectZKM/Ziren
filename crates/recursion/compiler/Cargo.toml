@@ -1,6 +1,6 @@
 [package]
 name = "zkm-recursion-compiler"
-description = "zkMIPS recursion compiler"
+description = "Ziren recursion compiler"
 readme = "../../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

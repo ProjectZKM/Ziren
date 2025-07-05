@@ -1,4 +1,4 @@
-//! Programs that can be executed by the zkMIPS.
+//! Programs that can be executed by the Ziren.
 
 extern crate alloc;
 

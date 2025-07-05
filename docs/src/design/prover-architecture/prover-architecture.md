@@ -1,9 +1,9 @@
 # Prover Architecture
 
-zkMIPS's prover architecture employs a multi-stage proof composition strategy to achieve scalable zero-knowledge computation. The system combines novel constraint reduction techniques with optimized polynomial commitment schemes and constraint construction schemes, delivering 10x faster proving speeds compared to previous ZKM, and outperforming other zkVM implementations to date.
+Ziren's prover architecture employs a multi-stage proof composition strategy to achieve scalable zero-knowledge computation. The system combines novel constraint reduction techniques with optimized polynomial commitment schemes and constraint construction schemes, delivering 10x faster proving speeds compared to previous ZKM, and outperforming other zkVM implementations to date.
 
 ## Core Components
-The zkMIPS proving system implements a hierarchical verification model through four key components.
+The Ziren proving system implements a hierarchical verification model through four key components.
 
 - Runtime Executor
   

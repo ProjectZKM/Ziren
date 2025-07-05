@@ -1,6 +1,6 @@
 [package]
 name = "zkm-recursion-gnark-ffi"
-description = "zkMIPS recursion gnark ffi"
+description = "Ziren recursion gnark ffi"
 readme = "../../../README.md"
 version = { workspace = true }
 edition = { workspace = true }

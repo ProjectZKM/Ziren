@@ -1,6 +1,6 @@
 # Installation
 
-zkMIPS is now available for Linux and macOS systems.
+Ziren is now available for Linux and macOS systems.
 
 ## Requirements
 
@@ -9,15 +9,15 @@ zkMIPS is now available for Linux and macOS systems.
 
 ## Option 1: Quick Install
 
-To install the zkMIPS toolchain, use the `zkmup` installer. Simply open your terminal, run the command below, and follow the on-screen instructions:
+To install the Ziren toolchain, use the `zkmup` installer. Simply open your terminal, run the command below, and follow the on-screen instructions:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
 ```
 
 It will:
 - Download the `zkmup` installer.
-- Automatically utilize `zkmup` to install the latest zkMIPS Rust toolchain which has support for the `mipsel-zkm-zkvm-elf` compilation target.
+- Automatically utilize `zkmup` to install the latest Ziren Rust toolchain which has support for the `mipsel-zkm-zkvm-elf` compilation target.
 
 List all available toolchain versions:
 
@@ -26,11 +26,11 @@ $ zkmup list-available
 20250224 20250108 20241217
 ```
 
-Now you can run zkMIPS examples or unit tests.
+Now you can run Ziren examples or unit tests.
 
 ```
-git clone https://github.com/zkMIPS/zkMIPS
-cd zkMIPS && cargo test -r
+git clone https://github.com/ProjectZKM/Ziren
+cd Ziren && cargo test -r
 ```
 
 ### Troubleshooting
@@ -48,4 +48,4 @@ Currently, our prebuilt binaries are built for Ubuntu 22.04 and macOS. Systems r
 
 ## Option 2: Building from Source
 
-For more details, please refer to document [toolchain](https://github.com/zkMIPS/toolchain.git).
+For more details, please refer to document [toolchain](https://github.com/ProjectZKM/toolchain.git).

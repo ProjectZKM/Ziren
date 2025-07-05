@@ -8,7 +8,7 @@ The zkm_sdk crate provides all the necessary tools for proof generation. Key fea
 
 When generating Groth16 or PLONK proofs, the `ProverClient` automatically downloads the pre-generated proving key (pk) from a trusted setup by calling `try_install_circuit_artifacts()`.
 
-## Example: [Fibonacci](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/src/main.rs)
+## Example: [Fibonacci](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/src/main.rs)
 
 The following code is an example of using zkm_sdk in host.
 
@@ -57,10 +57,10 @@ fn main() {
 
 ## Proof Types
 
-zkMIPS provides customizable proof generation options:
+Ziren provides customizable proof generation options:
 
 ```rust
-/// A proof generated with zkMIPS of a particular proof mode.
+/// A proof generated with Ziren of a particular proof mode.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
@@ -81,7 +81,7 @@ pub enum ZKMProof {
 }
 ```
 
-### [Core Proof (Default)](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/src/main.rs)
+### [Core Proof (Default)](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/src/main.rs)
 
 The default prover mode generates a sequence of STARK proofs whose cumulative proof size scales linearly with the execution trace length.
 
@@ -90,7 +90,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).run().unwrap();
 ```
 
-### [Compressed Proof](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/bin/compressed.rs)
+### [Compressed Proof](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/bin/compressed.rs)
 
 The compressed proving mode generates constant-sized STARK proofs, but not suitable for on-chain verification.
 
@@ -99,7 +99,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).compressed().run().unwrap();
 ```
 
-### [Groth16 Proof (Recommended)](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/bin/groth16_bn254.rs)
+### [Groth16 Proof (Recommended)](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/bin/groth16_bn254.rs)
 
 The Groth16 proving mode ​generates succinct SNARK proofs with a compact size of approximately 260 bytes, ​and features on-chain verification.
 
@@ -108,7 +108,7 @@ let client = ProverClient::new();
 client.prove(&pk, stdin).groth16().run().unwrap();
 ```
 
-### [PLONK Proof](https://github.com/zkMIPS/zkMIPS/blob/main/examples/fibonacci/host/bin/plonk_bn254.rs)
+### [PLONK Proof](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci/host/bin/plonk_bn254.rs)
 
 The PLONK proving mode generates succinct SNARK proofs with a compact size of approximately 868 bytes, while maintaining on-chain verifiability. In contrast to Groth16, PLONK removes the dependency on trusted setup ceremonies.
 
@@ -119,7 +119,7 @@ client.prove(&pk, stdin).plonk().run().unwrap();
 
 ## Hardware Acceleration
 
-zkMIPS provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
+Ziren provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
 
 You can check your CPU's AVX compatibility by running:
 
@@ -147,11 +147,11 @@ Each stage may take a different amount of time.
 
 ### Requirements
 
-- **CA certificate:** `ca.pem`, `ca.key`. These keys are stored [here](https://github.com/zkMIPS/zkMIPS/tree/main/crates/sdk/tool)
+- **CA certificate:** `ca.pem`, `ca.key`. These keys are stored [here](https://github.com/ProjectZKM/Ziren/tree/main/crates/sdk/tool)
 - [Register](https://www.zkm.io/apply) your address to gain access.
-- **SDK dependency**: add `zkm_sdk` from the zkMIPS SDK to your `Cargo.toml`:
+- **SDK dependency**: add `zkm_sdk` from the Ziren SDK to your `Cargo.toml`:
 ```toml
-zkm-sdk = { git = "https://github.com/zkMIPS/zkMIPS", branch = "main" }
+zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", branch = "main" }
 ```
 ### Environment Variable Setup
 Before running your application, export the following environment variables to enable the network prover:
@@ -160,7 +160,7 @@ export ZKM_PRIVATE_KEY=<your_private_key>       # Private key corresponding to y
 export SSL_CERT_PATH=<path_to_ssl_certificate>  # Path to the SSL client certificate (e.g., ssl.pem)
 export SSL_KEY_PATH=<path_to_ssl_key>           # Path to the SSL client private key (e.g., ssl.key)
 ```
-You can generate the SSL certificate and key by running the [`certgen.sh`](https://github.com/zkMIPS/zkMIPS/blob/main/crates/sdk/tool/certgen.sh) script.
+You can generate the SSL certificate and key by running the [`certgen.sh`](https://github.com/ProjectZKM/Ziren/blob/main/crates/sdk/tool/certgen.sh) script.
 
 To host your own network prover, export the following variables to configure your endpoint:
 ```bash
