@@ -40,6 +40,9 @@ pub struct NetworkProver {
     pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
+    // Polling interval (seconds) for checking proof status,
+    // default is 5 seconds
+    pub poll_interval: u64,
 }
 
 impl NetworkProver {
@@ -91,7 +94,11 @@ impl NetworkProver {
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
-        Ok(NetworkProver { endpoint, wallet, local_prover })
+        let poll_interval = env::var("ZKM_PROOF_POLL_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(5);
+        Ok(NetworkProver { endpoint, wallet, local_prover, poll_interval })
     }
 
     pub async fn sign_ecdsa(&self, request: &mut GenerateProofRequest) -> Result<()> {
@@ -160,7 +167,7 @@ impl NetworkProver {
         proof_id: &str,
         kind: ZKMProofKind,
         timeout: Option<Duration>,
-    ) -> Result<(ZKMProof, ZKMPublicValues)> {
+    ) -> Result<(ZKMProof, ZKMPublicValues, u64)> {
         let start_time = Instant::now();
         let mut client = self.connect().await;
         loop {
@@ -179,7 +186,7 @@ impl NetworkProver {
                         Some(step) => log::info!("Generate_proof: {step}"),
                         None => todo!(),
                     }
-                    sleep(Duration::from_secs(5)).await;
+                    sleep(Duration::from_secs(self.poll_interval)).await;
                 }
                 Some(Status::Success) => {
                     let public_values = if kind == ZKMProofKind::CompressToGroth16 {
@@ -195,7 +202,11 @@ impl NetworkProver {
                     let proof: ZKMProof =
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                             .expect("Failed to deserialize proof");
-                    return Ok((proof, public_values));
+                    let cycles = get_status_response.total_steps;
+                    tracing::info!(
+                        "Proof generation completed successfully, proof_id: {proof_id}, cycles: {cycles}"
+                    );
+                    return Ok((proof, public_values, cycles));
                 }
                 _ => {
                     log::error!("generate_proof failed status: {}", get_status_response.status);
@@ -205,13 +216,13 @@ impl NetworkProver {
         }
     }
 
-    pub(crate) async fn prove(
+    pub async fn prove_with_cycles(
         &self,
         elf: &[u8],
         stdin: ZKMStdin,
         kind: ZKMProofKind,
         timeout: Option<Duration>,
-    ) -> Result<ZKMProofWithPublicValues> {
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
         bincode::serialize_into(&mut pri_buf, &private_input)?;
@@ -230,19 +241,22 @@ impl NetworkProver {
         let proof_id = self.request_proof(&prover_input, kind).await?;
 
         log::info!("calling wait_proof, proof_id={proof_id}");
-        let (proof, mut public_values) = self.wait_proof(&proof_id, kind, timeout).await?;
+        let (proof, mut public_values, cycles) = self.wait_proof(&proof_id, kind, timeout).await?;
 
         if kind == ZKMProofKind::CompressToGroth16 {
             assert_eq!(private_input.len(), 1);
             public_values = bincode::deserialize(private_input.last().unwrap())?;
         }
 
-        Ok(ZKMProofWithPublicValues {
-            proof,
-            public_values,
-            stdin,
-            zkm_version: ZKM_CIRCUIT_VERSION.to_string(),
-        })
+        Ok((
+            ZKMProofWithPublicValues {
+                proof,
+                public_values,
+                stdin,
+                zkm_version: ZKM_CIRCUIT_VERSION.to_string(),
+            },
+            cycles,
+        ))
     }
 }
 
@@ -269,7 +283,7 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove(&pk.elf, stdin, kind, None))
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, None)).map(|(proof, _)| proof)
     }
 }
 

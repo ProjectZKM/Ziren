@@ -2,6 +2,7 @@
 
 - [Introduction](./introduction/overview.md)
     - [Installation](./introduction/installation.md)
+    - [Quickstart](./introduction/quickstart.md)
     - [Performance](./introduction/performance.md)
 - [MIPS VM](./mips-vm/mips-vm.md)
     - [MIPS ISA](./mips-vm/mips-isa.md)

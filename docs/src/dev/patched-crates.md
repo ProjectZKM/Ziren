@@ -14,6 +14,7 @@ Patching a crate refers to replacing the implementation of a specific interface 
 | substrate-bn | `substrate-bn = { git = "https://github.com/ziren-patches/bn", branch = "patch-0.6.0" }` | 0.6.0 |
 | rsa               | `rsa = { git = "https://github.com/ziren-patches/RustCrypto-RSA.git", branch = "patch-rsa-0.9.6" }` | 0.9.6        |
 
+
 ## Using Patched Crates
 
 There are two approaches to using patched crates:
@@ -51,6 +52,7 @@ First, implement the target precompile in zkVM (e.g., `syscall_keccak_sponge`) w
 
 Then replace the target crate's existing implementation with the zkVM precompile (e.g., `syscall_keccak_sponge`). For example, we have reimplemented [keccak256](https://github.com/ProjectZKM/Ziren/blob/main/crates/zkvm/lib/src/keccak256.rs) by `syscall_keccak_sponge`, and use this implementation to replace `keccak256` in the [core](https://github.com/alloy-rs/core/compare/main...ziren-patches:core:patch-alloy-primitives-1.0.0) crate.
 
+
 ```rust
 if #[cfg(target_os = "zkvm")] {
     let output = zkm_zkvm::lib::keccak256::keccak256(bytes);
@@ -59,3 +61,4 @@ if #[cfg(target_os = "zkvm")] {
 ```
 
 Finally, we can use the patched crate [core](https://github.com/ziren-patches/core/tree/patch-alloy-primitives-1.0.0) in the [reth-processor](https://github.com/ProjectZKM/reth-processor/blob/main/bin/guest/Cargo.toml#L27).
+

@@ -1,0 +1,323 @@
+# Quickstart
+
+Get started with zkMIPS by executing, generating and verifying a proof for your custom program. 
+
+Overview of all the steps to create your zkMIPS proof: 
+
+1. Create a new project with using the zkMIPS project template or CLI
+2. Compile and execute your guest program 
+3. Generate a ZK proof of your program locally or via the proving network 
+4. Verify the proof of your program, including on-chain verification  
+
+## Creating a new project
+
+After installing the zkMIPS toolchain, you can create a new project either directly via the CLI or by cloning the project template. 
+
+### Using the CLI
+
+Install the CLI locally from source: 
+
+```rust
+cd zkMIPS/crates/cli
+cargo install --locked --force --path .
+```
+
+You can now create a bare new project using the `new` command: 
+
+```rust
+cargo prove new --bare <NEW_PROJECT>
+```
+
+To view additional CLI commands, including `build` for compiling a program and `vkey` for displaying the guest’s verification key hash: 
+
+```rust
+cargo prove --help
+```
+
+### Using the Project Template:
+
+You can also create a new project by cloning the [zkMIPS Project Template](https://www.notion.so/Quickstart-223e267c266d801dba7bcf4776e43f79?pvs=21), which includes: 
+
+- Guest and host Rust programs for proving a Fibonacci sequence
+- Solidity contracts for on-chain verification
+- Sample inputs/outputs and test data
+
+The project directory has the following structure: 
+
+```jsx
+.
+├── contracts
+│   ├── lib
+│   ├── script
+│   │   ├── ZKMVerifierGroth16.s.sol
+│   │   └── ZKMVerifierPlonk.s.sol
+│   ├── src
+│   │   ├── Fibonacci.sol
+│   │   ├── IZKMVerifier.sol
+│   │   ├── fixtures
+│   │   │   ├── groth16-fixture.json
+│   │   │   └── plonk-fixture.json
+│   │   └── v1.0.0
+│   │       ├── Groth16Verifier.sol
+│   │       ├── PlonkVerifier.sol
+│   │       ├── ZKMVerifierGroth16.sol
+│   │       └── ZKMVerifierPlonk.sol
+│   └── test
+│       ├── Fibonacci.t.sol
+│       ├── ZKMVerifierGroth16.t.sol
+│       └── ZKMVerifierPlonk.t.sol
+├── guest
+│   ├── Cargo.toml
+│   └── src
+│       └── main.rs
+├── host
+│   ├── Cargo.toml
+│   ├── bin
+│   │   ├── evm.rs
+│   │   └── vkey.rs
+│   ├── build.rs
+│   ├── src
+│   │   └── main.rs
+│   └── tool
+│       ├── ca.key
+│       ├── ca.pem
+│       └── certgen.sh
+```
+
+There are three main directories in the project: 
+
+guest: contains the guest program executed inside the zkVM.
+
+- `./guest/src/main.rs` : guest program that contains your core program logic to be executed inside the zkVM.
+
+host: contains the host program that controls the end-to-end process of compiling and executing the guest, generating a proof and outputting verifier artifacts. 
+
+- `./host/src/main.rs` : host program that contains the host logic for your program.
+- `./host/bin/evm.rs` and `./host/bin/vkey.rs` : used to generate EVM-compatible verifier artifacts and print the verifying key.
+- `./host/tool/` : contains the certificates and scripts for network proving.
+- `./host/build.rs`: contains custom build logic including compiling the guest to an ELF artifact whenever the host is built.
+
+contracts: contains the Solidity verifier smart contracts and test scripts for on-chain verification.
+
+- `contracts/src/Fibonacci.sol`: a sample Solidity contract demonstrating input/output structure for the Fibonacci program.
+- `IZKMVerifier.sol`: implemented zkMIPS interface for verifiers.
+- `fixtures/`: contains the public outputs, proof and verification keys in JSON format.
+- `v1.0.0/`: contains the Groth16 and PlONK verifier implementations and wrapper contracts.
+- `contracts/script/`: contains forge scripts to deploy the verifier contracts.
+- `contracts/test/`: contains Foundry tests to validate verifier functionality.
+
+`./guest/src/main.rs` and `./host/bin/main.rs` contain the host and guest implementation of the Fibonacci example. You can change the content of these programs to fit your intended use case. 
+
+## Building the program
+
+The guest program is compiled into a MIPS executable ELF through `./host/build.rs`. The generated ELF file is stored in `./target/elf-compilation`
+
+## Executing the program
+
+You can execute the program and display the output without generating a proof to check its output: 
+
+```jsx
+cd host
+cargo run --release -- --execute
+```
+
+Sample output for the Fibonacci program example in the template: 
+
+```
+n: 20
+Program executed successfully.
+n: 20
+a: 6765
+b: 10946
+Values are correct!
+Number of cycles: 6755
+```
+
+## Generating a proof for the program
+
+The generated ELF binary will be used for proof generation. Generate a proof for your guest program with the following command: 
+
+```rust
+cargo run --release -- --<PROOF_TYPE> // for core and compressed proofs 
+cargo run --release --bin evm -- --system <PROOF_TYPE>  // for EVM-compatible proofs
+```
+
+Within the project template, there are three types of proofs that can be generated:
+
+- Core proof — generated by default:
+
+```rust
+cargo run --release -- --core
+```
+
+- Compressed proof — constant in size, ideal for reducing costs:
+
+```rust
+cargo run --release -- --compressed
+```
+
+- EVM-compatible proof — includes PLONK and Groth16 proofs.
+
+For Groth16 proofs — recommended for on-chain proof generation: 
+
+```rust
+cd host
+cargo run --release --bin evm -- --system groth16
+```
+
+The output includes public values, the verifying keys, and proof bytes. An example output: 
+
+```
+n: 20
+Proof System: Groth16
+Setting environment variables took 7.967µs
+Reading R1CS took 13.859710286s
+Reading proving key took 1.053438083s
+Reading witness file took 162.594µs
+Deserializing JSON data took 8.149672ms
+Generating witness took 144.081308ms
+16:57:23 DBG constraint system solver done nbConstraints=7189516 took=1561.336988
+16:57:39 DBG prover done acceleration=none backend=groth16 curve=bn254 nbConstraints=7189516 took=16100.719342
+Generating proof took 17.662248261s
+ignoring uninitialized slice: Vars []frontend.Variable
+ignoring uninitialized slice: Vars []frontend.Variable
+ignoring uninitialized slice: Vars []frontend.Variable
+16:57:39 DBG verifier done backend=groth16 curve=bn254 took=0.720668
+Verification Key: 0x009f93857b6ce5bea9e982a82efa735aa57c0af27165b85ad17f21f9d3aae01a
+Public Values: 0x00000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000001a6d0000000000000000000000000000000000000000000000000000000000002ac2
+Proof Bytes: 0x00cd9fa*f08b496bc4ff57a76d69719938a872d4b95f2f638b5f21f2b0cef825606bc14032748e2a86a8dadb00de79f88c650fa2f83813e4f69661b15600d09e9f328b7332dddaeb8dc27519c906bea438929e5474fe76dc940ea6ec3b50ce898a54c339d1c1ece67e746335652d5afb0d950d19960ef34dc7885d99296cad3b1385f9c161ab54408afffb8143708737c89c54988b3512478b79affac241bd08ba4dc75da105764b63b6101fdf06cdbd136a371f932d769c2cd6ba4b699fa61a2bfb5ad5215b4b64f1388484291240faf87c09a04d8ee2a7c47d3f68c6509ab172fecfffd02a2edee4e7deaf93557e22bc99fd3d7f2bf1af15b40b7d09685e6b8d528a122
+```
+
+For PLONK proofs — larger in size compared to Groth16, but with no trusted setup: 
+
+```rust
+cargo run --release --bin evm -- --system plonk
+```
+
+Proof fixtures will be saved in `./contracts/src/fixtures/` to be used for on-chain verification. These contain the public outputs, proof and verification keys in JSON format. An example of `groth16-fixture.json` :
+
+```
+{
+  "a": 6765,
+  "b": 10946,
+  "n": 20,
+  "vkey": "0x009f93857b6ce5bea9e982a82efa735aa57c0af27165b85ad17f21f9d3aae01a",
+  "publicValues": "0x00000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000001a6d0000000000000000000000000000000000000000000000000000000000002ac2",
+  "proof": "0x00cd9faf08b496bc4ff57a76d69719938a872d4b95f2f638b5f21f2b0cef825606bc14032748e2a86a8dadb00de79f88c650fa2f83813e4f69661b15600d09e9f328b7332dddaeb8dc27519c906bea438929e5474fe76dc940ea6ec3b50ce898a54c339d1c1ece67e746335652d5afb0d950d19960ef34dc7885d99296cad3b1385f9c161ab54408afffb8143708737c89c54988b3512478b79affac241bd08ba4dc75da105764b63b6101fdf06cdbd136a371f932d769c2cd6ba4b699fa61a2bfb5ad5215b4b64f1388484291240faf87c09a04d8ee2a7c47d3f68c6509ab172fecfffd02a2edee4e7deaf93557e22bc99fd3d7f2bf1af15b40b7d09685e6b8d528a122"
+}
+```
+
+Note: EVM-compatible proofs e.g., Groth16, are more computationally intensive to generate but are required for on-chain verification. See [here](https://docs.zkm.io/dev/prover.html#proof-types) for more detailed explanations on the types of proofs zkMIPS offers. 
+
+Local proving is enabled by default as `ZKM_PROVER=network` in your `.env` file. It is recommended that you use ZKM’s Prover Network for heavier workloads. To enable network proving, following the instructions listed [here](https://docs.zkm.io/dev/prover.html#network-prover) and update your `.env` file: 
+
+```rust
+ZKM_PROVER=network
+ZKM_PRIVATE_KEY=<your_key>
+SSL_CERT_PATH=<path_to_cert>
+SSL_KEY_PATH=<path_to_key>
+```
+
+## Verifying a proof on-chain
+
+Once you’ve generated a proof, you can compile the verifier contract. To compile and execute all Foundry Solidity test files in the contracts directory: 
+
+```rust
+cd contracts
+forge test
+```
+
+Foundry will detect and run all test contracts to verify that 
+
+- The proof fixtures in `./contracts/src/fixtures` (either PLONK or Groth16) are correctly accepted or rejected.
+- The Solidity verifier contracts `ZKMVerifierGroth16.sol` and `ZKMVerifierPlonk.sol` behave correctly.
+- The application contract `Fibonacci.sol` integrates correctly with the verifiers.
+
+An example output with all passing tests: 
+
+```
+[⠊] Compiling...
+[⠊] Compiling 32 files with Solc 0.8.28
+[⠒] Solc 0.8.28 finished in 902.25ms
+Compiler run successful!
+
+Ran 2 tests for test/Fibonacci.t.sol:FibonacciGroth16Test
+[PASS] testRevert_InvalidFibonacciProof() (gas: 28279)
+[PASS] test_ValidFibonacciProof() (gas: 28825)
+Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 1.37ms (617.07µs CPU time)
+
+Ran 2 tests for test/Fibonacci.t.sol:FibonacciPlonkTest
+[PASS] testRevert_InvalidFibonacciProof() (gas: 29569)
+[PASS] test_ValidFibonacciProof() (gas: 29995)
+Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 1.42ms (608.57µs CPU time)
+
+Ran 2 tests for test/ZKMVerifierGroth16.t.sol:ZKMVerifierGroth16Test
+[PASS] test_RevertVerifyProof_WhenGroth16() (gas: 209970)
+[PASS] test_VerifyProof_WhenGroth16() (gas: 209948)
+Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 9.24ms (15.99ms CPU time)
+
+Ran 2 tests for test/ZKMVerifierPlonk.t.sol:ZKMVerifierPlonkTest
+[PASS] test_RevertVerifyProof_WhenPlonk() (gas: 282131)
+[PASS] test_VerifyProof_WhenPlonk() (gas: 282132)
+Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 10.94ms (18.99ms CPU time)
+
+Ran 4 test suites in 11.53ms (22.97ms CPU time): 8 tests passed, 0 failed, 0 skipped (8 total tests)
+```
+
+Once you’ve compiled the verifier contracts, you can deploy it to Sepolia or another EVM-compatible test network: 
+
+```rust
+forge script script/ZKMVerifierGroth16.s.sol:ZKMVerifierGroth16Script \
+  --rpc-url <RPC_URL> \
+  --private-key <YOUR_PRIVATE_KEY> --broadcast
+```
+
+- `<RPC_URL>`: Replace with your RPC endpoint (e.g., from Alchemy or Infura)
+- `<YOUR_PRIVATE_KEY>`: Replace with the private key of your wallet
+
+The command executes the `ZKMVerifierGroth16Script` script, which deploys the `ZKMVerifierGroth16` contract to the network. 
+
+To deploy to a different verifier, e.g., PLONK, replace the script name accordingly: 
+
+```rust
+forge script script/ZKMVerifierPlonk.s.sol:ZKMVerifierPlonkScript \
+  --rpc-url <RPC_URL> \
+  --private-key <YOUR_PRIVATE_KEY> --broadcast
+```
+
+The successful deployment output for a Groth16 proof on Sepolia: 
+
+```
+Script ran successfully.
+
+## Setting up 1 EVM.
+
+==========================
+
+Chain 11155111
+
+Estimated gas price: 0.002525776 gwei
+
+Estimated total gas used for script: 3185830
+
+Estimated amount required: 0.00000804669295408 ETH
+
+==========================
+
+##### sepolia
+✅  [Success] Hash: 0x2143e3239579833092460969bffe71b8f2b8cc8cc360a34f01203c22bc465abb
+Contract Address: 0x750Ad1b02000F6cC9Bc4E1F2dE2a85534D681841
+Block: 8664583
+Paid: 0.000004480767952712 ETH (2450639 gas * 0.001828408 gwei)
+
+✅ Sequence #1 on sepolia | Total Paid: 0.000004480767952712 ETH (2450639 gas * avg 0.001828408 gwei)
+                                                                                                                                                                     
+
+==========================
+
+ONCHAIN EXECUTION COMPLETE & SUCCESSFUL.
+
+Transactions saved to: /zkm-project-template/contracts/broadcast/ZKMVerifierGroth16.s.sol/11155111/run-latest.json
+
+Sensitive values saved to: /zkm-project-template/contracts/cache/ZKMVerifierGroth16.s.sol/11155111/run-latest.json
+```
