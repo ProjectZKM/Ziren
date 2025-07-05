@@ -44,6 +44,7 @@ wget https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONS
 
 ```bash
 git clone https://github.com/ProjectZKM/semaphore-gnark-11.git
+cd semaphore-gnark-11
 git checkout zkm2
 go build
 mv semaphore-mtb-setup semaphore-gnark-11
