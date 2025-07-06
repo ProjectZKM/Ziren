@@ -14,6 +14,7 @@ Ziren(formerly zkMIPS) is an open-source, simple, stable, and universal zero-kno
 
 Ziren is the industry's first zero-knowledge proof virtual machine supporting the MIPS instruction set, developed by the ZKM team, enabling zero-knowledge proof generation for general-purpose computation. Ziren is fully open-source, equipped with a comprehensive developer toolkit and an efficient proof network. The Entangled Rollup protocol, designed specifically to utilize Ziren, is a native asset cross-chain circulation protocol, with example application cases including the Metis Hybrid Rollup design and the GOAT Network Bitcoin L2.
 
+Learn more about Ziren at [docs.zkm.io](https://docs.zkm.io).
 
 ## Why MIPS vs other ISA's?
 
