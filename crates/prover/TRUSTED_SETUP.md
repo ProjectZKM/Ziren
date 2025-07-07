@@ -10,6 +10,8 @@ The Groth16 proof system requires a two-phase trusted setup:
 
 ## Prerequisites
 
+Download the Plonk SRS keys and prepare the directory to generate Groth16 setup keys.
+
 ```bash
 make build-circuits
 ```
