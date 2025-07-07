@@ -36,7 +36,7 @@ cargo prove --help
 
 ### Using the Project Template:
 
-You can also create a new project by cloning the [Ziren Project Template](https://www.notion.so/Quickstart-223e267c266d801dba7bcf4776e43f79?pvs=21), which includes: 
+You can also create a new project by cloning the [Ziren Project Template](https://github.com/ProjectZKM/zkm-project-template), which includes: 
 
 - Guest and host Rust programs for proving a Fibonacci sequence
 - Solidity contracts for on-chain verification
