@@ -1,24 +1,24 @@
 # Quickstart
 
-Get started with zkMIPS by executing, generating and verifying a proof for your custom program. 
+Get started with Ziren by executing, generating and verifying a proof for your custom program. 
 
-Overview of all the steps to create your zkMIPS proof: 
+Overview of all the steps to create your Ziren proof: 
 
-1. Create a new project with using the zkMIPS project template or CLI
+1. Create a new project with using the Ziren project template or CLI
 2. Compile and execute your guest program 
 3. Generate a ZK proof of your program locally or via the proving network 
 4. Verify the proof of your program, including on-chain verification  
 
 ## Creating a new project
 
-After installing the zkMIPS toolchain, you can create a new project either directly via the CLI or by cloning the project template. 
+After installing the Ziren toolchain, you can create a new project either directly via the CLI or by cloning the project template. 
 
 ### Using the CLI
 
 Install the CLI locally from source: 
 
 ```rust
-cd zkMIPS/crates/cli
+cd Ziren/crates/cli
 cargo install --locked --force --path .
 ```
 
@@ -36,7 +36,7 @@ cargo prove --help
 
 ### Using the Project Template:
 
-You can also create a new project by cloning the [zkMIPS Project Template](https://www.notion.so/Quickstart-223e267c266d801dba7bcf4776e43f79?pvs=21), which includes: 
+You can also create a new project by cloning the [Ziren Project Template](https://www.notion.so/Quickstart-223e267c266d801dba7bcf4776e43f79?pvs=21), which includes: 
 
 - Guest and host Rust programs for proving a Fibonacci sequence
 - Solidity contracts for on-chain verification
@@ -100,7 +100,7 @@ host: contains the host program that controls the end-to-end process of compilin
 contracts: contains the Solidity verifier smart contracts and test scripts for on-chain verification.
 
 - `contracts/src/Fibonacci.sol`: a sample Solidity contract demonstrating input/output structure for the Fibonacci program.
-- `IZKMVerifier.sol`: implemented zkMIPS interface for verifiers.
+- `IZKMVerifier.sol`: implemented Ziren interface for verifiers.
 - `fixtures/`: contains the public outputs, proof and verification keys in JSON format.
 - `v1.0.0/`: contains the Groth16 and PlONK verifier implementations and wrapper contracts.
 - `contracts/script/`: contains forge scripts to deploy the verifier contracts.
@@ -207,7 +207,7 @@ Proof fixtures will be saved in `./contracts/src/fixtures/` to be used for on-ch
 }
 ```
 
-Note: EVM-compatible proofs e.g., Groth16, are more computationally intensive to generate but are required for on-chain verification. See [here](https://docs.zkm.io/dev/prover.html#proof-types) for more detailed explanations on the types of proofs zkMIPS offers. 
+Note: EVM-compatible proofs e.g., Groth16, are more computationally intensive to generate but are required for on-chain verification. See [here](https://docs.zkm.io/dev/prover.html#proof-types) for more detailed explanations on the types of proofs Ziren offers. 
 
 Local proving is enabled by default as `ZKM_PROVER=network` in your `.env` file. It is recommended that you use ZKM’s Prover Network for heavier workloads. To enable network proving, following the instructions listed [here](https://docs.zkm.io/dev/prover.html#network-prover) and update your `.env` file: 
 
