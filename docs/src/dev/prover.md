@@ -27,7 +27,7 @@ fn main() {
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
 
-    // Create a `ProverClient` method.
+    // Create a `ProverClient` instance.
     let client = ProverClient::new();
 
     // Execute the guest using the `ProverClient.execute` method, without generating a proof.
