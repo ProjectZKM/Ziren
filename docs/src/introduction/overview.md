@@ -47,7 +47,7 @@ Ziren is the world's first MIPS-based zkVM, achieving the industry-leading perfo
 
 - Hardware Acceleration
 
-  Ziren supports AVX2/512 and GPU acceleration. The GPU prover can achieve 5x faster than CPU prover.
+  Ziren supports AVX2/512 and GPU acceleration. The GPU prover can achieve 30x faster for Core proof, 15x for Aggregation proof and 30x for BN254 Wrapping proof than CPU prover. 
  
 - Integrating Cutting-edge Industry Advancements
 
