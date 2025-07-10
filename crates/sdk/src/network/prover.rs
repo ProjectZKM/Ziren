@@ -131,6 +131,12 @@ impl NetworkProver {
         let seg_size =
             env::var("SHARD_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or_default();
 
+        // set the maximum number of prover nodes needed for the proof generation
+        let max_prover_num = env::var("MAX_PROVER_NUM")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+
         let from_step =
             if kind == ZKMProofKind::CompressToGroth16 { Some(Step::InAgg.into()) } else { None };
 
@@ -151,6 +157,7 @@ impl NetworkProver {
             target_step: Some(target_step.into()),
             from_step,
             receipt_inputs: input.receipts,
+            max_prover_num,
             ..Default::default()
         };
 

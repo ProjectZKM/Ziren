@@ -162,6 +162,14 @@ export SSL_KEY_PATH=<path_to_ssl_key>           # Path to the SSL client private
 ```
 You can generate the SSL certificate and key by running the [`certgen.sh`](https://github.com/ProjectZKM/Ziren/blob/main/crates/sdk/tool/certgen.sh) script.
 
+**Optional**: You can also set the following environment variables to customize the network prover behavior:
+
+```bash
+export SHARD_SIZE=<shard_size>            # Size of each shard in bytes. 
+export MAX_PROVER_NUM=<max_prover_num>      # Maximum number of provers to use in parallel.
+```
+
+
 To host your own network prover, export the following variables to configure your endpoint:
 ```bash
 export ENDPOINT=<proof_network_endpoint>        # Proof network endpoint (default: https://152.32.186.45:20002)
