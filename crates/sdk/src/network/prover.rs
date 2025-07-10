@@ -146,6 +146,7 @@ impl NetworkProver {
         let mut request = GenerateProofRequest {
             proof_id: proof_id.clone(),
             elf_data: input.elf.clone(),
+            elf_id: input.elf_id.clone(),
             private_input_stream: input.private_inputstream.clone(),
             seg_size,
             target_step: Some(target_step.into()),
@@ -221,11 +222,18 @@ impl NetworkProver {
         elf: &[u8],
         stdin: ZKMStdin,
         kind: ZKMProofKind,
+        elf_id: Option<String>, // The SHA-256 hash of the ELF, without the 0x prefix
         timeout: Option<Duration>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
+        if elf.is_empty() && elf_id.is_none() {
+            log::error!("Please provide `elf` or `elf_id`");
+            bail!("Please provide `elf` or `elf_id`");
+        }
+
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
         bincode::serialize_into(&mut pri_buf, &private_input)?;
+
         let mut receipts = Vec::new();
         let proofs = stdin.proofs.clone();
         // todo: adapt to proof network after its updating
@@ -235,7 +243,7 @@ impl NetworkProver {
             receipts.push(receipt);
         }
         let prover_input =
-            ProverInput { elf: elf.to_vec(), private_inputstream: pri_buf, receipts };
+            ProverInput { elf: elf.to_vec(), private_inputstream: pri_buf, elf_id, receipts };
 
         log::info!("calling request_proof.");
         let proof_id = self.request_proof(&prover_input, kind).await?;
@@ -283,7 +291,7 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, None)).map(|(proof, _)| proof)
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, None, None)).map(|(proof, _)| proof)
     }
 }
 
