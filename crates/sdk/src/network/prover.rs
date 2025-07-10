@@ -127,7 +127,7 @@ impl NetworkProver {
             .expect("connect: {self.endpoint:?}")
     }
 
-    async fn request_proof(&self, input: &ProverInput, kind: ZKMProofKind) -> Result<String> {
+    async fn request_proof(&self, input: ProverInput, kind: ZKMProofKind) -> Result<String> {
         let seg_size =
             env::var("SHARD_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or_default();
 
@@ -142,23 +142,24 @@ impl NetworkProver {
             unimplemented!("unsupported ZKMProofKind")
         };
 
-        let proof_id = uuid::Uuid::new_v4().to_string();
         let mut request = GenerateProofRequest {
-            proof_id: proof_id.clone(),
-            elf_data: input.elf.clone(),
-            elf_id: input.elf_id.clone(),
-            private_input_stream: input.private_inputstream.clone(),
+            proof_id: uuid::Uuid::new_v4().to_string(),
+            elf_data: input.elf,
+            elf_id: input.elf_id,
+            private_input_stream: input.private_inputstream,
             seg_size,
             target_step: Some(target_step.into()),
             from_step,
+            receipt_inputs: input.receipts,
             ..Default::default()
         };
-        for receipt_input in input.receipts.iter() {
-            request.receipt_inputs.push(receipt_input.clone());
-        }
+
         self.sign_ecdsa(&mut request).await?;
         let mut client = self.connect().await;
+
+        let start = tokio::time::Instant::now();
         let response = client.generate_proof(request).await?.into_inner();
+        tracing::info!("[request proof] get response: {:?}", start.elapsed());
 
         Ok(response.proof_id)
     }
@@ -246,7 +247,7 @@ impl NetworkProver {
             ProverInput { elf: elf.to_vec(), private_inputstream: pri_buf, elf_id, receipts };
 
         log::info!("calling request_proof.");
-        let proof_id = self.request_proof(&prover_input, kind).await?;
+        let proof_id = self.request_proof(prover_input, kind).await?;
 
         log::info!("calling wait_proof, proof_id={proof_id}");
         let (proof, mut public_values, cycles) = self.wait_proof(&proof_id, kind, timeout).await?;
