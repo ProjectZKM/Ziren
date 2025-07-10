@@ -89,7 +89,29 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         stdin: ZKMStdin,
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
-        self.prove_impl(pk, stdin, ProofOpts::default(), ZKMContext::default(), kind)
+        self.prove_impl(pk, stdin, ProofOpts::default(), ZKMContext::default(), kind, None)
+    }
+
+    /// Prove the execution of a MIPS ELF with the given inputs, according to the given proof mode.
+    /// elf_id:
+    ///    The SHA-256 hash of the ELF, without the 0x prefix.
+    ///    If this field is not none, the network prover will use it to index the cached ELF.
+    fn prove_with_cycles(
+        &self,
+        pk: &ZKMProvingKey,
+        stdin: &ZKMStdin,
+        kind: ZKMProofKind,
+        elf_id: Option<String>,
+    ) -> Result<(ZKMProofWithPublicValues, Option<u64>)> {
+        let proof = self.prove_impl(
+            pk,
+            stdin.clone(),
+            ProofOpts::default(),
+            ZKMContext::default(),
+            kind,
+            elf_id,
+        )?;
+        Ok((proof, None))
     }
 
     /// Prove the execution of a MIPS ELF with the given inputs, according to the given proof mode.
@@ -100,6 +122,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
+        elf_id: Option<String>,
     ) -> Result<ZKMProofWithPublicValues>;
 
     /// Verify that a Ziren proof is valid given its vkey and metadata.
@@ -214,8 +237,9 @@ impl Prover<DefaultProverComponents> for ProverClient {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
+        elf_id: Option<String>,
     ) -> Result<ZKMProofWithPublicValues> {
-        self.prover.prove_impl(pk, stdin, opts, context, kind)
+        self.prover.prove_impl(pk, stdin, opts, context, kind, elf_id)
     }
 
     fn verify(

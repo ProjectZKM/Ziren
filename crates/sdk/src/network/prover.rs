@@ -228,14 +228,11 @@ impl NetworkProver {
         elf: &[u8],
         stdin: ZKMStdin,
         kind: ZKMProofKind,
-        elf_id: Option<String>, // The SHA-256 hash of the ELF, without the 0x prefix
+        // The SHA-256 hash of the ELF, without the 0x prefix.
+        // If this field is not none, the network prover will use it to index the cached ELF.
+        elf_id: Option<String>,
         timeout: Option<Duration>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
-        if elf.is_empty() && elf_id.is_none() {
-            log::error!("Please provide `elf` or `elf_id`");
-            bail!("Please provide `elf` or `elf_id`");
-        }
-
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
         bincode::serialize_into(&mut pri_buf, &private_input)?;
@@ -248,8 +245,10 @@ impl NetworkProver {
             bincode::serialize_into(&mut receipt, &proof)?;
             receipts.push(receipt);
         }
-        let prover_input =
-            ProverInput { elf: elf.to_vec(), private_inputstream: pri_buf, elf_id, receipts };
+
+        let elf = if elf_id.is_none() { elf.to_vec() } else { Default::default() };
+
+        let prover_input = ProverInput { elf, private_inputstream: pri_buf, elf_id, receipts };
 
         log::info!("calling request_proof.");
         let proof_id = self.request_proof(prover_input, kind).await?;
@@ -296,8 +295,20 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         _opts: ProofOpts,
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
+        elf_id: Option<String>,
     ) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, None, None)).map(|(proof, _)| proof)
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, None)).map(|(proof, _)| proof)
+    }
+
+    fn prove_with_cycles(
+        &self,
+        pk: &ZKMProvingKey,
+        stdin: &ZKMStdin,
+        kind: ZKMProofKind,
+        elf_id: Option<String>, // The SHA-256 hash of the ELF, without the 0x prefix
+    ) -> Result<(ZKMProofWithPublicValues, Option<u64>)> {
+        block_on(self.prove_with_cycles(&pk.elf, stdin.clone(), kind, elf_id, None))
+            .map(|(proof, cycles)| (proof, Some(cycles)))
     }
 }
 

@@ -54,6 +54,7 @@ impl Prover<DefaultProverComponents> for MockProver {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
+        _elf_id: Option<String>,
     ) -> Result<ZKMProofWithPublicValues> {
         match kind {
             ZKMProofKind::Core => {

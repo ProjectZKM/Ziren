@@ -84,6 +84,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
+        _elf_id: Option<String>,
     ) -> Result<ZKMProofWithPublicValues> {
         if kind == ZKMProofKind::CompressToGroth16 {
             return self.compress_to_groth16(stdin, opts);

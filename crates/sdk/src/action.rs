@@ -131,7 +131,7 @@ impl<'a> Prove<'a> {
         // Dump the program and stdin to files for debugging if `ZKM_DUMP` is set.
         crate::utils::zkm_dump(&pk.elf, &stdin);
 
-        prover.prove_impl(pk, stdin, proof_opts, context, kind)
+        prover.prove_impl(pk, stdin, proof_opts, context, kind, None)
     }
 
     /// Set the proof kind to the core mode. This is the default.
