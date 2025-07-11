@@ -38,7 +38,7 @@ jobs:
       - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
       - run: source ~/.zkm-toolchain/env && cd crates/test-artifacts && cargo build && cd ../..
       - name: Install Dependencies
-        run: sudo apt install protobuf-compiler
+        run: sudo apt update && sudo apt install protobuf-compiler
       - run: cargo clippy --all-targets -- -D warnings
   test:
     name: Cargo Test
