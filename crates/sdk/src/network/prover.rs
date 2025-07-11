@@ -296,19 +296,8 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
         elf_id: Option<String>,
-    ) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, None)).map(|(proof, _)| proof)
-    }
-
-    fn prove_with_cycles(
-        &self,
-        pk: &ZKMProvingKey,
-        stdin: &ZKMStdin,
-        kind: ZKMProofKind,
-        elf_id: Option<String>, // The SHA-256 hash of the ELF, without the 0x prefix
-    ) -> Result<(ZKMProofWithPublicValues, Option<u64>)> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin.clone(), kind, elf_id, None))
-            .map(|(proof, cycles)| (proof, Some(cycles)))
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, None))
     }
 }
 

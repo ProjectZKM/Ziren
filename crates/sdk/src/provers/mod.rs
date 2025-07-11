@@ -89,7 +89,9 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         stdin: ZKMStdin,
         kind: ZKMProofKind,
     ) -> Result<ZKMProofWithPublicValues> {
-        self.prove_impl(pk, stdin, ProofOpts::default(), ZKMContext::default(), kind, None)
+        let proof =
+            self.prove_impl(pk, stdin, ProofOpts::default(), ZKMContext::default(), kind, None)?;
+        Ok(proof.0)
     }
 
     /// Prove the execution of a MIPS ELF with the given inputs, according to the given proof mode.
@@ -102,16 +104,15 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         stdin: &ZKMStdin,
         kind: ZKMProofKind,
         elf_id: Option<String>,
-    ) -> Result<(ZKMProofWithPublicValues, Option<u64>)> {
-        let proof = self.prove_impl(
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
+        self.prove_impl(
             pk,
             stdin.clone(),
             ProofOpts::default(),
             ZKMContext::default(),
             kind,
             elf_id,
-        )?;
-        Ok((proof, None))
+        )
     }
 
     /// Prove the execution of a MIPS ELF with the given inputs, according to the given proof mode.
@@ -123,7 +124,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
         elf_id: Option<String>,
-    ) -> Result<ZKMProofWithPublicValues>;
+    ) -> Result<(ZKMProofWithPublicValues, u64)>;
 
     /// Verify that a Ziren proof is valid given its vkey and metadata.
     /// For Plonk proofs, verifies that the public inputs of the PlonkBn254 proof match
@@ -238,7 +239,7 @@ impl Prover<DefaultProverComponents> for ProverClient {
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
         elf_id: Option<String>,
-    ) -> Result<ZKMProofWithPublicValues> {
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
         self.prover.prove_impl(pk, stdin, opts, context, kind, elf_id)
     }
 
