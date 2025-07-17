@@ -3913,6 +3913,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "large-sum"
+version = "1.1.0"
+dependencies = [
+ "zkm-zkvm",
+]
+
+[[package]]
+name = "large-sum-host"
+version = "1.1.0"
+dependencies = [
+ "hex",
+ "rand 0.8.5",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

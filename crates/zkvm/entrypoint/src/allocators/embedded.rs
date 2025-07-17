@@ -33,7 +33,6 @@ struct EmbeddedAlloc;
 
 unsafe impl GlobalAlloc for EmbeddedAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        panic!("alloced memory in the reserved input region is not allowed");
         INNER_HEAP.alloc(layout)
     }
 
@@ -42,6 +41,7 @@ unsafe impl GlobalAlloc for EmbeddedAlloc {
         if (ptr as usize) >= EMBEDDED_RESERVED_INPUT_START {
             return;
         }
+
         // Deallocating other memory is allowed.
         INNER_HEAP.dealloc(ptr, layout)
     }

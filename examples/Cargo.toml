@@ -33,6 +33,8 @@ members = [
   "tendermint/host",
   "unconstrained/guest",
   "unconstrained/host",
+  "large-sum/guest",
+  "large-sum/host",
 ]
 resolver = "2"
 
