@@ -35,7 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           toolchain: nightly-2025-06-30
-      - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/zkMIPS/toolchain/refs/heads/main/setup.sh | sh
+      - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
       - run: source ~/.zkm-toolchain/env && cd crates/test-artifacts && cargo build && cd ../..
       - name: Install Dependencies
         run: sudo apt update && sudo apt install protobuf-compiler

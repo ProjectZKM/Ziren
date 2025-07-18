@@ -36,12 +36,15 @@ pub mod stage_service {
 use crate::network::prover::stage_service::{Status, Step};
 use crate::provers::{ProofOpts, ProverType};
 
+const DEFAULT_POLL_INTERVAL: u64 = 3000; // 3s
+const MIN_POLL_INTERVAL: u64 = 100; // 100ms
+
 pub struct NetworkProver {
     pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
-    // Polling interval (seconds) for checking proof status,
-    // default is 5 seconds
+    // Polling interval (milliseconds) for checking proof status,
+    // default is 3000 milliseconds
     pub poll_interval: u64,
 }
 
@@ -94,10 +97,15 @@ impl NetworkProver {
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
-        let poll_interval = env::var("ZKM_PROOF_POLL_INTERVAL")
+        let mut poll_interval = env::var("ZKM_PROOF_POLL_INTERVAL")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(5);
+            .unwrap_or(DEFAULT_POLL_INTERVAL);
+
+        if poll_interval < MIN_POLL_INTERVAL {
+            poll_interval = MIN_POLL_INTERVAL;
+        }
+
         Ok(NetworkProver { endpoint, wallet, local_prover, poll_interval })
     }
 
@@ -193,7 +201,7 @@ impl NetworkProver {
                         Some(step) => log::info!("Generate_proof: {step}"),
                         None => todo!(),
                     }
-                    sleep(Duration::from_secs(self.poll_interval)).await;
+                    sleep(Duration::from_millis(self.poll_interval)).await;
                 }
                 Some(Status::Success) => {
                     let public_values = if kind == ZKMProofKind::CompressToGroth16 {
