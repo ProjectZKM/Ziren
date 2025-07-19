@@ -1,6 +1,6 @@
 # STARK Aggregation
 
-'s STARK aggregation system decomposes complex program proofs into parallelizable shard proofs and recursively compresses them into a single STARK proof. 
+Ziren's STARK aggregation system decomposes complex program proofs into parallelizable shard proofs and recursively compresses them into a single STARK proof. 
 
 ## Shard Proof Generation
 
