@@ -13,7 +13,7 @@ impl<V> Default for Page<V> {
 
 const LOG_PAGE_LEN: usize = 12;
 const PAGE_LEN: usize = 1 << LOG_PAGE_LEN;
-const MAX_PAGE_COUNT: usize = ((1 << 31) - (1 << 27)) / 4 / PAGE_LEN + 1;
+const MAX_PAGE_COUNT: usize = ((1 << 31) - (1 << 24)) / 4 / PAGE_LEN + 1;
 const NO_PAGE: u16 = u16::MAX;
 const PAGE_MASK: usize = PAGE_LEN - 1;
 
