@@ -127,7 +127,7 @@ impl<V: Copy> PagedMemory<V> {
     }
 
     /// Returns an iterator over the occupied addresses.
-    pub fn keys(&self) -> impl Iterator<Item=u32> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item = u32> + '_ {
         self.index.iter().enumerate().filter(|(_, &i)| i != NO_PAGE).flat_map(|(i, index)| {
             let upper = i << LOG_PAGE_LEN;
             self.page_table[*index as usize]
@@ -261,7 +261,7 @@ impl<'a, V: Copy> OccupiedEntry<'a, V> {
 }
 
 impl<V: Copy> FromIterator<(u32, V)> for PagedMemory<V> {
-    fn from_iter<T: IntoIterator<Item=(u32, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (u32, V)>>(iter: T) -> Self {
         let mut mmu = Self::default();
         for (k, v) in iter {
             mmu.insert(k, v);
@@ -273,7 +273,7 @@ impl<V: Copy> FromIterator<(u32, V)> for PagedMemory<V> {
 impl<V: Copy + 'static> IntoIterator for PagedMemory<V> {
     type Item = (u32, V);
 
-    type IntoIter = Box<dyn Iterator<Item=Self::Item>>;
+    type IntoIter = Box<dyn Iterator<Item = Self::Item>>;
 
     fn into_iter(mut self) -> Self::IntoIter {
         Box::new(self.index.into_iter().enumerate().filter(|(_, i)| *i != NO_PAGE).flat_map(
