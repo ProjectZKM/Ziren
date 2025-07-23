@@ -56,12 +56,13 @@ impl NetworkProver {
         let endpoint =
             Some(env::var("ENDPOINT").unwrap_or("https://152.32.186.45:20002".to_string()));
         let domain_name = Some(env::var("DOMAIN_NAME").unwrap_or("stage".to_string()));
-        // Default ca cert directory
-        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let ca_cert_path = Some(
-            env::var("CA_CERT_PATH")
-                .unwrap_or(manifest_dir.join("tool/ca.pem").to_string_lossy().to_string()),
-        );
+
+        let ca_cert_path = if env::var("CA_CERT_PATH").is_ok() {
+            Some(env::var("CA_CERT_PATH").unwrap())
+        } else {
+            None
+        };
+
         let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
         let ssl_key_path = env::var("SSL_KEY_PATH").ok();
         let ssl_config = if ca_cert_path.as_ref().is_none() {
