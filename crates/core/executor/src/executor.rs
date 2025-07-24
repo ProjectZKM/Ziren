@@ -593,9 +593,13 @@ impl<'a> Executor<'a> {
     pub fn mr_cpu(&mut self, addr: u32, position: MemoryAccessPosition) -> u32 {
         // Assert that the address is aligned.
         assert_valid_memory_access!(addr, position);
-
         // Read the address from memory and create a memory read record.
         let record = self.mr(addr, self.shard(), self.timestamp(&position), None);
+
+        if position != MemoryAccessPosition::Memory {
+            // If the position is not Memory, we are reading from a register.
+            log::info!("pc: {:X} read register {}, {:X}", self.state.pc, addr, record.value);
+        }
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
@@ -1039,8 +1043,9 @@ impl<'a> Executor<'a> {
         let mut hi_or_prev_a = None;
         let mut syscall_code = 0u32;
 
+        let print_registers = self.state.next_is_delayslot;
         self.state.next_is_delayslot = false;
-
+       
         if self.executor_mode == ExecutorMode::Trace {
             self.memory_accesses = MemoryAccessRecord::default();
         }
@@ -1107,6 +1112,10 @@ impl<'a> Executor<'a> {
                 b = self.rr(Register::A0, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
                 let mut prev_a = syscall_id;
+                println!(
+                    "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
+                    self.state.pc, syscall_id, b, c
+                );
 
                 if self.print_report && !self.unconstrained {
                     self.report.syscall_counts[syscall] += 1;
@@ -1283,7 +1292,17 @@ impl<'a> Executor<'a> {
                 return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
             }
         }
-
+        log::debug!(
+            "Executing instruction: {:?} at PC: {:08X}, Next PC: {:08X}, Next Next PC: {:08X}， a: {:08X}, b: {:08X}, c: {:08X}, hi_or_prev_a: {:?}",
+            instruction,
+            pc,
+            next_pc,
+            next_next_pc,
+            a,
+            b,
+            c,
+            hi_or_prev_a
+        );
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
             self.emit_events(
@@ -1305,6 +1324,20 @@ impl<'a> Executor<'a> {
         // Update the program counter.
         self.state.pc = next_pc;
         self.state.next_pc = next_next_pc;
+
+        if print_registers {
+            let mut regs = [0u32; 34];
+            for reg in 0..34 {
+                regs[reg] = self.register((reg as u8).into());
+            }
+
+            log::debug!(
+                "PC: {:08X}, Next PC: {:08X} regs {:08X?}\n",
+                self.state.pc,
+                self.state.next_pc,
+                regs
+            );
+        }
 
         // Update the clk to the next cycle.
         self.state.clk += 5;

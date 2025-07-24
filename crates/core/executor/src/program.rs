@@ -23,6 +23,9 @@ use zkm_stark::LookupKind;
 
 use crate::{Instruction, MipsAirId};
 
+pub const MAX_MEMORY: usize = 0x7F000000;
+pub const MAX_CODE_MEMORY: usize = 0x3F000000;
+pub const INIT_SP: u32 = MAX_MEMORY as u32 - 0x4000;
 pub const WORD_SIZE: usize = core::mem::size_of::<u32>();
 
 /// A program that can be executed by the ZKM.
@@ -47,7 +50,7 @@ impl Program {
 
     /// Initialize a MIPS Program from an appropriate ELF file
     pub fn from(elf_code: &[u8]) -> Result<Program> {
-        let max_mem = 0x80000000; // todo: confirm it
+        let max_mem = MAX_CODE_MEMORY as u32;
 
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();
         let elf = ElfBytes::<LittleEndian>::minimal_parse(elf_code)
@@ -61,6 +64,9 @@ impl Program {
         if elf.ehdr.e_type != elf::abi::ET_EXEC {
             bail!("Invalid ELF type, must be executable");
         }
+
+        let mut patch_list: BTreeMap<u32, u32> = BTreeMap::new();
+        patch_elf(&elf, &mut patch_list);
         let entry: u32 = elf
             .ehdr
             .e_entry
@@ -110,6 +116,8 @@ impl Program {
                 hiaddr = a;
             }
 
+            let mut hiaddr = 0u32;
+
             let offset: u32 = segment
                 .p_offset
                 .try_into()
@@ -125,11 +133,15 @@ impl Program {
                 } else {
                     let mut word = 0;
                     // Don't read past the end of the file.
-                    let len = core::cmp::min(file_size - i, WORD_SIZE as u32);
-                    for j in 0..len {
-                        let offset = (offset + i + j) as usize;
-                        let byte = elf_code.get(offset).context("Invalid segment offset")?;
-                        word |= (*byte as u32) << (j * 8);
+                    if patch_list.contains_key(&addr) {
+                        word = patch_list[&addr];
+                    } else {
+                        let len = core::cmp::min(file_size - i, WORD_SIZE as u32);
+                        for j in 0..len {
+                            let offset = (offset + i + j) as usize;
+                            let byte = elf_code.get(offset).context("Invalid segment offset")?;
+                            word |= (*byte as u32) << (j * 8);
+                        }
                     }
                     image.insert(addr, word);
                     // todo: check it
@@ -137,8 +149,16 @@ impl Program {
                         instructions.push(word);
                     }
                 }
+                if addr > hiaddr {
+                    hiaddr = addr;
+                }
             }
         }
+
+        image.insert(34, hiaddr); // $brk
+        image.insert(35, 0x20000000); // $heap
+
+        patch_stack(&mut image);
 
         // decode each instruction
         let instructions: Vec<_> =
@@ -170,6 +190,124 @@ impl Program {
         let idx = ((pc - self.pc_base) / 4) as usize;
         self.instructions[idx]
     }
+}
+
+pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32, u32>) {
+    let symbols = f
+        .symbol_table()
+        .expect("failed to read symbols table, cannot patch program")
+        .expect("failed to parse symbols table, cannot patch program");
+
+    for symbol in symbols.0 {
+        match symbols.1.get(symbol.st_name as usize) {
+            Ok(name) => match name {
+                "runtime.gcenable"
+                | "runtime.init.5"
+                | "runtime.main.func1"
+                | "runtime.deductSweepCredit"
+                | "runtime.(*gcControllerState).commit"
+                | "github.com/prometheus/client_golang/prometheus.init"
+                | "github.com/prometheus/client_golang/prometheus.init.0"
+                | "github.com/prometheus/procfs.init"
+                | "github.com/prometheus/common/model.init"
+                | "github.com/prometheus/client_model/go.init"
+                | "github.com/prometheus/client_model/go.init.0"
+                | "github.com/prometheus/client_model/go.init.1"
+                | "flag.init"
+                | "runtime.check"
+                | "runtime.checkfds"
+                | "_dl_discover_osversion" => {
+                    patch_list.insert(
+                        symbol.st_value as u32,
+                        0x03e00008, // jalr $ra, $zero
+                    );
+                    patch_list.insert(
+                        (symbol.st_value + 4) as u32,
+                        0x0, // nop
+                    );
+                }
+                "runtime.MemProfileRate" => {
+                    patch_list.insert(
+                        symbol.st_value as u32,
+                        0x0, // nop
+                    );
+                }
+                _ => {
+                    if name.contains("sys_common") && name.contains("thread_info") {
+                        patch_list.insert(
+                            symbol.st_value as u32,
+                            0x03e00008, // jalr $ra, $zero
+                        );
+                        patch_list.insert(
+                            (symbol.st_value + 4) as u32,
+                            0x0, // nop
+                        );
+                    }
+                }
+            },
+            Err(e) => {
+                log::warn!("parse symbol failed, {}", e);
+                continue;
+            }
+        }
+    }
+}
+
+pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
+    let sp: u32 = INIT_SP;
+
+    image.insert(29, sp); // $sp
+
+    let mut store_mem = |addr: u32, v: u32| {
+        image.insert(addr, v);
+    };
+
+    let index = 0;
+    // init argc,  argv, aux on stack
+    store_mem(sp, index);
+    let mut cur_sp = sp + 4 * (index + 1);
+    store_mem(cur_sp, 0x00); // argv[n] = 0 (terminating argv)
+    cur_sp += 4;
+    store_mem(cur_sp, 0x00); // envp[term] = 0 (no env vars)
+    cur_sp += 4;
+
+    store_mem(cur_sp, 0x06); // auxv[0] = _AT_PAGESZ = 6 (key)
+    store_mem(cur_sp + 4, 0x1000); // auxv[1] = page size of 4 KiB (value)
+    cur_sp += 8;
+
+    store_mem(cur_sp, 0x0b); // auxv[0] = AT_UID = 11 (key)
+    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Real uid (value)
+    cur_sp += 8;
+    store_mem(cur_sp, 0x0c); // auxv[0] = AT_EUID = 12 (key)
+    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Effective uid (value)
+    cur_sp += 8;
+    store_mem(cur_sp, 0x0d); // auxv[0] = AT_GID = 13 (key)
+    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Real gid (value)
+    cur_sp += 8;
+    store_mem(cur_sp, 0x0e); // auxv[0] = AT_EGID = 14 (key)
+    store_mem(cur_sp + 4, 0x3e8); // auxv[1] = Effective gid (value)
+    cur_sp += 8;
+    store_mem(cur_sp, 0x10); // auxv[0] = AT_HWCAP = 16 (key)
+    store_mem(cur_sp + 4, 0x00); // auxv[1] =  arch dependent hints at CPU capabilities (value)
+    cur_sp += 8;
+    store_mem(cur_sp, 0x11); // auxv[0] = AT_CLKTCK = 17 (key)
+    store_mem(cur_sp + 4, 0x64); // auxv[1] = Frequency of times() (value)
+    cur_sp += 8;
+    store_mem(cur_sp, 0x17); // auxv[0] = AT_SECURE = 23 (key)
+    store_mem(cur_sp + 4, 0x00); // auxv[1] = secure mode boolean (value)
+    cur_sp += 8;
+
+    store_mem(cur_sp, 0x19); // auxv[4] = AT_RANDOM = 25 (key)
+    store_mem(cur_sp + 4, cur_sp + 12); // auxv[5] = address of 16 bytes containing random value
+    cur_sp += 8;
+    store_mem(cur_sp, 0); // auxv[term] = 0
+    cur_sp += 4;
+    store_mem(cur_sp, 0x5f28df1d); // auxv[term] = 0
+    store_mem(cur_sp + 4, 0x2cd1002a); // auxv[term] = 0
+    store_mem(cur_sp + 8, 0x5ff9f682); // auxv[term] = 0
+    store_mem(cur_sp + 12, 0xd4d8d538); // auxv[term] = 0
+    cur_sp += 16;
+    store_mem(cur_sp, 0x00); // auxv[term] = 0
 }
 
 impl<F: PrimeField32> MachineProgram<F> for Program {

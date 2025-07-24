@@ -7,6 +7,7 @@ mod deferred;
 mod halt;
 mod hint;
 pub(crate) mod precompiles;
+mod sys_linux;
 mod unconstrained;
 mod verify;
 mod write;
@@ -32,6 +33,7 @@ use precompiles::{
         double::WeierstrassDoubleAssignSyscall,
     },
 };
+use sys_linux::*;
 
 use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
 use verify::VerifySyscall;
@@ -226,6 +228,16 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
         SyscallCode::BLS12381_DECOMPRESS,
         Arc::new(WeierstrassDecompressSyscall::<Bls12381>::new()),
     );
+
+    syscall_map.insert(SyscallCode::SYS_BRK, Arc::new(SysBrkSyscall));
+    syscall_map.insert(SyscallCode::SYS_READ, Arc::new(SysReadSyscall));
+    syscall_map.insert(SyscallCode::SYS_WRITE, Arc::new(SysWriteSyscall));
+    syscall_map.insert(SyscallCode::SYS_EXT_GROUP, Arc::new(SysExitGroupSyscall));
+    syscall_map.insert(SyscallCode::SYS_MMAP, Arc::new(SysMmapSyscall));
+    syscall_map.insert(SyscallCode::SYS_MMAP2, Arc::new(SysMmapSyscall));
+    syscall_map.insert(SyscallCode::SYS_CLONE, Arc::new(SysCloneSyscall));
+    syscall_map.insert(SyscallCode::SYS_FCNTL, Arc::new(SysFcntlSyscall));
+    syscall_map.insert(SyscallCode::SYS_NOP, Arc::new(SysNopSyscall));
 
     syscall_map
 }
