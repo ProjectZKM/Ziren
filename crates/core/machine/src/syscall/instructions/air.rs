@@ -112,8 +112,8 @@ impl SyscallInstrsChip {
 
         // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
         // with different information.
-        let syscall_id = syscall_code[0];
-        let send_to_table = syscall_code[1];
+        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
+        let send_to_table = syscall_code[2];
 
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
@@ -122,7 +122,7 @@ impl SyscallInstrsChip {
         builder.send_syscall(
             local.shard,
             local.clk,
-            syscall_id,
+            syscall_id.clone(),
             local.op_b_value.reduce::<AB>(),
             local.op_c_value.reduce::<AB>(),
             send_to_table,
@@ -133,7 +133,7 @@ impl SyscallInstrsChip {
         let is_enter_unconstrained = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id
+                syscall_id.clone()
                     - AB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
                 local.is_enter_unconstrained,
                 local.is_real.into(),
@@ -145,7 +145,8 @@ impl SyscallInstrsChip {
         let is_hint_len = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
+                syscall_id.clone()
+                    - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
                 local.is_hint_len,
                 local.is_real.into(),
             );
@@ -301,7 +302,7 @@ impl SyscallInstrsChip {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.prev_a_value;
 
-        let syscall_id = syscall_code[0];
+        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
 
         // Compute whether this syscall is HALT.
         let is_halt = {
@@ -330,13 +331,13 @@ impl SyscallInstrsChip {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.prev_a_value;
 
-        let syscall_id = syscall_code[0];
+        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
 
         // Compute whether this syscall is COMMIT.
         let is_commit = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
+                syscall_id.clone() - AB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
                 local.is_commit,
                 local.is_real.into(),
             );
@@ -368,7 +369,7 @@ impl SyscallInstrsChip {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.prev_a_value;
 
-        let num_extra_cycles = syscall_code[2];
+        let num_extra_cycles = syscall_code[3];
 
         // If `is_real = 0`, then the return value is `0` regardless of `num_extra_cycles`.
         // If `is_real = 1`, then `num_extra_cycles` will be correct.
