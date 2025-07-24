@@ -593,9 +593,13 @@ impl<'a> Executor<'a> {
     pub fn mr_cpu(&mut self, addr: u32, position: MemoryAccessPosition) -> u32 {
         // Assert that the address is aligned.
         assert_valid_memory_access!(addr, position);
-
         // Read the address from memory and create a memory read record.
         let record = self.mr(addr, self.shard(), self.timestamp(&position), None);
+
+        if position != MemoryAccessPosition::Memory {
+            // If the position is not Memory, we are reading from a register.
+            log::debug!("pc: {:X} read register {}, {:X}", self.state.pc, addr, record.value);
+        }
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
@@ -710,7 +714,7 @@ impl<'a> Executor<'a> {
                 record.hi,
             );
         } else {
-            log::info!("wrong {}\n", instruction.opcode);
+            log::debug!("wrong {}\n", instruction.opcode);
             unreachable!()
         }
     }
@@ -1110,6 +1114,13 @@ impl<'a> Executor<'a> {
                 b = self.rr(Register::A0, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
                 let mut prev_a = syscall_id;
+                log::debug!(
+                    "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
+                    self.state.pc,
+                    syscall_id,
+                    b,
+                    c
+                );
 
                 if self.print_report && !self.unconstrained {
                     self.report.syscall_counts[syscall] += 1;
@@ -2188,7 +2199,7 @@ impl<'a> Executor<'a> {
 
     #[allow(dead_code)]
     fn show_regs(&self) {
-        let regs = (0..34).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
+        let regs = (0..36).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
     }
 }

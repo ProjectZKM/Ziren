@@ -42,6 +42,7 @@ pub(crate) mod mips_chips {
                 edwards::{EdAddAssignChip, EdDecompressChip},
                 keccak_sponge::KeccakSpongeChip,
                 sha256::{ShaCompressChip, ShaExtendChip},
+                sys_linux::SysLinuxChip,
                 u256x2048_mul::U256x2048MulChip,
                 uint256::Uint256MulChip,
                 weierstrass::{
@@ -168,6 +169,8 @@ pub enum MipsAir<F: PrimeField32> {
     Bn254Fp2Mul(Fp2MulAssignChip<Bn254BaseField>),
     /// A precompile for BN-254 fp2 addition/subtraction.
     Bn254Fp2AddSub(Fp2AddSubAssignChip<Bn254BaseField>),
+    /// A precompile for Linux Syscall.
+    SysLinux(SysLinuxChip),
 }
 
 impl<F: PrimeField32> MipsAir<F> {
@@ -423,6 +426,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
 
+        let sys_linux = Chip::new(MipsAir::SysLinux(SysLinuxChip::default()));
+        costs.insert(sys_linux.name(), sys_linux.cost());
+        chips.push(sys_linux);
+
         (chips, costs)
     }
 
@@ -617,6 +624,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
+            Self::SysLinux(_) => SyscallCode::SYS_LINUX,
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
             Self::DivRem(_) => unreachable!("Invalid for core chip"),
