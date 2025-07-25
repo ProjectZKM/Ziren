@@ -63,7 +63,7 @@ pub fn poseidon2_impl(input: &[u8], out_byte_len: usize) -> Vec<u8> {
         }
     }
 
-    let result = state.into_iter().map(|x| x.to_le_bytes()).flatten().collect::<Vec<u8>>();
+    let result = state.into_iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
 
     result[..out_byte_len].to_vec()
 }
