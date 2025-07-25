@@ -28,6 +28,7 @@ pub fn poseidon2_128(input: &[u8]) -> [u8; 16] {
     result.try_into().unwrap()
 }
 
+#[inline]
 pub fn poseidon2_impl(input: &[u8], out_byte_len: usize) -> Vec<u8> {
     let l = input.len();
     let mut padded_input = input.to_vec();
