@@ -1,7 +1,10 @@
 use crate::{
     global::GlobalChip,
     memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
-    syscall::precompiles::fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
+    syscall::precompiles::{
+        fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
+        poseidon2::Poseidon2PermuteChip,
+    },
 };
 use core::fmt;
 use hashbrown::{HashMap, HashSet};
@@ -137,6 +140,8 @@ pub enum MipsAir<F: PrimeField32> {
     Secp256r1Add(WeierstrassAddAssignChip<SwCurve<Secp256r1Parameters>>),
     /// A precompile for doubling a point on the Elliptic curve secp256r1.
     Secp256r1Double(WeierstrassDoubleAssignChip<SwCurve<Secp256r1Parameters>>),
+    /// A precompile for the Poseidon2 permutation
+    Poseidon2Permute(Poseidon2PermuteChip),
     /// A precompile for the Keccak Sponge
     KeccakSponge(KeccakSpongeChip),
     /// A precompile for addition on the Elliptic curve bn254.
@@ -261,6 +266,10 @@ impl<F: PrimeField32> MipsAir<F> {
             >::new()));
         costs.insert(secp256r1_double_assign.name(), secp256r1_double_assign.cost());
         chips.push(secp256r1_double_assign);
+
+        let poseidon2_permute = Chip::new(MipsAir::Poseidon2Permute(Poseidon2PermuteChip::new()));
+        costs.insert(poseidon2_permute.name(), poseidon2_permute.cost());
+        chips.push(poseidon2_permute);
 
         let keccak_sponge = Chip::new(MipsAir::KeccakSponge(KeccakSpongeChip::new()));
         costs.insert(keccak_sponge.name(), 24 * keccak_sponge.cost());
@@ -627,6 +636,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp(_) => SyscallCode::BLS12381_FP_ADD,
             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
+            Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),

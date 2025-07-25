@@ -154,6 +154,9 @@ pub enum SyscallCode {
 
     /// Executes the `BN254_FP2_MUL` precompile.
     BN254_FP2_MUL = 0x00_01_01_2B,
+
+    /// Executes the `POSEIDON2_PERMUTE` precompile.
+    POSEIDON2_PERMUTE = 0x00_00_01_30,
 }
 
 impl SyscallCode {
@@ -199,6 +202,7 @@ impl SyscallCode {
             0x00_01_01_2A => SyscallCode::BN254_FP2_SUB,
             0x00_01_01_2B => SyscallCode::BN254_FP2_MUL,
             0x00_00_01_1C => SyscallCode::BLS12381_DECOMPRESS,
+            0x00_00_01_30 => SyscallCode::POSEIDON2_PERMUTE,
             _ => panic!("invalid syscall number: {}", value),
         }
     }
@@ -531,7 +535,7 @@ mod tests {
                     assert_eq!(code as u32, zkm_zkvm::syscalls::UINT256_MUL)
                 }
                 SyscallCode::U256X2048_MUL => {
-                     assert_eq!(code as u32, zkm_zkvm::syscalls::U256X2048_MUL)
+                    assert_eq!(code as u32, zkm_zkvm::syscalls::U256X2048_MUL)
                 }
                 SyscallCode::COMMIT => assert_eq!(code as u32, zkm_zkvm::syscalls::COMMIT),
                 SyscallCode::COMMIT_DEFERRED_PROOFS => {

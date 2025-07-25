@@ -23,6 +23,8 @@ members = [
   "keccak-precompile/host",
   "plonk/guest",
   "plonk/host",
+  "poseidon2/guest",
+  "poseidon2/host",
   "regex/guest",
   "regex/host",
   "rsa/guest",

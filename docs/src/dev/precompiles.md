@@ -8,7 +8,8 @@ Within the zkVM, precompiles are made available as system calls executed through
 
 For advanced users, it's possible to directly interact with the precompiles through external system calls.
 
-Here is a list of all available [system calls & precompiles](https://github.com/ProjectZKM/Ziren/blob/main/crates/zkvm/lib/src/lib.rs).
+Here is a list of all
+available [system calls & precompiles](https://github.com/ProjectZKM/Ziren/blob/main/crates/zkvm/lib/src/lib.rs).
 
 ```rust
 //! Syscalls for the Ziren zkVM.
@@ -82,6 +83,9 @@ extern "C" {
 
     /// Executes the Keccak Sponge
     pub fn syscall_keccak_sponge(input: *const u32, result: *mut [u32; 17]);
+
+    /// Executes the Poseidon2 permutation
+    pub fn syscall_poseidon2_permute(state: *mut [u32; 16]);
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
@@ -158,7 +162,6 @@ extern "C" {
 
     /// Executes a BN254 Fp2 multiplication on the given inputs.
     pub fn syscall_bn254_fp2_mulmod(p: *mut u32, q: *const u32);
-
 }
 ```
 

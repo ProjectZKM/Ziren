@@ -5160,6 +5160,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "poseidon2"
+version = "1.1.0"
+dependencies = [
+ "zkm-zkvm",
+]
+
+[[package]]
+name = "poseidon2-host"
+version = "1.1.0"
+dependencies = [
+ "hex",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8540,6 +8556,7 @@ dependencies = [
  "p3-field",
  "p3-koala-bear",
  "p3-maybe-rayon",
+ "p3-symmetric",
  "rand 0.8.5",
  "rayon-scan",
  "rrs-succinct",

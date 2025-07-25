@@ -4,7 +4,7 @@ use strum_macros::EnumIter;
 
 /// System Calls.
 ///
-/// A system call is invoked by the the `syscall` instruction with a specific value in register t0.
+/// A system call is invoked by the `syscall` instruction with a specific value in register V0.
 /// The syscall number is a 32-bit integer with the following little-endian layout:
 ///
 /// | Byte 0 | Byte 1 | Byte 2 | Byte 3 |
@@ -140,6 +140,9 @@ pub enum SyscallCode {
     /// Executes the `SECP256R1_DECOMPRESS` precompile.
     SECP256R1_DECOMPRESS = 0x00_00_01_2E,
 
+    /// Executes the `POSEIDON2_PERMUTE` precompile.
+    POSEIDON2_PERMUTE = 0x00_00_01_30,
+
     UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
 
@@ -189,6 +192,7 @@ impl SyscallCode {
             0x00_01_01_2C => SyscallCode::SECP256R1_ADD,
             0x00_00_01_2D => SyscallCode::SECP256R1_DOUBLE,
             0x00_00_01_2E => SyscallCode::SECP256R1_DECOMPRESS,
+            0x00_00_01_30 => SyscallCode::POSEIDON2_PERMUTE,
             // _ => panic!("invalid syscall number: {value}"),
             _ => SyscallCode::UNIMPLEMENTED,
         }
