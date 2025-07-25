@@ -37,11 +37,11 @@ where
         for i in 0..WIDTH {
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
-                local.state_mem[i].prev_value().clone(),
+                *local.state_mem[i].prev_value(),
                 local.pre_state_range_check_cols[i],
                 local.is_real.into(),
             );
-            let pre_state_word = local.state_mem[i].prev_value().clone().0;
+            let pre_state_word = local.state_mem[i].prev_value().0;
             let pre_state = pre_state_word
                 .iter()
                 .enumerate()
@@ -62,11 +62,11 @@ where
         for i in 0..WIDTH {
             KoalaBearWordRangeChecker::<AB::F>::range_check(
                 builder,
-                local.state_mem[i].value().clone(),
+                *local.state_mem[i].value(),
                 local.post_state_range_check_cols[i],
                 local.is_real.into(),
             );
-            let post_state_word = local.state_mem[i].value().clone().0;
+            let post_state_word = local.state_mem[i].value().0;
             let post_state = post_state_word
                 .iter()
                 .enumerate()
