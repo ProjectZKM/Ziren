@@ -74,7 +74,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
 
         // Check the flags are of valid form.
 
-        // Verrify that only one flag is set to one.
+        // Verify that only one flag is set to one.
         let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in self.byte_flags.iter() {
             // Assert that the flag is boolean.
@@ -182,7 +182,7 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
 
         // Check the flags are of valid form.
 
-        // Verrify that only one flag is set to one.
+        // Verify that only one flag is set to one.
         let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in self.bit_flags.iter() {
             // Assert that the flag is boolean.
