@@ -70,7 +70,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// Fix the shape of the proof.
     pub fn fix_shape(&self, record: &mut ExecutionRecord) -> Result<(), CoreShapeError> {
         if record.program.preprocessed_shape.is_none() {
-            return Err(CoreShapeError::PrepcocessedShapeMissing);
+            return Err(CoreShapeError::PreprocessedShapeMissing);
         }
         if record.shape.is_some() {
             return Err(CoreShapeError::ShapeAlreadyFixed);
@@ -80,7 +80,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // program.
         record.shape.clone_from(&record.program.preprocessed_shape);
 
-        // If this is a packed "core" record where the cpu events are alongisde the memory init and
+        // If this is a packed "core" record where the cpu events are alongside the memory init and
         // finalize events, try to fix the shape using the tiny shapes.
         if record.contains_cpu()
             && (!record.global_memory_finalize_events.is_empty()
@@ -608,7 +608,7 @@ pub enum CoreShapeError {
     #[error("no shape found {0:?}")]
     ShapeError(HashMap<String, usize>),
     #[error("Preprocessed shape missing")]
-    PrepcocessedShapeMissing,
+    PreprocessedShapeMissing,
     #[error("Shape already fixed")]
     ShapeAlreadyFixed,
     #[error("Precompile not included in allowed shapes {0:?}")]

@@ -239,7 +239,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
 }
 
 impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
-    /// Allows an evaluation over opetations specified by boolean flags.
+    /// Allows an evaluation over operations specified by boolean flags.
     #[allow(clippy::too_many_arguments)]
     pub fn eval_variable<AB: ZKMAirBuilder<Var = V>>(
         &self,

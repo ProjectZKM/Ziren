@@ -21,7 +21,7 @@ pub struct FixedShiftRightOperation<T> {
     /// The shift output of `shrcarry` on each byte of a word.
     pub shift: Word<T>,
 
-    /// The carry ouytput of `shrcarry` on each byte of a word.
+    /// The carry output of `shrcarry` on each byte of a word.
     pub carry: Word<T>,
 }
 
