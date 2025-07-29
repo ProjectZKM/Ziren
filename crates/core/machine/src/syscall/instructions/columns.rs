@@ -26,6 +26,8 @@ pub struct SyscallInstrColumns<T> {
     /// operation.
     pub is_halt: T,
 
+    pub is_sys_linux: T,
+
     /// The access columns for the first operand.
     pub op_a_value: Word<T>,
     /// The value of the second operand.
@@ -43,6 +45,9 @@ pub struct SyscallInstrColumns<T> {
 
     /// Whether the current syscall is HALT.
     pub is_halt_check: IsZeroOperation<T>,
+
+    /// Whether the current syscall is HALT.
+    pub is_exit_group_check: IsZeroOperation<T>,
 
     /// Whether the current syscall is a COMMIT.
     pub is_commit: IsZeroOperation<T>,

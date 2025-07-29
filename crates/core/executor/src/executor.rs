@@ -1045,7 +1045,7 @@ impl<'a> Executor<'a> {
 
         let print_registers = self.state.next_is_delayslot;
         self.state.next_is_delayslot = false;
-       
+
         if self.executor_mode == ExecutorMode::Trace {
             self.memory_accesses = MemoryAccessRecord::default();
         }

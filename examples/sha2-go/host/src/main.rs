@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum DataId {
     TYPE1,
@@ -63,7 +62,7 @@ fn prove_sha2_go() {
     let mut stdin = ZKMStdin::new();
     stdin.write(&data);
 
- // Create a `ProverClient` method.
+    // Create a `ProverClient` method.
     let client = ProverClient::new();
 
     // Execute the guest using the `ProverClient.execute` method, without generating a proof.

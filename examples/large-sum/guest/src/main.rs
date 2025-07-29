@@ -18,6 +18,5 @@ pub fn main() {
         total_sum += sum;
     }
 
-    
     zkm_zkvm::io::commit::<u64>(&total_sum);
 }

@@ -7,7 +7,6 @@ mod deferred;
 mod halt;
 mod hint;
 pub(crate) mod precompiles;
-mod sys_linux;
 mod unconstrained;
 mod verify;
 mod write;
@@ -28,6 +27,11 @@ use precompiles::{
     keccak::sponge::KeccakSpongeSyscall,
     poseidon2::permute::Poseidon2PermuteSyscall,
     sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
+    sys_linux::{
+        sysbrk::SysBrkSyscall, sysclone::SysCloneSyscall, sysexitgroup::SysExitGroupSyscall,
+        sysfcntl::SysFcntlSyscall, sysmmap::SysMmapSyscall, sysnop::SysNopSyscall,
+        sysread::SysReadSyscall, syswrite::SysWriteSyscall,
+    },
     u256x2048_mul::U256xU2048MulSyscall,
     uint256::Uint256MulSyscall,
     weierstrass::{
@@ -35,7 +39,6 @@ use precompiles::{
         double::WeierstrassDoubleAssignSyscall,
     },
 };
-use sys_linux::*;
 
 use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
 use verify::VerifySyscall;

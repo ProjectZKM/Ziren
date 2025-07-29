@@ -3,6 +3,7 @@ mod edwards;
 mod fptower;
 mod keccak_sponge;
 mod poseidon2_permute;
+mod linux;
 mod sha256_compress;
 mod sha256_extend;
 mod u256x2048_mul;
@@ -16,6 +17,7 @@ pub use fptower::*;
 use hashbrown::HashMap;
 pub use keccak_sponge::*;
 pub use poseidon2_permute::*;
+pub use linux::*;
 use serde::{Deserialize, Serialize};
 pub use sha256_compress::*;
 pub use sha256_extend::*;
@@ -76,8 +78,13 @@ pub enum PrecompileEvent {
     Uint256Mul(Uint256MulEvent),
     /// U256XU2048 mul precompile event.
     U256xU2048Mul(U256xU2048MulEvent),
+<<<<<<< HEAD
     /// Poseidon2 permutation precompile event.
     Poseidon2Permute(Poseidon2PermuteEvent),
+=======
+    /// linux precompile event.
+    Linux(LinuxEvent),
+>>>>>>> a5dc80e (add initial constraints for linux syscalls)
 }
 
 /// Trait to retrieve all the local memory events from a vec of precompile events.
@@ -138,7 +145,11 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                 PrecompileEvent::Bls12381Fp2Mul(e) | PrecompileEvent::Bn254Fp2Mul(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
+<<<<<<< HEAD
                 PrecompileEvent::Poseidon2Permute(e) => {
+=======
+                PrecompileEvent::Linux(e) => {
+>>>>>>> a5dc80e (add initial constraints for linux syscalls)
                     iterators.push(e.local_mem_access.iter());
                 }
             }
@@ -158,7 +169,7 @@ impl Default for PrecompileEvents {
     fn default() -> Self {
         let mut events = HashMap::new();
         for syscall_code in SyscallCode::iter() {
-            if syscall_code.should_send() == 1 {
+            if syscall_code.should_send() == 1 || syscall_code.linux_sys() != 0 {
                 events.insert(syscall_code, Vec::new());
             }
         }
@@ -184,7 +195,7 @@ impl PrecompileEvents {
         syscall_event: SyscallEvent,
         event: PrecompileEvent,
     ) {
-        assert!(syscall_code.should_send() == 1);
+        assert!(syscall_code.should_send() == 1 || syscall_code.linux_sys() != 0);
         self.events.entry(syscall_code).or_default().push((syscall_event, event));
     }
 
@@ -207,7 +218,7 @@ impl PrecompileEvents {
         syscall_code: SyscallCode,
         events: Vec<(SyscallEvent, PrecompileEvent)>,
     ) {
-        assert!(syscall_code.should_send() == 1);
+        assert!(syscall_code.should_send() == 1 || syscall_code.linux_sys() != 0);
         self.events.insert(syscall_code, events);
     }
 
@@ -239,7 +250,7 @@ impl PrecompileEvents {
         &self,
         syscall_code: SyscallCode,
     ) -> Option<&Vec<(SyscallEvent, PrecompileEvent)>> {
-        assert!(syscall_code.should_send() == 1);
+        assert!(syscall_code.should_send() == 1 || syscall_code.linux_sys() != 0);
         self.events.get(&syscall_code)
     }
 

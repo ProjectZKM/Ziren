@@ -182,7 +182,10 @@ impl SyscallInstrsChip {
         // This implies that if `is_real = 1`, `syscall_range_check_operand` will be correct, and boolean.
         builder.assert_eq(
             local.syscall_range_check_operand,
-            local.is_real * (local.is_halt_check.result + local.is_commit_deferred_proofs.result),
+            local.is_real
+                * (local.is_halt_check.result
+                    + local.is_exit_group_check.result
+                    + local.is_commit_deferred_proofs.result),
         );
 
         // Babybear range check the operand_to_check word.
@@ -308,17 +311,30 @@ impl SyscallInstrsChip {
         let is_halt = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
+                syscall_id.clone() - AB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
                 local.is_halt_check,
                 local.is_real.into(),
             );
             local.is_halt_check.result
         };
 
+        // Compute whether this syscall is SYS_EXIT_GROUP.
+        let is_exit_group = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
+                local.is_exit_group_check,
+                local.is_real.into(),
+            );
+            local.is_exit_group_check.result
+        };
+
+        let is_halt_or_exit_group = is_halt + is_exit_group;
+
         // Verify that the is_halt flag is correct.
         // If `is_real = 0`, then `local.is_halt = 0`.
         // If `is_real = 1`, then `is_halt_check.result` will be correct, so `local.is_halt` is correct.
-        builder.assert_eq(local.is_halt, is_halt * local.is_real);
+        builder.assert_eq(local.is_halt, is_halt_or_exit_group * local.is_real);
     }
 
     /// Returns two boolean expression indicating whether the instruction is a COMMIT or
