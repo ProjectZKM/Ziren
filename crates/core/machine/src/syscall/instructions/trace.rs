@@ -91,12 +91,16 @@ impl SyscallInstrsChip {
         cols.op_c_value = event.arg2.into();
         cols.prev_a_value = event.a_record.prev_value.into();
 
-        let syscall_id = cols.prev_a_value[0];
+        let syscall_id = F::from_canonical_u32(event.a_record.prev_value & 0xffff);
         let num_cycles = cols.prev_a_value[2];
 
         cols.num_extra_cycles = num_cycles;
-        cols.is_halt =
-            F::from_bool(syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id()));
+        cols.is_halt = F::from_bool(
+            syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id())
+                || syscall_id == F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
+        );
+
+        cols.is_sys_linux = F::from_bool(cols.prev_a_value[1] != F::ZERO);
 
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
@@ -111,6 +115,11 @@ impl SyscallInstrsChip {
         // Populate `is_halt`.
         cols.is_halt_check.populate_from_field_element(
             syscall_id - F::from_canonical_u32(SyscallCode::HALT.syscall_id()),
+        );
+
+        // Populate `is_exit_group`.
+        cols.is_exit_group_check.populate_from_field_element(
+            syscall_id - F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
         );
 
         // Populate `is_commit`.

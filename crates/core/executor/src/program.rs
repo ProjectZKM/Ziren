@@ -111,13 +111,6 @@ impl Program {
                 base_address = vaddr;
             }
 
-            let a = vaddr + mem_size;
-            if a > hiaddr {
-                hiaddr = a;
-            }
-
-            let mut hiaddr = 0u32;
-
             let offset: u32 = segment
                 .p_offset
                 .try_into()

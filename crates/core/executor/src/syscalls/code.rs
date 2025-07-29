@@ -85,9 +85,6 @@ pub enum SyscallCode {
     /// Executes the `UINT256_MUL` precompile.
     UINT256_MUL = 0x01_01_00_1D,
 
-    /// Executes the `U256XU2048_MUL` precompile.
-    U256XU2048_MUL = 0x01_01_00_2F,
-
     /// Executes the `BLS12381_ADD` precompile.
     BLS12381_ADD = 0x01_01_00_1E,
 
@@ -139,6 +136,9 @@ pub enum SyscallCode {
     /// Executes the `SECP256R1_DECOMPRESS` precompile.
     SECP256R1_DECOMPRESS = 0x00_01_00_2E,
 
+    /// Executes the `U256XU2048_MUL` precompile.
+    U256XU2048_MUL = 0x01_01_00_2F,
+
     /// Load preimage
     SYS_LOAD_PREIMAGE = 4020,
 
@@ -167,6 +167,8 @@ pub enum SyscallCode {
     /// SYS_NOP
     SYS_NOP = 4000,
 
+    SYS_LINUX = 5000,
+
     UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
 
@@ -193,13 +195,13 @@ impl SyscallCode {
             0x00_01_00_0C => SyscallCode::SECP256K1_DECOMPRESS,
             0x01_01_00_0E => SyscallCode::BN254_ADD,
             0x00_01_00_0F => SyscallCode::BN254_DOUBLE,
-            0x01_01_00_1E => SyscallCode::BLS12381_ADD,
-            0x00_01_00_1F => SyscallCode::BLS12381_DOUBLE,
             0x00_00_00_10 => SyscallCode::COMMIT,
             0x00_00_00_1A => SyscallCode::COMMIT_DEFERRED_PROOFS,
             0x00_00_00_1B => SyscallCode::VERIFY_ZKM_PROOF,
+            0x00_01_00_1C => SyscallCode::BLS12381_DECOMPRESS,
             0x01_01_00_1D => SyscallCode::UINT256_MUL,
-            0x01_01_00_2F => SyscallCode::U256XU2048_MUL,
+            0x01_01_00_1E => SyscallCode::BLS12381_ADD,
+            0x00_01_00_1F => SyscallCode::BLS12381_DOUBLE,
             0x01_01_00_20 => SyscallCode::BLS12381_FP_ADD,
             0x01_01_00_21 => SyscallCode::BLS12381_FP_SUB,
             0x01_01_00_22 => SyscallCode::BLS12381_FP_MUL,
@@ -212,13 +214,12 @@ impl SyscallCode {
             0x01_01_00_29 => SyscallCode::BN254_FP2_ADD,
             0x01_01_00_2A => SyscallCode::BN254_FP2_SUB,
             0x01_01_00_2B => SyscallCode::BN254_FP2_MUL,
-            0x00_01_00_1C => SyscallCode::BLS12381_DECOMPRESS,
             0x01_01_00_2C => SyscallCode::SECP256R1_ADD,
             0x00_01_00_2D => SyscallCode::SECP256R1_DOUBLE,
             0x00_01_00_2E => SyscallCode::SECP256R1_DECOMPRESS,
-            // _ => panic!("invalid syscall number: {value}"),
+            0x01_01_00_2F => SyscallCode::U256XU2048_MUL,
             _ => {
-                if value >= 4000 && value <= 4999 {
+                if value >= 4000 && value <= 5000 {
                     // These are the syscall numbers for the Linux syscalls.
                     // We return them as is, without any mapping.
                     match value {
@@ -230,6 +231,7 @@ impl SyscallCode {
                         4120 => SyscallCode::SYS_CLONE,
                         4246 => SyscallCode::SYS_EXT_GROUP,
                         4210 => SyscallCode::SYS_MMAP,
+                        5090 => SyscallCode::SYS_LINUX,
                         _ => SyscallCode::SYS_NOP,
                     }
                 } else {
@@ -250,6 +252,12 @@ impl SyscallCode {
     #[must_use]
     pub fn should_send(self) -> u32 {
         (self as u32).to_le_bytes()[2].into()
+    }
+
+    /// Get whether the handler of the system call has its own table.
+    #[must_use]
+    pub fn linux_sys(self) -> u32 {
+        (self as u32).to_le_bytes()[1].into()
     }
 
     /// Get the number of additional cycles the syscall uses.
