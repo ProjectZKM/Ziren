@@ -10,7 +10,7 @@ Ziren implements an advanced continuation framework within its zkVM architecture
 
 - ​State Continuity
 
-  Overall [memory consistency checking](../memory_checking.md) and consecutive program counter verifying ensures protocol-level execution integrity beyond individual shards.
+  Overall [memory consistency checking](../design/memory-checking.md) and consecutive program counter verifying ensures protocol-level execution integrity beyond individual shards.
 
 ## Session-Shard Structure
 

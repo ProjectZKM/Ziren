@@ -240,11 +240,15 @@ where
                         let received = { checkpoints_rx.lock().unwrap().recv() };
                         if let Ok((index, mut checkpoint, done)) = received {
                             // Trace the checkpoint and reconstruct the execution records.
+                            let mut reader = io::BufReader::new(&checkpoint);
+                            let execution_state: ExecutionState =
+                                bincode::deserialize_from(&mut reader)
+                                    .expect("failed to deserialize state");
                             let (mut records, report) = tracing::debug_span!("trace checkpoint")
                                 .in_scope(|| {
                                     trace_checkpoint::<SC>(
                                         program.clone(),
-                                        &checkpoint,
+                                        execution_state,
                                         opts,
                                         shape_config,
                                     )
@@ -601,9 +605,9 @@ where
     run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
 }
 
-fn trace_checkpoint<SC: StarkGenericConfig>(
+pub fn trace_checkpoint<SC: StarkGenericConfig>(
     program: Program,
-    file: &File,
+    state: ExecutionState,
     opts: ZKMCoreOpts,
     shape_config: Option<&CoreShapeConfig<SC::Val>>,
 ) -> (Vec<ExecutionRecord>, ExecutionReport)
@@ -612,9 +616,6 @@ where
 {
     let noop = NoOpSubproofVerifier;
 
-    let mut reader = std::io::BufReader::new(file);
-    let state: ExecutionState =
-        bincode::deserialize_from(&mut reader).expect("failed to deserialize state");
     let mut runtime = Executor::recover(program, state, opts);
     runtime.maximal_shapes = shape_config.map(|config| {
         config.maximal_core_shapes(opts.shard_size.ilog2() as usize).into_iter().collect()

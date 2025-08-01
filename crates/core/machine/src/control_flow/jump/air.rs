@@ -62,10 +62,8 @@ where
             AB::Expr::ZERO,
             is_real.clone(),
         );
-        // Verify that the local.next_pc + 4 is saved in op_a for both jump instructions.
-        // When op_a is set to register X0, the MIPS spec states that the jump instruction will
-        // not have a return destination address (it is effectively a GOTO command).  In this case,
-        // we shouldn't verify the return address.
+
+        // Verify that the local.next_pc + 4 is op_a_value for all jump instructions.
         builder.when(is_real.clone()).assert_eq(
             local.op_a_value.reduce::<AB>(),
             local.next_pc.reduce::<AB>() + AB::F::from_canonical_u32(4),
@@ -74,8 +72,8 @@ where
         // Range check op_a, pc, and next_pc.
         // SAFETY: `is_real` is already checked to be boolean.
         // `op_a_value` is checked to be a valid word, as it matches the one in the CpuChip.
-        // In the CpuChip's `eval_registers`, it's checked that this is a valid word.
-        // Combined with the `op_a_value = pc + 4` check above when `op_a_0 = 0`, this fully constrains `op_a_value`.
+        // In the CpuChip's `eval_registers`, it's checked that this is valid word saved in op_a when `op_a_0 = 0`
+        // Combined with the `op_a_value = next_pc + 4` check above, this fully constrains `op_a_value`.
         KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
             local.op_a_value,

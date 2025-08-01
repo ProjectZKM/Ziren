@@ -84,21 +84,26 @@ impl Prover<DefaultProverComponents> for CpuProver {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues> {
+        _elf_id: Option<String>,
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
         if kind == ZKMProofKind::CompressToGroth16 {
-            return self.compress_to_groth16(stdin, opts);
+            return Ok((self.compress_to_groth16(stdin, opts)?, 0));
         }
 
         // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
             self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
+        let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
-            return Ok(ZKMProofWithPublicValues {
-                proof: ZKMProof::Core(proof.proof.0),
-                stdin: proof.stdin,
-                public_values: proof.public_values,
-                zkm_version: self.version().to_string(),
-            });
+            return Ok((
+                ZKMProofWithPublicValues {
+                    proof: ZKMProof::Core(proof.proof.0),
+                    stdin: proof.stdin,
+                    public_values: proof.public_values,
+                    zkm_version: self.version().to_string(),
+                },
+                cycles,
+            ));
         }
 
         let deferred_proofs =
@@ -109,12 +114,15 @@ impl Prover<DefaultProverComponents> for CpuProver {
         let reduce_proof =
             self.prover.compress(&pk.vk, proof, deferred_proofs, opts.zkm_prover_opts)?;
         if kind == ZKMProofKind::Compressed {
-            return Ok(ZKMProofWithPublicValues {
-                proof: ZKMProof::Compressed(Box::new(reduce_proof)),
-                stdin,
-                public_values,
-                zkm_version: self.version().to_string(),
-            });
+            return Ok((
+                ZKMProofWithPublicValues {
+                    proof: ZKMProof::Compressed(Box::new(reduce_proof)),
+                    stdin,
+                    public_values,
+                    zkm_version: self.version().to_string(),
+                },
+                cycles,
+            ));
         }
 
         // Generate the shrink proof.
@@ -134,12 +142,15 @@ impl Prover<DefaultProverComponents> for CpuProver {
             };
             let proof = self.prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
 
-            return Ok(ZKMProofWithPublicValues {
-                proof: ZKMProof::Plonk(proof),
-                stdin,
-                public_values,
-                zkm_version: self.version().to_string(),
-            });
+            return Ok((
+                ZKMProofWithPublicValues {
+                    proof: ZKMProof::Plonk(proof),
+                    stdin,
+                    public_values,
+                    zkm_version: self.version().to_string(),
+                },
+                cycles,
+            ));
         } else if kind == ZKMProofKind::Groth16 {
             let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
                 zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
@@ -151,12 +162,15 @@ impl Prover<DefaultProverComponents> for CpuProver {
             };
 
             let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
-            return Ok(ZKMProofWithPublicValues {
-                proof: ZKMProof::Groth16(proof),
-                stdin,
-                public_values,
-                zkm_version: self.version().to_string(),
-            });
+            return Ok((
+                ZKMProofWithPublicValues {
+                    proof: ZKMProof::Groth16(proof),
+                    stdin,
+                    public_values,
+                    zkm_version: self.version().to_string(),
+                },
+                cycles,
+            ));
         }
 
         unreachable!()

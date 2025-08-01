@@ -70,7 +70,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// Fix the shape of the proof.
     pub fn fix_shape(&self, record: &mut ExecutionRecord) -> Result<(), CoreShapeError> {
         if record.program.preprocessed_shape.is_none() {
-            return Err(CoreShapeError::PrepcocessedShapeMissing);
+            return Err(CoreShapeError::PreprocessedShapeMissing);
         }
         if record.shape.is_some() {
             return Err(CoreShapeError::ShapeAlreadyFixed);
@@ -80,7 +80,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // program.
         record.shape.clone_from(&record.program.preprocessed_shape);
 
-        // If this is a packed "core" record where the cpu events are alongisde the memory init and
+        // If this is a packed "core" record where the cpu events are alongside the memory init and
         // finalize events, try to fix the shape using the tiny shapes.
         if record.contains_cpu()
             && (!record.global_memory_finalize_events.is_empty()
@@ -448,9 +448,18 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
 impl<F: PrimeField32> Default for CoreShapeConfig<F> {
     fn default() -> Self {
         // Load the maximal shapes.
+        let maximal_shapes = std::env::var("MAXIMAL_SHAPES_FILE")
+            .ok()
+            .map(|file| std::fs::read(file).expect("Failed to read MAXIMAL_SHAPES_FILE"))
+            .unwrap_or_else(|| MAXIMAL_SHAPES.to_vec());
         let maximal_shapes: BTreeMap<usize, Vec<Shape<MipsAirId>>> =
-            serde_json::from_slice(MAXIMAL_SHAPES).unwrap();
-        let small_shapes: Vec<Shape<MipsAirId>> = serde_json::from_slice(SMALL_SHAPES).unwrap();
+            serde_json::from_slice(&maximal_shapes).unwrap();
+
+        let small_shapes = std::env::var("SMALL_SHAPES_FILE")
+            .ok()
+            .map(|file| std::fs::read(file).expect("Failed to read SMALL_SHAPES_FILE"))
+            .unwrap_or_else(|| SMALL_SHAPES.to_vec());
+        let small_shapes: Vec<Shape<MipsAirId>> = serde_json::from_slice(&small_shapes).unwrap();
 
         // Set the allowed preprocessed log2 heights.
         let allowed_preprocessed_log2_heights = HashMap::from([
@@ -599,7 +608,7 @@ pub enum CoreShapeError {
     #[error("no shape found {0:?}")]
     ShapeError(HashMap<String, usize>),
     #[error("Preprocessed shape missing")]
-    PrepcocessedShapeMissing,
+    PreprocessedShapeMissing,
     #[error("Shape already fixed")]
     ShapeAlreadyFixed,
     #[error("Precompile not included in allowed shapes {0:?}")]

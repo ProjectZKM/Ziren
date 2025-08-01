@@ -67,6 +67,11 @@ pub(crate) fn get_rust_compiler_flags(args: &BuildArgs) -> String {
         "link-arg=--entry=main".to_string(),
     ];
 
+    for flag in &args.rustflags {
+        rust_flags.push("--C".to_string());
+        rust_flags.push(flag.to_string());
+    }
+
     for l in &args.libraries {
         rust_flags.push("--C".to_string());
         let library_path = Path::new(l).to_path_buf();

@@ -6,6 +6,8 @@ pub const SHA2_RUST_ELF: &[u8] = include_elf!("sha2-rust");
 pub const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci");
 pub const HELLO_WORLD_ELF: &[u8] = include_elf!("hello-world");
 
+pub const POSEIDON2_PERMUTE_ELF: &[u8] = include_elf!("poseidon2-permute-test");
+
 pub const SHA2_ELF: &[u8] = include_elf!("sha2-test");
 pub const SHA_EXTEND_ELF: &[u8] = include_elf!("sha-extend-test");
 pub const SHA_COMPRESS_ELF: &[u8] = include_elf!("sha-compress-test");

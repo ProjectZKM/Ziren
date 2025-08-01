@@ -1633,7 +1633,7 @@ impl<'a> Executor<'a> {
         next_pc: u32,
         mut next_next_pc: u32,
     ) -> (u32, u32, u32, u32) {
-        let (src1, src2, target_pc) = self.branch_rr(instruction);
+        let (src1, src2, offset) = self.branch_rr(instruction);
         let should_jump = match instruction.opcode {
             Opcode::BEQ => src1 == src2,
             Opcode::BNE => src1 != src2,
@@ -1647,42 +1647,41 @@ impl<'a> Executor<'a> {
         };
 
         if should_jump {
-            next_next_pc = target_pc.wrapping_add(next_pc);
+            next_next_pc = offset.wrapping_add(next_pc);
         }
-        (src1, src2, target_pc, next_next_pc)
+        (src1, src2, offset, next_next_pc)
     }
 
+    /// For jump, jumpi, jumpdirect instructions, we need to set the return address to link register
+    /// and set the target address to next_next_pc (the next_pc is the address of delayslot instruction)
     fn execute_jump(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
         let (link, target) = (instruction.op_a.into(), (instruction.op_b as u8).into());
         let target_pc = self.rr(target, MemoryAccessPosition::B);
-        // maybe rename it
-        let next_pc = self.state.pc.wrapping_add(8);
-        self.rw(link, next_pc, MemoryAccessPosition::A);
 
-        (next_pc, target_pc, 0, target_pc)
+        let return_pc = self.state.next_pc.wrapping_add(4);
+        self.rw(link, return_pc, MemoryAccessPosition::A);
+
+        (return_pc, target_pc, 0, target_pc)
     }
 
     fn execute_jumpi(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
         let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
 
-        // maybe rename it
-        let pc = self.state.pc;
-        let next_pc = pc.wrapping_add(8);
-        self.rw(link, next_pc, MemoryAccessPosition::A);
+        let return_pc = self.state.next_pc.wrapping_add(4);
+        self.rw(link, return_pc, MemoryAccessPosition::A);
 
-        (next_pc, target_pc, 0, target_pc)
+        (return_pc, target_pc, 0, target_pc)
     }
 
     fn execute_jump_direct(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32) {
-        let (link, target_pc) = (instruction.op_a.into(), instruction.op_b);
+        let (link, offset) = (instruction.op_a.into(), instruction.op_b);
 
-        let pc = self.state.pc;
-        let target_pc = target_pc.wrapping_add(pc + 4);
-        // maybe rename it
-        let next_pc = pc.wrapping_add(8);
-        self.rw(link, next_pc, MemoryAccessPosition::A);
+        let target_pc = offset.wrapping_add(self.state.next_pc);
 
-        (next_pc, target_pc, 0, target_pc)
+        let return_pc = self.state.next_pc.wrapping_add(4);
+        self.rw(link, return_pc, MemoryAccessPosition::A);
+
+        (return_pc, offset, 0, target_pc)
     }
 
     /// Executes one cycle of the program, returning whether the program has finished.

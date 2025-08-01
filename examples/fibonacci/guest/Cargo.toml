@@ -5,4 +5,4 @@ edition = "2021"
 publish = false
 
 [dependencies]
-zkm-zkvm = { path = "../../../crates/zkvm/entrypoint" }
+zkm-zkvm = { path = "../../../crates/zkvm/entrypoint", features= ["embedded"] }

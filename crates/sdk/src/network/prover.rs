@@ -36,12 +36,15 @@ pub mod stage_service {
 use crate::network::prover::stage_service::{Status, Step};
 use crate::provers::{ProofOpts, ProverType};
 
+const DEFAULT_POLL_INTERVAL: u64 = 3000; // 3s
+const MIN_POLL_INTERVAL: u64 = 100; // 100ms
+
 pub struct NetworkProver {
     pub endpoint: Endpoint,
     pub wallet: LocalWallet,
     pub local_prover: CpuProver,
-    // Polling interval (seconds) for checking proof status,
-    // default is 5 seconds
+    // Polling interval (milliseconds) for checking proof status,
+    // default is 3000 milliseconds
     pub poll_interval: u64,
 }
 
@@ -94,10 +97,15 @@ impl NetworkProver {
         }
         let wallet = private_key.parse::<LocalWallet>()?;
         let local_prover = CpuProver::new();
-        let poll_interval = env::var("ZKM_PROOF_POLL_INTERVAL")
+        let mut poll_interval = env::var("ZKM_PROOF_POLL_INTERVAL")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(5);
+            .unwrap_or(DEFAULT_POLL_INTERVAL);
+
+        if poll_interval < MIN_POLL_INTERVAL {
+            poll_interval = MIN_POLL_INTERVAL;
+        }
+
         Ok(NetworkProver { endpoint, wallet, local_prover, poll_interval })
     }
 
@@ -127,9 +135,13 @@ impl NetworkProver {
             .expect("connect: {self.endpoint:?}")
     }
 
-    async fn request_proof(&self, input: &ProverInput, kind: ZKMProofKind) -> Result<String> {
+    async fn request_proof(&self, input: ProverInput, kind: ZKMProofKind) -> Result<String> {
         let seg_size =
             env::var("SHARD_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or_default();
+
+        // set the maximum number of prover nodes needed for the proof generation
+        let max_prover_num =
+            env::var("MAX_PROVER_NUM").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
 
         let from_step =
             if kind == ZKMProofKind::CompressToGroth16 { Some(Step::InAgg.into()) } else { None };
@@ -142,22 +154,25 @@ impl NetworkProver {
             unimplemented!("unsupported ZKMProofKind")
         };
 
-        let proof_id = uuid::Uuid::new_v4().to_string();
         let mut request = GenerateProofRequest {
-            proof_id: proof_id.clone(),
-            elf_data: input.elf.clone(),
-            private_input_stream: input.private_inputstream.clone(),
+            proof_id: uuid::Uuid::new_v4().to_string(),
+            elf_data: input.elf,
+            elf_id: input.elf_id,
+            private_input_stream: input.private_inputstream,
             seg_size,
             target_step: Some(target_step.into()),
             from_step,
+            receipt_inputs: input.receipts,
+            max_prover_num,
             ..Default::default()
         };
-        for receipt_input in input.receipts.iter() {
-            request.receipt_inputs.push(receipt_input.clone());
-        }
+
         self.sign_ecdsa(&mut request).await?;
         let mut client = self.connect().await;
+
+        let start = tokio::time::Instant::now();
         let response = client.generate_proof(request).await?.into_inner();
+        tracing::info!("[request proof] get response: {:?}", start.elapsed());
 
         Ok(response.proof_id)
     }
@@ -186,7 +201,7 @@ impl NetworkProver {
                         Some(step) => log::info!("Generate_proof: {step}"),
                         None => todo!(),
                     }
-                    sleep(Duration::from_secs(self.poll_interval)).await;
+                    sleep(Duration::from_millis(self.poll_interval)).await;
                 }
                 Some(Status::Success) => {
                     let public_values = if kind == ZKMProofKind::CompressToGroth16 {
@@ -221,11 +236,15 @@ impl NetworkProver {
         elf: &[u8],
         stdin: ZKMStdin,
         kind: ZKMProofKind,
+        // The SHA-256 hash of the ELF, without the 0x prefix.
+        // If this field is not none, the network prover will use it to index the cached ELF.
+        elf_id: Option<String>,
         timeout: Option<Duration>,
     ) -> Result<(ZKMProofWithPublicValues, u64)> {
         let private_input = stdin.buffer.clone();
         let mut pri_buf = Vec::new();
         bincode::serialize_into(&mut pri_buf, &private_input)?;
+
         let mut receipts = Vec::new();
         let proofs = stdin.proofs.clone();
         // todo: adapt to proof network after its updating
@@ -234,11 +253,13 @@ impl NetworkProver {
             bincode::serialize_into(&mut receipt, &proof)?;
             receipts.push(receipt);
         }
-        let prover_input =
-            ProverInput { elf: elf.to_vec(), private_inputstream: pri_buf, receipts };
+
+        let elf = if elf_id.is_none() { elf.to_vec() } else { Default::default() };
+
+        let prover_input = ProverInput { elf, private_inputstream: pri_buf, elf_id, receipts };
 
         log::info!("calling request_proof.");
-        let proof_id = self.request_proof(&prover_input, kind).await?;
+        let proof_id = self.request_proof(prover_input, kind).await?;
 
         log::info!("calling wait_proof, proof_id={proof_id}");
         let (proof, mut public_values, cycles) = self.wait_proof(&proof_id, kind, timeout).await?;
@@ -282,8 +303,9 @@ impl Prover<DefaultProverComponents> for NetworkProver {
         _opts: ProofOpts,
         _context: ZKMContext<'a>,
         kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues> {
-        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, None)).map(|(proof, _)| proof)
+        elf_id: Option<String>,
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
+        block_on(self.prove_with_cycles(&pk.elf, stdin, kind, elf_id, None))
     }
 }
 

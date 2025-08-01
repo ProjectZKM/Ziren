@@ -8,7 +8,7 @@ use zkm_stark::air::ZKMAirBuilder;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct KoalaBearBitDecomposition<T> {
-    /// The bit decoposition of the`value`.
+    /// The bit decomposition of the`value`.
     pub bits: [T; 32],
 
     /// The product of the the bits 0 to 2 in `most_sig_byte_decomp`.

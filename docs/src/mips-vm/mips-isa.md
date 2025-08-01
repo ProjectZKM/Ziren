@@ -212,3 +212,4 @@ The support instructions are as follows:
 | SECP256R1_ADD = 0x00_01_01_2C,           | Executes the `SECP256R1_ADD` precompile.           |
 | SECP256R1_DOUBLE = 0x00_00_01_2D,        | Executes the `SECP256R1_DOUBLE` precompile.        |
 | SECP256R1_DECOMPRESS = 0x00_00_01_2E,    | Executes the `SECP256R1_DECOMPRESS` precompile.    |
+| POSEIDON2_PERMUTE = 0x00_00_01_30,       | Executes the `POSEIDON2_PERMUTE` precompile.       |

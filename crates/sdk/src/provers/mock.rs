@@ -54,16 +54,20 @@ impl Prover<DefaultProverComponents> for MockProver {
         opts: ProofOpts,
         context: ZKMContext<'a>,
         kind: ZKMProofKind,
-    ) -> Result<ZKMProofWithPublicValues> {
+        _elf_id: Option<String>,
+    ) -> Result<(ZKMProofWithPublicValues, u64)> {
         match kind {
             ZKMProofKind::Core => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
-                Ok(ZKMProofWithPublicValues {
-                    proof: ZKMProof::Core(vec![]),
-                    stdin,
-                    public_values,
-                    zkm_version: self.version().to_string(),
-                })
+                Ok((
+                    ZKMProofWithPublicValues {
+                        proof: ZKMProof::Core(vec![]),
+                        stdin,
+                        public_values,
+                        zkm_version: self.version().to_string(),
+                    },
+                    0,
+                ))
             }
             ZKMProofKind::Compressed => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
@@ -98,46 +102,55 @@ impl Prover<DefaultProverComponents> for MockProver {
                     proof: shard_proof,
                 }));
 
-                Ok(ZKMProofWithPublicValues {
-                    proof,
-                    stdin,
-                    public_values,
-                    zkm_version: self.version().to_string(),
-                })
+                Ok((
+                    ZKMProofWithPublicValues {
+                        proof,
+                        stdin,
+                        public_values,
+                        zkm_version: self.version().to_string(),
+                    },
+                    0,
+                ))
             }
             ZKMProofKind::Plonk => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
-                Ok(ZKMProofWithPublicValues {
-                    proof: ZKMProof::Plonk(PlonkBn254Proof {
-                        public_inputs: [
-                            pk.vk.hash_bn254().as_canonical_biguint().to_string(),
-                            public_values.hash_bn254().to_string(),
-                        ],
-                        encoded_proof: "".to_string(),
-                        raw_proof: "".to_string(),
-                        plonk_vkey_hash: [0; 32],
-                    }),
-                    stdin,
-                    public_values,
-                    zkm_version: self.version().to_string(),
-                })
+                Ok((
+                    ZKMProofWithPublicValues {
+                        proof: ZKMProof::Plonk(PlonkBn254Proof {
+                            public_inputs: [
+                                pk.vk.hash_bn254().as_canonical_biguint().to_string(),
+                                public_values.hash_bn254().to_string(),
+                            ],
+                            encoded_proof: "".to_string(),
+                            raw_proof: "".to_string(),
+                            plonk_vkey_hash: [0; 32],
+                        }),
+                        stdin,
+                        public_values,
+                        zkm_version: self.version().to_string(),
+                    },
+                    0,
+                ))
             }
             ZKMProofKind::Groth16 => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
-                Ok(ZKMProofWithPublicValues {
-                    proof: ZKMProof::Groth16(Groth16Bn254Proof {
-                        public_inputs: [
-                            pk.vk.hash_bn254().as_canonical_biguint().to_string(),
-                            public_values.hash_bn254().to_string(),
-                        ],
-                        encoded_proof: "".to_string(),
-                        raw_proof: "".to_string(),
-                        groth16_vkey_hash: [0; 32],
-                    }),
-                    stdin,
-                    public_values,
-                    zkm_version: self.version().to_string(),
-                })
+                Ok((
+                    ZKMProofWithPublicValues {
+                        proof: ZKMProof::Groth16(Groth16Bn254Proof {
+                            public_inputs: [
+                                pk.vk.hash_bn254().as_canonical_biguint().to_string(),
+                                public_values.hash_bn254().to_string(),
+                            ],
+                            encoded_proof: "".to_string(),
+                            raw_proof: "".to_string(),
+                            groth16_vkey_hash: [0; 32],
+                        }),
+                        stdin,
+                        public_values,
+                        zkm_version: self.version().to_string(),
+                    },
+                    0,
+                ))
             }
             ZKMProofKind::CompressToGroth16 => unreachable!(),
         }

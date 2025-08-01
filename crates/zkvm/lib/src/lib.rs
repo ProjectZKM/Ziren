@@ -11,6 +11,7 @@ pub mod ecdsa;
 pub mod ed25519;
 pub mod io;
 pub mod keccak256;
+pub mod poseidon2;
 pub mod secp256k1;
 pub mod secp256r1;
 pub mod sha3;
@@ -73,6 +74,9 @@ extern "C" {
 
     /// Executes the Keccak Sponge
     pub fn syscall_keccak_sponge(input: *const u32, result: *mut [u32; 17]);
+
+    /// Executes the Poseidon2 permutation
+    pub fn syscall_poseidon2_permute(state: *mut [u32; 16]);
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
@@ -150,4 +154,13 @@ extern "C" {
     /// Executes a BN254 Fp2 multiplication on the given inputs.
     pub fn syscall_bn254_fp2_mulmod(p: *mut u32, q: *const u32);
 
+    /// Reads a buffer from the input stream.
+    pub fn read_vec_raw() -> ReadVecResult;
+}
+
+#[repr(C)]
+pub struct ReadVecResult {
+    pub ptr: *mut u8,
+    pub len: usize,
+    pub capacity: usize,
 }

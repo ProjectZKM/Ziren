@@ -23,6 +23,8 @@ members = [
   "keccak-precompile/host",
   "plonk/guest",
   "plonk/host",
+  "poseidon2/guest",
+  "poseidon2/host",
   "regex/guest",
   "regex/host",
   "rsa/guest",
@@ -33,6 +35,8 @@ members = [
   "tendermint/host",
   "unconstrained/guest",
   "unconstrained/host",
+  "large-sum/guest",
+  "large-sum/host",
 ]
 resolver = "2"
 

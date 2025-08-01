@@ -27,7 +27,7 @@ fn main() {
     let mut stdin = ZKMStdin::new();
     stdin.write(&n);
 
-    // Create a `ProverClient` method.
+    // Create a `ProverClient` instance.
     let client = ProverClient::new();
 
     // Execute the guest using the `ProverClient.execute` method, without generating a proof.
@@ -161,6 +161,14 @@ export SSL_CERT_PATH=<path_to_ssl_certificate>  # Path to the SSL client certifi
 export SSL_KEY_PATH=<path_to_ssl_key>           # Path to the SSL client private key (e.g., ssl.key)
 ```
 You can generate the SSL certificate and key by running the [`certgen.sh`](https://github.com/ProjectZKM/Ziren/blob/main/crates/sdk/tool/certgen.sh) script.
+
+**Optional**: You can also set the following environment variables to customize the network prover behavior:
+
+```bash
+export SHARD_SIZE=<shard_size>            # Size of each shard in bytes. 
+export MAX_PROVER_NUM=<max_prover_num>      # Maximum number of provers to use in parallel.
+```
+
 
 To host your own network prover, export the following variables to configure your endpoint:
 ```bash

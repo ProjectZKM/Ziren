@@ -1,0 +1,12 @@
+[package]
+name = "poseidon2-host"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+zkm-sdk = { workspace = true }
+hex = "0.4.3"
+
+[build-dependencies]
+zkm-build = { workspace = true }

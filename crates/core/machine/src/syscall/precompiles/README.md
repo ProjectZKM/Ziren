@@ -1,11 +1,14 @@
 # Guide to Adding Precompiles in Ziren
 
-Precompiles are specialized chips that allow you to extend the functionality of vanilla Ziren to execute custom logic more efficiently.
+Precompiles are specialized chips that allow you to extend the functionality of vanilla Ziren to execute custom logic
+more efficiently.
 
 ## Create the Chip
-Create a new rust Rust file for your chip in the `core/src/syscall/precompiles` directory. 
+
+Create a new rust Rust file for your chip in the `core/src/syscall/precompiles` directory.
 
 ### Define the Chip Struct:
+
 Define the core structure of your chip. This struct will represent the chip and its associated logic.
 
 ```rust
@@ -20,7 +23,9 @@ impl CustomOpChip {
 ```
 
 ### Define the Chip's Data Structure
-Define the necessary data structures that your chip will use. This might include columns for memory operations, input values, and output results. For instance, in the Uint256MulChip, we define the columns as follows:
+
+Define the necessary data structures that your chip will use. This might include columns for memory operations, input
+values, and output results. For instance, in the Uint256MulChip, we define the columns as follows:
 
 ```rust
 #[derive(Debug, Clone, AlignedBorrow)]
@@ -35,10 +40,13 @@ pub struct CustomOpCols<T> {
     pub output: FieldOpCols<T, U256Field>,
 }
 ```
+
 Adjust these fields according to your chip.
 
 ### Implement the Chip Logic
-The Syscall trait is where the core execution logic of your chip will reside. This involves defining how the chip interacts with the Ziren runtime during execution time.
+
+The Syscall trait is where the core execution logic of your chip will reside. This involves defining how the chip
+interacts with the Ziren runtime during execution time.
 
 ```rust
 impl Syscall for Uint256MulChip {
@@ -54,7 +62,9 @@ impl Syscall for Uint256MulChip {
 ```
 
 ### Implement the `MachineAir` Trait
-The `MachineAir` trait integrates your chip with Ziren’s Algebraic Intermediate Representation (AIR). This involves generating and evaluating traces that represent the chip's operations.
+
+The `MachineAir` trait integrates your chip with Ziren’s Algebraic Intermediate Representation (AIR). This involves
+generating and evaluating traces that represent the chip's operations.
 
 ```rust
 impl<F: PrimeField32> MachineAir<F> for CustomOpChip {
@@ -79,8 +89,12 @@ impl<F: PrimeField32> MachineAir<F> for CustomOpChip {
     }
 }
 ```
-You will also have to update `core/executor/src/events/precompiles/mod.rs` accordingly to register the new precompile op.
+
+You will also have to update `core/executor/src/events/precompiles/mod.rs` accordingly to register the new precompile
+op.
+
 #### Add a new field for your chip's events
+
 In the `PrecompileEvent` enum, add a new variant for you precompile op.
 
 ```rust
@@ -95,11 +109,12 @@ pub enum PrecompileEvent {
 ```
 
 #### Update the `get_local_mem_events` method
+
 In the `get_local_mem_events` method, add your variant to the match statement to add an iterator of the op's local
 memory events (if it has local memory events).
 
 ```rust
-fn get_local_mem_events(&self) -> impl IntoIterator<Item = &MemoryLocalEvent> {
+fn get_local_mem_events(&self) -> impl IntoIterator<Item=&MemoryLocalEvent> {
     let mut iterators = Vec::new();
 
     for event in self.iter() {
@@ -117,7 +132,9 @@ fn get_local_mem_events(&self) -> impl IntoIterator<Item = &MemoryLocalEvent> {
 ```
 
 ### Implement the `Air` and `BaseAir` traits
-To fully integrate your chip with the Ziren AIR framework, implement the `Air` and `BaseAir` traits. These traits define how your chip’s operations are evaluated within the AIR system.
+
+To fully integrate your chip with the Ziren AIR framework, implement the `Air` and `BaseAir` traits. These traits define
+how your chip’s operations are evaluated within the AIR system.
 
 ```rust
 impl<F> BaseAir<F> for CustomOpChip {
@@ -137,10 +154,15 @@ where
     }
 }
 ```
-> **Important Note**: Make sure that the `eval` method properly accounts for all aspects of your chip’s behavior, as discrepancies between `eval` and the actual execution logic can lead to proof failures or incorrect verification results even when `execute` is correct.
+
+> **Important Note**: Make sure that the `eval` method properly accounts for all aspects of your chip’s behavior, as
+> discrepancies between `eval` and the actual execution logic can lead to proof failures or incorrect verification results
+> even when `execute` is correct.
 
 ## Register a New Syscall
+
 ### Add a New Enum Variant
+
 In the `SyscallCode` enum, define a new variant for your custom syscall. The variant should be given a unique value.
 
 ```rust
@@ -155,6 +177,7 @@ pub enum SyscallCode {
 ```
 
 ### Update the `from_u32` method
+
 Ensure the `from_u32` method can map the unique value to the new `SyscallCode` variant.
 
 ```rust
@@ -172,8 +195,10 @@ impl SyscallCode {
 }
 ```
 
-### Insert the New Syscall in the `default_syscall_map` 
-In the `default_syscall_map` function, register your new syscall by inserting it into the `syscall_map` with its corresponding chip.
+### Insert the New Syscall in the `default_syscall_map`
+
+In the `default_syscall_map` function, register your new syscall by inserting it into the `syscall_map` with its
+corresponding chip.
 
 ```rust
 pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
@@ -187,9 +212,12 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 ```
 
 ## Write Unit Tests for the New Precompile
+
 ### Create a New Ziren Test Package
+
 Create a new Ziren crate for your custom precompile test package inside the directory
 `Ziren/crates/test-artifacts/programs`. An example `Cargo.toml` for this may look like:
+
 ```toml
 [package]
 name = "custom-precompile-test"
@@ -203,17 +231,23 @@ zkm-derive = { path = "../../../../derive" }
 num-bigint = "0.4.6"
 rand = "0.8.5"
 ```
-Don't forget to include your crate to the workspace at `crates/test-artifacts/programs/Cargo.toml`. Then implement the tests and run `cargo prove build` to generate an ELF file. 
+
+Don't forget to include your crate to the workspace at `crates/test-artifacts/programs/Cargo.toml`. Then implement the
+tests and run `cargo prove build` to generate an ELF file.
 
 ### Include the ELF File in `test-artifacts` crate `lib.rs`
-In your main Ziren project, include the generated ELF file by updating `crates/test-artifacts/src/lib.rs`. 
+
+In your main Ziren project, include the generated ELF file by updating `crates/test-artifacts/src/lib.rs`.
+
 ```rust
 pub const CUSTOM_PRECOMPILE_ELF: &[u8] = include_elf!("your-test-crate-name");
 // Other ELF files...
 ```
 
 ### Write Tests for Your Custom Precompile
+
 Add tests that use this ELF file in your local Ziren project.
+
 ```rust
 // /path/to/your/precompile/mod.rs
 
@@ -244,8 +278,11 @@ mod tests {
     // Add additional tests as needed
 }
 ```
+
 ### Run Your Tests
+
 Finally, run your test to verify that your custom precompile works as expected:
+
 ```bash
 cargo test --release
 ```

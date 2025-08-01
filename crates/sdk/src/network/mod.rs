@@ -7,9 +7,8 @@ pub mod prover;
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct ProverInput {
     pub elf: Vec<u8>,
-    // pub public_inputstream: Vec<u8>,
+    pub elf_id: Option<String>, // The SHA-256 hash of the ELF, without the 0x prefix
     pub private_inputstream: Vec<u8>,
-    // pub execute_only: bool,
     pub receipts: Vec<Vec<u8>>,
 }
 

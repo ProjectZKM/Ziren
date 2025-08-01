@@ -1,13 +1,10 @@
-//! Ported from Entrypoint for Ziren zkVM.
-
-use core::alloc::{GlobalAlloc, Layout};
-
 use crate::syscalls::sys_alloc_aligned;
+use core::alloc::{GlobalAlloc, Layout};
 
 /// A simple heap allocator.
 ///
 /// Allocates memory from left to right, without any deallocation.
-pub struct SimpleAlloc;
+struct SimpleAlloc;
 
 unsafe impl GlobalAlloc for SimpleAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -16,3 +13,6 @@ unsafe impl GlobalAlloc for SimpleAlloc {
 
     unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
+
+#[global_allocator]
+static HEAP: SimpleAlloc = SimpleAlloc;

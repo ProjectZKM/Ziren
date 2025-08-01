@@ -23,9 +23,6 @@ use zkm_stark::LookupKind;
 
 use crate::{Instruction, MipsAirId};
 
-pub const PAGE_SIZE: u32 = 4096;
-pub const MAX_MEMORY: usize = 0x10000000;
-pub const INIT_SP: u32 = MAX_MEMORY as u32 - 0x4000;
 pub const WORD_SIZE: usize = core::mem::size_of::<u32>();
 
 /// A program that can be executed by the ZKM.

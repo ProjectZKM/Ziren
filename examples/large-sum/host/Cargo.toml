@@ -1,0 +1,37 @@
+[package]
+name = "large-sum-host"
+version = { workspace = true }
+edition = { workspace = true }
+default-run = "large-sum-host"
+publish = false
+
+[dependencies]
+hex = "0.4.3"
+rand = "0.8"
+zkm-sdk = { workspace = true }
+
+[build-dependencies]
+zkm-build = { workspace = true }
+
+[[bin]]
+name = "plonk_bn254"
+path = "bin/plonk_bn254.rs"
+
+[[bin]]
+name = "groth16_bn254"
+path = "bin/groth16_bn254.rs"
+
+[[bin]]
+name = "compressed"
+path = "bin/compressed.rs"
+
+[[bin]]
+name = "execute"
+path = "bin/execute.rs"
+
+[[bin]]
+name = "large-sum-host"
+path = "src/main.rs"
+
+# [features]
+# cuda = ["zkm-sdk/cuda"]
