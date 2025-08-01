@@ -29,6 +29,7 @@
         - [STARK Aggregation](./design/prover-architecture/stark-aggregation.md)
         - [STARK-to-SNARK](./design/prover-architecture/stark-to-snark.md)
         - [Proof Composition](./design/prover-architecture/proof-composition.md)
+        - [Recursive STARK](./design/prover-architecture/recursive-stark.md)
     - [Continuation](./design/continuation.md)
 
 - [References](./references.md)
