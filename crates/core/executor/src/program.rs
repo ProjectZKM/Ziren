@@ -191,6 +191,8 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
         .expect("failed to read symbols table, cannot patch program")
         .expect("failed to parse symbols table, cannot patch program");
 
+    let mut exit_new = 0;
+    let mut exit_old = 0;
     for symbol in symbols.0 {
         match symbols.1.get(symbol.st_name as usize) {
             Ok(name) => match name {
@@ -219,11 +221,18 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
                         0x0, // nop
                     );
                 }
+
+                "runtime.exit" => {
+                    exit_old = symbol.st_value as u32;
+                }
                 "runtime.MemProfileRate" => {
                     patch_list.insert(
                         symbol.st_value as u32,
                         0x0, // nop
                     );
+                }
+                "zkvm.RuntimeExit" => {
+                    exit_new = symbol.st_value as u32;
                 }
                 _ => {
                     if name.contains("sys_common") && name.contains("thread_info") {
@@ -244,6 +253,19 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
             }
         }
     }
+
+
+    if exit_new!= 0 && exit_old!= 0 {
+        patch_list.insert(
+            exit_old,
+            0x08000000 | (exit_new >> 2), // j exit_new
+        );
+        patch_list.insert(
+            exit_old + 4,
+            0x0, // nop
+        );
+    }
+    
 }
 
 pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {

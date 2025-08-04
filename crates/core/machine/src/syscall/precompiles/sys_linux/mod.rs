@@ -31,7 +31,7 @@ pub mod sys_linux_tests {
         }
 
         instructions.extend(vec![
-            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::SYSMMAP as u32, false, true),
+            Instruction::new(Opcode::ADD, 2, 0, SyscallCode::SYS_MMAP as u32, false, true),
             Instruction::new(Opcode::ADD, 4, 0, w_ptr, false, true),
             Instruction::new(Opcode::ADD, 5, 0, h_ptr, false, true),
             Instruction::new(Opcode::SYSCALL, 2, 4, 5, false, false),

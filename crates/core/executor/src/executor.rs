@@ -1112,7 +1112,7 @@ impl<'a> Executor<'a> {
                 b = self.rr(Register::A0, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
                 let mut prev_a = syscall_id;
-                println!(
+                log::debug!(
                     "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
                     self.state.pc, syscall_id, b, c
                 );
@@ -1326,8 +1326,8 @@ impl<'a> Executor<'a> {
         self.state.next_pc = next_next_pc;
 
         if print_registers {
-            let mut regs = [0u32; 34];
-            for reg in 0..34 {
+            let mut regs = [0u32; 36];
+            for reg in 0..36 {
                 regs[reg] = self.register((reg as u8).into());
             }
 

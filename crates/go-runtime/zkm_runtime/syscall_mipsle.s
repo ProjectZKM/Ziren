@@ -22,3 +22,20 @@ TEXT ·SyscallHintRead(SB), $0-16
     MOVW len+12(FP), R5
     SYSCALL
     RET
+
+TEXT ·SyscallCommit(SB), $0-8
+	MOVW index+0(FP), R4   // a0 = index
+	MOVW word+4(FP),  R5   // a1 = word
+	MOVW $0x10, R2         // v0 = syscall 4001
+	SYSCALL
+	RET
+
+// --------------------------------------------------
+// func SyscallExit(code int)
+// 系统调用号 4003，参数：
+//   code -> a0
+TEXT ·SyscallExit(SB), $0-4
+	MOVW code+0(FP), R4    // a0 = code
+	MOVW $0, R2         // v0 = syscall 0
+	SYSCALL
+	RET
