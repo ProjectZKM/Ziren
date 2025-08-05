@@ -57,6 +57,26 @@ fn test_verify_plonk() {
         .expect("Plonk proof is invalid");
 }
 
+#[test]
+fn test_verify_stark() {
+    // Set up the pk and vk.
+    let client = ProverClient::cpu();
+    let (pk, vk) = client.setup(HELLO_WORLD_ELF);
+
+    // Generate the compressed proof.
+    let zkm_proof_with_public_values =
+        client.prove(&pk, ZKMStdin::new()).compressed().run().unwrap();
+
+    // Extract the proof and public inputs.
+    let proof = zkm_proof_with_public_values.bytes();
+    let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
+
+    let vk_bytes = bincode::serialize(&vk).unwrap();
+
+    crate::StarkVerifier::verify(&proof, &public_inputs, &vk_bytes)
+        .expect("Stark proof is invalid");
+}
+
 // ZKM_DEV=true RUST_LOG=debug cargo test -r test_e2e_verify_groth16 --features ark -- --nocapture
 #[test]
 #[ignore]

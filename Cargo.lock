@@ -8673,16 +8673,22 @@ dependencies = [
  "ark-ff 0.5.0",
  "ark-groth16",
  "ark-serialize 0.5.0",
+ "bincode",
  "hex",
+ "itertools 0.13.0",
  "lazy_static",
  "num-bigint 0.4.6",
  "num-traits",
+ "p3-field",
  "sha2",
  "substrate-bn",
  "test-artifacts",
  "thiserror 2.0.12",
+ "zkm-core-executor",
+ "zkm-primitives 1.1.1",
  "zkm-prover",
  "zkm-sdk",
+ "zkm-stark",
 ]
 
 [[package]]
