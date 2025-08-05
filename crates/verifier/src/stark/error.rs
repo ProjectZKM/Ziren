@@ -1,6 +1,8 @@
 use thiserror::Error;
-use zkm_prover::{CoreSC, InnerSC};
+// use zkm_prover::{CoreSC, InnerSC};
 use zkm_stark::MachineVerificationError;
+
+use super::{CoreSC, InnerSC};
 
 #[derive(Error, Debug)]
 pub enum StarkError {
