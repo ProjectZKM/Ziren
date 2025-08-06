@@ -29,7 +29,7 @@ const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
 
-pub(crate) fn verify_stark_algebraic(
+pub(crate) fn verify_stark_compressed_proof(
     vk: &ZKMVerifyingKey,
     proof: &ZKMReduceProof<InnerSC>,
 ) -> Result<(), MachineVerificationError<InnerSC>> {

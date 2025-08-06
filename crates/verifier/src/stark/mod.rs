@@ -18,7 +18,7 @@ use zkm_stark::{
 };
 
 use error::StarkError;
-use verify::verify_stark_algebraic;
+use verify::verify_stark_compressed_proof;
 
 pub mod error;
 mod verify;
@@ -67,7 +67,7 @@ impl StarkVerifier {
             }
         }
 
-        verify_stark_algebraic(&vk, &proof).map_err(StarkError::Recursion)
+        verify_stark_compressed_proof(&vk, &proof).map_err(StarkError::Recursion)
     }
 }
 
