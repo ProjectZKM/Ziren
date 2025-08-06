@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"crypto/sha256"
 	"hash"
-	_ "unsafe"
+	"unsafe"
 	"reflect"
 )
 
@@ -17,12 +17,18 @@ func SyscallCommit(index int, word uint32)
 func SyscallExit(code int)
 
 var PublicValuesHasher hash.Hash = sha256.New()
+const EMBEDDED_RESERVED_INPUT_REGION_SIZE int = 1024 * 1024 * 1024;
+const MAX_MEMORY int = 0x7ff00000;
+var RESERVED_INPUT_PTR int =  MAX_MEMORY - EMBEDDED_RESERVED_INPUT_REGION_SIZE
 
 func Read[T any]() T {
 	len := SyscallHintLen()
 	var value []byte
 	capacity := (len + 3) / 4 * 4
-	value = make([]byte, capacity)
+	addr := RESERVED_INPUT_PTR;
+	RESERVED_INPUT_PTR += capacity;
+	ptr := unsafe.Pointer(uintptr(addr))
+	value = unsafe.Slice((*byte)(ptr), capacity)
 	var result T
 	SyscallHintRead(value, len)
 	DeserializeData(value[0:len], &result)

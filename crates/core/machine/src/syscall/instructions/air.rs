@@ -165,9 +165,11 @@ impl SyscallInstrsChip {
         // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
         builder
             .when(local.is_real)
-            .when_not(is_enter_unconstrained + is_hint_len)
+            .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
             .assert_word_eq(local.op_a_value, local.prev_a_value);
 
+        // when the syscall is not LINUX SYSCALL， prev op_a[1] is zero
+        builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(syscall_code[1]);
         // SAFETY: This leaves the case where syscall is `HINT_LEN`.
         // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.
         // This is due to `op_a_val` being connected to the CpuChip.

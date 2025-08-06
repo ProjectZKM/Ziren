@@ -8,7 +8,7 @@ pub(crate) struct SysWriteSyscall;
 
 impl Syscall for SysWriteSyscall {
     fn num_extra_cycles(&self) -> u32 {
-        1
+        0
     }
 
     fn execute(

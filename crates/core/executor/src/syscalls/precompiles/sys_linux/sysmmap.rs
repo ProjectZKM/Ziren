@@ -12,7 +12,7 @@ pub const PAGE_SIZE: usize = 1 << PAGE_ADDR_SIZE;
 
 impl Syscall for SysMmapSyscall {
     fn num_extra_cycles(&self) -> u32 {
-        1
+        0
     }
 
     fn execute(
