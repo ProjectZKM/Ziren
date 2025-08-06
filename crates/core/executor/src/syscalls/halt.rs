@@ -13,7 +13,7 @@ impl Syscall for HaltSyscall {
         ctx.set_next_pc(0);
         ctx.set_exit_code(exit_code);
         println!("Halting with exit code: {}\n", exit_code);
-        println!("{:?}",ctx.rt.record.public_values);
+        log::debug!("{:?}", ctx.rt.record.public_values);
 
         None
     }

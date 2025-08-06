@@ -1114,7 +1114,10 @@ impl<'a> Executor<'a> {
                 let mut prev_a = syscall_id;
                 log::debug!(
                     "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
-                    self.state.pc, syscall_id, b, c
+                    self.state.pc,
+                    syscall_id,
+                    b,
+                    c
                 );
 
                 if self.print_report && !self.unconstrained {

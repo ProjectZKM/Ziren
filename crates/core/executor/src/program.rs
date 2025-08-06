@@ -254,8 +254,7 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
         }
     }
 
-
-    if exit_new!= 0 && exit_old!= 0 {
+    if exit_new != 0 && exit_old != 0 {
         patch_list.insert(
             exit_old,
             0x08000000 | (exit_new >> 2), // j exit_new
@@ -265,7 +264,6 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
             0x0, // nop
         );
     }
-    
 }
 
 pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
