@@ -29,12 +29,15 @@ const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
 
+const VK_MAP: &[u8] =
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/dummy_vk_map.bin"));
+
 pub(crate) fn verify_stark_compressed_proof(
     vk: &ZKMVerifyingKey,
     proof: &ZKMReduceProof<InnerSC>,
 ) -> Result<(), MachineVerificationError<InnerSC>> {
     let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
-        bincode::deserialize(include_bytes!("../../../prover/dummy_vk_map.bin")).unwrap();
+        bincode::deserialize(VK_MAP).unwrap();
     let (recursion_vk_root, _merkle_tree) =
         MerkleTree::<KoalaBear, InnerSC>::commit(allowed_vk_map.keys().copied().collect());
 
