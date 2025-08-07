@@ -345,6 +345,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(bls12381_decompress.name(), bls12381_decompress.cost());
         chips.push(bls12381_decompress);
 
+        let sys_linux = Chip::new(MipsAir::SysLinux(SysLinuxChip::default()));
+        costs.insert(sys_linux.name(), sys_linux.cost());
+        chips.push(sys_linux);
+
         let syscall_core = Chip::new(MipsAir::SyscallCore(SyscallChip::core()));
         costs.insert(syscall_core.name(), syscall_core.cost());
         chips.push(syscall_core);
@@ -427,10 +431,6 @@ impl<F: PrimeField32> MipsAir<F> {
         let byte = Chip::new(MipsAir::ByteLookup(ByteChip::default()));
         costs.insert(byte.name(), byte.cost());
         chips.push(byte);
-
-        let sys_linux = Chip::new(MipsAir::SysLinux(SysLinuxChip::default()));
-        costs.insert(sys_linux.name(), sys_linux.cost());
-        chips.push(sys_linux);
 
         (chips, costs)
     }

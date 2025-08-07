@@ -113,11 +113,11 @@ impl SyscallInstrsChip {
         // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
         // with different information.
         let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
-        let send_to_table = syscall_code[2];
+        let send_to_table = syscall_code[2] + local.is_sys_linux;
 
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
-        builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table);
+        builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table.clone());
 
         builder.send_syscall(
             local.shard,

@@ -47,7 +47,7 @@ where
         // Check that the a3 memory access.
         builder.eval_memory_access(
             local.shard,
-            local.clk.into(),
+            local.clk,
             AB::Expr::from_canonical_u32(Register::A3 as u32),
             &local.output,
             local.is_real,
@@ -164,7 +164,7 @@ impl SysLinuxChip {
     fn eval_brk<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
         builder.eval_memory_access(
             local.shard,
-            local.clk.into(),
+            local.clk,
             AB::Expr::from_canonical_u32(Register::BRK as u32),
             &local.inorout,
             local.is_brk,
@@ -232,7 +232,7 @@ impl SysLinuxChip {
 
         builder.eval_memory_access(
             local.shard,
-            local.clk.into(),
+            local.clk,
             AB::Expr::from_canonical_u32(Register::HEAP as u32),
             &local.inorout,
             local.is_mmap_a0_0,
@@ -303,7 +303,7 @@ impl SysLinuxChip {
     fn eval_write<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
         builder.eval_memory_access(
             local.shard,
-            local.clk.into(),
+            local.clk,
             AB::Expr::from_canonical_u32(Register::A2 as u32),
             &local.inorout,
             local.is_write,
