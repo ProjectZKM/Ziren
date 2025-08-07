@@ -228,13 +228,13 @@ impl SyscallCode {
                     match value {
                         4003 => SyscallCode::SYS_READ,
                         4004 => SyscallCode::SYS_WRITE,
-                        4045 => SyscallCode::SYS_FCNTL,
-                        4046 => SyscallCode::SYS_BRK,
+                        4055 => SyscallCode::SYS_FCNTL,
+                        4045 => SyscallCode::SYS_BRK,
                         4090 => SyscallCode::SYS_MMAP2,
                         4120 => SyscallCode::SYS_CLONE,
                         4246 => SyscallCode::SYS_EXT_GROUP,
                         4210 => SyscallCode::SYS_MMAP,
-                        5090 => SyscallCode::SYS_LINUX,
+                        5000 => SyscallCode::SYS_LINUX,
                         _ => SyscallCode::SYS_NOP,
                     }
                 } else {
@@ -280,6 +280,7 @@ impl SyscallCode {
             SyscallCode::BLS12381_FP_SUB => SyscallCode::BLS12381_FP_ADD,
             SyscallCode::BLS12381_FP_MUL => SyscallCode::BLS12381_FP_ADD,
             SyscallCode::BLS12381_FP2_SUB => SyscallCode::BLS12381_FP2_ADD,
+            SyscallCode::SYS_MMAP2 => SyscallCode::SYS_MMAP,
             _ => *self,
         }
     }

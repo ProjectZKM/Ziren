@@ -31,6 +31,9 @@ impl<F: Field> GtColsBytes<F> {
     pub fn populate(&mut self, a: u32, b: u32, record: &mut impl ByteRecord) {
         let mut byte_flags = vec![0u8; 4];
 
+        let mut result = 0;
+        let mut a_comparision_byte = 0u8;
+        let mut b_comparision_byte = 0u8;
         for (a_byte, b_byte, flag) in izip!(
             a.to_le_bytes().iter().rev(),
             b.to_le_bytes().iter().rev(),
@@ -38,34 +41,31 @@ impl<F: Field> GtColsBytes<F> {
         ) {
             if a_byte < b_byte {
                 *flag = 1;
-                self.a_comparison_byte = F::from_canonical_u8(*a_byte);
-                self.b_comparison_byte = F::from_canonical_u8(*b_byte);
-                self.result = F::from_canonical_u8(0);
-                record.add_byte_lookup_event(ByteLookupEvent {
-                    opcode: ByteOpcode::LTU,
-                    a1: 0,
-                    a2: 0,
-                    b: *b_byte,
-                    c: *a_byte,
-                });
+                a_comparision_byte = *a_byte;
+                b_comparision_byte = *b_byte;
+                result = 0;
                 break;
             } else {
                 if a_byte > b_byte {
                     *flag = 1;
-                    self.result = F::from_canonical_u8(1);
-                    self.a_comparison_byte = F::from_canonical_u8(*a_byte);
-                    self.b_comparison_byte = F::from_canonical_u8(*b_byte);
-                    record.add_byte_lookup_event(ByteLookupEvent {
-                        opcode: ByteOpcode::LTU,
-                        a1: 1,
-                        a2: 0,
-                        b: *b_byte,
-                        c: *a_byte,
-                    });
+                    a_comparision_byte = *a_byte;
+                    b_comparision_byte = *b_byte;
+                    result = 1;
                     break;
                 }
             }
         }
+
+        self.result = F::from_canonical_u8(result);
+        self.a_comparison_byte = F::from_canonical_u8(a_comparision_byte);
+        self.b_comparison_byte = F::from_canonical_u8(b_comparision_byte);
+        record.add_byte_lookup_event(ByteLookupEvent {
+            opcode: ByteOpcode::LTU,
+            a1: result as u16,
+            a2: 0,
+            b: b_comparision_byte,
+            c: a_comparision_byte,
+        });
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.iter_mut()) {
             *flag = F::from_canonical_u8(*byte);

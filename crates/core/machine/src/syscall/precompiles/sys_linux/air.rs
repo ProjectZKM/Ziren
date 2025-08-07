@@ -197,15 +197,15 @@ impl SysLinuxChip {
 
     fn eval_clone<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
         let res = local.output.value();
-        builder.when(local.is_brk).assert_zero(res[0]);
-        builder.when(local.is_brk).assert_zero(res[1]);
-        builder.when(local.is_brk).assert_zero(res[2]);
-        builder.when(local.is_brk).assert_zero(res[3]);
+        builder.when(local.is_clone).assert_zero(res[0]);
+        builder.when(local.is_clone).assert_zero(res[1]);
+        builder.when(local.is_clone).assert_zero(res[2]);
+        builder.when(local.is_clone).assert_zero(res[3]);
 
-        builder.when(local.is_brk).assert_one(local.result[0]);
-        builder.when(local.is_brk).assert_zero(local.result[1]);
-        builder.when(local.is_brk).assert_zero(local.result[2]);
-        builder.when(local.is_brk).assert_zero(local.result[3]);
+        builder.when(local.is_clone).assert_one(local.result[0]);
+        builder.when(local.is_clone).assert_zero(local.result[1]);
+        builder.when(local.is_clone).assert_zero(local.result[2]);
+        builder.when(local.is_clone).assert_zero(local.result[3]);
     }
 
     fn eval_mmap<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
