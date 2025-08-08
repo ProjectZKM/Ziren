@@ -29,15 +29,17 @@ const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
 
-const VK_MAP: &[u8] =
-    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/dummy_vk_map.bin"));
+lazy_static::lazy_static! {
+    static ref DUMMY_VK_MAP: &'static [u8] =
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/dummy_vk_map.bin"));
+}
 
 pub(crate) fn verify_stark_compressed_proof(
     vk: &ZKMVerifyingKey,
     proof: &ZKMReduceProof<InnerSC>,
 ) -> Result<(), MachineVerificationError<InnerSC>> {
     let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
-        bincode::deserialize(VK_MAP).unwrap();
+        bincode::deserialize(&DUMMY_VK_MAP).unwrap();
     let (recursion_vk_root, _merkle_tree) =
         MerkleTree::<KoalaBear, InnerSC>::commit(allowed_vk_map.keys().copied().collect());
 
@@ -45,9 +47,6 @@ pub(crate) fn verify_stark_compressed_proof(
     let compress_prover = CompressProver::new(compress_machine);
 
     let ZKMReduceProof { vk: compress_vk, proof } = proof;
-    let mut challenger = compress_prover.config().challenger();
-    let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
-    compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
     // Validate public values
     let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
@@ -72,6 +71,10 @@ pub(crate) fn verify_stark_compressed_proof(
     if public_values.zkm_vk_digest != vkey_hash {
         return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
     }
+
+    let mut challenger = compress_prover.config().challenger();
+    let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
+    compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
 
     Ok(())
 }
