@@ -521,11 +521,11 @@ mod bls {
 
     /// Given a field element, in big endian, this function computes the inverse.
     ///
-    /// This functions will panic if the additive identity is passed in.
+    /// This function will panic if the additive identity is passed in.
     pub fn hook_bls12_381_inverse(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
         let field_element = BigUint::from_bytes_be(&buf[..48]);
 
-        // Zero is not invertible, and we dont want to have to return a status from here.
+        // Zero is not invertible, and we don't want to have to return a status from here.
         assert!(!field_element.is_zero(), "Field element is the additive identity");
 
         let modulus = BigUint::from_bytes_le(BLS12_381_MODULUS);
