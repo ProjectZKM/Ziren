@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"log"
-
 	"github.com/ProjectZKM/Ziren/crates/go-runtime/zkm_runtime"
 )
 

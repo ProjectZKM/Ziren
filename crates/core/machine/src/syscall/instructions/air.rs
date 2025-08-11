@@ -119,13 +119,37 @@ impl SyscallInstrsChip {
         // interaction is not activated.
         builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table.clone());
 
+        // Compute whether this syscall is SYS_NOP.
+        let is_sys_nop = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                local.syscall_id
+                    - AB::Expr::from_canonical_u32(SyscallCode::SYS_NOP.syscall_id()),
+                local.is_sys_nop,
+                local.is_real.into(),
+            );
+            local.is_sys_nop.result
+        };
+
+
         builder.send_syscall(
             local.shard,
             local.clk,
             syscall_id.clone(),
             local.op_b_value.reduce::<AB>(),
             local.op_c_value.reduce::<AB>(),
-            send_to_table,
+            send_to_table - is_sys_nop.clone(),
+            LookupScope::Local,
+        );
+
+
+        builder.send_syscall(
+            local.shard,
+            local.clk,
+            local.syscall_id,
+            local.op_b_value.reduce::<AB>(),
+            local.op_c_value.reduce::<AB>(),
+            is_sys_nop.clone(),
             LookupScope::Local,
         );
 
@@ -140,6 +164,8 @@ impl SyscallInstrsChip {
             );
             local.is_enter_unconstrained.result
         };
+
+        builder.when(local.is_real).when_not(is_enter_unconstrained.clone() + is_sys_nop).assert_eq(local.syscall_id, syscall_id.clone());
 
         // Compute whether this syscall is HINT_LEN.
         let is_hint_len = {

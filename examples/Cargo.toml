@@ -37,7 +37,7 @@ members = [
   "unconstrained/host",
   "large-sum/guest",
   "large-sum/host",
-  "sha2-go/host",
+  "simple-go/host",
 ]
 resolver = "2"
 

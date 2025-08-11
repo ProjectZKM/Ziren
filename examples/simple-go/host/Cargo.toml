@@ -1,8 +1,8 @@
 [package]
-name = "sha2-go-host"
+name = "simple-go-host"
 version = { workspace = true }
 edition = { workspace = true }
-default-run = "sha2-go-host"
+default-run = "simple-go-host"
 publish = false
 
 [dependencies]
@@ -32,7 +32,7 @@ name = "execute"
 path = "bin/execute.rs"
 
 [[bin]]
-name = "sha2-go-host"
+name = "simple-go-host"
 path = "src/main.rs"
 
 # [features]

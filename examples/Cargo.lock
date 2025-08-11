@@ -6481,18 +6481,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2-go-host"
-version = "1.1.0"
-dependencies = [
- "byteorder",
- "hex",
- "serde",
- "serde_json",
- "zkm-build",
- "zkm-sdk",
-]
-
-[[package]]
 name = "sha3"
 version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6544,6 +6532,18 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "simple-go-host"
+version = "1.1.0"
+dependencies = [
+ "byteorder",
+ "hex",
+ "serde",
+ "serde_json",
+ "zkm-build",
+ "zkm-sdk",
 ]
 
 [[package]]

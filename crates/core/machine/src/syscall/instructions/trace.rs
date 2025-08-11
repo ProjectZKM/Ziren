@@ -90,7 +90,7 @@ impl SyscallInstrsChip {
         cols.op_b_value = event.arg1.into();
         cols.op_c_value = event.arg2.into();
         cols.prev_a_value = event.a_record.prev_value.into();
-
+        cols.syscall_id = F::from_canonical_u32(event.syscall_id);
         let syscall_id = F::from_canonical_u32(event.a_record.prev_value & 0xffff);
         let num_cycles = cols.prev_a_value[3];
 
@@ -101,6 +101,11 @@ impl SyscallInstrsChip {
         );
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
+
+        // Populate `is_sys_nop`.
+        cols.is_sys_nop.populate_from_field_element(
+            cols.syscall_id - F::from_canonical_u32(SyscallCode::SYS_NOP.syscall_id()),
+        );
 
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(

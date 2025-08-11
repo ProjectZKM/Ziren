@@ -3,7 +3,7 @@
   "Bn254Fp2MulAssign": 2885,
   "CloClz": 46,
   "Bls12831Fp2AddSubAssign": 2070,
-  "SyscallInstrs": 79,
+  "SyscallInstrs": 86,
   "DivRem": 162,
   "ShiftRight": 135,
   "Secp256r1Decompress": 2686,

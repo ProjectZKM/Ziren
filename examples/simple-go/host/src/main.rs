@@ -1,9 +1,9 @@
 use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
-const ELF: &[u8] = include_bytes!("../../guest/sha2-go");
+const ELF: &[u8] = include_bytes!("../../guest/simple-go");
 
-fn prove_sha2_go() {
+fn prove_simple_go() {
     let data = 10u32;
 
     // The input stream that the guest will read from using `zkm_zkvm::io::read`. Note that the
@@ -42,5 +42,5 @@ fn prove_sha2_go() {
 
 fn main() {
     utils::setup_logger();
-    prove_sha2_go();
+    prove_simple_go();
 }

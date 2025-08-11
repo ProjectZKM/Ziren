@@ -26,7 +26,11 @@ pub struct SyscallInstrColumns<T> {
     /// operation.
     pub is_halt: T,
 
+    /// Whether the current syscall is linux syscall
     pub is_sys_linux: T,
+
+    /// The syscall id
+    pub syscall_id: T,
 
     /// The access columns for the first operand.
     pub op_a_value: Word<T>,
@@ -36,6 +40,9 @@ pub struct SyscallInstrColumns<T> {
     pub op_c_value: Word<T>,
     /// The access columns for prev value of the first operand.
     pub prev_a_value: Word<T>,
+
+    /// Whether the current syscall is SYS_NOP
+    pub is_sys_nop: IsZeroOperation<T>,
 
     /// Whether the current syscall is ENTER_UNCONSTRAINED.
     pub is_enter_unconstrained: IsZeroOperation<T>,

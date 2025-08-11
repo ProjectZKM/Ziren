@@ -1,4 +1,4 @@
-module sha2-go
+module simple-go
 
 go 1.22.5
 
