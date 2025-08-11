@@ -210,12 +210,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .then_some(RecursionShapeConfig::default());
 
         let vk_verification =
-            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
+            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(true);
 
         tracing::debug!("vk verification: {}", vk_verification);
 
         // Read the shapes from the shapes directory and deserialize them into memory.
         let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> = if vk_verification {
+            // Regenerate the vk_map.bin when the Ziren circuit is updated.
+            // ```
+            // cd Ziren
+            // cargo run -r --bin build_compress_vks -- --reduce-batch-size 8 --num-compiler-workers 8 --count-setup-workers 8 --build-dir crates/prover
+            // ```
+            // It takes several days.
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap()
         } else {
             bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap()
