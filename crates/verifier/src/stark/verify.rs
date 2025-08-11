@@ -38,22 +38,14 @@ lazy_static::lazy_static! {
     // It takes several days.
     static ref VK_MAP: &'static [u8] =
         include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/vk_map.bin"));
-
-    static ref DUMMMY_VK_MAP: &'static [u8] =
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/dummy_vk_map.bin"));
 }
-
-const VK_VERIFICATION: bool = true;
 
 pub(crate) fn verify_stark_compressed_proof(
     vk: &ZKMVerifyingKey,
     proof: &ZKMReduceProof<InnerSC>,
 ) -> Result<(), MachineVerificationError<InnerSC>> {
-    let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> = if VK_VERIFICATION {
-        bincode::deserialize(&VK_MAP).unwrap()
-    } else {
-        bincode::deserialize(&DUMMMY_VK_MAP).unwrap()
-    };
+    let allowed_vk_map: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
+        bincode::deserialize(&VK_MAP).unwrap();
     let (recursion_vk_root, _merkle_tree) =
         MerkleTree::<KoalaBear, InnerSC>::commit(allowed_vk_map.keys().copied().collect());
 
@@ -62,7 +54,7 @@ pub(crate) fn verify_stark_compressed_proof(
 
     let ZKMReduceProof { vk: compress_vk, proof } = proof;
 
-    if VK_VERIFICATION && !allowed_vk_map.contains_key(&compress_vk.hash_koalabear()) {
+    if !allowed_vk_map.contains_key(&compress_vk.hash_koalabear()) {
         return Err(MachineVerificationError::InvalidVerificationKey);
     }
 
