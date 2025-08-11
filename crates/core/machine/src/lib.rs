@@ -39,7 +39,7 @@ pub use mips::*;
 /// This string should be updated whenever any step in verifying a Ziren proof changes, including
 /// core, recursion, and plonk-bn254. This string is used to download Ziren artifacts and the gnark
 /// docker image.
-pub const ZKM_CIRCUIT_VERSION: &str = "v1.1.1";
+pub const ZKM_CIRCUIT_VERSION: &str = "v1.1.2";
 
 // Re-export the `ZKMReduceProof` struct from zkm_core_machine.
 //
