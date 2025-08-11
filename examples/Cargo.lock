@@ -8977,11 +8977,25 @@ name = "zkm-verifier"
 version = "1.1.1"
 dependencies = [
  "anyhow",
+ "bincode",
  "hex",
+ "itertools 0.13.0",
  "lazy_static",
+ "p3-commit",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-symmetric",
+ "p3-util",
+ "rayon",
+ "serde",
  "sha2 0.10.8",
  "substrate-bn",
  "thiserror 2.0.12",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-primitives 1.1.1",
+ "zkm-recursion-core",
+ "zkm-stark",
 ]
 
 [[package]]

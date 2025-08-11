@@ -110,7 +110,7 @@ pub enum MipsAirId {
     /// The byte chip.
     Byte = 45,
     /// The SysLinux chip.
-    SysLinux = 46,
+    SysLinux = 47,
 }
 
 impl MipsAirId {
