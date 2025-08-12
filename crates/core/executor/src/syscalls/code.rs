@@ -222,7 +222,7 @@ impl SyscallCode {
             0x00_01_00_2E => SyscallCode::SECP256R1_DECOMPRESS,
             0x01_01_00_2F => SyscallCode::U256XU2048_MUL,
             _ => {
-                if value >= 0x100 && value <= 0x0ffff {
+                if (0x100..=0x0ffff).contains(&value) {
                     // These are the syscall numbers for the Linux syscalls.
                     // We return them as is, without any mapping.
                     match value {

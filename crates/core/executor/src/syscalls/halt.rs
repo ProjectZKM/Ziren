@@ -12,9 +12,6 @@ impl Syscall for HaltSyscall {
     ) -> Option<u32> {
         ctx.set_next_pc(0);
         ctx.set_exit_code(exit_code);
-        println!("Halting with exit code: {}\n", exit_code);
-        log::debug!("{:?}", ctx.rt.record.public_values);
-
         None
     }
 }

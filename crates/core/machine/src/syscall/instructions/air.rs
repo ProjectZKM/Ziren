@@ -136,7 +136,7 @@ impl SyscallInstrsChip {
             syscall_id.clone(),
             local.op_b_value.reduce::<AB>(),
             local.op_c_value.reduce::<AB>(),
-            send_to_table - is_sys_nop.clone(),
+            send_to_table - is_sys_nop,
             LookupScope::Local,
         );
 
@@ -146,7 +146,7 @@ impl SyscallInstrsChip {
             local.syscall_id,
             local.op_b_value.reduce::<AB>(),
             local.op_c_value.reduce::<AB>(),
-            is_sys_nop.clone(),
+            is_sys_nop,
             LookupScope::Local,
         );
 
@@ -164,7 +164,7 @@ impl SyscallInstrsChip {
 
         builder
             .when(local.is_real)
-            .when_not(is_enter_unconstrained.clone() + is_sys_nop)
+            .when_not(is_enter_unconstrained + is_sys_nop)
             .assert_eq(local.syscall_id, syscall_id.clone());
 
         // Compute whether this syscall is HINT_LEN.

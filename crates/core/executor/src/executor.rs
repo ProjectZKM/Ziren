@@ -1043,7 +1043,6 @@ impl<'a> Executor<'a> {
         let mut hi_or_prev_a = None;
         let mut syscall_code = 0u32;
 
-        let print_registers = self.state.next_is_delayslot;
         self.state.next_is_delayslot = false;
 
         if self.executor_mode == ExecutorMode::Trace {
@@ -1295,17 +1294,7 @@ impl<'a> Executor<'a> {
                 return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
             }
         }
-        log::debug!(
-            "Executing instruction: {:?} at PC: {:08X}, Next PC: {:08X}, Next Next PC: {:08X}， a: {:08X}, b: {:08X}, c: {:08X}, hi_or_prev_a: {:?}",
-            instruction,
-            pc,
-            next_pc,
-            next_next_pc,
-            a,
-            b,
-            c,
-            hi_or_prev_a
-        );
+
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
             self.emit_events(
@@ -1327,20 +1316,6 @@ impl<'a> Executor<'a> {
         // Update the program counter.
         self.state.pc = next_pc;
         self.state.next_pc = next_next_pc;
-
-        if print_registers {
-            let mut regs = [0u32; 36];
-            for reg in 0..36 {
-                regs[reg] = self.register((reg as u8).into());
-            }
-
-            log::debug!(
-                "PC: {:08X}, Next PC: {:08X} regs {:08X?}\n",
-                self.state.pc,
-                self.state.next_pc,
-                regs
-            );
-        }
 
         // Update the clk to the next cycle.
         self.state.clk += 5;

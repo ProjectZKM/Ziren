@@ -46,7 +46,7 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
                 let mut row = [F::ZERO; NUM_SYS_LINUX_COLS];
                 let cols: &mut SysLinuxCols<F> = row.as_mut_slice().borrow_mut();
                 let mut blu = Vec::new();
-                self.event_to_row(&event, cols, &mut blu);
+                self.event_to_row(event, cols, &mut blu);
                 row
             })
             .collect::<Vec<_>>();
@@ -77,7 +77,7 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
                     };
                     let mut row = [F::ZERO; NUM_SYS_LINUX_COLS];
                     let cols: &mut SysLinuxCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(&event, cols, &mut blu);
+                    self.event_to_row(event, cols, &mut blu);
                 });
                 blu
             })

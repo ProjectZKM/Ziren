@@ -23,7 +23,7 @@ fn prove_simple_go() {
     let mut proof = client.prove(&pk, stdin).run().unwrap();
 
     let a = proof.public_values.read::<u32>();
-    println!("a: {}", a);
+    println!("a: {a}");
 
     println!("generated proof");
     // Verify proof and public values

@@ -23,7 +23,6 @@ impl Syscall for SysExitGroupSyscall {
         let mut write_records = Vec::new();
         rt.set_next_pc(0);
         rt.set_exit_code(a0);
-        println!("ExitGroup with exit code: {}\n", a0);
         let v0 = 0; // Exit group does not return a value
         let a3_record = rt.mw(Register::A3 as u32, 0);
         write_records.push(a3_record);
@@ -35,8 +34,8 @@ impl Syscall for SysExitGroupSyscall {
             a1,
             v0,
             syscall_code: syscall_code.syscall_id(),
-            read_records: read_records.try_into().unwrap(),
-            write_records: write_records.try_into().unwrap(),
+            read_records,
+            write_records,
             local_mem_access: rt.postprocess(),
         });
         let syscall_event =

@@ -32,8 +32,8 @@ impl Syscall for SysCloneSyscall {
             a1,
             v0,
             syscall_code: syscall_code.syscall_id(),
-            read_records: read_records.try_into().unwrap(),
-            write_records: write_records.try_into().unwrap(),
+            read_records,
+            write_records,
             local_mem_access: rt.postprocess(),
         });
         let syscall_event =

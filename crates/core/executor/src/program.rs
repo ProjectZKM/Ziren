@@ -248,7 +248,7 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
                 }
             },
             Err(e) => {
-                log::warn!("parse symbol failed, {}", e);
+                log::warn!("parse symbol failed, {e}");
                 continue;
             }
         }

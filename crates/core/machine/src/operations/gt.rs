@@ -29,7 +29,7 @@ pub struct GtColsBytes<T> {
 
 impl<F: Field> GtColsBytes<F> {
     pub fn populate(&mut self, a: u32, b: u32, record: &mut impl ByteRecord) {
-        let mut byte_flags = vec![0u8; 4];
+        let mut byte_flags = [0u8; 4];
 
         let mut result = 0;
         let mut a_comparision_byte = 0u8;
@@ -45,14 +45,12 @@ impl<F: Field> GtColsBytes<F> {
                 b_comparision_byte = *b_byte;
                 result = 0;
                 break;
-            } else {
-                if a_byte > b_byte {
-                    *flag = 1;
-                    a_comparision_byte = *a_byte;
-                    b_comparision_byte = *b_byte;
-                    result = 1;
-                    break;
-                }
+            } else if a_byte > b_byte {
+                *flag = 1;
+                a_comparision_byte = *a_byte;
+                b_comparision_byte = *b_byte;
+                result = 1;
+                break;
             }
         }
 
@@ -99,11 +97,11 @@ impl<F: Field> GtColsBytes<F> {
         let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in cols.byte_flags.iter() {
             // Assert that the flag is boolean.
-            builder.when(is_real.clone()).assert_bool(flag);
+            builder.when(is_real).assert_bool(flag);
             // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.into();
         }
-        builder.when(is_real.clone()).assert_bool(sum_flags);
+        builder.when(is_real).assert_bool(sum_flags);
 
         // Check the less-than condition.
 
@@ -121,17 +119,14 @@ impl<F: Field> GtColsBytes<F> {
             // We can do this by calculating the sum of the flags since only `1` is set to `1`.
             is_inequality_visited = is_inequality_visited.clone() + flag.into();
 
-            first_gt_byte = first_gt_byte.clone() + a_byte.clone() * flag;
-            b_comparison_byte = b_comparison_byte.clone() + b_byte.clone() * flag;
+            first_gt_byte = first_gt_byte.clone() + a_byte * flag;
+            b_comparison_byte = b_comparison_byte.clone() + b_byte * flag;
 
-            builder
-                .when_not(is_inequality_visited.clone())
-                .when(is_real.clone())
-                .assert_eq(a_byte.clone(), b_byte.clone());
+            builder.when_not(is_inequality_visited.clone()).when(is_real).assert_eq(a_byte, b_byte);
         }
 
-        builder.when(is_real.clone()).assert_eq(cols.a_comparison_byte, first_gt_byte);
-        builder.when(is_real.clone()).assert_eq(cols.b_comparison_byte, b_comparison_byte);
+        builder.when(is_real).assert_eq(cols.a_comparison_byte, first_gt_byte);
+        builder.when(is_real).assert_eq(cols.b_comparison_byte, b_comparison_byte);
 
         // Send the comparison lookup.
         builder.send_byte(
