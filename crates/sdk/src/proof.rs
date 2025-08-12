@@ -68,6 +68,9 @@ impl ZKMProofWithPublicValues {
     /// encoded proof, in a form optimized for onchain verification.
     pub fn bytes(&self) -> Vec<u8> {
         match &self.proof {
+            ZKMProof::Compressed(stark_proof) => {
+                bincode::serialize(stark_proof).expect("Invalid stark proof")
+            }
             ZKMProof::Plonk(plonk_proof) => {
                 if plonk_proof.encoded_proof.is_empty() {
                     // If the proof is empty, then this is a mock proof. The mock Ziren verifier
@@ -90,7 +93,7 @@ impl ZKMProofWithPublicValues {
                     hex::decode(&groth16_proof.encoded_proof).expect("Invalid Groth16 proof");
                 [groth16_proof.groth16_vkey_hash[..4].to_vec(), proof_bytes].concat()
             }
-            _ => unimplemented!("only Plonk and Groth16 proofs are verifiable onchain"),
+            _ => unimplemented!("only Stark, Plonk and Groth16 proofs are verifiable onchain"),
         }
     }
 }

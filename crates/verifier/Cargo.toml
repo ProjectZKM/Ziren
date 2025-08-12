@@ -16,6 +16,8 @@ sha2 = { version = "0.10.8", default-features = false }
 thiserror = { version = "2", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 lazy_static = { version = "1.5.0", default-features = false }
+bincode = "1.3.3"
+rayon = "1.10.0"
 
 # arkworks
 ark-bn254 = { version = "0.5", optional = true }
@@ -24,6 +26,18 @@ ark-ff = { version = "0.5", optional = true }
 ark-groth16 = { version = "0.5", optional = true }
 ark-ec = { version = "0.5", optional = true }
 
+itertools.workspace = true
+p3-commit.workspace = true
+p3-field.workspace = true
+p3-koala-bear.workspace = true
+p3-symmetric.workspace = true
+p3-util.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
+zkm-core-executor.workspace = true
+zkm-core-machine.workspace = true
+zkm-primitives.workspace = true
+zkm-recursion-core.workspace = true
+zkm-stark.workspace = true
 zkm-sdk = { workspace = true, optional = true }
 
 [dev-dependencies]

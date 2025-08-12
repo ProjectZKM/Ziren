@@ -690,7 +690,7 @@ where
                     + local.is_modu * modu
             };
 
-            // DivRem Chip is only used for DIV and DIVU instruction currently. So is_write_hi will always be ture.
+            // DivRem Chip is only used for DIV and DIVU instruction currently. So is_write_hi will always be true.
             builder.receive_instruction(
                 local.shard,
                 local.clk,
