@@ -173,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "only Plonk and Groth16 proofs are verifiable onchain")]
+    #[should_panic(expected = "only Stark, Plonk and Groth16 proofs are verifiable onchain")]
     fn test_core_proof_bytes_unimplemented() {
         let core_proof = ZKMProofWithPublicValues {
             proof: ZKMProof::Core(vec![]),
