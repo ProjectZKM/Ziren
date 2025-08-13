@@ -598,7 +598,7 @@ impl<'a> Executor<'a> {
 
         if position != MemoryAccessPosition::Memory {
             // If the position is not Memory, we are reading from a register.
-            log::info!("pc: {:X} read register {}, {:X}", self.state.pc, addr, record.value);
+            log::debug!("pc: {:X} read register {}, {:X}", self.state.pc, addr, record.value);
         }
 
         // If we're not in unconstrained mode, record the access for the current cycle.
@@ -714,7 +714,7 @@ impl<'a> Executor<'a> {
                 record.hi,
             );
         } else {
-            log::info!("wrong {}\n", instruction.opcode);
+            log::debug!("wrong {}\n", instruction.opcode);
             unreachable!()
         }
     }
@@ -2150,7 +2150,7 @@ impl<'a> Executor<'a> {
 
     #[allow(dead_code)]
     fn show_regs(&self) {
-        let regs = (0..34).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
+        let regs = (0..36).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
     }
 }
