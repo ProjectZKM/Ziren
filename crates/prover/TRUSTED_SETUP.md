@@ -101,8 +101,8 @@ cp trusted-setup/Groth16Verifier.sol build/groth16/Groth16Verifier.sol
 ## Override Existing VKs
 
 ```bash
-cp build/groth16/groth16_vk.bin ../crates/verifier/bn254-vk/groth16_vk.bin
-cp build/groth16/plonk_vk.bin ../crates/verifier/bn254-vk/plonk_vk.bin
+cp build/groth16/groth16_vk.bin ../verifier/bn254-vk/
+cp build/plonk/plonk_vk.bin ../verifier/bn254-vk/
 ```
 
 ## Post Trusted Setup

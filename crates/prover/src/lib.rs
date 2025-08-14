@@ -210,7 +210,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .then_some(RecursionShapeConfig::default());
 
         let vk_verification =
-            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
+            env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(true);
 
         tracing::debug!("vk verification: {}", vk_verification);
 
@@ -219,7 +219,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // Regenerate the vk_map.bin when the Ziren circuit is updated.
             // ```
             // cd Ziren
-            // cargo run -r --bin build_compress_vks -- --reduce-batch-size 8 --num-compiler-workers 8 --count-setup-workers 8 --build-dir crates/prover
+            // cargo run -r --bin build_compress_vks -- --num-compiler-workers 32 --count-setup-workers 32 --build-dir crates/prover
             // ```
             // It takes several days.
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap()
