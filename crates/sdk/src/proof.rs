@@ -68,8 +68,8 @@ impl ZKMProofWithPublicValues {
     /// encoded proof, in a form optimized for onchain verification.
     pub fn bytes(&self) -> Vec<u8> {
         match &self.proof {
-            ZKMProof::Compressed(stark_proof) => {
-                bincode::serialize(stark_proof).expect("Invalid stark proof")
+            ZKMProof::Compressed(_) => {
+                bincode::serialize(&self.proof).expect("Invalid stark proof")
             }
             ZKMProof::Plonk(plonk_proof) => {
                 if plonk_proof.encoded_proof.is_empty() {

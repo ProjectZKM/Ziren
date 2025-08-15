@@ -8697,6 +8697,7 @@ dependencies = [
  "rayon",
  "serde",
  "sha2",
+ "strum_macros",
  "substrate-bn",
  "test-artifacts",
  "thiserror 2.0.12",
