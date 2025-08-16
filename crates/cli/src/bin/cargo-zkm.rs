@@ -8,7 +8,7 @@ use zkm_cli::{
 #[derive(Parser)]
 #[command(name = "cargo", bin_name = "cargo")]
 pub enum Cargo {
-    Prove(ProveCli),
+    ZKM(ProveCli),
 }
 
 #[derive(clap::Args)]
@@ -26,7 +26,7 @@ pub enum ProveCliCommands {
 }
 
 fn main() -> Result<()> {
-    let Cargo::Prove(args) = Cargo::parse();
+    let Cargo::ZKM(args) = Cargo::parse();
 
     match args.command {
         ProveCliCommands::New(cmd) => cmd.run(),
