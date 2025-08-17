@@ -14,6 +14,8 @@ members = [
   "fibonacci_c_lib/host",
   "groth16/guest",
   "groth16/host",
+  "bitcoin/host",
+  "bitcoin/guest",
   "is-prime/guest",
   "is-prime/host",
   "json/lib",

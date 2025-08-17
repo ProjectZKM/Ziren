@@ -1,0 +1,12 @@
+[package]
+name = "bitcoin-host"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+rsa = "0.6"
+zkm-sdk = { workspace = true }
+
+[build-dependencies]
+zkm-build = { workspace = true }
