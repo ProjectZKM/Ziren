@@ -82,7 +82,7 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
     cargo_rerun_if_changed(&metadata, program_dir);
 
     // Check if RUSTC_WORKSPACE_WRAPPER is set to clippy-driver (i.e. if `cargo clippy` is the
-    // current compiler). If so, don't execute `cargo zkm build` because it breaks
+    // current compiler). If so, don't execute `cargo ziren build` because it breaks
     // rust-analyzer's `cargo clippy` feature.
     let is_clippy_driver = std::env::var("RUSTC_WORKSPACE_WRAPPER")
         .map(|val| val.contains("clippy-driver"))

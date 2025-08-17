@@ -233,7 +233,7 @@ rand = "0.8.5"
 ```
 
 Don't forget to include your crate to the workspace at `crates/test-artifacts/programs/Cargo.toml`. Then implement the
-tests and run `cargo zkm build` to generate an ELF file.
+tests and run `cargo ziren build` to generate an ELF file.
 
 ### Include the ELF File in `test-artifacts` crate `lib.rs`
 
