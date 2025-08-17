@@ -13,7 +13,7 @@ jobs:
     name: Cargo Test
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
