@@ -26,6 +26,7 @@ pub mod error;
 mod verify;
 
 /// A proof generated with Ziren of a particular proof mode.
+/// Redefined due to SDK's non-no_std limitation, and is used only for deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]

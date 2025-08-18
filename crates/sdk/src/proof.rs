@@ -11,6 +11,7 @@ use zkm_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
 use zkm_stark::{MachineVerificationError, ShardProof};
 
 /// A proof generated with Ziren of a particular proof mode.
+/// Consistent with the definition in file crates/verifier/src/stark/mod.rs
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
