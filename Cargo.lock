@@ -6692,7 +6692,7 @@ dependencies = [
 
 [[package]]
 name = "test-artifacts"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "zkm-build",
 ]
@@ -8202,7 +8202,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-build"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -8213,7 +8213,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-cli"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -8227,7 +8227,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-executor"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "anyhow",
  "bincode",
@@ -8262,15 +8262,15 @@ dependencies = [
  "typenum",
  "vec_map",
  "zkm-curves",
- "zkm-lib 1.1.2",
- "zkm-primitives 1.1.2",
+ "zkm-lib 1.1.3",
+ "zkm-primitives 1.1.3",
  "zkm-stark",
  "zkm-zkvm",
 ]
 
 [[package]]
 name = "zkm-core-machine"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -8317,13 +8317,13 @@ dependencies = [
  "zkm-core-executor",
  "zkm-curves",
  "zkm-derive",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-curves"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "cfg-if",
  "curve25519-dalek",
@@ -8340,13 +8340,13 @@ dependencies = [
  "serde",
  "snowbridge-amcl",
  "typenum",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-derive"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -8367,14 +8367,14 @@ dependencies = [
 
 [[package]]
 name = "zkm-lib"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "bincode",
  "cfg-if",
  "elliptic-curve",
  "serde",
  "sha2",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
 ]
 
 [[package]]
@@ -8397,7 +8397,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-primitives"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "bincode",
  "hex",
@@ -8414,7 +8414,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-prover"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "anyhow",
  "bincode",
@@ -8443,7 +8443,7 @@ dependencies = [
  "tracing-subscriber 0.3.19",
  "zkm-core-executor",
  "zkm-core-machine",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-recursion-circuit",
  "zkm-recursion-compiler",
  "zkm-recursion-core",
@@ -8453,7 +8453,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-circuit"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "ff 0.13.1",
  "hashbrown 0.14.5",
@@ -8481,7 +8481,7 @@ dependencies = [
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-derive",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
@@ -8490,7 +8490,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-compiler"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "backtrace",
  "criterion",
@@ -8507,7 +8507,7 @@ dependencies = [
  "tracing",
  "vec_map",
  "zkm-core-machine",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-recursion-core",
  "zkm-recursion-derive",
  "zkm-stark",
@@ -8515,7 +8515,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-core"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "backtrace",
  "ff 0.13.1",
@@ -8545,13 +8545,13 @@ dependencies = [
  "zkhash",
  "zkm-core-machine",
  "zkm-derive",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-recursion-derive"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -8559,7 +8559,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-gnark-ffi"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "anyhow",
  "bincode",
@@ -8583,7 +8583,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-sdk"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "alloy-primitives",
  "alloy-signer",
@@ -8626,14 +8626,14 @@ dependencies = [
  "zkm-build",
  "zkm-core-executor",
  "zkm-core-machine",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-prover",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-stark"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "arrayref",
  "hashbrown 0.14.5",
@@ -8669,13 +8669,13 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.19",
  "zkm-derive",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-zkvm",
 ]
 
 [[package]]
 name = "zkm-verifier"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -8689,6 +8689,7 @@ dependencies = [
  "lazy_static",
  "num-bigint 0.4.6",
  "num-traits",
+ "once_cell",
  "p3-commit",
  "p3-field",
  "p3-koala-bear",
@@ -8703,7 +8704,7 @@ dependencies = [
  "thiserror 2.0.12",
  "zkm-core-executor",
  "zkm-core-machine",
- "zkm-primitives 1.1.2",
+ "zkm-primitives 1.1.3",
  "zkm-prover",
  "zkm-recursion-core",
  "zkm-sdk",
@@ -8712,7 +8713,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-zkvm"
-version = "1.1.2"
+version = "1.1.3"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -8726,8 +8727,8 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "sha2",
- "zkm-lib 1.1.2",
- "zkm-primitives 1.1.2",
+ "zkm-lib 1.1.3",
+ "zkm-primitives 1.1.3",
 ]
 
 [[package]]

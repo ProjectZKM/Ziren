@@ -63,10 +63,6 @@ name = "post_trusted_setup"
 path = "scripts/post_trusted_setup.rs"
 
 [[bin]]
-name = "e2e"
-path = "scripts/e2e.rs"
-
-[[bin]]
 name = "find_maximal_shapes"
 path = "scripts/find_maximal_shapes.rs"
 
