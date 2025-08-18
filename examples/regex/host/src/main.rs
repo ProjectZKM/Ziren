@@ -7,7 +7,7 @@ fn main() {
     // Setup a tracer for logging.
     utils::setup_logger();
 
-    // Create a new stdin with d the input for the program.
+    // Create a new stdin with the input for the program.
     let mut stdin = ZKMStdin::new();
 
     let pattern = "a+".to_string();
