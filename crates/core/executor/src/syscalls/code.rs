@@ -24,6 +24,7 @@ use strum_macros::EnumIter;
 #[allow(clippy::enum_clike_unportable_variant)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
+#[repr(u32)]
 pub enum SyscallCode {
     SYSHINTLEN = 0x00_00_00_F0,
     SYSHINTREAD = 0x00_00_00_F1,

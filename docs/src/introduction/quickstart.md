@@ -25,13 +25,13 @@ cargo install --locked --force --path .
 You can now create a bare new project using the `new` command: 
 
 ```rust
-cargo prove new --bare <NEW_PROJECT>
+cargo ziren new --bare <NEW_PROJECT>
 ```
 
 To view additional CLI commands, including `build` for compiling a program and `vkey` for displaying the guest’s verification key hash: 
 
 ```rust
-cargo prove --help
+cargo ziren --help
 ```
 
 ### Using the Project Template:
