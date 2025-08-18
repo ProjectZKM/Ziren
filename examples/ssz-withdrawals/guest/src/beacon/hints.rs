@@ -6,7 +6,7 @@ use hex_literal::hex;
 use ssz_rs::prelude::*;
 use std::hint::black_box;
 
-/// Returns the beaacon block's withdrawals root and a corresponding SSZ merkle proof.
+/// Returns the beacon block's withdrawals root and a corresponding SSZ merkle proof.
 pub fn withdrawals_root_proof(_block_root: Node) -> (Node, Vec<Node>) {
     let leaf =
         node_from_bytes(hex!("5cc52fb136d9ff526f071f8f87d44c3f35ff5dc973371a2c3613d8ecc53bfcd4"));
