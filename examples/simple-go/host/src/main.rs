@@ -1,22 +1,15 @@
-use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
+use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
-const ELF: &[u8] = include_elf!("large-sum");
+const ELF: &[u8] = include_bytes!("../../guest/simple-go");
 
-fn main() {
-    // Setup logging.
-    utils::setup_logger();
+fn prove_simple_go() {
+    let data = 10u32;
 
     // The input stream that the guest will read from using `zkm_zkvm::io::read`. Note that the
     // types of the elements in the input stream must match the types being read in the guest.
     let mut stdin = ZKMStdin::new();
-    // simulate big data, split into chunks of 1MB
-    let data = vec![1u8; 1024 * 1024];
-    let n: u32 = 1; //tmply set to 1 for testing, can be changed to a larger number
-    stdin.write(&n);
-    for _ in 0..n {
-        stdin.write(&data);
-    }
+    stdin.write(&data);
 
     // Create a `ProverClient` method.
     let client = ProverClient::new();
@@ -27,10 +20,12 @@ fn main() {
 
     // Generate the proof for the given guest and input.
     let (pk, vk) = client.setup(ELF);
-    let proof = client.prove(&pk, stdin).run().unwrap();
+    let mut proof = client.prove(&pk, stdin).run().unwrap();
+
+    let a = proof.public_values.read::<u32>();
+    println!("a: {a}");
 
     println!("generated proof");
-
     // Verify proof and public values
     client.verify(&proof, &vk).expect("verification failed");
 
@@ -43,4 +38,9 @@ fn main() {
     client.verify(&deserialized_proof, &vk).expect("verification failed");
 
     println!("successfully generated and verified proof for the program!")
+}
+
+fn main() {
+    utils::setup_logger();
+    prove_simple_go();
 }

@@ -5,6 +5,9 @@ pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
 pub const WORD_SIZE: usize = 4;
 
 pub mod fd {
+    /// The file descriptor for stdin.
+    pub const FD_STDIN: u32 = 0;
+
     /// The file descriptor for stdout.
     pub const FD_STDOUT: u32 = 1;
 
