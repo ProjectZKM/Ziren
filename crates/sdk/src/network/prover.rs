@@ -143,7 +143,9 @@ impl NetworkProver {
         let max_prover_num =
             env::var("MAX_PROVER_NUM").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
 
-        // set the single node mode
+        // Single-node mode
+        // When enabled, the proving process runs entirely on one node,
+        // without splitting into multiple tasks.
         let single_node =
             env::var("SINGLE_NODE").ok().and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
 
