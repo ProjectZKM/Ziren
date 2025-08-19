@@ -80,4 +80,5 @@ message GetStatusResponse {
   uint64 total_steps = 10;
   bytes receipt = 11;
   bytes elf_id = 12;
+  uint64 proving_time = 13; // in milliseconds
 }
