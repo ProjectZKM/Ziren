@@ -165,8 +165,9 @@ You can generate the SSL certificate and key by running the [`certgen.sh`](https
 **Optional**: You can also set the following environment variables to customize the network prover behavior:
 
 ```bash
-export SHARD_SIZE=<shard_size>            # Size of each shard in bytes. 
+export SHARD_SIZE=<shard_size>              # Size of each shard in bytes. 
 export MAX_PROVER_NUM=<max_prover_num>      # Maximum number of provers to use in parallel.
+export SINGLE_NODE=<true|false>             # Whether to use a single node for proving (default: false).
 ```
 
 

@@ -143,6 +143,12 @@ impl NetworkProver {
         let max_prover_num =
             env::var("MAX_PROVER_NUM").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
 
+        // set the single node mode
+        let single_node = env::var("SINGLE_NODE")
+            .ok()
+            .and_then(|s| s.parse::<bool>().ok())
+            .unwrap_or(false);
+
         let from_step =
             if kind == ZKMProofKind::CompressToGroth16 { Some(Step::InAgg.into()) } else { None };
 
@@ -164,6 +170,7 @@ impl NetworkProver {
             from_step,
             receipt_inputs: input.receipts,
             max_prover_num,
+            single_node,
             ..Default::default()
         };
 
