@@ -151,7 +151,7 @@ Each stage may take a different amount of time.
 - [Register](https://www.zkm.io/apply) your address to gain access.
 - **SDK dependency**: add `zkm_sdk` from the Ziren SDK to your `Cargo.toml`:
 ```toml
-zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren", branch = "main" }
+zkm-sdk = { git = "https://github.com/ProjectZKM/Ziren" }
 ```
 ### Environment Variable Setup
 Before running your application, export the following environment variables to enable the network prover:
