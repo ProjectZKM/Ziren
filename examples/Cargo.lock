@@ -1023,7 +1023,6 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 [[package]]
 name = "bitcoin"
 version = "0.32.7"
-source = "git+https://github.com/eigmax/rust-bitcoin?branch=patch-0.32.7#d14582ba6453b29e333678170554047a90b98238"
 dependencies = [
  "base58ck",
  "bech32 0.11.0",
@@ -1049,6 +1048,7 @@ dependencies = [
 name = "bitcoin-host"
 version = "1.1.0"
 dependencies = [
+ "bitcoin 0.32.7",
  "rsa 0.6.1",
  "zkm-build",
  "zkm-sdk",
@@ -6319,8 +6319,6 @@ dependencies = [
 [[package]]
 name = "secp256k1"
 version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b50c5943d326858130af85e049f2661ba3c78b26589b8ab98e65e80ae44a1252"
 dependencies = [
  "bitcoin_hashes",
  "rand 0.8.5",
@@ -6330,9 +6328,7 @@ dependencies = [
 
 [[package]]
 name = "secp256k1-sys"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4387882333d3aa8cb20530a17c69a3752e97837832f34f6dccc760e715001d9"
+version = "0.10.0"
 dependencies = [
  "cc",
 ]
