@@ -6,6 +6,7 @@ use core::borrow::Borrow;
 use core::iter::repeat;
 use itertools::Itertools;
 
+use once_cell::sync::Lazy;
 use p3_field::{Field, FieldAlgebra};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{CryptographicHasher, Permutation};
@@ -29,16 +30,17 @@ const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
 type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
 
-lazy_static::lazy_static! {
-    // Regenerate the vk_map.bin when the Ziren circuit is updated.
-    // ```
-    // cd Ziren
-    // cargo run -r --bin build_compress_vks -- --reduce-batch-size 8 --num-compiler-workers 8 --count-setup-workers 8 --build-dir crates/prover
-    // ```
-    // It takes several days.
-    static ref VK_MAP: &'static [u8] =
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/vk_map.bin"));
-}
+pub static VK_MAP: Lazy<&'static [u8]> = Lazy::new(|| {
+    #[cfg(feature = "dummy-vk-map")]
+    {
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/dummy_vk_map.bin"))
+    }
+
+    #[cfg(not(feature = "dummy-vk-map"))]
+    {
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prover/vk_map.bin"))
+    }
+});
 
 pub(crate) fn verify_stark_compressed_proof(
     vk: &ZKMVerifyingKey,
@@ -54,6 +56,7 @@ pub(crate) fn verify_stark_compressed_proof(
 
     let ZKMReduceProof { vk: compress_vk, proof } = proof;
 
+    #[cfg(not(feature = "dummy-vk-map"))]
     if !allowed_vk_map.contains_key(&compress_vk.hash_koalabear()) {
         return Err(MachineVerificationError::InvalidVerificationKey);
     }

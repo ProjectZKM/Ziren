@@ -11,6 +11,7 @@ use zkm_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
 use zkm_stark::{MachineVerificationError, ShardProof};
 
 /// A proof generated with Ziren of a particular proof mode.
+/// Consistent with the definition in file crates/verifier/src/stark/mod.rs
 #[derive(Debug, Clone, Serialize, Deserialize, EnumDiscriminants, EnumTryAs)]
 #[strum_discriminants(derive(Default, Hash, PartialOrd, Ord))]
 #[strum_discriminants(name(ZKMProofKind))]
@@ -68,8 +69,8 @@ impl ZKMProofWithPublicValues {
     /// encoded proof, in a form optimized for onchain verification.
     pub fn bytes(&self) -> Vec<u8> {
         match &self.proof {
-            ZKMProof::Compressed(stark_proof) => {
-                bincode::serialize(stark_proof).expect("Invalid stark proof")
+            ZKMProof::Compressed(_) => {
+                bincode::serialize(&self.proof).expect("Invalid stark proof")
             }
             ZKMProof::Plonk(plonk_proof) => {
                 if plonk_proof.encoded_proof.is_empty() {
