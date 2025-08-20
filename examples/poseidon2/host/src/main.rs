@@ -31,7 +31,10 @@ fn main() {
     // Note that this output is read from values committed to in the guest using
     // `zkm_zkvm::io::commit`.
     let hash = proof.public_values.read::<[u8; 32]>();
-    assert_eq!(hex::encode(&hash), "ae45b14fe23b9f584c76c67d4d9ef6635a27b553a7114427584cc87ba8919866");
+    assert_eq!(
+        hex::encode(&hash),
+        "ae45b14fe23b9f584c76c67d4d9ef6635a27b553a7114427584cc87ba8919866"
+    );
 
     // Verify proof and public values
     client.verify(&proof, &vk).expect("verification failed");

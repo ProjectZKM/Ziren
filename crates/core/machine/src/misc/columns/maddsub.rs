@@ -21,4 +21,5 @@ pub struct MaddsubCols<T> {
 
     /// Access to hi register
     pub op_hi_access: MemoryReadWriteCols<T>,
+    pub is_sign: T,
 }

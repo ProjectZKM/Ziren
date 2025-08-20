@@ -35,6 +35,8 @@ where
             + local.is_ext * Opcode::EXT.as_field::<AB::F>()
             + local.is_maddu * Opcode::MADDU.as_field::<AB::F>()
             + local.is_msubu * Opcode::MSUBU.as_field::<AB::F>()
+            + local.is_madd * Opcode::MADD.as_field::<AB::F>()
+            + local.is_msub * Opcode::MSUB.as_field::<AB::F>()
             + local.is_meq * Opcode::MEQ.as_field::<AB::F>()
             + local.is_mne * Opcode::MNE.as_field::<AB::F>()
             + local.is_teq * Opcode::TEQ.as_field::<AB::F>();
@@ -45,6 +47,8 @@ where
             + local.is_ext
             + local.is_maddu
             + local.is_msubu
+            + local.is_madd
+            + local.is_msub
             + local.is_meq
             + local.is_mne
             + local.is_teq;
@@ -55,12 +59,20 @@ where
         builder.assert_bool(local.is_ext);
         builder.assert_bool(local.is_maddu);
         builder.assert_bool(local.is_msubu);
+        builder.assert_bool(local.is_madd);
+        builder.assert_bool(local.is_msub);
         builder.assert_bool(local.is_meq);
         builder.assert_bool(local.is_mne);
         builder.assert_bool(local.is_teq);
         builder.assert_bool(is_real.clone());
 
-        let is_rw_a = local.is_maddu + local.is_msubu + local.is_ins + local.is_mne + local.is_meq;
+        let is_rw_a = local.is_maddu
+            + local.is_msubu
+            + local.is_madd
+            + local.is_msub
+            + local.is_ins
+            + local.is_mne
+            + local.is_meq;
         builder.receive_instruction(
             local.shard,
             local.clk,
@@ -179,10 +191,17 @@ impl MiscInstrsChip {
         local: &MiscInstrColumns<AB::Var>,
     ) {
         let maddsub_cols = local.misc_specific_columns.maddsub();
-        let is_real = local.is_maddu + local.is_msubu;
+        let is_real = local.is_maddu + local.is_msubu + local.is_madd + local.is_msub;
+        let is_sign = local.is_madd + local.is_msub;
+        let is_unsign = local.is_maddu + local.is_msubu;
+        let is_add = local.is_maddu + local.is_madd;
+        let is_sub = local.is_msubu + local.is_msub;
+
+        let opcode = is_sign * Opcode::MULT.as_field::<AB::F>()
+            + is_unsign * Opcode::MULTU.as_field::<AB::F>();
 
         builder.send_alu_with_hi(
-            Opcode::MULTU.as_field::<AB::F>(),
+            opcode,
             maddsub_cols.mul_lo,
             local.op_b_value,
             local.op_c_value,
@@ -193,12 +212,12 @@ impl MiscInstrsChip {
         for i in 0..WORD_SIZE {
             builder.when(is_real.clone()).assert_eq(
                 maddsub_cols.src2_hi[i],
-                maddsub_cols.op_hi_access.prev_value[i] * local.is_maddu
-                    + (*maddsub_cols.op_hi_access.value())[i] * local.is_msubu,
+                maddsub_cols.op_hi_access.prev_value[i] * is_add.clone()
+                    + (*maddsub_cols.op_hi_access.value())[i] * is_sub.clone(),
             );
             builder.when(is_real.clone()).assert_eq(
                 maddsub_cols.src2_lo[i],
-                local.prev_a_value[i] * local.is_maddu + local.op_a_value[i] * local.is_msubu,
+                local.prev_a_value[i] * is_add.clone() + local.op_a_value[i] * is_sub.clone(),
             );
         }
 
@@ -213,19 +232,19 @@ impl MiscInstrsChip {
         );
 
         builder
-            .when(local.is_maddu)
+            .when(is_add.clone())
             .assert_word_eq(local.op_a_value, maddsub_cols.add_operation.value);
 
-        builder.when(local.is_maddu).assert_word_eq(
+        builder.when(is_add).assert_word_eq(
             *maddsub_cols.op_hi_access.value(),
             maddsub_cols.add_operation.value_hi,
         );
 
         builder
-            .when(local.is_msubu)
+            .when(is_sub.clone())
             .assert_word_eq(local.prev_a_value, maddsub_cols.add_operation.value);
 
-        builder.when(local.is_msubu).assert_word_eq(
+        builder.when(is_sub).assert_word_eq(
             maddsub_cols.op_hi_access.prev_value,
             maddsub_cols.add_operation.value_hi,
         );

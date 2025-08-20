@@ -8,7 +8,7 @@ use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStd
 /// The ELF we want to execute inside the zkVM.
 const BTC_ELF: &[u8] = include_elf!("bitcoin");
 
-use bitcoin::{Address};
+use bitcoin::Address;
 use std::str::FromStr;
 
 fn main() {

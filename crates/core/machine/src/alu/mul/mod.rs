@@ -221,8 +221,8 @@ impl MulChip {
 
         cols.hi_record_is_real = F::from_bool(event.hi_record_is_real);
         if event.hi_record_is_real {
-            // For maddu/msubu instructions, pass in a dummy byte lookup vector.  This maddu/msubu instruction
-            // chip also has a op_hi_access field that will be populated and that will contribute
+            // For madd[u]/msub[u] instructions, pass in a dummy byte lookup vector.  This madd[u]/msub[u]
+            // instruction chip also has a op_hi_access field that will be populated and that will contribute
             // to the byte lookup dependencies.
             cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
             cols.shard = F::from_canonical_u32(event.shard);
