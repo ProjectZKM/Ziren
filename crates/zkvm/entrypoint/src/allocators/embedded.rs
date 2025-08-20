@@ -1,4 +1,3 @@
-#![cfg(feature = "embedded")]
 use crate::{
     syscalls::MAX_MEMORY, EMBEDDED_RESERVED_INPUT_REGION_SIZE, EMBEDDED_RESERVED_INPUT_START,
 };
@@ -48,5 +47,6 @@ unsafe impl GlobalAlloc for EmbeddedAlloc {
     }
 }
 
+#[cfg(feature = "embedded")]
 #[global_allocator]
 static HEAP: EmbeddedAlloc = EmbeddedAlloc;
