@@ -1,3 +1,4 @@
+#![cfg(all(feature = "bump", not(feature = "embedded")))]
 use crate::syscalls::sys_alloc_aligned;
 use core::alloc::{GlobalAlloc, Layout};
 

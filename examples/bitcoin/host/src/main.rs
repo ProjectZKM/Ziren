@@ -1,24 +1,16 @@
-use rsa::{
-    pkcs8::{DecodePrivateKey, DecodePublicKey},
-    RsaPrivateKey, RsaPublicKey,
-};
-use std::vec;
 use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const BTC_ELF: &[u8] = include_elf!("bitcoin");
 
-use bitcoin::Address;
-use std::str::FromStr;
-
 fn main() {
     // Setup a tracer for logging.
     utils::setup_logger();
-    let a = Address::from_str("tb1qfpfy0hhzpax6xkjz9y0ns6hdj36kp04geatuw0");
-    println!("a: {:?}", a);
 
     // Create a new stdin with the input for the program.
     let mut stdin = ZKMStdin::new();
+    let hash = [123u8; 32];
+    stdin.write(&hash);
 
     // Generate the proof for the given program and input.
     let client = ProverClient::new();

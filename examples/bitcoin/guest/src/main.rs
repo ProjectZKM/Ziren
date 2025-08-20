@@ -14,7 +14,7 @@ fn main() {
     let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
 
     // Create a message (32-byte hash)
-    let message_bytes = [42u8; 32]; // Example: hash of a transaction
+    let message_bytes: [u8; 32] = zkm_zkvm::io::read();
     let message = Message::from_slice(&message_bytes).expect("32 bytes");
 
     // Sign the message with the private key

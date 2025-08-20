@@ -1,3 +1,4 @@
+#![cfg(feature = "embedded")]
 use crate::{
     syscalls::MAX_MEMORY, EMBEDDED_RESERVED_INPUT_REGION_SIZE, EMBEDDED_RESERVED_INPUT_START,
 };
