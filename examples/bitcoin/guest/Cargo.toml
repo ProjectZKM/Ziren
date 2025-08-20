@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 zkm-zkvm = { path = "../../../crates/zkvm/entrypoint" }
-#bitcoin = { git = "https://github.com/eigmax/rust-bitcoin", branch = "patch-0.32.7", default-features = false, features = ["serde", "rand", "secp-recovery"] }
+bitcoin = { git = "https://github.com/eigmax/rust-bitcoin", branch = "patch-0.32.7", default-features = false, features = ["serde", "rand", "secp-recovery"] }
 
-bitcoin = { path = "../../../../rust-bitcoin/bitcoin", default-features = false, features = ["serde", "rand", "secp-recovery"] }
+#bitcoin = { path = "../../../../rust-bitcoin/bitcoin", default-features = false, features = ["serde", "rand", "secp-recovery"] }
 
