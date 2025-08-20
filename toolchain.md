@@ -15,7 +15,7 @@ the file contents is as follows：
 ```
 #!/bin/sh
 
-exec ~/.zkm-toolchain/mips32--musl--stable-2025.08-1/bin/mips-buildroot-linux-musl-gcc -EL -msoft-float $@
+exec ~/.zkm-toolchain/mips32--musl--stable-2025.08-1/bin/mips-buildroot-linux-musl-gcc -EL -msoft-float -fno-stack-protector $@
 ```
 Add execution permission for this file
 ```
