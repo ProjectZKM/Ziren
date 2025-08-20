@@ -267,6 +267,24 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             hi_record: MemoryWriteRecord::default(),
         };
         executor.record.add_mul_event(mul_event);
+    } else if matches!(event.opcode, Opcode::MADD | Opcode::MSUB) {
+        let multiply = ((event.b as i32 as i64) * (event.c as i32 as i64)) as u64;
+        let mul_hi = (multiply >> 32) as u32;
+        let mul_lo = multiply as u32;
+        let mul_event = CompAluEvent {
+            clk: 0,
+            shard: 0,
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::MULT,
+            hi: mul_hi,
+            a: mul_lo,
+            b: event.b,
+            c: event.c,
+            hi_record_is_real: false,
+            hi_record: MemoryWriteRecord::default(),
+        };
+        executor.record.add_mul_event(mul_event);
     } else if matches!(event.opcode, Opcode::EXT) {
         let lsb = event.c & 0x1f;
         let msbd = event.c >> 5;

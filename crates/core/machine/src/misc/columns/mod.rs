@@ -47,6 +47,8 @@ pub struct MiscInstrColumns<T: Copy> {
     pub is_ext: T,
     pub is_maddu: T,
     pub is_msubu: T,
+    pub is_madd: T,
+    pub is_msub: T,
     pub is_meq: T,
     pub is_mne: T,
     pub is_teq: T,

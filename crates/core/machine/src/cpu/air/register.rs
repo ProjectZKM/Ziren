@@ -49,7 +49,7 @@ impl CpuChip {
             .when_not(local.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.op_a_access.value());
 
-        // If we are maddu，msubu，ins，mne, meq, syscall, then the hi_or_prev_a should equal to op_a_access.prev_value.
+        // If we are maddu，msubu，madd, msub, ins，mne, meq, syscall, then the hi_or_prev_a should equal to op_a_access.prev_value.
         builder
             .when(local.is_rw_a)
             .assert_word_eq(local.hi_or_prev_a, local.op_a_access.prev_value);

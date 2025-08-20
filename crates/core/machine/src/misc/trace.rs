@@ -95,6 +95,8 @@ impl MiscInstrsChip {
         cols.is_ins = F::from_bool(matches!(event.opcode, Opcode::INS));
         cols.is_maddu = F::from_bool(matches!(event.opcode, Opcode::MADDU));
         cols.is_msubu = F::from_bool(matches!(event.opcode, Opcode::MSUBU));
+        cols.is_madd = F::from_bool(matches!(event.opcode, Opcode::MADD));
+        cols.is_msub = F::from_bool(matches!(event.opcode, Opcode::MSUB));
         cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
         cols.is_teq = F::from_bool(matches!(event.opcode, Opcode::TEQ));
@@ -155,17 +157,25 @@ impl MiscInstrsChip {
         event: &MiscEvent,
         blu: &mut impl ByteRecord,
     ) {
-        if !matches!(event.opcode, Opcode::MADDU | Opcode::MSUBU) {
+        if !matches!(event.opcode, Opcode::MADDU | Opcode::MSUBU | Opcode::MADD | Opcode::MSUB) {
             return;
         }
+
+        let is_sign = event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB;
         let maddsub_cols = cols.misc_specific_columns.maddsub_mut();
-        let multiply = event.b as u64 * event.c as u64;
+        let multiply = if is_sign {
+            maddsub_cols.is_sign = F::ONE;
+            ((event.b as i32 as i64) * (event.c as i32 as i64)) as u64
+        } else {
+            maddsub_cols.is_sign = F::ZERO;
+            event.b as u64 * event.c as u64
+        };
         let mul_hi = (multiply >> 32) as u32;
         let mul_lo = multiply as u32;
         maddsub_cols.mul_hi = Word::from(mul_hi);
         maddsub_cols.mul_lo = Word::from(mul_lo);
 
-        let is_add = event.opcode == Opcode::MADDU;
+        let is_add = event.opcode == Opcode::MADDU || event.opcode == Opcode::MADD;
         let src2_lo = if is_add { event.prev_a } else { event.a };
         let src2_hi = if is_add { event.hi_record.prev_value } else { event.hi_record.value };
         let _ = maddsub_cols.add_operation.populate(

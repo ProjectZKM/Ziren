@@ -55,5 +55,4 @@ fn main() {
     //args.libraries.push("../lib/libadd.a".to_string());
     //args.libraries.push("../lib/libmodulus.a".to_string());
     build_program_with_args("../guest", args);
-    
 }

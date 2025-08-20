@@ -1085,6 +1085,9 @@ impl<'a> Executor<'a> {
                 Opcode::MADDU | Opcode::MSUBU => {
                     self.local_counts.event_counts[Opcode::MULTU] += 1;
                 }
+                Opcode::MADD | Opcode::MSUB => {
+                    self.local_counts.event_counts[Opcode::MULT] += 1;
+                }
                 Opcode::EXT => {
                     self.local_counts.event_counts[Opcode::SLL] += 1;
                     self.local_counts.event_counts[Opcode::SRL] += 1;
@@ -1262,6 +1265,12 @@ impl<'a> Executor<'a> {
             Opcode::MSUBU => {
                 (hi_or_prev_a, a, b, c) = self.execute_msubu(instruction);
             }
+            Opcode::MADD => {
+                (hi_or_prev_a, a, b, c) = self.execute_madd(instruction);
+            }
+            Opcode::MSUB => {
+                (hi_or_prev_a, a, b, c) = self.execute_msub(instruction);
+            }
             Opcode::TEQ => {
                 (a, b, c) = self.execute_teq(instruction);
             }
@@ -1344,6 +1353,46 @@ impl<'a> Executor<'a> {
         let hi_val = self.register(33.into());
         let addend = ((hi_val as u64) << 32) + lo_val as u64;
         let out = addend - multiply;
+        let out_lo = out as u32;
+        let out_hi = (out >> 32) as u32;
+        self.rw(lo, out_lo, MemoryAccessPosition::A);
+        self.rw(Register::HI, out_hi, MemoryAccessPosition::HI);
+        (Some(lo_val), out_lo, b, c)
+    }
+
+    fn execute_madd(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
+        let (lo, rt, rs) = (
+            instruction.op_a.into(),
+            (instruction.op_b as u8).into(),
+            (instruction.op_c as u8).into(),
+        );
+        let c = self.rr(rs, MemoryAccessPosition::C);
+        let b = self.rr(rt, MemoryAccessPosition::B);
+        let multiply = (b as i32 as i64) * (c as i32 as i64);
+        let lo_val = self.register(32.into());
+        let hi_val = self.register(33.into());
+        let addend = ((hi_val as u64) << 32) + lo_val as u64;
+        let out = (multiply + (addend as i64)) as u64;
+        let out_lo = out as u32;
+        let out_hi = (out >> 32) as u32;
+        self.rw(lo, out_lo, MemoryAccessPosition::A);
+        self.rw(Register::HI, out_hi, MemoryAccessPosition::HI);
+        (Some(lo_val), out_lo, b, c)
+    }
+
+    fn execute_msub(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
+        let (lo, rt, rs) = (
+            instruction.op_a.into(),
+            (instruction.op_b as u8).into(),
+            (instruction.op_c as u8).into(),
+        );
+        let c = self.rr(rs, MemoryAccessPosition::C);
+        let b = self.rr(rt, MemoryAccessPosition::B);
+        let multiply = (b as i32 as i64) * (c as i32 as i64);
+        let lo_val = self.register(32.into());
+        let hi_val = self.register(33.into());
+        let addend = ((hi_val as u64) << 32) + lo_val as u64;
+        let out = ((addend as i64) - multiply) as u64;
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw(lo, out_lo, MemoryAccessPosition::A);

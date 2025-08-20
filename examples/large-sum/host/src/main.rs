@@ -12,7 +12,7 @@ fn main() {
     let mut stdin = ZKMStdin::new();
     // simulate big data, split into chunks of 1MB
     let data = vec![1u8; 1024 * 1024];
-    let n:u32 = 1;  //tmply set to 1 for testing, can be changed to a larger number
+    let n: u32 = 1; //tmply set to 1 for testing, can be changed to a larger number
     stdin.write(&n);
     for _ in 0..n {
         stdin.write(&data);
