@@ -3,6 +3,10 @@ name = "fibonacci_c_lib"
 version = "1.1.0"
 edition = "2021"
 publish = false
+build = "build.rs"
 
 [dependencies]
 zkm-zkvm = { path = "../../../crates/zkvm/entrypoint" }
+
+[build-dependencies]
+cc = "1.0"
