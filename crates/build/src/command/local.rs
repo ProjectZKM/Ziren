@@ -24,7 +24,7 @@ pub(crate) fn create_local_command(
     // 4. Remove the rustc configuration, otherwise in a build script it will attempt to compile the
     //    program with the toolchain of the normal build process, rather than the Ziren toolchain.
 
-    // TODO: Remove this conditional compilation once we provide it in ziren toolchain. 
+    // TODO: Remove this conditional compilation once we provide it in ziren toolchain.
     // See docs.zkm.io/introduction/installation.html#use-musl-gcc-for-static-compilation
     #[cfg(target_os = "linux")]
     command
