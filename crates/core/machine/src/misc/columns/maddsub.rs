@@ -16,10 +16,10 @@ pub struct MaddsubCols<T> {
 
     /// Add operations of low/high word.
     pub add_operation: AddDoubleOperation<T>,
+    /// Add or Sub source value
     pub src2_hi: Word<T>,
     pub src2_lo: Word<T>,
 
     /// Access to hi register
     pub op_hi_access: MemoryReadWriteCols<T>,
-    pub is_sign: T,
 }

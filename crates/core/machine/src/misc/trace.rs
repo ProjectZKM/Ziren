@@ -164,10 +164,8 @@ impl MiscInstrsChip {
         let is_sign = event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB;
         let maddsub_cols = cols.misc_specific_columns.maddsub_mut();
         let multiply = if is_sign {
-            maddsub_cols.is_sign = F::ONE;
             ((event.b as i32 as i64) * (event.c as i32 as i64)) as u64
         } else {
-            maddsub_cols.is_sign = F::ZERO;
             event.b as u64 * event.c as u64
         };
         let mul_hi = (multiply >> 32) as u32;
