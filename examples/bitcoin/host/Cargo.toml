@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 rsa = "0.6"
 zkm-sdk = { workspace = true }
-bitcoin = { git = "https://github.com/eigmax/rust-bitcoin", branch = "patch-0.32.7", default-features = false, features = ["serde", "rand", "secp-recovery"] }
+bitcoin = { git = "https://github.com/ProjectZKM/rust-bitcoin", branch = "patch-0.32.7", default-features = false, features = ["serde", "rand", "secp-recovery"] }
 #bitcoin = { path = "../../../../rust-bitcoin/bitcoin", default-features = false, features = ["serde", "rand", "secp-recovery"] }
 
 [build-dependencies]
