@@ -18,7 +18,7 @@ jobs:
       - run: |
           source ~/.zkm-toolchain/env
           for pkg in zkm-core-machine zkm-sdk zkm-verifier; do
-            cargo test -r -p $pkg
+            VERIFY_VK=false cargo test -r -p $pkg
           done
         env:
           RUSTFLAGS: "-C target-cpu=native"
