@@ -7,7 +7,8 @@ Ziren is now available for Linux and macOS systems.
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
 - [Rust (Nightly)](https://www.rust-lang.org/tools/install)
 
-## Option 1: Quick Install
+## Get Started 
+### Option 1: Quick Install
 
 To install the Ziren toolchain, use the `zkmup` installer. Simply open your terminal, run the command below, and follow the on-screen instructions:
 
@@ -33,7 +34,7 @@ git clone https://github.com/ProjectZKM/Ziren
 cd Ziren && cargo test -r
 ```
 
-### Troubleshooting
+#### Troubleshooting
 
 The following error may occur:
 
@@ -46,6 +47,42 @@ cargo: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required
 
 Currently, our prebuilt binaries are built for Ubuntu 22.04 and macOS. Systems running older GLIBC versions may experience compatibility issues and will need to build the toolchain from source.
 
-## Option 2: Building from Source
+### Option 2: Building from Source
 
 For more details, please refer to document [toolchain](https://github.com/ProjectZKM/toolchain.git).
+
+## Advanced Usage
+
+### Use Musl-gcc for Static Compilation 
+
+This feature is only enabled for Linux systems currently.
+
+#### Download toolchain
+The musl toolchain can be downloaded from https://toolchains.bootlin.com/releases_mips32.html
+
+```sh
+wget https://toolchains.bootlin.com/downloads/releases/toolchains/mips32/tarballs/mips32--musl--stable-2025.08-1.tar.xz
+
+tar xvf mips32--musl--stable-2025.08-1.tar.xz -C ~/.zkm-toolchain/
+```
+
+#### Create mipsel-zkm-zkvm-elf-gcc
+Create mipsel-zkm-zkvm-elf-gcc file in the same directory with rustc
+the file contents is as follows：
+
+```sh
+#!/bin/sh
+exec ~/.zkm-toolchain/mips32--musl--stable-2025.08-1/bin/mips-buildroot-linux-musl-gcc -EL -msoft-float -fno-stack-protector $@
+```
+Add execution permission for this file
+
+```sh
+chmod +x mipsel-zkm-zkvm-elf-gcc
+```
+
+Then build the host program with the following command: 
+
+```sh
+source ~/.zkm-toolchain/env
+CC=mipsel-zkm-zkvm-elf-gcc cargo build -r
+```
