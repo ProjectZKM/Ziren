@@ -84,5 +84,6 @@ Then build the host program with the following command:
 
 ```sh
 source ~/.zkm-toolchain/env
-CC=mipsel-zkm-zkvm-elf-gcc cargo build -r
+export ZIREN_ZKM_CC=mipsel-zkm-zkvm-elf-gcc  // Optional, used for rust project with c lib
+cargo build -r
 ```
