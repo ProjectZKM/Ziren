@@ -190,7 +190,7 @@ mod zkvm {
     .section .text.main;
     .globl main;
     main:
-        li  $sp, 0xfffc000
+        li  $sp, 0x7f000000
         jal _main;
     "#
     );
