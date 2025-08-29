@@ -2,7 +2,6 @@ use rsa::{
     pkcs8::{DecodePrivateKey, DecodePublicKey},
     RsaPrivateKey, RsaPublicKey,
 };
-use std::vec;
 use zkm_sdk::{include_elf, utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
