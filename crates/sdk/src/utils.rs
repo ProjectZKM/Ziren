@@ -44,7 +44,7 @@ pub fn compute_groth16_public_values(
     vk: &ZKMVerifyingKey,
 ) -> [String; 2] {
     // Compute the first one
-    let vkey_digest_koalabear = compte_vkey_digest_koalabear(vk);
+    let vkey_digest_koalabear = compute_vkey_digest_koalabear(vk);
     let first_value = koalabears_to_bn254(&vkey_digest_koalabear);
     // Convert to decimal string
     let str1 = first_value.to_string();
@@ -69,7 +69,7 @@ pub fn compute_groth16_public_values(
     [decimal_str1, decimal_str2]
 }
 
-fn compte_vkey_digest_koalabear(vk: &ZKMVerifyingKey) -> [KoalaBear; 8] {
+fn compute_vkey_digest_koalabear(vk: &ZKMVerifyingKey) -> [KoalaBear; 8] {
     let prep_domains = vk.vk.chip_information.iter().map(|(_, domain, _)| domain);
     let num_inputs = zkm_stark::DIGEST_SIZE + 1 + 14 + (4 * prep_domains.len());
     let mut inputs = Vec::with_capacity(num_inputs);
