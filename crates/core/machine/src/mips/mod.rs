@@ -66,8 +66,6 @@ pub const MAX_LOG_NUMBER_OF_SHARDS: usize = 16;
 /// The maximum number of shards in core.
 pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 
-const KECCAK_ROWS_PER_BLOCK: usize = 24;
-
 /// An AIR for encoding MIPS execution.
 ///
 /// This enum contains all the different AIRs that are used in the Ziren IOP. Each variant is
@@ -475,7 +473,11 @@ impl<F: PrimeField32> MipsAir<F> {
             .get_events(self.syscall_code())
             .filter(|events| !events.is_empty())
             .map(|events| {
-                let num_rows = events.len() * self.rows_per_event(Some(record));
+                let events_len = match self {
+                    Self::KeccakSponge(_) => self.keccak_permutation_in_record(record),
+                    _ => events.len(),
+                };
+                let num_rows = events_len * self.rows_per_event();
                 (
                     num_rows,
                     events.get_local_mem_events().into_iter().count(),
@@ -560,39 +562,16 @@ impl<F: PrimeField32> MipsAir<F> {
             .collect()
     }
 
-    pub(crate) fn rows_per_event(&self, record: Option<&ExecutionRecord>) -> usize {
+    pub(crate) fn rows_per_event(&self) -> usize {
         match self {
             Self::Sha256Compress(_) => 80,
             Self::Sha256Extend(_) => 48,
-            Self::KeccakSponge(_) => {
-                if let Some(record) = record {
-                    self.keccak_rows_per_event(record)
-                } else {
-                    0
-                }
-            }
+            Self::KeccakSponge(_) => 24,
             _ => 1,
         }
     }
 
-    fn keccak_rows_per_event(&self, record: &ExecutionRecord) -> usize {
-        let all = self.keccak_rows_per_record(record);
-        if all == 0 {
-            return 0;
-        }
-
-        let count = record
-            .precompile_events
-            .get_events(SyscallCode::KECCAK_SPONGE)
-            .map(|events| events.len())
-            .unwrap_or(0);
-        if count > 0 {
-            return all.div_ceil(count);
-        }
-        0
-    }
-
-    fn keccak_rows_per_record(&self, record: &ExecutionRecord) -> usize {
+    fn keccak_permutation_in_record(&self, record: &ExecutionRecord) -> usize {
         record
             .precompile_events
             .get_events(SyscallCode::KECCAK_SPONGE)
@@ -601,7 +580,7 @@ impl<F: PrimeField32> MipsAir<F> {
                     .iter()
                     .map(|(_, pre_e)| {
                         if let PrecompileEvent::KeccakSponge(event) = pre_e {
-                            event.num_blocks() * KECCAK_ROWS_PER_BLOCK
+                            event.num_blocks()
                         } else {
                             unreachable!()
                         }

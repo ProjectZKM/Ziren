@@ -146,7 +146,7 @@ fn main() {
         // Generate the Core proof
         let proof = if args.core {
             client.prove(&pk, stdin).run().expect("failed to generate Core proof")
-        // generats compressed proof 
+        // generates compressed proof 
         } else {
             client
                 .prove(&pk, stdin)
