@@ -61,7 +61,7 @@ pub fn main() {
 
 ### C/C++ Example: [Fibonacci_C](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci_c_lib/guest/src/main.rs)
 
-For non-Rust languages, you can compile them to static libraries and link them in Rust by FFI. For [example](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci_c_lib/lib/add.cpp):
+For non-Rust languages, you can compile them to static libraries and link them in Rust by FFI. For [example](https://github.com/ProjectZKM/Ziren/blob/main/examples/fibonacci_c_lib/guest/src/c_lib/add.cpp):
 
 ```C
 extern "C" {
