@@ -5,7 +5,7 @@ more efficiently.
 
 ## Create the Chip
 
-Create a new rust Rust file for your chip in the `core/src/syscall/precompiles` directory.
+Create a new Rust file for your chip in the `core/src/syscall/precompiles` directory.
 
 ### Define the Chip Struct:
 
