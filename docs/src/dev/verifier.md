@@ -240,7 +240,7 @@ Because the verification runs on a local CPU rather than on-chain, the process d
 
 ### **WASM Verification**
 
-Ziren provides WASM bindings for verifying Groth16, PLONK, and STARK proofs in-browser. These bindings are generated from Rust functions in the `zkm_verifier` crate and exposed to JavaScript via `wasm_bindgen`. See the [ziren-wasm-verifier](https://github.com/ProjectZKM/ziren-wasm-verifier?utm_source=chatgpt.com) repository for setup instructions.
+Ziren provides WASM bindings for verifying Groth16, PLONK, and STARK proofs in-browser. These bindings are generated from Rust functions in the `zkm_verifier` crate and exposed to JavaScript via `wasm_bindgen`. See the [ziren-wasm-verifier](https://github.com/ProjectZKM/ziren-wasm-verifier) repository for setup instructions.
 
 The repository includes the following: 
 

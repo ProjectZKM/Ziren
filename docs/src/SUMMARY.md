@@ -14,7 +14,6 @@
     - [Prover](./dev/prover.md)
     - [Verifier](./dev/verifier.md)
     - [Proof Aggregation](./dev/proof-aggregation.md)
-    - [Proof Composition](./dev/proof-composition.md)
     - [Precompiles](./dev/precompiles.md)
     - [Patched Crates](./dev/patched-crates.md)
     - [Optimizations](./dev/optimizations.md)
