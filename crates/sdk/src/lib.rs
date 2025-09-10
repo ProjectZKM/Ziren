@@ -404,11 +404,13 @@ impl NetworkProverBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::compute_groth16_public_values;
+    use crate::utils::committed_public_values;
     use crate::ZKMProof;
     use crate::ZKMProof::Groth16;
     use crate::{utils, ProverClient, ZKMStdin};
+    use p3_field::PrimeField;
     use zkm_primitives::io::ZKMPublicValues;
+    use zkm_prover::HashableKey;
 
     #[test]
     fn test_execute() {
@@ -533,28 +535,28 @@ mod tests {
         let client = ProverClient::cpu();
         let elf = test_artifacts::HELLO_WORLD_ELF;
         let (pk, vk) = client.setup(elf);
-
-        let string_input = b"hello world".to_vec();
-        let length = (string_input.len() as u64).to_le_bytes();
-        let guest_committed_values: Vec<u8> = length.into_iter().chain(string_input).collect();
-        let computed_public_inputs = compute_groth16_public_values(&guest_committed_values, &vk);
         let stdin = ZKMStdin::new();
 
         // Generate proof & verify.
         let proof = client.prove(&pk, stdin).groth16().run().unwrap();
         client.verify(&proof, &vk).unwrap();
 
+        let string_input = b"hello world".to_vec();
+        let guest_committed_values = bincode::serialize(&string_input).unwrap();
+        assert_eq!(proof.public_values.as_ref(), guest_committed_values);
+
         let inner_proof = match proof.proof.clone() {
             Groth16(proof) => proof,
             _ => panic!("expected a compressed proof"),
         };
+
+        let vk_hash = vk.hash_bn254().as_canonical_biguint().to_string();
+        assert_eq!(vk_hash, inner_proof.public_inputs[0], "vk hash does not match");
+
+        let committed_public_values = committed_public_values(proof.public_values.as_ref());
         assert_eq!(
-            computed_public_inputs[0], inner_proof.public_inputs[0],
-            "First public input does not match"
-        );
-        assert_eq!(
-            computed_public_inputs[1], inner_proof.public_inputs[1],
-            "Second public input does not match"
+            committed_public_values, inner_proof.public_inputs[1],
+            "committed public values does not match"
         );
     }
 
