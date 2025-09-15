@@ -18,6 +18,7 @@
     - [Patched Crates](./dev/patched-crates.md)
     - [Optimizations](./dev/optimizations.md)
     - [Use Cases](./dev/use-cases.md)
+    - [Independent Evaluations](./dev/independent-evaluations.md)
 - [Design](./design/design.md)
     - [State Machine](./design/chips/state-machine.md)
         - [CPU](./design/chips/cpu.md)
