@@ -1,6 +1,6 @@
 // ported from https://github.com/blocto/solana-go-sdk/blob/v1.30.0/pkg/bincode/serialize.go
 
-package zkm_runtime
+package zkvm_runtime
 
 import (
 	"encoding/binary"

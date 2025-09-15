@@ -1,4 +1,4 @@
-package zkm_runtime
+package zkvm_runtime
 
 import (
 	"encoding/binary"

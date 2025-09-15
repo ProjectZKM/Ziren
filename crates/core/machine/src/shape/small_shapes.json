@@ -152683,5 +152683,28 @@
       "CloClz": 6,
       "SyscallCore": 18
     }
+  },
+  {
+    "inner": {
+      "Cpu": 21,
+      "MemoryLocal": 20,
+      "Lt": 20,
+      "MemoryInstrs": 20,
+      "DivRem": 20,
+      "SyscallInstrs": 20,
+      "ShiftLeft": 20,
+      "Bitwise": 20,
+      "ShiftRight": 20,
+      "Mul": 20,
+      "Global": 20,
+      "MemoryGlobalInit": 20,
+      "MiscInstrs": 20,
+      "Branch": 20,
+      "MemoryGlobalFinalize": 20,
+      "Jump": 20,
+      "AddSub": 20,
+      "CloClz": 20,
+      "SyscallCore": 20
+    }
   }
 ]
