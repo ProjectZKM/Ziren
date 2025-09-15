@@ -34,6 +34,6 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/consensys/gnark => ../../../../../gnark-zkm
+replace github.com/consensys/gnark => github.com/alpenlabs/gnark v0.0.0-20250707125522-2d480d810efb
 
 replace github.com/consensys/gnark-crypto => github.com/alpenlabs/gnark-crypto v0.0.0-20250521035818-134953372b00

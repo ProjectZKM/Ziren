@@ -1,6 +1,6 @@
 //! Diffusion matrix for SECT
 //!
-//! Reference: https://github.com/HorizenLabs/poseidon2/blob/main/plain_implementations/src/poseidon2/poseidon2_instance_sect.rs
+//! Reference: https://github.com/HorizenLabs/poseidon2/blob/main/poseidon2_rust_params.sage
 
 use std::sync::OnceLock;
 
