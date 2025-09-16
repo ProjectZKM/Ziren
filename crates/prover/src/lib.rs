@@ -98,6 +98,11 @@ pub type InnerSC = KoalaBearPoseidon2;
 /// The configuration for the outer prover.
 pub type OuterSC = KoalaBearPoseidon2Outer;
 
+pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<
+    KoalaBearPoseidon2,
+    MipsAir<KoalaBear>,
+>>::DeviceProvingKey;
+
 const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
@@ -287,6 +292,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk: vk.clone(),
         };
         (pk, vk)
+    }
+
+    /// Creates a proving key and a verifying key for a given MIPS ELF.
+    #[instrument(name = "setup_v2", level = "debug", skip_all)]
+    pub fn setup_v2(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey, DeviceProvingKey<C>, Program) {
+        let program = self.get_program(elf).unwrap();
+        let (pk, vk) = self.core_prover.setup(&program);
+        let vk = ZKMVerifyingKey { vk };
+        let pk = ZKMProvingKey {
+            pk: self.core_prover.pk_to_host(&pk),
+            elf: elf.to_vec(),
+            vk: vk.clone(),
+        };
+        let pk_d = self.core_prover.pk_to_device(&pk.pk);
+        (pk, vk, pk_d, program)
     }
 
     /// Get a program with an allowed preprocessed shape.
