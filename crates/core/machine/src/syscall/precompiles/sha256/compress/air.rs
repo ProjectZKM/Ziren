@@ -73,7 +73,7 @@ impl ShaCompressChip {
         }
 
         // Verify that exactly one of the octet columns is true.
-        let mut octet_sum = AB::Expr::ZERO;
+        let mut octet_sum = AB::Expr::zero();
         for i in 0..8 {
             octet_sum = octet_sum.clone() + local.octet[i].into();
         }
@@ -93,7 +93,7 @@ impl ShaCompressChip {
         }
 
         // Verify that exactly one of the octet_num columns is true.
-        let mut octet_num_sum = AB::Expr::ZERO;
+        let mut octet_num_sum = AB::Expr::zero();
         for i in 0..10 {
             octet_num_sum = octet_num_sum.clone() + local.octet_num[i].into();
         }
@@ -127,7 +127,7 @@ impl ShaCompressChip {
             // last cycle is an exception since the next row must be a new 80-cycle loop or nonreal.
             builder
                 .when_transition()
-                .when(local.octet_num[0] + local.octet_num[9] * (AB::Expr::ONE - local.octet[7]))
+                .when(local.octet_num[0] + local.octet_num[9] * (AB::Expr::one() - local.octet[7]))
                 .assert_word_eq(*var, next_vars[i]);
 
             // When column is read from memory during init, is should be equal to the memory value.
@@ -210,13 +210,13 @@ impl ShaCompressChip {
         );
 
         // Calculate the current cycle_num.
-        let mut cycle_num = AB::Expr::ZERO;
+        let mut cycle_num = AB::Expr::zero();
         for i in 0..10 {
             cycle_num = cycle_num.clone() + local.octet_num[i] * AB::Expr::from_canonical_usize(i);
         }
 
         // Calculate the current step of the cycle 8.
-        let mut cycle_step = AB::Expr::ZERO;
+        let mut cycle_step = AB::Expr::zero();
         for i in 0..8 {
             cycle_step = cycle_step.clone() + local.octet[i] * AB::Expr::from_canonical_usize(i);
         }
@@ -231,7 +231,7 @@ impl ShaCompressChip {
         builder.when(local.is_compression).assert_eq(
             local.mem_addr,
             local.w_ptr
-                + (((cycle_num - AB::Expr::ONE) * AB::Expr::from_canonical_u32(8))
+                + (((cycle_num - AB::Expr::one()) * AB::Expr::from_canonical_u32(8))
                     + cycle_step.clone())
                     * AB::Expr::from_canonical_u32(4),
         );
@@ -481,7 +481,7 @@ impl ShaCompressChip {
         // We can get the needed operand (a,b,c,...,h) by doing an inner product between octet and
         // [a,b,c,...,h] which will act as a selector.
         let add_operands = [local.a, local.b, local.c, local.d, local.e, local.f, local.g, local.h];
-        let zero = AB::Expr::ZERO;
+        let zero = AB::Expr::zero();
         let mut filtered_operand = Word([zero.clone(), zero.clone(), zero.clone(), zero]);
         for (i, operand) in local.octet.iter().zip(add_operands.iter()) {
             for j in 0..4 {

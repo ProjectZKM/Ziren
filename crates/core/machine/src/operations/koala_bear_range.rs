@@ -53,7 +53,7 @@ impl<F: Field> KoalaBearBitDecomposition<F> {
         cols: KoalaBearBitDecomposition<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut reconstructed_value = AB::Expr::ZERO;
+        let mut reconstructed_value = AB::Expr::zero();
         for (i, bit) in cols.bits.iter().enumerate() {
             builder.when(is_real.clone()).assert_bool(*bit);
             reconstructed_value =
@@ -100,7 +100,7 @@ impl<F: Field> KoalaBearBitDecomposition<F> {
         );
 
         // If the top bits are all 0, then the lower bits must all be 0.
-        let mut lower_bits_sum: AB::Expr = AB::Expr::ZERO;
+        let mut lower_bits_sum: AB::Expr = AB::Expr::zero();
         for bit in cols.bits[0..24].iter() {
             lower_bits_sum = lower_bits_sum + *bit;
         }

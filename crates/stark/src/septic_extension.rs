@@ -33,6 +33,22 @@ impl<F: FieldAlgebra> FieldAlgebra for SepticExtension<F> {
     const NEG_ONE: Self =
         SepticExtension([F::NEG_ONE, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
 
+    fn zero() -> Self {
+        SepticExtension([F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+    }
+
+    fn one() -> Self {
+        SepticExtension([F::one(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+    }
+
+    fn two() -> Self {
+        SepticExtension([F::two(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+    }
+
+    fn neg_one() -> Self {
+        SepticExtension([F::neg_one(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+    }
+
     fn from_f(f: Self::F) -> Self {
         SepticExtension([
             F::from_f(f.0[0]),
@@ -253,7 +269,7 @@ impl<F: FieldAlgebra> Mul for SepticExtension<F> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut res: [F; 13] = core::array::from_fn(|_| F::ZERO);
+        let mut res: [F; 13] = core::array::from_fn(|_| F::zero());
         for i in 0..7 {
             for j in 0..7 {
                 res[i + j] = res[i + j].clone() + self.0[i].clone() * rhs.0[j].clone();
@@ -707,7 +723,7 @@ impl<T: Clone> SepticBlock<T> {
     pub fn as_extension<AB: SepticExtensionAirBuilder<Var = T>>(
         &self,
     ) -> SepticExtension<AB::Expr> {
-        let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::ZERO + x);
+        let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::zero() + x);
         SepticExtension(arr)
     }
 
@@ -716,7 +732,7 @@ impl<T: Clone> SepticBlock<T> {
         &self,
         base: AB::Expr,
     ) -> SepticExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 7] = self.0.clone().map(|_| AB::Expr::ZERO);
+        let mut arr: [AB::Expr; 7] = self.0.clone().map(|_| AB::Expr::zero());
         arr[0] = base;
 
         SepticExtension(arr)

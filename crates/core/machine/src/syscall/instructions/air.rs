@@ -53,7 +53,7 @@ where
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
         // `op_a_val` is constrained in `eval_syscall`.
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
-        let is_sequential = AB::Expr::ONE - local.is_halt;
+        let is_sequential = AB::Expr::one() - local.is_halt;
         builder.receive_instruction(
             local.shard,
             local.clk,
@@ -65,10 +65,10 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
+            AB::Expr::zero(),
             local.is_halt,
             is_sequential,
             local.is_real,
@@ -117,7 +117,7 @@ impl SyscallInstrsChip {
 
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
-        builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table);
+        builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table);
 
         builder.send_syscall(
             local.shard,
@@ -209,7 +209,7 @@ impl SyscallInstrsChip {
             self.get_is_commit_related_syscall(builder, local);
 
         // Verify the index bitmap.
-        let mut bitmap_sum = AB::Expr::ZERO;
+        let mut bitmap_sum = AB::Expr::zero();
         // They should all be bools.
         for bit in local.index_bitmap.iter() {
             builder.when(local.is_real).assert_bool(*bit);
@@ -223,7 +223,7 @@ impl SyscallInstrsChip {
         // When it's some other syscall, there should be no set bits.
         builder
             .when(local.is_real)
-            .when(AB::Expr::ONE - (is_commit.clone() + is_commit_deferred_proofs.clone()))
+            .when(AB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone()))
             .assert_zero(bitmap_sum);
 
         // Verify that word_idx corresponds to the set bit in index bitmap.

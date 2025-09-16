@@ -100,7 +100,7 @@ where
             local.clk,
             AB::F::from_canonical_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
             local.state_addr,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
             local.is_real,
             LookupScope::Local,
         );

@@ -101,3 +101,27 @@ test-artifacts = { path = "crates/test-artifacts" }
 
 # misc
 hashbrown = "0.14.5"
+
+# For local development.
+[patch."https://github.com/ProjectZKM/Plonky3.git"]
+p3-air = { path = "../patch/Plonky3/air" }
+p3-field = { path = "../patch/Plonky3/field" }
+p3-challenger = { path = "../patch/Plonky3/challenger" }
+p3-commit = { path = "../patch/Plonky3/commit" }
+p3-dft = { path = "../patch/Plonky3/dft" }
+p3-matrix = { path = "../patch/Plonky3/matrix" }
+p3-maybe-rayon = { path = "../patch/Plonky3/maybe-rayon" }
+p3-util = { path = "../patch/Plonky3/util" }
+p3-fri = { path = "../patch/Plonky3/fri" }
+p3-koala-bear = { path = "../patch/Plonky3/koala-bear" }
+p3-circle = { path = "../patch/Plonky3/circle" }
+p3-keccak = { path = "../patch/Plonky3/keccak" }
+p3-keccak-air = { path = "../patch/Plonky3/keccak-air" }
+p3-mds = { path = "../patch/Plonky3/mds" }
+p3-merkle-tree = { path = "../patch/Plonky3/merkle-tree" }
+p3-mersenne-31 = { path = "../patch/Plonky3/mersenne-31" }
+p3-monty-31 = { path = "../patch/Plonky3/monty-31" }
+p3-poseidon2 = { path = "../patch/Plonky3/poseidon2" }
+p3-symmetric = { path = "../patch/Plonky3/symmetric" }
+p3-bn254-fr = { path = "../patch/Plonky3/bn254-fr" }
+p3-uni-stark = { path = "../patch/Plonky3/uni-stark" }

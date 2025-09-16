@@ -111,14 +111,14 @@ impl<F: Field> Add4Operation<F> {
                         + cols.is_carry_1[i]
                         + cols.is_carry_2[i]
                         + cols.is_carry_3[i],
-                    AB::Expr::ONE,
+                    AB::Expr::one(),
                 );
             }
         }
 
         // Calculates carry from is_carry_{0,1,2,3}.
         {
-            let one = AB::Expr::ONE;
+            let one = AB::Expr::one();
             let two = AB::F::from_canonical_u32(2);
             let three = AB::F::from_canonical_u32(3);
 

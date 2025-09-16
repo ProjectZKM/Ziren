@@ -307,7 +307,7 @@ where
         // Evaluate the memory accesses for lo_memory and hi_memory.
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk.into() + AB::Expr::ONE,
+            local.clk.into() + AB::Expr::one(),
             local.lo_ptr,
             &local.lo_memory,
             local.is_real,
@@ -315,7 +315,7 @@ where
 
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk.into() + AB::Expr::ONE,
+            local.clk.into() + AB::Expr::one(),
             local.hi_ptr,
             &local.hi_memory,
             local.is_real,
@@ -332,8 +332,8 @@ where
             .collect::<Vec<_>>();
 
         let mut coeff_2_256 = Vec::new();
-        coeff_2_256.resize(32, AB::Expr::ZERO);
-        coeff_2_256.push(AB::Expr::ONE);
+        coeff_2_256.resize(32, AB::Expr::zero());
+        coeff_2_256.push(AB::Expr::one());
         let modulus_polynomial: Polynomial<AB::Expr> = Polynomial::from_coefficients(&coeff_2_256);
 
         // Evaluate that each of the mul and carry columns are valid.
@@ -352,7 +352,7 @@ where
             builder,
             &a_limbs,
             &b_limb_array[0],
-            &Polynomial::from_coefficients(&[AB::Expr::ZERO]), // Zero polynomial for no previous carry
+            &Polynomial::from_coefficients(&[AB::Expr::zero()]), // Zero polynomial for no previous carry
             &modulus_polynomial,
             local.is_real,
         );

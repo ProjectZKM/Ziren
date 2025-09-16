@@ -86,7 +86,7 @@ impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
         // Check the flags are of valid form.
 
         // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
+        let mut sum_flags: AB::Expr = AB::Expr::zero();
         for &flag in self.byte_flags.0.iter() {
             // Assert that the flag is boolean.
             builder.when(is_real.clone()).assert_bool(flag);
@@ -100,13 +100,13 @@ impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::ZERO;
+        let mut is_inequality_visited = AB::Expr::zero();
 
         let rhs: Polynomial<_> = rhs.clone().into();
         let lhs: Polynomial<_> = lhs.clone().into();
 
-        let mut lhs_comparison_byte = AB::Expr::ZERO;
-        let mut rhs_comparison_byte = AB::Expr::ZERO;
+        let mut lhs_comparison_byte = AB::Expr::zero();
+        let mut rhs_comparison_byte = AB::Expr::zero();
         for (lhs_byte, rhs_byte, &flag) in izip!(
             lhs.coefficients().iter().rev(),
             rhs.coefficients().iter().rev(),

@@ -30,7 +30,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
             local.instruction.op_b[0],
             &local.op_b_access,
-            AB::Expr::ONE - local.instruction.imm_b,
+            AB::Expr::one() - local.instruction.imm_b,
         );
 
         builder.eval_memory_access(
@@ -38,7 +38,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
             local.instruction.op_c[0],
             &local.op_c_access,
-            AB::Expr::ONE - local.instruction.imm_c,
+            AB::Expr::one() - local.instruction.imm_c,
         );
 
         // If we are writing to register 0, then the new value should be zero.

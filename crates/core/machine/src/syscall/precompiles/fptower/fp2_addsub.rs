@@ -244,7 +244,7 @@ where
                 &q_x,
                 &p_modulus,
                 local.is_add,
-                AB::Expr::ONE - local.is_add,
+                AB::Expr::one() - local.is_add,
                 AB::F::ZERO,
                 AB::F::ZERO,
                 local.is_real,
@@ -256,7 +256,7 @@ where
                 &q_y,
                 &p_modulus,
                 local.is_add,
-                AB::Expr::ONE - local.is_add,
+                AB::Expr::one() - local.is_add,
                 AB::F::ZERO,
                 AB::F::ZERO,
                 local.is_real,
@@ -299,7 +299,7 @@ where
         };
 
         let syscall_id_felt =
-            local.is_add * add_syscall_id + (AB::Expr::ONE - local.is_add) * sub_syscall_id;
+            local.is_add * add_syscall_id + (AB::Expr::one() - local.is_add) * sub_syscall_id;
 
         builder.receive_syscall(
             local.shard,

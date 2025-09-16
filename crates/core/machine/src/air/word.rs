@@ -61,7 +61,7 @@ pub trait WordAirBuilder: ByteAirBuilder {
         while index + 1 < input.len() {
             self.send_byte(
                 Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                Self::Expr::ZERO,
+                Self::Expr::zero(),
                 input[index].clone(),
                 input[index + 1].clone(),
                 mult.clone(),
@@ -71,9 +71,9 @@ pub trait WordAirBuilder: ByteAirBuilder {
         if index < input.len() {
             self.send_byte(
                 Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                Self::Expr::ZERO,
+                Self::Expr::zero(),
                 input[index].clone(),
-                Self::Expr::ZERO,
+                Self::Expr::zero(),
                 mult.clone(),
             );
         }
@@ -89,8 +89,8 @@ pub trait WordAirBuilder: ByteAirBuilder {
             self.send_byte(
                 Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
                 *limb,
-                Self::Expr::ZERO,
-                Self::Expr::ZERO,
+                Self::Expr::zero(),
+                Self::Expr::zero(),
                 mult.clone(),
             );
         });

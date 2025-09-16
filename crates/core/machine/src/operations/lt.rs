@@ -75,7 +75,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         // Check the flags are of valid form.
 
         // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
+        let mut sum_flags: AB::Expr = AB::Expr::zero();
         for &flag in self.byte_flags.iter() {
             // Assert that the flag is boolean.
             builder.assert_bool(flag);
@@ -89,15 +89,15 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::ZERO;
+        let mut is_inequality_visited = AB::Expr::zero();
 
         // The bytes of the modulus.
 
         let a: [AB::Expr; N] = core::array::from_fn(|i| a[i].clone().into());
         let b: [AB::Expr; N] = core::array::from_fn(|i| b[i].clone().into());
 
-        let mut first_lt_byte = AB::Expr::ZERO;
-        let mut b_comparison_byte = AB::Expr::ZERO;
+        let mut first_lt_byte = AB::Expr::zero();
+        let mut b_comparison_byte = AB::Expr::zero();
         for (a_byte, b_byte, &flag) in
             izip!(a.iter().rev(), b.iter().rev(), self.byte_flags.iter().rev())
         {
@@ -183,7 +183,7 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
         // Check the flags are of valid form.
 
         // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
+        let mut sum_flags: AB::Expr = AB::Expr::zero();
         for &flag in self.bit_flags.iter() {
             // Assert that the flag is boolean.
             builder.assert_bool(flag);
@@ -197,15 +197,15 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
 
         // A flag to indicate whether an equality check is necessary (this is for all bits from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::ZERO;
+        let mut is_inequality_visited = AB::Expr::zero();
 
         // The bits of the elements.
         let a: [AB::Expr; N] = core::array::from_fn(|i| a[i].clone().into());
         let b: [AB::Expr; N] = core::array::from_fn(|i| b[i].clone().into());
 
         // Calculate the bit which is the first inequality.
-        let mut a_comparison_bit = AB::Expr::ZERO;
-        let mut b_comparison_bit = AB::Expr::ZERO;
+        let mut a_comparison_bit = AB::Expr::zero();
+        let mut b_comparison_bit = AB::Expr::zero();
         for (a_bit, b_bit, &flag) in
             izip!(a.iter().rev(), b.iter().rev(), self.bit_flags.iter().rev())
         {

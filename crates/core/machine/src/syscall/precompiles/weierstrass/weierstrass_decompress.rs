@@ -357,7 +357,7 @@ where
 
         local.neg_y.eval(
             builder,
-            &[AB::Expr::ZERO].iter(),
+            &[AB::Expr::zero()].iter(),
             &local.y.multiplication.result,
             FieldOperation::Sub,
             local.is_real,
@@ -378,7 +378,7 @@ where
                 // negative square root of the y value.
                 builder
                     .when(local.is_real)
-                    .when_ne(local.y.lsb, AB::Expr::ONE - local.sign_bit)
+                    .when_ne(local.y.lsb, AB::Expr::one() - local.sign_bit)
                     .assert_all_eq(local.y.multiplication.result, y_limbs);
                 builder
                     .when(local.is_real)
