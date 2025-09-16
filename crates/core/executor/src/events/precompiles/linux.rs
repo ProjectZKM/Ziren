@@ -5,9 +5,9 @@ use crate::events::{
     MemoryLocalEvent,
 };
 
-/// SHA-256 Compress Event.
+/// Linux Syscall Event.
 ///
-/// This event is emitted when a SHA-256 compress operation is performed.
+/// This event is emitted when a Linux Syscall operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct LinuxEvent {
     /// The shard number.

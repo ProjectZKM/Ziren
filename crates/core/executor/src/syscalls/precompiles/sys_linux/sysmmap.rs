@@ -24,23 +24,19 @@ impl Syscall for SysMmapSyscall {
     ) -> Option<u32> {
         let mut size = a1;
         let start_clk = rt.clk;
-        let read_records = Vec::new();
-        let mut write_records = Vec::new();
         if size & (PAGE_ADDR_MASK as u32) != 0 {
             // adjust size to align with page size
             size += PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32));
         }
 
         let a3_record = rt.mw(Register::A3 as u32, 0);
-        write_records.push(a3_record);
 
-        let v0 = if a0 == 0 {
+        let (v0, write_records) = if a0 == 0 {
             let v0 = rt.rt.register(Register::HEAP);
             let w_record = rt.mw(Register::HEAP as u32, v0 + size);
-            write_records.push(w_record);
-            v0
+            (v0, vec![a3_record, w_record])
         } else {
-            a0
+            (a0, vec![a3_record])
         };
 
         let shard = rt.current_shard();
@@ -51,7 +47,7 @@ impl Syscall for SysMmapSyscall {
             a1,
             v0,
             syscall_code: syscall_code.syscall_id(),
-            read_records,
+            read_records: vec![],
             write_records,
             local_mem_access: rt.postprocess(),
         });

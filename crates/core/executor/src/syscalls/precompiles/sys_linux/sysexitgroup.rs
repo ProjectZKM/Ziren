@@ -19,13 +19,10 @@ impl Syscall for SysExitGroupSyscall {
         a1: u32,
     ) -> Option<u32> {
         let start_clk = rt.clk;
-        let read_records = Vec::new();
-        let mut write_records = Vec::new();
         rt.set_next_pc(0);
         rt.set_exit_code(a0);
         let v0 = 0; // Exit group does not return a value
         let a3_record = rt.mw(Register::A3 as u32, 0);
-        write_records.push(a3_record);
         let shard = rt.current_shard();
         let event = PrecompileEvent::Linux(LinuxEvent {
             shard,
@@ -34,8 +31,8 @@ impl Syscall for SysExitGroupSyscall {
             a1,
             v0,
             syscall_code: syscall_code.syscall_id(),
-            read_records,
-            write_records,
+            read_records: vec![],
+            write_records: vec![a3_record],
             local_mem_access: rt.postprocess(),
         });
         let syscall_event =

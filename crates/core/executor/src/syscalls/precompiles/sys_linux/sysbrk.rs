@@ -19,13 +19,9 @@ impl Syscall for SysBrkSyscall {
         a1: u32,
     ) -> Option<u32> {
         let start_clk = rt.clk;
-        let mut read_records = Vec::new();
-        let mut write_records = Vec::new();
         let (record, brk) = rt.mr(Register::BRK as u32);
-        read_records.push(record);
         let v0 = if a0 > brk { a0 } else { brk };
         let a3_record = rt.mw(Register::A3 as u32, 0);
-        write_records.push(a3_record);
         let shard = rt.current_shard();
         let event = PrecompileEvent::Linux(LinuxEvent {
             shard,
@@ -34,8 +30,8 @@ impl Syscall for SysBrkSyscall {
             a1,
             v0,
             syscall_code: syscall_code.syscall_id(),
-            read_records,
-            write_records,
+            read_records: vec![record],
+            write_records: vec![a3_record],
             local_mem_access: rt.postprocess(),
         });
         let syscall_event =

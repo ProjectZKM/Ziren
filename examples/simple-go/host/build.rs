@@ -17,6 +17,5 @@ fn main() {
         panic!("go build failed");
     }
 
-    // 5. 告诉 Cargo：只要 go/ 目录有变动就重新跑 build.rs
     println!("cargo:rerun-if-changed=../guest");
 }

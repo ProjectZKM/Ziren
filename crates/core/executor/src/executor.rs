@@ -31,7 +31,7 @@ use crate::{
     state::{ExecutionState, ForkState},
     subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
-    ExecutionReport, Instruction, MipsAirId, Opcode, Program, Register,
+    ExecutionReport, Instruction, MipsAirId, Opcode, Program, Register, NUM_REGISTERS,
 };
 
 /// The maximum number of instructions in a program.
@@ -2199,7 +2199,9 @@ impl<'a> Executor<'a> {
 
     #[allow(dead_code)]
     fn show_regs(&self) {
-        let regs = (0..36).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
+        let regs = (0..NUM_REGISTERS)
+            .map(|i| self.state.memory.get(i as u32).unwrap().value)
+            .collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
     }
 }

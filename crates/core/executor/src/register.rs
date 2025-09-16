@@ -1,5 +1,6 @@
 //! Registers for the Ziren zkVM.
 
+pub const NUM_REGISTERS: usize = 36;
 /// A register stores a 32-bit value used by operations.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Register {

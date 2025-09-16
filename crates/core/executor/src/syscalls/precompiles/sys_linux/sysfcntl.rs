@@ -23,8 +23,6 @@ impl Syscall for SysFcntlSyscall {
         a1: u32,
     ) -> Option<u32> {
         let start_clk = rt.clk;
-        let read_records = Vec::new();
-        let mut write_records = Vec::new();
         let v0: u32; // Default return value for unsupported operations
         let a3_record = if a1 == 3 {
             // F_GETFL: get file descriptor flags
@@ -59,7 +57,6 @@ impl Syscall for SysFcntlSyscall {
             rt.mw(Register::A3 as u32, MIPS_EBADF)
         };
 
-        write_records.push(a3_record);
         let shard = rt.current_shard();
         let event = PrecompileEvent::Linux(LinuxEvent {
             shard,
@@ -68,8 +65,8 @@ impl Syscall for SysFcntlSyscall {
             a1,
             v0,
             syscall_code: syscall_code.syscall_id(),
-            read_records,
-            write_records,
+            read_records: vec![],
+            write_records: vec![a3_record],
             local_mem_access: rt.postprocess(),
         });
         let syscall_event =

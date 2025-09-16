@@ -30,10 +30,6 @@ TEXT ·SyscallCommit(SB), $0-8
 	SYSCALL
 	RET
 
-// --------------------------------------------------
-// func SyscallExit(code int)
-// 系统调用号 4003，参数：
-//   code -> a0
 TEXT ·SyscallExit(SB), $0-4
 	MOVW code+0(FP), R4    // a0 = code
 	MOVW $0, R2         // v0 = syscall 0

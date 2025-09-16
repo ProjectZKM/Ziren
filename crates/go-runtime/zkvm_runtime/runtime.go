@@ -65,6 +65,6 @@ func RuntimeExit(code int) {
 }
 
 func init() {
-	// 显式引用，防止优化
+	// Explicit reference, prevent optimization
 	_ = reflect.ValueOf(RuntimeExit)
 }

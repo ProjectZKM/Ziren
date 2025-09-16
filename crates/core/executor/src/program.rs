@@ -21,7 +21,7 @@ use zkm_stark::septic_extension::SepticExtension;
 use zkm_stark::shape::Shape;
 use zkm_stark::LookupKind;
 
-use crate::{Instruction, MipsAirId};
+use crate::{Instruction, MipsAirId, Register};
 
 pub const MAX_MEMORY: usize = 0x7F000000;
 pub const MAX_CODE_MEMORY: usize = 0x3F000000;
@@ -148,8 +148,8 @@ impl Program {
             }
         }
 
-        image.insert(34, hiaddr); // $brk
-        image.insert(35, 0x20000000); // $heap
+        image.insert(Register::BRK as u32, hiaddr); // $brk
+        image.insert(Register::HEAP as u32, 0x20000000); // $heap
 
         patch_stack(&mut image);
 
@@ -270,7 +270,7 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
 pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
     let sp: u32 = INIT_SP;
 
-    image.insert(29, sp); // $sp
+    image.insert(Register::SP as u32, sp); // $sp
 
     let mut store_mem = |addr: u32, v: u32| {
         image.insert(addr, v);
