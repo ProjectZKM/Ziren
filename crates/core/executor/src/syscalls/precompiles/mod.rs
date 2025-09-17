@@ -1,4 +1,5 @@
 pub mod boolean_circuit;
+pub mod aes128;
 pub mod edwards;
 pub mod fptower;
 pub mod keccak;

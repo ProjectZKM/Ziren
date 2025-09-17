@@ -9,8 +9,11 @@ mod sha256_compress;
 mod sha256_extend;
 mod u256x2048_mul;
 mod uint256;
+mod aes128;
+
 use super::{MemoryLocalEvent, SyscallEvent};
 use crate::syscalls::SyscallCode;
+pub use aes128::*;
 pub use boolean_circuit_garble::*;
 pub use ec::*;
 pub use edwards::*;
@@ -35,6 +38,8 @@ pub enum PrecompileEvent {
     ShaCompress(ShaCompressEvent),
     /// Keccak sponge precompile event.
     KeccakSponge(KeccakSpongeEvent),
+    /// AES-128 encrypt precompile event.
+    Aes128Encrypt(AES128EncryptEvent),
     /// Edwards curve add precompile event.
     EdAdd(EllipticCurveAddEvent),
     /// Edwards curve decompress precompile event.
@@ -105,6 +110,9 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::KeccakSponge(e) => {
+                    iterators.push(e.local_mem_access.iter());
+                }
+                PrecompileEvent::Aes128Encrypt(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::EdDecompress(e) => {

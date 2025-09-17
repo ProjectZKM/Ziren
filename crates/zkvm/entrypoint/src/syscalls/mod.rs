@@ -1,3 +1,4 @@
+mod aes128;
 mod bigint;
 mod bls12381;
 mod bn254;
@@ -20,6 +21,8 @@ mod uint256_mul;
 mod unconstrained;
 #[cfg(feature = "verify")]
 mod verify;
+
+pub use aes128::*;
 pub use bigint::*;
 pub use bls12381::*;
 pub use bn254::*;
@@ -167,3 +170,6 @@ pub const POSEIDON2_PERMUTE: u32 = 0x00_01_00_30;
 
 /// Executes the `BOOLEAN_CIRCUIT_GARBLE` precompile.
 pub const BOOLEAN_CIRCUIT_GARBLE: u32 = 0x00_01_00_31;
+
+/// Executes the `AES128_ENCRYPT` precompile.
+pub const AES128_ENCRYPT: u32 = 0x01_01_00_32;

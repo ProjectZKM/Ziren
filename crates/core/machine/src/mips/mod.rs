@@ -5,6 +5,7 @@ use crate::{
     syscall::precompiles::{
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
+        aes128_encrypt::AES128EncryptChip,
     },
 };
 use core::fmt;
@@ -144,6 +145,8 @@ pub enum MipsAir<F: PrimeField32> {
     Secp256r1Double(WeierstrassDoubleAssignChip<SwCurve<Secp256r1Parameters>>),
     /// A precompile for the Poseidon2 permutation
     Poseidon2Permute(Poseidon2PermuteChip),
+    /// A precompile for AES-128 encryption
+    Aes128Encrypt(AES128EncryptChip),
     /// A precompile for the Boolean Circuit Garble
     BooleanCircuitGarble(BooleanCircuitGarbleChip),
     /// A precompile for the Keccak Sponge
@@ -276,6 +279,10 @@ impl<F: PrimeField32> MipsAir<F> {
         let poseidon2_permute = Chip::new(MipsAir::Poseidon2Permute(Poseidon2PermuteChip::new()));
         costs.insert(poseidon2_permute.name(), poseidon2_permute.cost());
         chips.push(poseidon2_permute);
+
+        let aes128_encrypt = Chip::new(MipsAir::Aes128Encrypt(AES128EncryptChip::new()));
+        costs.insert(aes128_encrypt.name(), 11 * aes128_encrypt.cost());
+        chips.push(aes128_encrypt);
 
         let keccak_sponge = Chip::new(MipsAir::KeccakSponge(KeccakSpongeChip::new()));
         costs.insert(keccak_sponge.name(), 24 * keccak_sponge.cost());
@@ -659,6 +666,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
+            Self::Aes128Encrypt(_) => SyscallCode::AES128_ENCRYPT,
             Self::BooleanCircuitGarble(_) => SyscallCode::BOOLEAN_CIRCUIT_GARBLE,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
             Self::SysLinux(_) => SyscallCode::SYS_LINUX,
