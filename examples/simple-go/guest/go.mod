@@ -1,6 +1,6 @@
 module simple-go
 
-go 1.22.5
+go 1.24.0
 
 replace github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime => ../../../crates/go-runtime/zkvm_runtime
 
