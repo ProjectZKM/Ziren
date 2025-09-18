@@ -111,6 +111,7 @@ mod sys {
             .include_item("AluEvent")
             .include_item("AddSubCols")
             .include_item("AddOperation")
+            .include_item("MemoryLocalEvent")
             .include_item("Ghost")
             .with_namespace("zkm_core_machine_sys")
             .with_crate(crate_dir)

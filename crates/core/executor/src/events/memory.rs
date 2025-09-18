@@ -8,6 +8,7 @@ pub const NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC: usize = 4;
 /// This object encapsulates the information needed to prove a memory access operation. This
 /// includes the shard, timestamp, and value of the memory address.
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct MemoryRecord {
     /// The shard number.
     pub shard: u32,
@@ -229,6 +230,7 @@ impl From<MemoryWriteRecord> for MemoryRecordEnum {
 /// shard. This includes the address, initial memory access, and final memory access within a
 /// shard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[repr(C)]
 pub struct MemoryLocalEvent {
     /// The address.
     pub addr: u32,

@@ -140,7 +140,7 @@ impl MemoryInstructionsChip {
             local.op_c_value,
             is_real.clone(),
         );
-        // Range check the addr_word to be a valid babybear word. Note that this will also implicitly
+        // Range check the addr_word to be a valid koalabear word. Note that this will also implicitly
         // do a byte range check on the most significant byte.
         KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,

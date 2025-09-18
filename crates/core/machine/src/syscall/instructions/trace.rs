@@ -132,7 +132,7 @@ impl SyscallInstrsChip {
             cols.index_bitmap[digest_idx] = F::ONE;
         }
 
-        // For halt and commit deferred proofs syscalls, we need to baby bear range check one of
+        // For halt and commit deferred proofs syscalls, we need to koala bear range check one of
         // it's operands.
         if cols.is_halt == F::ONE {
             cols.operand_to_check = event.arg1.into();

@@ -25,7 +25,7 @@ pub(crate) const NUM_MEMORY_LOCAL_INIT_COLS: usize = size_of::<MemoryLocalCols<u
 
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
-struct SingleMemoryLocal<T: Copy> {
+pub struct SingleMemoryLocal<T: Copy> {
     /// The address of the memory access.
     pub addr: T,
 
@@ -355,5 +355,98 @@ mod tests {
             vec![LookupKind::Byte],
             LookupScope::Global,
         );
+    }
+
+    #[cfg(feature = "sys")]
+    fn get_test_execution_record() -> ExecutionRecord {
+        use p3_field::PrimeField32;
+        use rand::{thread_rng, Rng};
+        use zkm_core_executor::events::{MemoryLocalEvent, MemoryRecord};
+
+        let cpu_local_memory_access = (0..=255)
+            .flat_map(|_| {
+                [{
+                    let addr = thread_rng().gen_range(0..KoalaBear::ORDER_U32);
+                    let init_value = thread_rng().gen_range(0..u32::MAX);
+                    let init_shard = thread_rng().gen_range(0..(1u32 << 16));
+                    let init_timestamp = thread_rng().gen_range(0..(1u32 << 24));
+                    let final_value = thread_rng().gen_range(0..u32::MAX);
+                    let final_timestamp = thread_rng().gen_range(0..(1u32 << 24));
+                    let final_shard = thread_rng().gen_range(0..(1u32 << 16));
+                    MemoryLocalEvent {
+                        addr,
+                        initial_mem_access: MemoryRecord {
+                            shard: init_shard,
+                            timestamp: init_timestamp,
+                            value: init_value,
+                        },
+                        final_mem_access: MemoryRecord {
+                            shard: final_shard,
+                            timestamp: final_timestamp,
+                            value: final_value,
+                        },
+                    }
+                }]
+            })
+            .collect::<Vec<_>>();
+        ExecutionRecord { cpu_local_memory_access, ..Default::default() }
+    }
+
+    #[cfg(feature = "sys")]
+    #[test]
+    fn test_generate_trace_ffi_eq_rust() {
+        use p3_matrix::Matrix;
+
+        let record = get_test_execution_record();
+        let chip = MemoryLocalChip::new();
+        let trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(&record, &mut ExecutionRecord::default());
+        let trace_ffi = generate_trace_ffi(&record, trace.height());
+
+        assert_eq!(trace_ffi, trace);
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_trace_ffi(input: &ExecutionRecord, height: usize) -> RowMajorMatrix<KoalaBear> {
+        use std::borrow::BorrowMut;
+
+        use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+
+        use crate::{
+            memory::{
+                MemoryLocalCols, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW, NUM_MEMORY_LOCAL_INIT_COLS,
+            },
+            utils::zeroed_f_vec,
+        };
+
+        type F = KoalaBear;
+        // Generate the trace rows for each event.
+        let events = input.get_local_mem_events().collect::<Vec<_>>();
+        let nb_rows = events.len().div_ceil(4);
+        let padded_nb_rows = height;
+        let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
+        let chunk_size = std::cmp::max(nb_rows / num_cpus::get(), 0) + 1;
+
+        let mut chunks = values[..nb_rows * NUM_MEMORY_LOCAL_INIT_COLS]
+            .chunks_mut(chunk_size * NUM_MEMORY_LOCAL_INIT_COLS)
+            .collect::<Vec<_>>();
+
+        chunks.par_iter_mut().enumerate().for_each(|(i, rows)| {
+            rows.chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS).enumerate().for_each(|(j, row)| {
+                let idx = (i * chunk_size + j) * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW;
+                let cols: &mut MemoryLocalCols<F> = row.borrow_mut();
+                for k in 0..NUM_LOCAL_MEMORY_ENTRIES_PER_ROW {
+                    let cols = &mut cols.memory_local_entries[k];
+                    if idx + k < events.len() {
+                        unsafe {
+                            crate::sys::memory_local_event_to_row_koalabear(events[idx + k], cols);
+                        }
+                    }
+                }
+            });
+        });
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(values, NUM_MEMORY_LOCAL_INIT_COLS)
     }
 }
