@@ -255,7 +255,7 @@ impl SyscallCode {
         (self as u32).to_le_bytes()[2].into()
     }
 
-    /// Get whether the handler of the system call has its own table.
+    /// Get upper byte of syscall ID, which is only used by Linux syscall.
     #[must_use]
     pub fn linux_sys(self) -> u32 {
         (self as u32).to_le_bytes()[1].into()
