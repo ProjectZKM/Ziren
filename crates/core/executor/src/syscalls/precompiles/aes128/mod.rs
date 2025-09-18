@@ -1,2 +1,2 @@
 pub mod encrypt;
-mod utils;
+pub mod utils;

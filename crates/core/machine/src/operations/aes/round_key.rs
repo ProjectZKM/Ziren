@@ -32,7 +32,7 @@ impl <F: Field> NextRoundKey<F> {
     ) -> [u8; 16] {
         // check sbox values
         let sbox_values: [u32; 4] = byte_subs_records.map(|m| m.value);
-        let all_in_u8 = sbox_values.iter().all(|&v| v <= 0xFF);
+        let all_in_u8 = sbox_values.iter().all(|&v| v <= u8::MAX as u32);
         if !all_in_u8 {
             panic!("Not all sbox_values fit in u8");
         }

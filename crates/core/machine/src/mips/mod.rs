@@ -281,6 +281,7 @@ impl<F: PrimeField32> MipsAir<F> {
         chips.push(poseidon2_permute);
 
         let aes128_encrypt = Chip::new(MipsAir::Aes128Encrypt(AES128EncryptChip::new()));
+        // log::info!("aes128 cost: {:?}", aes128_encrypt.cost());
         costs.insert(aes128_encrypt.name(), 11 * aes128_encrypt.cost());
         chips.push(aes128_encrypt);
 
@@ -598,6 +599,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Sha256Compress(_) => 80,
             Self::Sha256Extend(_) => 48,
             Self::KeccakSponge(_) => 24,
+            Self::Aes128Encrypt(_) => 11,
             _ => 1,
         }
     }

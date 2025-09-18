@@ -14,6 +14,8 @@ pub struct AES128EncryptionCols<T> {
     pub key_address: T,
     pub block_address: T,
     pub sbox_address: T,
+    pub receive_syscall: T,
+    pub sbox_addr_read: MemoryReadCols<T>,
     pub key: [MemoryReadCols<T>; 4],
     pub block: [MemoryReadWriteCols<T>; 4],
     pub sbox: [MemoryReadCols<T>; 24], //24 * 11 = 264 > 256 Sbox elements.

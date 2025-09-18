@@ -5,7 +5,8 @@ use crate::events::{
     MemoryLocalEvent,
 };
 
-pub(crate) const AES_128_BLOCK_U32S: usize = 4;
+pub const AES_128_BLOCK_U32S: usize = 4;
+pub const AES_128_BLOCK_BYTES: usize = 16;
 
 /// AES128 Encrypt Event
 ///
@@ -31,7 +32,7 @@ pub struct AES128EncryptEvent {
     /// The output block as a [u32; AES_128_BLOCK_U32S] words.
     pub output: [u32; AES_128_BLOCK_U32S],
     /// The sbox reads
-    pub sbox_reads: Vec<u32>,
+    pub sbox_reads: Vec<u8>,
     /// The memory records for the input
     pub input_read_records: [MemoryReadRecord; AES_128_BLOCK_U32S],
     /// The memory records for the key

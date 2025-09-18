@@ -8,16 +8,19 @@ fn prove_aes128_rust() {
 
     // load input
     let plain_text = vec![
-        21_u8, 2, 23, 21, 1, 1, 2, 2, 2, 7, 128, 21, 25, 57, 247, 26, 35,
-        97, 244, 57, 25, 124, 234, 234, 234, 214, 134, 135, 246, 17, 29, 7
+        // 21_u8, 2, 23, 21, 1, 1, 2, 2, 2, 7, 128, 21, 25, 57, 247, 26, 35,
+        // 97, 244, 57, 25, 124, 234, 234, 234, 214, 134, 135, 246, 17, 29, 7
+        0; 16
     ];
     let key = vec![0_u8; 16];
     let iv = vec![0_u8; 16];
 
-    let expected_output = vec![
-        97_u8, 203, 140, 117, 36, 211, 41, 97,
-        177, 36, 93, 148, 107, 228, 201, 129
-    ];
+    // let expected_output = vec![
+    //     97_u8, 203, 140, 117, 36, 211, 41, 97,
+    //     177, 36, 93, 148, 107, 228, 201, 129
+    // ];
+
+    let expected_output = vec![102_u8, 233, 75, 212, 239, 138, 44, 59, 136, 76, 250, 89, 202, 52, 43, 46];
 
     stdin.write(&plain_text);
     stdin.write(&key);
@@ -32,9 +35,9 @@ fn prove_aes128_rust() {
     println!("executed program with {} cycles", report.total_instruction_count());
 
     // // Generate the proof for the given program and input.
-    // let (pk, vk) = client.setup(ELF);
-    // let mut proof = client.prove(&pk, stdin).run().unwrap();
-    // println!("generated proof");
+    let (pk, vk) = client.setup(ELF);
+    let mut proof = client.prove(&pk, stdin).run().unwrap();
+    println!("generated proof");
     // 
     // // Read and verify the output.
     // //
