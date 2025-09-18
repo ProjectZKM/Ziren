@@ -64,6 +64,7 @@ pub struct MemoryReadRecord {
 /// includes the value, shard, timestamp, previous value, previous shard, and previous timestamp.
 #[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct MemoryWriteRecord {
     /// The value.
     pub value: u32,
