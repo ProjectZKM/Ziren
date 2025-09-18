@@ -13,7 +13,7 @@ Below is the workflow of Ziren.
 Referring to the above diagram, Ziren follows a structured pipeline composed of the following stages:
 
 1. **Guest Program**  
-   A program that written in a high-level language such as Rust or C/C++, creating the application logic that needs to be proved. 
+   A program that written in a high-level language such as Rust, Go or C/C++, creating the application logic that needs to be proved.
 
 2. **MIPS Compiler**  
    The high-level program is compiled into a MIPS ELF binary using a dedicated compiler. This step compiles the program into MIPS32R2 ELF binary.
