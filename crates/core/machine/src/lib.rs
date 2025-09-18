@@ -29,6 +29,8 @@ pub mod program;
 #[cfg(test)]
 pub mod programs;
 pub mod shape;
+#[cfg(feature = "sys")]
+pub mod sys;
 pub mod syscall;
 pub mod utils;
 pub use cpu::*;

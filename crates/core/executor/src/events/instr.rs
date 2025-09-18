@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// This object encapsulated the information needed to prove an ALU operation. This includes its
 /// shard, opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[repr(C)]
 pub struct AluEvent {
     pub pc: u32,
     pub next_pc: u32,

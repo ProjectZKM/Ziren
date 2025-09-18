@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Enum,
 )]
+#[repr(u8)]
 pub enum Opcode {
     // ALU
     ADD = 0,   // ADDSUB
