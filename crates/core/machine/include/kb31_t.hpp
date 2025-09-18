@@ -24,13 +24,14 @@ class kb31_t {
 
   static const uint32_t DEGREE = 1;
   static const uint32_t NBITS = 31;
-  static const uint32_t MOD = 0x78000001u;
-  static const uint32_t M = 0x7effffffu;
-  static const uint32_t RR = 0x45dddde3u; // TODO: fix it
-  static const uint32_t ONE = 0x1fffffeu;
+  static const uint32_t MOD = 0x7f000001; // The KoalaBear prime: 2^31 - 2^24 + 1 = 127 * 2^24 + 1
+  static const uint32_t M = 0x7effffff;  // MOD - 2
+  static const uint32_t ONE = 0x1fffffe; // in Montgomery form
+  static const uint32_t TWO = 0x3fffffc; // in Montgomery form
   static const uint32_t MONTY_BITS = 32;
-  static const uint32_t MONTY_MU = 0x88000001;
-  static const uint32_t MONTY_MASK = ((1ULL << MONTY_BITS) - 1);
+  static const uint32_t RR = 0x17f7efe4; // R = 2^MONTY_BITS, RR = R * R mod MOD
+  static const uint32_t MONTY_MU = 0x81000001;   // MONTY_MU = MOD^{-1} (mod 2^MONTY_BITS)
+  static const uint32_t MONTY_MASK = 0xffffffff; // MONTY_MASK = ((1ULL << MONTY_BITS) - 1);
 
   static constexpr size_t __device__ bit_length() { return 31; }
 
@@ -56,7 +57,7 @@ class kb31_t {
 
   static inline const kb31_t one() { return kb31_t(ONE); }
 
-  static inline const kb31_t two() { return from_canonical_u32(2); }
+  static inline const kb31_t two() { return kb31_t(TWO); }
 
   static inline constexpr uint32_t to_monty(uint32_t x) {
     return (((uint64_t)x << MONTY_BITS) % MOD);
@@ -396,16 +397,19 @@ class kb31_t {
   }
 
  public:
-  inline kb31_t reciprocal() const { // TODO: fix it
-    kb31_t x11, xff, ret = *this;
 
-    x11 = sqr_n_mul(ret, 4, ret);  // 0b10001
-    ret = sqr_n_mul(x11, 1, x11);  // 0b110011
-    ret = sqr_n_mul(ret, 1, x11);  // 0b1110111
-    xff = sqr_n_mul(ret, 1, x11);  // 0b11111111
-    ret = sqr_n_mul(ret, 8, xff);  // 0b111011111111111
-    ret = sqr_n_mul(ret, 8, xff);  // 0b11101111111111111111111
-    ret = sqr_n_mul(ret, 8, xff);  // 0b1110111111111111111111111111111
+  // a^{-1} ≡ a^{MOD-2} mod MOD
+  inline kb31_t reciprocal() const {
+    kb31_t x03, x06, x0f, xff, ret = *this;
+
+    x03 = sqr_n_mul(ret, 1, ret); // 0b11
+    x0f = sqr_n_mul(x03, 2, x03); // 0b1111
+    x06 = sqr_n(x03, 1);          // 0b110
+    ret = sqr_n_mul(x0f, 3, x06); // 0b1111110
+    xff = sqr_n_mul(x0f, 4, x0f); // 0b11111111
+    ret = sqr_n_mul(ret, 8, xff); // 0b111111011111111
+    ret = sqr_n_mul(ret, 8, xff); // 0b11111101111111111111111
+    ret = sqr_n_mul(ret, 8, xff); // 0b1111110111111111111111111111111
 
     return ret;
   }
@@ -422,18 +426,16 @@ class kb31_t {
 
   inline kb31_t& operator/=(const kb31_t a) { return *this *= a.reciprocal(); }
 
-  inline kb31_t heptaroot() const {  // TODO: fix it
-    kb31_t x03, x18, x1b, ret = *this;
+  inline kb31_t heptaroot() const {
+    kb31_t x01, x15, ret = *this;
 
-    x03 = sqr_n_mul(ret, 1, ret);    // 0b11
-    x18 = sqr_n(x03, 3);             // 0b11000
-    x1b = x18 * x03;                 // 0b11011
-    ret = x18 * x1b;                 // 0b110011
-    ret = sqr_n_mul(ret, 6, x1b);    // 0b110011011011
-    ret = sqr_n_mul(ret, 6, x1b);    // 0b110011011011011011
-    ret = sqr_n_mul(ret, 6, x1b);    // 0b110011011011011011011011
-    ret = sqr_n_mul(ret, 6, x1b);    // 0b110011011011011011011011011011
-    ret = sqr_n_mul(ret, 1, *this);  // 0b1100110110110110110110110110111
+    ret = sqr_n_mul(ret, 2, ret);  // 0b101
+    x15 = sqr_n_mul(ret, 2, x01);  // 0b10101
+    ret = sqr_n_mul(ret, 7, x15);  // 0b101010010101
+    ret = sqr_n_mul(ret, 6, x15);  // 0b101010010101010101
+    ret = sqr_n_mul(ret, 6, x15);  // 0b101010010101010101010101
+    ret = sqr_n_mul(ret, 6, x15);  // 0b101010010101010101010101010101
+    ret = sqr_n_mul(ret, 1, x01);  // 0b1010100101010101010101010101011
 
     return ret;
   }
@@ -457,7 +459,7 @@ class kb31_t {
 class kb31_t {
  private:
   static const uint32_t M = 0x7effffffu;
-  static const uint32_t RR = 0x45dddde3u; // TODO: fix it
+  static const uint32_t RR = 0x17f7efe4;
   static const uint32_t ONE = 0x1fffffeu;
   static const uint32_t MONTY_BITS = 32;
   static const uint32_t MONTY_MU = 0x88000001;
