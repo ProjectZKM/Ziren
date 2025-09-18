@@ -8,6 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
+links = "zkm-core-machine-sys"
 
 [dependencies]
 bincode = "1.3.3"

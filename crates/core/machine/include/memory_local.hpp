@@ -19,4 +19,4 @@ namespace zkm_core_machine_sys::memory_local {
 
         cols->is_real = F::one();
     }
-}  // namespace sp1::memory_local
+}  // namespace zkm::memory_local

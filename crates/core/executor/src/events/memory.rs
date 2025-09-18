@@ -133,6 +133,7 @@ impl MemoryRecordEnum {
 /// operation. This includes the address, value, shard, timestamp, and whether the memory is
 /// initialized or finalized.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[repr(C)]
 pub struct MemoryInitializeFinalizeEvent {
     /// The address.
     pub addr: u32,
