@@ -20,6 +20,7 @@ pub struct AES128EncryptionCols<T> {
     pub block: [MemoryReadWriteCols<T>; 4],
     pub sbox: [MemoryReadCols<T>; 24], //24 * 11 = 264 > 256 Sbox elements.
     pub round: [T; 11], // [0,..10]
+    pub round_1to9: T, // 1 to 9
     pub state_matrix: [T; 16],
     pub round_key_matrix: [T; 16],
     pub next_round_key: NextRoundKey<T>,

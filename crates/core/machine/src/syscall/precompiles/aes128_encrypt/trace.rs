@@ -107,6 +107,7 @@ impl AES128EncryptChip {
             cols.round = [F::ZERO; 11];
             cols.round[round] = F::ONE;
             cols.receive_syscall = F::from_bool(round == 0);
+            cols.round_1to9 = F::from_bool(round >= 1 && round <= 9);
 
             for i in 0..AES_128_BLOCK_BYTES {
                 cols.state_matrix[i] = F::from_canonical_u8(state[i]);
@@ -258,9 +259,6 @@ impl AES128EncryptChip {
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);
             }
-        }
-        if rows.as_ref().is_some() {
-            log::info!("rows height: {:?}", rows.as_ref().unwrap().len());
         }
     }
 }
