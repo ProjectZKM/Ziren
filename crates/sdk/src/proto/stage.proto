@@ -50,6 +50,7 @@ message GenerateProofRequest {
   repeated bytes receipt_inputs = 12;
   repeated bytes receipts = 13;
   optional Step from_step = 14;
+  bool single_node = 15;
   uint32 max_prover_num = 16;
 }
 
@@ -79,4 +80,5 @@ message GetStatusResponse {
   uint64 total_steps = 10;
   bytes receipt = 11;
   bytes elf_id = 12;
+  uint64 proving_time = 13; // in milliseconds
 }
