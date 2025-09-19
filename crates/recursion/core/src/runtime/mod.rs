@@ -43,12 +43,12 @@ use crate::air::{Block, RECURSIVE_PROOF_NUM_PV_ELTS};
 /// TODO expand glob import once things are organized enough
 use crate::*;
 
+pub const STACK_SIZE: usize = 1 << 24;
+pub const MEMORY_SIZE: usize = 1 << 28;
+
 /// The heap pointer address.
 pub const HEAP_PTR: i32 = -4;
 pub const HEAP_START_ADDRESS: usize = STACK_SIZE + 4;
-
-pub const STACK_SIZE: usize = 1 << 24;
-pub const MEMORY_SIZE: usize = 1 << 28;
 
 /// The width of the Poseidon2 permutation.
 pub const PERMUTATION_WIDTH: usize = 16;

@@ -73,14 +73,6 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     }
 }
 
-pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
-    state: &[AF; WIDTH],
-) -> [AF; WIDTH] {
-    let mut state = *state;
-    external_linear_layer(&mut state);
-    state
-}
-
 const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] = KoalaBear::new_array([
     KoalaBear::ORDER_U32 - 2,
     1,

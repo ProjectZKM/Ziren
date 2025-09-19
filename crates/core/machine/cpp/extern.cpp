@@ -21,7 +21,7 @@ extern void memory_global_event_to_row_koalabear(const MemoryInitializeFinalizeE
     memory_global::event_to_row<kb31_t, kb31_septic_extension_t>(event, is_receive, cols_kb31);
 }
 
-extern void syscall_event_to_row_babybear(const SyscallEvent* event, const bool is_receive, SyscallCols<KoalaBearP3>* cols) {
+extern void syscall_event_to_row_koalabear(const SyscallEvent* event, const bool is_receive, SyscallCols<KoalaBearP3>* cols) {
     SyscallCols<kb31_t>* cols_kb31 = reinterpret_cast<SyscallCols<kb31_t>*>(cols);
     syscall::event_to_row<kb31_t, kb31_septic_extension_t>(event, is_receive, cols_kb31);
 }

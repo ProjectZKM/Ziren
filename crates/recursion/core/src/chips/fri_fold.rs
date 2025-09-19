@@ -2,26 +2,24 @@
 
 use core::borrow::Borrow;
 use itertools::Itertools;
+use p3_koala_bear::KoalaBear;
 use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_stark::air::{BinomialExtension, MachineAir};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
-use p3_field::PrimeField32;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
 
 use zkm_derive::AlignedBorrow;
 
 use crate::{
-    air::Block,
-    builder::ZKMRecursionAirBuilder,
-    runtime::{Instruction, RecursionProgram},
-    ExecutionRecord, FriFoldInstr,
+    air::Block, builder::ZKMRecursionAirBuilder, runtime::{Instruction, RecursionProgram}, ExecutionRecord, FriFoldEvent, FriFoldInstr
 };
 
-use super::mem::MemoryAccessCols;
+use super::mem::MemoryAccessColsChips;
 
 pub const NUM_FRI_FOLD_COLS: usize = core::mem::size_of::<FriFoldCols<u8>>();
 pub const NUM_FRI_FOLD_PREPROCESSED_COLS: usize =
@@ -45,19 +43,19 @@ pub struct FriFoldPreprocessedCols<T: Copy> {
     pub is_first: T,
 
     // Memory accesses for the single fields.
-    pub z_mem: MemoryAccessCols<T>,
-    pub alpha_mem: MemoryAccessCols<T>,
-    pub x_mem: MemoryAccessCols<T>,
+    pub z_mem: MemoryAccessColsChips<T>,
+    pub alpha_mem: MemoryAccessColsChips<T>,
+    pub x_mem: MemoryAccessColsChips<T>,
 
     // Memory accesses for the vector field inputs.
-    pub alpha_pow_input_mem: MemoryAccessCols<T>,
-    pub ro_input_mem: MemoryAccessCols<T>,
-    pub p_at_x_mem: MemoryAccessCols<T>,
-    pub p_at_z_mem: MemoryAccessCols<T>,
+    pub alpha_pow_input_mem: MemoryAccessColsChips<T>,
+    pub ro_input_mem: MemoryAccessColsChips<T>,
+    pub p_at_x_mem: MemoryAccessColsChips<T>,
+    pub p_at_z_mem: MemoryAccessColsChips<T>,
 
     // Memory accesses for the vector field outputs.
-    pub ro_output_mem: MemoryAccessCols<T>,
-    pub alpha_pow_output_mem: MemoryAccessCols<T>,
+    pub ro_output_mem: MemoryAccessColsChips<T>,
+    pub alpha_pow_output_mem: MemoryAccessColsChips<T>,
 
     pub is_real: T,
 }
@@ -100,65 +98,42 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
     fn preprocessed_width(&self) -> usize {
         NUM_FRI_FOLD_PREPROCESSED_COLS
     }
+
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        let mut rows: Vec<[F; NUM_FRI_FOLD_PREPROCESSED_COLS]> = Vec::new();
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let mut rows: Vec<[KoalaBear; NUM_FRI_FOLD_PREPROCESSED_COLS]> = Vec::new();
         program
             .instructions
             .iter()
-            .filter_map(|instruction| {
-                if let Instruction::FriFold(instr) = instruction {
-                    Some(instr)
-                } else {
-                    None
-                }
+            .filter_map(|instruction| match instruction {
+                Instruction::FriFold(instr) => Some(unsafe {
+                    std::mem::transmute::<&Box<FriFoldInstr<F>>, &Box<FriFoldInstr<KoalaBear>>>(
+                        instr,
+                    )
+                }),
+                _ => None,
             })
             .for_each(|instruction| {
-                let FriFoldInstr {
-                    base_single_addrs,
-                    ext_single_addrs,
-                    ext_vec_addrs,
-                    alpha_pow_mults,
-                    ro_mults,
-                } = instruction.as_ref();
-                let mut row_add =
-                    vec![[F::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS]; ext_vec_addrs.ps_at_z.len()];
+                let mut row_add = vec![
+                    [KoalaBear::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS];
+                    instruction.ext_vec_addrs.ps_at_z.len()
+                ];
 
-                row_add.iter_mut().enumerate().for_each(|(i, row)| {
-                    let row: &mut FriFoldPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
-                    row.is_first = F::from_bool(i == 0);
-
-                    // Only need to read z, x, and alpha on the first iteration, hence the
-                    // multiplicities are i==0.
-                    row.z_mem =
-                        MemoryAccessCols { addr: ext_single_addrs.z, mult: -F::from_bool(i == 0) };
-                    row.x_mem =
-                        MemoryAccessCols { addr: base_single_addrs.x, mult: -F::from_bool(i == 0) };
-                    row.alpha_mem = MemoryAccessCols {
-                        addr: ext_single_addrs.alpha,
-                        mult: -F::from_bool(i == 0),
-                    };
-
-                    // Read the memory for the input vectors.
-                    row.alpha_pow_input_mem = MemoryAccessCols {
-                        addr: ext_vec_addrs.alpha_pow_input[i],
-                        mult: F::NEG_ONE,
-                    };
-                    row.ro_input_mem =
-                        MemoryAccessCols { addr: ext_vec_addrs.ro_input[i], mult: F::NEG_ONE };
-                    row.p_at_z_mem =
-                        MemoryAccessCols { addr: ext_vec_addrs.ps_at_z[i], mult: F::NEG_ONE };
-                    row.p_at_x_mem =
-                        MemoryAccessCols { addr: ext_vec_addrs.mat_opening[i], mult: F::NEG_ONE };
-
-                    // Write the memory for the output vectors.
-                    row.alpha_pow_output_mem = MemoryAccessCols {
-                        addr: ext_vec_addrs.alpha_pow_output[i],
-                        mult: alpha_pow_mults[i],
-                    };
-                    row.ro_output_mem =
-                        MemoryAccessCols { addr: ext_vec_addrs.ro_output[i], mult: ro_mults[i] };
-
-                    row.is_real = F::ONE;
+                row_add.iter_mut().enumerate().for_each(|(row_idx, row)| {
+                    let cols: &mut FriFoldPreprocessedCols<KoalaBear> =
+                        row.as_mut_slice().borrow_mut();
+                    unsafe {
+                        crate::sys::fri_fold_instr_to_row_koalabear(
+                            &instruction.into(),
+                            row_idx,
+                            cols,
+                        );
+                    }
                 });
                 rows.extend(row_add);
             });
@@ -167,13 +142,17 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         if self.pad {
             pad_rows_fixed(
                 &mut rows,
-                || [F::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS],
+                || [KoalaBear::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS],
                 self.fixed_log2_rows,
             );
         }
 
         let trace = RowMajorMatrix::new(
-            rows.into_iter().flatten().collect(),
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
             NUM_FRI_FOLD_PREPROCESSED_COLS,
         );
         Some(trace)
@@ -185,37 +164,44 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
     ) -> RowMajorMatrix<F> {
-        let mut rows = input
-            .fri_fold_events
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let events = unsafe {
+            std::mem::transmute::<&Vec<FriFoldEvent<F>>, &Vec<FriFoldEvent<KoalaBear>>>(
+                &input.fri_fold_events,
+            )
+        };
+
+        let mut rows = events
             .iter()
             .map(|event| {
-                let mut row = [F::ZERO; NUM_FRI_FOLD_COLS];
-
-                let cols: &mut FriFoldCols<F> = row.as_mut_slice().borrow_mut();
-
-                cols.x = event.base_single.x;
-                cols.z = event.ext_single.z;
-                cols.alpha = event.ext_single.alpha;
-
-                cols.p_at_z = event.ext_vec.ps_at_z;
-                cols.p_at_x = event.ext_vec.mat_opening;
-                cols.alpha_pow_input = event.ext_vec.alpha_pow_input;
-                cols.ro_input = event.ext_vec.ro_input;
-
-                cols.alpha_pow_output = event.ext_vec.alpha_pow_output;
-                cols.ro_output = event.ext_vec.ro_output;
-
+                let mut row = [KoalaBear::ZERO; NUM_FRI_FOLD_COLS];
+                let cols: &mut FriFoldCols<KoalaBear> = row.as_mut_slice().borrow_mut();
+                unsafe {
+                    crate::sys::fri_fold_event_to_row_koalabear(event, cols);
+                }
                 row
             })
             .collect_vec();
 
         // Pad the trace to a power of two.
         if self.pad {
-            pad_rows_fixed(&mut rows, || [F::ZERO; NUM_FRI_FOLD_COLS], self.fixed_log2_rows);
+            pad_rows_fixed(&mut rows, || [KoalaBear::ZERO; NUM_FRI_FOLD_COLS], self.fixed_log2_rows);
         }
 
         // Convert the trace to a row major matrix.
-        let trace = RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_FRI_FOLD_COLS);
+        let trace = RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_FRI_FOLD_COLS,
+        );
 
         #[cfg(debug_assertions)]
         println!("fri fold trace dims is width: {:?}, height: {:?}", trace.width(), trace.height());

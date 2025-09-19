@@ -18,7 +18,7 @@ mod sys {
 
     /// The library name, used for the static library archive and the headers.
     /// Should be chosen as to not conflict with other library/header names.
-    const LIB_NAME: &str = "zkm-core-machine-sys";
+    const LIB_NAME: &str = "zkm-recursion-core-sys";
 
     /// The name of all include directories involved, used to find and output header files.
     const INCLUDE_DIRNAME: &str = "include";
@@ -46,10 +46,10 @@ mod sys {
             let mut dir = out_dir.clone();
             loop {
                 if dir.ends_with("target") {
-                    break Some(dir);
+                    break dir;
                 }
                 if !dir.pop() {
-                    break None;
+                    panic!("OUT_DIR does not have parent called \"target\": {out_dir:?}");
                 }
             }
         };
@@ -61,7 +61,7 @@ mod sys {
         let target_include_dir = out_dir.join(INCLUDE_DIRNAME);
 
         // The directory to place symlinks to headers into. Has the fixed path "target/include".
-        let target_include_dir_fixed = target_dir.map(|dir| dir.join(INCLUDE_DIRNAME));
+        let target_include_dir_fixed = target_dir.join(INCLUDE_DIRNAME);
 
         // The directory to read source files from.
         let source_dir = crate_dir.join(SOURCE_DIRNAME);
@@ -95,39 +95,58 @@ mod sys {
             .with_autogen_warning(AUTOGEN_WARNING)
             .with_no_includes()
             .with_sys_include("cstdint")
+            .with_sys_include("cstddef")
             .with_parse_deps(true)
             .with_parse_include(&[
-                "zkm-core-executor",
                 "zkm-stark",
                 "zkm-primitives",
                 "zkm-core-machine",
                 "p3-koala-bear",
                 "p3-monty-31",
+                "zkm-core-executor",
             ])
-            .with_parse_extra_bindings(&["zkm-stark", "zkm-primitives", "p3-koala-bear", "p3-monty-31",])
+            .with_parse_extra_bindings(&["zkm-stark", "zkm-primitives", "p3-koala-bear", "p3-monty-31"])
             .rename_item("KoalaBear", "KoalaBearP3")
             .include_item("KoalaBear")
-            .include_item("MemoryRecord") // Just for convenience. Not exposed, so we need to manually do this.
-            .include_item("SyscallCode") // Required for populating the CPU columns for ECALL.
-            .include_item("SepticExtension")
-            .include_item("SepticCurve")
-            .include_item("MemoryLocalCols")
-            .include_item("MEMORY_LOCAL_INITIAL_DIGEST_POS")
-            .include_item("MemoryInitCols")
-            .include_item("MemoryInitializeFinalizeEvent")
-            .include_item("GlobalInteractionOperation")
-            .include_item("GlobalInteractionEvent")
-            .include_item("Poseidon2StateCols")
-            .include_item("GlobalCols")
-            .include_item("INTERACTION_KIND_GLOBAL")
-            .include_item("Opcode")
-            .include_item("AluEvent")
-            .include_item("AddSubCols")
-            .include_item("AddOperation")
-            .include_item("MemoryLocalEvent")
-            .include_item("GlobalCols")
-            .include_item("Ghost")
-            .with_namespace("zkm_core_machine_sys")
+            .include_item("MontyField31")
+            .include_item("BaseAluOpcode")
+            .include_item("BaseAluEvent")
+            .include_item("BaseAluValueCols")
+            .include_item("BaseAluAccessCols")
+            .include_item("BaseAluInstr")
+            .include_item("ExtAluEvent")
+            .include_item("ExtAluValueCols")
+            .include_item("ExtAluInstr")
+            .include_item("ExtAluAccessCols")
+            .include_item("BatchFRIEvent")
+            .include_item("BatchFRICols")
+            .include_item("BatchFRIInstrFFI")
+            .include_item("BatchFRIPreprocessedCols")
+            .include_item("ExpReverseBitsEventFFI")
+            .include_item("ExpReverseBitsLenCols")
+            .include_item("ExpReverseBitsInstrFFI")
+            .include_item("ExpReverseBitsLenPreprocessedCols")
+            .include_item("FriFoldEvent")
+            .include_item("FriFoldCols")
+            .include_item("FriFoldInstrFFI")
+            .include_item("FriFoldPreprocessedCols")
+            .include_item("SelectEvent")
+            .include_item("SelectCols")
+            .include_item("CommitPublicValuesEvent")
+            .include_item("PublicValuesCols")
+            .include_item("CommitPublicValuesInstr")
+            .include_item("PublicValuesPreprocessedCols")
+            .include_item("SelectEvent")
+            .include_item("SelectCols")
+            .include_item("SelectInstr")
+            .include_item("SelectPreprocessedCols")
+            .include_item("Poseidon2Event")
+            .include_item("Poseidon2")
+            .include_item("Poseidon2Instr")
+            .include_item("Poseidon2PreprocessedColsSkinny")
+            .include_item("Poseidon2PreprocessedColsWide")
+            .include_item("MemoryAccessColsChips")
+            .with_namespace("zkm_recursion_core_sys")
             .with_crate(crate_dir)
             .generate()
         {
@@ -135,10 +154,8 @@ mod sys {
                 // Write the bindings to the target include directory.
                 let header_path = target_include_dir.join(cbindgen_hpp);
                 if bindings.write_to_file(&header_path) {
-                    if let Some(ref target_include_dir_fixed) = target_include_dir_fixed {
-                        // Symlink the header to the fixed include directory.
-                        rel_symlink_file(header_path, target_include_dir_fixed.join(cbindgen_hpp));
-                    }
+                    // Symlink the header to the fixed include directory.
+                    rel_symlink_file(header_path, target_include_dir_fixed.join(cbindgen_hpp));
                 }
             }
             Err(cbindgen::Error::ParseSyntaxError { .. }) => {} /* Ignore parse errors so */
@@ -160,17 +177,15 @@ mod sys {
                 fs::create_dir_all(parent).unwrap();
             }
             fs::copy(header, &dst).unwrap();
-
-            // We only need to symlink if we have a target.
-            if let Some(ref target_include_dir_fixed) = target_include_dir_fixed {
-                // Symlink the header to the fixed include directory.
-                rel_symlink_file(dst, target_include_dir_fixed.join(relpath));
-            }
+            rel_symlink_file(dst, target_include_dir_fixed.join(relpath));
         }
+
+        println!("cargo::rustc-link-lib=static=zkm-core-machine-sys");
+        let include_dir = env::var("DEP_ZKM_CORE_MACHINE_SYS_INCLUDE").unwrap();
 
         // Use the `cc` crate to build the library and statically link it to the crate.
         let mut cc_builder = cc::Build::new();
-        cc_builder.files(&compilation_units).include(target_include_dir);
+        cc_builder.files(&compilation_units).include(target_include_dir).include(include_dir);
         cc_builder.cpp(true).std("c++17");
         cc_builder.compile(LIB_NAME)
     }

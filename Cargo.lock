@@ -8666,7 +8666,10 @@ name = "zkm-recursion-core"
 version = "1.1.4"
 dependencies = [
  "backtrace",
+ "cbindgen",
+ "cc",
  "ff 0.13.1",
+ "glob",
  "hashbrown 0.14.5",
  "itertools 0.13.0",
  "p3-air",
@@ -8684,6 +8687,7 @@ dependencies = [
  "p3-poseidon2 0.1.0",
  "p3-symmetric 0.1.0",
  "p3-util 0.1.0",
+ "pathdiff",
  "rand 0.8.5",
  "serde",
  "static_assertions",
