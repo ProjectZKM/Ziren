@@ -57,7 +57,7 @@ where
             );
         }
 
-        // // Constrain the permutation.
+        // Constrain the permutation.
         for r in 0..NUM_EXTERNAL_ROUNDS {
             eval_external_round(builder, &local.poseidon2.permutation, r);
         }

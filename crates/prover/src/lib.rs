@@ -353,7 +353,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         mut context: ZKMContext<'a>,
     ) -> Result<ZKMCoreProof, ZKMCoreProverError> {
         context.subproof_verifier = Some(self);
-        // Copy the proving key to the device.
         let pk = pk_d;
         let (proof, public_values_stream, cycles) =
             zkm_core_machine::utils::prove_with_context::<_, C::CoreProver>(

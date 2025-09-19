@@ -227,8 +227,7 @@ where
         program: &A::Program,
         vk: &StarkVerifyingKey<SC>,
     ) -> Self::DeviceProvingKey {
-        todo!()
-        // self.machine().setup_core(program, vk.initial_global_cumulative_sum).0
+        self.machine().setup_core(program, vk.initial_global_cumulative_sum).0
     }
 
     fn pk_to_device(&self, pk: &StarkProvingKey<SC>) -> Self::DeviceProvingKey {
