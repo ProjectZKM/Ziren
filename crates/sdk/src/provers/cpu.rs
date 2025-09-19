@@ -70,7 +70,8 @@ impl Prover<DefaultProverComponents> for CpuProver {
     }
 
     fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
-        self.prover.setup(elf)
+        let (pk, _, _, vk) = self.prover.setup(elf);
+        (pk, vk)
     }
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {

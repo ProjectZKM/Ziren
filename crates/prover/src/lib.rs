@@ -282,21 +282,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Creates a proving key and a verifying key for a given MIPS ELF.
     #[instrument(name = "setup", level = "debug", skip_all)]
-    pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
-        let program = self.get_program(elf).unwrap();
-        let (pk, vk) = self.core_prover.setup(&program);
-        let vk = ZKMVerifyingKey { vk };
-        let pk = ZKMProvingKey {
-            pk: self.core_prover.pk_to_host(&pk),
-            elf: elf.to_vec(),
-            vk: vk.clone(),
-        };
-        (pk, vk)
-    }
-
-    /// Creates a proving key and a verifying key for a given MIPS ELF.
-    #[instrument(name = "setup_v2", level = "debug", skip_all)]
-    pub fn setup_v2(&self, elf: &[u8]) -> (ZKMProvingKey, DeviceProvingKey<C>, Program, ZKMVerifyingKey) {
+    pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, DeviceProvingKey<C>, Program, ZKMVerifyingKey) {
         let program = self.get_program(elf).unwrap();
         let (pk, vk) = self.core_prover.setup(&program);
         let vk = ZKMVerifyingKey { vk };
@@ -1429,7 +1415,7 @@ pub mod tests {
         let prover = ZKMProver::<C>::new();
 
         tracing::info!("setup keccak elf");
-        let (_, keccak_pk_d, keccak_program, keccak_vk) = prover.setup_v2(keccak_elf);
+        let (_, keccak_pk_d, keccak_program, keccak_vk) = prover.setup(keccak_elf);
 
 
         tracing::info!("setup verify elf");
@@ -1454,7 +1440,7 @@ pub mod tests {
         stdin.write(&vec![0u8, 1, 2]);
         stdin.write(&vec![2, 3, 4]);
         stdin.write(&vec![5, 6, 7]);
-        let deferred_proof_2 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
+        let deferred_proof_2 = prover.prove_core(&keccak_pk_d, keccak_program, &stdin, opts, Default::default())?;
         let pv_2 = deferred_proof_2.public_values.as_slice().to_vec().clone();
 
         // Generate recursive proof of first subproof.
@@ -1481,7 +1467,7 @@ pub mod tests {
         stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
 
         tracing::info!("proving verify program (core)");
-        let verify_proof = prover.prove_core(&verify_pk, &stdin, opts, Default::default())?;
+        let verify_proof = prover.prove_core(&verify_pk_d, verify_program, &stdin, opts, Default::default())?;
         // let public_values = verify_proof.public_values.clone();
 
         // Generate recursive proof of verify program

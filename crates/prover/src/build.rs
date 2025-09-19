@@ -157,7 +157,7 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     let context = ZKMContext::default();
 
     tracing::info!("setup elf");
-    let (_, pk_d, program, vk) = prover.setup_v2(elf);
+    let (_, pk_d, program, vk) = prover.setup(elf);
 
     tracing::info!("prove core");
     let mut stdin = ZKMStdin::new();
