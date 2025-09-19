@@ -5,7 +5,8 @@ use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 use tempfile::Builder;
 use zkm_core_executor::events::AES_128_BLOCK_BYTES;
-use zkm_stark::{MachineAir, ZKMAirBuilder};
+use zkm_core_executor::syscalls::SyscallCode;
+use zkm_stark::{LookupScope, MachineAir, ZKMAirBuilder};
 use crate::air::MemoryAirBuilder;
 use crate::KeccakSpongeChip;
 use crate::syscall::precompiles::aes128_encrypt::AES128EncryptChip;
@@ -27,9 +28,18 @@ where
         let local: &AES128EncryptionCols<AB::Var> = (*local).borrow();
         let next: &AES128EncryptionCols<AB::Var> = (*next).borrow();
 
+        self.eval_flags(builder, local);
+        self.eval_memory_access(builder, local);
 
-
-        // Constrain memory
+        builder.receive_syscall(
+            local.shard,
+            local.clk,
+            AB::F::from_canonical_u32(SyscallCode::AES128_ENCRYPT.syscall_id()),
+            local.block_address,
+            local.key_address,
+            local.receive_syscall,
+            LookupScope::Local,
+        );
     }
 }
 
@@ -140,6 +150,6 @@ impl AES128EncryptChip {
         }
         
         // round key subs bytes
-        todo!()
+        // todo!()
     }
 }

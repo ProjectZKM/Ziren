@@ -52,9 +52,9 @@ fn prove_aes128_rust() {
     // println!("iv: {:?}", iv);
     // assert_eq!(expected_output, public_input);
     // 
-    // // Verify proof and public values
-    // client.verify(&proof, &vk).expect("verification failed");
-    // println!("successfully generated and verified proof for the program!");
+    // Verify proof and public values
+    client.verify(&proof, &vk).expect("verification failed");
+    println!("successfully generated and verified proof for the program!");
 }
 
 fn main() {
