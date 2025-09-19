@@ -52,7 +52,8 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void external_linear_layer(
 
 template <class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void internal_linear_layer(
-    F state[POSEIDON2_WIDTH]) {
+    F state[POSEIDON2_WIDTH]
+) {
   F matmul_constants[POSEIDON2_WIDTH];
   for (size_t i = 0; i < POSEIDON2_WIDTH; i++) {
     matmul_constants[i] = F(F::to_monty(F::from_monty(

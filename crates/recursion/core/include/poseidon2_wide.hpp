@@ -10,7 +10,10 @@ using namespace poseidon2;
 template <class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_external_round(
     const F external_rounds_state[WIDTH * NUM_EXTERNAL_ROUNDS],
-    F sbox[WIDTH * NUM_EXTERNAL_ROUNDS], size_t r, F next_state[WIDTH]) {
+    F sbox[WIDTH * NUM_EXTERNAL_ROUNDS],
+    size_t r,
+    F next_state[WIDTH]
+) {
   F round_state[WIDTH];
   if (r == 0) {
     // external_linear_layer_immut
@@ -54,8 +57,10 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_external_round(
 template <class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_internal_rounds(
     const F internal_rounds_state[WIDTH],
-    F internal_rounds_s0[NUM_INTERNAL_ROUNDS - 1], F sbox[NUM_INTERNAL_ROUNDS],
-    F ret_state[WIDTH]) {
+    F internal_rounds_s0[NUM_INTERNAL_ROUNDS - 1],
+    F sbox[NUM_INTERNAL_ROUNDS],
+    F ret_state[WIDTH]
+) {
   F state[WIDTH];
   for (size_t i = 0; i < WIDTH; i++) {
     state[i] = internal_rounds_state[i];
@@ -89,11 +94,13 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_internal_rounds(
 
 template <class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_perm(
-    const F input[WIDTH], F external_rounds_state[WIDTH * NUM_EXTERNAL_ROUNDS],
+    const F input[WIDTH],
+    F external_rounds_state[WIDTH * NUM_EXTERNAL_ROUNDS],
     F internal_rounds_state[WIDTH],
     F internal_rounds_s0[NUM_INTERNAL_ROUNDS - 1],
     F external_sbox[WIDTH * NUM_EXTERNAL_ROUNDS],
-    F internal_sbox[NUM_INTERNAL_ROUNDS], F output_state[WIDTH]) {
+    F internal_sbox[NUM_INTERNAL_ROUNDS], F output_state[WIDTH]
+) {
   for (size_t i = 0; i < WIDTH; i++) {
     external_rounds_state[i] = input[i];
   }
@@ -138,9 +145,13 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_perm(
 }
 
 template <class F>
-__ZKM_HOSTDEV__ void event_to_row(const F input[WIDTH], F* input_row,
-                                  size_t start, size_t stride,
-                                  bool sbox_state) {
+__ZKM_HOSTDEV__ void event_to_row(
+  const F input[WIDTH],
+  F* input_row,
+  size_t start,
+  size_t stride,
+  bool sbox_state
+) {
   F external_rounds_state[WIDTH * NUM_EXTERNAL_ROUNDS];
   F internal_rounds_state[WIDTH];
   F internal_rounds_s0[NUM_INTERNAL_ROUNDS - 1];

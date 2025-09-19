@@ -1062,47 +1062,41 @@ constexpr const uint32_t RC_16_30_U32[30][16] = {
 #ifdef __CUDA_ARCH__
 __constant__ constexpr const kb31_t
     POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY[16] = {
-        // kb31_t(kb31_t::to_monty(0x7f000001u - 2)),  // KoalaBear::ORDER_U32 - 2
-        // kb31_t(kb31_t::to_monty(1)),                // 1
-        // kb31_t(kb31_t::to_monty(1 << 1)),           // 1 << 1
-        // kb31_t(kb31_t::to_monty(1 << 2)),           // 1 << 2
-        // kb31_t(kb31_t::to_monty(1 << 3)),           // 1 << 3
-        // kb31_t(kb31_t::to_monty(1 << 4)),           // 1 << 4
-        // kb31_t(kb31_t::to_monty(1 << 5)),           // 1 << 5
-        // kb31_t(kb31_t::to_monty(1 << 6)),           // 1 << 6
-        // kb31_t(kb31_t::to_monty(1 << 7)),           // 1 << 7
-        // kb31_t(kb31_t::to_monty(1 << 8)),           // 1 << 8
-        // kb31_t(kb31_t::to_monty(1 << 9)),           // 1 << 9
-        // kb31_t(kb31_t::to_monty(1 << 10)),          // 1 << 10
-        // kb31_t(kb31_t::to_monty(1 << 11)),          // 1 << 11
-        // kb31_t(kb31_t::to_monty(1 << 12)),          // 1 << 12
-        // kb31_t(kb31_t::to_monty(1 << 13)),          // 1 << 13
-        // kb31_t(kb31_t::to_monty(1 << 15)),          // 1 << 15
-
-        0x7b000005u, 0x01fffffeu, 0x03fffffcu, 0x00ffffffu, 0x05fffffau, 0x07fffff8u, 0x7e000002u, 0x79000007u,
-        0x77000009u, 0x01000000u, 0x20000000u, 0x00000100u, 0x7e000001u, 0x5f000001u, 0x6f000001u, 0x7effff01u
+        kb31_t(kb31_t::to_monty(0x7f000001u - 2)),
+        kb31_t(kb31_t::to_monty(1)),
+        kb31_t(kb31_t::to_monty(2)),
+        kb31_t(kb31_t::to_monty((0x7f000001u + 1) >> 1)),
+        kb31_t(kb31_t::to_monty(3)),
+        kb31_t(kb31_t::to_monty(4)),
+        kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 1)),
+        kb31_t(kb31_t::to_monty(0x7f000001u - 3)),
+        kb31_t(kb31_t::to_monty(0x7f000001u - 4)),
+        kb31_t(kb31_t::to_monty(0x7f000001u - ((0x7f000001u - 1) >> 8))),
+        kb31_t(kb31_t::to_monty(0x7f000001u - ((0x7f000001u - 1) >> 3))),
+        kb31_t(kb31_t::to_monty(0x7f000001u - 127)),
+        kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 8)),
+        kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 3)),
+        kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 4)),
+        kb31_t(kb31_t::to_monty(127)),
 };
 #else
 constexpr const kb31_t POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY[16] = {
-    // kb31_t(kb31_t::to_monty(0x7f000001u - 2)),  // KoalaBear::ORDER_U32 - 2
-    // kb31_t(kb31_t::to_monty(1)),                // 1
-    // kb31_t(kb31_t::to_monty(1 << 1)),           // 1 << 1
-    // kb31_t(kb31_t::to_monty(1 << 2)),           // 1 << 2
-    // kb31_t(kb31_t::to_monty(1 << 3)),           // 1 << 3
-    // kb31_t(kb31_t::to_monty(1 << 4)),           // 1 << 4
-    // kb31_t(kb31_t::to_monty(1 << 5)),           // 1 << 5
-    // kb31_t(kb31_t::to_monty(1 << 6)),           // 1 << 6
-    // kb31_t(kb31_t::to_monty(1 << 7)),           // 1 << 7
-    // kb31_t(kb31_t::to_monty(1 << 8)),           // 1 << 8
-    // kb31_t(kb31_t::to_monty(1 << 9)),           // 1 << 9
-    // kb31_t(kb31_t::to_monty(1 << 10)),          // 1 << 10
-    // kb31_t(kb31_t::to_monty(1 << 11)),          // 1 << 11
-    // kb31_t(kb31_t::to_monty(1 << 12)),          // 1 << 12
-    // kb31_t(kb31_t::to_monty(1 << 13)),          // 1 << 13
-    // kb31_t(kb31_t::to_monty(1 << 15)),          // 1 << 15
-
-    0x7b000005u, 0x01fffffeu, 0x03fffffcu, 0x00ffffffu, 0x05fffffau, 0x07fffff8u, 0x7e000002u, 0x79000007u,
-    0x77000009u, 0x01000000u, 0x20000000u, 0x00000100u, 0x7e000001u, 0x5f000001u, 0x6f000001u, 0x7effff01u
+    kb31_t(kb31_t::to_monty(0x7f000001u - 2)),
+    kb31_t(kb31_t::to_monty(1)),
+    kb31_t(kb31_t::to_monty(2)),
+    kb31_t(kb31_t::to_monty((0x7f000001u + 1) >> 1)),
+    kb31_t(kb31_t::to_monty(3)),
+    kb31_t(kb31_t::to_monty(4)),
+    kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 1)),
+    kb31_t(kb31_t::to_monty(0x7f000001u - 3)),
+    kb31_t(kb31_t::to_monty(0x7f000001u - 4)),
+    kb31_t(kb31_t::to_monty(0x7f000001u - ((0x7f000001u - 1) >> 8))),
+    kb31_t(kb31_t::to_monty(0x7f000001u - ((0x7f000001u - 1) >> 3))),
+    kb31_t(kb31_t::to_monty(0x7f000001u - 127)),
+    kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 8)),
+    kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 3)),
+    kb31_t(kb31_t::to_monty((0x7f000001u - 1) >> 4)),
+    kb31_t(kb31_t::to_monty(127)),
 };
 #endif
 }  // namespace zkm_recursion_core_sys::constants

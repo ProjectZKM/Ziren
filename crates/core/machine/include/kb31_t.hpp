@@ -458,19 +458,19 @@ class kb31_t {
 
 class kb31_t {
  private:
-  static const uint32_t M = 0x7effffffu;
-  static const uint32_t RR = 0x17f7efe4;
-  static const uint32_t ONE = 0x1fffffeu;
+  static const uint32_t M = 0x7effffff;  // MOD - 2
+  static const uint32_t RR = 0x17f7efe4; // R = 2^MONTY_BITS, RR = R * R mod MOD
+  static const uint32_t ONE = 0x1fffffe; // in Montgomery form
   static const uint32_t MONTY_BITS = 32;
-  static const uint32_t MONTY_MU = 0x88000001;
-  static const uint32_t MONTY_MASK = ((1ULL << MONTY_BITS) - 1);
+  static const uint32_t MONTY_MU = 0x81000001;   // MONTY_MU = MOD^{-1} (mod 2^MONTY_BITS)
+  static const uint32_t MONTY_MASK = 0xffffffff; // MONTY_MASK = ((1ULL << MONTY_BITS) - 1);
 
  public:
   using mem_t = kb31_t;
   uint32_t val;
   static const uint32_t DEGREE = 1;
   static const uint32_t NBITS = 31;
-  static const uint32_t MOD = 0x7f000001;
+  static const uint32_t MOD = 0x7f000001; // The KoalaBear prime: 2^31 - 2^24 + 1 = 127 * 2^24 + 1
 
   inline constexpr kb31_t() : val(0) {}
 
