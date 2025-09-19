@@ -267,7 +267,7 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
         builder
             .when(local_prepr.is_real)
             .when_not(local.current_bit)
-            .assert_eq(local.multiplier, AB::Expr::ONE);
+            .assert_eq(local.multiplier, AB::Expr::one());
 
         // To get `next.accum`, we multiply `local.prev_accum_squared` by `local.multiplier` when
         // not `is_last`.

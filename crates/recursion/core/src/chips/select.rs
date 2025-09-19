@@ -169,11 +169,11 @@ where
         builder.send_single(prep_local.addrs.out2, local.vals.out2, prep_local.mult2);
         builder.assert_eq(
             local.vals.out1,
-            local.vals.bit * local.vals.in2 + (AB::Expr::ONE - local.vals.bit) * local.vals.in1,
+            local.vals.bit * local.vals.in2 + (AB::Expr::one() - local.vals.bit) * local.vals.in1,
         );
         builder.assert_eq(
             local.vals.out2,
-            local.vals.bit * local.vals.in1 + (AB::Expr::ONE - local.vals.bit) * local.vals.in2,
+            local.vals.bit * local.vals.in1 + (AB::Expr::one() - local.vals.bit) * local.vals.in2,
         );
     }
 }

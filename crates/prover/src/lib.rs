@@ -296,7 +296,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Creates a proving key and a verifying key for a given MIPS ELF.
     #[instrument(name = "setup_v2", level = "debug", skip_all)]
-    pub fn setup_v2(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey, DeviceProvingKey<C>, Program) {
+    pub fn setup_v2(&self, elf: &[u8]) -> (ZKMProvingKey, DeviceProvingKey<C>, Program, ZKMVerifyingKey) {
         let program = self.get_program(elf).unwrap();
         let (pk, vk) = self.core_prover.setup(&program);
         let vk = ZKMVerifyingKey { vk };
@@ -306,7 +306,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk: vk.clone(),
         };
         let pk_d = self.core_prover.pk_to_device(&pk.pk);
-        (pk, vk, pk_d, program)
+        (pk, pk_d, program, vk)
     }
 
     /// Get a program with an allowed preprocessed shape.
