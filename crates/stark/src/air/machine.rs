@@ -44,6 +44,11 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
         0
     }
 
+    /// The number of rows in the preprocessed trace
+    fn preprocessed_num_rows(&self, _program: &Self::Program, _instrs_len: usize) -> Option<usize> {
+        None
+    }
+
     /// Generate the preprocessed trace given a specific program.
     fn generate_preprocessed_trace(&self, _program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         None

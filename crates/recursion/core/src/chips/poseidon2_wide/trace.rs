@@ -36,6 +36,14 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         // This is a no-op.
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.poseidon2_events;
+        match input.fixed_log2_rows(self) {
+            Some(log2_rows) => Some(1 << log2_rows),
+            None => Some(next_power_of_two(events.len(), None)),
+        }
+    }
+
     #[instrument(name = "generate poseidon2 wide trace", level = "debug", skip_all, fields(rows = input.poseidon2_events.len()))]
     fn generate_trace(
         &self,
@@ -54,10 +62,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             )
         };
 
-        let padded_nb_rows = match input.fixed_log2_rows(self) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(events.len(), None),
-        };
+        let padded_nb_rows = self.num_rows(input).unwrap();
         let num_columns = <Self as BaseAir<KoalaBear>>::width(self);
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * num_columns];
 
@@ -107,6 +112,13 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         PREPROCESSED_POSEIDON2_WIDTH
     }
 
+    fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
+        Some(match program.fixed_log2_rows(self) {
+            Some(log2_rows) => 1 << log2_rows,
+            None => next_power_of_two(instrs_len, None),
+        })
+    }
+
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -130,10 +142,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
                 })
                 .collect::<Vec<_>>();
 
-        let padded_nb_rows = match program.fixed_log2_rows(self) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(instrs.len(), None),
-        };
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * PREPROCESSED_POSEIDON2_WIDTH];
 
         let populate_len = instrs.len() * PREPROCESSED_POSEIDON2_WIDTH;

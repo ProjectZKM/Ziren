@@ -9,7 +9,7 @@ use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
-use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_core_machine::utils::next_power_of_two;
 use zkm_stark::air::MachineAir;
 
 use crate::{
@@ -36,6 +36,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
     fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
         // This is a no-op.
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.poseidon2_events;
+        Some(next_power_of_two(events.len() * (OUTPUT_ROUND_IDX + 1), input.fixed_log2_rows(self)))
     }
 
     #[instrument(name = "generate poseidon2 skinny trace", level = "debug", skip_all, fields(rows = input.poseidon2_events.len()))]
@@ -71,7 +76,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
         // Pad the trace to a power of two.
         // This will need to be adjusted when the AIR constraints are implemented.
-        pad_rows_fixed(&mut rows, || [KoalaBear::ZERO; NUM_POSEIDON2_COLS], input.fixed_log2_rows(self));
+        rows.resize(self.num_rows(input).unwrap(), [KoalaBear::ZERO; NUM_POSEIDON2_COLS]);
 
         RowMajorMatrix::new(
             unsafe {
@@ -89,6 +94,10 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
     fn preprocessed_width(&self) -> usize {
         PREPROCESSED_POSEIDON2_WIDTH
+    }
+
+    fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
+        Some(next_power_of_two(instrs_len, program.fixed_log2_rows(self)))
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
@@ -133,10 +142,9 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
         // Pad the trace to a power of two.
         // This may need to be adjusted when the AIR constraints are implemented.
-        pad_rows_fixed(
-            &mut rows,
-            || [KoalaBear::ZERO; PREPROCESSED_POSEIDON2_WIDTH],
-            program.fixed_log2_rows(self),
+        rows.resize(
+            self.preprocessed_num_rows(program, rows.len()).unwrap(),
+            [KoalaBear::ZERO; PREPROCESSED_POSEIDON2_WIDTH],
         );
 
         Some(RowMajorMatrix::new(

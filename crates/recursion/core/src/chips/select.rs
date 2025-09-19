@@ -52,6 +52,14 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         SELECT_PREPROCESSED_COLS
     }
 
+    fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
+        let fixed_log2_rows = program.fixed_log2_rows(self);
+        Some(match fixed_log2_rows {
+            Some(log2_rows) => 1 << log2_rows,
+            None => next_power_of_two(instrs_len, None),
+        })
+    }
+
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -72,12 +80,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             )
         };
 
-        let nb_rows = instrs.len();
-        let fixed_log2_rows = program.fixed_log2_rows(self);
-        let padded_nb_rows = match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -102,6 +105,11 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         // This is a no-op.
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.select_events;
+        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+    }
+
     fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -112,12 +120,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         let events = unsafe {
             std::mem::transmute::<&Vec<SelectIo<F>>, &Vec<SelectIo<KoalaBear>>>(&input.select_events)
         };
-        let nb_rows = events.len();
-        let fixed_log2_rows = input.fixed_log2_rows(self);
-        let padded_nb_rows = match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.

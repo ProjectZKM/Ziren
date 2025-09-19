@@ -5,7 +5,7 @@ use itertools::Itertools;
 use p3_koala_bear::KoalaBear;
 use std::borrow::BorrowMut;
 use tracing::instrument;
-use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
 use zkm_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
@@ -126,6 +126,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         ))
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.batch_fri_events;
+        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+    }
+
     #[instrument(name = "generate batch fri trace", level = "debug", skip_all, fields(rows = input.batch_fri_events.len()))]
     fn generate_trace(
         &self,
@@ -156,7 +161,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             .collect_vec();
 
         // Pad the trace to a power of two.
-        pad_rows_fixed(&mut rows, || [KoalaBear::ZERO; NUM_BATCH_FRI_COLS], input.fixed_log2_rows(self));
+        rows.resize(self.num_rows(input).unwrap(), [KoalaBear::ZERO; NUM_BATCH_FRI_COLS]);
 
         // Convert the trace to a row major matrix.
         let trace = RowMajorMatrix::new(

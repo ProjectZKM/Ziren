@@ -126,6 +126,7 @@ mod sys {
             .include_item("AddOperation")
             .include_item("MemoryLocalEvent")
             .include_item("GlobalCols")
+            .include_item("GlobalLookupEvent")
             .include_item("Ghost")
             .with_namespace("zkm_core_machine_sys")
             .with_crate(crate_dir)
