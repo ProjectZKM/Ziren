@@ -1,7 +1,11 @@
-//! The scalar field of the SECT curve, defined as `F_r` where `r =
-//! 3450873173395281893717377931138512760570940988862252126328087024741343`.
+/// Adapted from AlpenLabs' `p3-sect-fr`:
+/// <https://github.com/alpenlabs/sp1/tree/feat/sect233_wrap_final_224_bits_sp1_v500>
 
+/// Defines the scalar field of the SECT curve, denoted `F_r`,
+/// where
+/// `r = 3450873173395281893717377931138512760570940988862252126328087024741343`.
 pub mod params;
+
 pub mod poseidon2;
 
 use core::{
