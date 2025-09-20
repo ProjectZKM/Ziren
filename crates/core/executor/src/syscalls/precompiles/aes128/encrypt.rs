@@ -66,9 +66,9 @@ impl Syscall for AES128EncryptSyscall {
         }
 
         // // Add Roundkey, Round 0
-        // for i in 0..state.len() {
-        //     state[i] = state[i] ^ key[i];
-        // }
+        for i in 0..state.len() {
+            state[i] = state[i] ^ key[i];
+        }
 
         // Read first 24 sbox elements, Round 0
         for i in 0..24 {
@@ -127,11 +127,11 @@ impl Syscall for AES128EncryptSyscall {
                 shift_row
             };
 
-        //     // Add round key
-        //     for i in 0..state.len() {
-        //         state[i] = mix_columns[i] ^ round_key[i];
-        //     }
-        //
+            // Add round key
+            for j in 0..state.len() {
+                state[j] = mix_columns[j] ^ round_key[j];
+            }
+
             // Read 24 sbox elements
             if i != 10 {
                 for j in i * 24..i * 24 + 24 {
@@ -224,7 +224,7 @@ impl AES128EncryptSyscall {
             .collect::<Vec<u8>>().try_into().unwrap();
         let w7: [u8; 4] = w6.iter().zip(w3.iter()).map(|(&a, &b)| a ^ b)
             .collect::<Vec<u8>>().try_into().unwrap();
-        
+
         previous_key[0..4].copy_from_slice(&w4);
         previous_key[4..8].copy_from_slice(&w5);
         previous_key[8..12].copy_from_slice(&w6);

@@ -143,19 +143,19 @@ impl AES128EncryptChip {
                 }
 
                 // add_round_key
-                // for i in 0..AES_128_BLOCK_BYTES {
-                //     let tmp = state[i] ^ round_key[i];
-                //     cols.add_round_key[i] = F::from_canonical_u8(tmp);
-                //     let byte_lookup_event = ByteLookupEvent {
-                //         opcode: ByteOpcode::XOR,
-                //         a1: tmp as u16,
-                //         a2: 0,
-                //         b: state[i],
-                //         c: round_key[i],
-                //     };
-                //     blu.add_byte_lookup_event(byte_lookup_event);
-                //     state[i] = tmp;
-                // }
+                for i in 0..AES_128_BLOCK_BYTES {
+                    let tmp = state[i] ^ round_key[i];
+                    cols.add_round_key[i] = F::from_canonical_u8(tmp);
+                    let byte_lookup_event = ByteLookupEvent {
+                        opcode: ByteOpcode::XOR,
+                        a1: tmp as u16,
+                        a2: 0,
+                        b: state[i],
+                        c: round_key[i],
+                    };
+                    blu.add_byte_lookup_event(byte_lookup_event);
+                    state[i] = tmp;
+                }
             } else
             {
                 // subs_bytes
@@ -183,22 +183,25 @@ impl AES128EncryptChip {
                         &shifted_row
                     )
                 } else {
+                    for i in 0..AES_128_BLOCK_BYTES {
+                        cols.mix_column.xor_byte4s[i].value = F::from_canonical_u8(shifted_row[i]);
+                    }
                     shifted_row
                 };
 
-                // // Add round key
-                // for i in 0..AES_128_BLOCK_BYTES {
-                //     state[i] = mixed_columns[i] ^ round_key[i];
-                //     cols.add_round_key[i] = F::from_canonical_u8(state[i]);
-                //     let byte_lookup_event = ByteLookupEvent {
-                //         opcode: ByteOpcode::XOR,
-                //         a1: state[i] as u16,
-                //         a2: 0,
-                //         b: mixed_columns[i],
-                //         c: round_key[i],
-                //     };
-                //     blu.add_byte_lookup_event(byte_lookup_event);
-                // }
+                // Add round key
+                for i in 0..AES_128_BLOCK_BYTES {
+                    state[i] = mixed_columns[i] ^ round_key[i];
+                    cols.add_round_key[i] = F::from_canonical_u8(state[i]);
+                    let byte_lookup_event = ByteLookupEvent {
+                        opcode: ByteOpcode::XOR,
+                        a1: state[i] as u16,
+                        a2: 0,
+                        b: mixed_columns[i],
+                        c: round_key[i],
+                    };
+                    blu.add_byte_lookup_event(byte_lookup_event);
+                }
             }
 
             if round != 10 {
@@ -211,6 +214,13 @@ impl AES128EncryptChip {
                 }
                 sbox_read_index += 24;
 
+                // read the round key byte subs
+                for i in 0..4 {
+                    cols.roundkey_subs_bytes[i].populate(
+                        event.sbox_read_records[sbox_read_index + i],
+                        blu
+                    );
+                }
 
                 // compute next round key
                 let next_round_key = cols.next_round_key.populate(
@@ -221,17 +231,8 @@ impl AES128EncryptChip {
                         .expect("Slice length must be exactly 4"),
                     round as u8,
                 );
-
-                // read the round key byte subs
-                for i in 0..4 {
-                    cols.roundkey_subs_bytes[i].populate(
-                        event.sbox_read_records[sbox_read_index + i],
-                        blu
-                    );
-                }
                 sbox_read_index += 4;
-                //
-                // round_key = next_round_key;
+                round_key = next_round_key;
             } else
             {
                 for i in sbox_read_index..(sbox_read_index + 16) {
@@ -241,7 +242,7 @@ impl AES128EncryptChip {
                     )
                 }
                 sbox_read_index += 16;
-                // assert_eq!(sbox_read_index, 456);
+                assert_eq!(sbox_read_index, 456);
 
                 for i in 0..4 {
                     // check output
@@ -253,7 +254,6 @@ impl AES128EncryptChip {
                         assert_eq!(state[i * 4 + 3], tmp[3]);
                     }
                 }
-
                 // write output
                 for i in 0..AES_128_BLOCK_U32S {
                     cols.block[i].populate(

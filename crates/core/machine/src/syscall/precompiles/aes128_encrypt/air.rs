@@ -47,7 +47,7 @@ where
 
         self.eval_mix_column(builder, local);
         self.eval_compute_round_key(builder, local);
-        // self.eval_add_round_key(builder, local);
+        self.eval_add_round_key(builder, local);
 
     }
 }
@@ -109,7 +109,7 @@ impl AES128EncryptChip {
             &local.sbox_addr_read,
             local.round[0],
         );
-        
+
         // if this is the last row, populate writing output
         for i in 0..4 {
             builder.eval_memory_access(
@@ -122,7 +122,7 @@ impl AES128EncryptChip {
         }
 
         let round_1to10 = local.round[10] + local.round_1to9;
-        
+
         // subs_bytes for state matrix
         for i in 0..AES_128_BLOCK_BYTES {
             let index = local.state_matrix[i];
@@ -134,7 +134,7 @@ impl AES128EncryptChip {
                 round_1to10.clone(),
             )
         }
-        
+
         // sbox elements
         let round_0to9 = local.round_1to9 + local.round[0];
         let start = round * AB::F::from_canonical_u32(24);
@@ -158,7 +158,7 @@ impl AES128EncryptChip {
                 local.round[10].clone(),
             );
         }
-        
+
         // round key subs bytes
         let key_id = [13, 14, 15, 12];
         for (i, id) in key_id.iter().enumerate() {
@@ -239,13 +239,14 @@ impl AES128EncryptChip {
         builder: &mut AB,
         local: &AES128EncryptionCols<AB::Var>,
     ) {
+
         for i in 0..AES_128_BLOCK_BYTES {
             builder.send_byte(
                 AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
                 local.add_round_key[i],
                 local.mix_column.xor_byte4s[i].value,
                 local.round_key_matrix[i],
-                local.is_real,
+                local.is_real
             )
         }
     }
