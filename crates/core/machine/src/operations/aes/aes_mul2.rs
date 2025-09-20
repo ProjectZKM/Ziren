@@ -11,6 +11,7 @@ use zkm_stark::{air::ZKMAirBuilder, Word};
 pub struct MulBy2InAES<T> {
     pub and_0x80: T,
     pub left_shift_1: T,
+    pub is_xor: T, // 0 or 1
     pub xor_0x1b: T  // also the result
 }
 
@@ -18,11 +19,18 @@ impl<F: Field> MulBy2InAES<F> {
     pub fn populate(&mut self, record: &mut impl ByteRecord, x: u8) -> u8 {
         let and_0x80 = x & 0x80;
         let left_shift_1 = x << 1;
-        let xor_0x1b = if and_0x80 != 0 { left_shift_1 ^ 0x1b } else { left_shift_1 };
+        let mut is_xor = 0_u8;
+        let xor_0x1b = if and_0x80 != 0 {
+            is_xor = 1;
+            left_shift_1 ^ 0x1b
+        } else {
+            left_shift_1
+        };
 
         self.and_0x80 = F::from_canonical_u8(and_0x80);
         self.left_shift_1 = F::from_canonical_u8(left_shift_1);
         self.xor_0x1b = F::from_canonical_u8(xor_0x1b);
+        self.is_xor = F::from_canonical_u8(is_xor);
 
         // Byte lookup events
         let byte_event_and = ByteLookupEvent {
@@ -43,7 +51,7 @@ impl<F: Field> MulBy2InAES<F> {
         };
         record.add_byte_lookup_event(byte_event_ssl);
 
-        if and_0x80 != 0 {
+        if is_xor == 1 {
             let byte_event_xor = ByteLookupEvent {
                 opcode: ByteOpcode::XOR,
                 a1: xor_0x1b as u16,
@@ -71,6 +79,7 @@ impl<F: Field> MulBy2InAES<F> {
             AB::F::from_canonical_u32(0x80),
             is_real,
         );
+
         builder.send_byte(
             AB::F::from_canonical_u32(ByteOpcode::SLL as u32),
             cols.left_shift_1,
@@ -78,14 +87,26 @@ impl<F: Field> MulBy2InAES<F> {
             AB::F::from_canonical_u32(1),
             is_real,
         );
-    builder
-        .when(cols.and_0x80).inner
+
+        builder.assert_bool(cols.is_xor);
+        // if cols.is_xor == 1, then and_0x80 == 128, else and_0x80 = 0
+        builder.assert_eq(
+            cols.and_0x80,
+            cols.is_xor * AB::Expr::from_canonical_u8(128u8)
+        );
+
+        builder.assert_eq(
+            (AB::Expr::ONE- is_real.into()) * cols.is_xor,
+            AB::Expr::ZERO
+        );
+
+        builder
         .send_byte(
             AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
             cols.xor_0x1b,
             cols.left_shift_1,
             AB::F::from_canonical_u32(0x1b),
-            is_real,
+            cols.is_xor,
         );
     }
 }

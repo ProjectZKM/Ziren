@@ -6,14 +6,13 @@ use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
 use crate::memory::{MemoryCols, MemoryReadCols};
 
-pub const ROUND_CONST: [u8; 10] = [
-    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
+pub const ROUND_CONST: [u8; 11] = [
+    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36, 0x00
 ];
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct NextRoundKey<T> {
-    pub round_const: T,
     pub add_round_const: T, // XOR
     // new round key
     pub w4: [T; 4],
@@ -45,7 +44,6 @@ impl <F: Field> NextRoundKey<F> {
 
         let mut sub_rot_w3 = sbox_values.map(|u| u as u8);
         let rcon = ROUND_CONST[round as usize];
-        self.round_const = F::from_canonical_u8(rcon);
         let first_byte = sub_rot_w3[0] ^ rcon;
         self.add_round_const = F::from_canonical_u8(first_byte);
         let first_byte_xor_event = ByteLookupEvent {
@@ -125,7 +123,7 @@ impl <F: Field> NextRoundKey<F> {
         cols: NextRoundKey<AB::Var>,
         prev_round_key: [AB::Var; 16],
         sbox_read: &[MemoryReadCols<AB::Var>; 4],
-        round: usize,
+        rcon: AB::Var,
         is_real: AB::Var,
     ) {
         let w0 = &prev_round_key[0..4];
@@ -134,16 +132,13 @@ impl <F: Field> NextRoundKey<F> {
         let w3 = &prev_round_key[12..16];
 
         // round const
-        let rcon = AB::F::from_canonical_u32(ROUND_CONST[round] as u32);
-        builder.when(is_real).assert_eq(cols.round_const, rcon);
-
         let sbox_values: [AB::Var; 4] = sbox_read.map(|m| m.value().0[0]);
 
         builder.send_byte(
             AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
             cols.add_round_const,
             sbox_values[0],
-            cols.round_const,
+            rcon,
             is_real,
         );
 

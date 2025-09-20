@@ -65,10 +65,10 @@ impl Syscall for AES128EncryptSyscall {
             key.extend(value.to_le_bytes());
         }
 
-        // Add Roundkey, Round 0
-        for i in 0..state.len() {
-            state[i] = state[i] ^ key[i];
-        }
+        // // Add Roundkey, Round 0
+        // for i in 0..state.len() {
+        //     state[i] = state[i] ^ key[i];
+        // }
 
         // Read first 24 sbox elements, Round 0
         for i in 0..24 {
@@ -92,14 +92,14 @@ impl Syscall for AES128EncryptSyscall {
             );
 
             // Subs_bytes
-            for i in 0..state.len() {
-                let (record, value) = rt.mr(sbox_ptr + state[i] as u32 * 4);
+            for j in 0..state.len() {
+                let (record, value) = rt.mr(sbox_ptr + state[j] as u32 * 4);
                 sbox_read_records.push(record);
                 assert!(value <= u8::MAX as u32);
                 sbox.push(value as u8);
-                state[i] = value as u8;
+                state[j] = value as u8;
             }
-            
+
             // Shift row
             let shift_row = [
               state[0], state[5], state[10], state[15],
@@ -127,22 +127,22 @@ impl Syscall for AES128EncryptSyscall {
                 shift_row
             };
 
-            // Add round key
-            for i in 0..state.len() {
-                state[i] = mix_columns[i] ^ round_key[i];
-            }
-
+        //     // Add round key
+        //     for i in 0..state.len() {
+        //         state[i] = mix_columns[i] ^ round_key[i];
+        //     }
+        //
             // Read 24 sbox elements
             if i != 10 {
                 for j in i * 24..i * 24 + 24 {
-                    let (record, value) = rt.mr(sbox_ptr as u32 + j as u32 * 4);
+                    let (record, value) = rt.mr(sbox_ptr + j as u32 * 4);
                     sbox_read_records.push(record);
                     assert!(value <= u8::MAX as u32);
                     sbox.push(value as u8);
                 }
             } else {
                 for j in i * 24..256 {
-                    let (record, value) = rt.mr(sbox_ptr as u32 + j as u32 * 4);
+                    let (record, value) = rt.mr(sbox_ptr + j as u32 * 4);
                     sbox_read_records.push(record);
                     assert!(value <= u8::MAX as u32);
                     sbox.push(value as u8);
@@ -150,7 +150,6 @@ impl Syscall for AES128EncryptSyscall {
             }
         }
 
-        
         // write output
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         rt.clk += 1;
@@ -225,7 +224,7 @@ impl AES128EncryptSyscall {
             .collect::<Vec<u8>>().try_into().unwrap();
         let w7: [u8; 4] = w6.iter().zip(w3.iter()).map(|(&a, &b)| a ^ b)
             .collect::<Vec<u8>>().try_into().unwrap();
-
+        
         previous_key[0..4].copy_from_slice(&w4);
         previous_key[4..8].copy_from_slice(&w5);
         previous_key[8..12].copy_from_slice(&w6);
