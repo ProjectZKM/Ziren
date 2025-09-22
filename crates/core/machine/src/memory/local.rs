@@ -124,6 +124,13 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         output.global_lookup_events.extend(events);
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let count = input.get_local_mem_events().count();
+        let nb_rows = nb_rows(count);
+        let size_log2 = input.fixed_log2_rows::<F, _>(self);
+        Some(next_power_of_two(nb_rows, size_log2))
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -132,9 +139,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         // Generate the trace rows for each event.
         let events = input.get_local_mem_events().collect::<Vec<_>>();
         let nb_rows = nb_rows(events.len());
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
-
+        let padded_nb_rows = <MemoryLocalChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
         let chunk_size = std::cmp::max(nb_rows / num_cpus::get(), 0) + 1;
 

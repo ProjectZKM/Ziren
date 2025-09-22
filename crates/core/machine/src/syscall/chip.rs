@@ -19,7 +19,7 @@ use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 use zkm_stark::LookupKind;
 
-use crate::utils::pad_rows_fixed;
+use crate::utils::{next_power_of_two, pad_rows_fixed};
 
 /// The number of main trace columns for `SyscallChip`.
 pub const NUM_SYSCALL_COLS: usize = size_of::<SyscallCols<u8>>();
@@ -110,6 +110,21 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         output.global_lookup_events.extend(events);
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = match self.shard_kind() {
+            SyscallShardKind::Core => &input.syscall_events,
+            SyscallShardKind::Precompile => &input
+                .precompile_events
+                .all_events()
+                .map(|(event, _)| event.to_owned())
+                .collect::<Vec<_>>(),
+        };
+        let nb_rows = events.len();
+        let size_log2 = input.fixed_log2_rows::<F, _>(self);
+        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        Some(padded_nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -146,10 +161,9 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         };
 
         // Pad the trace to a power of two depending on the proof shape in `input`.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_SYSCALL_COLS],
-            input.fixed_log2_rows::<F, _>(self),
+        rows.resize(
+            <SyscallChip as MachineAir<F>>::num_rows(self, input).unwrap(),
+            [F::zero(); NUM_SYSCALL_COLS],
         );
 
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYSCALL_COLS)

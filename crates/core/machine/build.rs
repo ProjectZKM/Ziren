@@ -118,7 +118,6 @@ mod sys {
             .include_item("GlobalInteractionOperation")
             .include_item("GlobalInteractionEvent")
             .include_item("Poseidon2StateCols")
-            .include_item("GlobalCols")
             .include_item("INTERACTION_KIND_GLOBAL")
             .include_item("Opcode")
             .include_item("AluEvent")

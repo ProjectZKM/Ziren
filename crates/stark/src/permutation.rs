@@ -132,9 +132,9 @@ pub fn generate_permutation_trace<F: PrimeField, EF: ExtensionField<F>>(
             assert_eq!(
                 prep.height(),
                 main.height(),
-                "preprocessed and main have different heights: main width = {}, preprocessed width = {}",
-                main.width(),
-                prep.width()
+                "preprocessed and main have different heights: main height = {}, preprocessed height = {}",
+                main.height(),
+                prep.height()
             );
             assert_eq!(
                 permutation_trace.height(),
