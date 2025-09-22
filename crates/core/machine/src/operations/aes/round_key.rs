@@ -131,7 +131,7 @@ impl <F: Field> NextRoundKey<F> {
         let w2 = &prev_round_key[8..12];
         let w3 = &prev_round_key[12..16];
 
-        // round const
+        // sbox substitution bytes.
         let sbox_values: [AB::Var; 4] = sbox_read.map(|m| m.value().0[0]);
 
         builder.send_byte(

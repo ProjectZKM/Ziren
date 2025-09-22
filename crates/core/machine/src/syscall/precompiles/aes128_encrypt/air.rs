@@ -7,13 +7,13 @@ use tempfile::Builder;
 use zkm_core_executor::ByteOpcode;
 use zkm_core_executor::events::AES_128_BLOCK_BYTES;
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::{LookupScope, MachineAir, ZKMAirBuilder};
-use crate::air::MemoryAirBuilder;
+use zkm_stark::{ByteAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use crate::air::{MemoryAirBuilder, WordAirBuilder};
 use crate::KeccakSpongeChip;
 use crate::memory::MemoryCols;
 use crate::operations::mix_column::MixColumn;
 use crate::operations::round_key::{NextRoundKey, ROUND_CONST};
-use crate::syscall::precompiles::aes128_encrypt::AES128EncryptChip;
+use crate::syscall::precompiles::aes128_encrypt::{AES128EncryptChip, AES_SBOX};
 use crate::syscall::precompiles::aes128_encrypt::columns::{AES128EncryptionCols, NUM_AES128_ENCRYPTION_COLS};
 
 impl<F> BaseAir<F> for AES128EncryptChip {
@@ -44,11 +44,12 @@ where
 
         self.eval_flags(builder, local);
         self.eval_memory_access(builder, local);
-
         self.eval_mix_column(builder, local);
         self.eval_compute_round_key(builder, local);
         self.eval_add_round_key(builder, local);
-
+        self.eval_input_output(builder, local);
+        self.eval_sbox_values(builder, local);
+        self.eval_transition(builder, local, next);
     }
 }
 
@@ -64,7 +65,11 @@ impl AES128EncryptChip {
             builder.assert_bool(local.round[i]);
         }
         builder.assert_bool(local.round_1to9);
-
+        let mut computed_1to9 = AB::Expr::ZERO;
+        for i in 1..10 {
+            computed_1to9 = computed_1to9 + local.round[i];
+        }
+        builder.assert_eq(computed_1to9, local.round_1to9);
         builder.assert_eq(first_round * local.is_real, local.receive_syscall);
         builder.assert_eq(last_round + first_round + local.round_1to9, local.is_real);
     }
@@ -84,7 +89,7 @@ impl AES128EncryptChip {
             builder.eval_memory_access(
                 local.shard,
                 local.clk,
-                local.key_address + AB::F::from_canonical_u32((i as u32 * 4)),
+                local.key_address + AB::F::from_canonical_u32(i as u32 * 4),
                 &local.key[i],
                 local.round[0],
             );
@@ -122,8 +127,9 @@ impl AES128EncryptChip {
         }
 
         let round_1to10 = local.round[10] + local.round_1to9;
+        let round_0to9 = local.round_1to9 + local.round[0];
 
-        // subs_bytes for state matrix
+        // subs bytes for state matrix
         for i in 0..AES_128_BLOCK_BYTES {
             let index = local.state_matrix[i];
             builder.eval_memory_access(
@@ -135,8 +141,19 @@ impl AES128EncryptChip {
             )
         }
 
+        // subs bytes for round key computation
+        let key_id = [13_usize, 14, 15, 12];
+        for (i, id) in key_id.iter().enumerate() {
+            builder.eval_memory_access(
+                local.shard,
+                local.clk,
+                local.sbox_address + local.round_key_matrix[*id] * AB::F::from_canonical_u8(4),
+                &local.roundkey_subs_bytes[i],
+                round_0to9.clone(),
+            );
+        }
+
         // sbox elements
-        let round_0to9 = local.round_1to9 + local.round[0];
         let start = round * AB::F::from_canonical_u32(24);
         for i in 0..24 {
             builder.eval_memory_access(
@@ -159,17 +176,6 @@ impl AES128EncryptChip {
             );
         }
 
-        // round key subs bytes
-        let key_id = [13, 14, 15, 12];
-        for (i, id) in key_id.iter().enumerate() {
-        builder.eval_memory_access(
-                local.shard,
-                local.clk,
-                local.sbox_address + local.round_key_matrix[*id as usize] * AB::F::from_canonical_u8(4),
-                &local.roundkey_subs_bytes[i],
-                round_0to9.clone(),
-            );
-        }
     }
 
     fn eval_mix_column<AB: ZKMAirBuilder>(
@@ -239,7 +245,6 @@ impl AES128EncryptChip {
         builder: &mut AB,
         local: &AES128EncryptionCols<AB::Var>,
     ) {
-
         for i in 0..AES_128_BLOCK_BYTES {
             builder.send_byte(
                 AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
@@ -248,6 +253,153 @@ impl AES128EncryptChip {
                 local.round_key_matrix[i],
                 local.is_real
             )
+        }
+    }
+
+    fn eval_input_output<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &AES128EncryptionCols<AB::Var>,
+    ) {
+        // In round 0, all state matrix values and key values are in [0, 255]
+        for i in 0..AES_128_BLOCK_BYTES {
+            builder.send_byte(
+                AB::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                local.state_matrix[i],
+                local.round[0],
+            );
+
+            builder.send_byte(
+                AB::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                local.round_key_matrix[i],
+                local.round[0],
+            );
+        }
+
+        // In round 0, state and key matrix should be derived from cols.block and cols.key
+        for i in 0..4 {
+            for j in 0..4 {
+                let idx = i * 4 + j;
+                builder.when(local.round[0]).assert_eq(
+                    local.state_matrix[idx],
+                    local.block[i].access.value[j]
+                );
+                builder.when(local.round[0]).assert_eq(
+                    local.round_key_matrix[idx],
+                    (local.key[i].access.value[j])
+                );
+            }
+        }
+
+        // In round 1-9, block should remain the same
+        for i in 0..4 {
+            builder.when(local.round_1to9).assert_word_eq(
+                *local.block[i].prev_value(),
+                *local.block[i].value()
+            );
+        }
+
+        // In round 10, output block should be derived from state matrix
+        for i in 0..4 {
+            for j in 0..4 {
+                let idx = i * 4 + j;
+                builder.when(local.round[10]).assert_eq(
+                    local.block[i].access.value[j],
+                    local.add_round_key[idx]
+                );
+            }
+        }
+    }
+
+    fn eval_sbox_values<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &AES128EncryptionCols<AB::Var>,
+    ) {
+        // sbox values are true
+        for i in 0..24 {
+            for round in 0..10 {
+                builder.when(local.round[round]).assert_eq(
+                    local.sbox[i].access.value[0],
+                    AB::Expr::from_canonical_u8(AES_SBOX[round * 24 + i])
+                );
+            }
+        }
+
+        for i in 0..16 {
+            builder.when(local.round[10]).assert_eq(
+                local.sbox[i].access.value[0],
+                AB::Expr::from_canonical_u8(AES_SBOX[240 + i])
+            );
+        }
+
+        for i in 0..24 {
+            for j in 1..4 {
+                builder.assert_eq(
+                    local.sbox[i].access.value[j],
+                    AB::Expr::ZERO
+                );
+            }
+        }
+    }
+
+    fn eval_transition<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &AES128EncryptionCols<AB::Var>,
+        next: &AES128EncryptionCols<AB::Var>,
+    ) {
+        // if it's not the last round, shard, clk remain the same
+        let round_0to9 = local.round_1to9 + local.round[0];
+        builder.when(round_0to9.clone()).assert_eq(next.shard, local.shard);
+        builder.when(round_0to9.clone()).assert_eq(next.clk, local.clk);
+
+        // key_address, block_address, sbox_address remain the same
+        builder.when(round_0to9.clone()).assert_eq(next.key_address, local.key_address);
+        builder.when(round_0to9.clone()).assert_eq(next.block_address, local.block_address);
+        builder.when(round_0to9.clone()).assert_eq(next.sbox_address, local.sbox_address);
+
+        // round transition
+        for i in 0..10 {
+            builder.when(round_0to9.clone()).assert_eq(
+                local.round[i],
+                next.round[i + 1]
+            );
+        }
+
+        // state transition
+        for i in 0..AES_128_BLOCK_BYTES {
+            builder.when(round_0to9.clone()).assert_eq(
+                local.add_round_key[i],
+                next.state_matrix[i]
+            );
+        }
+
+        // round key transition
+        for i in 0..4 {
+            builder.when(round_0to9.clone()).assert_eq(
+                local.next_round_key.w4[i],
+                next.round_key_matrix[i]
+            );
+
+            builder.when(round_0to9.clone()).assert_eq(
+                local.next_round_key.w5[i],
+                next.round_key_matrix[i + 4]
+            );
+
+            builder.when(round_0to9.clone()).assert_eq(
+                local.next_round_key.w6[i],
+                next.round_key_matrix[i + 8]
+            );
+
+            builder.when(round_0to9.clone()).assert_eq(
+                local.next_round_key.w7[i],
+                next.round_key_matrix[i + 12]
+            );
         }
     }
 }

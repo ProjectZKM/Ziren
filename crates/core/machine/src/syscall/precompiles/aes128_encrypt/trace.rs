@@ -11,7 +11,7 @@ use zkm_core_executor::events::{AES128EncryptEvent, MemoryRecordEnum, AES_128_BL
 use zkm_stark::{air::MachineAir};
 use crate::operations::round_key::ROUND_CONST;
 use crate::syscall::precompiles::aes128_encrypt::columns::AES128EncryptionCols;
-use super::{columns::NUM_AES128_ENCRYPTION_COLS, AES128EncryptChip, AES_SBOX};
+use super::{columns::NUM_AES128_ENCRYPTION_COLS, AES128EncryptChip};
 
 impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
     type Record = ExecutionRecord;
@@ -115,6 +115,13 @@ impl AES128EncryptChip {
                 cols.state_matrix[i] = F::from_canonical_u8(state[i]);
                 cols.round_key_matrix[i] = F::from_canonical_u8(round_key[i]);
             }
+            // all the state matrix values and key should be in [0, 255] in round 0
+            if round == 0 {
+                for i in 0..AES_128_BLOCK_BYTES {
+                    blu.add_u8_range_check(0, state[i]);
+                    blu.add_u8_range_check(0, round_key[i]);
+                }
+            }
 
             if round == 0 {
                 // read the input
@@ -203,7 +210,7 @@ impl AES128EncryptChip {
                     blu.add_byte_lookup_event(byte_lookup_event);
                 }
             }
-
+            
             if round != 10 {
                 // read 24 sbox elements for each, except the last round
                 for i in sbox_read_index..sbox_read_index + 24 {
