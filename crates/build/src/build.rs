@@ -127,7 +127,7 @@ pub fn generate_elf_paths(
                         .iter()
                         .find(|p| p.name == *wanted_package)
                         .ok_or_else(|| {
-                            anyhow::anyhow!("cannot find package named {}", wanted_package)
+                            anyhow::anyhow!("cannot find package named {wanted_package}")
                         })
                         .map(|p| p.id.clone())
                 })
@@ -144,7 +144,7 @@ pub fn generate_elf_paths(
             .packages
             .iter()
             .find(|p| p.id == program_crate)
-            .ok_or_else(|| anyhow::anyhow!("cannot find package for {}", program_crate))?;
+            .ok_or_else(|| anyhow::anyhow!("cannot find package for {program_crate}"))?;
 
         for bin_target in program.targets.iter().filter(|t| {
             t.kind.contains(&"bin".to_owned()) && t.crate_types.contains(&"bin".to_owned())
