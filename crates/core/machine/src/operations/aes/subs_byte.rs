@@ -86,28 +86,28 @@ impl<F: Field> SubsByte<F> {
             // if is_left = 1 then byte = i else byte = i+128
             builder.assert_eq(
                 cols.is_left
-                    * (AB::Expr::from_canonical_usize(i) - byte.clone())
-                    * cols.positions[row][col].clone(),
+                    * (AB::Expr::from_canonical_usize(i) - byte)
+                    * cols.positions[row][col],
                 AB::Expr::ZERO,
             );
             builder.assert_eq(
-                (AB::Expr::ONE - cols.is_left.clone())
-                    * (AB::Expr::from_canonical_usize(i + 128) - byte.clone())
-                    * cols.positions[row][col].clone(),
+                (AB::Expr::ONE - cols.is_left)
+                    * (AB::Expr::from_canonical_usize(i + 128) - byte)
+                    * cols.positions[row][col],
                 AB::Expr::ZERO,
             );
 
             // value = SBOX[byte]
             builder.assert_eq(
                 cols.is_left
-                    * (AB::Expr::from_canonical_u8(AES_SBOX[i]) - cols.value.clone())
-                    * cols.positions[row][col].clone(),
+                    * (AB::Expr::from_canonical_u8(AES_SBOX[i]) - cols.value)
+                    * cols.positions[row][col],
                 AB::Expr::ZERO,
             );
             builder.assert_eq(
-                (AB::Expr::ONE - cols.is_left.clone())
-                    * (AB::Expr::from_canonical_u8(AES_SBOX[i + 128]) - cols.value.clone())
-                    * cols.positions[row][col].clone(),
+                (AB::Expr::ONE - cols.is_left)
+                    * (AB::Expr::from_canonical_u8(AES_SBOX[i + 128]) - cols.value)
+                    * cols.positions[row][col],
                 AB::Expr::ZERO,
             );
         }

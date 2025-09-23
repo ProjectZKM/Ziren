@@ -181,7 +181,7 @@ impl AES128EncryptChip {
         builder: &mut AB,
         local: &AES128EncryptionCols<AB::Var>,
     ) {
-        let round_0to9 = local.round_1to9 + local.round[0].clone();
+        let round_0to9 = local.round_1to9 + local.round[0];
         NextRoundKey::<AB::F>::eval(
             builder,
             local.next_round_key,

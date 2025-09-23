@@ -79,7 +79,7 @@ impl Syscall for AES128EncryptSyscall {
 
         // // Add Roundkey, Round 0
         for i in 0..state.len() {
-            state[i] = state[i] ^ key[i];
+            state[i] ^= key[i];
         }
 
         // perform AES
@@ -90,9 +90,8 @@ impl Syscall for AES128EncryptSyscall {
 
             // Subs_bytes
             for j in 0..state.len() {
-                assert!(state[j] <= u8::MAX);
                 let value = AES_SBOX[state[j] as usize];
-                state[j] = value as u8;
+                state[j] = value;
             }
 
             // Shift row
@@ -174,7 +173,6 @@ impl AES128EncryptSyscall {
             let mut result =
                 [previous_key[13], previous_key[14], previous_key[15], previous_key[12]];
             for (i, rcon) in AES128_RCON[round].iter().enumerate() {
-                assert!(result[i] <= u8::MAX);
                 let value = AES_SBOX[result[i] as usize];
                 result[i] = value ^ rcon;
             }
