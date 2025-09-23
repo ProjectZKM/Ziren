@@ -3,11 +3,11 @@
 //! Documentation for these syscalls can be found in the zkVM entrypoint
 //! `zkm_zkvm::syscalls` module.
 
+pub mod aes128;
 pub mod bls12381;
 pub mod bn254;
 #[cfg(feature = "ecdsa")]
 pub mod ecdsa;
-
 pub mod ed25519;
 pub mod io;
 pub mod keccak256;
@@ -77,6 +77,9 @@ extern "C" {
 
     /// Executes the Poseidon2 permutation
     pub fn syscall_poseidon2_permute(state: *mut [u32; 16]);
+
+    /// Executes the AES-128 encryption on the given state with the given key.
+    pub fn syscall_aes128_encrypt(state: *mut [u32; 4], key: *const [u32; 4]);
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);

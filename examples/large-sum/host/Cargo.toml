@@ -13,21 +13,21 @@ zkm-sdk = { workspace = true }
 [build-dependencies]
 zkm-build = { workspace = true }
 
-[[bin]]
-name = "plonk_bn254"
-path = "bin/plonk_bn254.rs"
-
-[[bin]]
-name = "groth16_bn254"
-path = "bin/groth16_bn254.rs"
-
-[[bin]]
-name = "compressed"
-path = "bin/compressed.rs"
-
-[[bin]]
-name = "execute"
-path = "bin/execute.rs"
+#[[bin]]
+#name = "plonk_bn254"
+#path = "bin/plonk_bn254.rs"
+#
+#[[bin]]
+#name = "groth16_bn254"
+#path = "bin/groth16_bn254.rs"
+#
+#[[bin]]
+#name = "compressed"
+#path = "bin/compressed.rs"
+#
+#[[bin]]
+#name = "execute"
+#path = "bin/execute.rs"
 
 [[bin]]
 name = "large-sum-host"

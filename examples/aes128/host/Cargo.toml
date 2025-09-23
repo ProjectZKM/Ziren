@@ -1,0 +1,14 @@
+[package]
+name = "aes128-host"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+
+[dependencies]
+zkm-sdk = { workspace = true }
+tracing = { workspace = true }
+hex = "0.4.3"
+log = "0.4.27"
+
+[build-dependencies]
+zkm-build = { workspace = true }

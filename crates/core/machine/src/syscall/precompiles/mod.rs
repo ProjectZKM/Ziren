@@ -1,3 +1,4 @@
+pub mod aes128_encrypt;
 pub mod edwards;
 pub mod fptower;
 pub mod keccak_sponge;

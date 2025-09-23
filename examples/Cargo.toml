@@ -1,5 +1,7 @@
 [workspace]
 members = [
+  "aes128/guest",
+  "aes128/host",
   "aggregation/guest",
   "aggregation/host",
   "bn254/guest",

@@ -41,6 +41,8 @@ pub enum MipsAirId {
     Secp256r1DoubleAssign = 11,
     /// The Poseidon2 Permute chip
     Poseidon2Permute = 46,
+    /// The AES-128 Encrypt chip
+    Aes128Encrypt = 49,
     /// The Keccak sponge chip.
     KeccakSponge = 48,
     /// The bn254 add assign chip.
@@ -153,6 +155,7 @@ impl MipsAirId {
             Self::Secp256r1AddAssign => "Secp256r1AddAssign",
             Self::Secp256r1DoubleAssign => "Secp256r1DoubleAssign",
             Self::Poseidon2Permute => "Poseidon2Permute",
+            Self::Aes128Encrypt => "Aes128Encrypt",
             Self::KeccakSponge => "KeccakSponge",
             Self::Bn254AddAssign => "Bn254AddAssign",
             Self::Bn254DoubleAssign => "Bn254DoubleAssign",

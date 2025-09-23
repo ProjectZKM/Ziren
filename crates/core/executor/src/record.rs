@@ -124,6 +124,7 @@ impl ExecutionRecord {
                 SyscallCode::KECCAK_SPONGE => opts.keccak,
                 SyscallCode::SHA_EXTEND => opts.sha_extend,
                 SyscallCode::SHA_COMPRESS => opts.sha_compress,
+                SyscallCode::AES128_ENCRYPT => opts.aes128_encrypt,
                 _ => opts.deferred,
             };
 

@@ -22,6 +22,7 @@ pub use code::*;
 pub use context::*;
 use hint::{HintLenSyscall, HintReadSyscall};
 use precompiles::{
+    aes128::encrypt::AES128EncryptSyscall,
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{Fp2AddSubSyscall, Fp2MulSyscall, FpOpSyscall},
     keccak::sponge::KeccakSpongeSyscall,
@@ -101,6 +102,8 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
 
     syscall_map.insert(SyscallCode::POSEIDON2_PERMUTE, Arc::new(Poseidon2PermuteSyscall));
+
+    syscall_map.insert(SyscallCode::AES128_ENCRYPT, Arc::new(AES128EncryptSyscall));
 
     syscall_map.insert(SyscallCode::KECCAK_SPONGE, Arc::new(KeccakSpongeSyscall));
 

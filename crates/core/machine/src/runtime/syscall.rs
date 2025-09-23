@@ -157,6 +157,9 @@ pub enum SyscallCode {
 
     /// Executes the `POSEIDON2_PERMUTE` precompile.
     POSEIDON2_PERMUTE = 0x00_00_01_30,
+
+    /// Executes the `AES128_ENCRYPT` precompile.
+    AES128_ENCRYPT = 0x00_01_01_31,
 }
 
 impl SyscallCode {
@@ -201,6 +204,7 @@ impl SyscallCode {
             0x00_01_01_29 => SyscallCode::BN254_FP2_ADD,
             0x00_01_01_2A => SyscallCode::BN254_FP2_SUB,
             0x00_01_01_2B => SyscallCode::BN254_FP2_MUL,
+            0x00_01_01_31 => SyscallCode::AES128_ENCRYPT,
             0x00_00_01_1C => SyscallCode::BLS12381_DECOMPRESS,
             0x00_00_01_30 => SyscallCode::POSEIDON2_PERMUTE,
             _ => panic!("invalid syscall number: {}", value),

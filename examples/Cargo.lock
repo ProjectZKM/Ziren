@@ -50,6 +50,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aes128"
+version = "1.1.0"
+dependencies = [
+ "zkm-zkvm",
+]
+
+[[package]]
+name = "aes128-host"
+version = "1.1.0"
+dependencies = [
+ "hex",
+ "log",
+ "tracing",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
 name = "aggregation"
 version = "1.1.0"
 dependencies = [
@@ -8721,6 +8739,7 @@ dependencies = [
 name = "zkm-core-executor"
 version = "1.2.0"
 dependencies = [
+ "aes",
  "anyhow",
  "bincode",
  "bytemuck",

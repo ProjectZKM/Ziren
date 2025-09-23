@@ -204,6 +204,8 @@ pub struct SplitOpts {
     pub sha_extend: usize,
     /// The threshold for sha compress events.
     pub sha_compress: usize,
+    /// The threshold for aes128 encrypt events.
+    pub aes128_encrypt: usize,
     /// The threshold for memory events.
     pub memory: usize,
 }
@@ -217,6 +219,7 @@ impl SplitOpts {
             keccak: 8 * deferred_split_threshold / 24,
             sha_extend: 32 * deferred_split_threshold / 48,
             sha_compress: 32 * deferred_split_threshold / 80,
+            aes128_encrypt: 32 * deferred_split_threshold / 11,
             memory: 64 * deferred_split_threshold,
         }
     }
