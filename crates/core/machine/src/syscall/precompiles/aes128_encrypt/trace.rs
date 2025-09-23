@@ -2,7 +2,6 @@ use std::borrow::BorrowMut;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
@@ -45,7 +44,7 @@ impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
     }
 
-    fn generate_trace(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
         let rows = Vec::new();
         log::info!("generate trace");
 
@@ -60,11 +59,9 @@ impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
         }
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();
-        let mut padded_num_rows = num_real_rows.next_power_of_two();
-        for i in num_real_rows..padded_num_rows {
-            let mut row = [F::ZERO; NUM_AES128_ENCRYPTION_COLS];
-            // let cols: &mut AES128EncryptionCols<F> = row.as_mut_slice().borrow_mut();
-            //
+        let padded_num_rows = num_real_rows.next_power_of_two();
+        for _ in num_real_rows..padded_num_rows {
+            let row = [F::ZERO; NUM_AES128_ENCRYPTION_COLS];
             rows.push(row);
         }
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_AES128_ENCRYPTION_COLS)
@@ -95,7 +92,6 @@ impl AES128EncryptChip {
             state[i * 4..i * 4 + 4].copy_from_slice(&event.input[i].to_le_bytes());
             round_key[i * 4..i * 4 + 4].copy_from_slice(&event.key[i].to_le_bytes());
         }
-        let mut sbox_read_index = 0_usize;
         for round in 0..num_round {
             let mut row = [F::ZERO; NUM_AES128_ENCRYPTION_COLS];
             let cols: &mut AES128EncryptionCols<F> = row.as_mut_slice().borrow_mut();
@@ -104,7 +100,6 @@ impl AES128EncryptChip {
             cols.is_real = F::ONE;
             cols.key_address = F::from_canonical_u32(event.key_addr);
             cols.block_address = F::from_canonical_u32(event.block_addr);
-            cols.sbox_address = F::from_canonical_u32(event.sbox_addr);
             cols.round = [F::ZERO; 11];
             cols.round[round] = F::ONE;
             cols.receive_syscall = F::from_bool(round == 0);
@@ -138,11 +133,6 @@ impl AES128EncryptChip {
                         blu
                     );
                 }
-                // read the sbox address
-                cols.sbox_addr_read.populate(
-                    event.sbox_addr_memory,
-                    blu
-                );
 
                 // the mix column value should be the state
                 for i in 0..AES_128_BLOCK_BYTES {
@@ -167,13 +157,11 @@ impl AES128EncryptChip {
             {
                 // subs_bytes
                 for i in 0..AES_128_BLOCK_BYTES {
-                    cols.state_subs_bytes[i].populate(
-                        event.sbox_read_records[sbox_read_index + i],
-                        blu
+                    let subs_value = cols.state_subs_byte[i].populate(
+                        state[i]
                     );
-                    state[i] = event.sbox_reads[sbox_read_index + i];
+                    state[i] = subs_value;
                 }
-                sbox_read_index += AES_128_BLOCK_BYTES;
 
                 // shift_rows
                 let shifted_row = [
@@ -212,45 +200,15 @@ impl AES128EncryptChip {
             }
             
             if round != 10 {
-                // read 24 sbox elements for each, except the last round
-                for i in sbox_read_index..sbox_read_index + 24 {
-                    cols.sbox[i - sbox_read_index].populate(
-                        event.sbox_read_records[i],
-                        blu
-                    )
-                }
-                sbox_read_index += 24;
-
-                // read the round key byte subs
-                for i in 0..4 {
-                    cols.roundkey_subs_bytes[i].populate(
-                        event.sbox_read_records[sbox_read_index + i],
-                        blu
-                    );
-                }
-
                 // compute next round key
                 let next_round_key = cols.next_round_key.populate(
                     blu,
                     &round_key,
-                    event.sbox_read_records[sbox_read_index..sbox_read_index + 4]
-                        .try_into()
-                        .expect("Slice length must be exactly 4"),
-                    round as u8,
+                    round as u8
                 );
-                sbox_read_index += 4;
                 round_key = next_round_key;
             } else
             {
-                for i in sbox_read_index..(sbox_read_index + 16) {
-                    cols.sbox[i - sbox_read_index].populate(
-                        event.sbox_read_records[i],
-                        blu
-                    )
-                }
-                sbox_read_index += 16;
-                assert_eq!(sbox_read_index, 456);
-
                 for i in 0..4 {
                     // check output
                     let tmp = event.output_write_records[i].value.to_le_bytes();

@@ -1,9 +1,6 @@
 use p3_field::{Field, FieldAlgebra};
-use zkm_core_executor::ByteOpcode;
-use zkm_core_executor::events::{ByteLookupEvent, ByteRecord, MemoryReadRecord};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
-use crate::memory::{MemoryCols, MemoryReadCols};
 pub const AES_SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -47,8 +44,8 @@ impl<F: Field> SubsByte<F> {
         }
 
         for i in 0..128 {
-            let row = i / 4;
-            let col = i % 4;
+            let row = i / 32;
+            let col = i % 32;
             if i as u8 == pos {
                 self.positions[row][col] = F::ONE;
             } else {
@@ -65,14 +62,14 @@ impl<F: Field> SubsByte<F> {
         builder: &mut AB,
         cols: SubsByte<AB::Var>,
         byte: AB::Var,
-        is_real: AB::Var,
+        is_real: AB::Expr,
     ) {
 
         builder.assert_bool(cols.is_left);
-        builder.assert_bool(is_real);
+        builder.assert_bool(is_real.clone());
         // if is_real = 0 then is_left must be 0
         builder.assert_eq(
-            (AB::Expr::ONE - is_real.into()) * cols.is_left,
+            (AB::Expr::ONE - is_real.clone()) * cols.is_left,
             AB::Expr::ZERO,
         );
 
@@ -82,16 +79,16 @@ impl<F: Field> SubsByte<F> {
         }).sum::<AB::Expr>();
         builder.assert_eq(
             sum_positions,
-            is_real.into(),
+            is_real.clone(),
         );
 
         for i in 0..128 {
             // positions are boolean
-            let row = i / 4;
-            let col = i % 4;
+            let row = i / 32;
+            let col = i % 32;
             builder.assert_bool(cols.positions[row][col]);
             builder.assert_eq(
-                (AB::Expr::ONE - is_real.into()) * cols.positions[row][col],
+                (AB::Expr::ONE - is_real.clone()) * cols.positions[row][col],
                 AB::Expr::ZERO,
             );
             // if is_left = 1 then byte = i else byte = i+128
@@ -106,7 +103,9 @@ impl<F: Field> SubsByte<F> {
 
             // value = SBOX[byte]
             builder.assert_eq(
-                cols.is_left * (AB::Expr::from_canonical_u8(AES_SBOX[i]) - cols.value.clone()) * cols.positions[row][col].clone(),
+                cols.is_left
+                    * (AB::Expr::from_canonical_u8(AES_SBOX[i]) - cols.value.clone())
+                    * cols.positions[row][col].clone(),
                 AB::Expr::ZERO,
             );
             builder.assert_eq(

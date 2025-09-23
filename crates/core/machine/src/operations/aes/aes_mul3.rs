@@ -4,7 +4,7 @@ use zkm_core_executor::{
     ByteOpcode,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_stark::air::ZKMAirBuilder;
 use crate::operations::aes_mul2::MulBy2InAES;
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

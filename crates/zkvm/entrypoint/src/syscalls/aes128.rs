@@ -9,7 +9,7 @@ use core::arch::asm;
 /// a four byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_aes128_encrypt(state: *mut [u32; 4], key: *const [u32; 4], sbox: *const [u32; 256]) {
+pub extern "C" fn syscall_aes128_encrypt(state: *mut [u32; 4], key: *const [u32; 4]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
@@ -17,7 +17,6 @@ pub extern "C" fn syscall_aes128_encrypt(state: *mut [u32; 4], key: *const [u32;
         in("$2") crate::syscalls::AES128_ENCRYPT,
         in("$4") state,
         in("$5") key,
-        in("$6") sbox,
         );
     }
 

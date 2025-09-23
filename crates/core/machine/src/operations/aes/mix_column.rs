@@ -1,8 +1,5 @@
-use p3_field::{Field, FieldAlgebra};
-use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord},
-    ByteOpcode,
-};
+use p3_field::Field;
+use zkm_core_executor::events::ByteRecord;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
 use crate::operations::aes::xor_byte_4::XorByte4;

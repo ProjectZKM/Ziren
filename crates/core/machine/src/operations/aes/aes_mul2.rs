@@ -4,7 +4,7 @@ use zkm_core_executor::{
     ByteOpcode,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_stark::air::ZKMAirBuilder;
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]

@@ -1,10 +1,9 @@
-use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
 use zkm_core_executor::ByteOpcode;
-use zkm_core_executor::events::{ByteLookupEvent, ByteRecord, MemoryReadRecord};
+use zkm_core_executor::events::{ByteLookupEvent, ByteRecord};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
-use crate::memory::{MemoryCols, MemoryReadCols};
+use crate::operations::subs_byte::SubsByte;
 
 pub const ROUND_CONST: [u8; 11] = [
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36, 0x00
@@ -14,6 +13,7 @@ pub const ROUND_CONST: [u8; 11] = [
 #[repr(C)]
 pub struct NextRoundKey<T> {
     pub add_round_const: T, // XOR
+    pub w3_subs_byte: [SubsByte<T>; 4],  // for round key
     // new round key
     pub w4: [T; 4],
     pub w5: [T; 4],
@@ -26,14 +26,13 @@ impl <F: Field> NextRoundKey<F> {
         &mut self,
         records: &mut impl ByteRecord,
         prev_round_key: &[u8; 16],
-        byte_subs_records: &[MemoryReadRecord; 4],
         round: u8,
     ) -> [u8; 16] {
         // check sbox values
-        let sbox_values: [u32; 4] = byte_subs_records.map(|m| m.value);
-        let all_in_u8 = sbox_values.iter().all(|&v| v <= u8::MAX as u32);
-        if !all_in_u8 {
-            panic!("Not all sbox_values fit in u8");
+        let mut sub_rot_w3 = [0u8; 4];
+        let shifted_w3 = [prev_round_key[13], prev_round_key[14], prev_round_key[15], prev_round_key[12]];
+        for i in 0..4 {
+            sub_rot_w3[i] = self.w3_subs_byte[i].populate(shifted_w3[i]);
         }
 
         // previous round key
@@ -42,7 +41,6 @@ impl <F: Field> NextRoundKey<F> {
         let w2 = &prev_round_key[8..12];
         let w3 = &prev_round_key[12..16];
 
-        let mut sub_rot_w3 = sbox_values.map(|u| u as u8);
         let rcon = ROUND_CONST[round as usize];
         let first_byte = sub_rot_w3[0] ^ rcon;
         self.add_round_const = F::from_canonical_u8(first_byte);
@@ -122,24 +120,33 @@ impl <F: Field> NextRoundKey<F> {
         builder: &mut AB,
         cols: NextRoundKey<AB::Var>,
         prev_round_key: [AB::Var; 16],
-        sbox_read: &[MemoryReadCols<AB::Var>; 4],
         rcon: AB::Var,
-        is_real: AB::Var,
+        is_real: AB::Expr,
     ) {
         let w0 = &prev_round_key[0..4];
         let w1 = &prev_round_key[4..8];
         let w2 = &prev_round_key[8..12];
         let w3 = &prev_round_key[12..16];
 
+        let shifted_w3 = [prev_round_key[13], prev_round_key[14], prev_round_key[15], prev_round_key[12]];
+        for i in 0..4 {
+            SubsByte::<F>::eval(
+                builder,
+                cols.w3_subs_byte[i],
+                shifted_w3[i],
+                is_real.clone(),
+            );
+        }
+
         // sbox substitution bytes.
-        let sbox_values: [AB::Var; 4] = sbox_read.map(|m| m.value().0[0]);
+        let subs_byte_values: [AB::Var; 4] = cols.w3_subs_byte.map(|m| m.value);
 
         builder.send_byte(
             AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
             cols.add_round_const,
-            sbox_values[0],
+            subs_byte_values[0],
             rcon,
-            is_real,
+            is_real.clone(),
         );
 
         builder.send_byte(
@@ -147,7 +154,7 @@ impl <F: Field> NextRoundKey<F> {
             cols.w4[0],
             w0[0],
             cols.add_round_const,
-            is_real,
+            is_real.clone(),
         );
 
         for i in 1..4 {
@@ -155,8 +162,8 @@ impl <F: Field> NextRoundKey<F> {
                 AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
                 cols.w4[i],
                 w0[i],
-                sbox_values[i],
-                is_real,
+                subs_byte_values[i],
+                is_real.clone(),
             )
         }
 
@@ -166,7 +173,7 @@ impl <F: Field> NextRoundKey<F> {
                 cols.w5[i],
                 cols.w4[i],
                 w1[i],
-                is_real,
+                is_real.clone(),
             )
         }
 
@@ -176,7 +183,7 @@ impl <F: Field> NextRoundKey<F> {
                 cols.w6[i],
                 cols.w5[i],
                 w2[i],
-                is_real,
+                is_real.clone(),
             )
         }
 
@@ -186,7 +193,7 @@ impl <F: Field> NextRoundKey<F> {
                 cols.w7[i],
                 cols.w6[i],
                 w3[i],
-                is_real,
+                is_real.clone(),
             )
         }
     }

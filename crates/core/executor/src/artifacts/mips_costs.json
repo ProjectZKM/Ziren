@@ -9,6 +9,7 @@
   "Secp256r1Decompress": 2686,
   "Secp256k1Decompress": 2686,
   "KeccakSponge": 102216,
+  "Aes128Encrypt": 38764,
   "Bn254AddAssign": 4013,
   "Bitwise": 42,
   "ShiftLeft": 68,

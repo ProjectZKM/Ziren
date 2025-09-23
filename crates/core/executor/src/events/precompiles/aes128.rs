@@ -21,24 +21,16 @@ pub struct AES128EncryptEvent {
     pub block_addr: u32,
     /// The address of the key
     pub key_addr: u32,
-    /// The address of sbox
-    pub sbox_addr: u32,
-    /// The memory records for sbox address
-    pub sbox_addr_memory: MemoryReadRecord,
     /// The input block as a [u32; AES_128_BLOCK_U32S] words.
     pub input: [u32; AES_128_BLOCK_U32S],
     /// The key as a [u32; AES_128_BLOCK_U32S] words.
     pub key: [u32; AES_128_BLOCK_U32S],
     /// The output block as a [u32; AES_128_BLOCK_U32S] words.
     pub output: [u32; AES_128_BLOCK_U32S],
-    /// The sbox reads
-    pub sbox_reads: Vec<u8>,
     /// The memory records for the input
     pub input_read_records: [MemoryReadRecord; AES_128_BLOCK_U32S],
     /// The memory records for the key
     pub key_read_records: [MemoryReadRecord; AES_128_BLOCK_U32S],
-    /// The memory records for reading sbox
-    pub sbox_read_records: Vec<MemoryReadRecord>,
     /// The memory records for the output
     pub output_write_records: [MemoryWriteRecord; AES_128_BLOCK_U32S],
     /// The local memory access records.

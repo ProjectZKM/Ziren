@@ -1,6 +1,4 @@
-use log::info;
-use crate::events::{AES128EncryptEvent, MemoryReadRecord, PrecompileEvent, AES_128_BLOCK_U32S};
-use crate::Register::A2;
+use crate::events::{AES128EncryptEvent, PrecompileEvent, AES_128_BLOCK_U32S};
 use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 use crate::syscalls::precompiles::aes128::utils::mul_md5;
 
@@ -17,6 +15,25 @@ pub const AES128_RCON: [[u8; 4]; 10] = [
     [0x80, 0x00, 0x00, 0x00],
     [0x1B, 0x00, 0x00, 0x00],
     [0x36, 0x00, 0x00, 0x00],
+];
+
+pub const AES_SBOX: [u8; 256] = [
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
 ];
 
 impl Syscall for AES128EncryptSyscall {
@@ -36,7 +53,6 @@ impl Syscall for AES128EncryptSyscall {
 
         let mut input_read_records = Vec::new();
         let mut key_read_records = Vec::new();
-        let mut sbox_read_records = Vec::new();
         let mut output_write_records = Vec::new();
 
         let mut input = Vec::new();
@@ -44,10 +60,7 @@ impl Syscall for AES128EncryptSyscall {
         let mut state = Vec::new();
         let mut key = Vec::new();
         let mut output = Vec::new();
-        let mut sbox: Vec<u8> = Vec::new();
 
-        // read sbox ptr
-        let (sbox_ptr_memory, sbox_ptr) = rt.mr(A2 as u32);
 
         // read block input
         for i in 0..AES_128_BLOCK_U32S {
@@ -70,33 +83,19 @@ impl Syscall for AES128EncryptSyscall {
             state[i] = state[i] ^ key[i];
         }
 
-        // Read first 24 sbox elements, Round 0
-        for i in 0..24 {
-            let (record, value) = rt.mr(sbox_ptr + i as u32 * 4);
-            sbox_read_records.push(record);
-            assert!(value <= u8::MAX as u32);
-            sbox.push(value as u8);
-        }
-
         // perform AES
         let mut round_key = key;
         for i in 1..11 {
             // compute round key
             Self::compute_round_key(
-                rt,
                 &mut round_key,
-                &mut sbox_read_records,
-                &mut sbox,
-                sbox_ptr,
                 i - 1
             );
 
             // Subs_bytes
             for j in 0..state.len() {
-                let (record, value) = rt.mr(sbox_ptr + state[j] as u32 * 4);
-                sbox_read_records.push(record);
-                assert!(value <= u8::MAX as u32);
-                sbox.push(value as u8);
+                assert!(state[j] <= u8::MAX);
+                let value = AES_SBOX[state[j] as usize];
                 state[j] = value as u8;
             }
 
@@ -131,30 +130,12 @@ impl Syscall for AES128EncryptSyscall {
             for j in 0..state.len() {
                 state[j] = mix_columns[j] ^ round_key[j];
             }
-
-            // Read 24 sbox elements
-            if i != 10 {
-                for j in i * 24..i * 24 + 24 {
-                    let (record, value) = rt.mr(sbox_ptr + j as u32 * 4);
-                    sbox_read_records.push(record);
-                    assert!(value <= u8::MAX as u32);
-                    sbox.push(value as u8);
-                }
-            } else {
-                for j in i * 24..256 {
-                    let (record, value) = rt.mr(sbox_ptr + j as u32 * 4);
-                    sbox_read_records.push(record);
-                    assert!(value <= u8::MAX as u32);
-                    sbox.push(value as u8);
-                }
-            }
         }
 
         // write output
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         rt.clk += 1;
         assert_eq!(state.len(), 16);
-        log::info!("AES128 Encrypt output: {:?}", state);
         for chunk in state.chunks(4) {
             let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             output.push(value);
@@ -169,15 +150,11 @@ impl Syscall for AES128EncryptSyscall {
             clk: start_clk,
             block_addr: block_ptr,
             key_addr: key_ptr,
-            sbox_addr: sbox_ptr,
-            sbox_addr_memory: sbox_ptr_memory,
             input: input.as_slice().try_into().unwrap(),
             key: key_u32s.as_slice().try_into().unwrap(),
             output: output.as_slice().try_into().unwrap(),
-            sbox_reads: sbox,
             input_read_records: input_read_records.as_slice().try_into().unwrap(),
             key_read_records: key_read_records.as_slice().try_into().unwrap(),
-            sbox_read_records,
             output_write_records: output_write_records.as_slice().try_into().unwrap(),
             local_mem_access: rt.postprocess(),
         });
@@ -190,11 +167,7 @@ impl Syscall for AES128EncryptSyscall {
 
 impl AES128EncryptSyscall {
     fn compute_round_key(
-        rt: &mut SyscallContext,
         previous_key: &mut [u8],
-        sbox_records: &mut Vec<MemoryReadRecord>,
-        sbox: &mut Vec<u8>,
-        sbox_ptr: u32,
         round: usize
     ) {
         if previous_key.len() != 16 {
@@ -204,30 +177,29 @@ impl AES128EncryptSyscall {
         let g_w3 = {
             let mut result = [previous_key[13], previous_key[14], previous_key[15], previous_key[12]];
             for (i, rcon) in AES128_RCON[round].iter().enumerate() {
-                let (record, value) = rt.mr(sbox_ptr + result[i] as u32 * 4);
-                sbox_records.push(record);
-                assert!(value <= u8::MAX as u32);
-                sbox.push(value as u8);
-                result[i] = (value as u8) ^ rcon;
+                assert!(result[i] <= u8::MAX);
+                let value = AES_SBOX[result[i] as usize];
+                result[i] = value ^ rcon;
             }
             result
         };
-        let w0 = [previous_key[0], previous_key[1], previous_key[2], previous_key[3]];
-        let w1 = [previous_key[4], previous_key[5], previous_key[6], previous_key[7]];
-        let w2 = [previous_key[8], previous_key[9], previous_key[10], previous_key[11]];
-        let w3 = [previous_key[12], previous_key[13], previous_key[14], previous_key[15]];
-        let w4: [u8; 4] = w0.iter().zip(g_w3.iter()).map(|(&a, &b)| a ^ b)
-            .collect::<Vec<u8>>().try_into().unwrap();
-        let w5: [u8; 4] = w4.iter().zip(w1.iter()).map(|(&a, &b)| a ^ b)
-            .collect::<Vec<u8>>().try_into().unwrap();
-        let w6: [u8; 4] = w5.iter().zip(w2.iter()).map(|(&a, &b)| a ^ b)
-            .collect::<Vec<u8>>().try_into().unwrap();
-        let w7: [u8; 4] = w6.iter().zip(w3.iter()).map(|(&a, &b)| a ^ b)
-            .collect::<Vec<u8>>().try_into().unwrap();
 
-        previous_key[0..4].copy_from_slice(&w4);
-        previous_key[4..8].copy_from_slice(&w5);
-        previous_key[8..12].copy_from_slice(&w6);
-        previous_key[12..16].copy_from_slice(&w7);
+        let prev = previous_key.to_vec().clone();
+        for i in 0..4 {
+            let w = if i == 0 {
+                prev[0..4]
+                    .iter()
+                    .zip(g_w3.iter())
+                    .map(|(&a, &b)| a ^ b)
+                    .collect::<Vec<u8>>()
+            } else {
+                prev[i * 4..(i + 1) * 4]
+                    .iter()
+                    .zip(previous_key[(i - 1) * 4..i * 4].iter())
+                    .map(|(&a, &b)| a ^ b)
+                    .collect::<Vec<u8>>()
+            };
+            previous_key[i * 4..(i + 1) * 4].copy_from_slice(&w);
+        }
     }
 }

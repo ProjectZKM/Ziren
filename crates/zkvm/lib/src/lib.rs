@@ -83,7 +83,7 @@ extern "C" {
     pub fn syscall_boolean_circuit_garble(input: *const u8, output: *mut u32);
 
     /// Executes the AES-128 encryption on the given state with the given key.
-    pub fn syscall_aes128_encrypt(state: *mut [u32; 4], key: *const [u32; 4], sbox: *const [u32; 256]);
+    pub fn syscall_aes128_encrypt(state: *mut [u32; 4], key: *const [u32; 4]);
 
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
