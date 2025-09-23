@@ -2,12 +2,13 @@
 //!
 //! Documentation for these syscalls can be found in the zkVM entrypoint
 //! `zkm_zkvm::syscalls` module.
+
+pub mod aes128;
 pub mod bls12381;
 pub mod bn254;
 pub mod boolean_circuit_garble;
 #[cfg(feature = "ecdsa")]
 pub mod ecdsa;
-
 pub mod ed25519;
 pub mod io;
 pub mod keccak256;
@@ -19,7 +20,6 @@ pub mod unconstrained;
 pub mod utils;
 #[cfg(feature = "verify")]
 pub mod verify;
-pub mod aes128;
 
 extern "C" {
     /// Halts the program with the given exit code.

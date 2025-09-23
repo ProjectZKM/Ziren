@@ -8,7 +8,6 @@ use core::cmp::min;
 use zkm_zkvm::lib::aes128::aes128_encrypt;
 zkm_zkvm::entrypoint!(main);
 
-
 pub fn main() {
     let plain_text: Vec<u8> = zkm_zkvm::io::read();
     let key: Vec<u8> = zkm_zkvm::io::read();
@@ -37,4 +36,3 @@ fn cipher_block_chaining(input: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> [u8; 16
     }
     block
 }
-

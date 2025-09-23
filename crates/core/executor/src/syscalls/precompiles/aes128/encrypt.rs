@@ -1,6 +1,6 @@
 use crate::events::{AES128EncryptEvent, PrecompileEvent, AES_128_BLOCK_U32S};
-use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 use crate::syscalls::precompiles::aes128::utils::mul_md5;
+use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 
 pub(crate) struct AES128EncryptSyscall;
 
@@ -61,7 +61,6 @@ impl Syscall for AES128EncryptSyscall {
         let mut key = Vec::new();
         let mut output = Vec::new();
 
-
         // read block input
         for i in 0..AES_128_BLOCK_U32S {
             let (record, value) = rt.mr(block_ptr + i as u32 * 4);
@@ -87,10 +86,7 @@ impl Syscall for AES128EncryptSyscall {
         let mut round_key = key;
         for i in 1..11 {
             // compute round key
-            Self::compute_round_key(
-                &mut round_key,
-                i - 1
-            );
+            Self::compute_round_key(&mut round_key, i - 1);
 
             // Subs_bytes
             for j in 0..state.len() {
@@ -101,11 +97,10 @@ impl Syscall for AES128EncryptSyscall {
 
             // Shift row
             let shift_row = [
-              state[0], state[5], state[10], state[15],
-              state[4], state[9], state[14], state[3],
-              state[8], state[13], state[2], state[7],
-              state[12], state[1], state[6], state[11],
-            ].to_vec();
+                state[0], state[5], state[10], state[15], state[4], state[9], state[14], state[3],
+                state[8], state[13], state[2], state[7], state[12], state[1], state[6], state[11],
+            ]
+            .to_vec();
 
             // Mix columns
             let mix_columns = if i != 10 {
@@ -116,10 +111,14 @@ impl Syscall for AES128EncryptSyscall {
                     let s1 = shift_row[col_start + 1];
                     let s2 = shift_row[col_start + 2];
                     let s3 = shift_row[col_start + 3];
-                    mixed[col_start]     = mul_md5(s0, 2) ^ mul_md5(s1, 3) ^ mul_md5(s2, 1) ^ mul_md5(s3, 1);
-                    mixed[col_start + 1] = mul_md5(s0, 1) ^ mul_md5(s1, 2) ^ mul_md5(s2, 3) ^ mul_md5(s3, 1);
-                    mixed[col_start + 2] = mul_md5(s0, 1) ^ mul_md5(s1, 1) ^ mul_md5(s2, 2) ^ mul_md5(s3, 3);
-                    mixed[col_start + 3] = mul_md5(s0, 3) ^ mul_md5(s1, 1) ^ mul_md5(s2, 1) ^ mul_md5(s3, 2);
+                    mixed[col_start] =
+                        mul_md5(s0, 2) ^ mul_md5(s1, 3) ^ mul_md5(s2, 1) ^ mul_md5(s3, 1);
+                    mixed[col_start + 1] =
+                        mul_md5(s0, 1) ^ mul_md5(s1, 2) ^ mul_md5(s2, 3) ^ mul_md5(s3, 1);
+                    mixed[col_start + 2] =
+                        mul_md5(s0, 1) ^ mul_md5(s1, 1) ^ mul_md5(s2, 2) ^ mul_md5(s3, 3);
+                    mixed[col_start + 3] =
+                        mul_md5(s0, 3) ^ mul_md5(s1, 1) ^ mul_md5(s2, 1) ^ mul_md5(s3, 2);
                 }
                 mixed
             } else {
@@ -166,16 +165,14 @@ impl Syscall for AES128EncryptSyscall {
 }
 
 impl AES128EncryptSyscall {
-    fn compute_round_key(
-        previous_key: &mut [u8],
-        round: usize
-    ) {
+    fn compute_round_key(previous_key: &mut [u8], round: usize) {
         if previous_key.len() != 16 {
             panic!("AES128: wrong previous key length");
         }
         // First 4 bytes
         let g_w3 = {
-            let mut result = [previous_key[13], previous_key[14], previous_key[15], previous_key[12]];
+            let mut result =
+                [previous_key[13], previous_key[14], previous_key[15], previous_key[12]];
             for (i, rcon) in AES128_RCON[round].iter().enumerate() {
                 assert!(result[i] <= u8::MAX);
                 let value = AES_SBOX[result[i] as usize];
@@ -187,11 +184,7 @@ impl AES128EncryptSyscall {
         let prev = previous_key.to_vec().clone();
         for i in 0..4 {
             let w = if i == 0 {
-                prev[0..4]
-                    .iter()
-                    .zip(g_w3.iter())
-                    .map(|(&a, &b)| a ^ b)
-                    .collect::<Vec<u8>>()
+                prev[0..4].iter().zip(g_w3.iter()).map(|(&a, &b)| a ^ b).collect::<Vec<u8>>()
             } else {
                 prev[i * 4..(i + 1) * 4]
                     .iter()

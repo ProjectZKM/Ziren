@@ -1,8 +1,8 @@
-use zkm_derive::AlignedBorrow;
 use crate::memory::{MemoryReadCols, MemoryReadWriteCols};
 use crate::operations::mix_column::MixColumn;
 use crate::operations::round_key::NextRoundKey;
 use crate::operations::subs_byte::SubsByte;
+use zkm_derive::AlignedBorrow;
 
 /// AES128EncryptCols is the column layout for the AES128 encryption.
 /// The number of rows equal to the number of block.
@@ -18,7 +18,7 @@ pub struct AES128EncryptionCols<T> {
     pub key: [MemoryReadCols<T>; 4],
     pub block: [MemoryReadWriteCols<T>; 4],
     pub round: [T; 11], // [0,..,10]
-    pub round_1to9: T, // 1 to 9
+    pub round_1to9: T,  // 1 to 9
     pub round_const: T,
     pub state_matrix: [T; 16],
     pub round_key_matrix: [T; 16],

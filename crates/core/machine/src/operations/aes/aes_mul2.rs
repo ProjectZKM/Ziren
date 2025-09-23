@@ -11,8 +11,8 @@ use zkm_stark::air::ZKMAirBuilder;
 pub struct MulBy2InAES<T> {
     pub and_0x80: T,
     pub left_shift_1: T,
-    pub is_xor: T, // 0 or 1
-    pub xor_0x1b: T  // also the result
+    pub is_xor: T,   // 0 or 1
+    pub xor_0x1b: T, // also the result
 }
 
 impl<F: Field> MulBy2InAES<F> {
@@ -33,22 +33,12 @@ impl<F: Field> MulBy2InAES<F> {
         self.is_xor = F::from_canonical_u8(is_xor);
 
         // Byte lookup events
-        let byte_event_and = ByteLookupEvent {
-            opcode: ByteOpcode::AND,
-            a1: and_0x80 as u16,
-            a2: 0,
-            b: x,
-            c: 0x80,
-        };
+        let byte_event_and =
+            ByteLookupEvent { opcode: ByteOpcode::AND, a1: and_0x80 as u16, a2: 0, b: x, c: 0x80 };
         record.add_byte_lookup_event(byte_event_and);
 
-        let byte_event_ssl = ByteLookupEvent {
-            opcode: ByteOpcode::SLL,
-            a1: left_shift_1 as u16,
-            a2: 0,
-            b: x,
-            c: 1,
-        };
+        let byte_event_ssl =
+            ByteLookupEvent { opcode: ByteOpcode::SLL, a1: left_shift_1 as u16, a2: 0, b: x, c: 1 };
         record.add_byte_lookup_event(byte_event_ssl);
 
         if is_xor == 1 {
@@ -90,18 +80,11 @@ impl<F: Field> MulBy2InAES<F> {
 
         builder.assert_bool(cols.is_xor);
         // if cols.is_xor == 1, then and_0x80 == 128, else and_0x80 = 0
-        builder.assert_eq(
-            cols.and_0x80,
-            cols.is_xor * AB::Expr::from_canonical_u8(128u8)
-        );
+        builder.assert_eq(cols.and_0x80, cols.is_xor * AB::Expr::from_canonical_u8(128u8));
 
-        builder.assert_eq(
-            (AB::Expr::ONE- is_real.into()) * cols.is_xor,
-            AB::Expr::ZERO
-        );
+        builder.assert_eq((AB::Expr::ONE - is_real.into()) * cols.is_xor, AB::Expr::ZERO);
 
-        builder
-        .send_byte(
+        builder.send_byte(
             AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
             cols.xor_0x1b,
             cols.left_shift_1,

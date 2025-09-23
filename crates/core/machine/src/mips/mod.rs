@@ -3,9 +3,9 @@ use crate::{
     global::GlobalChip,
     memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     syscall::precompiles::{
+        aes128_encrypt::AES128EncryptChip,
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
-        aes128_encrypt::AES128EncryptChip,
     },
 };
 use core::fmt;

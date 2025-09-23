@@ -1,6 +1,6 @@
 use p3_field::{Field, FieldAlgebra};
-use zkm_core_executor::ByteOpcode;
 use zkm_core_executor::events::{ByteLookupEvent, ByteRecord};
+use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
 
@@ -10,27 +10,15 @@ use zkm_stark::ZKMAirBuilder;
 pub struct XorByte4<T> {
     pub interm1: T,
     pub interm2: T,
-    pub value: T
+    pub value: T,
 }
 
 impl<F: Field> XorByte4<F> {
-    pub fn populate(
-        &mut self, 
-        record: &mut impl ByteRecord, 
-        x: u8,
-        y: u8,
-        z: u8,
-        w: u8,
-    ) -> u8 {
+    pub fn populate(&mut self, record: &mut impl ByteRecord, x: u8, y: u8, z: u8, w: u8) -> u8 {
         let xor_inter1 = x ^ y;
         self.interm1 = F::from_canonical_u8(xor_inter1);
-        let byte_event = ByteLookupEvent {
-            opcode: ByteOpcode::XOR,
-            a1: xor_inter1 as u16,
-            a2: 0,
-            b: x,
-            c: y,
-        };
+        let byte_event =
+            ByteLookupEvent { opcode: ByteOpcode::XOR, a1: xor_inter1 as u16, a2: 0, b: x, c: y };
         record.add_byte_lookup_event(byte_event);
 
         let xor_inter2 = xor_inter1 ^ z;
@@ -56,7 +44,7 @@ impl<F: Field> XorByte4<F> {
         record.add_byte_lookup_event(byte_event);
         result
     }
-    
+
     pub fn eval<AB: ZKMAirBuilder>(
         builder: &mut AB,
         x: AB::Var,

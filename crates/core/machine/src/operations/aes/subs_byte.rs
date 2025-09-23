@@ -31,10 +31,7 @@ pub struct SubsByte<T> {
 }
 
 impl<F: Field> SubsByte<F> {
-    pub fn populate(
-        &mut self,
-        byte: u8,
-    ) -> u8 {
+    pub fn populate(&mut self, byte: u8) -> u8 {
         let mut pos = byte;
         if byte > 127 {
             self.is_left = F::ZERO;
@@ -64,23 +61,18 @@ impl<F: Field> SubsByte<F> {
         byte: AB::Var,
         is_real: AB::Expr,
     ) {
-
         builder.assert_bool(cols.is_left);
         builder.assert_bool(is_real.clone());
         // if is_real = 0 then is_left must be 0
-        builder.assert_eq(
-            (AB::Expr::ONE - is_real.clone()) * cols.is_left,
-            AB::Expr::ZERO,
-        );
+        builder.assert_eq((AB::Expr::ONE - is_real.clone()) * cols.is_left, AB::Expr::ZERO);
 
         // exactly one position is selected
-        let sum_positions = cols.positions.iter().map(|&pos| {
-            pos.iter().map(|&p| p.into()).sum::<AB::Expr>()
-        }).sum::<AB::Expr>();
-        builder.assert_eq(
-            sum_positions,
-            is_real.clone(),
-        );
+        let sum_positions = cols
+            .positions
+            .iter()
+            .map(|&pos| pos.iter().map(|&p| p.into()).sum::<AB::Expr>())
+            .sum::<AB::Expr>();
+        builder.assert_eq(sum_positions, is_real.clone());
 
         for i in 0..128 {
             // positions are boolean
@@ -93,11 +85,15 @@ impl<F: Field> SubsByte<F> {
             );
             // if is_left = 1 then byte = i else byte = i+128
             builder.assert_eq(
-                cols.is_left * (AB::Expr::from_canonical_usize(i) - byte.clone()) * cols.positions[row][col].clone(),
+                cols.is_left
+                    * (AB::Expr::from_canonical_usize(i) - byte.clone())
+                    * cols.positions[row][col].clone(),
                 AB::Expr::ZERO,
             );
             builder.assert_eq(
-                (AB::Expr::ONE - cols.is_left.clone()) * (AB::Expr::from_canonical_usize(i + 128) - byte.clone()) * cols.positions[row][col].clone(),
+                (AB::Expr::ONE - cols.is_left.clone())
+                    * (AB::Expr::from_canonical_usize(i + 128) - byte.clone())
+                    * cols.positions[row][col].clone(),
                 AB::Expr::ZERO,
             );
 

@@ -1,19 +1,18 @@
+use crate::operations::subs_byte::SubsByte;
 use p3_field::{Field, FieldAlgebra};
-use zkm_core_executor::ByteOpcode;
 use zkm_core_executor::events::{ByteLookupEvent, ByteRecord};
+use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
-use crate::operations::subs_byte::SubsByte;
 
-pub const ROUND_CONST: [u8; 11] = [
-    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36, 0x00
-];
+pub const ROUND_CONST: [u8; 11] =
+    [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36, 0x00];
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct NextRoundKey<T> {
-    pub add_round_const: T, // XOR
-    pub w3_subs_byte: [SubsByte<T>; 4],  // for round key
+    pub add_round_const: T,             // XOR
+    pub w3_subs_byte: [SubsByte<T>; 4], // for round key
     // new round key
     pub w4: [T; 4],
     pub w5: [T; 4],
@@ -21,7 +20,7 @@ pub struct NextRoundKey<T> {
     pub w7: [T; 4],
 }
 
-impl <F: Field> NextRoundKey<F> {
+impl<F: Field> NextRoundKey<F> {
     pub fn populate(
         &mut self,
         records: &mut impl ByteRecord,
@@ -30,7 +29,8 @@ impl <F: Field> NextRoundKey<F> {
     ) -> [u8; 16] {
         // check sbox values
         let mut sub_rot_w3 = [0u8; 4];
-        let shifted_w3 = [prev_round_key[13], prev_round_key[14], prev_round_key[15], prev_round_key[12]];
+        let shifted_w3 =
+            [prev_round_key[13], prev_round_key[14], prev_round_key[15], prev_round_key[12]];
         for i in 0..4 {
             sub_rot_w3[i] = self.w3_subs_byte[i].populate(shifted_w3[i]);
         }
@@ -128,14 +128,10 @@ impl <F: Field> NextRoundKey<F> {
         let w2 = &prev_round_key[8..12];
         let w3 = &prev_round_key[12..16];
 
-        let shifted_w3 = [prev_round_key[13], prev_round_key[14], prev_round_key[15], prev_round_key[12]];
+        let shifted_w3 =
+            [prev_round_key[13], prev_round_key[14], prev_round_key[15], prev_round_key[12]];
         for i in 0..4 {
-            SubsByte::<F>::eval(
-                builder,
-                cols.w3_subs_byte[i],
-                shifted_w3[i],
-                is_real.clone(),
-            );
+            SubsByte::<F>::eval(builder, cols.w3_subs_byte[i], shifted_w3[i], is_real.clone());
         }
 
         // sbox substitution bytes.

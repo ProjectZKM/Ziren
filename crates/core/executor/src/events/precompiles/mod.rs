@@ -1,3 +1,4 @@
+mod aes128;
 mod boolean_circuit_garble;
 mod ec;
 mod edwards;
@@ -9,7 +10,6 @@ mod sha256_compress;
 mod sha256_extend;
 mod u256x2048_mul;
 mod uint256;
-mod aes128;
 
 use super::{MemoryLocalEvent, SyscallEvent};
 use crate::syscalls::SyscallCode;

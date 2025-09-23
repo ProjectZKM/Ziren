@@ -1,16 +1,22 @@
 use std::borrow::BorrowMut;
 
+use super::{columns::NUM_AES128_ENCRYPTION_COLS, AES128EncryptChip};
+use crate::operations::round_key::ROUND_CONST;
+use crate::syscall::precompiles::aes128_encrypt::columns::AES128EncryptionCols;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
-use zkm_core_executor::{events::{ByteLookupEvent, ByteRecord, PrecompileEvent}, syscalls::SyscallCode, ByteOpcode, ExecutionRecord, Program};
-use zkm_core_executor::events::{AES128EncryptEvent, MemoryRecordEnum, AES_128_BLOCK_BYTES, AES_128_BLOCK_U32S};
-use zkm_stark::{air::MachineAir};
-use crate::operations::round_key::ROUND_CONST;
-use crate::syscall::precompiles::aes128_encrypt::columns::AES128EncryptionCols;
-use super::{columns::NUM_AES128_ENCRYPTION_COLS, AES128EncryptChip};
+use zkm_core_executor::events::{
+    AES128EncryptEvent, MemoryRecordEnum, AES_128_BLOCK_BYTES, AES_128_BLOCK_U32S,
+};
+use zkm_core_executor::{
+    events::{ByteLookupEvent, ByteRecord, PrecompileEvent},
+    syscalls::SyscallCode,
+    ByteOpcode, ExecutionRecord, Program,
+};
+use zkm_stark::air::MachineAir;
 
 impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
     type Record = ExecutionRecord;
@@ -44,7 +50,11 @@ impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
     }
 
-    fn generate_trace(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _output: &mut Self::Record,
+    ) -> RowMajorMatrix<F> {
         let rows = Vec::new();
         log::info!("generate trace");
 
@@ -64,10 +74,11 @@ impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
             let row = [F::ZERO; NUM_AES128_ENCRYPTION_COLS];
             rows.push(row);
         }
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_AES128_ENCRYPTION_COLS)
+        RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_AES128_ENCRYPTION_COLS,
+        )
     }
-
-
 
     fn included(&self, shard: &Self::Record) -> bool {
         if let Some(shape) = shard.shape.as_ref() {
@@ -121,17 +132,12 @@ impl AES128EncryptChip {
             if round == 0 {
                 // read the input
                 for i in 0..AES_128_BLOCK_U32S {
-                    cols.block[i].populate(
-                        MemoryRecordEnum::Read(event.input_read_records[i]),
-                        blu
-                    );
+                    cols.block[i]
+                        .populate(MemoryRecordEnum::Read(event.input_read_records[i]), blu);
                 }
                 // read the key
                 for i in 0..AES_128_BLOCK_U32S {
-                    cols.key[i].populate(
-                        event.key_read_records[i],
-                        blu
-                    );
+                    cols.key[i].populate(event.key_read_records[i], blu);
                 }
 
                 // the mix column value should be the state
@@ -153,30 +159,23 @@ impl AES128EncryptChip {
                     blu.add_byte_lookup_event(byte_lookup_event);
                     state[i] = tmp;
                 }
-            } else
-            {
+            } else {
                 // subs_bytes
                 for i in 0..AES_128_BLOCK_BYTES {
-                    let subs_value = cols.state_subs_byte[i].populate(
-                        state[i]
-                    );
+                    let subs_value = cols.state_subs_byte[i].populate(state[i]);
                     state[i] = subs_value;
                 }
 
                 // shift_rows
                 let shifted_row = [
-                    state[0], state[5], state[10], state[15],
-                    state[4], state[9], state[14], state[3],
-                    state[8], state[13], state[2], state[7],
-                    state[12], state[1], state[6], state[11],
+                    state[0], state[5], state[10], state[15], state[4], state[9], state[14],
+                    state[3], state[8], state[13], state[2], state[7], state[12], state[1],
+                    state[6], state[11],
                 ];
 
                 // Mix columns
                 let mixed_columns = if round != 10 {
-                    cols.mix_column.populate(
-                        blu,
-                        &shifted_row
-                    )
+                    cols.mix_column.populate(blu, &shifted_row)
                 } else {
                     for i in 0..AES_128_BLOCK_BYTES {
                         cols.mix_column.xor_byte4s[i].value = F::from_canonical_u8(shifted_row[i]);
@@ -198,17 +197,12 @@ impl AES128EncryptChip {
                     blu.add_byte_lookup_event(byte_lookup_event);
                 }
             }
-            
+
             if round != 10 {
                 // compute next round key
-                let next_round_key = cols.next_round_key.populate(
-                    blu,
-                    &round_key,
-                    round as u8
-                );
+                let next_round_key = cols.next_round_key.populate(blu, &round_key, round as u8);
                 round_key = next_round_key;
-            } else
-            {
+            } else {
                 for i in 0..4 {
                     // check output
                     let tmp = event.output_write_records[i].value.to_le_bytes();
@@ -221,10 +215,8 @@ impl AES128EncryptChip {
                 }
                 // write output
                 for i in 0..AES_128_BLOCK_U32S {
-                    cols.block[i].populate(
-                        MemoryRecordEnum::Write(event.output_write_records[i]),
-                        blu
-                    );
+                    cols.block[i]
+                        .populate(MemoryRecordEnum::Write(event.output_write_records[i]), blu);
                 }
             }
 

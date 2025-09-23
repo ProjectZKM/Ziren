@@ -1,10 +1,10 @@
+use crate::operations::aes::xor_byte_4::XorByte4;
+use crate::operations::aes_mul2::MulBy2InAES;
+use crate::operations::aes_mul3::MulBy3InAES;
 use p3_field::Field;
 use zkm_core_executor::events::ByteRecord;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::ZKMAirBuilder;
-use crate::operations::aes::xor_byte_4::XorByte4;
-use crate::operations::aes_mul2::MulBy2InAES;
-use crate::operations::aes_mul3::MulBy3InAES;
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
@@ -15,11 +15,7 @@ pub struct MixColumn<T> {
 }
 
 impl<F: Field> MixColumn<F> {
-    pub fn populate(
-        &mut self,
-        record: &mut impl ByteRecord,
-        shifted_state: &[u8; 16],
-    ) -> [u8; 16] {
+    pub fn populate(&mut self, record: &mut impl ByteRecord, shifted_state: &[u8; 16]) -> [u8; 16] {
         let mut mixed = [0u8; 16];
         for col in 0..4 {
             let col_start = col * 4;
@@ -74,18 +70,8 @@ impl<F: Field> MixColumn<F> {
 
             // col_start
             {
-                MulBy2InAES::<F>::eval(
-                    builder,
-                    s0,
-                    cols.mul_by_2s[col_start],
-                    is_real,
-                );
-                MulBy3InAES::<F>::eval(
-                    builder,
-                    s1,
-                    cols.mul_by_3s[col_start],
-                    is_real,
-                );
+                MulBy2InAES::<F>::eval(builder, s0, cols.mul_by_2s[col_start], is_real);
+                MulBy3InAES::<F>::eval(builder, s1, cols.mul_by_3s[col_start], is_real);
                 XorByte4::<F>::eval(
                     builder,
                     cols.mul_by_2s[col_start].xor_0x1b,
@@ -99,18 +85,8 @@ impl<F: Field> MixColumn<F> {
 
             // col_start + 1
             {
-                MulBy2InAES::<F>::eval(
-                    builder,
-                    s1,
-                    cols.mul_by_2s[col_start + 1],
-                    is_real,
-                );
-                MulBy3InAES::<F>::eval(
-                    builder,
-                    s2,
-                    cols.mul_by_3s[col_start + 1],
-                    is_real,
-                );
+                MulBy2InAES::<F>::eval(builder, s1, cols.mul_by_2s[col_start + 1], is_real);
+                MulBy3InAES::<F>::eval(builder, s2, cols.mul_by_3s[col_start + 1], is_real);
                 XorByte4::<F>::eval(
                     builder,
                     s0,
@@ -124,18 +100,8 @@ impl<F: Field> MixColumn<F> {
 
             // col_start + 2
             {
-                MulBy2InAES::<F>::eval(
-                    builder,
-                    s2,
-                    cols.mul_by_2s[col_start + 2],
-                    is_real,
-                );
-                MulBy3InAES::<F>::eval(
-                    builder,
-                    s3,
-                    cols.mul_by_3s[col_start + 2],
-                    is_real,
-                );
+                MulBy2InAES::<F>::eval(builder, s2, cols.mul_by_2s[col_start + 2], is_real);
+                MulBy3InAES::<F>::eval(builder, s3, cols.mul_by_3s[col_start + 2], is_real);
                 XorByte4::<F>::eval(
                     builder,
                     s0,
@@ -149,18 +115,8 @@ impl<F: Field> MixColumn<F> {
 
             // col_start + 3
             {
-                MulBy3InAES::<F>::eval(
-                    builder,
-                    s0,
-                    cols.mul_by_3s[col_start + 3],
-                    is_real,
-                );
-                MulBy2InAES::<F>::eval(
-                    builder,
-                    s3,
-                    cols.mul_by_2s[col_start + 3],
-                    is_real,
-                );
+                MulBy3InAES::<F>::eval(builder, s0, cols.mul_by_3s[col_start + 3], is_real);
+                MulBy2InAES::<F>::eval(builder, s3, cols.mul_by_2s[col_start + 3], is_real);
                 XorByte4::<F>::eval(
                     builder,
                     cols.mul_by_3s[col_start + 3].xor_x,
@@ -172,7 +128,5 @@ impl<F: Field> MixColumn<F> {
                 )
             }
         }
-
     }
-
-}   
+}
