@@ -10,20 +10,10 @@ zkm_zkvm::entrypoint!(main);
 
 pub fn main() {
     let plain_text: Vec<u8> = zkm_zkvm::io::read();
-    let key: Vec<u8> = zkm_zkvm::io::read();
-    let iv: Vec<u8> = zkm_zkvm::io::read();
-    let expected_output: Vec<u8> = zkm_zkvm::io::read();
-    zkm_zkvm::io::commit::<Vec<u8>>(&plain_text);
-    zkm_zkvm::io::commit::<Vec<u8>>(&key);
-    zkm_zkvm::io::commit::<Vec<u8>>(&iv);
-
-    assert_eq!(key.len(), 16);
-    assert_eq!(iv.len(), 16);
-    let key_array: [u8; 16] = key.as_slice().try_into().unwrap();
-    let iv_array: [u8; 16] = iv.as_slice().try_into().unwrap();
-    let output = cipher_block_chaining(&plain_text, &key_array, &iv_array);
-    assert_eq!(expected_output, output.to_vec());
-    zkm_zkvm::io::commit::<Vec<u8>>(&output.to_vec());
+    let key: [u8; 16] = zkm_zkvm::io::read();
+    let iv: [u8; 16] = zkm_zkvm::io::read();
+    let output = cipher_block_chaining(&plain_text, &key, &iv);
+    zkm_zkvm::io::commit::<[u8; 16]>(&output);
 }
 
 fn cipher_block_chaining(input: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> [u8; 16] {
