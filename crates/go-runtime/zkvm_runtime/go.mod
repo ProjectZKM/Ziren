@@ -1,3 +1,3 @@
-module github.com/zkMIPS/zkMIPS/crates/go-runtime/zkm_runtime
+module github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime
 
 go 1.24.0

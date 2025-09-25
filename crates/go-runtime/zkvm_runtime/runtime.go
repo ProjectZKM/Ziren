@@ -20,7 +20,7 @@ func SyscallExit(code int)
 var PublicValuesHasher hash.Hash = sha256.New()
 
 const EMBEDDED_RESERVED_INPUT_REGION_SIZE int = 1024 * 1024 * 1024
-const MAX_MEMORY int = 0x7ff00000
+const MAX_MEMORY int = 0x7f000000
 
 var RESERVED_INPUT_PTR int = MAX_MEMORY - EMBEDDED_RESERVED_INPUT_REGION_SIZE
 
