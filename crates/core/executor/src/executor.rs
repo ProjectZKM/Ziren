@@ -2221,8 +2221,9 @@ pub const fn align(addr: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use crate::programs::tests::{
-        fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program,
-        simple_memory_program, simple_program, ssz_withdrawals_program, u256xu2048_mul_program,
+        fibonacci_program, max_memory_program, panic_program, secp256r1_add_program,
+        secp256r1_double_program, simple_memory_program, simple_program, ssz_withdrawals_program,
+        u256xu2048_mul_program,
     };
     use zkm_stark::ZKMCoreOpts;
 
@@ -2248,6 +2249,13 @@ mod tests {
     #[test]
     fn test_fibonacci_program_run() {
         let program = fibonacci_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run_very_fast().unwrap();
+    }
+
+    #[test]
+    fn test_max_memory_program_run() {
+        let program = max_memory_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run_very_fast().unwrap();
     }
