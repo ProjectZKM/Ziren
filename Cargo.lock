@@ -7871,6 +7871,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-picus"
+version = "1.2.4"
+dependencies = [
+ "clap",
+ "p3-air",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-matrix",
+ "zkm-core-executor",
+ "zkm-core-machine",
+ "zkm-stark",
+]
+
+[[package]]
 name = "zkm-primitives"
 version = "1.2.4"
 source = "git+https://github.com/ProjectZKM/Ziren.git#24a0cf30913b6889c835620e6cb6e61e1cf3d651"
