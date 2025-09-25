@@ -10,7 +10,7 @@ use crate::{
     air::{LookupScope, MachineAir, MultiTableAirBuilder, ZKMAirBuilder},
     local_permutation_trace_width,
     lookup::{Lookup, LookupBuilder, LookupKind},
-    scoped_lookups,
+    scoped_lookups, PicusInfo,
 };
 
 use super::{eval_permutation_constraints, generate_permutation_trace, PROOF_MAX_NUM_PVS};
@@ -228,6 +228,10 @@ where
 
     fn local_only(&self) -> bool {
         self.air.local_only()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        self.air.picus_info()
     }
 }
 

@@ -15,6 +15,7 @@ members = [
     "crates/core/machine",
     "crates/curves",
     "crates/derive",
+    "crates/picus",
     "crates/primitives",
     "crates/prover",
     "crates/recursion/circuit",
@@ -91,6 +92,7 @@ zkm-prover = { path = "crates/prover" }
 zkm-build = { path = "crates/build" }
 zkm-sdk = { path = "crates/sdk" }
 zkm-verifier = { path = "crates/verifier" }
+zkm-picus = {path = "crates/picus"}
 
 zkm-lib = { path = "crates/zkvm/lib", default-features = false }
 zkm-zkvm = { path = "crates/zkvm/entrypoint", default-features = false }

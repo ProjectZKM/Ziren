@@ -15,7 +15,7 @@ use zkm_core_executor::{
 };
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{
-    air::{MachineAir, ZKMAirBuilder},
+    air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
 };
 
@@ -68,6 +68,14 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
 
     fn name(&self) -> String {
         "AddSub".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        let input_ranges =
+            vec![(9, 12, "operand_1".to_string()), (13, 16, "operand_2".to_string())];
+        let output_ranges = vec![(2, 5, "value".to_string())];
+        let selector_indices = vec![(17, "is_add".to_string()), (18, "is_sub".to_string())];
+        PicusInfo { input_ranges, output_ranges, selector_indices }
     }
 
     fn generate_trace(
