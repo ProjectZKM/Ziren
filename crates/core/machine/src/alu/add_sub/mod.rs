@@ -71,6 +71,9 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
+        // Right now these ranges were derived manually but they could be computed via macros in the future
+        // From extracting the constraints it appears that Main columns 9-12 correspond to operand_1
+        // columns 13-16 are operand 2, columns 2-5 are the output value and the selectors are columns 17, 18
         let input_ranges =
             vec![(9, 12, "operand_1".to_string()), (13, 16, "operand_2".to_string())];
         let output_ranges = vec![(2, 5, "value".to_string())];
