@@ -167,16 +167,22 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::BorrowMut;
+
+    use p3_air::BaseAir;
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::dense::RowMajorMatrix;
+    use p3_matrix::{dense::RowMajorMatrix, Matrix};
+    use p3_maybe_rayon::prelude::{join, IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
     use p3_symmetric::Permutation;
     use zkhash::ark_ff::UniformRand;
+    use zkm_core_machine::operations::poseidon2::trace::populate_perm;
     use zkm_stark::{air::MachineAir, inner_perm};
 
     use crate::{
-        chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},
-        ExecutionRecord, Poseidon2Event,
+        chips::{mem::MemoryAccessCols, poseidon2_wide::{columns::preprocessed::Poseidon2PreprocessedColsWide, trace::PREPROCESSED_POSEIDON2_WIDTH, Poseidon2WideChip, WIDTH}, test_fixtures},
+        ExecutionRecord, Poseidon2Event, RecursionProgram,
+        Instruction::Poseidon2,
     };
 
     #[test]
@@ -198,7 +204,9 @@ mod tests {
             ..Default::default()
         };
         let chip_3 = Poseidon2WideChip::<3>;
-        let _: RowMajorMatrix<F> = chip_3.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> = chip_3.generate_trace(&shard, &mut ExecutionRecord::default());
+
+        assert_eq!(trace, generate_trace_reference::<3>(&shard, &mut ExecutionRecord::default()));
     }
 
     #[test]
@@ -220,6 +228,43 @@ mod tests {
             ..Default::default()
         };
         let chip_9 = Poseidon2WideChip::<9>;
-        let _: RowMajorMatrix<F> = chip_9.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> = chip_9.generate_trace(&shard, &mut ExecutionRecord::default());
+
+        assert_eq!(trace, generate_trace_reference::<9>(&shard, &mut ExecutionRecord::default()));
+    }
+
+    fn generate_trace_reference<const DEGREE: usize>(
+        input: &ExecutionRecord<KoalaBear>,
+        _: &mut ExecutionRecord<KoalaBear>,
+    ) -> RowMajorMatrix<KoalaBear> {
+        type F = KoalaBear;
+
+        let events = &input.poseidon2_events;
+        let chip = Poseidon2WideChip::<DEGREE>;
+        let padded_nb_rows = chip.num_rows(input).unwrap();
+        let num_columns = <Poseidon2WideChip<DEGREE> as BaseAir<F>>::width(&chip);
+        let mut values = vec![F::zero(); padded_nb_rows * num_columns];
+
+        let populate_len = events.len() * num_columns;
+        let (values_pop, values_dummy) = values.split_at_mut(populate_len);
+        join(
+            || {
+                values_pop.par_chunks_mut(num_columns).zip_eq(&input.poseidon2_events).for_each(
+                    |(row, &event)| {
+                        populate_perm::<F, DEGREE>(event.input, Some(event.output), row);
+                    },
+                )
+            },
+            || {
+                let mut dummy_row = vec![F::zero(); num_columns];
+                populate_perm::<F, DEGREE>([F::zero(); WIDTH], None, &mut dummy_row);
+                values_dummy
+                    .par_chunks_mut(num_columns)
+                    .for_each(|row| row.copy_from_slice(&dummy_row))
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(values, num_columns)
     }
 }
