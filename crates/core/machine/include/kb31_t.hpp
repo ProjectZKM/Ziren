@@ -382,8 +382,7 @@ class kb31_t {
           : "+r"(tmp[0]), "=r"(s.val)
           : "r"(red), "r"(MOD), "r"(tmp[1]));
 
-      if (n & 1)
-        final_sub(s.val);
+      final_sub(s.val);
     }
 #endif
     return s;
@@ -461,6 +460,7 @@ class kb31_t {
   static const uint32_t M = 0x7effffff;  // MOD - 2
   static const uint32_t RR = 0x17f7efe4; // R = 2^MONTY_BITS, RR = R * R mod MOD
   static const uint32_t ONE = 0x1fffffe; // in Montgomery form
+  static const uint32_t TWO = 0x3fffffc; // in Montgomery form
   static const uint32_t MONTY_BITS = 32;
   static const uint32_t MONTY_MU = 0x81000001;   // MONTY_MU = MOD^{-1} (mod 2^MONTY_BITS)
   static const uint32_t MONTY_MASK = 0xffffffff; // MONTY_MASK = ((1ULL << MONTY_BITS) - 1);
@@ -482,7 +482,7 @@ class kb31_t {
 
   static inline const kb31_t one() { return kb31_t(ONE); }
 
-  static inline const kb31_t two() { return kb31_t(to_monty(2)); }
+  static inline const kb31_t two() { return kb31_t(TWO); }
 
   static inline constexpr uint32_t to_monty(uint32_t x) {
     return (((uint64_t)x << MONTY_BITS) % MOD);
