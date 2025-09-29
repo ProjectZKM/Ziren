@@ -178,11 +178,8 @@ mod tests {
     use zkm_stark::{air::MachineAir, inner_perm};
 
     use crate::{
-        chips::{
-            poseidon2_wide::{Poseidon2WideChip, WIDTH},
-        },
-        ExecutionRecord,
-        Poseidon2Event,
+        chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},
+        ExecutionRecord, Poseidon2Event,
     };
 
     #[test]
