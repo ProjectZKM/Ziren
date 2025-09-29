@@ -130,7 +130,7 @@ impl Groth16Bn254Prover {
             &vkey_hash.to_string(),
             &committed_values_digest.to_string(),
         )
-        .map_err(|e| anyhow::anyhow!("failed to verify proof: {}", e))
+        .map_err(|e| anyhow::anyhow!("failed to verify proof: {e}"))
     }
 
     /// Modify the Groth16Verifier so that it works with the ZKMVerifier.

@@ -174,9 +174,14 @@ impl CpuChip {
 
         let mut is_halt = false;
         if instruction.is_syscall_instruction() {
-            let syscall_id = cols.op_a_access.prev_value[0];
-            let num_extra_cycles = cols.op_a_access.prev_value[2];
-            is_halt = syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id());
+            let syscall_id0 = cols.op_a_access.prev_value[0];
+            let syscall_id1 = cols.op_a_access.prev_value[1];
+            let num_extra_cycles = cols.op_a_access.prev_value[3];
+            let sys_exit_group = SyscallCode::SYS_EXT_GROUP.syscall_id();
+            is_halt = (syscall_id0 == F::from_canonical_u32(SyscallCode::HALT.syscall_id())
+                && syscall_id1 == F::ZERO)
+                || (syscall_id0 == F::from_canonical_u8(sys_exit_group as u8)
+                    && syscall_id1 == F::from_canonical_u8((sys_exit_group >> 8) as u8));
             cols.is_halt = F::from_bool(is_halt);
             cols.num_extra_cycles = num_extra_cycles;
         }

@@ -24,37 +24,42 @@ impl Syscall for WriteSyscall {
         // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes).map(|i| rt.byte(write_buf + i)).collect::<Vec<u8>>();
         let slice = bytes.as_slice();
-        if fd == FD_STDOUT {
-            let s = core::str::from_utf8(slice).unwrap();
-            match parse_cycle_tracker_command(s) {
-                Some(command) => handle_cycle_tracker_command(rt, command),
-                None => {
-                    // If the string does not match any known command, print it to stdout.
-                    let flush_s = update_io_buf(ctx, fd, s);
-                    if !flush_s.is_empty() {
-                        flush_s.into_iter().for_each(|line| println!("stdout: {line}"));
-                    }
+        write_fd(ctx, fd, slice);
+        None
+    }
+}
+
+pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) {
+    let rt = &mut ctx.rt;
+    if fd == FD_STDOUT {
+        let s = core::str::from_utf8(slice).unwrap();
+        match parse_cycle_tracker_command(s) {
+            Some(command) => handle_cycle_tracker_command(rt, command),
+            None => {
+                // If the string does not match any known command, print it to stdout.
+                let flush_s = update_io_buf(ctx, fd, s);
+                if !flush_s.is_empty() {
+                    flush_s.into_iter().for_each(|line| println!("stdout: {line}"));
                 }
             }
-        } else if fd == FD_STDERR {
-            let s = core::str::from_utf8(slice).unwrap();
-            let flush_s = update_io_buf(ctx, fd, s);
-            if !flush_s.is_empty() {
-                flush_s.into_iter().for_each(|line| println!("stderr: {line}"));
-            }
-        } else if fd == FD_PUBLIC_VALUES {
-            rt.state.public_values_stream.extend_from_slice(slice);
-        } else if fd == FD_HINT {
-            rt.state.input_stream.push(slice.to_vec());
-        } else if let Some(mut hook) = rt.hook_registry.get(fd) {
-            let res = hook.invoke_hook(rt.hook_env(), slice);
-            // Add result vectors to the beginning of the stream.
-            let ptr = rt.state.input_stream_ptr;
-            rt.state.input_stream.splice(ptr..ptr, res);
-        } else {
-            tracing::warn!("tried to write to unknown file descriptor {fd}");
         }
-        None
+    } else if fd == FD_STDERR {
+        let s = core::str::from_utf8(slice).unwrap();
+        let flush_s = update_io_buf(ctx, fd, s);
+        if !flush_s.is_empty() {
+            flush_s.into_iter().for_each(|line| println!("stderr: {line}"));
+        }
+    } else if fd == FD_PUBLIC_VALUES {
+        rt.state.public_values_stream.extend_from_slice(slice);
+    } else if fd == FD_HINT {
+        rt.state.input_stream.push(slice.to_vec());
+    } else if let Some(mut hook) = rt.hook_registry.get(fd) {
+        let res = hook.invoke_hook(rt.hook_env(), slice);
+        // Add result vectors to the beginning of the stream.
+        let ptr = rt.state.input_stream_ptr;
+        rt.state.input_stream.splice(ptr..ptr, res);
+    } else {
+        tracing::warn!("tried to write to unknown file descriptor {fd}");
     }
 }
 

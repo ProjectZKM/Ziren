@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 hex = "0.4.3"
 zkm-sdk = { workspace = true }
-alloy-primitives = { version = "0.8.21", default-features = false, features = [
+alloy-primitives = { version = "1.0", default-features = false, features = [
     "rlp",
 ] }
 log = "0.4.22"

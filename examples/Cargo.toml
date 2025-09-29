@@ -39,6 +39,7 @@ members = [
   "unconstrained/host",
   "large-sum/guest",
   "large-sum/host",
+  "simple-go/host",
 ]
 resolver = "2"
 

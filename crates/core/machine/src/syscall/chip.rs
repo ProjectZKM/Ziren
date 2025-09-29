@@ -89,7 +89,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => &input
                 .syscall_events
                 .iter()
-                .filter(|e| e.a_record.prev_value.to_le_bytes()[1] == 1)
+                .filter(|e| {
+                    (e.a_record.prev_value.to_le_bytes()[2] == 1)
+                        || (e.a_record.prev_value.to_le_bytes()[1] != 0)
+                })
                 .copied()
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => &input
@@ -148,7 +151,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => input
                 .syscall_events
                 .par_iter()
-                .filter(|event| event.a_record.prev_value.to_le_bytes()[1] == 1)
+                .filter(|event| {
+                    (event.a_record.prev_value.to_le_bytes()[2] == 1)
+                        || (event.a_record.prev_value.to_le_bytes()[1] != 0)
+                })
                 .map(|event| row_fn(event, false))
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => input
@@ -178,7 +184,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     shard
                         .syscall_events
                         .iter()
-                        .filter(|e| e.a_record.prev_value.to_le_bytes()[1] == 1)
+                        .filter(|e| {
+                            (e.a_record.prev_value.to_le_bytes()[2] == 1)
+                                || (e.a_record.prev_value.to_le_bytes()[1] != 0)
+                        })
                         .take(1)
                         .count()
                         > 0

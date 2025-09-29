@@ -262,7 +262,7 @@ pub struct MiscEvent {
 }
 
 impl MiscEvent {
-    /// Create a new [`JumpEvent`].
+    /// Create a new [`MiscEvent`].
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
