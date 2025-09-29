@@ -84,9 +84,9 @@ where
 
         // Check that the a0 flags are correct.
         {
-            builder.when(local.is_real).when(local.is_a0_0).assert_eq(local.a0[0], AB::Expr::ZERO);
-            builder.when(local.is_real).when(local.is_a0_1).assert_eq(local.a0[0], AB::Expr::ONE);
-            builder.when(local.is_real).when(local.is_a0_2).assert_eq(local.a0[0], AB::Expr::TWO);
+            builder.when(local.is_real).when(local.is_a0_0).assert_eq(local.a0[0], AB::Expr::zero());
+            builder.when(local.is_real).when(local.is_a0_1).assert_eq(local.a0[0], AB::Expr::one());
+            builder.when(local.is_real).when(local.is_a0_2).assert_eq(local.a0[0], AB::Expr::two());
             builder
                 .when(local.is_real)
                 .when(local.is_a0_0 + local.is_a0_1 + local.is_a0_2)
@@ -212,13 +212,13 @@ impl SysLinuxChip {
         builder
             .when(local.is_mmap)
             .when(local.is_offset_0)
-            .assert_eq(local.page_offset, AB::Expr::ZERO);
+            .assert_eq(local.page_offset, AB::Expr::zero());
 
         builder
             .when(local.is_mmap)
             .assert_eq(local.page_offset + local.upper_address, local.a1.reduce::<AB>());
         let size = local.upper_address
-            + AB::Expr::from_canonical_u32(0x1000) * (AB::Expr::ONE - local.is_offset_0);
+            + AB::Expr::from_canonical_u32(0x1000) * (AB::Expr::one() - local.is_offset_0);
 
         builder.when(local.is_mmap).when(local.is_a0_0).assert_eq(
             local.inorout.value().reduce::<AB>(),
@@ -246,7 +246,7 @@ impl SysLinuxChip {
     }
 
     fn eval_fnctl<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
-        builder.when(local.is_fnctl).when(local.is_a1_1).assert_eq(local.a1[0], AB::Expr::ONE);
+        builder.when(local.is_fnctl).when(local.is_a1_1).assert_eq(local.a1[0], AB::Expr::one());
         builder
             .when(local.is_fnctl)
             .when(local.is_a1_3)
