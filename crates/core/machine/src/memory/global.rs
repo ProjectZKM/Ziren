@@ -21,7 +21,7 @@ use zkm_stark::{
 
 use crate::{
     operations::{AssertLtColsBits, IsZeroOperation, KoalaBearBitDecomposition},
-    utils::{next_power_of_two, pad_rows_fixed},
+    utils::next_power_of_two,
 };
 
 use super::MemoryChipType;

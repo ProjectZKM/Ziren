@@ -2,6 +2,8 @@ use std::borrow::Borrow;
 
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};
+#[cfg(any(test, feature = "program_validation"))]
+use smallvec::SmallVec;
 
 use crate::*;
 

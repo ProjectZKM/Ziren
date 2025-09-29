@@ -637,6 +637,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 .sum::<SepticDigest<Val<SC>>>();
 
             if !sum.is_zero() {
+                tracing::error!("global cumulative sum: {:?}", sum);
                 return Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0));
             }
 

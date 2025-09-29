@@ -19,7 +19,7 @@ use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 use zkm_stark::LookupKind;
 
-use crate::utils::{next_power_of_two, pad_rows_fixed};
+use crate::utils::next_power_of_two;
 
 /// The number of main trace columns for `SyscallChip`.
 pub const NUM_SYSCALL_COLS: usize = size_of::<SyscallCols<u8>>();
