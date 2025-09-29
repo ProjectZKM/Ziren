@@ -1,8 +1,8 @@
 use std::{borrow::BorrowMut, mem::size_of};
 
 use p3_air::BaseAir;
-use p3_field::PrimeField32;
 use p3_field::FieldAlgebra;
+use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
@@ -12,14 +12,12 @@ use zkm_stark::air::MachineAir;
 
 use crate::Poseidon2SkinnyInstr;
 use crate::{
-    chips::poseidon2_wide::{
-            Poseidon2WideChip, WIDTH,
-        }, instruction::Instruction::Poseidon2, ExecutionRecord, Poseidon2Io, RecursionProgram
+    chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},
+    instruction::Instruction::Poseidon2,
+    ExecutionRecord, Poseidon2Io, RecursionProgram,
 };
 
-use super::{
-    columns::preprocessed::Poseidon2PreprocessedColsWide,
-};
+use super::columns::preprocessed::Poseidon2PreprocessedColsWide;
 
 const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedColsWide<u8>>();
 
@@ -167,22 +165,24 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::BorrowMut;
-
     use p3_air::BaseAir;
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrix, Matrix};
-    use p3_maybe_rayon::prelude::{join, IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_maybe_rayon::prelude::{
+        join, IndexedParallelIterator, ParallelIterator, ParallelSliceMut,
+    };
     use p3_symmetric::Permutation;
     use zkhash::ark_ff::UniformRand;
     use zkm_core_machine::operations::poseidon2::trace::populate_perm;
     use zkm_stark::{air::MachineAir, inner_perm};
 
     use crate::{
-        chips::{mem::MemoryAccessCols, poseidon2_wide::{columns::preprocessed::Poseidon2PreprocessedColsWide, trace::PREPROCESSED_POSEIDON2_WIDTH, Poseidon2WideChip, WIDTH}, test_fixtures},
-        ExecutionRecord, Poseidon2Event, RecursionProgram,
-        Instruction::Poseidon2,
+        chips::{
+            poseidon2_wide::{Poseidon2WideChip, WIDTH},
+        },
+        ExecutionRecord,
+        Poseidon2Event,
     };
 
     #[test]
@@ -204,7 +204,8 @@ mod tests {
             ..Default::default()
         };
         let chip_3 = Poseidon2WideChip::<3>;
-        let trace: RowMajorMatrix<F> = chip_3.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip_3.generate_trace(&shard, &mut ExecutionRecord::default());
 
         assert_eq!(trace, generate_trace_reference::<3>(&shard, &mut ExecutionRecord::default()));
     }
@@ -228,7 +229,8 @@ mod tests {
             ..Default::default()
         };
         let chip_9 = Poseidon2WideChip::<9>;
-        let trace: RowMajorMatrix<F> = chip_9.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip_9.generate_trace(&shard, &mut ExecutionRecord::default());
 
         assert_eq!(trace, generate_trace_reference::<9>(&shard, &mut ExecutionRecord::default()));
     }

@@ -1,7 +1,4 @@
-use std::{
-    borrow::BorrowMut,
-    mem::size_of,
-};
+use std::{borrow::BorrowMut, mem::size_of};
 
 use itertools::Itertools;
 use p3_field::FieldAlgebra;
@@ -14,12 +11,14 @@ use zkm_stark::air::MachineAir;
 
 use crate::{
     chips::poseidon2_skinny::{
-            columns::{Poseidon2 as Poseidon2Cols, NUM_POSEIDON2_COLS},
-            Poseidon2SkinnyChip, NUM_EXTERNAL_ROUNDS,
-        }, instruction::Instruction::Poseidon2, ExecutionRecord, Poseidon2Io, Poseidon2SkinnyInstr, RecursionProgram
+        columns::{Poseidon2 as Poseidon2Cols, NUM_POSEIDON2_COLS},
+        Poseidon2SkinnyChip, NUM_EXTERNAL_ROUNDS,
+    },
+    instruction::Instruction::Poseidon2,
+    ExecutionRecord, Poseidon2Io, Poseidon2SkinnyInstr, RecursionProgram,
 };
 
-use super::{columns::preprocessed::Poseidon2PreprocessedCols};
+use super::columns::preprocessed::Poseidon2PreprocessedCols;
 
 const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedCols<u8>>();
 
@@ -107,15 +106,16 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
             "generate_trace only supports KoalaBear field"
         );
 
-        let instructions = program.instructions.iter().filter_map(|instruction| match instruction {
-            Poseidon2(instr) => Some(unsafe {
-                std::mem::transmute::<
-                    &Box<Poseidon2SkinnyInstr<F>>,
-                    &Box<Poseidon2SkinnyInstr<KoalaBear>>,
-                >(instr)
-            }),
-            _ => None,
-        });
+        let instructions =
+            program.instructions.iter().filter_map(|instruction| match instruction {
+                Poseidon2(instr) => Some(unsafe {
+                    std::mem::transmute::<
+                        &Box<Poseidon2SkinnyInstr<F>>,
+                        &Box<Poseidon2SkinnyInstr<KoalaBear>>,
+                    >(instr)
+                }),
+                _ => None,
+            });
 
         let num_instructions =
             program.instructions.iter().filter(|instr| matches!(instr, Poseidon2(_))).count();

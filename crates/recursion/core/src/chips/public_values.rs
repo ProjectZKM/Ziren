@@ -9,7 +9,10 @@ use zkm_derive::AlignedBorrow;
 use zkm_stark::air::MachineAir;
 
 use crate::{
-    air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS}, builder::ZKMRecursionAirBuilder, runtime::{Instruction, RecursionProgram}, CommitPublicValuesEvent, CommitPublicValuesInstr, ExecutionRecord
+    air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
+    builder::ZKMRecursionAirBuilder,
+    runtime::{Instruction, RecursionProgram},
+    CommitPublicValuesEvent, CommitPublicValuesInstr, ExecutionRecord,
 };
 
 use crate::DIGEST_SIZE;
@@ -97,7 +100,8 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         for instr in commit_pv_hash_instrs.iter().take(1) {
             for i in 0..DIGEST_SIZE {
                 let mut row = [KoalaBear::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
-                let cols: &mut PublicValuesPreprocessedCols<KoalaBear> = row.as_mut_slice().borrow_mut();
+                let cols: &mut PublicValuesPreprocessedCols<KoalaBear> =
+                    row.as_mut_slice().borrow_mut();
                 unsafe {
                     crate::sys::public_values_instr_to_row_koalabear(instr, i, cols);
                 }
@@ -145,9 +149,10 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         // values hash.
         for event in input.commit_pv_hash_events.iter().take(1) {
             let bb_event = unsafe {
-                std::mem::transmute::<&CommitPublicValuesEvent<F>, &CommitPublicValuesEvent<KoalaBear>>(
-                    event,
-                )
+                std::mem::transmute::<
+                    &CommitPublicValuesEvent<F>,
+                    &CommitPublicValuesEvent<KoalaBear>,
+                >(event)
             };
             for i in 0..DIGEST_SIZE {
                 let mut row = [KoalaBear::ZERO; NUM_PUBLIC_VALUES_COLS];

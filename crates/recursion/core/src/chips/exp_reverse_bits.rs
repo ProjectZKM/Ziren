@@ -12,7 +12,9 @@ use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
 
 use crate::{
-    builder::ZKMRecursionAirBuilder, runtime::{ExecutionRecord, RecursionProgram}, ExpReverseBitsEvent, ExpReverseBitsInstr, Instruction
+    builder::ZKMRecursionAirBuilder,
+    runtime::{ExecutionRecord, RecursionProgram},
+    ExpReverseBitsEvent, ExpReverseBitsInstr, Instruction,
 };
 
 use super::mem::MemoryAccessColsChips;
@@ -105,8 +107,10 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             })
             .for_each(|instruction| {
                 let ExpReverseBitsInstr { addrs, mult } = instruction;
-                let mut row_add =
-                    vec![[KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]; addrs.exp.len()];
+                let mut row_add = vec![
+                    [KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS];
+                    addrs.exp.len()
+                ];
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExpReverseBitsLenPreprocessedCols<KoalaBear> =
                         row.as_mut_slice().borrow_mut();
@@ -114,8 +118,12 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                     row.is_first = KoalaBear::from_bool(i == 0);
                     row.is_last = KoalaBear::from_bool(i == addrs.exp.len() - 1);
                     row.is_real = KoalaBear::ONE;
-                    row.x_mem = MemoryAccessColsChips { addr: addrs.base, mult: -KoalaBear::from_bool(i == 0) };
-                    row.exponent_mem = MemoryAccessColsChips { addr: addrs.exp[i], mult: KoalaBear::NEG_ONE };
+                    row.x_mem = MemoryAccessColsChips {
+                        addr: addrs.base,
+                        mult: -KoalaBear::from_bool(i == 0),
+                    };
+                    row.exponent_mem =
+                        MemoryAccessColsChips { addr: addrs.exp[i], mult: KoalaBear::NEG_ONE };
                     row.result_mem = MemoryAccessColsChips {
                         addr: addrs.result,
                         mult: *mult * KoalaBear::from_bool(i == addrs.exp.len() - 1),
@@ -162,7 +170,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
 
         let mut overall_rows = Vec::new();
         events.iter().for_each(|event| {
-            let mut rows = vec![vec![KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
+            let mut rows =
+                vec![vec![KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
 
             let mut accum = KoalaBear::ONE;
 

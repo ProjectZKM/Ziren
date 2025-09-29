@@ -438,7 +438,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         )
     }
 
-     /// The setup preprocessing phase. Same as `setup` but initial global cumulative sum is
+    /// The setup preprocessing phase. Same as `setup` but initial global cumulative sum is
     /// precomputed.
     pub fn setup_core(
         &self,

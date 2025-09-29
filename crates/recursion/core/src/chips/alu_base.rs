@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
-use p3_field::{Field, PrimeField32};
 use p3_field::FieldAlgebra;
+use p3_field::{Field, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;

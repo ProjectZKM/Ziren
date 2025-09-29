@@ -118,7 +118,9 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         );
 
         let events = unsafe {
-            std::mem::transmute::<&Vec<SelectIo<F>>, &Vec<SelectIo<KoalaBear>>>(&input.select_events)
+            std::mem::transmute::<&Vec<SelectIo<F>>, &Vec<SelectIo<KoalaBear>>>(
+                &input.select_events,
+            )
         };
         let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_COLS];

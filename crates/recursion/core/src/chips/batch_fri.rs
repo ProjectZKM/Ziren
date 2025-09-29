@@ -16,7 +16,10 @@ use zkm_stark::air::ExtensionAirBuilder;
 use zkm_derive::AlignedBorrow;
 
 use crate::{
-    air::Block, builder::ZKMRecursionAirBuilder, runtime::{Instruction, RecursionProgram}, Address, BatchFRIEvent, BatchFRIInstr, ExecutionRecord
+    air::Block,
+    builder::ZKMRecursionAirBuilder,
+    runtime::{Instruction, RecursionProgram},
+    Address, BatchFRIEvent, BatchFRIInstr, ExecutionRecord,
 };
 
 pub const NUM_BATCH_FRI_COLS: usize = core::mem::size_of::<BatchFRICols<u8>>();
@@ -101,7 +104,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             debug_assert_eq!(*acc_mult, KoalaBear::ONE);
 
             row_add.iter_mut().enumerate().for_each(|(i, row)| {
-                let cols: &mut BatchFRIPreprocessedCols<KoalaBear> = row.as_mut_slice().borrow_mut();
+                let cols: &mut BatchFRIPreprocessedCols<KoalaBear> =
+                    row.as_mut_slice().borrow_mut();
                 unsafe {
                     crate::sys::batch_fri_instr_to_row_koalabear(&instruction.into(), cols, i);
                 }

@@ -282,7 +282,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Creates a proving key and a verifying key for a given MIPS ELF.
     #[instrument(name = "setup", level = "debug", skip_all)]
-    pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, DeviceProvingKey<C>, Program, ZKMVerifyingKey) {
+    pub fn setup(
+        &self,
+        elf: &[u8],
+    ) -> (ZKMProvingKey, DeviceProvingKey<C>, Program, ZKMVerifyingKey) {
         let program = self.get_program(elf).unwrap();
         let (pk, vk) = self.core_prover.setup(&program);
         let vk = ZKMVerifyingKey { vk };
@@ -343,7 +346,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let (proof, public_values_stream, cycles) =
             zkm_core_machine::utils::prove_with_context::<_, C::CoreProver>(
                 &self.core_prover,
-                &pk,
+                pk,
                 program,
                 stdin,
                 opts.core_opts,
@@ -1417,7 +1420,6 @@ pub mod tests {
         tracing::info!("setup keccak elf");
         let (_, keccak_pk_d, keccak_program, keccak_vk) = prover.setup(keccak_elf);
 
-
         tracing::info!("setup verify elf");
         let (_, verify_pk_d, verify_program, verify_vk) = prover.setup(verify_elf);
 
@@ -1425,7 +1427,8 @@ pub mod tests {
         let mut stdin = ZKMStdin::new();
         stdin.write(&1usize);
         stdin.write(&vec![0u8, 0, 0]);
-        let deferred_proof_1 = prover.prove_core(&keccak_pk_d,
+        let deferred_proof_1 = prover.prove_core(
+            &keccak_pk_d,
             keccak_program.clone(),
             &stdin,
             opts,
@@ -1440,7 +1443,8 @@ pub mod tests {
         stdin.write(&vec![0u8, 1, 2]);
         stdin.write(&vec![2, 3, 4]);
         stdin.write(&vec![5, 6, 7]);
-        let deferred_proof_2 = prover.prove_core(&keccak_pk_d, keccak_program, &stdin, opts, Default::default())?;
+        let deferred_proof_2 =
+            prover.prove_core(&keccak_pk_d, keccak_program, &stdin, opts, Default::default())?;
         let pv_2 = deferred_proof_2.public_values.as_slice().to_vec().clone();
 
         // Generate recursive proof of first subproof.
@@ -1467,7 +1471,8 @@ pub mod tests {
         stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
 
         tracing::info!("proving verify program (core)");
-        let verify_proof = prover.prove_core(&verify_pk_d, verify_program, &stdin, opts, Default::default())?;
+        let verify_proof =
+            prover.prove_core(&verify_pk_d, verify_program, &stdin, opts, Default::default())?;
         // let public_values = verify_proof.public_values.clone();
 
         // Generate recursive proof of verify program

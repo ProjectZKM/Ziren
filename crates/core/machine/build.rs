@@ -104,7 +104,12 @@ mod sys {
                 "p3-koala-bear",
                 "p3-monty-31",
             ])
-            .with_parse_extra_bindings(&["zkm-stark", "zkm-primitives", "p3-koala-bear", "p3-monty-31",])
+            .with_parse_extra_bindings(&[
+                "zkm-stark",
+                "zkm-primitives",
+                "p3-koala-bear",
+                "p3-monty-31",
+            ])
             .rename_item("KoalaBear", "KoalaBearP3")
             .include_item("KoalaBear")
             .include_item("MemoryRecord") // Just for convenience. Not exposed, so we need to manually do this.

@@ -1,7 +1,13 @@
 use p3_koala_bear::KoalaBear;
-use zkm_core_executor::events::{AluEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent, SyscallEvent};
+use zkm_core_executor::events::{
+    AluEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent, SyscallEvent,
+};
 
-use crate::{alu::AddSubCols, memory::{MemoryInitCols, SingleMemoryLocal}, syscall::chip::SyscallCols};
+use crate::{
+    alu::AddSubCols,
+    memory::{MemoryInitCols, SingleMemoryLocal},
+    syscall::chip::SyscallCols,
+};
 
 #[link(name = "zkm-core-machine-sys", kind = "static")]
 extern "C-unwind" {

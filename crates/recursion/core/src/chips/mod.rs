@@ -12,8 +12,8 @@ pub mod select;
 pub mod test_fixtures {
     use std::{array, borrow::Borrow};
 
+    use p3_field::{Field, FieldAlgebra, PrimeField32};
     use p3_koala_bear::KoalaBear;
-    use p3_field::{FieldAlgebra, Field, PrimeField32};
     use p3_symmetric::Permutation;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use zkm_stark::inner_perm;

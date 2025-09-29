@@ -105,7 +105,12 @@ mod sys {
                 "p3-monty-31",
                 "zkm-core-executor",
             ])
-            .with_parse_extra_bindings(&["zkm-stark", "zkm-primitives", "p3-koala-bear", "p3-monty-31"])
+            .with_parse_extra_bindings(&[
+                "zkm-stark",
+                "zkm-primitives",
+                "p3-koala-bear",
+                "p3-monty-31",
+            ])
             .rename_item("KoalaBear", "KoalaBearP3")
             .include_item("KoalaBear")
             .include_item("MontyField31")

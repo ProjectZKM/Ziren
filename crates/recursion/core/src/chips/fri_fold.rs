@@ -16,7 +16,10 @@ use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
 use zkm_derive::AlignedBorrow;
 
 use crate::{
-    air::Block, builder::ZKMRecursionAirBuilder, runtime::{Instruction, RecursionProgram}, ExecutionRecord, FriFoldEvent, FriFoldInstr
+    air::Block,
+    builder::ZKMRecursionAirBuilder,
+    runtime::{Instruction, RecursionProgram},
+    ExecutionRecord, FriFoldEvent, FriFoldInstr,
 };
 
 use super::mem::MemoryAccessColsChips;

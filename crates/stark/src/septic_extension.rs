@@ -34,19 +34,51 @@ impl<F: FieldAlgebra> FieldAlgebra for SepticExtension<F> {
         SepticExtension([F::NEG_ONE, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
 
     fn zero() -> Self {
-        SepticExtension([F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+        SepticExtension([
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+        ])
     }
 
     fn one() -> Self {
-        SepticExtension([F::one(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+        SepticExtension([
+            F::one(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+        ])
     }
 
     fn two() -> Self {
-        SepticExtension([F::two(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+        SepticExtension([
+            F::two(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+        ])
     }
 
     fn neg_one() -> Self {
-        SepticExtension([F::neg_one(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero(), F::zero()])
+        SepticExtension([
+            F::neg_one(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+        ])
     }
 
     fn from_f(f: Self::F) -> Self {
