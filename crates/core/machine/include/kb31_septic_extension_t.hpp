@@ -218,7 +218,7 @@ class kb31_septic_extension_t {
             }
             for(uintptr_t i = 7 ; i < 13 ; i++) {
                 res[i - 7] += res[i] * kb31_t::from_canonical_u32(8);
-                res[i - 6] += res[i] * kb31_t::from_canonical_u32(2);
+                res[i - 6] -= res[i] * kb31_t::from_canonical_u32(2);
             }
             for(uintptr_t i = 0 ; i < 7 ; i++) {
                 value[i] = res[i];
@@ -343,7 +343,7 @@ class kb31_septic_extension_t {
         FUN kb31_septic_extension_t curve_formula() const {
             kb31_septic_extension_t result = *this * *this * *this;
             kb31_t t[7] = { kb31_t(0u), kb31_t(int(3)), kb31_t(0u), kb31_t(0u), kb31_t(0u), kb31_t(0u), kb31_t(0u)};
-            result *= kb31_septic_extension_t(t);
+            result += *this * kb31_septic_extension_t(t);
             result.value[0] -= kb31_t::from_canonical_u32(3);
             return result;
         }

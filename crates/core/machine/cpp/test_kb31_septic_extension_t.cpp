@@ -31,13 +31,13 @@ extern "C" void test_mul() {
     kb31_septic_extension_t c = a * b;
 
     kb31_t t2[7] = {
-        kb31_t::from_canonical_u32(1207801784),
-        kb31_t::from_canonical_u32(1358820143),
-        kb31_t::from_canonical_u32(1241383606),
-        kb31_t::from_canonical_u32(1711239578),
-        kb31_t::from_canonical_u32(452949349),
-        kb31_t::from_canonical_u32(1207938232),
-        kb31_t::from_canonical_u32(167755766),
+        kb31_t(1207801784u),
+        kb31_t(1358820143u),
+        kb31_t(1241383606u),
+        kb31_t(1711239578u),
+        kb31_t(452949349u),
+        kb31_t(1207938232u),
+        kb31_t(167755766u),
     };
     assert(c == kb31_septic_extension_t(t2));
 }

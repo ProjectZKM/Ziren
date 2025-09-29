@@ -84,7 +84,10 @@ where
 
         // Check that the a0 flags are correct.
         {
-            builder.when(local.is_real).when(local.is_a0_0).assert_eq(local.a0[0], AB::Expr::zero());
+            builder
+                .when(local.is_real)
+                .when(local.is_a0_0)
+                .assert_eq(local.a0[0], AB::Expr::zero());
             builder.when(local.is_real).when(local.is_a0_1).assert_eq(local.a0[0], AB::Expr::one());
             builder.when(local.is_real).when(local.is_a0_2).assert_eq(local.a0[0], AB::Expr::two());
             builder

@@ -833,6 +833,29 @@ mod tests {
         let b: SepticExtension<KoalaBear> = SepticExtension::from_canonical_u32(2);
         let c = a * b;
         println!("{c}");
+
+        let i = 0;
+        let a: SepticExtension<KoalaBear> = SepticExtension([
+            KoalaBear::from_canonical_u32(i + 3),
+            KoalaBear::from_canonical_u32(2 * i + 6),
+            KoalaBear::from_canonical_u32(5 * i + 17),
+            KoalaBear::from_canonical_u32(6 * i + 91),
+            KoalaBear::from_canonical_u32(8 * i + 37),
+            KoalaBear::from_canonical_u32(11 * i + 35),
+            KoalaBear::from_canonical_u32(14 * i + 33),
+        ]);
+        let i = 1;
+        let b: SepticExtension<KoalaBear> = SepticExtension([
+            KoalaBear::from_canonical_u32(i + 3),
+            KoalaBear::from_canonical_u32(2 * i + 6),
+            KoalaBear::from_canonical_u32(5 * i + 17),
+            KoalaBear::from_canonical_u32(6 * i + 91),
+            KoalaBear::from_canonical_u32(8 * i + 37),
+            KoalaBear::from_canonical_u32(11 * i + 35),
+            KoalaBear::from_canonical_u32(14 * i + 33),
+        ]);
+        let c = a * b;
+        println!("{c}");
     }
 
     #[test]

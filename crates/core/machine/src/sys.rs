@@ -26,4 +26,22 @@ extern "C-unwind" {
         is_receive: bool,
         cols: &mut SyscallCols<KoalaBear>,
     );
+
+    pub fn test_mul();
+    pub fn test_inv();
+    pub fn test_sqrt();
+    pub fn test_curve_formula();
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sys::{test_curve_formula, test_inv, test_mul, test_sqrt};
+
+    #[test]
+    fn test_septic() {
+        unsafe { test_mul() };
+        unsafe { test_inv() };
+        unsafe { test_sqrt() };
+        unsafe { test_curve_formula() };
+    }
 }
