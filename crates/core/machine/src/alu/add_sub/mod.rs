@@ -13,7 +13,7 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
@@ -37,27 +37,34 @@ pub const NUM_ADD_SUB_COLS: usize = size_of::<AddSubCols<u8>>();
 pub struct AddSubChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct AddSubCols<T> {
     /// The current/next pc, used for instruction lookup table.
+    #[picus(input)]
     pub pc: T,
+    #[picus(output)]
     pub next_pc: T,
 
     /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
+    #[picus(output)]
     pub add_operation: AddOperation<T>,
 
     /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
+    #[picus(input)]
     pub operand_1: Word<T>,
 
     /// The second input operand.  This will be `c` for both operations.
+    #[picus(input)]
     pub operand_2: Word<T>,
 
     /// Flag indicating whether the opcode is `ADD`.
+    #[picus(selector)]
     pub is_add: T,
 
     /// Flag indicating whether the opcode is `SUB`.
+    #[picus(selector)]
     pub is_sub: T,
 }
 
@@ -74,11 +81,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         // Right now these ranges were derived manually but they could be computed via macros in the future
         // From extracting the constraints it appears that Main columns 9-12 correspond to operand_1
         // columns 13-16 are operand 2, columns 2-5 are the output value and the selectors are columns 17, 18
-        let input_ranges =
-            vec![(9, 12, "operand_1".to_string()), (13, 16, "operand_2".to_string())];
-        let output_ranges = vec![(2, 5, "value".to_string())];
-        let selector_indices = vec![(17, "is_add".to_string()), (18, "is_sub".to_string())];
-        PicusInfo { input_ranges, output_ranges, selector_indices }
+        AddSubCols::<u8>::picus_info()
     }
 
     fn generate_trace(

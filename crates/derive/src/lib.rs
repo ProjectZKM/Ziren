@@ -23,7 +23,7 @@
 // THE SOFTWARE.
 
 extern crate proc_macro;
-
+mod picus_annotations;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
@@ -403,4 +403,9 @@ fn find_eval_trait_bound(attrs: &[syn::Attribute]) -> Option<String> {
     }
 
     None
+}
+
+#[proc_macro_derive(PicusAnnotations, attributes(picus))]
+pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
+    picus_annotations::picus_annotations_derive(input)
 }

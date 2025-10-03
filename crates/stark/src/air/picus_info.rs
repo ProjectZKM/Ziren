@@ -1,6 +1,10 @@
+use std::collections::HashMap;
 /// Information about Picus annotations on AIR columns.
 #[derive(Debug, Clone, Default)]
 pub struct PicusInfo {
+    /// Column to name mapping. column i will get map to the string "f_i" where f is the field
+    /// in the column struct that contains column i
+    pub col_to_name: HashMap<usize, String>,
     /// Ranges of columns marked as inputs.
     /// Each tuple contains (`start_index`, `end_index`, `field_name`) where:
     /// - `start_index` is the first column index (inclusive)

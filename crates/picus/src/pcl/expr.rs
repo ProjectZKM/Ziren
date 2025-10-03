@@ -1,10 +1,40 @@
 use std::{
+    collections::HashMap,
     fmt::{self, Display, Formatter},
     iter::{Product, Sum},
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
-    sync::{Arc, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, OnceLock, RwLock,
+    },
     u64,
 };
+
+/// Mapping from column ids to variable names. This mapping should be derived in the `PicusInfo` struct
+static PICUS_NAMES_GLOBAL: OnceLock<RwLock<HashMap<usize, String>>> = OnceLock::new();
+
+/// Maintains col indices for fresh variables during the course of extraction
+static FRESH_VAR_CTR: OnceLock<AtomicUsize> = OnceLock::new();
+pub fn set_picus_names(map: HashMap<usize, String>) {
+    let _ = PICUS_NAMES_GLOBAL.set(RwLock::new(map));
+}
+
+// Get or initialize the fresh var counter
+fn ctr() -> &'static AtomicUsize {
+    FRESH_VAR_CTR.get_or_init(|| AtomicUsize::new(0))
+}
+
+// set the fresh counter val to something
+pub fn initialize_fresh_var_ctr(val: usize) {
+    let _ = FRESH_VAR_CTR.set(AtomicUsize::new(val));
+}
+
+// update the counter
+pub fn fresh_picus_var() -> PicusExpr {
+    let cur_var = ctr().load(Ordering::Relaxed);
+    ctr().store(cur_var + 1, Ordering::Relaxed);
+    PicusExpr::Var(PicusVar::new(cur_var))
+}
 
 use p3_field::{FieldAlgebra, PrimeField32};
 
@@ -77,7 +107,12 @@ impl PicusVar {
 
 impl Display for PicusVar {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "x_{}", self.id)
+        if let Some(lock) = PICUS_NAMES_GLOBAL.get() {
+            if let Some(name) = lock.read().unwrap().get(&self.id) {
+                return f.write_str(name);
+            }
+        }
+        write!(f, "v{}", self.id)
     }
 }
 

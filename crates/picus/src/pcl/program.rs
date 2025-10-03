@@ -8,7 +8,7 @@ use std::{
 
 use crate::pcl::{
     expr::{PicusConstraint, PicusExpr},
-    partial_evaluate, PicusVar,
+    partial_evaluate, partial_evaluate_calls, PicusVar,
 };
 
 /// A call to another Picus module (by name).
@@ -85,6 +85,7 @@ impl PicusModule {
             name += &format!("{k}_{v}");
         }
         let constraints = partial_evaluate(&self.constraints, &env);
+        let calls = partial_evaluate_calls(&self.calls, env);
         let postconditions = partial_evaluate(&self.postconditions, &env);
         PicusModule {
             name,
@@ -93,7 +94,7 @@ impl PicusModule {
             constraints,
             postconditions,
             assume_deterministic: self.assume_deterministic.clone(),
-            calls: self.calls.clone(),
+            calls,
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::pcl::{current_modulus, reduce_mod, PicusConstraint, PicusExpr, PicusVar};
+use crate::pcl::{current_modulus, reduce_mod, PicusCall, PicusConstraint, PicusExpr, PicusVar};
 
 // === Helpers ===
 
@@ -82,6 +82,21 @@ fn subst_expr(e: &PicusExpr, env: &BTreeMap<PicusVar, u64>) -> PicusExpr {
         Neg(a) => -subst_expr(a, env),
         Pow(k, a) => pow_simplify(*k, subst_expr(a, env)),
     }
+}
+
+// === Call substitution/simplification ===
+/// This function replaces variables in `call` with constants in `env`
+/// and then simplifies.
+pub fn subst_call(call: &PicusCall, env: &BTreeMap<PicusVar, u64>) -> PicusCall {
+    let mut new_inputs = Vec::new();
+    let mut new_outputs = Vec::new();
+    for input in &call.inputs {
+        new_inputs.push(subst_expr(input, env));
+    }
+    for output in &call.outputs {
+        new_outputs.push(subst_expr(output, env));
+    }
+    return PicusCall { inputs: new_inputs, outputs: new_outputs, mod_name: call.mod_name.clone() };
 }
 
 // === Constraint substitution/simplification ===
@@ -225,15 +240,26 @@ pub fn partial_evaluate(
     constraints: &[PicusConstraint],
     env: &BTreeMap<PicusVar, u64>,
 ) -> Vec<PicusConstraint> {
-    let mut out = Vec::with_capacity(constraints.len());
+    let mut out_constraints = Vec::with_capacity(constraints.len());
     for c in constraints {
         if let Some(cc) = subst_constraint(c, env) {
             // Optional micro-normalization: if we ever produce Eq(Const(0)) here, drop it
             match &cc {
                 PicusConstraint::Eq(e) if matches!(&**e, PicusExpr::Const(0)) => {}
-                _ => out.push(cc),
+                _ => out_constraints.push(cc),
             }
         }
     }
-    out
+    out_constraints
+}
+
+pub fn partial_evaluate_calls(
+    calls: &[PicusCall],
+    env: &BTreeMap<PicusVar, u64>,
+) -> Vec<PicusCall> {
+    let mut out_calls = Vec::with_capacity(calls.len());
+    for call in calls {
+        out_calls.push(subst_call(call, env))
+    }
+    out_calls
 }
