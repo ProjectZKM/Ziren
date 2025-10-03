@@ -42,22 +42,17 @@ pub struct AddSubChip;
 #[repr(C)]
 pub struct AddSubCols<T> {
     /// The current/next pc, used for instruction lookup table.
-    #[picus(input)]
     pub pc: T,
-    #[picus(output)]
     pub next_pc: T,
 
     /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
-    #[picus(output)]
     pub add_operation: AddOperation<T>,
 
     /// The first input operand.  This will be `b` for add operations and `a` for sub operations.
-    #[picus(input)]
     pub operand_1: Word<T>,
 
     /// The second input operand.  This will be `c` for both operations.
-    #[picus(input)]
     pub operand_2: Word<T>,
 
     /// Flag indicating whether the opcode is `ADD`.
