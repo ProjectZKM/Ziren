@@ -1,14 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::pcl::{
-    fresh_picus_var, Felt, PicusCall, PicusConstraint, PicusExpr, PicusModule, PicusVar,
-};
+use crate::pcl::{fresh_picus_var, Felt, PicusConstraint, PicusExpr, PicusModule, PicusVar};
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::{AirLookup, LookupKind, MessageBuilder};
-
-const RECEIVE_INSTRUCTION: &str = "Receive_Instruction";
 
 /// Implementation `AirBuilder` which builds Picus programs
 pub struct PicusBuilder {
@@ -83,51 +79,49 @@ impl PicusBuilder {
         }
     }
 
-    // for a receive instruction we will generate a picus module called `receive_instruction`. The module will be a stub as follows:
-    // ```
-    // (begin-module Receive_Interaction)
-    // (input v0)
-    // (input v2)
-    // ...
-    // (input vk)
-    // (assume-deterministic v1)
-    // (output v1)
-    // (end-module)
-    // ```
-    // the main idea is we can verify the constraints for the other side of the interaction separately. When verifying a chip that uses the interaction
-    // we mainly care that the the right values are passed to the interaction. In particular:
-    //    - values[0] (pc) -- this is an input.
-    //    - values[1] (next_pc) -- this is an output.
-    //    - rest are treated as inputs for now.
+    // The receive instruction interaction is used to determine which columns are inputs/outputs.
+    // In particular, the following values correspond to inputs and outputs:
+    //    - values[2] -> pc (input)
+    //    - values[3] -> next_pc (output)
+    //    - values[6-9] -> a (output)
+    //    - values[10-13] -> b (input)
+    //    - values[14-17] -> c (input)
+    //    - TODO (Add high and low)
     fn handle_receive_instruction(&mut self, multiplicity: PicusExpr, values: &Vec<PicusExpr>) {
-        let next_pc_idx = 3;
-        if !self.aux_modules.contains_key(RECEIVE_INSTRUCTION) {
-            // build the receive instruction module
-            let mut receive_mod = PicusModule::new(RECEIVE_INSTRUCTION.to_string());
-            for i in 0..values.len() {
-                let var = fresh_picus_var();
-                if i == next_pc_idx {
-                    receive_mod.outputs.push(var.clone());
-                    receive_mod.assume_deterministic.push(var.clone());
-                } else {
-                    receive_mod.inputs.push(var)
-                }
-            }
-            self.aux_modules.insert(RECEIVE_INSTRUCTION.to_string(), receive_mod);
+        // Creating a fresh var because picus outputs need to be variables.
+        // When performing partial evaluation,
+        let next_pc_out = fresh_picus_var();
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
+        };
+        self.picus_module.outputs.push(next_pc_out.clone());
+        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[3], &next_pc_out));
+        // If this is a sequential instruction then we can assume next-pc is deterministic as we will check its
+        // determinism in the CPU chip. Otherwise, we have to prove it is deterministic. The flag for specifying the
+        // if the instruction is sequential is stored at index 27.
+        if let PicusExpr::Const(1) = values[27].clone() {
+            self.picus_module.assume_deterministic.push(next_pc_out);
         }
-        let mut inputs = Vec::new();
-        let outputs = vec![multiplicity.clone() * values[next_pc_idx].clone()];
-        for (i, input) in values.iter().enumerate() {
-            if i == next_pc_idx {
-                continue;
-            }
-            inputs.push(multiplicity.clone() * input.clone());
+        // We need to mark some of the register values as inputs and other values as outputs.
+        // In particular, the parameters `b` and `c` to `receive_instruction` are inputs and
+        // parameter `a` is an output. `b` and `c` are at indexes 10-13 and 14-17 in `values` whereas
+        // `a` is at indexes 6-9. As in the code above, we need to create variables for the outputs since
+        // Picus requires the inputs and outputs to be variables.
+        for i in 6..=9 {
+            let a_var = fresh_picus_var();
+            self.picus_module.outputs.push(a_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[i], &a_var));
         }
-        self.picus_module.calls.push(PicusCall {
-            inputs,
-            outputs,
-            mod_name: RECEIVE_INSTRUCTION.to_string(),
-        });
+        for i in 10..=13 {
+            let b_var = fresh_picus_var();
+            self.picus_module.inputs.push(b_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[i], &b_var));
+        }
+        for i in 14..=17 {
+            let c_var = fresh_picus_var();
+            self.picus_module.inputs.push(c_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[i], &c_var));
+        }
     }
 }
 
@@ -151,6 +145,9 @@ impl<'a> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder {
             LookupKind::Byte => {
                 self.handle_byte_interaction(message.multiplicity, &message.values);
             }
+            LookupKind::Memory => {
+                // TODO: fill in
+            }
             _ => todo!("handle send: {}", message.kind),
         }
     }
@@ -161,6 +158,9 @@ impl<'a> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder {
         match message.kind {
             LookupKind::Instruction => {
                 self.handle_receive_instruction(message.multiplicity, &message.values);
+            }
+            LookupKind::Memory => {
+                // TODO: fill in
             }
             _ => todo!("handle receive: {}", message.kind),
         }

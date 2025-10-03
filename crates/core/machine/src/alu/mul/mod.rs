@@ -80,11 +80,9 @@ pub struct MulCols<T> {
     /// The current/next pc, used for instruction lookup table.
     #[picus(input)]
     pub pc: T,
-    #[picus(input)]
     pub next_pc: T,
 
     /// The upper bits of the output operand.
-    #[picus(output)]
     pub hi: Word<T>,
 
     /// The output operand.
@@ -92,11 +90,9 @@ pub struct MulCols<T> {
     pub a: Word<T>,
 
     /// The first input operand.
-    #[picus(input)]
     pub b: Word<T>,
 
     /// The second input operand.
-    #[picus(input)]
     pub c: Word<T>,
 
     /// Trace.
@@ -140,10 +136,8 @@ pub struct MulCols<T> {
     pub hi_record_is_real: T,
 
     /// The shard number.
-    #[picus(input)]
     pub shard: T,
     /// The clock cycle number.
-    #[picus(input)]
     pub clk: T,
 }
 
@@ -156,6 +150,10 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
 
     fn name(&self) -> String {
         "Mul".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        MulCols::<u8>::picus_info()
     }
 
     fn generate_trace(
