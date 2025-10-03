@@ -44,9 +44,9 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
@@ -74,23 +74,29 @@ const BYTE_MASK: u8 = 0xff;
 pub struct MulChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MulCols<T> {
     /// The current/next pc, used for instruction lookup table.
+    #[picus(input)]
     pub pc: T,
+    #[picus(input)]
     pub next_pc: T,
 
     /// The upper bits of the output operand.
+    #[picus(output)]
     pub hi: Word<T>,
 
     /// The output operand.
+    #[picus(output)]
     pub a: Word<T>,
 
     /// The first input operand.
+    #[picus(input)]
     pub b: Word<T>,
 
     /// The second input operand.
+    #[picus(input)]
     pub c: Word<T>,
 
     /// Trace.
@@ -112,15 +118,19 @@ pub struct MulCols<T> {
     pub c_sign_extend: T,
 
     /// Flag indicating whether the opcode is `MUL`.
+    #[picus(selector)]
     pub is_mul: T,
 
     /// Flag indicating whether the opcode is `MULT`.
+    #[picus(selector)]
     pub is_mult: T,
 
     /// Flag indicating whether the opcode is `MULTU`.
+    #[picus(selector)]
     pub is_multu: T,
 
     /// Selector to know whether this row is enabled.
+    #[picus(selector)]
     pub is_real: T,
 
     /// Access to hi register
@@ -130,8 +140,10 @@ pub struct MulCols<T> {
     pub hi_record_is_real: T,
 
     /// The shard number.
+    #[picus(input)]
     pub shard: T,
     /// The clock cycle number.
+    #[picus(input)]
     pub clk: T,
 }
 
