@@ -243,7 +243,8 @@ where
         // If the modulus is zero, then we don't perform the modulus operation.
         // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
         // not overflow because we are summing 32 bytes.
-        let modulus_byte_sum = modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
+        let modulus_byte_sum =
+            modulus_limbs.0.iter().fold(AB::Expr::zero(), |acc, &limb| acc + limb);
         IsZeroOperation::<AB::F>::eval(
             builder,
             modulus_byte_sum,
@@ -255,11 +256,11 @@ where
         // Otherwise, we use the modulus passed in.
         let modulus_is_zero = local.modulus_is_zero.result;
         let mut coeff_2_256 = Vec::new();
-        coeff_2_256.resize(32, AB::Expr::ZERO);
-        coeff_2_256.push(AB::Expr::ONE);
+        coeff_2_256.resize(32, AB::Expr::zero());
+        coeff_2_256.push(AB::Expr::one());
         let modulus_polynomial: Polynomial<AB::Expr> = modulus_limbs.into();
         let p_modulus: Polynomial<AB::Expr> = modulus_polynomial
-            * (AB::Expr::ONE - modulus_is_zero.into())
+            * (AB::Expr::one() - modulus_is_zero.into())
             + Polynomial::from_coefficients(&coeff_2_256) * modulus_is_zero.into();
 
         // Evaluate the uint256 multiplication
@@ -282,7 +283,7 @@ where
         );
         builder.assert_eq(
             local.modulus_is_not_zero,
-            local.is_real * (AB::Expr::ONE - modulus_is_zero.into()),
+            local.is_real * (AB::Expr::one() - modulus_is_zero.into()),
         );
 
         // Assert that the correct result is being written to x_memory.
@@ -293,7 +294,7 @@ where
         // Read and write x.
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk.into() + AB::Expr::ONE,
+            local.clk.into() + AB::Expr::one(),
             local.x_ptr,
             &local.x_memory,
             local.is_real,

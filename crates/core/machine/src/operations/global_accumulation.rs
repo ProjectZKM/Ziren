@@ -192,10 +192,10 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             // Now we can constrain that when `local_is_real[i] == 1`, the two `sum_checker` values are both zero.
             builder
                 .when(local_is_real[i])
-                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::ZERO);
+                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::zero());
             builder
                 .when(local_is_real[i])
-                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::ZERO);
+                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::zero());
 
             // If `is_real == 0`, current_sum == next_sum must hold.
             builder

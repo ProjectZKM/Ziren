@@ -449,7 +449,7 @@ where
             local.clk,
             syscall_id_felt,
             local.p_ptr,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
             local.is_real,
             LookupScope::Local,
         );

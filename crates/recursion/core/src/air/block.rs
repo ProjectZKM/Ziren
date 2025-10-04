@@ -48,7 +48,7 @@ impl<T> Block<T> {
 
 impl<T: Clone> Block<T> {
     pub fn as_extension<AB: ExtensionAirBuilder<Var = T>>(&self) -> BinomialExtension<AB::Expr> {
-        let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::ZERO + x);
+        let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::zero() + x);
         BinomialExtension(arr)
     }
 
@@ -56,7 +56,7 @@ impl<T: Clone> Block<T> {
         &self,
         base: AB::Expr,
     ) -> BinomialExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::ZERO);
+        let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::zero());
         arr[0] = base;
 
         BinomialExtension(arr)

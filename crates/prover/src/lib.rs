@@ -98,6 +98,11 @@ pub type InnerSC = KoalaBearPoseidon2;
 /// The configuration for the outer prover.
 pub type OuterSC = KoalaBearPoseidon2Outer;
 
+pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<
+    KoalaBearPoseidon2,
+    MipsAir<KoalaBear>,
+>>::DeviceProvingKey;
+
 const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
@@ -277,7 +282,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Creates a proving key and a verifying key for a given MIPS ELF.
     #[instrument(name = "setup", level = "debug", skip_all)]
-    pub fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
+    pub fn setup(
+        &self,
+        elf: &[u8],
+    ) -> (ZKMProvingKey, DeviceProvingKey<C>, Program, ZKMVerifyingKey) {
         let program = self.get_program(elf).unwrap();
         let (pk, vk) = self.core_prover.setup(&program);
         let vk = ZKMVerifyingKey { vk };
@@ -286,7 +294,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             elf: elf.to_vec(),
             vk: vk.clone(),
         };
-        (pk, vk)
+        let pk_d = self.core_prover.pk_to_device(&pk.pk);
+        (pk, pk_d, program, vk)
     }
 
     /// Get a program with an allowed preprocessed shape.
@@ -323,18 +332,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     #[instrument(name = "prove_core", level = "info", skip_all)]
     pub fn prove_core<'a>(
         &'a self,
-        pk: &ZKMProvingKey,
+        pk_d: &<<C as ZKMProverComponents>::CoreProver as MachineProver<
+            KoalaBearPoseidon2,
+            MipsAir<KoalaBear>,
+        >>::DeviceProvingKey,
+        program: Program,
         stdin: &ZKMStdin,
         opts: ZKMProverOpts,
         mut context: ZKMContext<'a>,
     ) -> Result<ZKMCoreProof, ZKMCoreProverError> {
         context.subproof_verifier = Some(self);
-        let program = self.get_program(&pk.elf).unwrap();
-        let pk = self.core_prover.pk_to_device(&pk.pk);
+        let pk = pk_d;
         let (proof, public_values_stream, cycles) =
             zkm_core_machine::utils::prove_with_context::<_, C::CoreProver>(
                 &self.core_prover,
-                &pk,
+                pk,
                 program,
                 stdin,
                 opts.core_opts,
@@ -1267,10 +1279,10 @@ pub mod tests {
         let context = ZKMContext::default();
 
         tracing::info!("setup elf");
-        let (pk, vk) = prover.setup(elf);
+        let (_, pk_d, program, vk) = prover.setup(elf);
 
         tracing::info!("prove core");
-        let core_proof = prover.prove_core(&pk, &stdin, opts, context)?;
+        let core_proof = prover.prove_core(&pk_d, program, &stdin, opts, context)?;
         let public_values = core_proof.public_values.clone();
 
         if env::var("COLLECT_SHAPES").is_ok() {
@@ -1406,16 +1418,22 @@ pub mod tests {
         let prover = ZKMProver::<C>::new();
 
         tracing::info!("setup keccak elf");
-        let (keccak_pk, keccak_vk) = prover.setup(keccak_elf);
+        let (_, keccak_pk_d, keccak_program, keccak_vk) = prover.setup(keccak_elf);
 
         tracing::info!("setup verify elf");
-        let (verify_pk, verify_vk) = prover.setup(verify_elf);
+        let (_, verify_pk_d, verify_program, verify_vk) = prover.setup(verify_elf);
 
         tracing::info!("prove subproof 1");
         let mut stdin = ZKMStdin::new();
         stdin.write(&1usize);
         stdin.write(&vec![0u8, 0, 0]);
-        let deferred_proof_1 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
+        let deferred_proof_1 = prover.prove_core(
+            &keccak_pk_d,
+            keccak_program.clone(),
+            &stdin,
+            opts,
+            Default::default(),
+        )?;
         let pv_1 = deferred_proof_1.public_values.as_slice().to_vec().clone();
 
         // Generate a second proof of keccak of various inputs.
@@ -1425,7 +1443,8 @@ pub mod tests {
         stdin.write(&vec![0u8, 1, 2]);
         stdin.write(&vec![2, 3, 4]);
         stdin.write(&vec![5, 6, 7]);
-        let deferred_proof_2 = prover.prove_core(&keccak_pk, &stdin, opts, Default::default())?;
+        let deferred_proof_2 =
+            prover.prove_core(&keccak_pk_d, keccak_program, &stdin, opts, Default::default())?;
         let pv_2 = deferred_proof_2.public_values.as_slice().to_vec().clone();
 
         // Generate recursive proof of first subproof.
@@ -1452,7 +1471,8 @@ pub mod tests {
         stdin.write_proof(deferred_reduce_2.clone(), keccak_vk.vk.clone());
 
         tracing::info!("proving verify program (core)");
-        let verify_proof = prover.prove_core(&verify_pk, &stdin, opts, Default::default())?;
+        let verify_proof =
+            prover.prove_core(&verify_pk_d, verify_program, &stdin, opts, Default::default())?;
         // let public_values = verify_proof.public_values.clone();
 
         // Generate recursive proof of verify program

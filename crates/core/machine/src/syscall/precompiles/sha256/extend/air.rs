@@ -201,7 +201,7 @@ where
             local.clk,
             AB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
             local.w_ptr,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
             local.cycle_48_start,
             LookupScope::Local,
         );

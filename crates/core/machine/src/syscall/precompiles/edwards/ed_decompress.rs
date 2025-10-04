@@ -120,7 +120,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.u.eval(
             builder,
             &self.yy.result,
-            &[AB::Expr::ONE].iter(),
+            &[AB::Expr::one()].iter(),
             FieldOperation::Sub,
             self.is_real,
         );
@@ -129,7 +129,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.dyy.eval(builder, &d_const, &self.yy.result, FieldOperation::Mul, self.is_real);
         self.v.eval(
             builder,
-            &[AB::Expr::ONE].iter(),
+            &[AB::Expr::one()].iter(),
             &self.dyy.result,
             FieldOperation::Add,
             self.is_real,
@@ -144,7 +144,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.x.eval(builder, &self.u_div_v.result, AB::F::ZERO, self.is_real);
         self.neg_x.eval(
             builder,
-            &[AB::Expr::ZERO].iter(),
+            &[AB::Expr::zero()].iter(),
             &self.x.multiplication.result,
             FieldOperation::Sub,
             self.is_real,

@@ -93,7 +93,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
         a: impl Into<Self::Expr> + Clone,
         b: impl Into<Self::Expr> + Clone,
     ) -> Self::Expr {
-        condition.clone().into() * a.into() + (Self::Expr::ONE - condition.into()) * b.into()
+        condition.clone().into() * a.into() + (Self::Expr::one() - condition.into()) * b.into()
     }
 
     /// Index an array of expressions using an index bitmap.  This function assumes that the
@@ -103,7 +103,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
         array: &[impl Into<Self::Expr> + Clone],
         index_bitmap: &[impl Into<Self::Expr> + Clone],
     ) -> Self::Expr {
-        let mut result = Self::Expr::ZERO;
+        let mut result = Self::Expr::zero();
 
         for (value, i) in array.iter().zip_eq(index_bitmap) {
             result = result.clone() + value.clone().into() * i.clone().into();
@@ -125,7 +125,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.send_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
+        self.send_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
     }
 
     /// Sends a byte operation with two outputs to be processed.
@@ -159,7 +159,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.receive_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
+        self.receive_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
     }
 
     /// Receives a byte operation with two outputs to be processed.
@@ -303,22 +303,22 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.send_instruction(
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
+            Self::Expr::zero(),
+            Self::Expr::zero(),
             Self::Expr::from_canonical_u32(UNUSED_PC),
             Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC),
-            Self::Expr::ZERO,
+            Self::Expr::zero(),
             opcode,
             a,
             b,
             c,
             hi,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ONE,
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::one(),
             multiplicity,
         )
     }
