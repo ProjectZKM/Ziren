@@ -439,6 +439,7 @@ where
             AB::Expr::ZERO,
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             AB::Expr::ZERO,
             local.is_slt * AB::F::from_canonical_u32(Opcode::SLT as u32)
                 + local.is_sltu * AB::F::from_canonical_u32(Opcode::SLTU as u32),

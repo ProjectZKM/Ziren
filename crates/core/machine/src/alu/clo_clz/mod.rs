@@ -216,6 +216,7 @@ where
             AB::Expr::ZERO,
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             AB::Expr::ZERO,
             cpu_opcode,
             local.a,
