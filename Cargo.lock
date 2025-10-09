@@ -1153,7 +1153,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.37",
  "proc-macro2",
@@ -4555,23 +4555,23 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-matrix",
 ]
 
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "ff 0.13.1",
  "halo2curves",
  "num-bigint 0.4.6",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-poseidon2",
+ "p3-symmetric",
  "rand 0.8.5",
  "serde",
 ]
@@ -4579,12 +4579,12 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
  "serde",
  "tracing",
 ]
@@ -4592,17 +4592,17 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
  "p3-fri",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
  "serde",
  "tracing",
 ]
@@ -4610,72 +4610,42 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-util",
  "serde",
 ]
 
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "tracing",
-]
-
-[[package]]
-name = "p3-dft"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-matrix 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-util 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
  "tracing",
 ]
 
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
  "num-integer",
  "num-traits",
  "nums",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "rand 0.8.5",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "p3-field"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "itertools 0.13.0",
- "num-bigint 0.4.6",
- "num-integer",
- "num-traits",
- "nums",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-util 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-maybe-rayon",
+ "p3-util",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -4684,17 +4654,17 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
  "p3-interpolation",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -4703,63 +4673,49 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
 ]
 
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-symmetric",
+ "p3-util",
  "tiny-keccak",
 ]
 
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "p3-air",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
  "tracing",
 ]
 
 [[package]]
 name = "p3-koala-bear"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-mds 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-monty-31 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "rand 0.8.5",
- "serde",
-]
-
-[[package]]
-name = "p3-koala-bear"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-mds 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-monty-31 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-poseidon2 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-symmetric 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-field",
+ "p3-mds",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
  "rand 0.8.5",
  "serde",
 ]
@@ -4767,27 +4723,12 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "rand 0.8.5",
- "serde",
- "tracing",
- "transpose",
-]
-
-[[package]]
-name = "p3-matrix"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-util 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-util",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -4797,56 +4738,37 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
-name = "p3-maybe-rayon"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-
-[[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "rand 0.8.5",
-]
-
-[[package]]
-name = "p3-mds"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "itertools 0.13.0",
- "p3-dft 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-matrix 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-symmetric 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-util 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-symmetric",
+ "p3-util",
  "rand 0.8.5",
 ]
 
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -4855,18 +4777,18 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-mds 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
  "rand 0.8.5",
  "serde",
 ]
@@ -4874,40 +4796,18 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-mds 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "tracing",
- "transpose",
-]
-
-[[package]]
-name = "p3-monty-31"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "itertools 0.13.0",
- "num-bigint 0.4.6",
- "p3-dft 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-matrix 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-mds 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-poseidon2 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-symmetric 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-util 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -4918,25 +4818,12 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "gcd",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-mds 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "rand 0.8.5",
- "serde",
-]
-
-[[package]]
-name = "p3-poseidon2"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "gcd",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-mds 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-symmetric 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-field",
+ "p3-mds",
+ "p3-symmetric",
  "rand 0.8.5",
  "serde",
 ]
@@ -4944,37 +4831,27 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "serde",
-]
-
-[[package]]
-name = "p3-symmetric"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
-dependencies = [
- "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-field",
  "serde",
 ]
 
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
  "serde",
  "tracing",
 ]
@@ -4982,16 +4859,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/felicityin/Plonky3?branch=adapt-gpu#ee137c885bf1a401bc8ad77586c8799f88326007"
-dependencies = [
- "lock_api",
- "serde",
-]
-
-[[package]]
-name = "p3-util"
-version = "0.1.0"
-source = "git+https://github.com/ProjectZKM/Plonky3#79f986caf008ee3ae455474f42100cb7227219f3"
+source = "git+https://github.com/ProjectZKM/Plonky3#faa24ca4597eebeecbf71b194b71c7d1a99b3f01"
 dependencies = [
  "lock_api",
  "serde",
@@ -8553,10 +8421,10 @@ dependencies = [
  "log",
  "nohash-hasher",
  "num",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-maybe-rayon",
+ "p3-symmetric",
  "rand 0.8.5",
  "rayon-scan",
  "rrs-succinct",
@@ -8601,14 +8469,14 @@ dependencies = [
  "p256",
  "p3-air",
  "p3-challenger",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
  "p3-keccak-air",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-koala-bear",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-poseidon2",
  "p3-uni-stark",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-util",
  "pathdiff",
  "rand 0.8.5",
  "rayon",
@@ -8649,7 +8517,7 @@ dependencies = [
  "k256",
  "num",
  "p256",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
  "rand 0.8.5",
  "rug",
  "serde",
@@ -8701,11 +8569,11 @@ dependencies = [
  "hex",
  "lazy_static",
  "num-bigint 0.4.6",
- "p3-field 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-koala-bear 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-monty-31 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-poseidon2 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
- "p3-symmetric 0.1.0 (git+https://github.com/ProjectZKM/Plonky3)",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
  "serde",
  "sha2",
 ]
@@ -8718,11 +8586,11 @@ dependencies = [
  "hex",
  "lazy_static",
  "num-bigint 0.4.6",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-monty-31 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
  "serde",
  "sha2",
 ]
@@ -8742,11 +8610,11 @@ dependencies = [
  "p3-bn254-fr",
  "p3-challenger",
  "p3-commit",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-matrix",
+ "p3-symmetric",
+ "p3-util",
  "rayon",
  "serde",
  "serde_json",
@@ -8778,15 +8646,15 @@ dependencies = [
  "p3-bn254-fr",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
  "p3-fri",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-koala-bear",
+ "p3-matrix",
  "p3-merkle-tree",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
  "rand 0.8.5",
  "rayon",
  "serde",
@@ -8812,11 +8680,11 @@ dependencies = [
  "itertools 0.13.0",
  "p3-bn254-fr",
  "p3-challenger",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
+ "p3-koala-bear",
  "p3-merkle-tree",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-symmetric",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -8843,17 +8711,17 @@ dependencies = [
  "p3-bn254-fr",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
  "p3-fri",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-koala-bear",
+ "p3-matrix",
+ "p3-maybe-rayon",
  "p3-merkle-tree",
- "p3-monty-31 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
  "pathdiff",
  "rand 0.8.5",
  "range-set-blaze",
@@ -8890,9 +8758,9 @@ dependencies = [
  "hex",
  "log",
  "num-bigint 0.4.6",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-symmetric",
  "serde",
  "serde_json",
  "sha2",
@@ -8924,9 +8792,9 @@ dependencies = [
  "itertools 0.13.0",
  "log",
  "num-bigint 0.4.6",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
  "p3-fri",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-koala-bear",
  "prost 0.11.9",
  "reqwest 0.11.27",
  "reqwest-middleware",
@@ -8965,20 +8833,20 @@ dependencies = [
  "p3-challenger",
  "p3-circle",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-dft",
+ "p3-field",
  "p3-fri",
  "p3-keccak",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-matrix 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-mds 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-koala-bear",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
  "p3-merkle-tree",
  "p3-mersenne-31",
- "p3-poseidon2 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-poseidon2",
+ "p3-symmetric",
  "p3-uni-stark",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-util",
  "postcard",
  "rand 0.8.5",
  "rayon-scan",
@@ -9012,10 +8880,10 @@ dependencies = [
  "num-traits",
  "once_cell",
  "p3-commit",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-symmetric 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-util 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-symmetric",
+ "p3-util",
  "rayon",
  "serde",
  "sha2",
@@ -9043,8 +8911,8 @@ dependencies = [
  "getrandom 0.2.16",
  "lazy_static",
  "libm",
- "p3-field 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
- "p3-koala-bear 0.1.0 (git+https://github.com/felicityin/Plonky3?branch=adapt-gpu)",
+ "p3-field",
+ "p3-koala-bear",
  "rand 0.8.5",
  "serde",
  "sha2",

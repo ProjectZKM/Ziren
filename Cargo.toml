@@ -44,27 +44,27 @@ debug-assertions = true
 
 
 [workspace.dependencies]
-# p3-air = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-field = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-commit = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-dft = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-util = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-fri = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-circle = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-mds = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3" }
-# p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-air = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-field = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-commit = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-dft = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-util = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-fri = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-circle = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-mds = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3" }
 
 # p3-air = { path = "../patch/Plonky3/air" }
 # p3-field = { path = "../patch/Plonky3/field" }
@@ -87,28 +87,6 @@ debug-assertions = true
 # p3-symmetric = { path = "../patch/Plonky3/symmetric" }
 # p3-bn254-fr = { path = "../patch/Plonky3/bn254-fr" }
 # p3-uni-stark = { path = "../patch/Plonky3/uni-stark" }
-
-p3-air = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-field = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-challenger = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-commit = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-dft = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-matrix = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-maybe-rayon = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-util = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-fri = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-koala-bear = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-circle = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-keccak = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-keccak-air = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-mds = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-merkle-tree = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-mersenne-31 = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-monty-31 = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-poseidon2 = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-symmetric = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-bn254-fr = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
-p3-uni-stark = { git = "https://github.com/felicityin/Plonky3", branch = "adapt-gpu" }
 
 itertools = "0.13.0"
 tracing = "0.1.37"
