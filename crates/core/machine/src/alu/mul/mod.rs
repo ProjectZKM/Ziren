@@ -456,6 +456,7 @@ where
             local.clk,
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             AB::Expr::zero(),
             opcode,
             local.a,

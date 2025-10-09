@@ -48,6 +48,7 @@ where
             AB::Expr::zero(),
             local.pc,
             local.next_pc.reduce::<AB>(),
+            local.next_next_pc.reduce::<AB>(),
             AB::Expr::zero(),
             opcode,
             local.op_a_value,

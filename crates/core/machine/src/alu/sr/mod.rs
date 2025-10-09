@@ -509,6 +509,7 @@ where
             AB::Expr::zero(),
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             AB::Expr::zero(),
             local.is_srl * AB::F::from_canonical_u32(Opcode::SRL as u32)
                 + local.is_sra * AB::F::from_canonical_u32(Opcode::SRA as u32)

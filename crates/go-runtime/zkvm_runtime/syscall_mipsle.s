@@ -35,3 +35,10 @@ TEXT ·SyscallExit(SB), $0-4
 	MOVW $0, R2         // v0 = syscall 0
 	SYSCALL
 	RET
+
+TEXT ·SyscallKeccakSponge(SB), $0-8
+	MOVW $0x01010009, R2   // v0 = KECCAK_SPONGE syscall
+	MOVW input+0(FP), R4   // a0 = input pointer
+	MOVW result+4(FP), R5  // a1 = result pointer
+	SYSCALL
+	RET

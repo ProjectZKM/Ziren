@@ -59,6 +59,7 @@ where
             local.clk,
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             local.num_extra_cycles,
             Opcode::SYSCALL.as_field::<AB::F>(),
             local.op_a_value,

@@ -67,6 +67,7 @@ where
             local.clk_to_send,
             local.pc,
             local.next_pc,
+            local.next_next_pc,
             local.num_extra_cycles,
             local.instruction.opcode,
             local.op_a_value,

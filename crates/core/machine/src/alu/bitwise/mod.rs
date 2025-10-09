@@ -203,6 +203,7 @@ where
             AB::Expr::zero(),
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             AB::Expr::zero(),
             cpu_opcode,
             local.a,

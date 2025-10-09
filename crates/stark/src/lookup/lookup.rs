@@ -30,23 +30,17 @@ pub enum LookupKind {
     /// Lookup with instruction oracle.
     Instruction = 3,
 
-    /// Lookup with the ALU operations.
-    Alu = 4,
-
     /// Lookup with the byte lookup table for byte operations.
-    Byte = 5,
+    Byte = 4,
 
     /// Requesting a range check for a given value and range.
-    Range = 6,
-
-    /// Lookup with the field op table for field operations.
-    Field = 7,
+    Range = 5,
 
     /// Lookup with a syscall.
-    Syscall = 8,
+    Syscall = 6,
 
     /// Lookup with the global table.
-    Global = 9,
+    Global = 7,
 }
 
 impl LookupKind {
@@ -57,10 +51,8 @@ impl LookupKind {
             LookupKind::Memory,
             LookupKind::Program,
             LookupKind::Instruction,
-            LookupKind::Alu,
             LookupKind::Byte,
             LookupKind::Range,
-            LookupKind::Field,
             LookupKind::Syscall,
             LookupKind::Global,
         ]
@@ -99,10 +91,8 @@ impl Display for LookupKind {
             LookupKind::Memory => write!(f, "Memory"),
             LookupKind::Program => write!(f, "Program"),
             LookupKind::Instruction => write!(f, "Instruction"),
-            LookupKind::Alu => write!(f, "Alu"),
             LookupKind::Byte => write!(f, "Byte"),
             LookupKind::Range => write!(f, "Range"),
-            LookupKind::Field => write!(f, "Field"),
             LookupKind::Syscall => write!(f, "Syscall"),
             LookupKind::Global => write!(f, "Global"),
         }

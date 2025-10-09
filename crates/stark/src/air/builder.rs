@@ -194,6 +194,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         clk: impl Into<Self::Expr> + Clone,
         pc: impl Into<Self::Expr>,
         next_pc: impl Into<Self::Expr>,
+        next_next_pc: impl Into<Self::Expr>,
         num_extra_cycles: impl Into<Self::Expr>,
         opcode: impl Into<Self::Expr>,
         a: Word<impl Into<Self::Expr>>,
@@ -212,6 +213,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(once(clk.into()))
             .chain(once(pc.into()))
             .chain(once(next_pc.into()))
+            .chain(once(next_next_pc.into()))
             .chain(once(num_extra_cycles.into()))
             .chain(once(opcode.into()))
             .chain(a.0.into_iter().map(Into::into))
@@ -240,6 +242,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         clk: impl Into<Self::Expr> + Clone,
         pc: impl Into<Self::Expr>,
         next_pc: impl Into<Self::Expr>,
+        next_next_pc: impl Into<Self::Expr>,
         num_extra_cycles: impl Into<Self::Expr>,
         opcode: impl Into<Self::Expr>,
         a: Word<impl Into<Self::Expr>>,
@@ -258,6 +261,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(once(clk.into()))
             .chain(once(pc.into()))
             .chain(once(next_pc.into()))
+            .chain(once(next_next_pc.into()))
             .chain(once(num_extra_cycles.into()))
             .chain(once(opcode.into()))
             .chain(a.0.into_iter().map(Into::into))
@@ -307,6 +311,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             Self::Expr::zero(),
             Self::Expr::from_canonical_u32(UNUSED_PC),
             Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC),
+            Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC + DEFAULT_PC_INC),
             Self::Expr::zero(),
             opcode,
             a,
