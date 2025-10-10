@@ -19,7 +19,7 @@ impl<T> BinomialExtension<T> {
     where
         T: FieldAlgebra,
     {
-        let mut arr: [T; D] = core::array::from_fn(|_| T::ZERO);
+        let mut arr: [T; D] = core::array::from_fn(|_| T::zero());
         arr[0] = b;
         Self(arr)
     }
@@ -56,7 +56,7 @@ impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra> Mul for BinomialExtens
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
+        let mut result = [T::zero(), T::zero(), T::zero(), T::zero()];
         let w = T::from_canonical_u32(3);
 
         for i in 0..D {

@@ -70,7 +70,8 @@ impl Prover<DefaultProverComponents> for CpuProver {
     }
 
     fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
-        self.prover.setup(elf)
+        let (pk, _, _, vk) = self.prover.setup(elf);
+        (pk, vk)
     }
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
@@ -90,9 +91,11 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((self.compress_to_groth16(stdin, opts)?, 0));
         }
 
+        let program = self.prover.get_program(&pk.elf).unwrap();
+
         // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
-            self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
+            self.prover.prove_core(&pk.pk, program, &stdin, opts.zkm_prover_opts, context)?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             return Ok((

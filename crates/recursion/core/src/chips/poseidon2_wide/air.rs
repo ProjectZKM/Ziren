@@ -12,7 +12,7 @@ use crate::builder::ZKMRecursionAirBuilder;
 
 use super::{
     columns::{
-        permutation::Poseidon2, preprocessed::Poseidon2PreprocessedCols,
+        permutation::Poseidon2, preprocessed::Poseidon2PreprocessedColsWide,
         NUM_POSEIDON2_DEGREE3_COLS, NUM_POSEIDON2_DEGREE9_COLS,
     },
     external_linear_layer, internal_linear_layer, Poseidon2WideChip, NUM_EXTERNAL_ROUNDS,
@@ -41,7 +41,7 @@ where
         let prepr = builder.preprocessed();
         let local_row = Self::convert::<AB::Var>(main.row_slice(0));
         let prep_local = prepr.row_slice(0);
-        let prep_local: &Poseidon2PreprocessedCols<_> = (*prep_local).borrow();
+        let prep_local: &Poseidon2PreprocessedColsWide<_> = (*prep_local).borrow();
 
         // Dummy constraints to normalize to DEGREE.
         let lhs = (0..DEGREE)
@@ -106,7 +106,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
         // let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
-        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
+        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
         for i in 0..WIDTH {
             let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 

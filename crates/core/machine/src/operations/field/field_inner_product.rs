@@ -104,7 +104,7 @@ where
         let p_result: Polynomial<<AB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
 
-        let p_zero = Polynomial::<AB::Expr>::new(vec![AB::Expr::ZERO]);
+        let p_zero = Polynomial::<AB::Expr>::new(vec![AB::Expr::zero()]);
 
         let p_inner_product = p_a_vec
             .iter()

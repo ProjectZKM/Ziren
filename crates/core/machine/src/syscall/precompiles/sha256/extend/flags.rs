@@ -66,7 +66,7 @@ impl ShaExtendChip {
         // Constrain `cycle_16_end.result` to be `cycle_16 - 1 == 0`. Intuitively g^16 is 1.
         IsZeroOperation::<AB::F>::eval(
             builder,
-            local.cycle_16 - AB::Expr::ONE,
+            local.cycle_16 - AB::Expr::one(),
             local.cycle_16_end,
             one.clone(),
         );

@@ -115,7 +115,7 @@ impl<F: Field> GlobalLookupOperation<F> {
         builder.assert_bool(is_real);
 
         // Compute the offset and range check each bits, ensuring that the offset is a byte.
-        let mut offset = AB::Expr::ZERO;
+        let mut offset = AB::Expr::zero();
         for i in 0..8 {
             builder.assert_bool(cols.offset_bits[i]);
             offset = offset.clone() + cols.offset_bits[i] * AB::F::from_canonical_u32(1 << i);
@@ -125,8 +125,8 @@ impl<F: Field> GlobalLookupOperation<F> {
         builder.send_byte(
             AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
             values[0].clone(),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             is_real,
         );
 
@@ -141,14 +141,14 @@ impl<F: Field> GlobalLookupOperation<F> {
             values[5].clone(),
             values[6].clone(),
             offset.clone(),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
         ];
 
         // Constrain the input of the permutation to be the message.
@@ -181,8 +181,8 @@ impl<F: Field> GlobalLookupOperation<F> {
         // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^24`.
         // Decompose `y6_value` into 30 bits, and then constrain that the top 7 bits cannot be all 1.
         // To do this, check that the sum of the top 7 bits is not equal to 7, which can be done by providing an inverse.
-        let mut y6_value = AB::Expr::ZERO;
-        let mut top_7_bits = AB::Expr::ZERO;
+        let mut y6_value = AB::Expr::zero();
+        let mut top_7_bits = AB::Expr::zero();
         for i in 0..30 {
             builder.assert_bool(cols.y6_bit_decomp[i]);
             y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * AB::F::from_canonical_u32(1 << i);
@@ -193,13 +193,13 @@ impl<F: Field> GlobalLookupOperation<F> {
         // If `is_real` is true, check that `top_7_bits - 7` is non-zero, by checking `range_check_witness` is an inverse of it.
         builder.when(is_real).assert_eq(
             cols.range_check_witness * (top_7_bits - AB::Expr::from_canonical_u8(7)),
-            AB::Expr::ONE,
+            AB::Expr::one(),
         );
 
         // Constrain that y has correct sign.
         // If it's a receive: `1 <= y_6 <= (p - 1) / 2`, so `0 <= y_6 - 1 = y6_value < (p - 1) / 2`.
         // If it's a send: `(p + 1) / 2 <= y_6 <= p - 1`, so `0 <= y_6 - (p + 1) / 2 = y6_value < (p - 1) / 2`.
-        builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value.clone());
+        builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::one() + y6_value.clone());
         builder.when(is_send).assert_eq(
             y.0[6].clone(),
             AB::Expr::from_canonical_u32((1 << 30) - (1 << 23) + 1) + y6_value.clone(),

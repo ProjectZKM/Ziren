@@ -71,13 +71,13 @@ impl<F: Field> SepticCurve<F> {
     pub fn double(&self) -> Self {
         let slope = (self.x * self.x * F::from_canonical_u8(3u8)
             + SepticExtension::from_base_slice(&[
-                F::ZERO,
+                F::zero(),
                 F::from_canonical_u32(3),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ]))
             / (self.y * F::TWO);
         let result_x = slope.square() - self.x * F::TWO;
@@ -104,22 +104,22 @@ impl<F: FieldAlgebra> SepticCurve<F> {
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
         x.cube()
             + x * SepticExtension::from_base_slice(&[
-                F::ZERO,
+                F::zero(),
                 F::from_canonical_u32(3),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ])
             - SepticExtension::from_base_slice(&[
                 F::from_canonical_u32(3),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ])
     }
 }
@@ -141,14 +141,14 @@ impl<F: PrimeField32> SepticCurve<F> {
                 m.0[5],
                 m.0[6],
                 F::from_canonical_u8(offset),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ];
 
             let m_hash = perm

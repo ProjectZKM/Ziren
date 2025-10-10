@@ -81,18 +81,18 @@ where
             local.pc,
             local.next_pc,
             local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
             opcode,
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
-            Word([AB::Expr::ZERO; 4]),
+            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
             local.is_sb + local.is_sh + local.is_sw + local.is_swl + local.is_swr,
-            AB::Expr::ONE,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
+            AB::Expr::one(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
             is_real,
         );
     }
@@ -141,7 +141,7 @@ impl MemoryInstructionsChip {
             local.op_c_value,
             is_real.clone(),
         );
-        // Range check the addr_word to be a valid babybear word. Note that this will also implicitly
+        // Range check the addr_word to be a valid koalabear word. Note that this will also implicitly
         // do a byte range check on the most significant byte.
         KoalaBearWordRangeChecker::<AB::F>::range_check(
             builder,
@@ -218,7 +218,7 @@ impl MemoryInstructionsChip {
             ByteOpcode::MSB.as_field::<AB::F>(),
             local.most_sig_bit,
             local.most_sig_byte,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
             local.is_lb + local.is_lh,
         );
         builder.assert_eq(
@@ -229,10 +229,10 @@ impl MemoryInstructionsChip {
         // When the memory value is negative and not writing to x0, use the SUB opcode to compute
         // the signed value of the memory value and verify that the op_a value is correct.
         let signed_value = Word([
-            AB::Expr::ZERO,
-            AB::Expr::ONE * local.is_lb,
-            AB::Expr::ONE * local.is_lh,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::one() * local.is_lb,
+            AB::Expr::one() * local.is_lh,
+            AB::Expr::zero(),
         ]);
 
         // SAFETY: As we mentioned before, `mem_value_is_neg` is correct in all cases and boolean in all cases.
@@ -248,7 +248,7 @@ impl MemoryInstructionsChip {
         // SAFETY: If it's a store instruction or a padding row, `mem_value_is_pos = 0`.
         // If it's an unsigned instruction (LBU, LHU, LW), then `mem_value_is_pos = 1`.
         // If it's signed instruction (LB, LH), then `most_sig_bit` will be constrained correctly, and same for `mem_value_is_pos`.
-        let mem_value_is_pos = (local.is_lb + local.is_lh) * (AB::Expr::ONE - local.most_sig_bit)
+        let mem_value_is_pos = (local.is_lb + local.is_lh) * (AB::Expr::one() - local.most_sig_bit)
             + local.is_lbu
             + local.is_lhu
             + local.is_lw
@@ -272,10 +272,10 @@ impl MemoryInstructionsChip {
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
         let offset_is_zero =
-            AB::Expr::ONE - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
+            AB::Expr::one() - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
 
         // Compute the expected stored value for a SB instruction.
-        let one = AB::Expr::ONE;
+        let one = AB::Expr::one();
         let a_val = *local.op_a_access.value();
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
@@ -391,7 +391,7 @@ impl MemoryInstructionsChip {
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
         let offset_is_zero =
-            AB::Expr::ONE - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
+            AB::Expr::one() - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
 
         // Compute the byte value.
         let mem_byte = mem_val[0] * offset_is_zero.clone()
@@ -418,8 +418,8 @@ impl MemoryInstructionsChip {
         let half_value = Word([
             use_lower_half.clone() * mem_val[0] + use_upper_half * mem_val[2],
             use_lower_half * mem_val[1] + use_upper_half * mem_val[3],
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
         ]);
         builder
             .when(local.is_lh + local.is_lhu)
@@ -428,7 +428,7 @@ impl MemoryInstructionsChip {
         // When the instruction is LW, just use the word.
         builder.when(local.is_lw).assert_word_eq(mem_val, local.unsigned_mem_val);
 
-        let one = AB::Expr::ONE;
+        let one = AB::Expr::one();
         let a_val = *local.op_a_access.value();
         // Compute the expected stored value for a LWR instruction.
         let lwr_expected_load_value = Word([
@@ -485,7 +485,7 @@ impl MemoryInstructionsChip {
         local: &MemoryInstructionsColumns<AB::Var>,
     ) {
         let offset_is_zero =
-            AB::Expr::ONE - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
+            AB::Expr::one() - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
 
         // Assert that the value flags are boolean
         builder.assert_bool(local.ls_bits_is_one);
@@ -505,7 +505,7 @@ impl MemoryInstructionsChip {
         // As their sum is constrained to be 1, the only possibility is that exactly one flag is on, with value 1.
         builder.when(offset_is_zero).assert_zero(local.addr_ls_two_bits);
         builder.when(local.ls_bits_is_one).assert_one(local.addr_ls_two_bits);
-        builder.when(local.ls_bits_is_two).assert_eq(local.addr_ls_two_bits, AB::Expr::TWO);
+        builder.when(local.ls_bits_is_two).assert_eq(local.addr_ls_two_bits, AB::Expr::two());
         builder
             .when(local.ls_bits_is_three)
             .assert_eq(local.addr_ls_two_bits, AB::Expr::from_canonical_u8(3));
