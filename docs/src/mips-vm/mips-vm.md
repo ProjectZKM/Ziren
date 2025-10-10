@@ -62,6 +62,7 @@ Two kinds of allocators are provided to rust guest program
 
 ### Go guest program
 Go guest program is similar to embeded-mode rust guest program, except that the initial args is set by VM at the top of the stack. The memory layout is as follows:
+
 |   Section	  |    Start	 |     Size	        |   Access		| Controlled-by |	
 | ----------- | ---------- | ---------------- | ----------- | ------------- |
 | registers 	|    0x00	   | 36	              |     rw      |     VM        |
