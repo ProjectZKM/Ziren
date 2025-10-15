@@ -1,4 +1,4 @@
-use std::{cmp::max, env};
+use std::env;
 
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
@@ -85,7 +85,7 @@ impl ZKMProverOpts {
         // Set the core options.
         if 24 <= gpu_ram_gb {
             let log2_shard_size = 21;
-            opts.core_opts.shard_size = max(opts.core_opts.shard_size, 1 << log2_shard_size);
+            opts.core_opts.shard_size = 1 << log2_shard_size;
             opts.core_opts.shard_batch_size = 1;
 
             let log2_deferred_threshold = 14;
