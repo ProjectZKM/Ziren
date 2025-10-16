@@ -695,7 +695,7 @@ impl<'a> Executor<'a> {
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
-            self.emit_mem_instr_event(instruction.opcode, a, b, c);
+            self.emit_mem_instr_event(instruction.opcode, a, b, c, hi_or_prev_a.unwrap_or(0));
         } else if instruction.is_branch_instruction() {
             self.emit_branch_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
         } else if instruction.is_jump_instruction() {
@@ -830,7 +830,7 @@ impl<'a> Executor<'a> {
 
     /// Emit a memory instruction event.
     #[inline]
-    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32) {
+    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32, prev_a_val: u32) {
         let event = MemInstrEvent {
             shard: self.shard(),
             clk: self.state.clk,
@@ -841,7 +841,7 @@ impl<'a> Executor<'a> {
             b,
             c,
             mem_access: self.memory_accesses.memory.expect("Must have memory access"),
-            op_a_access: self.memory_accesses.a.expect("Must have memory access"),
+            prev_a_val,
         };
 
         self.record.memory_instr_events.push(event);
@@ -1233,12 +1233,12 @@ impl<'a> Executor<'a> {
             | Opcode::LHU
             | Opcode::LWR
             | Opcode::LL => {
-                (a, b, c) = self.execute_load(instruction)?;
+                (hi_or_prev_a, a, b, c) = self.execute_load(instruction)?;
             }
 
             // Store instructions.
             Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SC => {
-                (a, b, c) = self.execute_store(instruction)?;
+                (hi_or_prev_a, a, b, c) = self.execute_store(instruction)?;
             }
 
             // Branch instructions.
@@ -1561,7 +1561,7 @@ impl<'a> Executor<'a> {
     fn execute_load(
         &mut self,
         instruction: &Instruction,
-    ) -> Result<(u32, u32, u32), ExecutionError> {
+    ) -> Result<(Option<u32>, u32, u32, u32), ExecutionError> {
         let (rt_reg, rs_reg, offset_ext) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs_raw = self.rr(rs_reg, MemoryAccessPosition::B);
@@ -1614,13 +1614,13 @@ impl<'a> Executor<'a> {
         };
         self.rw(rt_reg, val, MemoryAccessPosition::A);
 
-        Ok((val, rs_raw, offset_ext))
+        Ok((Some(rt), val, rs_raw, offset_ext))
     }
 
     fn execute_store(
         &mut self,
         instruction: &Instruction,
-    ) -> Result<(u32, u32, u32), ExecutionError> {
+    ) -> Result<(Option<u32>, u32, u32, u32), ExecutionError> {
         let (rt_reg, rs_reg, offset_ext) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs = self.rr(rs_reg, MemoryAccessPosition::B);
@@ -1681,9 +1681,9 @@ impl<'a> Executor<'a> {
         if instruction.opcode == Opcode::SC {
             self.rw(rt_reg, 1, MemoryAccessPosition::A);
 
-            Ok((1, rs, offset_ext))
+            Ok((Some(rt), 1, rs, offset_ext))
         } else {
-            Ok((rt, rs, offset_ext))
+            Ok((Some(rt), rt, rs, offset_ext))
         }
     }
 
