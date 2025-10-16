@@ -22,7 +22,7 @@
   "Bls12831Fp2MulAssign": 4341,
   "SyscallPrecompile": 22,
   "SyscallInstrs": 86,
-  "MemoryInstrs": 119,
+  "MemoryInstrs": 110,
   "Secp256k1AddAssign": 4013,
   "SysLinux": 125,
   "DivRem": 162,

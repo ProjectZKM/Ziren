@@ -86,7 +86,7 @@ where
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+            local.prev_a_val,
             local.is_sb + local.is_sh + local.is_sw + local.is_swl + local.is_swr,
             AB::Expr::one(),
             AB::Expr::zero(),
@@ -252,7 +252,9 @@ impl MemoryInstructionsChip {
             + local.is_lbu
             + local.is_lhu
             + local.is_lw
-            + local.is_ll;
+            + local.is_ll
+            + local.is_lwl
+            + local.is_lwr;
         builder.assert_eq(local.mem_value_is_pos, mem_value_is_pos);
 
         // When the memory value is not positive and not writing to x0, assert that op_a value is
@@ -276,7 +278,7 @@ impl MemoryInstructionsChip {
 
         // Compute the expected stored value for a SB instruction.
         let one = AB::Expr::one();
-        let a_val = *local.op_a_access.value();
+        let a_val = local.op_a_value;
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
         let sb_expected_stored_value = Word([
@@ -359,7 +361,7 @@ impl MemoryInstructionsChip {
             .assert_word_eq(mem_val.map(|x| x.into()), swr_expected_stored_value);
 
         // When the instruction is SC: compute the expected stored value
-        let prev_a_val = local.op_a_access.prev_value();
+        let prev_a_val = local.prev_a_val;
 
         // Ensure that the offset is 0.
         builder.when(local.is_sc).assert_one(offset_is_zero.clone());
@@ -384,8 +386,6 @@ impl MemoryInstructionsChip {
         local: &MemoryInstructionsColumns<AB::Var>,
     ) {
         let mem_val = *local.memory_access.value();
-        let prev_a_val = local.op_a_access.prev_value();
-        let prev_mem_val = *local.memory_access.prev_value();
 
         // Compute the offset_is_zero flag.  The other offset flags are already constrained by the
         // method `eval_memory_address_and_access`, which is called in
@@ -429,7 +429,7 @@ impl MemoryInstructionsChip {
         builder.when(local.is_lw).assert_word_eq(mem_val, local.unsigned_mem_val);
 
         let one = AB::Expr::one();
-        let a_val = *local.op_a_access.value();
+        let prev_a_val = local.prev_a_val;
         // Compute the expected stored value for a LWR instruction.
         let lwr_expected_load_value = Word([
             mem_val[0] * offset_is_zero.clone()
@@ -446,7 +446,7 @@ impl MemoryInstructionsChip {
             mem_val[3] * offset_is_zero.clone()
                 + prev_a_val[3] * (one.clone() - offset_is_zero.clone()),
         ]);
-        builder.when(local.is_lwr).assert_word_eq(a_val.map(|x| x.into()), lwr_expected_load_value);
+        builder.when(local.is_lwr).assert_word_eq(local.unsigned_mem_val, lwr_expected_load_value);
 
         // Compute the expected stored value for a LWL instruction.
         let lwl_expected_load_value = Word([
@@ -465,17 +465,12 @@ impl MemoryInstructionsChip {
                 + mem_val[1] * local.ls_bits_is_one
                 + mem_val[0] * offset_is_zero.clone(),
         ]);
-        builder.when(local.is_lwl).assert_word_eq(a_val.map(|x| x.into()), lwl_expected_load_value);
+        builder.when(local.is_lwl).assert_word_eq(local.unsigned_mem_val, lwl_expected_load_value);
 
         // Compute the expected stored value for a LL instruction.
-        builder.when(local.is_ll).assert_word_eq(a_val.map(|x| x.into()), mem_val);
+        builder.when(local.is_ll).assert_word_eq(local.unsigned_mem_val, mem_val);
         // Ensure that the offset is 0.
         builder.when(local.is_ll).assert_one(offset_is_zero.clone());
-
-        // value stay the same.
-        builder.when(local.is_lwr).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
-        builder.when(local.is_lwl).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
-        builder.when(local.is_ll).assert_word_eq(mem_val.map(|x| x.into()), prev_mem_val);
     }
 
     /// Evaluates the offset value flags.
