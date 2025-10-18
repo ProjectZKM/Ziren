@@ -17,9 +17,7 @@ pub trait ProgramAirBuilder: BaseAirBuilder {
         instruction: InstructionCols<impl Into<Self::Expr> + Copy>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        let values = once(pc.into())
-            .chain(instruction.into_iter().map(|x| x.into()))
-            .collect();
+        let values = once(pc.into()).chain(instruction.into_iter().map(|x| x.into())).collect();
 
         self.send(
             AirLookup::new(values, multiplicity.into(), LookupKind::Program),
@@ -34,9 +32,8 @@ pub trait ProgramAirBuilder: BaseAirBuilder {
         instruction: InstructionCols<impl Into<Self::Expr> + Copy>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        let values: Vec<<Self as AirBuilder>::Expr> = once(pc.into())
-            .chain(instruction.into_iter().map(|x| x.into()))
-            .collect();
+        let values: Vec<<Self as AirBuilder>::Expr> =
+            once(pc.into()).chain(instruction.into_iter().map(|x| x.into())).collect();
 
         self.receive(
             AirLookup::new(values, multiplicity.into(), LookupKind::Program),
