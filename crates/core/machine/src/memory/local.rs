@@ -197,10 +197,7 @@ where
         let local: &MemoryLocalCols<AB::Var> = (*local).borrow();
 
         for local in local.memory_local_entries.iter() {
-            builder.assert_eq(
-                local.is_real * local.is_real * local.is_real,
-                local.is_real * local.is_real * local.is_real,
-            );
+            builder.assert_bool(local.is_real);
 
             let mut values =
                 vec![local.initial_shard.into(), local.initial_clk.into(), local.addr.into()];

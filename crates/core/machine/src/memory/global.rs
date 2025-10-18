@@ -261,9 +261,6 @@ where
         let value = [byte1, byte2, byte3, byte4];
 
         if self.kind == MemoryChipType::Initialize {
-            let mut values = vec![AB::Expr::zero(), AB::Expr::zero(), local.addr.into()];
-            values.extend(value.clone().map(Into::into));
-
             // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
@@ -285,9 +282,6 @@ where
                 LookupScope::Local,
             );
         } else {
-            let mut values = vec![local.shard.into(), local.timestamp.into(), local.addr.into()];
-            values.extend(value.clone());
-
             // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(

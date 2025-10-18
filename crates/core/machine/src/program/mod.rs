@@ -39,7 +39,7 @@ pub struct ProgramMultiplicityCols<T> {
     pub multiplicity: T,
 }
 
-/// A chip that implements addition for the opcodes ADD and ADDI.
+/// A chip for Program
 #[derive(Default)]
 pub struct ProgramChip;
 
