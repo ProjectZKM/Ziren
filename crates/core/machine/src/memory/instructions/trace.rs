@@ -97,7 +97,7 @@ impl MemoryInstructionsChip {
 
         // Populate memory accesses for reading from memory.
         cols.memory_access.populate(event.mem_access, blu);
-        cols.op_a_access.populate(event.op_a_access, &mut Vec::new());
+        cols.prev_a_val = event.prev_a_val.into();
 
         // Populate addr_word and addr_aligned columns.
         let memory_addr = event.b.wrapping_add(event.c);
@@ -163,7 +163,7 @@ impl MemoryInstructionsChip {
                     //    (rt & (!mask)) | val
                     let val = mem_value << (24 - addr_ls_two_bits * 8);
                     let mask = 0xFFFFFFFF_u32 << (24 - addr_ls_two_bits * 8);
-                    cols.unsigned_mem_val = ((mem_value & (!mask)) | val).into();
+                    cols.unsigned_mem_val = ((event.prev_a_val & (!mask)) | val).into();
                 }
                 Opcode::LWR => {
                     // LWR:
@@ -172,7 +172,7 @@ impl MemoryInstructionsChip {
                     //     (rt & (!mask)) | val
                     let val = mem_value >> (addr_ls_two_bits * 8);
                     let mask = 0xFFFFFFFF_u32 >> (addr_ls_two_bits * 8);
-                    cols.unsigned_mem_val = ((mem_value & (!mask)) | val).into();
+                    cols.unsigned_mem_val = ((event.prev_a_val & (!mask)) | val).into();
                 }
                 Opcode::LL => {
                     cols.unsigned_mem_val = mem_value.into();
@@ -208,7 +208,15 @@ impl MemoryInstructionsChip {
             // Set the `mem_value_is_pos` composite flag.
             cols.mem_value_is_pos = F::from_bool(
                 (matches!(event.opcode, Opcode::LB | Opcode::LH) && (cols.most_sig_bit == F::ZERO))
-                    || matches!(event.opcode, Opcode::LBU | Opcode::LHU | Opcode::LW | Opcode::LL),
+                    || matches!(
+                        event.opcode,
+                        Opcode::LBU
+                            | Opcode::LHU
+                            | Opcode::LW
+                            | Opcode::LL
+                            | Opcode::LWL
+                            | Opcode::LWR
+                    ),
             )
         }
 

@@ -78,7 +78,7 @@ pub struct MemoryInstructionsColumns<T> {
 
     /// Memory consistency columns for the memory access.
     pub memory_access: MemoryReadWriteCols<T>,
-    pub op_a_access: MemoryReadWriteCols<T>,
+    pub prev_a_val: Word<T>,
 
     /// Used for load memory instructions to store the unsigned memory value.
     pub unsigned_mem_val: Word<T>,
