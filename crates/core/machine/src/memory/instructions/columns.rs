@@ -57,7 +57,7 @@ pub struct MemoryInstructionsColumns<T> {
 
     /// The relationships among addr_word, addr_aligned, and addr_offset is as follows:
     /// addr_aligned = addr_word - addr_offset
-    /// addr_offset = addr_word % 4
+    /// addr_ls_two_bits = addr_word % 4
     /// Note that this all needs to be verified in the AIR
     pub addr_word: Word<T>,
 
