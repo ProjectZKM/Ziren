@@ -18,7 +18,6 @@ pub trait ProgramAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(pc.into())
-            .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .collect();
 
@@ -36,7 +35,6 @@ pub trait ProgramAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values: Vec<<Self as AirBuilder>::Expr> = once(pc.into())
-            .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .collect();
 
