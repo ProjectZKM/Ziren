@@ -3,6 +3,7 @@
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::{FieldAlgebra, PrimeField32};
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::BorrowMut;
@@ -11,10 +12,12 @@ use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
 
+#[cfg(feature = "sys")]
+use crate::ExpReverseBitsEvent;
 use crate::{
     builder::ZKMRecursionAirBuilder,
     runtime::{ExecutionRecord, RecursionProgram},
-    ExpReverseBitsEvent, ExpReverseBitsInstr, Instruction,
+    ExpReverseBitsInstr, Instruction,
 };
 
 use super::mem::MemoryAccessColsChips;
@@ -86,6 +89,57 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        let mut rows: Vec<[F; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]> = Vec::new();
+        program
+            .instructions
+            .iter()
+            .filter_map(|instruction| {
+                if let Instruction::ExpReverseBitsLen(instr) = instruction {
+                    Some(instr)
+                } else {
+                    None
+                }
+            })
+            .for_each(|instruction| {
+                let ExpReverseBitsInstr { addrs, mult } = instruction;
+                let mut row_add =
+                    vec![[F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]; addrs.exp.len()];
+                row_add.iter_mut().enumerate().for_each(|(i, row)| {
+                    let row: &mut ExpReverseBitsLenPreprocessedCols<F> =
+                        row.as_mut_slice().borrow_mut();
+                    row.iteration_num = F::from_canonical_u32(i as u32);
+                    row.is_first = F::from_bool(i == 0);
+                    row.is_last = F::from_bool(i == addrs.exp.len() - 1);
+                    row.is_real = F::ONE;
+                    row.x_mem =
+                        MemoryAccessColsChips { addr: addrs.base, mult: -F::from_bool(i == 0) };
+                    row.exponent_mem =
+                        MemoryAccessColsChips { addr: addrs.exp[i], mult: F::NEG_ONE };
+                    row.result_mem = MemoryAccessColsChips {
+                        addr: addrs.result,
+                        mult: *mult * F::from_bool(i == addrs.exp.len() - 1),
+                    };
+                });
+                rows.extend(row_add);
+            });
+
+        // Pad the trace to a power of two.
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
+            program.fixed_log2_rows(self),
+        );
+
+        let trace = RowMajorMatrix::new(
+            rows.into_iter().flatten().collect(),
+            NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS,
+        );
+        Some(trace)
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -150,6 +204,67 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         Some(trace)
     }
 
+    #[cfg(not(feature = "sys"))]
+    #[instrument(name = "generate exp reverse bits len trace", level = "debug", skip_all, fields(rows = input.exp_reverse_bits_len_events.len()))]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        let mut overall_rows = Vec::new();
+        input.exp_reverse_bits_len_events.iter().for_each(|event| {
+            let mut rows = vec![vec![F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
+
+            let mut accum = F::ONE;
+
+            rows.iter_mut().enumerate().for_each(|(i, row)| {
+                let cols: &mut ExpReverseBitsLenCols<F> = row.as_mut_slice().borrow_mut();
+
+                let prev_accum = accum;
+                accum = prev_accum
+                    * prev_accum
+                    * if event.exp[i] == F::ONE { event.base } else { F::ONE };
+
+                cols.x = event.base;
+                cols.current_bit = event.exp[i];
+                cols.accum = accum;
+                cols.accum_squared = accum * accum;
+                cols.prev_accum_squared = prev_accum * prev_accum;
+                cols.multiplier = if event.exp[i] == F::ONE { event.base } else { F::ONE };
+                cols.prev_accum_squared_times_multiplier =
+                    cols.prev_accum_squared * cols.multiplier;
+                if i == event.exp.len() {
+                    assert_eq!(event.result, accum);
+                }
+            });
+
+            overall_rows.extend(rows);
+        });
+
+        // Pad the trace to a power of two.
+        pad_rows_fixed(
+            &mut overall_rows,
+            || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
+            input.fixed_log2_rows(self),
+        );
+
+        // Convert the trace to a row major matrix.
+        let trace = RowMajorMatrix::new(
+            overall_rows.into_iter().flatten().collect(),
+            NUM_EXP_REVERSE_BITS_LEN_COLS,
+        );
+
+        #[cfg(debug_assertions)]
+        println!(
+            "exp reverse bits len trace dims is width: {:?}, height: {:?}",
+            trace.width(),
+            trace.height()
+        );
+
+        trace
+    }
+
+    #[cfg(feature = "sys")]
     #[instrument(name = "generate exp reverse bits len trace", level = "debug", skip_all, fields(rows = input.exp_reverse_bits_len_events.len()))]
     fn generate_trace(
         &self,

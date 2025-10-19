@@ -246,12 +246,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "sys")]
     use std::borrow::BorrowMut;
+    #[cfg(feature = "sys")]
     use std::sync::LazyLock;
 
+    #[cfg(feature = "sys")]
     use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "sys")]
     use p3_maybe_rayon::prelude::ParallelIterator;
     use rand::{thread_rng, Rng};
     use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
@@ -259,7 +263,9 @@ mod tests {
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
-    use super::{AddSubChip, AddSubCols, NUM_ADD_SUB_COLS};
+    use super::AddSubChip;
+    #[cfg(feature = "sys")]
+    use super::{AddSubCols, NUM_ADD_SUB_COLS};
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
 
     #[test]

@@ -2,7 +2,10 @@ use core::borrow::Borrow;
 use std::{borrow::BorrowMut, iter::zip};
 
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::{extension::BinomiallyExtendable, Field, FieldAlgebra, PrimeField32};
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
+use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -10,6 +13,10 @@ use zkm_core_machine::utils::next_power_of_two;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{ExtensionAirBuilder, MachineAir};
 
+#[cfg(feature = "sys")]
+use crate::chips::alu_base::BaseAluAccessCols;
+#[cfg(feature = "sys")]
+use crate::chips::alu_base::{BaseAluValueCols, NUM_BASE_ALU_COLS, NUM_BASE_ALU_VALUE_COLS};
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
 pub const NUM_EXT_ALU_ENTRIES_PER_ROW: usize = 4;
@@ -81,6 +88,50 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         })
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        // Allocating an intermediate `Vec` is faster.
+        let instrs = program
+            .instructions
+            .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .filter_map(|instruction| match instruction {
+                Instruction::ExtAlu(x) => Some(x),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = instrs.len() * NUM_EXT_ALU_ACCESS_COLS;
+        values[..populate_len].par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let ExtAluInstr { opcode, mult, addrs } = instr;
+                let access: &mut ExtAluAccessCols<_> = row.borrow_mut();
+                *access = ExtAluAccessCols {
+                    addrs: addrs.to_owned(),
+                    is_add: F::from_bool(false),
+                    is_sub: F::from_bool(false),
+                    is_mul: F::from_bool(false),
+                    is_div: F::from_bool(false),
+                    mult: mult.to_owned(),
+                };
+                let target_flag = match opcode {
+                    ExtAluOpcode::AddE => &mut access.is_add,
+                    ExtAluOpcode::SubE => &mut access.is_sub,
+                    ExtAluOpcode::MulE => &mut access.is_mul,
+                    ExtAluOpcode::DivE => &mut access.is_div,
+                };
+                *target_flag = F::from_bool(true);
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        Some(RowMajorMatrix::new(values, NUM_EXT_ALU_PREPROCESSED_COLS))
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -137,6 +188,26 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         })
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        let events = &input.ext_alu_events;
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
+        values[..populate_len].par_chunks_mut(NUM_EXT_ALU_VALUE_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
+                let cols: &mut ExtAluValueCols<_> = row.borrow_mut();
+                *cols = ExtAluValueCols { vals };
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(values, NUM_EXT_ALU_COLS)
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         assert_eq!(
             std::any::TypeId::of::<F>(),

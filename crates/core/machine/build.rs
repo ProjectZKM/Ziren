@@ -1,5 +1,6 @@
 fn main() {
     if std::env::var("DOCS_RS").is_ok() {
+        #[allow(clippy::needless_return)]
         return;
     }
 

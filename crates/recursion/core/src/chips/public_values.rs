@@ -1,7 +1,10 @@
 use std::borrow::{Borrow, BorrowMut};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
-use p3_field::{FieldAlgebra, PrimeField32};
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
+use p3_field::PrimeField32;
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_machine::utils::pad_rows_fixed;
@@ -12,8 +15,10 @@ use crate::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     builder::ZKMRecursionAirBuilder,
     runtime::{Instruction, RecursionProgram},
-    CommitPublicValuesEvent, CommitPublicValuesInstr, ExecutionRecord,
+    ExecutionRecord,
 };
+#[cfg(feature = "sys")]
+use crate::{CommitPublicValuesEvent, CommitPublicValuesInstr};
 
 use crate::DIGEST_SIZE;
 
@@ -66,6 +71,53 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         NUM_PUBLIC_VALUES_PREPROCESSED_COLS
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        let mut rows: Vec<[F; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
+        let commit_pv_hash_instrs = program
+            .instructions
+            .iter()
+            .filter_map(|instruction| {
+                if let Instruction::CommitPublicValues(instr) = instruction {
+                    Some(instr)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if commit_pv_hash_instrs.len() != 1 {
+            tracing::warn!("Expected exactly one CommitPVHash instruction.");
+        }
+
+        // We only take 1 commit pv hash instruction, since our air only checks for one public
+        // values hash.
+        for instr in commit_pv_hash_instrs.iter().take(1) {
+            for (i, addr) in instr.pv_addrs.digest.iter().enumerate() {
+                let mut row = [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
+                let cols: &mut PublicValuesPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
+                cols.pv_idx[i] = F::ONE;
+                cols.pv_mem = MemoryAccessColsChips { addr: *addr, mult: F::NEG_ONE };
+                rows.push(row);
+            }
+        }
+
+        // Pad the preprocessed rows to 8 rows.
+        // gpu code breaks for small traces
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
+            Some(PUB_VALUES_LOG_HEIGHT),
+        );
+
+        let trace = RowMajorMatrix::new(
+            rows.into_iter().flatten().collect(),
+            NUM_PUBLIC_VALUES_PREPROCESSED_COLS,
+        );
+        Some(trace)
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -128,6 +180,42 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         Some(trace)
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        if input.commit_pv_hash_events.len() != 1 {
+            tracing::warn!("Expected exactly one CommitPVHash event.");
+        }
+
+        let mut rows: Vec<[F; NUM_PUBLIC_VALUES_COLS]> = Vec::new();
+
+        // We only take 1 commit pv hash instruction, since our air only checks for one public
+        // values hash.
+        for event in input.commit_pv_hash_events.iter().take(1) {
+            for element in event.public_values.digest.iter() {
+                let mut row = [F::ZERO; NUM_PUBLIC_VALUES_COLS];
+                let cols: &mut PublicValuesCols<F> = row.as_mut_slice().borrow_mut();
+
+                cols.pv_element = *element;
+                rows.push(row);
+            }
+        }
+
+        // Pad the trace to 8 rows.
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_PUBLIC_VALUES_COLS],
+            Some(PUB_VALUES_LOG_HEIGHT),
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_PUBLIC_VALUES_COLS)
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_trace(
         &self,
         input: &ExecutionRecord<F>,

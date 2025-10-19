@@ -1,5 +1,6 @@
 fn main() {
     if std::env::var("DOCS_RS").is_ok() {
+        #[allow(clippy::needless_return)]
         return;
     }
 
@@ -191,7 +192,7 @@ mod sys {
         // Use the `cc` crate to build the library and statically link it to the crate.
         let mut cc_builder = cc::Build::new();
         cc_builder.files(&compilation_units).include(target_include_dir).include(include_dir);
-        cc_builder.cpp(true).std("c++17");
+        cc_builder.cpp(true).std("c++20");
         cc_builder.compile(LIB_NAME)
     }
 

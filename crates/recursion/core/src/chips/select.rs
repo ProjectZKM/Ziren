@@ -1,6 +1,7 @@
 use core::borrow::Borrow;
 use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::{Field, FieldAlgebra, PrimeField32};
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -60,6 +61,40 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         })
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        let instrs = program
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction {
+                Instruction::Select(x) => Some(x),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
+        let mut values = vec![F::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
+        values[..populate_len].par_chunks_mut(SELECT_PREPROCESSED_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let SelectInstr { addrs, mult1, mult2 } = instr;
+                let access: &mut SelectPreprocessedCols<_> = row.borrow_mut();
+                *access = SelectPreprocessedCols {
+                    is_real: F::ONE,
+                    addrs: addrs.to_owned(),
+                    mult1: mult1.to_owned(),
+                    mult2: mult2.to_owned(),
+                };
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        Some(RowMajorMatrix::new(values, SELECT_PREPROCESSED_COLS))
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -110,6 +145,26 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        let events = &input.select_events;
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        let mut values = vec![F::ZERO; padded_nb_rows * SELECT_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = events.len() * SELECT_COLS;
+        values[..populate_len].par_chunks_mut(SELECT_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
+                let cols: &mut SelectCols<_> = row.borrow_mut();
+                *cols = SelectCols { vals };
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(values, SELECT_COLS)
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         assert_eq!(
             std::any::TypeId::of::<F>(),

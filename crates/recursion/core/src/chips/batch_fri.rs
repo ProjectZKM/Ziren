@@ -2,24 +2,28 @@
 
 use core::borrow::Borrow;
 use itertools::Itertools;
+
+use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
+use p3_field::PrimeField32;
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
+use zkm_derive::AlignedBorrow;
+use zkm_stark::air::ExtensionAirBuilder;
 use zkm_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use zkm_stark::air::ExtensionAirBuilder;
-
-use zkm_derive::AlignedBorrow;
-
+#[cfg(feature = "sys")]
+use crate::BatchFRIEvent;
 use crate::{
     air::Block,
     builder::ZKMRecursionAirBuilder,
     runtime::{Instruction, RecursionProgram},
-    Address, BatchFRIEvent, BatchFRIInstr, ExecutionRecord,
+    Address, BatchFRIInstr, ExecutionRecord,
 };
 
 pub const NUM_BATCH_FRI_COLS: usize = core::mem::size_of::<BatchFRICols<u8>>();
@@ -74,6 +78,53 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         NUM_BATCH_FRI_PREPROCESSED_COLS
     }
 
+    #[cfg(not(feature = "sys"))]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        let mut rows: Vec<[F; NUM_BATCH_FRI_PREPROCESSED_COLS]> = Vec::new();
+        program
+            .instructions
+            .iter()
+            .filter_map(|instruction| {
+                if let Instruction::BatchFRI(instr) = instruction {
+                    Some(instr)
+                } else {
+                    None
+                }
+            })
+            .for_each(|instruction| {
+                let BatchFRIInstr { base_vec_addrs, ext_single_addrs, ext_vec_addrs, acc_mult } =
+                    instruction.as_ref();
+                let len = ext_vec_addrs.p_at_z.len();
+                let mut row_add = vec![[F::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS]; len];
+                debug_assert_eq!(*acc_mult, F::ONE);
+
+                row_add.iter_mut().enumerate().for_each(|(i, row)| {
+                    let row: &mut BatchFRIPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
+                    row.is_real = F::ONE;
+                    row.is_end = F::from_bool(i == len - 1);
+                    row.acc_addr = ext_single_addrs.acc;
+                    row.alpha_pow_addr = ext_vec_addrs.alpha_pow[i];
+                    row.p_at_z_addr = ext_vec_addrs.p_at_z[i];
+                    row.p_at_x_addr = base_vec_addrs.p_at_x[i];
+                });
+                rows.extend(row_add);
+            });
+
+        // Pad the trace to a power of two.
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS],
+            program.fixed_log2_rows(self),
+        );
+
+        let trace = RowMajorMatrix::new(
+            rows.into_iter().flatten().collect(),
+            NUM_BATCH_FRI_PREPROCESSED_COLS,
+        );
+        Some(trace)
+    }
+
+    #[cfg(feature = "sys")]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
@@ -135,6 +186,44 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
     }
 
+    #[cfg(not(feature = "sys"))]
+    #[instrument(name = "generate batch fri trace", level = "debug", skip_all, fields(rows = input.batch_fri_events.len()))]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        let mut rows = input
+            .batch_fri_events
+            .iter()
+            .map(|event| {
+                let mut row = [F::ZERO; NUM_BATCH_FRI_COLS];
+                let cols: &mut BatchFRICols<F> = row.as_mut_slice().borrow_mut();
+                cols.acc = event.ext_single.acc;
+                cols.alpha_pow = event.ext_vec.alpha_pow;
+                cols.p_at_z = event.ext_vec.p_at_z;
+                cols.p_at_x = event.base_vec.p_at_x;
+                row
+            })
+            .collect_vec();
+
+        // Pad the trace to a power of two.
+        rows.resize(self.num_rows(input).unwrap(), [F::ZERO; NUM_BATCH_FRI_COLS]);
+
+        // Convert the trace to a row major matrix.
+        let trace = RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_BATCH_FRI_COLS);
+
+        #[cfg(debug_assertions)]
+        println!(
+            "batch fri trace dims is width: {:?}, height: {:?}",
+            trace.width(),
+            trace.height()
+        );
+
+        trace
+    }
+
+    #[cfg(feature = "sys")]
     #[instrument(name = "generate batch fri trace", level = "debug", skip_all, fields(rows = input.batch_fri_events.len()))]
     fn generate_trace(
         &self,

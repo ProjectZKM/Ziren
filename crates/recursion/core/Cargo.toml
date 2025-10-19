@@ -73,7 +73,7 @@ pathdiff = "0.2.1"
 glob = "0.3.1"
 
 [features]
-default = ["sys"]
+default = []
 debug = ["zkm-core-machine/debug"]
 sys = ["zkm-core-machine/sys"]
 program_validation = ["dep:range-set-blaze", "dep:smallvec"]
