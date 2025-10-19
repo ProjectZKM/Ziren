@@ -1,8 +1,6 @@
 use std::array;
 use std::{borrow::BorrowMut, mem::size_of};
 
-#[cfg(feature = "sys")]
-use itertools::Itertools;
 use itertools::Itertools;
 #[cfg(feature = "sys")]
 use p3_field::FieldAlgebra;
@@ -29,7 +27,7 @@ use crate::{
     ExecutionRecord, RecursionProgram,
 };
 #[cfg(feature = "sys")]
-use crate::{instruction::Instruction::Poseidon2, Poseidon2Io, Poseidon2SkinnyInstr};
+use crate::{Poseidon2Io, Poseidon2SkinnyInstr};
 
 use super::columns::preprocessed::Poseidon2PreprocessedCols;
 
@@ -37,7 +35,7 @@ const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedCols<
 
 const INTERNAL_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS / 2 + 1;
 const INPUT_ROUND_IDX: usize = 0;
-const OUTPUT_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS + 2;
+pub const OUTPUT_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS + 2;
 
 impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip<DEGREE> {
     type Record = ExecutionRecord<F>;

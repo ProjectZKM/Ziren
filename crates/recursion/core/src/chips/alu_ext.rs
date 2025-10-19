@@ -13,10 +13,6 @@ use zkm_core_machine::utils::next_power_of_two;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{ExtensionAirBuilder, MachineAir};
 
-#[cfg(feature = "sys")]
-use crate::chips::alu_base::BaseAluAccessCols;
-#[cfg(feature = "sys")]
-use crate::chips::alu_base::{BaseAluValueCols, NUM_BASE_ALU_COLS, NUM_BASE_ALU_VALUE_COLS};
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
 pub const NUM_EXT_ALU_ENTRIES_PER_ROW: usize = 4;

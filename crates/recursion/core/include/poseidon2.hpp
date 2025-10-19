@@ -8,7 +8,6 @@ using namespace constants;
 
 constexpr size_t INPUT_ROUND_IDX = 0;
 constexpr size_t INTERNAL_ROUND_IDX = NUM_EXTERNAL_ROUNDS / 2 + 1;
-
 constexpr size_t NUM_ROUNDS = OUTPUT_ROUND_IDX + 1;
 
 constexpr size_t PERMUTATION_NO_SBOX =

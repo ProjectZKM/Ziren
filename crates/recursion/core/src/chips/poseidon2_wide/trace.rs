@@ -22,14 +22,14 @@ use crate::chips::poseidon2_wide::internal_linear_layer;
 use crate::chips::poseidon2_wide::NUM_EXTERNAL_ROUNDS;
 use crate::chips::poseidon2_wide::NUM_INTERNAL_ROUNDS;
 #[cfg(feature = "sys")]
+use crate::Poseidon2Io;
+#[cfg(feature = "sys")]
 use crate::Poseidon2SkinnyInstr;
 use crate::{
     chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},
     instruction::Instruction::Poseidon2,
     ExecutionRecord, RecursionProgram,
 };
-#[cfg(feature = "sys")]
-use crate::{instruction::Instruction::Poseidon2, Poseidon2Io};
 
 use super::columns::preprocessed::Poseidon2PreprocessedColsWide;
 
