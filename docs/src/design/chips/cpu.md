@@ -28,7 +28,7 @@ Ziren's CPU constraints ensure instruction integrity across four key dimensions:
   
   Validates operand sources (register/immediate distinction) and enforces zero-value rules under specific conditions.
 
-- ​Memory Consisetency Constraints​​
+- Memory Consistency Constraints
   
   Address validity: Verify memory address validity.
   Value consistency: Verify memory consistency checking.

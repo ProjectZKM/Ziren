@@ -370,7 +370,7 @@ This example logs:
 - Verification time (in ms)
 - Whether the proof is valid
 
-The `eth_wasm` example demonstrates **in-browser STARK verification for Ethereum block proofs** as part of the [EthProofs](https://ethproofs.org/?utm_source=chatgpt.com) initiatve. 
+The `eth_wasm` example demonstrates **in-browser STARK verification for Ethereum block proofs** as part of the [EthProofs](https://ethproofs.org/?utm_source=chatgpt.com) initiate. 
 
 main.js: 
 
