@@ -63,7 +63,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                 Ok((
                     ZKMProofWithPublicValues {
                         proof: ZKMProof::Core(vec![]),
-                        stdin,
                         public_values,
                         zkm_version: self.version().to_string(),
                     },
@@ -106,7 +105,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                 Ok((
                     ZKMProofWithPublicValues {
                         proof,
-                        stdin,
                         public_values,
                         zkm_version: self.version().to_string(),
                     },
@@ -126,7 +124,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                             raw_proof: "".to_string(),
                             plonk_vkey_hash: [0; 32],
                         }),
-                        stdin,
                         public_values,
                         zkm_version: self.version().to_string(),
                     },
@@ -146,7 +143,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                             raw_proof: "".to_string(),
                             groth16_vkey_hash: [0; 32],
                         }),
-                        stdin,
                         public_values,
                         zkm_version: self.version().to_string(),
                     },

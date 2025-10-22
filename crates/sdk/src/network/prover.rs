@@ -281,7 +281,6 @@ impl NetworkProver {
             ZKMProofWithPublicValues {
                 proof,
                 public_values,
-                stdin,
                 zkm_version: ZKM_CIRCUIT_VERSION.to_string(),
             },
             cycles,

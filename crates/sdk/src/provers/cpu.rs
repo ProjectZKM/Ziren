@@ -57,7 +57,6 @@ impl CpuProver {
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
-            stdin,
             public_values,
             zkm_version: self.version().to_string(),
         })
@@ -101,7 +100,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Core(proof.proof.0),
-                    stdin: proof.stdin,
                     public_values: proof.public_values,
                     zkm_version: self.version().to_string(),
                 },
@@ -120,7 +118,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Compressed(Box::new(reduce_proof)),
-                    stdin,
                     public_values,
                     zkm_version: self.version().to_string(),
                 },
@@ -148,7 +145,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Plonk(proof),
-                    stdin,
                     public_values,
                     zkm_version: self.version().to_string(),
                 },
@@ -168,7 +164,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Groth16(proof),
-                    stdin,
                     public_values,
                     zkm_version: self.version().to_string(),
                 },

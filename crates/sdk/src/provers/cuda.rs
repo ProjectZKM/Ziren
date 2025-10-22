@@ -50,7 +50,6 @@ impl CudaProver {
                 proof: ZKMProof::Core(proof.proof.0),
                 public_values: proof.public_values,
                 zkm_version: self.version().to_string(),
-                stdin: stdin.clone(),
             };
             return Ok((proof_with_pv, cycles));
         }
@@ -65,7 +64,6 @@ impl CudaProver {
                 proof: ZKMProof::Compressed(Box::new(reduce_proof)),
                 public_values,
                 zkm_version: self.version().to_string(),
-                stdin: stdin.clone(),
             };
             return Ok((proof_with_pv, cycles));
         }
@@ -90,7 +88,6 @@ impl CudaProver {
                 proof: ZKMProof::Plonk(proof),
                 public_values,
                 zkm_version: self.version().to_string(),
-                stdin: stdin.clone(),
             };
             return Ok((proof_with_pv, cycles));
         } else if kind == ZKMProofKind::Groth16 {
@@ -108,7 +105,6 @@ impl CudaProver {
                 proof: ZKMProof::Groth16(proof),
                 public_values,
                 zkm_version: self.version().to_string(),
-                stdin: stdin.clone(),
             };
             return Ok((proof_with_pv, cycles));
         }
@@ -141,7 +137,6 @@ impl CudaProver {
         let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
-            stdin,
             public_values,
             zkm_version: self.version().to_string(),
         })
