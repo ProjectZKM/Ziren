@@ -211,9 +211,9 @@ impl ZKMCudaProver {
         port: Option<u64>,
     ) -> Result<ZKMCudaProver, Box<dyn StdError>> {
         // If the gpu endpoint url hasn't been provided, we start the Docker container
-        let container_name = port.map(|p| format!("gpu-{p}")).unwrap_or("zkm-gpu".to_string());
+        let container_name = port.map(|p| format!("zkm-gpu-server-{p}")).unwrap_or("zkm-gpu-server".to_string());
         let image_name = std::env::var("ZKM_GPU_IMAGE")
-            .unwrap_or_else(|_| "public.ecr.aws/zkm-labs/zkm-gpu:v5.0.8".to_string());
+            .unwrap_or_else(|_| "public.ecr.aws/ProjectZKM/zkm-gpu-server:v1.0.0".to_string());
 
         let cleaned_up = Arc::new(AtomicBool::new(false));
         let port = port.unwrap_or(3000);

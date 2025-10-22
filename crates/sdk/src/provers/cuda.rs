@@ -176,3 +176,24 @@ impl Default for CudaProver {
         Self::new(ZKMProver::new(), ZKMGpuServer::default())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use zkm_core_machine::io::ZKMStdin;
+    use crate::{utils, ProverClient};
+
+    #[ignore]
+    #[test]
+    fn test_proof_cuda_fib() {
+        utils::setup_logger();
+
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let client = ProverClient::cuda();
+        let (pk, vk) = client.setup(elf);
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&10usize);
+
+        let proof = client.prove(&pk, stdin).run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+    }
+}
