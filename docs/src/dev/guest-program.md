@@ -15,7 +15,7 @@ Note that type `T` must implement both `serde::Serialize` and `serde::Deserializ
 Ziren also provides Go runtime libraries for guest programs to handle input/output operations and exit operation:
 - `zkm_runtime.Read[T any]` (for reading structured data)
 - `zkm_runtime.Commit[T any]` (for committing structured data)
-- `zkm_runtime.RuntimeExit` (for exitting program)
+- `zkm_runtime.RuntimeExit` (for exiting program)
 
 ## Guest Program Example
 
