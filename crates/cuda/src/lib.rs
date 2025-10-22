@@ -131,16 +131,22 @@ pub enum ZKMGpuServer {
 
 impl Default for ZKMGpuServer {
     fn default() -> Self {
+        if let Ok(endpoint) = std::env::var("CUDA_ENDPOINT") {
+            return Self::External { endpoint };
+        }
+
         let visible_device_index = if let Ok(device) = std::env::var("CUDA_VISIBLE_DEVICE_INDEX") {
             Some(device.parse().expect("Invalid device index"))
         } else {
             None
         };
+
         let port = if let Ok(port) = std::env::var("CUDA_PORT") {
             Some(port.parse().expect("Invalid port"))
         } else {
             None
         };
+
         Self::Local { visible_device_index, port }
     }
 }
