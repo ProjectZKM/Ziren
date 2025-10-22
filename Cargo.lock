@@ -1153,7 +1153,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease 0.2.37",
  "proc-macro2",
@@ -1463,6 +1463,12 @@ name = "cfg-if"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chrono"
@@ -1863,6 +1869,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "881c5d0a13b2f1498e2306e82cbada78390e152d4b1378fb28a84f4dcd0dc4f3"
+dependencies = [
+ "dispatch",
+ "nix",
+ "windows-sys 0.61.0",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2143,6 +2160,12 @@ dependencies = [
  "redox_users",
  "winapi",
 ]
+
+[[package]]
+name = "dispatch"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 
 [[package]]
 name = "displaydoc"
@@ -4241,6 +4264,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.9.4",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5395,11 +5430,31 @@ dependencies = [
  "petgraph",
  "prettyplease 0.1.25",
  "prost 0.11.9",
- "prost-types",
+ "prost-types 0.11.9",
  "regex",
  "syn 1.0.109",
  "tempfile",
  "which",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
+dependencies = [
+ "heck 0.5.0",
+ "itertools 0.14.0",
+ "log",
+ "multimap",
+ "once_cell",
+ "petgraph",
+ "prettyplease 0.2.37",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
+ "regex",
+ "syn 2.0.106",
+ "tempfile",
 ]
 
 [[package]]
@@ -5435,6 +5490,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213622a1460818959ac1181aaeb2dc9c7f63df720db7d788b3e24eacd1983e13"
 dependencies = [
  "prost 0.11.9",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
+dependencies = [
+ "prost 0.13.5",
 ]
 
 [[package]]
@@ -6968,6 +7032,7 @@ dependencies = [
  "io-uring",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "slab",
@@ -7182,7 +7247,7 @@ checksum = "5bf5e9b9c0f7e0a7c027dcfaba7b2c60816c7049171f679d99ee2ff65d0de8c4"
 dependencies = [
  "prettyplease 0.1.25",
  "proc-macro2",
- "prost-build",
+ "prost-build 0.11.9",
  "quote",
  "syn 1.0.109",
 ]
@@ -7393,6 +7458,15 @@ dependencies = [
  "thiserror 1.0.69",
  "url",
  "utf-8",
+]
+
+[[package]]
+name = "twirp-build-rs"
+version = "0.13.0-succinct"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8160cc3d9282e192ec842f1ab44e9d396312ff5472bdab58f5e7f4d882b22eea"
+dependencies = [
+ "prost-build 0.13.5",
 ]
 
 [[package]]
@@ -8505,6 +8579,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-cuda"
+version = "1.2.1"
+dependencies = [
+ "bincode",
+ "ctrlc",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "serde",
+ "test-artifacts",
+ "tokio",
+ "tracing",
+ "twirp-build-rs",
+ "twirp-rs",
+ "zkm-core-machine",
+ "zkm-prover",
+]
+
+[[package]]
 name = "zkm-curves"
 version = "1.2.1"
 dependencies = [
@@ -8815,6 +8907,7 @@ dependencies = [
  "zkm-build",
  "zkm-core-executor",
  "zkm-core-machine",
+ "zkm-cuda",
  "zkm-primitives 1.2.1",
  "zkm-prover",
  "zkm-stark",

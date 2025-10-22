@@ -13,6 +13,7 @@ members = [
     "crates/cli",
     "crates/core/executor",
     "crates/core/machine",
+    "crates/cuda",
     "crates/curves",
     "crates/derive",
     "crates/primitives",
@@ -112,6 +113,7 @@ zkm-stark = { path = "crates/stark" }
 zkm-prover = { path = "crates/prover" }
 zkm-build = { path = "crates/build" }
 zkm-sdk = { path = "crates/sdk" }
+zkm-cuda = { path = "crates/cuda" }
 zkm-verifier = { path = "crates/verifier" }
 
 zkm-lib = { path = "crates/zkvm/lib", default-features = false }

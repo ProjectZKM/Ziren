@@ -47,6 +47,7 @@ hashbrown = { workspace = true }
 zkm-core-executor = { workspace = true }
 zkm-stark = { workspace = true }
 zkm-primitives = { workspace = true }
+zkm-cuda = { workspace = true }
 itertools = { workspace = true }
 tonic = { version = "0.8.1", features = ["tls", "tls-roots", "transport"], optional = true }
 alloy-sol-types = { version = "1.1", optional = true }
@@ -90,8 +91,6 @@ network-v2 = [
   "dep:tonic",
   "dep:backoff",
 ]
-# cuda = ["zkm-cuda"]
-cuda = []
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = [

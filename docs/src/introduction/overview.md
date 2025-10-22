@@ -51,7 +51,7 @@ Ziren is the world's first MIPS-based zkVM, achieving the industry-leading perfo
  
 - Integrating Cutting-edge Industry Advancements
 
-  Ziren constructs its zero-knowledge proof system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized Fast Reed-Solomon IOP (FRI) protocol and adapting [SP1](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler, and precompiles for the MIPS architecture.
+  Ziren constructs its zero-knowledge proof system by integrating [Plonky3](https://github.com/Plonky3/Plonky3)'s optimized Fast Reed-Solomon IOP (FRI) protocol and adapting [ZKM](https://github.com/succinctlabs/sp1)'s circuit builder, recursion compiler, and precompiles for the MIPS architecture.
 
 ## Target Use Cases
 Ziren enables universal verifiable computation via STARK proofs, including:
