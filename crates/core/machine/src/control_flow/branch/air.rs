@@ -122,6 +122,12 @@ where
                 local.next_next_pc.reduce::<AB>(),
             );
 
+            // check local.next_pc/next_next_pc to be valid word when we are not branching.
+            // they are checked as valid value by the ADD ALU table when we are branching.
+            builder.slice_range_check_u8(&local.next_pc.0, is_real.clone() - local.is_branching);
+            builder
+                .slice_range_check_u8(&local.next_next_pc.0, is_real.clone() - local.is_branching);
+
             // When we are branching, assert that local.next_next_pc <==> next.target_pc.
             builder
                 .when(is_real.clone())
