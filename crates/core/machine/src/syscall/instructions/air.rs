@@ -372,7 +372,7 @@ impl SyscallInstrsChip {
 
         // Verify that the is_halt flag is correct.
         // If `is_real = 0`, then `local.is_halt = 0`.
-        // If `is_real = 1`, then `is_halt_check.result` will be correct, so `local.is_halt` is correct.
+        // If `is_real = 1`, then `is_halt_check.result or is_exit_group_check.result` will be correct, so `local.is_halt` is correct.
         builder.assert_eq(local.is_halt, is_halt_or_exit_group * local.is_real);
     }
 
