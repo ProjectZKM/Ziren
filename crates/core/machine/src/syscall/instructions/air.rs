@@ -116,6 +116,10 @@ impl SyscallInstrsChip {
         let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
         let send_to_table = syscall_code[2] + local.is_sys_linux;
 
+        builder.assert_bool(syscall_code[2]);
+        builder.assert_bool(local.is_sys_linux);
+        builder.assert_bool(send_to_table.clone());
+
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table.clone());
