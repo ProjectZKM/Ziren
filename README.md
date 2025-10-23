@@ -33,4 +33,4 @@ Learn more about Ziren at [docs.zkm.io](https://docs.zkm.io).
 ## Acknowledgements
 Ziren draws inspiration from the following projects, which represents the cutting-edge zero-knowledge proof systems. 
 - [Plonky3](https://github.com/Plonky3/Plonky3): Ziren proving backend is based on Plonky3.
-- [ZKM](https://github.com/succinctlabs/sp1): Ziren circuit builder, recursion compiler, and precompiles originate from ZKM.
+- [SP1](https://github.com/succinctlabs/sp1): Ziren circuit builder, recursion compiler, and precompiles originate from SP1.
