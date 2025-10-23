@@ -73,7 +73,7 @@ pub struct MemoryInstructionsColumns<T> {
     /// Whether the least significant two bits of the address are three.
     pub ls_bits_is_three: T,
 
-    /// Gadget to verify that the address word is within the Baby-Bear field.
+    /// Gadget to verify that the address word is within the Koala-Bear field.
     pub addr_word_range_checker: KoalaBearWordRangeChecker<T>,
 
     /// Memory consistency columns for the memory access.

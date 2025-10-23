@@ -227,7 +227,7 @@ impl SyscallInstrsChip {
                     + local.is_commit_deferred_proofs.result),
         );
 
-        // Babybear range check the operand_to_check word.
+        // Koalabear range check the operand_to_check word.
         // SAFETY: `syscall_range_check_operand` is boolean, and no interactions can be made in padding rows.
         // `operand_to_check` is already known to be a valid word, as it is either
         // - `op_b_val` in the case of `HALT`
