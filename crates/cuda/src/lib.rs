@@ -136,17 +136,15 @@ impl Default for ZKMGpuServer {
         }
 
         let visible_device_index = if let Ok(device) = std::env::var("CUDA_VISIBLE_DEVICE_INDEX") {
-            Some(device.parse().expect("Invalid device index"))
+            Some(device.parse().expect("Invalid CUDA device index"))
         } else {
             None
         };
-
         let port = if let Ok(port) = std::env::var("CUDA_PORT") {
-            Some(port.parse().expect("Invalid port"))
+            Some(port.parse().expect("Invalid CUDA local server port"))
         } else {
             None
         };
-
         Self::Local { visible_device_index, port }
     }
 }
@@ -217,7 +215,8 @@ impl ZKMCudaProver {
         port: Option<u64>,
     ) -> Result<ZKMCudaProver, Box<dyn StdError>> {
         // If the gpu endpoint url hasn't been provided, we start the Docker container
-        let container_name = port.map(|p| format!("zkm-gpu-server-{p}")).unwrap_or("zkm-gpu-server".to_string());
+        let container_name =
+            port.map(|p| format!("zkm-gpu-server-{p}")).unwrap_or("zkm-gpu-server".to_string());
         let image_name = std::env::var("ZKM_GPU_IMAGE")
             .unwrap_or_else(|_| "public.ecr.aws/ProjectZKM/zkm-gpu-server:v1.0.0".to_string());
 

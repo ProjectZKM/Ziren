@@ -31,6 +31,3 @@ path = "bin/execute.rs"
 [[bin]]
 name = "fibonacci-host"
 path = "src/main.rs"
-
-# [features]
-# cuda = ["zkm-sdk/cuda"]

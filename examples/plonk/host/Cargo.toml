@@ -9,6 +9,3 @@ zkm-sdk = { workspace = true }
 
 [build-dependencies]
 zkm-build = { workspace = true }
-
-# [features]
-# cuda = ["zkm-sdk/cuda"]

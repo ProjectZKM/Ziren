@@ -179,8 +179,8 @@ impl Default for CudaProver {
 
 #[cfg(test)]
 mod test {
-    use zkm_core_machine::io::ZKMStdin;
     use crate::{utils, ProverClient};
+    use zkm_core_machine::io::ZKMStdin;
 
     #[ignore]
     #[test]

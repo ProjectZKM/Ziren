@@ -34,6 +34,3 @@ path = "bin/execute.rs"
 [[bin]]
 name = "simple-go-host"
 path = "src/main.rs"
-
-# [features]
-# cuda = ["zkm-sdk/cuda"]

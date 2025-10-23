@@ -32,6 +32,3 @@ path = "bin/execute.rs"
 [[bin]]
 name = "large-sum-host"
 path = "src/main.rs"
-
-# [features]
-# cuda = ["zkm-sdk/cuda"]
