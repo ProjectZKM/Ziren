@@ -168,6 +168,12 @@ impl SyscallInstrsChip {
             .when_not(is_enter_unconstrained + is_sys_nop)
             .assert_eq(local.syscall_id, syscall_id.clone());
 
+        // The syscall_id should be EXIT_UNCONSTRAINED when is_enter_unconstrained is true.
+        builder.when(local.is_real).when(is_enter_unconstrained).assert_eq(
+            local.syscall_id,
+            AB::Expr::from_canonical_u32(SyscallCode::EXIT_UNCONSTRAINED.syscall_id()),
+        );
+
         // Compute whether this syscall is HINT_LEN.
         let is_hint_len = {
             IsZeroOperation::<AB::F>::eval(
