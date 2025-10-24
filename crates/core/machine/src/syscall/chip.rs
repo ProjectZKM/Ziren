@@ -216,10 +216,7 @@ where
         let local = main.row_slice(0);
         let local: &SyscallCols<AB::Var> = (*local).borrow();
 
-        builder.assert_eq(
-            local.is_real * local.is_real * local.is_real,
-            local.is_real * local.is_real * local.is_real,
-        );
+        builder.assert_bool(local.is_real);
 
         match self.shard_kind {
             SyscallShardKind::Core => {

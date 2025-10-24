@@ -491,14 +491,7 @@ impl MemoryInstructionsChip {
         builder.assert_bool(local.ls_bits_is_one);
         builder.assert_bool(local.ls_bits_is_two);
         builder.assert_bool(local.ls_bits_is_three);
-
-        // Assert that only one of the value flags is true
-        builder.assert_one(
-            offset_is_zero.clone()
-                + local.ls_bits_is_one
-                + local.ls_bits_is_two
-                + local.ls_bits_is_three,
-        );
+        builder.assert_bool(offset_is_zero.clone());
 
         // Assert that the correct value flag is set
         // SAFETY: Due to the constraints here, at most one of the four flags can be turned on (non-zero).

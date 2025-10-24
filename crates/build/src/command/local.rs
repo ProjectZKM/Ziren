@@ -31,7 +31,6 @@ pub(crate) fn create_local_command(
         .env("CARGO_TARGET_DIR", program_metadata.target_directory.join(HELPER_TARGET_SUBDIR))
         .args(get_program_build_args(args));
 
-    // See docs.zkm.io/introduction/installation.html#use-musl-gcc-for-static-compilation
     if let Some(zkm_cc) = env::var_os("ZIREN_ZKM_CC") {
         command.env("CC", zkm_cc);
     }

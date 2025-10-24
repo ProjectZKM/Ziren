@@ -29,11 +29,11 @@ impl<C: ECDSACurve> AffinePoint<C> {
     /// Create an affine point from the given field elements, without checking if the point is on the curve.
     pub fn from_field_elements_unchecked(x: FieldElement<C>, y: FieldElement<C>) -> Self {
         let mut x_slice = x.to_bytes();
-        let x_slice = x_slice.as_mut_slice();
+        let x_slice = &mut x_slice;
         x_slice.reverse();
 
         let mut y_slice = y.to_bytes();
-        let y_slice = y_slice.as_mut_slice();
+        let y_slice = &mut y_slice;
         y_slice.reverse();
 
         AffinePoint { inner: <C::ZKMAffinePoint as ECDSAPoint>::from(x_slice, y_slice) }
