@@ -122,9 +122,15 @@ impl ByteRecord for Vec<ByteLookupEvent> {
 
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        _new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
     ) {
-        todo!()
+        for new_blu_map in new_events {
+            for (blu_event, count) in new_blu_map.iter() {
+                for _ in 0..*count {
+                    self.push(*blu_event);
+                }
+            }
+        }
     }
 }
 
