@@ -39,7 +39,7 @@ const GLOBAL_COL_MAP: GlobalCols<usize> = make_col_map();
 
 pub const GLOBAL_INITIAL_DIGEST_POS: usize = GLOBAL_COL_MAP.accumulation.initial_digest[0].0[0];
 
-pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 377;
+pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 64;
 
 #[repr(C)]
 pub struct Ghost {

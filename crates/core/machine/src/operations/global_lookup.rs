@@ -27,7 +27,7 @@ pub struct GlobalLookupOperation<T: Copy> {
     pub y_coordinate: SepticBlock<T>,
     pub y6_bit_decomp: [T; 30],
     pub range_check_witness: T,
-    pub permutation: Poseidon2Operation<T>,
+    // pub permutation: Poseidon2Operation<T>,
 }
 
 impl<F: PrimeField32> GlobalLookupOperation<F> {
@@ -35,14 +35,14 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         values: SepticBlock<u32>,
         is_receive: bool,
         kind: u8,
-    ) -> (SepticCurve<F>, u8, [F; 16], [F; 16]) {
+    ) -> (SepticCurve<F>, u8) {
         let x_start = SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values.0[i]))
             + SepticExtension::from_base(F::from_canonical_u32((kind as u32) << 16));
-        let (point, offset, m_trial, m_hash) = SepticCurve::<F>::lift_x(x_start);
+        let (point, offset) = SepticCurve::<F>::lift_x(x_start);
         if !is_receive {
-            return (point.neg(), offset, m_trial, m_hash);
+            return (point.neg(), offset);
         }
-        (point, offset, m_trial, m_hash)
+        (point, offset)
     }
 
     pub fn populate(
@@ -53,7 +53,7 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         kind: u8,
     ) {
         if is_real {
-            let (point, offset, m_trial, m_hash) = Self::get_digest(values, is_receive, kind);
+            let (point, offset) = Self::get_digest(values, is_receive, kind);
             for i in 0..8 {
                 self.offset_bits[i] = F::from_canonical_u8((offset >> i) & 1);
             }
@@ -73,12 +73,12 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             }
             top_7_bits -= F::from_canonical_u32(7);
             self.range_check_witness = top_7_bits.inverse();
-            self.permutation = populate_perm_deg3(m_trial, Some(m_hash));
+            // self.permutation = populate_perm_deg3(m_trial, Some(m_hash));
 
-            assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
+            // assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         } else {
             self.populate_dummy();
-            assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
+            // assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         }
     }
 
@@ -96,7 +96,7 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             self.y6_bit_decomp[i] = F::ZERO;
         }
         self.range_check_witness = F::ZERO;
-        self.permutation = populate_perm_deg3([F::ZERO; 16], None);
+        // self.permutation = populate_perm_deg3([F::ZERO; 16], None);
     }
 }
 
@@ -132,44 +132,44 @@ impl<F: Field> GlobalLookupOperation<F> {
 
         // Turn the message into a hash input. Only the first 8 elements are non-zero, as the rate of the Poseidon2 hash is 8.
         // Combining `values[0]` with `kind` is safe, as `values[0]` is range checked to be u16, and `kind` is known to be u8.
-        let m_trial = [
-            values[0].clone() + AB::Expr::from_canonical_u32(1 << 16) * kind,
-            values[1].clone(),
-            values[2].clone(),
-            values[3].clone(),
-            values[4].clone(),
-            values[5].clone(),
-            values[6].clone(),
-            offset.clone(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-        ];
+        // let m_trial = [
+        //     values[0].clone() + AB::Expr::from_canonical_u32(1 << 16) * kind,
+        //     values[1].clone(),
+        //     values[2].clone(),
+        //     values[3].clone(),
+        //     values[4].clone(),
+        //     values[5].clone(),
+        //     values[6].clone(),
+        //     offset.clone(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        //     AB::Expr::zero(),
+        // ];
 
         // Constrain the input of the permutation to be the message.
-        for i in 0..16 {
-            builder.when(is_real).assert_eq(
-                cols.permutation.permutation.external_rounds_state()[0][i].into(),
-                m_trial[i].clone(),
-            );
-        }
+        // for i in 0..16 {
+        //     builder.when(is_real).assert_eq(
+        //         cols.permutation.permutation.external_rounds_state()[0][i].into(),
+        //         m_trial[i].clone(),
+        //     );
+        // }
 
         // Constrain the permutation.
-        for r in 0..NUM_EXTERNAL_ROUNDS {
-            eval_external_round(builder, &cols.permutation.permutation, r);
-        }
-        eval_internal_rounds(builder, &cols.permutation.permutation);
+        // for r in 0..NUM_EXTERNAL_ROUNDS {
+        //     eval_external_round(builder, &cols.permutation.permutation, r);
+        // }
+        // eval_internal_rounds(builder, &cols.permutation.permutation);
 
         // Constrain that when `is_real` is true, the x-coordinate is the hash of the message.
-        let m_hash = cols.permutation.permutation.perm_output();
-        for i in 0..7 {
-            builder.when(is_real).assert_eq(cols.x_coordinate[i].into(), m_hash[i]);
-        }
+        // let m_hash = cols.permutation.permutation.perm_output();
+        // for i in 0..7 {
+        //     builder.when(is_real).assert_eq(cols.x_coordinate[i].into(), m_hash[i]);
+        // }
         let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
         let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
 

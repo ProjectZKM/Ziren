@@ -346,7 +346,7 @@ impl<F: PrimeField32> MachineProgram<F> for Program {
                 ];
                 let x_start =
                     SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values[i]));
-                let (point, _, _, _) = SepticCurve::<F>::lift_x(x_start);
+                let (point, _) = SepticCurve::<F>::lift_x(x_start);
                 SepticCurveComplete::Affine(point.neg())
             })
             .collect();
