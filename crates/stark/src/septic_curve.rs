@@ -132,15 +132,7 @@ impl<F: PrimeField32> SepticCurve<F> {
     pub fn lift_x(m: SepticExtension<F>) -> (Self, u8) {
         // let perm = KoalaBearPoseidon2::new().perm;
         for offset in 0..=255 {
-            let x_trial = SepticExtension::from_base_slice(&[
-                m.0[0],
-                m.0[1],
-                m.0[2],
-                m.0[3],
-                m.0[4],
-                m.0[5],
-                F::from_canonical_u32(m.0[6].as_canonical_u32() << 8 + offset),
-            ]);
+            let x_trial = m * F::from_canonical_u32(255) + F::from_canonical_u8(offset);
 
             let y_sq = Self::curve_formula(x_trial);
             if let Some(y) = y_sq.sqrt() {
@@ -152,9 +144,6 @@ impl<F: PrimeField32> SepticCurve<F> {
                 }
                 return (Self { x: x_trial, y }, offset);
             }
-
-            // let x_trial = SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(m.0[i]))
-            //     + SepticExtension::from_base(F::from_canonical_u32((offset as u32) << 16));
 
             // let m_trial = [
             //     m.0[0],
