@@ -162,12 +162,25 @@ pub enum SyscallCode {
     /// Fcntl
     SYS_FCNTL = 4055,
 
-    /// SYS_NOP
-    SYS_NOP = 4000,
+    /// follows are executed as NOP syscalls
+    SYS_OPEN = 4005,
+    SYS_CLOSE = 4006,
+    SYS_RT_SIGACTION = 4194,
+    SYS_RT_SIGPROCMASK = 4195,
+    SYS_SIGALTSTACK = 4206,
+    SYS_FSTAT64 = 4215,
+    SYS_MADVISE = 4218,
+    SYS_GETTID = 4222,
+    SYS_SCHED_GETAFFINITY = 4240,
+    SYS_CLOCK_GETTIME = 4263,
+    SYS_OPENAT = 4288,
+    SYS_PRLIMIT64 = 4338,
 
     /// Executes the `POSEIDON2_PERMUTE` precompile.
     POSEIDON2_PERMUTE = 0x00_01_00_30,
-    SYS_LINUX = 5000,
+
+    SYS_LINUX = 4000,  // not real syscall, used for represent all linux syscalls
+    SYS_NOP = 0xFF_FF, // not real syscall, used for represent all no operation syscalls
 
     UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
@@ -219,27 +232,29 @@ impl SyscallCode {
             0x00_01_00_2D => SyscallCode::SECP256R1_DOUBLE,
             0x00_01_00_2E => SyscallCode::SECP256R1_DECOMPRESS,
             0x01_01_00_2F => SyscallCode::U256XU2048_MUL,
-            _ => {
-                if (0x100..=0x0ffff).contains(&value) {
-                    // These are the syscall numbers for the Linux syscalls.
-                    // We return them as is, without any mapping.
-                    match value {
-                        4003 => SyscallCode::SYS_READ,
-                        4004 => SyscallCode::SYS_WRITE,
-                        4055 => SyscallCode::SYS_FCNTL,
-                        4045 => SyscallCode::SYS_BRK,
-                        4090 => SyscallCode::SYS_MMAP2,
-                        4120 => SyscallCode::SYS_CLONE,
-                        4246 => SyscallCode::SYS_EXT_GROUP,
-                        4210 => SyscallCode::SYS_MMAP,
-                        5000 => SyscallCode::SYS_LINUX,
-                        _ => SyscallCode::SYS_NOP,
-                    }
-                } else {
-                    // If the syscall number is not recognized, return UNIMPLEMENTED.
-                    SyscallCode::UNIMPLEMENTED
-                }
-            }
+            4000 => SyscallCode::SYS_LINUX,
+            4003 => SyscallCode::SYS_READ,
+            4004 => SyscallCode::SYS_WRITE,
+            4005 => SyscallCode::SYS_OPEN,
+            4006 => SyscallCode::SYS_CLOSE,
+            4055 => SyscallCode::SYS_FCNTL,
+            4045 => SyscallCode::SYS_BRK,
+            4090 => SyscallCode::SYS_MMAP2,
+            4120 => SyscallCode::SYS_CLONE,
+            4194 => SyscallCode::SYS_RT_SIGACTION,
+            4195 => SyscallCode::SYS_RT_SIGPROCMASK,
+            4206 => SyscallCode::SYS_SIGALTSTACK,
+            4210 => SyscallCode::SYS_MMAP,
+            4215 => SyscallCode::SYS_FSTAT64,
+            4218 => SyscallCode::SYS_MADVISE,
+            4222 => SyscallCode::SYS_GETTID,
+            4240 => SyscallCode::SYS_SCHED_GETAFFINITY,
+            4246 => SyscallCode::SYS_EXT_GROUP,
+            4263 => SyscallCode::SYS_CLOCK_GETTIME,
+            4288 => SyscallCode::SYS_OPENAT,
+            4338 => SyscallCode::SYS_PRLIMIT64,
+            0xFFFF => SyscallCode::SYS_NOP,
+            _ => SyscallCode::UNIMPLEMENTED,
         }
     }
 
@@ -279,6 +294,18 @@ impl SyscallCode {
             SyscallCode::BLS12381_FP_MUL => SyscallCode::BLS12381_FP_ADD,
             SyscallCode::BLS12381_FP2_SUB => SyscallCode::BLS12381_FP2_ADD,
             SyscallCode::SYS_MMAP2 => SyscallCode::SYS_MMAP,
+            SyscallCode::SYS_OPEN
+            | SyscallCode::SYS_CLOSE
+            | SyscallCode::SYS_RT_SIGACTION
+            | SyscallCode::SYS_RT_SIGPROCMASK
+            | SyscallCode::SYS_MADVISE
+            | SyscallCode::SYS_GETTID
+            | SyscallCode::SYS_SCHED_GETAFFINITY
+            | SyscallCode::SYS_CLOCK_GETTIME
+            | SyscallCode::SYS_PRLIMIT64
+            | SyscallCode::SYS_SIGALTSTACK
+            | SyscallCode::SYS_OPENAT
+            | SyscallCode::SYS_FSTAT64 => SyscallCode::SYS_NOP,
             _ => *self,
         }
     }

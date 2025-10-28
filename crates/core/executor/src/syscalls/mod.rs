@@ -243,7 +243,18 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::SYS_MMAP2, Arc::new(SysMmapSyscall));
     syscall_map.insert(SyscallCode::SYS_CLONE, Arc::new(SysCloneSyscall));
     syscall_map.insert(SyscallCode::SYS_FCNTL, Arc::new(SysFcntlSyscall));
-    syscall_map.insert(SyscallCode::SYS_NOP, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_OPEN, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_CLOSE, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_RT_SIGACTION, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_RT_SIGPROCMASK, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_MADVISE, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_GETTID, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_SCHED_GETAFFINITY, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_CLOCK_GETTIME, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_PRLIMIT64, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_SIGALTSTACK, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_OPENAT, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_FSTAT64, Arc::new(SysNopSyscall));
 
     syscall_map
 }

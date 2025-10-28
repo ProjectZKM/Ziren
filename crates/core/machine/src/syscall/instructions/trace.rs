@@ -102,11 +102,6 @@ impl SyscallInstrsChip {
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
 
-        // Populate `is_sys_nop`.
-        cols.is_sys_nop.populate_from_field_element(
-            cols.syscall_id - F::from_canonical_u32(SyscallCode::SYS_NOP.syscall_id()),
-        );
-
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
             syscall_id - F::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
