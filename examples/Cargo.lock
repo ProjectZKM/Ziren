@@ -1806,7 +1806,7 @@ checksum = "881c5d0a13b2f1498e2306e82cbada78390e152d4b1378fb28a84f4dcd0dc4f3"
 dependencies = [
  "dispatch",
  "nix",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4103,6 +4103,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "keeper-host"
+version = "1.1.0"
+dependencies = [
+ "byteorder",
+ "hex",
+ "serde",
+ "serde_json",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
+name = "keeper-host-executor"
+version = "1.1.0"
+dependencies = [
+ "byteorder",
+ "hex",
+ "serde",
+ "serde_json",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
+name = "keeper-host-network"
+version = "1.1.0"
+dependencies = [
+ "byteorder",
+ "hex",
+ "serde",
+ "serde_json",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
 name = "lalrpop"
 version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4376,7 +4412,7 @@ version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "cfg-if",
  "cfg_aliases",
  "libc",
@@ -5593,7 +5629,7 @@ dependencies = [
  "prettyplease 0.1.25",
  "prost 0.11.9",
  "prost-types 0.11.9",
- "regex 1.11.2",
+ "regex 1.12.2",
  "syn 1.0.109",
  "tempfile",
  "which",
@@ -5614,8 +5650,8 @@ dependencies = [
  "prettyplease 0.2.37",
  "prost 0.13.5",
  "prost-types 0.13.5",
- "regex 1.11.2",
- "syn 2.0.106",
+ "regex 1.12.2",
+ "syn 2.0.107",
  "tempfile",
 ]
 
