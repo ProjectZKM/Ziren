@@ -66,12 +66,8 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             }
             top_7_bits -= F::from_canonical_u32(7);
             self.range_check_witness = top_7_bits.inverse();
-            // self.permutation = populate_perm_deg3(m_trial, Some(m_hash));
-
-            // assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         } else {
             self.populate_dummy();
-            // assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         }
     }
 
@@ -89,7 +85,6 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             self.y6_bit_decomp[i] = F::ZERO;
         }
         self.range_check_witness = F::ZERO;
-        // self.permutation = populate_perm_deg3([F::ZERO; 16], None);
     }
 }
 

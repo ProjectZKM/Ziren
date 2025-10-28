@@ -14,7 +14,7 @@
   "ShiftLeft": 68,
   "MemoryLocal": 100,
   "Program": 31,
-  "Global": 428,
+  "Global": 115,
   "Secp256k1AddAssign": 4013,
   "AddSub": 47,
   "Jump": 82,
