@@ -1,10 +1,3 @@
-use super::poseidon2::permutation::Poseidon2Cols;
-use super::poseidon2::trace::populate_perm_deg3;
-use super::poseidon2::Poseidon2Operation;
-use super::poseidon2::{
-    air::{eval_external_round, eval_internal_rounds},
-    NUM_EXTERNAL_ROUNDS,
-};
 use p3_air::AirBuilder;
 use p3_field::Field;
 use p3_field::FieldAlgebra;
@@ -109,7 +102,7 @@ impl<F: Field> GlobalLookupOperation<F> {
         is_receive: AB::Expr,
         is_send: AB::Expr,
         is_real: AB::Var,
-        kind: AB::Var,
+        _kind: AB::Var,
     ) {
         // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);

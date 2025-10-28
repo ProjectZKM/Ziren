@@ -1,8 +1,6 @@
 //! Elliptic Curve `y^2 = x^3 + 3z*x - 3` over the `F_{p^7} = F_p[z]/(z^7 + 2z - 8)` extension field.
-use crate::{koala_bear_poseidon2::KoalaBearPoseidon2, septic_extension::SepticExtension};
+use crate::septic_extension::SepticExtension;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
-use p3_koala_bear::KoalaBear;
-use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 
@@ -130,7 +128,6 @@ impl<F: PrimeField32> SepticCurve<F> {
     /// Also, we always return the curve point with y-coordinate within `[1, (p-1)/2]`, where p is the characteristic.
     /// The returned values are the curve point, the offset used, and the hash input and output.
     pub fn lift_x(m: SepticExtension<F>) -> (Self, u8) {
-        // let perm = KoalaBearPoseidon2::new().perm;
         for offset in 0..=255 {
             let x_trial = m * F::from_canonical_u32(256) + F::from_canonical_u8(offset);
 
@@ -144,41 +141,6 @@ impl<F: PrimeField32> SepticCurve<F> {
                 }
                 return (Self { x: x_trial, y }, offset);
             }
-
-            // let m_trial = [
-            //     m.0[0],
-            //     m.0[1],
-            //     m.0[2],
-            //     m.0[3],
-            //     m.0[4],
-            //     m.0[5],
-            //     m.0[6],
-            //     F::from_canonical_u8(offset),
-            //     F::zero(),
-            //     F::zero(),
-            //     F::zero(),
-            //     F::zero(),
-            //     F::zero(),
-            //     F::zero(),
-            //     F::zero(),
-            //     F::zero(),
-            // ];
-
-            // let m_hash = perm
-            //     .permute(m_trial.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())))
-            //     .map(|x| F::from_canonical_u32(x.as_canonical_u32()));
-            // let x_trial = SepticExtension(m_hash[..7].try_into().unwrap());
-
-            // let y_sq = Self::curve_formula(x_trial);
-            // if let Some(y) = y_sq.sqrt() {
-            //     if y.is_exception() {
-            //         continue;
-            //     }
-            //     if y.is_send() {
-            //         return (Self { x: x_trial, y: -y }, offset, m_trial, m_hash);
-            //     }
-            //     return (Self { x: x_trial, y }, offset, m_trial, m_hash);
-            // }
         }
         panic!("curve point couldn't be found after 256 attempts");
     }
