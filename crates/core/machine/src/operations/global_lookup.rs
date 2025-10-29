@@ -20,7 +20,6 @@ pub struct GlobalLookupOperation<T: Copy> {
     pub y_coordinate: SepticBlock<T>,
     pub y6_bit_decomp: [T; 30],
     pub range_check_witness: T,
-    // pub permutation: Poseidon2Operation<T>,
 }
 
 impl<F: PrimeField32> GlobalLookupOperation<F> {
@@ -118,46 +117,6 @@ impl<F: Field> GlobalLookupOperation<F> {
             is_real,
         );
 
-        // Turn the message into a hash input. Only the first 8 elements are non-zero, as the rate of the Poseidon2 hash is 8.
-        // Combining `values[0]` with `kind` is safe, as `values[0]` is range checked to be u16, and `kind` is known to be u8.
-        // let m_trial = [
-        //     values[0].clone() + AB::Expr::from_canonical_u32(1 << 16) * kind,
-        //     values[1].clone(),
-        //     values[2].clone(),
-        //     values[3].clone(),
-        //     values[4].clone(),
-        //     values[5].clone(),
-        //     values[6].clone(),
-        //     offset.clone(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        //     AB::Expr::zero(),
-        // ];
-
-        // Constrain the input of the permutation to be the message.
-        // for i in 0..16 {
-        //     builder.when(is_real).assert_eq(
-        //         cols.permutation.permutation.external_rounds_state()[0][i].into(),
-        //         m_trial[i].clone(),
-        //     );
-        // }
-
-        // Constrain the permutation.
-        // for r in 0..NUM_EXTERNAL_ROUNDS {
-        //     eval_external_round(builder, &cols.permutation.permutation, r);
-        // }
-        // eval_internal_rounds(builder, &cols.permutation.permutation);
-
-        // Constrain that when `is_real` is true, the x-coordinate is the hash of the message.
-        // let m_hash = cols.permutation.permutation.perm_output();
-        // for i in 0..7 {
-        //     builder.when(is_real).assert_eq(cols.x_coordinate[i].into(), m_hash[i]);
-        // }
         let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
         let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
 

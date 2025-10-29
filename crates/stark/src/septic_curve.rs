@@ -129,7 +129,15 @@ impl<F: PrimeField32> SepticCurve<F> {
     /// The returned values are the curve point, the offset used, and the hash input and output.
     pub fn lift_x(m: SepticExtension<F>) -> (Self, u8) {
         for offset in 0..=255 {
-            let x_trial = m * F::from_canonical_u32(256) + F::from_canonical_u8(offset);
+            let x_trial = SepticExtension::from_base_slice(&[
+                m.0[0],
+                m.0[1],
+                m.0[2],
+                m.0[3],
+                m.0[4],
+                m.0[5],
+                m.0[6] * F::from_canonical_u16(256) + F::from_canonical_u8(offset),
+            ]);
 
             let y_sq = Self::curve_formula(x_trial);
             if let Some(y) = y_sq.sqrt() {
