@@ -179,8 +179,7 @@ pub enum SyscallCode {
     /// Executes the `POSEIDON2_PERMUTE` precompile.
     POSEIDON2_PERMUTE = 0x00_01_00_30,
 
-    SYS_LINUX = 4000,  // not real syscall, used for represent all linux syscalls
-    SYS_NOP = 0xFF_FF, // not real syscall, used for represent all no operation syscalls
+    SYS_LINUX = 4000, // not real syscall, used for represent all linux syscalls
 
     UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
@@ -253,7 +252,6 @@ impl SyscallCode {
             4263 => SyscallCode::SYS_CLOCK_GETTIME,
             4288 => SyscallCode::SYS_OPENAT,
             4338 => SyscallCode::SYS_PRLIMIT64,
-            0xFFFF => SyscallCode::SYS_NOP,
             _ => SyscallCode::UNIMPLEMENTED,
         }
     }
@@ -294,18 +292,6 @@ impl SyscallCode {
             SyscallCode::BLS12381_FP_MUL => SyscallCode::BLS12381_FP_ADD,
             SyscallCode::BLS12381_FP2_SUB => SyscallCode::BLS12381_FP2_ADD,
             SyscallCode::SYS_MMAP2 => SyscallCode::SYS_MMAP,
-            SyscallCode::SYS_OPEN
-            | SyscallCode::SYS_CLOSE
-            | SyscallCode::SYS_RT_SIGACTION
-            | SyscallCode::SYS_RT_SIGPROCMASK
-            | SyscallCode::SYS_MADVISE
-            | SyscallCode::SYS_GETTID
-            | SyscallCode::SYS_SCHED_GETAFFINITY
-            | SyscallCode::SYS_CLOCK_GETTIME
-            | SyscallCode::SYS_PRLIMIT64
-            | SyscallCode::SYS_SIGALTSTACK
-            | SyscallCode::SYS_OPENAT
-            | SyscallCode::SYS_FSTAT64 => SyscallCode::SYS_NOP,
             _ => *self,
         }
     }
