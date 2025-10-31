@@ -255,6 +255,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::SYS_SIGALTSTACK, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_OPENAT, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_FSTAT64, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_MUNMAP, Arc::new(SysNopSyscall));
 
     syscall_map
 }

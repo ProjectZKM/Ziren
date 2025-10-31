@@ -165,6 +165,7 @@ pub enum SyscallCode {
     /// follows are executed as NOP syscalls
     SYS_OPEN = 4005,
     SYS_CLOSE = 4006,
+    SYS_MUNMAP = 4091,
     SYS_RT_SIGACTION = 4194,
     SYS_RT_SIGPROCMASK = 4195,
     SYS_SIGALTSTACK = 4206,
@@ -239,6 +240,7 @@ impl SyscallCode {
             4055 => SyscallCode::SYS_FCNTL,
             4045 => SyscallCode::SYS_BRK,
             4090 => SyscallCode::SYS_MMAP2,
+            4091 => SyscallCode::SYS_MUNMAP,
             4120 => SyscallCode::SYS_CLONE,
             4194 => SyscallCode::SYS_RT_SIGACTION,
             4195 => SyscallCode::SYS_RT_SIGPROCMASK,
