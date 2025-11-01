@@ -2,7 +2,10 @@ use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::Word;
 
-use crate::{memory::MemoryReadWriteCols, operations::KoalaBearWordRangeChecker};
+use crate::{
+    memory::MemoryReadWriteCols,
+    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
+};
 
 pub const NUM_MEMORY_INSTRUCTIONS_COLUMNS: usize = size_of::<MemoryInstructionsColumns<u8>>();
 
@@ -96,4 +99,8 @@ pub struct MemoryInstructionsColumns<T> {
     /// Flag for load memory instructions that contains bool value of
     /// (memory value is pos).
     pub mem_value_is_pos: T,
+
+    /// This is used to check if the most significant three bytes of the memory address are all
+    /// zero.
+    pub most_sig_bytes_zero: IsZeroOperation<T>,
 }
