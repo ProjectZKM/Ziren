@@ -115,6 +115,20 @@ impl Instruction {
                 | Opcode::MSUB
                 | Opcode::MEQ
                 | Opcode::MNE
+                | Opcode::LH
+                | Opcode::LWL
+                | Opcode::LW
+                | Opcode::LBU
+                | Opcode::LHU
+                | Opcode::LWR
+                | Opcode::SB
+                | Opcode::SH
+                | Opcode::SWL
+                | Opcode::SW
+                | Opcode::SWR
+                | Opcode::LL
+                | Opcode::SC
+                | Opcode::LB
         )
     }
 

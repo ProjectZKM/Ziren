@@ -465,7 +465,6 @@ where
             local.hi,
             AB::Expr::zero(),
             AB::Expr::zero(),
-            AB::Expr::zero(),
             local.hi_record_is_real,
             AB::Expr::zero(),
             AB::Expr::one(),

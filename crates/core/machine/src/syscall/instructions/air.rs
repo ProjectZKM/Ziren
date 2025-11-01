@@ -45,7 +45,6 @@ where
         // SAFETY: This checks the following.
         // - `shard`, `clk` are correctly received from the CpuChip
         // - `op_a_immutable = 0`
-        // - `is_memory = 0`
         // - `is_syscall = 1`
         // `next_pc`, `num_extra_cycles`, `op_a_val`, `is_halt` need to be constrained. We outline the checks below.
         // `next_pc` is constrained for the case where `is_halt` is true to be `0` in `eval_is_halt_unimpl`.
@@ -66,7 +65,6 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),
             AB::Expr::zero(),

@@ -214,7 +214,6 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),
-            AB::Expr::zero(),
             AB::Expr::one(),
             local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
