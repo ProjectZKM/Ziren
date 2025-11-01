@@ -51,7 +51,7 @@ impl CpuChip {
 
         // If we are maddu，msubu，madd, msub, ins，mne, meq, syscall and memory instruction then the hi_or_prev_a should equal to op_a_access.prev_value.
         builder
-            .when(local.is_rw_a + local.is_memory)
+            .when(local.is_rw_a)
             .assert_word_eq(local.hi_or_prev_a, local.op_a_access.prev_value);
 
         // Write the `a` or the result to the first register described in the instruction unless

@@ -71,7 +71,7 @@ where
         // - `next_pc = pc + 4`
         // - `num_extra_cycles = 0`
         // - `op_a_immutable = is_sb + is_sh + is_sw + local.is_swl + local.is_swr`, as these store instructions keep `op_a` immutable
-        // - `is_memory = 1`
+        // - `is_rw_a = 1`
         // - `is_syscall = 0`
         // - `is_halt = 0`
         // `op_a_value` when the instruction is load still has to be constrained, as well as memory opcode behavior.
@@ -89,7 +89,6 @@ where
             local.prev_a_val,
             local.is_sb + local.is_sh + local.is_sw + local.is_swl + local.is_swr,
             AB::Expr::one(),
-            AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),

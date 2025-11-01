@@ -227,7 +227,6 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),
-            AB::Expr::zero(),
             AB::Expr::one(),
             local.is_real,
         );

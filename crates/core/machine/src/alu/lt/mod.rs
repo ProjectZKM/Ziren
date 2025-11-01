@@ -451,7 +451,6 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),
-            AB::Expr::zero(),
             AB::Expr::one(),
             is_real,
         );

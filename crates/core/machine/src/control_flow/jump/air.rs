@@ -39,7 +39,7 @@ where
         // SAFETY: This checks the following.
         // - `num_extra_cycles = 0`
         // - `op_a_immutable = 0`
-        // - `is_memory = 0`
+        // - `is_rw_a = 0`
         // - `is_syscall = 0`
         // - `is_halt = 0`
         // `next_pc` and `op_a_value` still has to be constrained, and this is done below.
@@ -55,7 +55,6 @@ where
             local.op_b_value,
             local.op_c_value,
             Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),

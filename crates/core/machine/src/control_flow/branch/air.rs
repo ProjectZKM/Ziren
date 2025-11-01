@@ -61,7 +61,7 @@ where
         // - `num_extra_cycles = 0`
         // - `op_a_val` will be constrained in the BranchChip as `op_a_immutable = 1`
         // - `op_a_immutable = 1`, as this is a branch instruction
-        // - `is_memory = 0`
+        // - `is_rw_a = 0`
         // - `is_syscall = 0`
         // - `is_halt = 0`
         // `next_pc` still has to be constrained, and this is done below.
@@ -78,7 +78,6 @@ where
             local.op_c_value,
             Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
             AB::Expr::one(),
-            AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::zero(),

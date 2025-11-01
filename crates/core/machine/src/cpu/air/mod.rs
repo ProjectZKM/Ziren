@@ -49,16 +49,10 @@ where
         // SAFETY: The usage of `builder.if_else` requires `is_memory + is_syscall` to be boolean.
         // The correctness of `is_memory` and `is_syscall` will be checked in the opcode specific chips.
         // In these correct cases, `is_memory + is_syscall` will be always boolean.
-        let expected_shard_to_send = builder.if_else(
-            local.is_memory + local.is_rw_a + local.is_write_hi,
-            local.shard,
-            AB::Expr::zero(),
-        );
-        let expected_clk_to_send = builder.if_else(
-            local.is_memory + local.is_rw_a + local.is_write_hi,
-            clk.clone(),
-            AB::Expr::zero(),
-        );
+        let expected_shard_to_send =
+            builder.if_else(local.is_rw_a + local.is_write_hi, local.shard, AB::Expr::zero());
+        let expected_clk_to_send =
+            builder.if_else(local.is_rw_a + local.is_write_hi, clk.clone(), AB::Expr::zero());
         builder.when(local.is_real).assert_eq(local.shard_to_send, expected_shard_to_send);
         builder.when(local.is_real).assert_eq(local.clk_to_send, expected_clk_to_send);
 
@@ -75,7 +69,6 @@ where
             local.op_c_val(),
             local.hi_or_prev_a,
             local.op_a_immutable,
-            local.is_memory,
             local.is_rw_a,
             local.is_write_hi,
             local.is_halt,
