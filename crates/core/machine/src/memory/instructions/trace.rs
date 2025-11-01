@@ -7,7 +7,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemInstrEvent},
-    ByteOpcode, ExecutionRecord, Opcode, Program,
+    ByteOpcode, ExecutionRecord, Opcode, Program, NUM_REGISTERS,
 };
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::air::MachineAir;
@@ -230,5 +230,18 @@ impl MemoryInstructionsChip {
             b: addr_bytes[1],
             c: addr_bytes[2],
         });
+
+        cols.most_sig_bytes_zero
+            .populate_from_field_element(cols.addr_word[1] + cols.addr_word[2] + cols.addr_word[3]);
+
+        if cols.most_sig_bytes_zero.result == F::one() {
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::LTU,
+                a1: 1,
+                a2: 0,
+                b: NUM_REGISTERS as u8 - 1,
+                c: cols.addr_word[0].as_canonical_u32() as u8,
+            });
+        }
     }
 }

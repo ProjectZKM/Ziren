@@ -8,9 +8,9 @@ use zkm_stark::{air::ZKMAirBuilder, Word};
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     memory::MemoryCols,
-    operations::KoalaBearWordRangeChecker,
+    operations::{IsZeroOperation, KoalaBearWordRangeChecker},
 };
-use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode};
+use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode, NUM_REGISTERS};
 
 use super::{columns::MemoryInstructionsColumns, MemoryInstructionsChip};
 
@@ -152,6 +152,33 @@ impl MemoryInstructionsChip {
         // Check that the 2nd and 3rd addr_word elements are bytes. We already check the most sig
         // byte in the KoalaBearWordRangeChecker, and the least sig one in the AND byte lookup below.
         builder.slice_range_check_u8(&local.addr_word.0[1..3], is_real.clone());
+
+        // We check that `addr_word >= NUM_REGISTERS`, or `addr_word > NUM_REGISTERS` to avoid registers.
+        // Check that if the most significant bytes are zero, then the least significant byte is at
+        // least NUM_REGISTERS.
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::one(),
+            AB::Expr::from_canonical_u8(NUM_REGISTERS as u8 - 1),
+            local.addr_word[0],
+            local.most_sig_bytes_zero.result,
+        );
+
+        // SAFETY: Check that the above interaction is only sent if one of the opcode flags is set.
+        // If `is_real = 0`, then `local.most_sig_bytes_zero.result = 0`, leading to no interaction.
+        // Note that when `is_real = 1`, due to `IsZeroOperation`,
+        // `local.most_sig_bytes_zero.result` is boolean.
+        builder.when(local.most_sig_bytes_zero.result).assert_one(is_real.clone());
+
+        // Check the most_sig_byte_zero flag.  Note that we can simply add up the three most
+        // significant bytes and check if the sum is zero.  Those bytes are going to be byte
+        // range checked, so the only way the sum is zero is if all bytes are 0.
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            local.addr_word[1] + local.addr_word[2] + local.addr_word[3],
+            local.most_sig_bytes_zero,
+            is_real.clone(),
+        );
 
         // Evaluate the addr_offset column and offset flags.
         self.eval_offset_value_flags(builder, local);
