@@ -2,7 +2,7 @@
     <img alt="zkmreadme" width="1412" src="https://i.ibb.co/xDTXTgH/zkmreadme.gif">
 </p>
 <p align="center">
-    <a href="https://discord.gg/zkm"><img src="https://img.shields.io/discord/700454073459015690?logo=discord"/></a>
+    <a href="https://discord.com/invite/h8cs3ZHeA7"><img src="https://img.shields.io/discord/700454073459015690?logo=discord"/></a>
     <a href="https://x.com/ProjectZKM"><img src="https://img.shields.io/twitter/follow/ProjectZKM?style=social"/></a>
     <a href="https://github.com/ProjectZKM/Ziren/graphs/contributors"><img src="https://img.shields.io/github/contributors/ProjectZKM/Ziren.svg"/></a>
 </p>
