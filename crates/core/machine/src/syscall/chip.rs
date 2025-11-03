@@ -19,7 +19,7 @@ use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 use zkm_stark::LookupKind;
 
-use crate::utils::pad_rows_fixed;
+use crate::utils::next_power_of_two;
 
 /// The number of main trace columns for `SyscallChip`.
 pub const NUM_SYSCALL_COLS: usize = size_of::<SyscallCols<u8>>();
@@ -89,7 +89,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => &input
                 .syscall_events
                 .iter()
-                .filter(|e| e.a_record.prev_value.to_le_bytes()[1] == 1)
+                .filter(|e| {
+                    (e.a_record.prev_value.to_le_bytes()[2] == 1)
+                        || (e.a_record.prev_value.to_le_bytes()[1] != 0)
+                })
                 .copied()
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => &input
@@ -108,6 +111,21 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             })
             .collect_vec();
         output.global_lookup_events.extend(events);
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = match self.shard_kind() {
+            SyscallShardKind::Core => &input.syscall_events,
+            SyscallShardKind::Precompile => &input
+                .precompile_events
+                .all_events()
+                .map(|(event, _)| event.to_owned())
+                .collect::<Vec<_>>(),
+        };
+        let nb_rows = events.len();
+        let size_log2 = input.fixed_log2_rows::<F, _>(self);
+        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        Some(padded_nb_rows)
     }
 
     fn generate_trace(
@@ -133,7 +151,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             SyscallShardKind::Core => input
                 .syscall_events
                 .par_iter()
-                .filter(|event| event.a_record.prev_value.to_le_bytes()[1] == 1)
+                .filter(|event| {
+                    (event.a_record.prev_value.to_le_bytes()[2] == 1)
+                        || (event.a_record.prev_value.to_le_bytes()[1] != 0)
+                })
                 .map(|event| row_fn(event, false))
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => input
@@ -146,10 +167,9 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         };
 
         // Pad the trace to a power of two depending on the proof shape in `input`.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_SYSCALL_COLS],
-            input.fixed_log2_rows::<F, _>(self),
+        rows.resize(
+            <SyscallChip as MachineAir<F>>::num_rows(self, input).unwrap(),
+            [F::zero(); NUM_SYSCALL_COLS],
         );
 
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYSCALL_COLS)
@@ -164,7 +184,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     shard
                         .syscall_events
                         .iter()
-                        .filter(|e| e.a_record.prev_value.to_le_bytes()[1] == 1)
+                        .filter(|e| {
+                            (e.a_record.prev_value.to_le_bytes()[2] == 1)
+                                || (e.a_record.prev_value.to_le_bytes()[1] != 0)
+                        })
                         .take(1)
                         .count()
                         > 0
@@ -193,10 +216,7 @@ where
         let local = main.row_slice(0);
         let local: &SyscallCols<AB::Var> = (*local).borrow();
 
-        builder.assert_eq(
-            local.is_real * local.is_real * local.is_real,
-            local.is_real * local.is_real * local.is_real,
-        );
+        builder.assert_bool(local.is_real);
 
         match self.shard_kind {
             SyscallShardKind::Core => {
@@ -219,10 +239,10 @@ where
                             local.syscall_id.into(),
                             local.arg1.into(),
                             local.arg2.into(),
-                            AB::Expr::ZERO,
-                            AB::Expr::ZERO,
-                            local.is_real.into() * AB::Expr::ONE,
-                            local.is_real.into() * AB::Expr::ZERO,
+                            AB::Expr::zero(),
+                            AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::one(),
+                            local.is_real.into() * AB::Expr::zero(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
@@ -251,10 +271,10 @@ where
                             local.syscall_id.into(),
                             local.arg1.into(),
                             local.arg2.into(),
-                            AB::Expr::ZERO,
-                            AB::Expr::ZERO,
-                            local.is_real.into() * AB::Expr::ZERO,
-                            local.is_real.into() * AB::Expr::ONE,
+                            AB::Expr::zero(),
+                            AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::one(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),

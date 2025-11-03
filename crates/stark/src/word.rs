@@ -31,20 +31,20 @@ impl<T> Word<T> {
 
     /// Extends a variable to a word.
     pub fn extend_var<AB: ZKMAirBuilder<Var = T>>(var: T) -> Word<AB::Expr> {
-        Word([AB::Expr::ZERO + var, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
+        Word([AB::Expr::zero() + var, AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()])
     }
 }
 
 impl<T: FieldAlgebra> Word<T> {
     /// Extends a variable to a word.
     pub fn extend_expr<AB: ZKMAirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
-        Word([AB::Expr::ZERO + expr, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
+        Word([AB::Expr::zero() + expr, AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()])
     }
 
     /// Returns a word with all zero expressions.
     #[must_use]
     pub fn zero<AB: ZKMAirBuilder<Expr = T>>() -> Word<T> {
-        Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
+        Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()])
     }
 }
 

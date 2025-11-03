@@ -1,7 +1,11 @@
 use std::borrow::{Borrow, BorrowMut};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
 use p3_field::PrimeField32;
+#[cfg(feature = "sys")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
@@ -13,10 +17,12 @@ use crate::{
     runtime::{Instruction, RecursionProgram},
     ExecutionRecord,
 };
+#[cfg(feature = "sys")]
+use crate::{CommitPublicValuesEvent, CommitPublicValuesInstr};
 
 use crate::DIGEST_SIZE;
 
-use super::mem::MemoryAccessCols;
+use super::mem::MemoryAccessColsChips;
 
 pub const NUM_PUBLIC_VALUES_COLS: usize = core::mem::size_of::<PublicValuesCols<u8>>();
 pub const NUM_PUBLIC_VALUES_PREPROCESSED_COLS: usize =
@@ -32,7 +38,7 @@ pub struct PublicValuesChip;
 #[repr(C)]
 pub struct PublicValuesPreprocessedCols<T: Copy> {
     pub pv_idx: [T; DIGEST_SIZE],
-    pub pv_mem: MemoryAccessCols<T>,
+    pub pv_mem: MemoryAccessColsChips<T>,
 }
 
 /// The cols for a CommitPVHash invocation.
@@ -65,6 +71,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         NUM_PUBLIC_VALUES_PREPROCESSED_COLS
     }
 
+    #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
         let commit_pv_hash_instrs = program
@@ -90,7 +97,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
                 let mut row = [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
                 let cols: &mut PublicValuesPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
                 cols.pv_idx[i] = F::ONE;
-                cols.pv_mem = MemoryAccessCols { addr: *addr, mult: F::NEG_ONE };
+                cols.pv_mem = MemoryAccessColsChips { addr: *addr, mult: F::NEG_ONE };
                 rows.push(row);
             }
         }
@@ -110,6 +117,70 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         Some(trace)
     }
 
+    #[cfg(feature = "sys")]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let mut rows: Vec<[KoalaBear; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
+        let commit_pv_hash_instrs = program
+            .instructions
+            .iter()
+            .filter_map(|instruction| {
+                if let Instruction::CommitPublicValues(instr) = instruction {
+                    Some(unsafe {
+                        std::mem::transmute::<
+                            &Box<CommitPublicValuesInstr<F>>,
+                            &Box<CommitPublicValuesInstr<KoalaBear>>,
+                        >(instr)
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if commit_pv_hash_instrs.len() != 1 {
+            tracing::warn!("Expected exactly one CommitPVHash instruction.");
+        }
+
+        // We only take 1 commit pv hash instruction, since our air only checks for one public
+        // values hash.
+        for instr in commit_pv_hash_instrs.iter().take(1) {
+            for i in 0..DIGEST_SIZE {
+                let mut row = [KoalaBear::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS];
+                let cols: &mut PublicValuesPreprocessedCols<KoalaBear> =
+                    row.as_mut_slice().borrow_mut();
+                unsafe {
+                    crate::sys::public_values_instr_to_row_koalabear(instr, i, cols);
+                }
+                rows.push(row);
+            }
+        }
+
+        // Pad the preprocessed rows to 8 rows.
+        // gpu code breaks for small traces
+        pad_rows_fixed(
+            &mut rows,
+            || [KoalaBear::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
+            Some(PUB_VALUES_LOG_HEIGHT),
+        );
+
+        let trace = RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_PUBLIC_VALUES_PREPROCESSED_COLS,
+        );
+        Some(trace)
+    }
+
+    #[cfg(not(feature = "sys"))]
     fn generate_trace(
         &self,
         input: &ExecutionRecord<F>,
@@ -142,6 +213,61 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_PUBLIC_VALUES_COLS)
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        if input.commit_pv_hash_events.len() != 1 {
+            tracing::warn!("Expected exactly one CommitPVHash event.");
+        }
+
+        let mut rows: Vec<[KoalaBear; NUM_PUBLIC_VALUES_COLS]> = Vec::new();
+
+        // We only take 1 commit pv hash instruction, since our air only checks for one public
+        // values hash.
+        for event in input.commit_pv_hash_events.iter().take(1) {
+            let bb_event = unsafe {
+                std::mem::transmute::<
+                    &CommitPublicValuesEvent<F>,
+                    &CommitPublicValuesEvent<KoalaBear>,
+                >(event)
+            };
+            for i in 0..DIGEST_SIZE {
+                let mut row = [KoalaBear::ZERO; NUM_PUBLIC_VALUES_COLS];
+                let cols: &mut PublicValuesCols<KoalaBear> = row.as_mut_slice().borrow_mut();
+                unsafe {
+                    crate::sys::public_values_event_to_row_koalabear(bb_event, i, cols);
+                }
+                rows.push(row);
+            }
+        }
+
+        // Pad the trace to 8 rows.
+        pad_rows_fixed(
+            &mut rows,
+            || [KoalaBear::ZERO; NUM_PUBLIC_VALUES_COLS],
+            Some(PUB_VALUES_LOG_HEIGHT),
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_PUBLIC_VALUES_COLS,
+        )
     }
 
     fn included(&self, _record: &Self::Record) -> bool {

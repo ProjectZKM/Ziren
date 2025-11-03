@@ -210,7 +210,7 @@ where
         builder.assert_bool(local.is_mul);
 
         // Check that only one of them is set.
-        builder.assert_eq(local.is_add + local.is_sub + local.is_mul, AB::Expr::ONE);
+        builder.assert_eq(local.is_add + local.is_sub + local.is_mul, AB::Expr::one());
 
         let p = limbs_from_prev_access(&local.x_access);
         let q = limbs_from_prev_access(&local.y_access);

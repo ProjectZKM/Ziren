@@ -17,7 +17,7 @@ use zkm_stark::{
 
 /// A set of columns needed to compute the global lookup elliptic curve digest.
 /// It is critical that this struct is at the end of the main trace, as the permutation constraints will be dependent on this fact.
-/// It is also critical the the cumulative sum is at the end of this struct, for the same reason.
+/// It is also critical the cumulative sum is at the end of this struct, for the same reason.
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct GlobalAccumulationOperation<T, const N: usize> {
@@ -192,10 +192,10 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             // Now we can constrain that when `local_is_real[i] == 1`, the two `sum_checker` values are both zero.
             builder
                 .when(local_is_real[i])
-                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::ZERO);
+                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::zero());
             builder
                 .when(local_is_real[i])
-                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::ZERO);
+                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::zero());
 
             // If `is_real == 0`, current_sum == next_sum must hold.
             builder

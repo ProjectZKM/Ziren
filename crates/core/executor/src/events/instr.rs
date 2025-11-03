@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// This object encapsulated the information needed to prove an ALU operation. This includes its
 /// shard, opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[repr(C)]
 pub struct AluEvent {
     pub pc: u32,
     pub next_pc: u32,
@@ -130,7 +131,7 @@ pub struct MemInstrEvent {
     /// The memory access record for memory operations.
     pub mem_access: MemoryRecordEnum,
     /// The memory access record for memory operations.
-    pub op_a_access: MemoryRecordEnum,
+    pub prev_a_val: u32,
 }
 
 impl MemInstrEvent {
@@ -147,9 +148,9 @@ impl MemInstrEvent {
         b: u32,
         c: u32,
         mem_access: MemoryRecordEnum,
-        op_a_access: MemoryRecordEnum,
+        prev_a_val: u32,
     ) -> Self {
-        Self { shard, clk, pc, next_pc, opcode, a, b, c, mem_access, op_a_access }
+        Self { shard, clk, pc, next_pc, opcode, a, b, c, mem_access, prev_a_val }
     }
 }
 
@@ -261,7 +262,7 @@ pub struct MiscEvent {
 }
 
 impl MiscEvent {
-    /// Create a new [`JumpEvent`].
+    /// Create a new [`MiscEvent`].
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(

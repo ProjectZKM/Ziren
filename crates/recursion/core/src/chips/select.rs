@@ -1,7 +1,8 @@
 use core::borrow::Borrow;
 use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::FieldAlgebra;
-use p3_field::{Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
+#[cfg(feature = "sys")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use std::borrow::BorrowMut;
@@ -52,6 +53,15 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         SELECT_PREPROCESSED_COLS
     }
 
+    fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
+        let fixed_log2_rows = program.fixed_log2_rows(self);
+        Some(match fixed_log2_rows {
+            Some(log2_rows) => 1 << log2_rows,
+            None => next_power_of_two(instrs_len, None),
+        })
+    }
+
+    #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let instrs = program
             .instructions
@@ -62,12 +72,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             })
             .collect::<Vec<_>>();
 
-        let nb_rows = instrs.len();
-        let fixed_log2_rows = program.fixed_log2_rows(self);
-        let padded_nb_rows = match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -89,18 +94,61 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         Some(RowMajorMatrix::new(values, SELECT_PREPROCESSED_COLS))
     }
 
+    #[cfg(feature = "sys")]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let instrs = unsafe {
+            std::mem::transmute::<Vec<&SelectInstr<F>>, Vec<&SelectInstr<KoalaBear>>>(
+                program
+                    .instructions
+                    .iter()
+                    .filter_map(|instruction| match instruction {
+                        Instruction::Select(x) => Some(x),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
+        let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_PREPROCESSED_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = instrs.len() * SELECT_PREPROCESSED_COLS;
+        values[..populate_len].par_chunks_mut(SELECT_PREPROCESSED_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let cols: &mut SelectPreprocessedCols<_> = row.borrow_mut();
+                unsafe {
+                    crate::sys::select_instr_to_row_koalabear(instr, cols);
+                }
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        Some(RowMajorMatrix::new(
+            unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
+            SELECT_PREPROCESSED_COLS,
+        ))
+    }
+
     fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
         // This is a no-op.
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.select_events;
+        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+    }
+
+    #[cfg(not(feature = "sys"))]
     fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let events = &input.select_events;
-        let nb_rows = events.len();
-        let fixed_log2_rows = input.fixed_log2_rows(self);
-        let padded_nb_rows = match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * SELECT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -114,6 +162,40 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, SELECT_COLS)
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let events = unsafe {
+            std::mem::transmute::<&Vec<SelectIo<F>>, &Vec<SelectIo<KoalaBear>>>(
+                &input.select_events,
+            )
+        };
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        let mut values = vec![KoalaBear::ZERO; padded_nb_rows * SELECT_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = events.len() * SELECT_COLS;
+        values[..populate_len].par_chunks_mut(SELECT_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
+                let cols: &mut SelectCols<_> = row.borrow_mut();
+                unsafe {
+                    crate::sys::select_event_to_row_koalabear(&vals, cols);
+                }
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(
+            unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<_>>(values) },
+            SELECT_COLS,
+        )
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -144,11 +226,11 @@ where
         builder.send_single(prep_local.addrs.out2, local.vals.out2, prep_local.mult2);
         builder.assert_eq(
             local.vals.out1,
-            local.vals.bit * local.vals.in2 + (AB::Expr::ONE - local.vals.bit) * local.vals.in1,
+            local.vals.bit * local.vals.in2 + (AB::Expr::one() - local.vals.bit) * local.vals.in1,
         );
         builder.assert_eq(
             local.vals.out2,
-            local.vals.bit * local.vals.in1 + (AB::Expr::ONE - local.vals.bit) * local.vals.in2,
+            local.vals.bit * local.vals.in1 + (AB::Expr::one() - local.vals.bit) * local.vals.in2,
         );
     }
 }

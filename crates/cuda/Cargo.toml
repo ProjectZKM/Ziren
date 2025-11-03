@@ -1,0 +1,31 @@
+[package]
+name = "zkm-cuda"
+readme = "../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+zkm-core-machine = { workspace = true, default-features = true }
+zkm-prover = { workspace = true }
+prost = "0.13"
+bincode = "1.3.3"
+serde = { workspace = true, features = ["derive"] }
+tokio = { version = "^1.44.2", features = ["full"] }
+tracing = { workspace = true }
+twirp = { package = "twirp-rs", version = "0.13.0-succinct" }
+ctrlc = "3.4.4"
+
+[build-dependencies]
+prost-build = { version = "0.13" }
+twirp-build = { package = "twirp-build-rs", version = "0.13.0-succinct" }
+
+[dev-dependencies]
+zkm-core-machine = { path = "../core/machine" }
+test-artifacts = { path = "../test-artifacts" }
+
+[features]
+default = []

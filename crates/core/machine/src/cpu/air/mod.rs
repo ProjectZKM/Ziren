@@ -52,12 +52,12 @@ where
         let expected_shard_to_send = builder.if_else(
             local.is_memory + local.is_rw_a + local.is_write_hi,
             local.shard,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
         );
         let expected_clk_to_send = builder.if_else(
             local.is_memory + local.is_rw_a + local.is_write_hi,
             clk.clone(),
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
         );
         builder.when(local.is_real).assert_eq(local.shard_to_send, expected_shard_to_send);
         builder.when(local.is_real).assert_eq(local.clk_to_send, expected_clk_to_send);
@@ -67,6 +67,7 @@ where
             local.clk_to_send,
             local.pc,
             local.next_pc,
+            local.next_next_pc,
             local.num_extra_cycles,
             local.instruction.opcode,
             local.op_a_value,
@@ -91,10 +92,10 @@ where
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
 
-        let not_real = AB::Expr::ONE - local.is_real;
-        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_b);
-        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_c);
-        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.is_rw_a);
+        let not_real = AB::Expr::one() - local.is_real;
+        builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_b);
+        builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_c);
+        builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.is_rw_a);
     }
 }
 
@@ -120,8 +121,8 @@ impl CpuChip {
         builder.send_byte(
             AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
             local.shard,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             local.is_real,
         );
 

@@ -64,7 +64,7 @@ impl NewCmd {
         let output = command.output().expect("failed to execute command");
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("Failed to clone repository: {}", stderr));
+            return Err(anyhow::anyhow!("Failed to clone repository: {stderr}"));
         }
 
         // Remove the .git directory.

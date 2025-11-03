@@ -14,7 +14,7 @@ Core Components:
 
 - ALU Chips
    
-  The ALU chips manage common field operations and bitwise operations. These chips are responsible for verifying correctness of arithmetic and bitwise operations and throug corss-table lookups from the main CPU chip to make sure executing the correct instructions.
+  The ALU chips manage common field operations and bitwise operations. These chips are responsible for verifying correctness of arithmetic and bitwise operations and through cross-table lookups from the main CPU chip to make sure executing the correct instructions.
 
 - Flow-Control Chips
   

@@ -57,7 +57,6 @@ impl CpuProver {
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
-            stdin,
             public_values,
             zkm_version: self.version().to_string(),
         })
@@ -70,7 +69,8 @@ impl Prover<DefaultProverComponents> for CpuProver {
     }
 
     fn setup(&self, elf: &[u8]) -> (ZKMProvingKey, ZKMVerifyingKey) {
-        self.prover.setup(elf)
+        let (pk, _, _, vk) = self.prover.setup(elf);
+        (pk, vk)
     }
 
     fn zkm_prover(&self) -> &ZKMProver<DefaultProverComponents> {
@@ -90,15 +90,16 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((self.compress_to_groth16(stdin, opts)?, 0));
         }
 
+        let program = self.prover.get_program(&pk.elf).unwrap();
+
         // Generate the core proof.
         let proof: zkm_prover::ZKMProofWithMetadata<zkm_prover::ZKMCoreProofData> =
-            self.prover.prove_core(pk, &stdin, opts.zkm_prover_opts, context)?;
+            self.prover.prove_core(&pk.pk, program, &stdin, opts.zkm_prover_opts, context)?;
         let cycles = proof.cycles;
         if kind == ZKMProofKind::Core {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Core(proof.proof.0),
-                    stdin: proof.stdin,
                     public_values: proof.public_values,
                     zkm_version: self.version().to_string(),
                 },
@@ -117,7 +118,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Compressed(Box::new(reduce_proof)),
-                    stdin,
                     public_values,
                     zkm_version: self.version().to_string(),
                 },
@@ -145,7 +145,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Plonk(proof),
-                    stdin,
                     public_values,
                     zkm_version: self.version().to_string(),
                 },
@@ -165,7 +164,6 @@ impl Prover<DefaultProverComponents> for CpuProver {
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Groth16(proof),
-                    stdin,
                     public_values,
                     zkm_version: self.version().to_string(),
                 },

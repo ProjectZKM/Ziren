@@ -199,22 +199,23 @@ where
 
         // Receive the instruction.
         builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             local.pc,
             local.next_pc,
-            AB::Expr::ZERO,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
+            AB::Expr::zero(),
             cpu_opcode,
             local.a,
             local.b,
             local.c,
-            Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
+            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
             local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
 

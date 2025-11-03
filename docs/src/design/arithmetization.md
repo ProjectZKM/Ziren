@@ -90,7 +90,7 @@ The corresponding constraints support (we use op_1, op_2, add_op for short of op
 - range check
   8-bits values for op_1.i, op_2.i, add_op.value.i. e.g., \\(op\\_1.0 \in \\{0,1,2,\cdots,255\\}\\).
 
-### Matrix Polulation
+### Matrix Population
 
 Sample register state evolution:
 

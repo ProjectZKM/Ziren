@@ -37,7 +37,7 @@ We use the following key constraints to validate the branch chip:
   - Opcode validity is enforced through linear combination verification.
 
 - Branch Condition Logic
-  `is_branching` and `not_branching` consistent whti condition flags.
+  `is_branching` and `not_branching` consistent with condition flags.
 
 ## Jump Chip
 

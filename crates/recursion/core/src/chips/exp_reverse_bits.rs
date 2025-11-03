@@ -3,6 +3,8 @@
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
 use p3_field::{FieldAlgebra, PrimeField32};
+#[cfg(feature = "sys")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::BorrowMut;
 use tracing::instrument;
@@ -10,13 +12,15 @@ use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
 
+#[cfg(feature = "sys")]
+use crate::ExpReverseBitsEvent;
 use crate::{
     builder::ZKMRecursionAirBuilder,
     runtime::{ExecutionRecord, RecursionProgram},
     ExpReverseBitsInstr, Instruction,
 };
 
-use super::mem::MemoryAccessCols;
+use super::mem::MemoryAccessColsChips;
 
 pub const NUM_EXP_REVERSE_BITS_LEN_COLS: usize = core::mem::size_of::<ExpReverseBitsLenCols<u8>>();
 pub const NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS: usize =
@@ -28,9 +32,9 @@ pub struct ExpReverseBitsLenChip<const DEGREE: usize>;
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct ExpReverseBitsLenPreprocessedCols<T: Copy> {
-    pub x_mem: MemoryAccessCols<T>,
-    pub exponent_mem: MemoryAccessCols<T>,
-    pub result_mem: MemoryAccessCols<T>,
+    pub x_mem: MemoryAccessColsChips<T>,
+    pub exponent_mem: MemoryAccessColsChips<T>,
+    pub result_mem: MemoryAccessColsChips<T>,
     pub iteration_num: T,
     pub is_first: T,
     pub is_last: T,
@@ -85,6 +89,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS
     }
 
+    #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]> = Vec::new();
         program
@@ -108,9 +113,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                     row.is_first = F::from_bool(i == 0);
                     row.is_last = F::from_bool(i == addrs.exp.len() - 1);
                     row.is_real = F::ONE;
-                    row.x_mem = MemoryAccessCols { addr: addrs.base, mult: -F::from_bool(i == 0) };
-                    row.exponent_mem = MemoryAccessCols { addr: addrs.exp[i], mult: F::NEG_ONE };
-                    row.result_mem = MemoryAccessCols {
+                    row.x_mem =
+                        MemoryAccessColsChips { addr: addrs.base, mult: -F::from_bool(i == 0) };
+                    row.exponent_mem =
+                        MemoryAccessColsChips { addr: addrs.exp[i], mult: F::NEG_ONE };
+                    row.result_mem = MemoryAccessColsChips {
                         addr: addrs.result,
                         mult: *mult * F::from_bool(i == addrs.exp.len() - 1),
                     };
@@ -132,6 +139,72 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         Some(trace)
     }
 
+    #[cfg(feature = "sys")]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let mut rows: Vec<[KoalaBear; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]> = Vec::new();
+        program
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction {
+                Instruction::ExpReverseBitsLen(x) => Some(unsafe {
+                    std::mem::transmute::<&ExpReverseBitsInstr<F>, &ExpReverseBitsInstr<KoalaBear>>(
+                        x,
+                    )
+                }),
+                _ => None,
+            })
+            .for_each(|instruction| {
+                let ExpReverseBitsInstr { addrs, mult } = instruction;
+                let mut row_add = vec![
+                    [KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS];
+                    addrs.exp.len()
+                ];
+                row_add.iter_mut().enumerate().for_each(|(i, row)| {
+                    let row: &mut ExpReverseBitsLenPreprocessedCols<KoalaBear> =
+                        row.as_mut_slice().borrow_mut();
+                    row.iteration_num = KoalaBear::from_canonical_u32(i as u32);
+                    row.is_first = KoalaBear::from_bool(i == 0);
+                    row.is_last = KoalaBear::from_bool(i == addrs.exp.len() - 1);
+                    row.is_real = KoalaBear::ONE;
+                    row.x_mem = MemoryAccessColsChips {
+                        addr: addrs.base,
+                        mult: -KoalaBear::from_bool(i == 0),
+                    };
+                    row.exponent_mem =
+                        MemoryAccessColsChips { addr: addrs.exp[i], mult: KoalaBear::NEG_ONE };
+                    row.result_mem = MemoryAccessColsChips {
+                        addr: addrs.result,
+                        mult: *mult * KoalaBear::from_bool(i == addrs.exp.len() - 1),
+                    };
+                });
+                rows.extend(row_add);
+            });
+
+        // Pad the trace to a power of two.
+        pad_rows_fixed(
+            &mut rows,
+            || [KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
+            program.fixed_log2_rows(self),
+        );
+
+        let trace = RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS,
+        );
+        Some(trace)
+    }
+
+    #[cfg(not(feature = "sys"))]
     #[instrument(name = "generate exp reverse bits len trace", level = "debug", skip_all, fields(rows = input.exp_reverse_bits_len_events.len()))]
     fn generate_trace(
         &self,
@@ -178,6 +251,81 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         // Convert the trace to a row major matrix.
         let trace = RowMajorMatrix::new(
             overall_rows.into_iter().flatten().collect(),
+            NUM_EXP_REVERSE_BITS_LEN_COLS,
+        );
+
+        #[cfg(debug_assertions)]
+        println!(
+            "exp reverse bits len trace dims is width: {:?}, height: {:?}",
+            trace.width(),
+            trace.height()
+        );
+
+        trace
+    }
+
+    #[cfg(feature = "sys")]
+    #[instrument(name = "generate exp reverse bits len trace", level = "debug", skip_all, fields(rows = input.exp_reverse_bits_len_events.len()))]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let events = unsafe {
+            std::mem::transmute::<&Vec<ExpReverseBitsEvent<F>>, &Vec<ExpReverseBitsEvent<KoalaBear>>>(
+                &input.exp_reverse_bits_len_events,
+            )
+        };
+
+        let mut overall_rows = Vec::new();
+        events.iter().for_each(|event| {
+            let mut rows =
+                vec![vec![KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
+
+            let mut accum = KoalaBear::ONE;
+
+            rows.iter_mut().enumerate().for_each(|(i, row)| {
+                let cols: &mut ExpReverseBitsLenCols<KoalaBear> = row.as_mut_slice().borrow_mut();
+                unsafe {
+                    crate::sys::exp_reverse_bits_event_to_row_koalabear(&event.into(), i, cols);
+                }
+
+                let prev_accum = accum;
+                accum = prev_accum * prev_accum * cols.multiplier;
+
+                cols.accum = accum;
+                cols.accum_squared = accum * accum;
+                cols.prev_accum_squared = prev_accum * prev_accum;
+                cols.prev_accum_squared_times_multiplier =
+                    cols.prev_accum_squared * cols.multiplier;
+                if i == event.exp.len() {
+                    assert_eq!(event.result, accum);
+                }
+            });
+
+            overall_rows.extend(rows);
+        });
+
+        // Pad the trace to a power of two.
+        pad_rows_fixed(
+            &mut overall_rows,
+            || [KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
+            input.fixed_log2_rows(self),
+        );
+
+        // Convert the trace to a row major matrix.
+        let trace = RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    overall_rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
             NUM_EXP_REVERSE_BITS_LEN_COLS,
         );
 
@@ -243,7 +391,7 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
         builder
             .when(local_prepr.is_real)
             .when_not(local.current_bit)
-            .assert_eq(local.multiplier, AB::Expr::ONE);
+            .assert_eq(local.multiplier, AB::Expr::one());
 
         // To get `next.accum`, we multiply `local.prev_accum_squared` by `local.multiplier` when
         // not `is_last`.

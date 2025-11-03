@@ -28,9 +28,9 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
         let local: &BytePreprocessedCols<AB::Var> = (*prep).borrow();
 
         // Send all the lookups for each operation.
-        for (i, opcode) in ByteOpcode::all().iter().enumerate() {
+        for opcode in ByteOpcode::all() {
             let field_op = opcode.as_field::<AB::F>();
-            let mult = local_mult.multiplicities[i];
+            let mult = local_mult.multiplicities[opcode as usize];
             match opcode {
                 ByteOpcode::AND => {
                     builder.receive_byte(field_op, local.and, local.b, local.c, mult)
@@ -46,7 +46,7 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                     builder.receive_byte(field_op, local.sll, local.b, local.c, mult)
                 }
                 ByteOpcode::U8Range => {
-                    builder.receive_byte(field_op, AB::F::ZERO, local.b, local.c, mult)
+                    builder.receive_byte(field_op, AB::F::zero(), local.b, local.c, mult)
                 }
                 ByteOpcode::ShrCarry => builder.receive_byte_pair(
                     field_op,
@@ -60,11 +60,15 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                     builder.receive_byte(field_op, local.ltu, local.b, local.c, mult)
                 }
                 ByteOpcode::MSB => {
-                    builder.receive_byte(field_op, local.msb, local.b, AB::F::ZERO, mult)
+                    builder.receive_byte(field_op, local.msb, local.b, AB::F::zero(), mult)
                 }
-                ByteOpcode::U16Range => {
-                    builder.receive_byte(field_op, local.value_u16, AB::F::ZERO, AB::F::ZERO, mult)
-                }
+                ByteOpcode::U16Range => builder.receive_byte(
+                    field_op,
+                    local.value_u16,
+                    AB::F::zero(),
+                    AB::F::zero(),
+                    mult,
+                ),
             }
         }
     }

@@ -4,7 +4,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumTryAs};
 use zkm_core_executor::ZKMReduceProof;
-use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::io::ZKMPublicValues;
 
 use zkm_prover::{CoreSC, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
@@ -37,7 +36,6 @@ pub enum ZKMProof {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZKMProofWithPublicValues {
     pub proof: ZKMProof,
-    pub stdin: ZKMStdin,
     pub public_values: ZKMPublicValues,
     pub zkm_version: String,
 }
@@ -116,7 +114,6 @@ mod tests {
                 public_inputs: ["".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
-            stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
             zkm_version: "".to_string(),
         };
@@ -133,7 +130,6 @@ mod tests {
                 public_inputs: ["".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
-            stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
             zkm_version: "".to_string(),
         };
@@ -150,7 +146,6 @@ mod tests {
                 public_inputs: ["".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
-            stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
             zkm_version: "".to_string(),
         };
@@ -166,7 +161,6 @@ mod tests {
                 public_inputs: ["".to_string(), "".to_string()],
                 raw_proof: "".to_string(),
             }),
-            stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
             zkm_version: "".to_string(),
         };
@@ -178,7 +172,6 @@ mod tests {
     fn test_core_proof_bytes_unimplemented() {
         let core_proof = ZKMProofWithPublicValues {
             proof: ZKMProof::Core(vec![]),
-            stdin: ZKMStdin::new(),
             public_values: ZKMPublicValues::new(),
             zkm_version: "".to_string(),
         };

@@ -325,7 +325,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// The setup preprocessing phase.
     ///
     /// Given a program, this function generates the proving and verifying keys. The keys correspond
-    /// to the program code and other preprocessed colunms such as lookup tables.
+    /// to the program code and other preprocessed columns such as lookup tables.
     #[instrument("setup machine", level = "debug", skip_all)]
     #[allow(clippy::map_unwrap_or)]
     #[allow(clippy::redundant_closure_for_method_calls)]
@@ -438,6 +438,121 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         )
     }
 
+    /// The setup preprocessing phase. Same as `setup` but initial global cumulative sum is
+    /// precomputed.
+    pub fn setup_core(
+        &self,
+        program: &A::Program,
+        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
+    ) -> (StarkProvingKey<SC>, StarkVerifyingKey<SC>) {
+        let parent_span = tracing::debug_span!("generate preprocessed traces");
+        let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) =
+            parent_span.in_scope(|| {
+                self.chips()
+                    .par_iter()
+                    .map(|chip| {
+                        let chip_name = chip.name();
+                        let begin = Instant::now();
+                        let prep_trace = chip.generate_preprocessed_trace(program);
+                        tracing::debug!(
+                            parent: &parent_span,
+                            "generated preprocessed trace for chip {} in {:?}",
+                            chip_name,
+                            begin.elapsed()
+                        );
+                        // Assert that the chip width data is correct.
+                        let expected_width =
+                            prep_trace.as_ref().map_or(0, p3_matrix::Matrix::width);
+                        assert_eq!(
+                            expected_width,
+                            chip.preprocessed_width(),
+                            "Incorrect number of preprocessed columns for chip {chip_name}"
+                        );
+
+                        // Count the number of constraints.
+                        let num_main_constraints = get_symbolic_constraints(
+                            &chip.air,
+                            chip.preprocessed_width(),
+                            PROOF_MAX_NUM_PVS,
+                        )
+                        .len();
+
+                        let num_permutation_constraints = count_permutation_constraints(
+                            &chip.sends,
+                            &chip.receives,
+                            chip.logup_batch_size(),
+                            chip.air.commit_scope(),
+                        );
+
+                        (
+                            prep_trace.map(move |t| (chip.name(), chip.local_only(), t)),
+                            (chip_name, num_main_constraints + num_permutation_constraints),
+                        )
+                    })
+                    .unzip()
+            });
+
+        let mut named_preprocessed_traces =
+            named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
+
+        // Order the chips and traces by trace size (biggest first), and get the ordering map.
+        named_preprocessed_traces
+            .sort_by_key(|(name, _, trace)| (Reverse(trace.height()), name.clone()));
+
+        let pcs = self.config.pcs();
+        let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
+            .iter()
+            .map(|(name, _, trace)| {
+                let domain = pcs.natural_domain_for_degree(trace.height());
+                ((name.to_owned(), domain, trace.dimensions()), (domain, trace.to_owned()))
+            })
+            .unzip();
+
+        // Commit to the batch of traces.
+        let (commit, data) = tracing::debug_span!("commit to preprocessed traces")
+            .in_scope(|| pcs.commit(domains_and_traces));
+
+        // Get the chip ordering.
+        let chip_ordering = named_preprocessed_traces
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _, _))| (name.to_owned(), i))
+            .collect::<HashMap<_, _>>();
+
+        let local_only = named_preprocessed_traces
+            .iter()
+            .map(|(_, local_only, _)| local_only.to_owned())
+            .collect::<Vec<_>>();
+
+        let constraints_map: HashMap<_, _> = num_constraints.into_iter().collect();
+
+        // Get the preprocessed traces
+        let traces =
+            named_preprocessed_traces.into_iter().map(|(_, _, trace)| trace).collect::<Vec<_>>();
+
+        let pc_start = program.pc_start();
+
+        (
+            StarkProvingKey {
+                commit: commit.clone(),
+                pc_start,
+                initial_global_cumulative_sum,
+                traces,
+                data,
+                chip_ordering: chip_ordering.clone(),
+                local_only,
+                constraints_map,
+            },
+            StarkVerifyingKey {
+                commit,
+                pc_start,
+                initial_global_cumulative_sum,
+                chip_information,
+                chip_ordering,
+            },
+        )
+    }
+
     /// Generates the dependencies of the given records.
     #[allow(clippy::needless_for_each)]
     pub fn generate_dependencies(
@@ -522,6 +637,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 .sum::<SepticDigest<Val<SC>>>();
 
             if !sum.is_zero() {
+                tracing::error!("global cumulative sum: {:?}", sum);
                 return Err(MachineVerificationError::NonZeroCumulativeSum(LookupScope::Global, 0));
             }
 

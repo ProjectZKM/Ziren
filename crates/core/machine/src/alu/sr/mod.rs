@@ -345,7 +345,7 @@ where
         // Calculate the number of bits and bytes to shift by from c.
         {
             // The sum of c_least_sig_byte[i] * 2^i must match c[0].
-            let mut c_byte_sum = AB::Expr::ZERO;
+            let mut c_byte_sum = AB::Expr::zero();
             for i in 0..BYTE_SIZE {
                 let val: AB::Expr = AB::F::from_canonical_u32(1 << i).into();
                 c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
@@ -356,7 +356,7 @@ where
 
             // The 3-bit number represented by the 3 least significant bits of c equals the number
             // of bits to shift.
-            let mut num_bits_to_shift = AB::Expr::ZERO;
+            let mut num_bits_to_shift = AB::Expr::zero();
             for i in 0..3 {
                 num_bits_to_shift = num_bits_to_shift.clone()
                     + local.c_least_sig_byte[i] * AB::F::from_canonical_u32(1 << i);
@@ -427,7 +427,7 @@ where
 
             // The 3-bit number represented by the 3 least significant bits of c equals the number
             // of bits to shift.
-            let mut num_bits_to_shift = AB::Expr::ZERO;
+            let mut num_bits_to_shift = AB::Expr::zero();
             for i in 0..3 {
                 num_bits_to_shift = num_bits_to_shift.clone()
                     + local.c_least_sig_byte[i] * AB::F::from_canonical_u32(1 << i);
@@ -505,24 +505,25 @@ where
 
         // Receive the arguments.
         builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             local.pc,
             local.next_pc,
-            AB::Expr::ZERO,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
+            AB::Expr::zero(),
             local.is_srl * AB::F::from_canonical_u32(Opcode::SRL as u32)
                 + local.is_sra * AB::F::from_canonical_u32(Opcode::SRA as u32)
                 + local.is_ror * AB::F::from_canonical_u32(Opcode::ROR as u32),
             local.a,
             local.b,
             local.c,
-            Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
+            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
             local.is_real,
         );
     }

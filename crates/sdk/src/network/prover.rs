@@ -143,6 +143,12 @@ impl NetworkProver {
         let max_prover_num =
             env::var("MAX_PROVER_NUM").ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
 
+        // Single-node mode
+        // When enabled, the proving process runs entirely on one node,
+        // without splitting into multiple tasks.
+        let single_node =
+            env::var("SINGLE_NODE").ok().and_then(|s| s.parse::<bool>().ok()).unwrap_or(false);
+
         let from_step =
             if kind == ZKMProofKind::CompressToGroth16 { Some(Step::InAgg.into()) } else { None };
 
@@ -164,6 +170,7 @@ impl NetworkProver {
             from_step,
             receipt_inputs: input.receipts,
             max_prover_num,
+            single_node,
             ..Default::default()
         };
 
@@ -218,8 +225,9 @@ impl NetworkProver {
                         serde_json::from_slice(&get_status_response.proof_with_public_inputs)
                             .expect("Failed to deserialize proof");
                     let cycles = get_status_response.total_steps;
+                    let proving_time = get_status_response.proving_time;
                     tracing::info!(
-                        "Proof generation completed successfully, proof_id: {proof_id}, cycles: {cycles}"
+                        "Proof generation completed successfully, proof_id: {proof_id}, cycles: {cycles}, proving time: {proving_time}ms"
                     );
                     return Ok((proof, public_values, cycles));
                 }
@@ -273,7 +281,6 @@ impl NetworkProver {
             ZKMProofWithPublicValues {
                 proof,
                 public_values,
-                stdin,
                 zkm_version: ZKM_CIRCUIT_VERSION.to_string(),
             },
             cycles,

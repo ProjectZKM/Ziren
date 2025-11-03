@@ -109,7 +109,7 @@ pub struct HookEnv<'a, 'b: 'a> {
 /// The input should be of the form [(`curve_id_u8` | `r_is_y_odd_u8` << 7) || `r` || `alpha`]
 /// where:
 /// * `curve_id` is 1 for secp256k1 and 2 for secp256r1
-/// * `r_is_y_odd` is 0 if r is even and 1 if r is is odd
+/// * `r_is_y_odd` is 0 if r is even and 1 if r is odd
 /// * r is the x-coordinate of the point, which should be 32 bytes,
 /// * alpha := r * r * r * (a * r) + b, which should be 32 bytes.
 ///
@@ -148,10 +148,10 @@ mod ecrecover {
             FieldElement as K256FieldElement, Scalar as K256Scalar,
         };
 
-        let r = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&r)).unwrap();
+        let r = K256FieldElement::from_bytes(&K256FieldBytes::from(r)).unwrap();
         debug_assert!(!bool::from(r.is_zero()), "r should not be zero");
 
-        let alpha = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&alpha)).unwrap();
+        let alpha = K256FieldElement::from_bytes(&K256FieldBytes::from(alpha)).unwrap();
         assert!(!bool::from(alpha.is_zero()), "alpha should not be zero");
 
         // normalize the y-coordinate always to be consistent.
@@ -166,7 +166,7 @@ mod ecrecover {
 
             vec![vec![1], y_coord.to_bytes().to_vec(), r_inv.to_bytes().to_vec()]
         } else {
-            let nqr_field = K256FieldElement::from_bytes(K256FieldBytes::from_slice(&NQR)).unwrap();
+            let nqr_field = K256FieldElement::from_bytes(&K256FieldBytes::from(NQR)).unwrap();
             let qr = alpha * nqr_field;
             let root = qr.sqrt().expect("if alpha is not a square, then qr should be a square");
 
@@ -180,10 +180,10 @@ mod ecrecover {
             FieldElement as P256FieldElement, Scalar as P256Scalar,
         };
 
-        let r = P256FieldElement::from_bytes(P256FieldBytes::from_slice(&r)).unwrap();
+        let r = P256FieldElement::from_bytes(&P256FieldBytes::from(r)).unwrap();
         debug_assert!(!bool::from(r.is_zero()), "r should not be zero");
 
-        let alpha = P256FieldElement::from_bytes(P256FieldBytes::from_slice(&alpha)).unwrap();
+        let alpha = P256FieldElement::from_bytes(&P256FieldBytes::from(alpha)).unwrap();
         debug_assert!(!bool::from(alpha.is_zero()), "alpha should not be zero");
 
         if let Some(mut y_coord) = alpha.sqrt().into_option() {
@@ -196,7 +196,7 @@ mod ecrecover {
 
             vec![vec![1], y_coord.to_bytes().to_vec(), r_inv.to_bytes().to_vec()]
         } else {
-            let nqr_field = P256FieldElement::from_bytes(P256FieldBytes::from_slice(&NQR)).unwrap();
+            let nqr_field = P256FieldElement::from_bytes(&P256FieldBytes::from(NQR)).unwrap();
             let qr = alpha * nqr_field;
             let root = qr.sqrt().expect("if alpha is not a square, then qr should be a square");
 

@@ -338,7 +338,7 @@ where
         // Check that `a[0]` is set correctly.
         builder.assert_eq(
             local.a[0],
-            local.bit_b * (AB::Expr::ONE - local.bit_c) + local.is_sign_eq * local.sltu,
+            local.bit_b * (AB::Expr::one() - local.bit_c) + local.is_sign_eq * local.sltu,
         );
         // Check the 3 most significant bytes of 'a' are zero.
         builder.assert_zero(local.a[1]);
@@ -354,7 +354,7 @@ where
         builder.assert_bool(local.byte_flags[2]);
         builder.assert_bool(local.byte_flags[3]);
         builder.assert_bool(sum_flags.clone());
-        builder.when(is_real.clone()).assert_eq(AB::Expr::ONE - local.is_comp_eq, sum_flags);
+        builder.when(is_real.clone()).assert_eq(AB::Expr::one() - local.is_comp_eq, sum_flags);
 
         // Constrain `local.sltu == STLU(b_comp, c_comp)`.
         //
@@ -371,11 +371,11 @@ where
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::ZERO;
+        let mut is_inequality_visited = AB::Expr::zero();
 
         // Expressions for computing the comparison bytes.
-        let mut b_comparison_byte = AB::Expr::ZERO;
-        let mut c_comparison_byte = AB::Expr::ZERO;
+        let mut b_comparison_byte = AB::Expr::zero();
+        let mut c_comparison_byte = AB::Expr::zero();
         // Iterate over the bytes in reverse order and select the differing bytes using the byte
         // flag columns values.
         for (b_byte, c_byte, &flag) in
@@ -435,23 +435,24 @@ where
 
         // Receive the arguments.
         builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             local.pc,
             local.next_pc,
-            AB::Expr::ZERO,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
+            AB::Expr::zero(),
             local.is_slt * AB::F::from_canonical_u32(Opcode::SLT as u32)
                 + local.is_sltu * AB::F::from_canonical_u32(Opcode::SLTU as u32),
             local.a,
             local.b,
             local.c,
-            Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
+            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
             is_real,
         );
     }

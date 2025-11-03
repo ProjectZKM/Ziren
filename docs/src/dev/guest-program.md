@@ -2,7 +2,7 @@
 
 In Ziren, the guest program is the code that will be executed and proven by the zkVM.
 
-Any program written in C, Go, Rust, etc. can be compiled into a MIPS R3000 big-endian ELF executable file using a universal MIPS compiler, that satisfies the required specification.
+Any program written in C, Go, Rust, etc. can be compiled into a MIPS32 little-endian ELF executable file using a universal MIPS compiler, that satisfies the required specification.
 
 Ziren provides Rust runtime libraries for guest programs to handle input/output operations:
 - `zkm_zkvm::io::read::<T>` (for reading structured data)
@@ -11,6 +11,11 @@ Ziren provides Rust runtime libraries for guest programs to handle input/output 
 Note that type `T` must implement both `serde::Serialize` and `serde::Deserialize`. For direct byte-level operations, use the following methods to bypass serialization and reduce cycle counts:
 - `zkm_zkvm::io::read_vec` (raw byte reading)
 - `zkm_zkvm::io::commit_slice` (raw byte writing)
+
+Ziren also provides Go runtime libraries for guest programs to handle input/output operations and exit operation:
+- `zkm_runtime.Read[T any]` (for reading structured data)
+- `zkm_runtime.Commit[T any]` (for committing structured data)
+- `zkm_runtime.RuntimeExit` (for exiting program)
 
 ## Guest Program Example
 
@@ -56,6 +61,32 @@ pub fn main() {
     // outputs to the prover.
     zkm_zkvm::io::commit(&a);
     zkm_zkvm::io::commit(&b);
+}
+```
+
+### Go Example: [Simple-Go]
+(https://github.com/ProjectZKM/Ziren/blob/main/examples/simple-go/guest/main.go)
+
+```go
+//! A simple program that takes a number `n` as input, and writes the `n`
+//! number as output.
+
+package main
+
+import (
+	"log"
+
+	"github.com/ProjectZKM/Ziren/crates/go-runtime/zkm_runtime"
+)
+
+func main() {
+	a := zkm_runtime.Read[uint32]()
+
+	if a != 10 {
+		log.Fatal("%x != 10", a)
+	}
+
+	zkm_runtime.Commit[uint32](a)
 }
 ```
 

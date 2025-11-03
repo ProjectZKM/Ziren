@@ -76,6 +76,37 @@ impl ZKMProverOpts {
 
         opts
     }
+
+    /// Get the default prover options for a prover on GPU given the amount of CPU and GPU memory.
+    #[must_use]
+    pub fn gpu(cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
+        let mut opts = ZKMProverOpts::default();
+
+        // Set the core options.
+        if 24 <= gpu_ram_gb {
+            let log2_shard_size = 21;
+            opts.core_opts.shard_size = 1 << log2_shard_size;
+            opts.core_opts.shard_batch_size = 1;
+
+            let log2_deferred_threshold = 14;
+            opts.core_opts.split_opts = SplitOpts::new(1 << log2_deferred_threshold);
+
+            opts.core_opts.records_and_traces_channel_capacity = 4;
+            opts.core_opts.trace_gen_workers = 4;
+
+            if cpu_ram_gb <= 20 {
+                opts.core_opts.records_and_traces_channel_capacity = 1;
+                opts.core_opts.trace_gen_workers = 2;
+            }
+        } else {
+            unreachable!("not enough gpu memory");
+        }
+
+        // Set the recursion options.
+        opts.recursion_opts.shard_batch_size = 1;
+
+        opts
+    }
 }
 
 /// Options for the core prover.

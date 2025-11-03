@@ -70,6 +70,14 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         "AddSub".to_string()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.add_events.len() + input.sub_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -80,9 +88,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             std::cmp::max((input.add_events.len() + input.sub_events.len()) / num_cpus::get(), 1);
         let merged_events =
             input.add_events.iter().chain(input.sub_events.iter()).collect::<Vec<_>>();
-        let nb_rows = merged_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <AddSubChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_COLS);
 
         values.chunks_mut(chunk_size * NUM_ADD_SUB_COLS).enumerate().par_bridge().for_each(
@@ -189,43 +195,45 @@ where
         );
 
         builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             local.pc,
             local.next_pc,
-            AB::Expr::ZERO,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
+            AB::Expr::zero(),
             Opcode::ADD.as_field::<AB::F>(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
-            Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
+            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
             local.is_add,
         );
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
         builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             local.pc,
             local.next_pc,
-            AB::Expr::ZERO,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
+            AB::Expr::zero(),
             Opcode::SUB.as_field::<AB::F>(),
             local.operand_1,
             local.add_operation.value,
             local.operand_2,
-            Word([AB::Expr::ZERO; 4]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
+            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
             local.is_sub,
         );
 
@@ -238,8 +246,17 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "sys")]
+    use std::borrow::BorrowMut;
+    #[cfg(feature = "sys")]
+    use std::sync::LazyLock;
+
+    #[cfg(feature = "sys")]
+    use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
+    #[cfg(feature = "sys")]
+    use p3_maybe_rayon::prelude::ParallelIterator;
     use rand::{thread_rng, Rng};
     use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
     use zkm_stark::{
@@ -247,6 +264,8 @@ mod tests {
     };
 
     use super::AddSubChip;
+    #[cfg(feature = "sys")]
+    use super::{AddSubCols, NUM_ADD_SUB_COLS};
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
 
     #[test]
@@ -285,5 +304,86 @@ mod tests {
 
         let mut challenger = config.challenger();
         verify(&config, &chip, &mut challenger, &proof).unwrap();
+    }
+
+    /// Lazily initialized record for use across multiple tests.
+    /// Consists of random `ADD` and `SUB` instructions.
+    #[cfg(feature = "sys")]
+    static SHARD: LazyLock<ExecutionRecord> = LazyLock::new(|| {
+        let add_events = (0..1)
+            .flat_map(|i| {
+                [{
+                    let operand_1 = 1u32;
+                    let operand_2 = 2u32;
+                    let result = operand_1.wrapping_add(operand_2);
+                    AluEvent::new(i % 2, Opcode::ADD, result, operand_1, operand_2)
+                }]
+            })
+            .collect::<Vec<_>>();
+        let _sub_events = (0..255)
+            .flat_map(|i| {
+                [{
+                    let operand_1 = thread_rng().gen_range(0..u32::MAX);
+                    let operand_2 = thread_rng().gen_range(0..u32::MAX);
+                    let result = operand_1.wrapping_add(operand_2);
+                    AluEvent::new(i % 2, Opcode::SUB, result, operand_1, operand_2)
+                }]
+            })
+            .collect::<Vec<_>>();
+        ExecutionRecord { add_events, ..Default::default() }
+    });
+
+    #[cfg(feature = "sys")]
+    #[test]
+    fn test_generate_trace_ffi_eq_rust() {
+        let shard = LazyLock::force(&SHARD);
+
+        let chip = AddSubChip::default();
+        let trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(shard, &mut ExecutionRecord::default());
+        let trace_ffi = generate_trace_ffi(shard);
+
+        assert_eq!(trace_ffi, trace);
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
+        use rayon::slice::ParallelSlice;
+
+        use crate::utils::pad_rows_fixed;
+
+        type F = KoalaBear;
+
+        let chunk_size =
+            std::cmp::max((input.add_events.len() + input.sub_events.len()) / num_cpus::get(), 1);
+
+        let events = input.add_events.iter().chain(input.sub_events.iter()).collect::<Vec<_>>();
+        let row_batches = events
+            .par_chunks(chunk_size)
+            .map(|events| {
+                let rows = events
+                    .iter()
+                    .map(|event| {
+                        let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
+                        let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
+                        unsafe {
+                            crate::sys::add_sub_event_to_row_koalabear(event, cols);
+                        }
+                        row
+                    })
+                    .collect::<Vec<_>>();
+                rows
+            })
+            .collect::<Vec<_>>();
+
+        let mut rows: Vec<[F; NUM_ADD_SUB_COLS]> = vec![];
+        for row_batch in row_batches {
+            rows.extend(row_batch);
+        }
+
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None);
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)
     }
 }

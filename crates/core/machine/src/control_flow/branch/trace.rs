@@ -79,7 +79,7 @@ impl BranchChip {
         &self,
         event: &BranchEvent,
         cols: &mut BranchColumns<F>,
-        _blu: &mut HashMap<ByteLookupEvent, usize>,
+        blu: &mut HashMap<ByteLookupEvent, usize>,
     ) {
         cols.pc = F::from_canonical_u32(event.pc);
         cols.is_beq = F::from_bool(matches!(event.opcode, Opcode::BEQ));
@@ -117,7 +117,10 @@ impl BranchChip {
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_pc_range_checker.populate(event.next_pc);
         cols.next_next_pc_range_checker.populate(event.next_next_pc);
-
         cols.is_branching = F::from_bool(branching);
+        if !branching {
+            blu.add_u8_range_checks(&event.next_pc.to_le_bytes());
+            blu.add_u8_range_checks(&event.next_next_pc.to_le_bytes());
+        }
     }
 }

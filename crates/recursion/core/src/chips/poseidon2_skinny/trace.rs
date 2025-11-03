@@ -1,36 +1,41 @@
-use std::{
-    array,
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
+use std::array;
+use std::{borrow::BorrowMut, mem::size_of};
 
 use itertools::Itertools;
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
 use p3_field::PrimeField32;
+#[cfg(feature = "sys")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
-use zkm_core_machine::utils::pad_rows_fixed;
+use zkm_core_machine::utils::next_power_of_two;
 use zkm_primitives::RC_16_30_U32;
 use zkm_stark::air::MachineAir;
 
+use crate::chips::mem::MemoryAccessColsChips;
+use crate::chips::poseidon2_skinny::external_linear_layer;
+use crate::chips::poseidon2_skinny::internal_linear_layer;
+use crate::chips::poseidon2_skinny::NUM_INTERNAL_ROUNDS;
+use crate::chips::poseidon2_skinny::WIDTH;
 use crate::{
-    chips::{
-        mem::MemoryAccessCols,
-        poseidon2_skinny::{
-            columns::{Poseidon2 as Poseidon2Cols, NUM_POSEIDON2_COLS},
-            external_linear_layer, Poseidon2SkinnyChip, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS,
-        },
+    chips::poseidon2_skinny::{
+        columns::{Poseidon2 as Poseidon2Cols, NUM_POSEIDON2_COLS},
+        Poseidon2SkinnyChip, NUM_EXTERNAL_ROUNDS,
     },
     instruction::Instruction::Poseidon2,
     ExecutionRecord, RecursionProgram,
 };
+#[cfg(feature = "sys")]
+use crate::{Poseidon2Io, Poseidon2SkinnyInstr};
 
-use super::{columns::preprocessed::Poseidon2PreprocessedCols, internal_linear_layer, WIDTH};
+use super::columns::preprocessed::Poseidon2PreprocessedCols;
 
 const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedCols<u8>>();
 
 const INTERNAL_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS / 2 + 1;
 const INPUT_ROUND_IDX: usize = 0;
-const OUTPUT_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS + 2;
+pub const OUTPUT_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS + 2;
 
 impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip<DEGREE> {
     type Record = ExecutionRecord<F>;
@@ -45,6 +50,12 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         // This is a no-op.
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.poseidon2_events;
+        Some(next_power_of_two(events.len() * (OUTPUT_ROUND_IDX + 1), input.fixed_log2_rows(self)))
+    }
+
+    #[cfg(not(feature = "sys"))]
     #[instrument(name = "generate poseidon2 skinny trace", level = "debug", skip_all, fields(rows = input.poseidon2_events.len()))]
     fn generate_trace(
         &self,
@@ -62,6 +73,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
             // NUM_INTERNAL_ROUNDS-1] in its state columns. The sbox_state will be
             // modified in the computation of the first row.
             {
+                use crate::chips::poseidon2_skinny::external_linear_layer;
+
                 let (first_row, second_row) = &mut row_add[0..2].split_at_mut(1);
                 let input_cols: &mut Poseidon2Cols<F> = first_row[0].as_mut_slice().borrow_mut();
                 input_cols.state_var = event.input;
@@ -93,6 +106,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
             // Check that the permutation is computed correctly.
             {
+                use std::borrow::Borrow;
+
                 let last_row_cols: &Poseidon2Cols<F> =
                     row_add[OUTPUT_ROUND_IDX].as_slice().borrow();
                 debug_assert_eq!(last_row_cols.state_var, event.output);
@@ -102,10 +117,56 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
         // Pad the trace to a power of two.
         // This will need to be adjusted when the AIR constraints are implemented.
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_POSEIDON2_COLS], input.fixed_log2_rows(self));
+        rows.resize(self.num_rows(input).unwrap(), [F::ZERO; NUM_POSEIDON2_COLS]);
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_POSEIDON2_COLS)
+    }
+
+    #[cfg(feature = "sys")]
+    #[instrument(name = "generate poseidon2 skinny trace", level = "debug", skip_all, fields(rows = input.poseidon2_events.len()))]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _output: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let mut rows = Vec::new();
+
+        let events = unsafe {
+            std::mem::transmute::<&Vec<Poseidon2Io<F>>, &Vec<Poseidon2Io<KoalaBear>>>(
+                &input.poseidon2_events,
+            )
+        };
+
+        for event in events {
+            let mut row_add = [[KoalaBear::ZERO; NUM_POSEIDON2_COLS]; NUM_EXTERNAL_ROUNDS + 3];
+            unsafe {
+                crate::sys::poseidon2_skinny_event_to_row_koalabear(
+                    event,
+                    row_add.as_mut_ptr() as *mut Poseidon2Cols<KoalaBear>,
+                );
+            }
+            rows.extend(row_add.into_iter());
+        }
+
+        // Pad the trace to a power of two.
+        // This will need to be adjusted when the AIR constraints are implemented.
+        rows.resize(self.num_rows(input).unwrap(), [KoalaBear::ZERO; NUM_POSEIDON2_COLS]);
+
+        RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_POSEIDON2_COLS,
+        )
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -116,6 +177,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         PREPROCESSED_POSEIDON2_WIDTH
     }
 
+    fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
+        Some(next_power_of_two(instrs_len, program.fixed_log2_rows(self)))
+    }
+
+    #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let instructions =
             program.instructions.iter().filter_map(|instruction| match instruction {
@@ -172,9 +238,9 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
                         cols.memory_preprocessed = instruction
                             .addrs
                             .input
-                            .map(|addr| MemoryAccessCols { addr, mult: F::NEG_ONE });
+                            .map(|addr| MemoryAccessColsChips { addr, mult: F::NEG_ONE });
                     } else if i == OUTPUT_ROUND_IDX {
-                        cols.memory_preprocessed = array::from_fn(|i| MemoryAccessCols {
+                        cols.memory_preprocessed = array::from_fn(|i| MemoryAccessColsChips {
                             addr: instruction.addrs.output[i],
                             mult: instruction.mults[i],
                         });
@@ -185,13 +251,71 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
         // Pad the trace to a power of two.
         // This may need to be adjusted when the AIR constraints are implemented.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; PREPROCESSED_POSEIDON2_WIDTH],
-            program.fixed_log2_rows(self),
+        rows.resize(
+            self.preprocessed_num_rows(program, rows.len()).unwrap(),
+            [F::ZERO; PREPROCESSED_POSEIDON2_WIDTH],
         );
         let trace_rows = rows.into_iter().flatten().collect::<Vec<_>>();
         Some(RowMajorMatrix::new(trace_rows, PREPROCESSED_POSEIDON2_WIDTH))
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let instructions =
+            program.instructions.iter().filter_map(|instruction| match instruction {
+                Poseidon2(instr) => Some(unsafe {
+                    std::mem::transmute::<
+                        &Box<Poseidon2SkinnyInstr<F>>,
+                        &Box<Poseidon2SkinnyInstr<KoalaBear>>,
+                    >(instr)
+                }),
+                _ => None,
+            });
+
+        let num_instructions =
+            program.instructions.iter().filter(|instr| matches!(instr, Poseidon2(_))).count();
+
+        let mut rows = vec![
+            [KoalaBear::ZERO; PREPROCESSED_POSEIDON2_WIDTH];
+            num_instructions * (NUM_EXTERNAL_ROUNDS + 3)
+        ];
+
+        // Iterate over the instructions and take NUM_EXTERNAL_ROUNDS + 3 rows for each instruction.
+        // We have one extra round for the internal rounds, one extra round for the input,
+        // and one extra round for the output.
+        instructions.zip_eq(&rows.iter_mut().chunks(NUM_EXTERNAL_ROUNDS + 3)).for_each(
+            |(instruction, row_add)| {
+                row_add.into_iter().enumerate().for_each(|(i, row)| {
+                    let cols: &mut Poseidon2PreprocessedCols<_> =
+                        (*row).as_mut_slice().borrow_mut();
+                    unsafe {
+                        crate::sys::poseidon2_skinny_instr_to_row_koalabear(instruction, i, cols);
+                    }
+                });
+            },
+        );
+
+        // Pad the trace to a power of two.
+        // This may need to be adjusted when the AIR constraints are implemented.
+        rows.resize(
+            self.preprocessed_num_rows(program, rows.len()).unwrap(),
+            [KoalaBear::ZERO; PREPROCESSED_POSEIDON2_WIDTH],
+        );
+
+        Some(RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            PREPROCESSED_POSEIDON2_WIDTH,
+        ))
     }
 }
 

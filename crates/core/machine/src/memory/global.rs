@@ -21,7 +21,7 @@ use zkm_stark::{
 
 use crate::{
     operations::{AssertLtColsBits, IsZeroOperation, KoalaBearBitDecomposition},
-    utils::pad_rows_fixed,
+    utils::next_power_of_two,
 };
 
 use super::MemoryChipType;
@@ -87,6 +87,17 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             }
         });
         output.global_lookup_events.extend(events);
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = match self.kind {
+            MemoryChipType::Initialize => &input.global_memory_initialize_events,
+            MemoryChipType::Finalize => &input.global_memory_finalize_events,
+        };
+        let nb_rows = events.len();
+        let size_log2 = input.fixed_log2_rows::<F, Self>(self);
+        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        Some(padded_nb_rows)
     }
 
     fn generate_trace(
@@ -158,10 +169,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         }
 
         // Pad the trace to a power of two depending on the proof shape in `input`.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::ZERO; NUM_MEMORY_INIT_COLS],
-            input.fixed_log2_rows::<F, Self>(self),
+        rows.resize(
+            <MemoryGlobalChip as MachineAir<F>>::num_rows(self, input).unwrap(),
+            [F::zero(); NUM_MEMORY_INIT_COLS],
         );
 
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEMORY_INIT_COLS)
@@ -238,10 +248,10 @@ where
             builder.assert_bool(local.value[i]);
         }
 
-        let mut byte1 = AB::Expr::ZERO;
-        let mut byte2 = AB::Expr::ZERO;
-        let mut byte3 = AB::Expr::ZERO;
-        let mut byte4 = AB::Expr::ZERO;
+        let mut byte1 = AB::Expr::zero();
+        let mut byte2 = AB::Expr::zero();
+        let mut byte3 = AB::Expr::zero();
+        let mut byte4 = AB::Expr::zero();
         for i in 0..8 {
             byte1 = byte1.clone() + local.value[i].into() * AB::F::from_canonical_u8(1 << i);
             byte2 = byte2.clone() + local.value[i + 8].into() * AB::F::from_canonical_u8(1 << i);
@@ -251,22 +261,19 @@ where
         let value = [byte1, byte2, byte3, byte4];
 
         if self.kind == MemoryChipType::Initialize {
-            let mut values = vec![AB::Expr::ZERO, AB::Expr::ZERO, local.addr.into()];
-            values.extend(value.clone().map(Into::into));
-
             // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
                     vec![
-                        AB::Expr::ZERO,
-                        AB::Expr::ZERO,
+                        AB::Expr::zero(),
+                        AB::Expr::zero(),
                         local.addr.into(),
                         value[0].clone(),
                         value[1].clone(),
                         value[2].clone(),
                         value[3].clone(),
-                        local.is_real.into() * AB::Expr::ONE,
-                        local.is_real.into() * AB::Expr::ZERO,
+                        local.is_real.into() * AB::Expr::one(),
+                        local.is_real.into() * AB::Expr::zero(),
                         AB::Expr::from_canonical_u8(LookupKind::Memory as u8),
                     ],
                     local.is_real.into(),
@@ -275,9 +282,6 @@ where
                 LookupScope::Local,
             );
         } else {
-            let mut values = vec![local.shard.into(), local.timestamp.into(), local.addr.into()];
-            values.extend(value.clone());
-
             // Send the lookup to the global table.
             builder.send(
                 AirLookup::new(
@@ -289,8 +293,8 @@ where
                         value[1].clone(),
                         value[2].clone(),
                         value[3].clone(),
-                        local.is_real.into() * AB::Expr::ZERO,
-                        local.is_real.into() * AB::Expr::ONE,
+                        local.is_real.into() * AB::Expr::zero(),
+                        local.is_real.into() * AB::Expr::one(),
                         AB::Expr::from_canonical_u8(LookupKind::Memory as u8),
                     ],
                     local.is_real.into(),
@@ -364,7 +368,7 @@ where
         builder.assert_bool(local.is_first_comp);
         builder
             .when_first_row()
-            .assert_eq(local.is_first_comp, AB::Expr::ONE - local.is_prev_addr_zero.result);
+            .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
 
         // Ensure at least one real row.
         builder.when_first_row().assert_one(local.is_real);
@@ -415,7 +419,7 @@ where
         // Constrain the `is_last_addr` flag.
         builder
             .when_transition()
-            .assert_eq(local.is_last_addr, local.is_real * (AB::Expr::ONE - next.is_real));
+            .assert_eq(local.is_last_addr, local.is_real * (AB::Expr::one() - next.is_real));
 
         // Constrain the last address bits to be equal to the corresponding `last_addr_bits` value.
         for (local_bit, pub_bit) in local.addr_bits.bits.iter().zip(last_addr_bits.iter()) {

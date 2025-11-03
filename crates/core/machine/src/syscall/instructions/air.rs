@@ -53,22 +53,23 @@ where
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
         // `op_a_val` is constrained in `eval_syscall`.
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
-        let is_sequential = AB::Expr::ONE - local.is_halt;
+        let is_sequential = AB::Expr::one() - local.is_halt;
         builder.receive_instruction(
             local.shard,
             local.clk,
             local.pc,
             local.next_pc,
+            local.next_pc + AB::Expr::from_canonical_u32(4),
             local.num_extra_cycles,
             Opcode::SYSCALL.as_field::<AB::F>(),
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            AB::Expr::one(),
+            AB::Expr::zero(),
             local.is_halt,
             is_sequential,
             local.is_real,
@@ -112,17 +113,21 @@ impl SyscallInstrsChip {
 
         // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
         // with different information.
-        let syscall_id = syscall_code[0];
-        let send_to_table = syscall_code[1];
+        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
+        let send_to_table = syscall_code[2] + local.is_sys_linux;
+
+        builder.assert_bool(syscall_code[2]);
+        builder.assert_bool(local.is_sys_linux);
+        builder.assert_bool(send_to_table.clone());
 
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
-        builder.when(AB::Expr::ONE - local.is_real).assert_zero(send_to_table);
+        builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table.clone());
 
         builder.send_syscall(
             local.shard,
             local.clk,
-            syscall_id,
+            syscall_id.clone(),
             local.op_b_value.reduce::<AB>(),
             local.op_c_value.reduce::<AB>(),
             send_to_table,
@@ -133,7 +138,7 @@ impl SyscallInstrsChip {
         let is_enter_unconstrained = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id
+                syscall_id.clone()
                     - AB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
                 local.is_enter_unconstrained,
                 local.is_real.into(),
@@ -141,11 +146,23 @@ impl SyscallInstrsChip {
             local.is_enter_unconstrained.result
         };
 
+        builder
+            .when(local.is_real)
+            .when_not(is_enter_unconstrained)
+            .assert_eq(local.syscall_id, syscall_id.clone());
+
+        // The syscall_id should be EXIT_UNCONSTRAINED when is_enter_unconstrained is true.
+        builder.when(local.is_real).when(is_enter_unconstrained).assert_eq(
+            local.syscall_id,
+            AB::Expr::from_canonical_u32(SyscallCode::EXIT_UNCONSTRAINED.syscall_id()),
+        );
+
         // Compute whether this syscall is HINT_LEN.
         let is_hint_len = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
+                syscall_id.clone()
+                    - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
                 local.is_hint_len,
                 local.is_real.into(),
             );
@@ -164,9 +181,11 @@ impl SyscallInstrsChip {
         // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
         builder
             .when(local.is_real)
-            .when_not(is_enter_unconstrained + is_hint_len)
+            .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
             .assert_word_eq(local.op_a_value, local.prev_a_value);
 
+        // when the syscall is not LINUX SYSCALL， prev op_a[1] is zero
+        builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(syscall_code[1]);
         // SAFETY: This leaves the case where syscall is `HINT_LEN`.
         // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.
         // This is due to `op_a_val` being connected to the CpuChip.
@@ -181,10 +200,13 @@ impl SyscallInstrsChip {
         // This implies that if `is_real = 1`, `syscall_range_check_operand` will be correct, and boolean.
         builder.assert_eq(
             local.syscall_range_check_operand,
-            local.is_real * (local.is_halt_check.result + local.is_commit_deferred_proofs.result),
+            local.is_real
+                * (local.is_halt_check.result
+                    + local.is_exit_group_check.result
+                    + local.is_commit_deferred_proofs.result),
         );
 
-        // Babybear range check the operand_to_check word.
+        // Koalabear range check the operand_to_check word.
         // SAFETY: `syscall_range_check_operand` is boolean, and no interactions can be made in padding rows.
         // `operand_to_check` is already known to be a valid word, as it is either
         // - `op_b_val` in the case of `HALT`
@@ -209,7 +231,7 @@ impl SyscallInstrsChip {
             self.get_is_commit_related_syscall(builder, local);
 
         // Verify the index bitmap.
-        let mut bitmap_sum = AB::Expr::ZERO;
+        let mut bitmap_sum = AB::Expr::zero();
         // They should all be bools.
         for bit in local.index_bitmap.iter() {
             builder.when(local.is_real).assert_bool(*bit);
@@ -223,7 +245,7 @@ impl SyscallInstrsChip {
         // When it's some other syscall, there should be no set bits.
         builder
             .when(local.is_real)
-            .when(AB::Expr::ONE - (is_commit.clone() + is_commit_deferred_proofs.clone()))
+            .when(AB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone()))
             .assert_zero(bitmap_sum);
 
         // Verify that word_idx corresponds to the set bit in index bitmap.
@@ -301,23 +323,36 @@ impl SyscallInstrsChip {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.prev_a_value;
 
-        let syscall_id = syscall_code[0];
+        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
 
         // Compute whether this syscall is HALT.
         let is_halt = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
+                syscall_id.clone() - AB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
                 local.is_halt_check,
                 local.is_real.into(),
             );
             local.is_halt_check.result
         };
 
+        // Compute whether this syscall is SYS_EXIT_GROUP.
+        let is_exit_group = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
+                local.is_exit_group_check,
+                local.is_real.into(),
+            );
+            local.is_exit_group_check.result
+        };
+
+        let is_halt_or_exit_group = is_halt + is_exit_group;
+
         // Verify that the is_halt flag is correct.
         // If `is_real = 0`, then `local.is_halt = 0`.
-        // If `is_real = 1`, then `is_halt_check.result` will be correct, so `local.is_halt` is correct.
-        builder.assert_eq(local.is_halt, is_halt * local.is_real);
+        // If `is_real = 1`, then `is_halt_check.result or is_exit_group_check.result` will be correct, so `local.is_halt` is correct.
+        builder.assert_eq(local.is_halt, is_halt_or_exit_group * local.is_real);
     }
 
     /// Returns two boolean expression indicating whether the instruction is a COMMIT or
@@ -330,13 +365,13 @@ impl SyscallInstrsChip {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.prev_a_value;
 
-        let syscall_id = syscall_code[0];
+        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
 
         // Compute whether this syscall is COMMIT.
         let is_commit = {
             IsZeroOperation::<AB::F>::eval(
                 builder,
-                syscall_id - AB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
+                syscall_id.clone() - AB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
                 local.is_commit,
                 local.is_real.into(),
             );
@@ -368,7 +403,7 @@ impl SyscallInstrsChip {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.prev_a_value;
 
-        let num_extra_cycles = syscall_code[2];
+        let num_extra_cycles = syscall_code[3];
 
         // If `is_real = 0`, then the return value is `0` regardless of `num_extra_cycles`.
         // If `is_real = 1`, then `num_extra_cycles` will be correct.

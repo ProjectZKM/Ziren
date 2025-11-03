@@ -1,8 +1,6 @@
 //! Elliptic Curve `y^2 = x^3 + 3z*x - 3` over the `F_{p^7} = F_p[z]/(z^7 + 2z - 8)` extension field.
-use crate::{koala_bear_poseidon2::KoalaBearPoseidon2, septic_extension::SepticExtension};
+use crate::septic_extension::SepticExtension;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
-use p3_koala_bear::KoalaBear;
-use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 
@@ -71,13 +69,13 @@ impl<F: Field> SepticCurve<F> {
     pub fn double(&self) -> Self {
         let slope = (self.x * self.x * F::from_canonical_u8(3u8)
             + SepticExtension::from_base_slice(&[
-                F::ZERO,
+                F::zero(),
                 F::from_canonical_u32(3),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ]))
             / (self.y * F::TWO);
         let result_x = slope.square() - self.x * F::TWO;
@@ -104,22 +102,22 @@ impl<F: FieldAlgebra> SepticCurve<F> {
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
         x.cube()
             + x * SepticExtension::from_base_slice(&[
-                F::ZERO,
+                F::zero(),
                 F::from_canonical_u32(3),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ])
             - SepticExtension::from_base_slice(&[
                 F::from_canonical_u32(3),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ])
     }
 }
@@ -129,32 +127,17 @@ impl<F: PrimeField32> SepticCurve<F> {
     /// As an x-coordinate may not be a valid one, we allow an additional value in `[0, 256)` to the hash input.
     /// Also, we always return the curve point with y-coordinate within `[1, (p-1)/2]`, where p is the characteristic.
     /// The returned values are the curve point, the offset used, and the hash input and output.
-    pub fn lift_x(m: SepticExtension<F>) -> (Self, u8, [F; 16], [F; 16]) {
-        let perm = KoalaBearPoseidon2::new().perm;
+    pub fn lift_x(m: SepticExtension<F>) -> (Self, u8) {
         for offset in 0..=255 {
-            let m_trial = [
+            let x_trial = SepticExtension::from_base_slice(&[
                 m.0[0],
                 m.0[1],
                 m.0[2],
                 m.0[3],
                 m.0[4],
                 m.0[5],
-                m.0[6],
-                F::from_canonical_u8(offset),
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-            ];
-
-            let m_hash = perm
-                .permute(m_trial.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())))
-                .map(|x| F::from_canonical_u32(x.as_canonical_u32()));
-            let x_trial = SepticExtension(m_hash[..7].try_into().unwrap());
+                m.0[6] * F::from_canonical_u16(256) + F::from_canonical_u8(offset),
+            ]);
 
             let y_sq = Self::curve_formula(x_trial);
             if let Some(y) = y_sq.sqrt() {
@@ -162,9 +145,9 @@ impl<F: PrimeField32> SepticCurve<F> {
                     continue;
                 }
                 if y.is_send() {
-                    return (Self { x: x_trial, y: -y }, offset, m_trial, m_hash);
+                    return (Self { x: x_trial, y: -y }, offset);
                 }
-                return (Self { x: x_trial, y }, offset, m_trial, m_hash);
+                return (Self { x: x_trial, y }, offset);
             }
         }
         panic!("curve point couldn't be found after 256 attempts");
@@ -272,7 +255,7 @@ mod tests {
             KoalaBear::from_canonical_u32(0),
             KoalaBear::from_canonical_u32(0),
         ]);
-        let (curve_point, _, _, _) = SepticCurve::<KoalaBear>::lift_x(x);
+        let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
         assert!(curve_point.check_on_point());
         println!("{curve_point:?}");
     }
@@ -288,7 +271,7 @@ mod tests {
             KoalaBear::from_canonical_u32(0x2016),
             KoalaBear::from_canonical_u32(0x2017),
         ]);
-        let (curve_point, _, _, _) = SepticCurve::<KoalaBear>::lift_x(x);
+        let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
         assert!(curve_point.check_on_point());
     }
 
@@ -303,7 +286,7 @@ mod tests {
             KoalaBear::from_canonical_u32(0x2016),
             KoalaBear::from_canonical_u32(0x2017),
         ]);
-        let (curve_point, _, _, _) = SepticCurve::<KoalaBear>::lift_x(x);
+        let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
         let double_point = curve_point.double();
         assert!(double_point.check_on_point());
     }
@@ -325,7 +308,7 @@ mod tests {
                 KoalaBear::from_canonical_u32(32 * i + 196),
                 KoalaBear::from_canonical_u32(64 * i + 667),
             ]);
-            let (curve_point, _, _, _) = SepticCurve::<KoalaBear>::lift_x(x);
+            let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
             vec.push(curve_point);
         }
         println!("Time elapsed: {:?}", start.elapsed());
@@ -364,7 +347,7 @@ mod tests {
                 KoalaBear::from_canonical_u32(32 * i + 196),
                 KoalaBear::from_canonical_u32(64 * i + 667),
             ]);
-            let (curve_point, _, _, _) = SepticCurve::<KoalaBear>::lift_x(x);
+            let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
             vec.push(SepticCurveComplete::Affine(curve_point));
         }
         println!("Time elapsed: {:?}", start.elapsed());

@@ -132,9 +132,9 @@ pub fn generate_permutation_trace<F: PrimeField, EF: ExtensionField<F>>(
             assert_eq!(
                 prep.height(),
                 main.height(),
-                "preprocessed and main have different heights: main width = {}, preprocessed width = {}",
-                main.width(),
-                prep.width()
+                "preprocessed and main have different heights: main height = {}, preprocessed height = {}",
+                main.height(),
+                prep.height()
             );
             assert_eq!(
                 permutation_trace.height(),
@@ -290,14 +290,14 @@ pub fn eval_permutation_constraints<'a, F, AB>(
             }
 
             // Now we can calculate the numerator and denominator of the combined batch.
-            let mut product = AB::ExprEF::ONE;
-            let mut numerator = AB::ExprEF::ZERO;
+            let mut product = AB::ExprEF::one();
+            let mut numerator = AB::ExprEF::zero();
             for (i, (m, rlc)) in multiplicities.into_iter().zip(rlcs.iter()).enumerate() {
                 // Calculate the running product of all rlcs.
                 product = product.clone() * rlc.clone();
 
                 // Calculate the product of all but the current rlc.
-                let mut all_but_current = AB::ExprEF::ONE;
+                let mut all_but_current = AB::ExprEF::one();
                 for other_rlc in
                     rlcs.iter().enumerate().filter(|(j, _)| i != *j).map(|(_, rlc)| rlc)
                 {

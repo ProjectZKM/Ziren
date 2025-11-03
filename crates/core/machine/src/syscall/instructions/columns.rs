@@ -26,6 +26,12 @@ pub struct SyscallInstrColumns<T> {
     /// operation.
     pub is_halt: T,
 
+    /// Whether the current syscall is linux syscall
+    pub is_sys_linux: T,
+
+    /// The syscall id
+    pub syscall_id: T,
+
     /// The access columns for the first operand.
     pub op_a_value: Word<T>,
     /// The value of the second operand.
@@ -44,6 +50,9 @@ pub struct SyscallInstrColumns<T> {
     /// Whether the current syscall is HALT.
     pub is_halt_check: IsZeroOperation<T>,
 
+    /// Whether the current syscall is HALT.
+    pub is_exit_group_check: IsZeroOperation<T>,
+
     /// Whether the current syscall is a COMMIT.
     pub is_commit: IsZeroOperation<T>,
 
@@ -54,10 +63,10 @@ pub struct SyscallInstrColumns<T> {
     /// should be set to 1 and everything else set to 0.
     pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],
 
-    /// Columns to babybear range check the halt/commit_deferred_proofs operand.
+    /// Columns to koalabear range check the halt/commit_deferred_proofs operand.
     pub operand_range_check_cols: KoalaBearWordRangeChecker<T>,
 
-    /// The operand value to babybear range check.
+    /// The operand value to koalabear range check.
     pub operand_to_check: Word<T>,
 
     /// The result of is_real * (is_halt || is_commit_deferred_proofs)

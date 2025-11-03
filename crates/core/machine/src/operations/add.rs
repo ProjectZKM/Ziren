@@ -41,7 +41,7 @@ impl<F: Field> AddOperation<F> {
         }
 
         let base = 256u32;
-        let overflow = a[0].wrapping_add(b[0]).wrapping_sub(expected.to_le_bytes()[0]) as u32;
+        let overflow = a[3].wrapping_add(b[3]).wrapping_sub(expected.to_le_bytes()[3]) as u32;
         debug_assert_eq!(overflow.wrapping_mul(overflow.wrapping_sub(base)), 0);
 
         // Range check
@@ -60,7 +60,7 @@ impl<F: Field> AddOperation<F> {
         cols: AddOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::ONE;
+        let one = AB::Expr::one();
         let base = AB::F::from_canonical_u32(256);
 
         let mut builder_is_real = builder.when(is_real.clone());
@@ -71,9 +71,7 @@ impl<F: Field> AddOperation<F> {
         let overflow_1 = a[1] + b[1] - cols.value[1] + cols.carry[0];
         let overflow_2 = a[2] + b[2] - cols.value[2] + cols.carry[1];
         let overflow_3 = a[3] + b[3] - cols.value[3] + cols.carry[2];
-        builder_is_real.assert_zero(overflow_0.clone() * (overflow_0.clone() - base));
-        builder_is_real.assert_zero(overflow_1.clone() * (overflow_1.clone() - base));
-        builder_is_real.assert_zero(overflow_2.clone() * (overflow_2.clone() - base));
+
         builder_is_real.assert_zero(overflow_3.clone() * (overflow_3.clone() - base));
 
         // If the carry is one, then the overflow must be the base.

@@ -31,7 +31,7 @@ use crate::{
     state::{ExecutionState, ForkState},
     subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
-    ExecutionReport, Instruction, MipsAirId, Opcode, Program, Register,
+    ExecutionReport, Instruction, MipsAirId, Opcode, Program, Register, NUM_REGISTERS,
 };
 
 /// The maximum number of instructions in a program.
@@ -593,9 +593,13 @@ impl<'a> Executor<'a> {
     pub fn mr_cpu(&mut self, addr: u32, position: MemoryAccessPosition) -> u32 {
         // Assert that the address is aligned.
         assert_valid_memory_access!(addr, position);
-
         // Read the address from memory and create a memory read record.
         let record = self.mr(addr, self.shard(), self.timestamp(&position), None);
+
+        if position != MemoryAccessPosition::Memory {
+            // If the position is not Memory, we are reading from a register.
+            log::debug!("pc: {:X} read register {}, {:X}", self.state.pc, addr, record.value);
+        }
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
@@ -691,7 +695,7 @@ impl<'a> Executor<'a> {
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
-            self.emit_mem_instr_event(instruction.opcode, a, b, c);
+            self.emit_mem_instr_event(instruction.opcode, a, b, c, hi_or_prev_a.unwrap_or(0));
         } else if instruction.is_branch_instruction() {
             self.emit_branch_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
         } else if instruction.is_jump_instruction() {
@@ -710,7 +714,7 @@ impl<'a> Executor<'a> {
                 record.hi,
             );
         } else {
-            log::info!("wrong {}\n", instruction.opcode);
+            log::debug!("wrong {}\n", instruction.opcode);
             unreachable!()
         }
     }
@@ -826,7 +830,7 @@ impl<'a> Executor<'a> {
 
     /// Emit a memory instruction event.
     #[inline]
-    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32) {
+    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32, prev_a_val: u32) {
         let event = MemInstrEvent {
             shard: self.shard(),
             clk: self.state.clk,
@@ -837,7 +841,7 @@ impl<'a> Executor<'a> {
             b,
             c,
             mem_access: self.memory_accesses.memory.expect("Must have memory access"),
-            op_a_access: self.memory_accesses.a.expect("Must have memory access"),
+            prev_a_val,
         };
 
         self.record.memory_instr_events.push(event);
@@ -1110,6 +1114,13 @@ impl<'a> Executor<'a> {
                 b = self.rr(Register::A0, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
                 let mut prev_a = syscall_id;
+                log::debug!(
+                    "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
+                    self.state.pc,
+                    syscall_id,
+                    b,
+                    c
+                );
 
                 if self.print_report && !self.unconstrained {
                     self.report.syscall_counts[syscall] += 1;
@@ -1222,12 +1233,12 @@ impl<'a> Executor<'a> {
             | Opcode::LHU
             | Opcode::LWR
             | Opcode::LL => {
-                (a, b, c) = self.execute_load(instruction)?;
+                (hi_or_prev_a, a, b, c) = self.execute_load(instruction)?;
             }
 
             // Store instructions.
             Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SC => {
-                (a, b, c) = self.execute_store(instruction)?;
+                (hi_or_prev_a, a, b, c) = self.execute_store(instruction)?;
             }
 
             // Branch instructions.
@@ -1550,7 +1561,7 @@ impl<'a> Executor<'a> {
     fn execute_load(
         &mut self,
         instruction: &Instruction,
-    ) -> Result<(u32, u32, u32), ExecutionError> {
+    ) -> Result<(Option<u32>, u32, u32, u32), ExecutionError> {
         let (rt_reg, rs_reg, offset_ext) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs_raw = self.rr(rs_reg, MemoryAccessPosition::B);
@@ -1603,13 +1614,13 @@ impl<'a> Executor<'a> {
         };
         self.rw(rt_reg, val, MemoryAccessPosition::A);
 
-        Ok((val, rs_raw, offset_ext))
+        Ok((Some(rt), val, rs_raw, offset_ext))
     }
 
     fn execute_store(
         &mut self,
         instruction: &Instruction,
-    ) -> Result<(u32, u32, u32), ExecutionError> {
+    ) -> Result<(Option<u32>, u32, u32, u32), ExecutionError> {
         let (rt_reg, rs_reg, offset_ext) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let rs = self.rr(rs_reg, MemoryAccessPosition::B);
@@ -1670,9 +1681,9 @@ impl<'a> Executor<'a> {
         if instruction.opcode == Opcode::SC {
             self.rw(rt_reg, 1, MemoryAccessPosition::A);
 
-            Ok((1, rs, offset_ext))
+            Ok((Some(rt), 1, rs, offset_ext))
         } else {
-            Ok((rt, rs, offset_ext))
+            Ok((Some(rt), rt, rs, offset_ext))
         }
     }
 
@@ -2188,7 +2199,9 @@ impl<'a> Executor<'a> {
 
     #[allow(dead_code)]
     fn show_regs(&self) {
-        let regs = (0..34).map(|i| self.state.memory.get(i).unwrap().value).collect::<Vec<_>>();
+        let regs = (0..NUM_REGISTERS)
+            .map(|i| self.state.memory.get(i as u32).unwrap().value)
+            .collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
     }
 }
@@ -2208,8 +2221,9 @@ pub const fn align(addr: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use crate::programs::tests::{
-        fibonacci_program, panic_program, secp256r1_add_program, secp256r1_double_program,
-        simple_memory_program, simple_program, ssz_withdrawals_program, u256xu2048_mul_program,
+        fibonacci_program, max_memory_program, panic_program, secp256r1_add_program,
+        secp256r1_double_program, simple_memory_program, simple_program, ssz_withdrawals_program,
+        u256xu2048_mul_program,
     };
     use zkm_stark::ZKMCoreOpts;
 
@@ -2235,6 +2249,13 @@ mod tests {
     #[test]
     fn test_fibonacci_program_run() {
         let program = fibonacci_program();
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run_very_fast().unwrap();
+    }
+
+    #[test]
+    fn test_max_memory_program_run() {
+        let program = max_memory_program();
         let mut runtime = Executor::new(program, ZKMCoreOpts::default());
         runtime.run_very_fast().unwrap();
     }

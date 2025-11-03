@@ -57,7 +57,7 @@ pub struct MemoryInstructionsColumns<T> {
 
     /// The relationships among addr_word, addr_aligned, and addr_offset is as follows:
     /// addr_aligned = addr_word - addr_offset
-    /// addr_offset = addr_word % 4
+    /// addr_ls_two_bits = addr_word % 4
     /// Note that this all needs to be verified in the AIR
     pub addr_word: Word<T>,
 
@@ -73,12 +73,12 @@ pub struct MemoryInstructionsColumns<T> {
     /// Whether the least significant two bits of the address are three.
     pub ls_bits_is_three: T,
 
-    /// Gadget to verify that the address word is within the Baby-Bear field.
+    /// Gadget to verify that the address word is within the Koala-Bear field.
     pub addr_word_range_checker: KoalaBearWordRangeChecker<T>,
 
     /// Memory consistency columns for the memory access.
     pub memory_access: MemoryReadWriteCols<T>,
-    pub op_a_access: MemoryReadWriteCols<T>,
+    pub prev_a_val: Word<T>,
 
     /// Used for load memory instructions to store the unsigned memory value.
     pub unsigned_mem_val: Word<T>,

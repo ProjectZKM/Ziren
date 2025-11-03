@@ -28,9 +28,9 @@ pub struct CpuEvent {
     pub c: u32,
     /// The third operand memory record.
     pub c_record: Option<MemoryRecordEnum>,
-    /// The forth operand.
+    /// The fourth operand.
     pub hi: Option<u32>,
-    /// The forth operand memory record.
+    /// The fourth operand memory record.
     pub hi_record: Option<MemoryRecordEnum>,
     /// The memory record.
     pub memory_record: Option<MemoryRecordEnum>,

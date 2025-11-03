@@ -84,7 +84,7 @@ impl<F: Field> AddDoubleOperation<F> {
         cols: AddDoubleOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::ONE;
+        let one = AB::Expr::one();
         let base = AB::F::from_canonical_u32(256);
 
         let mut builder_is_real = builder.when(is_real.clone());

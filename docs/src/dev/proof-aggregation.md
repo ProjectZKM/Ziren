@@ -4,9 +4,9 @@ With aggregation, multiple proofs can be combined together into a single aggrega
 
 In this example, multiple proofs proving the execution of a Fibonacci sequence for different values of `n` are combined into a single higher-level “aggregated” proof. This higher-level proof proves that the collection of all the other Fibonacci individual proofs are valid. 
 
-Instead of verifying each proof one by one, a verifier only needs to check a single aggregated proof. The batching  of many small computations into a single proof reduces verification costs and enable applications such as block aggregation, where many transactions in a block can be proven with one single succinct proof.  
+Instead of verifying each proof one by one, a verifier only needs to check a single aggregated proof. The batching  of many small computations into a single proof reduces verification costs and enables applications such as block aggregation, where many transactions in a block can be proven with one single succinct proof.  
 
-The host generates individual proofs, the guest recursively verifies them, and the final outputted aggregation proof can be cheaply verified. 
+The host generates individual proofs, the guest recursively verifies them, and the final output aggregated proof can be cheaply verified. 
 
 The following is the guest program implementation in the example: 
 
@@ -176,9 +176,9 @@ fn main() {
 
 In the host program, during the setup, the host will compile and load two guest programs as compiled ELF binaries: the `AGGREGATION_ELF` (representing the aggregation guest program) and `FIBONACCI_ELF`, whose corresponding guest program implementation can be found [here](https://github.com/ProjectZKM/Ziren/tree/main/examples/fibonacci). These programs are passed to `client.setup()` to generate the proving and verifying keys and to `client.prove()` to execute inside the zkVM and generate proofs. In this example, the host generates three compressed proofs proving the correct computation of Fibonacci for inputs n=10, 20, 30. 
 
-The host then prepares inputs corresponding to each Fibonacci proof for the aggregaton guest. Specifically, the host feeds the verification key hashes and raw public values as inputs and supplies the compressed proofs and full verification keys as witness data. The guest hashes the public values to a digest and calls `verify_zkm_proof(vk_hash, digest)` to check each proof. After all pass, the guest commits to the batch. That commitment becomes the public output of the aggregated proof.
+The host then prepares inputs corresponding to each Fibonacci proof for the aggregation guest. Specifically, the host feeds the verification key hashes and raw public values as inputs and supplies the compressed proofs and full verification keys as witness data. The guest hashes the public values to a digest and calls `verify_zkm_proof(vk_hash, digest)` to check each proof. After all pass, the guest commits to the batch. That commitment becomes the public output of the aggregated proof.
 
-The aggregation program is ran inside the zkVM and generates a Plonk proof (representing the aggregated proof) that certifies the validity of the three individual Fibonacci proofs. 
+The aggregation program is run inside the zkVM and generates a Plonk proof (representing the aggregated proof) that certifies the validity of the three individual Fibonacci proofs. 
 
 As an overview what aggregation entails in Ziren: 
 
@@ -187,4 +187,4 @@ As an overview what aggregation entails in Ziren:
 - Inside another zkVM program (the aggregation guest), recursively verify all proofs.
 - Commit to the batch as a single public commitment and generate a succinct new proof proving the correct execution of all individual proofs (the aggregated proof).
 
-For computationally heavy applications, proving logic can be divided into multiple proofs and later aggregated into a single proof. In block-level aggregation, instead of re-executing transactions individually on-chain (which can incur high gas costs), a succinct proof attesting to the validity of all transactions in a block can be generated off-chain and verified on-chain. The aggregated proof can also be in other proof formats, such as STARK or Groth16. In addition to verification via smart contract deloyment, the aggregated proof can be verified off-chain using Ziren's [WASM verifier](https://github.com/ProjectZKM/ziren-wasm-verifier).
+For computationally heavy applications, proving logic can be divided into multiple proofs and later aggregated into a single proof. In block-level aggregation, instead of re-executing transactions individually on-chain (which can incur high gas costs), a succinct proof attesting to the validity of all transactions in a block can be generated off-chain and verified on-chain. The aggregated proof can also be in other proof formats, such as STARK or Groth16. In addition to verification via smart contract deployment, the aggregated proof can be verified off-chain using Ziren's [WASM verifier](https://github.com/ProjectZKM/ziren-wasm-verifier).

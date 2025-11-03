@@ -1,10 +1,3 @@
-use super::poseidon2::permutation::Poseidon2Cols;
-use super::poseidon2::trace::populate_perm_deg3;
-use super::poseidon2::Poseidon2Operation;
-use super::poseidon2::{
-    air::{eval_external_round, eval_internal_rounds},
-    NUM_EXTERNAL_ROUNDS,
-};
 use p3_air::AirBuilder;
 use p3_field::Field;
 use p3_field::FieldAlgebra;
@@ -27,7 +20,6 @@ pub struct GlobalLookupOperation<T: Copy> {
     pub y_coordinate: SepticBlock<T>,
     pub y6_bit_decomp: [T; 30],
     pub range_check_witness: T,
-    pub permutation: Poseidon2Operation<T>,
 }
 
 impl<F: PrimeField32> GlobalLookupOperation<F> {
@@ -35,14 +27,14 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         values: SepticBlock<u32>,
         is_receive: bool,
         kind: u8,
-    ) -> (SepticCurve<F>, u8, [F; 16], [F; 16]) {
+    ) -> (SepticCurve<F>, u8) {
         let x_start = SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values.0[i]))
             + SepticExtension::from_base(F::from_canonical_u32((kind as u32) << 16));
-        let (point, offset, m_trial, m_hash) = SepticCurve::<F>::lift_x(x_start);
+        let (point, offset) = SepticCurve::<F>::lift_x(x_start);
         if !is_receive {
-            return (point.neg(), offset, m_trial, m_hash);
+            return (point.neg(), offset);
         }
-        (point, offset, m_trial, m_hash)
+        (point, offset)
     }
 
     pub fn populate(
@@ -53,7 +45,7 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         kind: u8,
     ) {
         if is_real {
-            let (point, offset, m_trial, m_hash) = Self::get_digest(values, is_receive, kind);
+            let (point, offset) = Self::get_digest(values, is_receive, kind);
             for i in 0..8 {
                 self.offset_bits[i] = F::from_canonical_u8((offset >> i) & 1);
             }
@@ -73,12 +65,8 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             }
             top_7_bits -= F::from_canonical_u32(7);
             self.range_check_witness = top_7_bits.inverse();
-            self.permutation = populate_perm_deg3(m_trial, Some(m_hash));
-
-            assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         } else {
             self.populate_dummy();
-            assert_eq!(self.x_coordinate.0[0], self.permutation.permutation.perm_output()[0]);
         }
     }
 
@@ -96,7 +84,6 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             self.y6_bit_decomp[i] = F::ZERO;
         }
         self.range_check_witness = F::ZERO;
-        self.permutation = populate_perm_deg3([F::ZERO; 16], None);
     }
 }
 
@@ -109,13 +96,13 @@ impl<F: Field> GlobalLookupOperation<F> {
         is_receive: AB::Expr,
         is_send: AB::Expr,
         is_real: AB::Var,
-        kind: AB::Var,
+        _kind: AB::Var,
     ) {
         // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);
 
         // Compute the offset and range check each bits, ensuring that the offset is a byte.
-        let mut offset = AB::Expr::ZERO;
+        let mut offset = AB::Expr::zero();
         for i in 0..8 {
             builder.assert_bool(cols.offset_bits[i]);
             offset = offset.clone() + cols.offset_bits[i] * AB::F::from_canonical_u32(1 << i);
@@ -125,51 +112,11 @@ impl<F: Field> GlobalLookupOperation<F> {
         builder.send_byte(
             AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
             values[0].clone(),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
             is_real,
         );
 
-        // Turn the message into a hash input. Only the first 8 elements are non-zero, as the rate of the Poseidon2 hash is 8.
-        // Combining `values[0]` with `kind` is safe, as `values[0]` is range checked to be u16, and `kind` is known to be u8.
-        let m_trial = [
-            values[0].clone() + AB::Expr::from_canonical_u32(1 << 16) * kind,
-            values[1].clone(),
-            values[2].clone(),
-            values[3].clone(),
-            values[4].clone(),
-            values[5].clone(),
-            values[6].clone(),
-            offset.clone(),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-        ];
-
-        // Constrain the input of the permutation to be the message.
-        for i in 0..16 {
-            builder.when(is_real).assert_eq(
-                cols.permutation.permutation.external_rounds_state()[0][i].into(),
-                m_trial[i].clone(),
-            );
-        }
-
-        // Constrain the permutation.
-        for r in 0..NUM_EXTERNAL_ROUNDS {
-            eval_external_round(builder, &cols.permutation.permutation, r);
-        }
-        eval_internal_rounds(builder, &cols.permutation.permutation);
-
-        // Constrain that when `is_real` is true, the x-coordinate is the hash of the message.
-        let m_hash = cols.permutation.permutation.perm_output();
-        for i in 0..7 {
-            builder.when(is_real).assert_eq(cols.x_coordinate[i].into(), m_hash[i]);
-        }
         let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
         let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
 
@@ -181,8 +128,8 @@ impl<F: Field> GlobalLookupOperation<F> {
         // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^24`.
         // Decompose `y6_value` into 30 bits, and then constrain that the top 7 bits cannot be all 1.
         // To do this, check that the sum of the top 7 bits is not equal to 7, which can be done by providing an inverse.
-        let mut y6_value = AB::Expr::ZERO;
-        let mut top_7_bits = AB::Expr::ZERO;
+        let mut y6_value = AB::Expr::zero();
+        let mut top_7_bits = AB::Expr::zero();
         for i in 0..30 {
             builder.assert_bool(cols.y6_bit_decomp[i]);
             y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * AB::F::from_canonical_u32(1 << i);
@@ -193,13 +140,13 @@ impl<F: Field> GlobalLookupOperation<F> {
         // If `is_real` is true, check that `top_7_bits - 7` is non-zero, by checking `range_check_witness` is an inverse of it.
         builder.when(is_real).assert_eq(
             cols.range_check_witness * (top_7_bits - AB::Expr::from_canonical_u8(7)),
-            AB::Expr::ONE,
+            AB::Expr::one(),
         );
 
         // Constrain that y has correct sign.
         // If it's a receive: `1 <= y_6 <= (p - 1) / 2`, so `0 <= y_6 - 1 = y6_value < (p - 1) / 2`.
         // If it's a send: `(p + 1) / 2 <= y_6 <= p - 1`, so `0 <= y_6 - (p + 1) / 2 = y6_value < (p - 1) / 2`.
-        builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value.clone());
+        builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::one() + y6_value.clone());
         builder.when(is_send).assert_eq(
             y.0[6].clone(),
             AB::Expr::from_canonical_u32((1 << 30) - (1 << 23) + 1) + y6_value.clone(),

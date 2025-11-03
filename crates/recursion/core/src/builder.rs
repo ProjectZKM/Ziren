@@ -22,7 +22,7 @@ pub trait RecursionAirBuilder: BaseAirBuilder {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
         padded_value[0] = val.into();
         self.send_block(Address(addr.0.into()), Block(padded_value), mult)
     }
@@ -49,7 +49,7 @@ pub trait RecursionAirBuilder: BaseAirBuilder {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
         padded_value[0] = val.into();
         self.receive_block(Address(addr.0.into()), Block(padded_value), mult)
     }

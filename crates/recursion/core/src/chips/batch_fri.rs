@@ -2,18 +2,23 @@
 
 use core::borrow::Borrow;
 use itertools::Itertools;
-use std::borrow::BorrowMut;
-use tracing::instrument;
-use zkm_core_machine::utils::pad_rows_fixed;
-use zkm_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
 use p3_field::PrimeField32;
+#[cfg(feature = "sys")]
+use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use zkm_stark::air::ExtensionAirBuilder;
-
+use std::borrow::BorrowMut;
+use tracing::instrument;
+use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
 use zkm_derive::AlignedBorrow;
+use zkm_stark::air::ExtensionAirBuilder;
+use zkm_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 
+#[cfg(feature = "sys")]
+use crate::BatchFRIEvent;
 use crate::{
     air::Block,
     builder::ZKMRecursionAirBuilder,
@@ -72,6 +77,8 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
     fn preprocessed_width(&self) -> usize {
         NUM_BATCH_FRI_PREPROCESSED_COLS
     }
+
+    #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_BATCH_FRI_PREPROCESSED_COLS]> = Vec::new();
         program
@@ -117,6 +124,69 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         Some(trace)
     }
 
+    #[cfg(feature = "sys")]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let mut rows: Vec<[KoalaBear; NUM_BATCH_FRI_PREPROCESSED_COLS]> = Vec::new();
+
+        let instrs = unsafe {
+            std::mem::transmute::<Vec<&Box<BatchFRIInstr<F>>>, Vec<&Box<BatchFRIInstr<KoalaBear>>>>(
+                program
+                    .instructions
+                    .iter()
+                    .filter_map(|instruction| match instruction {
+                        Instruction::BatchFRI(x) => Some(x),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        instrs.iter().for_each(|instruction| {
+            let BatchFRIInstr { base_vec_addrs: _, ext_single_addrs: _, ext_vec_addrs, acc_mult } =
+                instruction.as_ref();
+            let len: usize = ext_vec_addrs.p_at_z.len();
+            let mut row_add = vec![[KoalaBear::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS]; len];
+            debug_assert_eq!(*acc_mult, KoalaBear::ONE);
+
+            row_add.iter_mut().enumerate().for_each(|(i, row)| {
+                let cols: &mut BatchFRIPreprocessedCols<KoalaBear> =
+                    row.as_mut_slice().borrow_mut();
+                unsafe {
+                    crate::sys::batch_fri_instr_to_row_koalabear(&instruction.into(), cols, i);
+                }
+            });
+            rows.extend(row_add);
+        });
+
+        // Pad the trace to a power of two.
+        pad_rows_fixed(
+            &mut rows,
+            || [KoalaBear::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS],
+            program.fixed_log2_rows(self),
+        );
+
+        Some(RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_BATCH_FRI_PREPROCESSED_COLS,
+        ))
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let events = &input.batch_fri_events;
+        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+    }
+
+    #[cfg(not(feature = "sys"))]
     #[instrument(name = "generate batch fri trace", level = "debug", skip_all, fields(rows = input.batch_fri_events.len()))]
     fn generate_trace(
         &self,
@@ -138,10 +208,63 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             .collect_vec();
 
         // Pad the trace to a power of two.
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_BATCH_FRI_COLS], input.fixed_log2_rows(self));
+        rows.resize(self.num_rows(input).unwrap(), [F::ZERO; NUM_BATCH_FRI_COLS]);
 
         // Convert the trace to a row major matrix.
         let trace = RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_BATCH_FRI_COLS);
+
+        #[cfg(debug_assertions)]
+        println!(
+            "batch fri trace dims is width: {:?}, height: {:?}",
+            trace.width(),
+            trace.height()
+        );
+
+        trace
+    }
+
+    #[cfg(feature = "sys")]
+    #[instrument(name = "generate batch fri trace", level = "debug", skip_all, fields(rows = input.batch_fri_events.len()))]
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord<F>,
+        _: &mut ExecutionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let mut rows = input
+            .batch_fri_events
+            .iter()
+            .map(|event| {
+                let bb_event = unsafe {
+                    std::mem::transmute::<&BatchFRIEvent<F>, &BatchFRIEvent<KoalaBear>>(event)
+                };
+                let mut row = [KoalaBear::ZERO; NUM_BATCH_FRI_COLS];
+                let cols: &mut BatchFRICols<KoalaBear> = row.as_mut_slice().borrow_mut();
+                cols.acc = bb_event.ext_single.acc;
+                cols.alpha_pow = bb_event.ext_vec.alpha_pow;
+                cols.p_at_z = bb_event.ext_vec.p_at_z;
+                cols.p_at_x = bb_event.base_vec.p_at_x;
+                row
+            })
+            .collect_vec();
+
+        // Pad the trace to a power of two.
+        rows.resize(self.num_rows(input).unwrap(), [KoalaBear::ZERO; NUM_BATCH_FRI_COLS]);
+
+        // Convert the trace to a row major matrix.
+        let trace = RowMajorMatrix::new(
+            unsafe {
+                std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
+                    rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
+                )
+            },
+            NUM_BATCH_FRI_COLS,
+        );
 
         #[cfg(debug_assertions)]
         println!(

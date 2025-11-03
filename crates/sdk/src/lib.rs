@@ -10,8 +10,7 @@ pub mod install;
 pub use crate::network::prover::NetworkProver;
 use cfg_if::cfg_if;
 use std::env;
-// #[cfg(feature = "cuda")]
-// pub use crate::provers::CudaProver;
+use zkm_cuda::ZKMGpuServer;
 
 pub mod network;
 pub mod proof;
@@ -35,7 +34,7 @@ pub use zkm_prover::{
 };
 
 // Re-export the utilities.
-use crate::utils::block_on;
+use crate::{provers::CudaProver, utils::block_on};
 pub use utils::setup_logger;
 
 /// A client for interacting with Ziren.
@@ -65,16 +64,16 @@ impl ProverClient {
         #[allow(unreachable_code)]
         match env::var("ZKM_PROVER").unwrap_or("local".to_string()).to_lowercase().as_str() {
             "mock" => Self { prover: Box::new(MockProver::new()) },
-            "local" => {
+            "cpu" | "local" => {
                 #[cfg(debug_assertions)]
                 eprintln!("Warning: Local prover in dev mode is not recommended. Proof generation may be slow.");
                 Self {
-                    #[cfg(not(feature = "cuda"))]
                     prover: Box::new(CpuProver::new()),
-                    #[cfg(feature = "cuda")]
-                    prover: Box::new(CudaProver::new(ZKMProver::new())),
                 }
             }
+            "cuda" => Self {
+                prover: Box::new(CudaProver::new(ZKMProver::new(), ZKMGpuServer::default()))
+            },
             "network" => {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
@@ -146,9 +145,8 @@ impl ProverClient {
     ///
     /// let client = ProverClient::cuda();
     /// ```
-    #[cfg(feature = "cuda")]
     pub fn cuda() -> Self {
-        Self { prover: Box::new(CudaProver::new(ZKMProver::new())) }
+        Self { prover: Box::new(CudaProver::new(ZKMProver::new(), ZKMGpuServer::default())) }
     }
 
     /// Creates a new [ProverClient] with the network prover.
@@ -330,15 +328,7 @@ impl ProverClientBuilder {
     pub fn build(self) -> ProverClient {
         match self.mode.expect("The prover mode is required") {
             ProverMode::Cpu => ProverClient::cpu(),
-            // ProverMode::Cuda => {
-            //     cfg_if! {
-            //         if #[cfg(feature = "cuda")] {
-            //             ProverClient::cuda()
-            //         } else {
-            //             panic!("cuda feature is not enabled")
-            //         }
-            //     }
-            // }
+            ProverMode::Cuda => ProverClient::cuda(),
             ProverMode::Network => {
                 cfg_if! {
                    if #[cfg(feature = "network")] {
@@ -351,7 +341,6 @@ impl ProverClientBuilder {
                 }
             }
             ProverMode::Mock => ProverClient::mock(),
-            _ => unimplemented!("other provers not supported for now"),
         }
     }
 }

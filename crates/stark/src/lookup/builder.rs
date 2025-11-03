@@ -244,7 +244,7 @@ mod tests {
                 AirLookup::new(
                     vec![x.into(), y.into()],
                     AB::F::from_canonical_u32(3).into(),
-                    LookupKind::Alu,
+                    LookupKind::Byte,
                 ),
                 LookupScope::Local,
             );
@@ -252,7 +252,7 @@ mod tests {
                 AirLookup::new(
                     vec![x + y, z.into()],
                     AB::F::from_canonical_u32(5).into(),
-                    LookupKind::Alu,
+                    LookupKind::Byte,
                 ),
                 LookupScope::Local,
             );

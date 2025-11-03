@@ -30,7 +30,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
             local.instruction.op_b[0],
             &local.op_b_access,
-            AB::Expr::ONE - local.instruction.imm_b,
+            AB::Expr::one() - local.instruction.imm_b,
         );
 
         builder.eval_memory_access(
@@ -38,7 +38,7 @@ impl CpuChip {
             clk.clone() + AB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
             local.instruction.op_c[0],
             &local.op_c_access,
-            AB::Expr::ONE - local.instruction.imm_c,
+            AB::Expr::one() - local.instruction.imm_c,
         );
 
         // If we are writing to register 0, then the new value should be zero.
@@ -49,9 +49,9 @@ impl CpuChip {
             .when_not(local.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.op_a_access.value());
 
-        // If we are maddu，msubu，madd, msub, ins，mne, meq, syscall, then the hi_or_prev_a should equal to op_a_access.prev_value.
+        // If we are maddu，msubu，madd, msub, ins，mne, meq, syscall and memory instruction then the hi_or_prev_a should equal to op_a_access.prev_value.
         builder
-            .when(local.is_rw_a)
+            .when(local.is_rw_a + local.is_memory)
             .assert_word_eq(local.hi_or_prev_a, local.op_a_access.prev_value);
 
         // Write the `a` or the result to the first register described in the instruction unless

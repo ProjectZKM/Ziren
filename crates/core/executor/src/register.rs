@@ -1,5 +1,6 @@
-//! Registers for the Zkm zkVM.
+//! Registers for the Ziren zkVM.
 
+pub const NUM_REGISTERS: usize = 36;
 /// A register stores a 32-bit value used by operations.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Register {
@@ -37,6 +38,8 @@ pub enum Register {
     RA = 31,
     LO = 32,
     HI = 33,
+    BRK = 34,
+    HEAP = 35,
 }
 
 impl From<u8> for Register {
@@ -76,6 +79,8 @@ impl From<u8> for Register {
             31 => Register::RA,
             32 => Register::LO,
             33 => Register::HI,
+            34 => Register::BRK,
+            35 => Register::HEAP,
             _ => panic!("invalid register {value}"),
         }
     }

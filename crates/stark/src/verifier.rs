@@ -234,6 +234,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // Verify that the local cumulative sum is zero.
         let local_cumulative_sum = proof.local_cumulative_sum();
         if local_cumulative_sum != SC::Challenge::ZERO {
+            tracing::error!(
+                "local cumulative sum: {:?}, should be: {:?}",
+                local_cumulative_sum,
+                SC::Challenge::ZERO
+            );
             return Err(VerificationError::CumulativeSumsError("local cumulative sum is not zero"));
         }
 

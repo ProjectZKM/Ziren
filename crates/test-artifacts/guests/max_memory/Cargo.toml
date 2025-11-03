@@ -1,0 +1,8 @@
+[package]
+name = "max_memory"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkm-zkvm = { path = "../../../../crates/zkvm/entrypoint", features=["embedded"] }

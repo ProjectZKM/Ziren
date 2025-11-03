@@ -47,11 +47,12 @@ hashbrown = { workspace = true }
 zkm-core-executor = { workspace = true }
 zkm-stark = { workspace = true }
 zkm-primitives = { workspace = true }
+zkm-cuda = { workspace = true }
 itertools = { workspace = true }
 tonic = { version = "0.8.1", features = ["tls", "tls-roots", "transport"], optional = true }
 alloy-sol-types = { version = "1.1", optional = true }
-alloy-signer = { version = "0.14", optional = true }
-alloy-signer-local = { version = "0.14", optional = true }
+alloy-signer = { version = "1.0", optional = true }
+alloy-signer-local = { version = "1.0", optional = true }
 alloy-primitives = { version = "1.0", optional = true }
 backoff = { version = "0.4", features = ["tokio"], optional = true }
 num-bigint = "0.4.6"
@@ -90,8 +91,6 @@ network-v2 = [
   "dep:tonic",
   "dep:backoff",
 ]
-# cuda = ["zkm-cuda"]
-cuda = []
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = [

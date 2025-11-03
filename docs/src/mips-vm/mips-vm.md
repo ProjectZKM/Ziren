@@ -28,3 +28,50 @@ MIPS VM employs a specially designed executor to simulate the execution of the E
 After the execution process of MIPS VM, the execution record will be used by the prover to generate zero-knowledge proof:
   - The events recorded in execution record will be used to generate different traces by different chips. 
   - This traces serve as the core data for generating the zero-knowledge proof, ensuring that the proof accurately reflects the real execution of the compiled program. 
+
+## Memory Layout for guest program
+The memory layout for guest program is controlled by VM, runtime and toolchain.
+### Rust guest program
+Two kinds of allocators are provided to rust guest program
+ - bump allocator: both normal memory and program I/O is allocated from the heap. And the heap address is always increased and cannot be reused.
+
+|   Section	  |    Start	 |     Size	        |   Access		| Controlled-by |	
+| ----------- | ---------- | ---------------- | ----------- | ------------- |
+| registers 	|    0x00	   | 36	              |     rw      |     VM        |
+| Stack	      | 0x7f000000 |(stack grows down)|		  rw      |   runtime     |
+| Code			  |            |                  |             |               |
+|   .text	    |            |.text size        |     ro      |   toolchain   |
+|   .rodata	  |            |.rodata size      |     ro      |   toolchain   |
+|   .eh_frame	|            |.eh_frame size    |     ro      |   toolchain   |
+|   .bss	    |            |.bss size         |     ro      |   toolchain   |
+| Heap (contains program I/O) |	_end | 0x7f000000 - _end | rw | runtime     | 
+
+ - embeded allocator： Program I/O address space is reserved and split from heap address space. A [TLS heap](https://github.com/rust-embedded/embedded-alloc) is used for heap management.
+
+|   Section	  |    Start	 |     Size	        |   Access		| Controlled-by |	
+| ----------- | ---------- | ---------------- | ----------- | ------------- |
+| registers 	|    0x00	   | 36	              |     rw      |     VM        |
+| Stack	      | 0x7f000000 |(stack grows down)|		  rw      |   runtime     |
+| Code			  |            |                  |             |               |
+|   .text	    |            |.text size        |     ro      |   toolchain   |
+|   .rodata	  |            |.rodata size      |     ro      |   toolchain   |
+|   .eh_frame	|            |.eh_frame size    |     ro      |   toolchain   |
+|   .bss	    |            |.bss size         |     ro      |   toolchain   |
+| Program I/O | 0x3f000000 | 0x40000000	      |     rw      |    runtime    |
+| Heap        |	_end       | 0x3f000000 - _end | rw         |    runtime    | 
+
+### Go guest program
+Go guest program is similar to embeded-mode rust guest program, except that the initial args is set by VM at the top of the stack. The memory layout is as follows:
+
+|   Section	  |    Start	 |     Size	        |   Access		| Controlled-by |	
+| ----------- | ---------- | ---------------- | ----------- | ------------- |
+| registers 	|    0x00	   | 36	              |     rw      |     VM        |
+| Stack	      | 0x7f000000 |(stack grows down)|		  rw      |   runtime     |
+|   Initial args | 0x7effc000 |   0x4000      |     ro      |     VM        |
+| Code			  |            |                  |             |               |
+|   .text	    |            |.text size        |     ro      |   toolchain   |
+|   .rodata	  |            |.rodata size      |     ro      |   toolchain   |
+|   .eh_frame	|            |.eh_frame size    |     ro      |   toolchain   |
+|   .bss	    |            |.bss size         |     ro      |   toolchain   |
+| Program I/O | 0x3f000000 | 0x40000000	      |     rw      |    runtime    |
+| Heap        |	_end       | 0x3f000000 - _end | rw         |    runtime    |

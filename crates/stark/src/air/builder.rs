@@ -21,7 +21,7 @@ pub const DEFAULT_PC_INC: u32 = 4;
 /// A valid pc should be divisible by 4, so we use 1 to indicate that the pc is not used.
 pub const UNUSED_PC: u32 = 1;
 
-/// The scope of an lookup.
+/// The scope of a lookup.
 #[derive(
     Debug,
     Clone,
@@ -93,7 +93,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
         a: impl Into<Self::Expr> + Clone,
         b: impl Into<Self::Expr> + Clone,
     ) -> Self::Expr {
-        condition.clone().into() * a.into() + (Self::Expr::ONE - condition.into()) * b.into()
+        condition.clone().into() * a.into() + (Self::Expr::one() - condition.into()) * b.into()
     }
 
     /// Index an array of expressions using an index bitmap.  This function assumes that the
@@ -103,7 +103,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
         array: &[impl Into<Self::Expr> + Clone],
         index_bitmap: &[impl Into<Self::Expr> + Clone],
     ) -> Self::Expr {
-        let mut result = Self::Expr::ZERO;
+        let mut result = Self::Expr::zero();
 
         for (value, i) in array.iter().zip_eq(index_bitmap) {
             result = result.clone() + value.clone().into() * i.clone().into();
@@ -125,7 +125,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.send_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
+        self.send_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
     }
 
     /// Sends a byte operation with two outputs to be processed.
@@ -159,7 +159,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.receive_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
+        self.receive_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
     }
 
     /// Receives a byte operation with two outputs to be processed.
@@ -194,6 +194,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         clk: impl Into<Self::Expr> + Clone,
         pc: impl Into<Self::Expr>,
         next_pc: impl Into<Self::Expr>,
+        next_next_pc: impl Into<Self::Expr>,
         num_extra_cycles: impl Into<Self::Expr>,
         opcode: impl Into<Self::Expr>,
         a: Word<impl Into<Self::Expr>>,
@@ -212,6 +213,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(once(clk.into()))
             .chain(once(pc.into()))
             .chain(once(next_pc.into()))
+            .chain(once(next_next_pc.into()))
             .chain(once(num_extra_cycles.into()))
             .chain(once(opcode.into()))
             .chain(a.0.into_iter().map(Into::into))
@@ -240,6 +242,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         clk: impl Into<Self::Expr> + Clone,
         pc: impl Into<Self::Expr>,
         next_pc: impl Into<Self::Expr>,
+        next_next_pc: impl Into<Self::Expr>,
         num_extra_cycles: impl Into<Self::Expr>,
         opcode: impl Into<Self::Expr>,
         a: Word<impl Into<Self::Expr>>,
@@ -258,6 +261,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(once(clk.into()))
             .chain(once(pc.into()))
             .chain(once(next_pc.into()))
+            .chain(once(next_next_pc.into()))
             .chain(once(num_extra_cycles.into()))
             .chain(once(opcode.into()))
             .chain(a.0.into_iter().map(Into::into))
@@ -303,27 +307,28 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.send_instruction(
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
+            Self::Expr::zero(),
+            Self::Expr::zero(),
             Self::Expr::from_canonical_u32(UNUSED_PC),
             Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC),
-            Self::Expr::ZERO,
+            Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC + DEFAULT_PC_INC),
+            Self::Expr::zero(),
             opcode,
             a,
             b,
             c,
             hi,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ONE,
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            Self::Expr::one(),
             multiplicity,
         )
     }
 
-    /// Sends an syscall operation to be processed (with "ECALL" opcode).
+    /// Sends a syscall operation to be processed (with "ECALL" opcode).
     #[allow(clippy::too_many_arguments)]
     fn send_syscall(
         &mut self,

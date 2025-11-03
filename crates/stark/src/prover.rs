@@ -51,6 +51,14 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// Setup the preprocessed data into a proving and verifying key.
     fn setup(&self, program: &A::Program) -> (Self::DeviceProvingKey, StarkVerifyingKey<SC>);
 
+    /// Setup the proving key given a verifying key. This is similar to `setup` but faster since
+    /// some computed information is already in the verifying key.
+    fn pk_from_vk(
+        &self,
+        program: &A::Program,
+        vk: &StarkVerifyingKey<SC>,
+    ) -> Self::DeviceProvingKey;
+
     /// Copy the proving key from the host to the device.
     fn pk_to_device(&self, pk: &StarkProvingKey<SC>) -> Self::DeviceProvingKey;
 
@@ -212,6 +220,14 @@ where
 
     fn setup(&self, program: &A::Program) -> (Self::DeviceProvingKey, StarkVerifyingKey<SC>) {
         self.machine().setup(program)
+    }
+
+    fn pk_from_vk(
+        &self,
+        program: &A::Program,
+        vk: &StarkVerifyingKey<SC>,
+    ) -> Self::DeviceProvingKey {
+        self.machine().setup_core(program, vk.initial_global_cumulative_sum).0
     }
 
     fn pk_to_device(&self, pk: &StarkProvingKey<SC>) -> Self::DeviceProvingKey {

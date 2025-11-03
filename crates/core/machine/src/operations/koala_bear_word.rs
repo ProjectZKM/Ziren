@@ -54,7 +54,7 @@ impl<F: Field> KoalaBearWordRangeChecker<F> {
         cols: KoalaBearWordRangeChecker<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut recomposed_byte = AB::Expr::ZERO;
+        let mut recomposed_byte = AB::Expr::zero();
         cols.most_sig_byte_decomp.iter().enumerate().for_each(|(i, value)| {
             builder.when(is_real.clone()).assert_bool(*value);
             recomposed_byte =

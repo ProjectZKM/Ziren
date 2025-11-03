@@ -1,9 +1,17 @@
 use core::borrow::Borrow;
+use std::borrow::BorrowMut;
+use std::iter::zip;
+
 use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+#[cfg(feature = "sys")]
+use p3_field::FieldAlgebra;
 use p3_field::{Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::*;
-use std::{borrow::BorrowMut, iter::zip};
+#[cfg(feature = "sys")]
+use p3_koala_bear::KoalaBear;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
+use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+
 use zkm_core_machine::utils::next_power_of_two;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::MachineAir;
@@ -72,6 +80,16 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         NUM_BASE_ALU_PREPROCESSED_COLS
     }
 
+    fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
+        let nb_rows = instrs_len.div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW);
+        let fixed_log2_rows = program.fixed_log2_rows(self);
+        Some(match fixed_log2_rows {
+            Some(log2_rows) => 1 << log2_rows,
+            None => next_power_of_two(nb_rows, None),
+        })
+    }
+
+    #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         // Allocating an intermediate `Vec` is faster.
         let instrs = program
@@ -83,12 +101,7 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             })
             .collect::<Vec<_>>();
 
-        let nb_rows = instrs.len().div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW);
-        let fixed_log2_rows = program.fixed_log2_rows(self);
-        let padded_nb_rows = match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -119,18 +132,66 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         Some(RowMajorMatrix::new(values, NUM_BASE_ALU_PREPROCESSED_COLS))
     }
 
+    #[cfg(feature = "sys")]
+    fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_preprocessed_trace only supports KoalaBear field"
+        );
+
+        // Allocating an intermediate `Vec` is faster.
+        let instrs = unsafe {
+            std::mem::transmute::<Vec<&BaseAluInstr<F>>, Vec<&BaseAluInstr<KoalaBear>>>(
+                program
+                    .instructions
+                    .iter()
+                    .filter_map(|instruction| match instruction {
+                        Instruction::BaseAlu(x) => Some(x),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        let padded_nb_rows = self.preprocessed_num_rows(program, instrs.len()).unwrap();
+        let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_BASE_ALU_PREPROCESSED_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = instrs.len() * NUM_BASE_ALU_ACCESS_COLS;
+        values[..populate_len].par_chunks_mut(NUM_BASE_ALU_ACCESS_COLS).zip_eq(instrs).for_each(
+            |(row, instr)| {
+                let access: &mut BaseAluAccessCols<_> = row.borrow_mut();
+                unsafe {
+                    crate::sys::alu_base_instr_to_row_koalabear(instr, access);
+                }
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        Some(RowMajorMatrix::new(
+            unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
+            NUM_BASE_ALU_PREPROCESSED_COLS,
+        ))
+    }
+
     fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
         // This is a no-op.
     }
 
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        let events = &input.base_alu_events;
-        let nb_rows = events.len().div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW);
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = input.base_alu_events.len().div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW);
         let fixed_log2_rows = input.fixed_log2_rows(self);
-        let padded_nb_rows = match fixed_log2_rows {
+        Some(match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
-        };
+        })
+    }
+
+    #[cfg(not(feature = "sys"))]
+    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        let events = &input.base_alu_events;
+        let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -144,6 +205,40 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_BASE_ALU_COLS)
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        assert_eq!(
+            std::any::TypeId::of::<F>(),
+            std::any::TypeId::of::<KoalaBear>(),
+            "generate_trace only supports KoalaBear field"
+        );
+
+        let events = unsafe {
+            std::mem::transmute::<&Vec<BaseAluIo<F>>, &Vec<BaseAluIo<KoalaBear>>>(
+                &input.base_alu_events,
+            )
+        };
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
+
+        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let populate_len = events.len() * NUM_BASE_ALU_VALUE_COLS;
+        values[..populate_len].par_chunks_mut(NUM_BASE_ALU_VALUE_COLS).zip_eq(events).for_each(
+            |(row, &vals)| {
+                let cols: &mut BaseAluValueCols<_> = row.borrow_mut();
+                unsafe {
+                    crate::sys::alu_base_event_to_row_koalabear(&vals, cols);
+                }
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(
+            unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
+            NUM_BASE_ALU_COLS,
+        )
     }
 
     fn included(&self, _record: &Self::Record) -> bool {

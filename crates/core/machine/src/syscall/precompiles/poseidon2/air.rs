@@ -57,7 +57,7 @@ where
             );
         }
 
-        // // Constrain the permutation.
+        // Constrain the permutation.
         for r in 0..NUM_EXTERNAL_ROUNDS {
             eval_external_round(builder, &local.poseidon2.permutation, r);
         }
@@ -100,7 +100,7 @@ where
             local.clk,
             AB::F::from_canonical_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
             local.state_addr,
-            AB::Expr::ZERO,
+            AB::Expr::zero(),
             local.is_real,
             LookupScope::Local,
         );

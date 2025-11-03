@@ -119,6 +119,35 @@ client.prove(&pk, stdin).plonk().run().unwrap();
 
 ## Hardware Acceleration
 
+### GPU Acceleration
+
+Ziren leverages CUDA-based GPU acceleration to achieve significantly lower latency and superior cost-performance relative to a CPU-based prover, even when the CPU employs AVX vector instruction extensions.
+
+#### Software Requirements
+
+To get started with the CUDA prover, please confirm that your system meets the following requirements:
+- [CUDA 12](https://developer.nvidia.com/cuda-12-8-0-download-archive?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=22.04&target_type=deb_local)
+- [CUDA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
+#### Hardware Requirements
+
+- ​​Processor:​​ 4-core CPU or higher
+- ​​System Memory:​​ 16GB RAM or higher
+- ​​Graphics Card:​​ 24GB or higher VRAM
+
+> To use Ziren with GPU acceleration, ensure your NVIDIA GPU has a compute capability of at least 8.6. You can verify this by checking the [official NVIDIA documentation](https://developer.nvidia.com/cuda-gpus).
+
+#### Usage
+
+To initialize the CUDA prover, choose one of the following methods to build your client:
+
+- ​Option A (Environment Variable):​​ Use `ProverClient::new()` and ensure the `ZKM_PROVER` environment variable is set to `cuda`, eg. `export ZKM_PROVER=cuda`.
+- ​​Option B (Direct Method):​​ Use `ProverClient::cuda()`.
+
+With the client built, you can then proceed to generate proofs using its standard methods.
+
+### CPU Acceleration
+
 Ziren provides hardware acceleration support for [`AVX256/AVX512`](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions) on x86 CPUs due to support in [`Plonky3`](https://github.com/Plonky3/Plonky3).
 
 You can check your CPU's AVX compatibility by running:
@@ -140,6 +169,7 @@ To activate **AVX512** optimization, add these flags to your RUSTFLAGS environme
 ```shell
 RUSTFLAGS="-C target-cpu=native -C target-feature=+avx512f" cargo run --release
 ```
+
 ## Network Prover
 We support a network prover via the ZKM Proof Network, accessible through our RESTful API.The network prover currently supports only the **Groth16** proving mode.
 >The proving process consists of several stages: queuing, splitting, proving, and finalizing.
@@ -165,8 +195,9 @@ You can generate the SSL certificate and key by running the [`certgen.sh`](https
 **Optional**: You can also set the following environment variables to customize the network prover behavior:
 
 ```bash
-export SHARD_SIZE=<shard_size>            # Size of each shard in bytes. 
+export SHARD_SIZE=<shard_size>              # Size of each shard in bytes. 
 export MAX_PROVER_NUM=<max_prover_num>      # Maximum number of provers to use in parallel.
+export SINGLE_NODE=<true|false>             # Whether to use a single node for proving (default: false).
 ```
 
 

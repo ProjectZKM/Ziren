@@ -27,6 +27,11 @@ use precompiles::{
     keccak::sponge::KeccakSpongeSyscall,
     poseidon2::permute::Poseidon2PermuteSyscall,
     sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
+    sys_linux::{
+        sysbrk::SysBrkSyscall, sysclone::SysCloneSyscall, sysexitgroup::SysExitGroupSyscall,
+        sysfcntl::SysFcntlSyscall, sysmmap::SysMmapSyscall, sysnop::SysNopSyscall,
+        sysread::SysReadSyscall, syswrite::SysWriteSyscall,
+    },
     u256x2048_mul::U256xU2048MulSyscall,
     uint256::Uint256MulSyscall,
     weierstrass::{
@@ -229,6 +234,28 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
         SyscallCode::BLS12381_DECOMPRESS,
         Arc::new(WeierstrassDecompressSyscall::<Bls12381>::new()),
     );
+
+    syscall_map.insert(SyscallCode::SYS_BRK, Arc::new(SysBrkSyscall));
+    syscall_map.insert(SyscallCode::SYS_READ, Arc::new(SysReadSyscall));
+    syscall_map.insert(SyscallCode::SYS_WRITE, Arc::new(SysWriteSyscall));
+    syscall_map.insert(SyscallCode::SYS_EXT_GROUP, Arc::new(SysExitGroupSyscall));
+    syscall_map.insert(SyscallCode::SYS_MMAP, Arc::new(SysMmapSyscall));
+    syscall_map.insert(SyscallCode::SYS_MMAP2, Arc::new(SysMmapSyscall));
+    syscall_map.insert(SyscallCode::SYS_CLONE, Arc::new(SysCloneSyscall));
+    syscall_map.insert(SyscallCode::SYS_FCNTL, Arc::new(SysFcntlSyscall));
+    syscall_map.insert(SyscallCode::SYS_OPEN, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_CLOSE, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_RT_SIGACTION, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_RT_SIGPROCMASK, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_MADVISE, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_GETTID, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_SCHED_GETAFFINITY, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_CLOCK_GETTIME, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_PRLIMIT64, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_SIGALTSTACK, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_OPENAT, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_FSTAT64, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_MUNMAP, Arc::new(SysNopSyscall));
 
     syscall_map
 }

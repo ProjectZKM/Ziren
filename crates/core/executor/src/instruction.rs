@@ -462,7 +462,7 @@ impl Instruction {
             // MSUB
             (0b011100, 0b000100) => Ok(Self::new(Opcode::MSUB, 32, rt, rs, false, false)),
             _ => {
-                log::warn!("decode: invalid opcode {opcode:#08b} {func:#08b}");
+                log::debug!("decode: invalid opcode {opcode:#08b} {func:#08b}");
                 Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
             }
         }
