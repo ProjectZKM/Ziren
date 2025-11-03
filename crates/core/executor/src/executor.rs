@@ -21,7 +21,7 @@ use crate::{
     events::{
         AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
         MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,
-        MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent, SyscallEvent, MovCondEvent,
+        MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent, MovCondEvent, SyscallEvent,
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, PagedMemory},
@@ -899,15 +899,8 @@ impl<'a> Executor<'a> {
         hi_record: Option<MemoryRecordEnum>,
     ) {
         if matches!(opcode, Opcode::MNE | Opcode::MEQ | Opcode::WSBH) {
-            let event = MovCondEvent::new(
-                self.state.pc,
-                self.state.next_pc,
-                opcode,
-                a,
-                b,
-                c,
-                prev_a,
-            );
+            let event =
+                MovCondEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, prev_a);
             self.record.movcond_events.push(event);
         } else {
             let hi_access = match hi_record {

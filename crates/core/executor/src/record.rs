@@ -15,8 +15,8 @@ use crate::{
     events::{
         AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, CpuEvent,
         GlobalLookupEvent, JumpEvent, MemInstrEvent, MemoryInitializeFinalizeEvent,
-        MemoryLocalEvent, MemoryRecordEnum, MiscEvent, PrecompileEvent, PrecompileEvents,
-        SyscallEvent, MovCondEvent,
+        MemoryLocalEvent, MemoryRecordEnum, MiscEvent, MovCondEvent, PrecompileEvent,
+        PrecompileEvents, SyscallEvent,
     },
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
     MipsAirId, Program,

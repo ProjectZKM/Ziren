@@ -279,7 +279,6 @@ impl MiscEvent {
     }
 }
 
-
 /// Misc Instruction Event.
 ///
 /// This object encapsulated the information needed to prove a MIPS misc operation.
@@ -305,15 +304,7 @@ impl MovCondEvent {
     /// Create a new [`MovCondEvent`].
     #[must_use]
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        pc: u32,
-        next_pc: u32,
-        opcode: Opcode,
-        a: u32,
-        b: u32,
-        c: u32,
-        prev_a: u32,
-    ) -> Self {
+    pub fn new(pc: u32, next_pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, prev_a: u32) -> Self {
         Self { pc, next_pc, opcode, a, b, c, prev_a }
     }
 }

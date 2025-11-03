@@ -101,11 +101,7 @@ impl Instruction {
     /// Returns if the instruction is an mov condition instruction.
     #[must_use]
     pub const fn is_mov_cond_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::MEQ
-                | Opcode::MNE
-        )
+        matches!(self.opcode, Opcode::MEQ | Opcode::MNE)
     }
 
     /// Returns if the instruction is a syscall instruction.

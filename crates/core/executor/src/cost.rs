@@ -172,9 +172,8 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::MSUB]
         + opcode_counts[Opcode::TEQ];
 
-    events_counts[MipsAirId::MovCond] = opcode_counts[Opcode::WSBH]
-        + opcode_counts[Opcode::MNE]
-        + opcode_counts[Opcode::MEQ];
+    events_counts[MipsAirId::MovCond] =
+        opcode_counts[Opcode::WSBH] + opcode_counts[Opcode::MNE] + opcode_counts[Opcode::MEQ];
 
     // Compute the number of events in the auipc chip.
     events_counts[MipsAirId::CloClz] = opcode_counts[Opcode::CLO] + opcode_counts[Opcode::CLZ];

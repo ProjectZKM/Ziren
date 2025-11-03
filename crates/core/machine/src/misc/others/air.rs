@@ -6,10 +6,7 @@ use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
 use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{
-    air::ZKMAirBuilder,
-    Word,
-};
+use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},
@@ -57,22 +54,16 @@ where
         builder.assert_bool(local.is_teq);
         builder.assert_bool(is_real.clone());
 
-        let is_rw_a = local.is_maddu
-            + local.is_msubu
-            + local.is_madd
-            + local.is_msub
-            + local.is_ins;
-        
-        let is_check_memory = local.is_maddu 
-            + local.is_msubu
-            + local.is_madd
-            + local.is_msub;
+        let is_rw_a =
+            local.is_maddu + local.is_msubu + local.is_madd + local.is_msub + local.is_ins;
+
+        let is_check_memory = local.is_maddu + local.is_msubu + local.is_madd + local.is_msub;
 
         builder.receive_instruction(
             local.shard,
             local.clk,
             local.pc,
-            local.next_pc, 
+            local.next_pc,
             local.next_pc + AB::Expr::from_canonical_u32(4),
             AB::Expr::zero(),
             cpu_opcode.clone(),
@@ -129,10 +120,8 @@ impl MiscInstrsChip {
         builder
             .when(local.is_teq * sext_cols.a_eq_b)
             .assert_word_eq(local.op_a_value, local.op_b_value);
-    
-        builder
-            .when(local.is_teq)
-            .assert_zero(sext_cols.a_eq_b);
+
+        builder.when(local.is_teq).assert_zero(sext_cols.a_eq_b);
 
         // most_sig_bit is bit 7 of sig_byte.
         builder.send_byte(

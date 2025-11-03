@@ -126,7 +126,9 @@ impl CpuChip {
         );
 
         cols.is_rw_a = F::from_bool(instruction.is_rw_a_instruction());
-        cols.is_check_memory = F::from_bool(instruction.is_mult_div_instruction() || instruction.is_check_memory_instruction());
+        cols.is_check_memory = F::from_bool(
+            instruction.is_mult_div_instruction() || instruction.is_check_memory_instruction(),
+        );
 
         cols.op_a_value = event.a.into();
         if let Some(hi) = event.hi {

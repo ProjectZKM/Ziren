@@ -5,12 +5,12 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, BaseAir, AirBuilder};
+use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{MovCondEvent, ByteLookupEvent, ByteRecord},
+    events::{ByteLookupEvent, ByteRecord, MovCondEvent},
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::AlignedBorrow;
