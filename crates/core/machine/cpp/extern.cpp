@@ -3,6 +3,16 @@
 
 namespace zkm_core_machine_sys {
 
+extern void cpu_event_to_row_koalabear(
+    const CpuEventFfi event,
+    const uint32_t shard,
+    const InstructionFfi instruction,
+    CpuCols<KoalaBearP3>* cols
+) {
+    CpuCols<kb31_t>* cols_kb31 = reinterpret_cast<CpuCols<kb31_t>*>(cols);
+    cpu::event_to_row<kb31_t>(event, shard, instruction, *cols_kb31);
+}
+
 extern void add_sub_event_to_row_koalabear(
     const AluEvent* event,
     AddSubCols<KoalaBearP3>* cols

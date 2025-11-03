@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::{
+    events::{MemoryReadRecord, MemoryWriteRecord},
+    OptionU32,
+};
+
 use super::memory::MemoryRecordEnum;
 
 /// CPU Event.
@@ -36,4 +41,98 @@ pub struct CpuEvent {
     pub memory_record: Option<MemoryRecordEnum>,
     /// The exit code.
     pub exit_code: u32,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct CpuEventFfi {
+    /// The clock cycle.
+    pub clk: u32,
+    /// The program counter.
+    pub pc: u32,
+    /// The next program counter.
+    pub next_pc: u32,
+    /// The next after the next program counter.
+    pub next_next_pc: u32,
+    /// The first operand.
+    pub a: u32,
+    /// The first operand memory record.
+    pub a_record: OptionMemoryRecordEnum,
+    /// The second operand.
+    pub b: u32,
+    /// The second operand memory record.
+    pub b_record: OptionMemoryRecordEnum,
+    /// The third operand.
+    pub c: u32,
+    /// The third operand memory record.
+    pub c_record: OptionMemoryRecordEnum,
+    /// The fourth operand.
+    pub hi: OptionU32,
+    /// The fourth operand memory record.
+    pub hi_record: OptionMemoryRecordEnum,
+    /// The memory record.
+    pub memory_record: OptionMemoryRecordEnum,
+    /// The exit code.
+    pub exit_code: u32,
+}
+
+impl From<&CpuEvent> for CpuEventFfi {
+    fn from(event: &CpuEvent) -> Self {
+        Self {
+            clk: event.clk,
+            pc: event.pc,
+            next_pc: event.next_pc,
+            next_next_pc: event.next_next_pc,
+            a: event.a,
+            a_record: event.a_record.into(),
+            b: event.b,
+            b_record: event.b_record.into(),
+            c: event.c,
+            c_record: event.c_record.into(),
+            hi: event.hi.into(),
+            hi_record: event.hi_record.into(),
+            memory_record: event.memory_record.into(),
+            exit_code: event.exit_code,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(C)]
+pub struct OptionMemoryRecordEnum {
+    pub tag: OptionMemoryRecordEnumTag,
+    pub read: MemoryReadRecord,
+    pub write: MemoryWriteRecord,
+}
+
+impl From<Option<MemoryRecordEnum>> for OptionMemoryRecordEnum {
+    fn from(record: Option<MemoryRecordEnum>) -> Self {
+        match record {
+            Some(record) => match record {
+                MemoryRecordEnum::Read(read) => OptionMemoryRecordEnum {
+                    tag: OptionMemoryRecordEnumTag::Read,
+                    read,
+                    write: MemoryWriteRecord::default(),
+                },
+                MemoryRecordEnum::Write(write) => OptionMemoryRecordEnum {
+                    tag: OptionMemoryRecordEnumTag::Write,
+                    read: MemoryReadRecord::default(),
+                    write,
+                },
+            },
+            None => OptionMemoryRecordEnum {
+                tag: OptionMemoryRecordEnumTag::None,
+                read: MemoryReadRecord::default(),
+                write: MemoryWriteRecord::default(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum OptionMemoryRecordEnumTag {
+    Read = 0,
+    Write,
+    None,
 }

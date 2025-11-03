@@ -1,3 +1,4 @@
+#[cfg(not(feature = "sys"))]
 use std::array;
 use std::{borrow::BorrowMut, mem::size_of};
 
@@ -10,13 +11,19 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
 use zkm_core_machine::utils::next_power_of_two;
+#[cfg(not(feature = "sys"))]
 use zkm_primitives::RC_16_30_U32;
 use zkm_stark::air::MachineAir;
 
+#[cfg(not(feature = "sys"))]
 use crate::chips::mem::MemoryAccessColsChips;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_skinny::external_linear_layer;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_skinny::internal_linear_layer;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_skinny::NUM_INTERNAL_ROUNDS;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_skinny::WIDTH;
 use crate::{
     chips::poseidon2_skinny::{
@@ -33,7 +40,9 @@ use super::columns::preprocessed::Poseidon2PreprocessedCols;
 
 const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedCols<u8>>();
 
+#[cfg(not(feature = "sys"))]
 const INTERNAL_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS / 2 + 1;
+#[cfg(not(feature = "sys"))]
 const INPUT_ROUND_IDX: usize = 0;
 pub const OUTPUT_ROUND_IDX: usize = NUM_EXTERNAL_ROUNDS + 2;
 
@@ -319,6 +328,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
     }
 }
 
+#[cfg(not(feature = "sys"))]
 impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
     fn populate_external_round<F: PrimeField32>(
         &self,

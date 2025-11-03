@@ -1,16 +1,24 @@
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::events::{
-    AluEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent, SyscallEvent,
+    AluEvent, CpuEventFfi, MemoryInitializeFinalizeEvent, MemoryLocalEvent, SyscallEvent,
 };
+use zkm_core_executor::InstructionFfi;
 
 use crate::{
     alu::AddSubCols,
+    cpu::columns::CpuCols,
     memory::{MemoryInitCols, SingleMemoryLocal},
     syscall::chip::SyscallCols,
 };
 
 #[link(name = "zkm-core-machine-sys", kind = "static")]
 extern "C-unwind" {
+    pub fn cpu_event_to_row_koalabear(
+        event: CpuEventFfi,
+        shard: u32,
+        instruction: InstructionFfi,
+        cols: &mut CpuCols<KoalaBear>,
+    );
     pub fn add_sub_event_to_row_koalabear(event: &AluEvent, cols: &mut AddSubCols<KoalaBear>);
     pub fn memory_local_event_to_row_koalabear(
         event: &MemoryLocalEvent,

@@ -36,3 +36,26 @@ pub use report::*;
 pub use state::*;
 pub use subproof::*;
 pub use utils::*;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+pub enum OptionValTag {
+    Some = 0,
+    None,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct OptionU32 {
+    pub tag: OptionValTag,
+    pub value: u32,
+}
+
+impl From<Option<u32>> for OptionU32 {
+    fn from(val: Option<u32>) -> Self {
+        match val {
+            Some(value) => OptionU32 { tag: OptionValTag::Some, value },
+            None => OptionU32 { tag: OptionValTag::None, value: 0 },
+        }
+    }
+}

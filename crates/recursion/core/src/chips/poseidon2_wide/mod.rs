@@ -73,6 +73,7 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     }
 }
 
+#[cfg(not(feature = "sys"))]
 pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
     state: &[AF; WIDTH],
 ) -> [AF; WIDTH] {

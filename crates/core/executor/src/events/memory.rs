@@ -45,6 +45,7 @@ pub enum MemoryAccessPosition {
 /// includes the value, shard, timestamp, and previous shard and timestamp.
 #[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[repr(C)]
 pub struct MemoryReadRecord {
     /// The value.
     pub value: u32,

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::opcode::Opcode;
 use crate::sign_extend;
+use crate::OptionU32;
 
 /// MIPS Instruction.
 #[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -23,6 +24,39 @@ pub struct Instruction {
     pub imm_c: bool,
     // raw instruction, for some special instructions
     pub raw: Option<u32>,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct InstructionFfi {
+    /// The operation to execute.
+    pub opcode: Opcode,
+    /// The first operand.
+    pub op_a: u8,
+    /// The second operand.
+    pub op_b: u32,
+    /// The third operand.
+    pub op_c: u32,
+    /// Whether the second operand is an immediate value.
+    pub imm_b: bool,
+    /// Whether the third operand is an immediate value.
+    pub imm_c: bool,
+    // raw instruction, for some special instructions
+    pub raw: OptionU32,
+}
+
+impl From<Instruction> for InstructionFfi {
+    fn from(event: Instruction) -> Self {
+        Self {
+            opcode: event.opcode,
+            op_a: event.op_a,
+            op_b: event.op_b,
+            op_c: event.op_c,
+            imm_b: event.imm_b,
+            imm_c: event.imm_c,
+            raw: event.raw.into(),
+        }
+    }
 }
 
 impl Instruction {

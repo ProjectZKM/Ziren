@@ -11,15 +11,23 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
 use zkm_core_machine::utils::next_power_of_two;
+#[cfg(not(feature = "sys"))]
 use zkm_primitives::RC_16_30_U32;
 use zkm_stark::air::MachineAir;
 
+#[cfg(not(feature = "sys"))]
 use crate::chips::mem::MemoryAccessColsChips;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_wide::columns::permutation::permutation_mut;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_wide::external_linear_layer;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_wide::external_linear_layer_immut;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_wide::internal_linear_layer;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_wide::NUM_EXTERNAL_ROUNDS;
+#[cfg(not(feature = "sys"))]
 use crate::chips::poseidon2_wide::NUM_INTERNAL_ROUNDS;
 #[cfg(feature = "sys")]
 use crate::Poseidon2Io;
@@ -249,6 +257,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
     }
 }
 
+#[cfg(not(feature = "sys"))]
 impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     fn populate_perm<F: PrimeField32>(
         &self,

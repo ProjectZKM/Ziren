@@ -26,11 +26,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         self.id().to_string()
     }
 
-    fn generate_trace(
-        &self,
-        input: &ExecutionRecord,
-        _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let n_real_rows = input.cpu_events.len();
         let padded_nb_rows = if let Some(shape) = &input.shape {
             shape.height(&self.id()).unwrap()
@@ -39,6 +35,15 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         } else {
             n_real_rows.next_power_of_two()
         };
+        Some(padded_nb_rows)
+    }
+
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord,
+        _: &mut ExecutionRecord,
+    ) -> RowMajorMatrix<F> {
+        let padded_nb_rows = <CpuChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_CPU_COLS);
         let shard = input.public_values.execution_shard;
 
@@ -234,5 +239,107 @@ impl CpuChip {
             0,
             clk_8bit_limb as u8,
         ));
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "sys")]
+mod tests {
+    use std::borrow::BorrowMut;
+    use std::sync::Arc;
+
+    use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_maybe_rayon::prelude::ParallelBridge;
+    use p3_maybe_rayon::prelude::ParallelIterator;
+    use zkm_core_executor::events::CpuEvent;
+    use zkm_core_executor::events::MemoryReadRecord;
+    use zkm_core_executor::events::MemoryWriteRecord;
+    use zkm_core_executor::ExecutionRecord;
+    use zkm_core_executor::Instruction;
+    use zkm_core_executor::Opcode;
+    use zkm_stark::air::MachineAir;
+
+    use crate::columns::NUM_CPU_COLS;
+    use crate::cpu::columns::CpuCols;
+    use crate::trace::MemoryRecordEnum;
+    use crate::utils::zeroed_f_vec;
+    use crate::CpuChip;
+
+    type F = KoalaBear;
+
+    #[test]
+    fn test_generate_cpu_trace_ffi_eq_rust() {
+        let shard: ExecutionRecord = {
+            let cpu_event = CpuEvent {
+                clk: 0,
+                pc: 0,
+                next_pc: 1,
+                next_next_pc: 2,
+                a: 5,
+                a_record: Some(MemoryRecordEnum::Write(MemoryWriteRecord::new(5, 1, 2, 1, 1, 1))),
+                b: 10,
+                b_record: Some(MemoryRecordEnum::Read(MemoryReadRecord::new(5, 0, 1, 0, 0))),
+                c: 15,
+                c_record: Some(MemoryRecordEnum::Read(MemoryReadRecord::new(5, 0, 2, 0, 0))),
+                hi: Some(1),
+                hi_record: None,
+                memory_record: Some(MemoryRecordEnum::Read(MemoryReadRecord::new(5, 0, 3, 0, 0))),
+                exit_code: 0,
+            };
+            ExecutionRecord {
+                program: Arc::new(zkm_core_executor::Program::new(
+                    vec![Instruction::new(Opcode::ADD, 29, 0, 1, false, true)],
+                    0,
+                    0,
+                )),
+                cpu_events: vec![cpu_event],
+                ..Default::default()
+            }
+        };
+
+        let chip = CpuChip::default();
+        let trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace_ffi = generate_trace_ffi(&shard);
+
+        assert_eq!(trace_ffi, trace);
+    }
+
+    fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
+        let padded_nb_rows = 16;
+        let mut values = zeroed_f_vec(padded_nb_rows * NUM_CPU_COLS);
+        let shard = input.public_values.execution_shard;
+
+        let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
+        values.chunks_mut(chunk_size * NUM_CPU_COLS).enumerate().par_bridge().for_each(
+            |(i, rows)| {
+                rows.chunks_mut(NUM_CPU_COLS).enumerate().for_each(|(j, row)| {
+                    let idx = i * chunk_size + j;
+                    let cols: &mut CpuCols<F> = row.borrow_mut();
+
+                    if idx >= input.cpu_events.len() {
+                        cols.instruction.imm_b = F::ONE;
+                        cols.instruction.imm_c = F::ONE;
+                        cols.is_rw_a = F::ONE;
+                    } else {
+                        let event = &input.cpu_events[idx];
+                        let instruction = input.program.fetch(event.pc);
+                        unsafe {
+                            crate::sys::cpu_event_to_row_koalabear(
+                                event.into(),
+                                shard,
+                                instruction.into(),
+                                cols,
+                            );
+                        }
+                    }
+                });
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(values, NUM_CPU_COLS)
     }
 }
