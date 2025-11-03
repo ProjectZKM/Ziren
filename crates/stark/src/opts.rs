@@ -79,7 +79,7 @@ impl ZKMProverOpts {
 
     /// Get the default prover options for a prover on GPU given the amount of CPU and GPU memory.
     #[must_use]
-    pub fn gpu(cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
+    pub fn gpu(_cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
         let mut opts = ZKMProverOpts::default();
 
         // Set the core options.

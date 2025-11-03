@@ -171,7 +171,6 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::MADD]
         + opcode_counts[Opcode::MSUB]
         + opcode_counts[Opcode::TEQ];
-;
 
     events_counts[MipsAirId::MovCond] = opcode_counts[Opcode::WSBH]
         + opcode_counts[Opcode::MNE]
