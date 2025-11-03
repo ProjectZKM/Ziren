@@ -29,8 +29,7 @@ where
         let local = main.row_slice(0);
         let local: &MiscInstrColumns<AB::Var> = (*local).borrow();
 
-        let cpu_opcode = local.is_wsbh * Opcode::WSBH.as_field::<AB::F>()
-            + local.is_sext * Opcode::SEXT.as_field::<AB::F>()
+        let cpu_opcode = local.is_sext * Opcode::SEXT.as_field::<AB::F>()
             + local.is_ins * Opcode::INS.as_field::<AB::F>()
             + local.is_ext * Opcode::EXT.as_field::<AB::F>()
             + local.is_maddu * Opcode::MADDU.as_field::<AB::F>()
@@ -39,8 +38,7 @@ where
             + local.is_msub * Opcode::MSUB.as_field::<AB::F>()
             + local.is_teq * Opcode::TEQ.as_field::<AB::F>();
 
-        let is_real = local.is_wsbh
-            + local.is_sext
+        let is_real = local.is_sext
             + local.is_ins
             + local.is_ext
             + local.is_maddu
@@ -49,7 +47,6 @@ where
             + local.is_msub
             + local.is_teq;
 
-        builder.assert_bool(local.is_wsbh);
         builder.assert_bool(local.is_sext);
         builder.assert_bool(local.is_ins);
         builder.assert_bool(local.is_ext);
@@ -108,10 +105,9 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),
-            local.is_wsbh + local.is_sext + local.is_teq + local.is_ext + local.is_ins,
+            local.is_sext + local.is_teq + local.is_ext + local.is_ins,
         );
 
-        self.eval_wsbh(builder, local);
         self.eval_ext(builder, local);
         self.eval_ins(builder, local);
         self.eval_maddsub(builder, local);
@@ -430,19 +426,4 @@ impl MiscInstrsChip {
             local.is_ext,
         );
     }
-
-    pub(crate) fn eval_wsbh<AB: ZKMAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local: &MiscInstrColumns<AB::Var>,
-    ) {
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[0], local.op_b_value[1]);
-
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[1], local.op_b_value[0]);
-
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[2], local.op_b_value[3]);
-
-        builder.when(local.is_wsbh).assert_eq(local.op_a_value[3], local.op_b_value[2]);
-    }
-
 }

@@ -54,6 +54,9 @@ pub struct MovCondCols<T> {
 
     /// Flag indicating whether the opcode is `MEQ`.
     pub is_meq: T,
+
+    /// Flag indicating whether the opcode is `WSBH`.
+    pub is_wsbh: T,
 }
 
 impl<F: PrimeField32> MachineAir<F> for MovCondChip {
@@ -134,7 +137,7 @@ impl MovCondChip {
 
         cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
-        
+        cols.is_wsbh = F::from_bool(matches!(event.opcode, Opcode::WSBH));
     }
 }
 
@@ -152,9 +155,10 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &MovCondCols<AB::Var> = (*local).borrow();
-        let is_real = local.is_mne + local.is_meq;
+        let is_real = local.is_mne + local.is_meq + local.is_wsbh;
 
-        let cpu_opcode = local.is_meq * Opcode::MEQ.as_field::<AB::F>()
+        let cpu_opcode = local.is_wsbh * Opcode::WSBH.as_field::<AB::F>()
+            + local.is_meq * Opcode::MEQ.as_field::<AB::F>()
             + local.is_mne * Opcode::MNE.as_field::<AB::F>();
 
         builder.receive_instruction(
@@ -170,7 +174,7 @@ where
             local.op_c_value,
             local.prev_a_value,
             AB::Expr::zero(),
-            AB::Expr::one(),
+            local.is_mne + local.is_meq,
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),
@@ -203,10 +207,29 @@ where
                 .when(local.c_eq_0)
                 .assert_word_eq(local.op_a_value, local.prev_a_value);
         }
-    
+
+        self.eval_wsbh(builder, local);
+
         builder.assert_bool(local.is_mne);
         builder.assert_bool(local.is_meq);
+        builder.assert_bool(local.is_wsbh);
         builder.assert_bool(is_real);
+    }
+}
+
+impl MovCondChip {
+    pub(crate) fn eval_wsbh<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &MovCondCols<AB::Var>,
+    ) {
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[0], local.op_b_value[1]);
+
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[1], local.op_b_value[0]);
+
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[2], local.op_b_value[3]);
+
+        builder.when(local.is_wsbh).assert_eq(local.op_a_value[3], local.op_b_value[2]);
     }
 }
 
@@ -231,6 +254,9 @@ mod tests {
             Instruction::new(Opcode::MEQ, 0, 29, 29, false, false),
             Instruction::new(Opcode::MNE, 30, 29, 28, false, false),
             Instruction::new(Opcode::MNE, 0, 29, 0, false, false),
+            Instruction::new(Opcode::WSBH, 32, 29, 0, false, true),
+            Instruction::new(Opcode::WSBH, 32, 31, 0, false, true),
+            Instruction::new(Opcode::WSBH, 0, 29, 0, false, true),
         ];
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();

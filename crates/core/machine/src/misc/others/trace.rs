@@ -89,7 +89,6 @@ impl MiscInstrsChip {
         cols.shard = F::from_canonical_u32(event.shard);
         cols.clk = F::from_canonical_u32(event.clk);
 
-        cols.is_wsbh = F::from_bool(matches!(event.opcode, Opcode::WSBH));
         cols.is_sext = F::from_bool(matches!(event.opcode, Opcode::SEXT));
         cols.is_ext = F::from_bool(matches!(event.opcode, Opcode::EXT));
         cols.is_ins = F::from_bool(matches!(event.opcode, Opcode::INS));

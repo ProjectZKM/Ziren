@@ -898,7 +898,7 @@ impl<'a> Executor<'a> {
         prev_a: u32,
         hi_record: Option<MemoryRecordEnum>,
     ) {
-        if matches!(opcode, Opcode::MNE | Opcode::MEQ) {
+        if matches!(opcode, Opcode::MNE | Opcode::MEQ | Opcode::WSBH) {
             let event = MovCondEvent::new(
                 self.state.pc,
                 self.state.next_pc,

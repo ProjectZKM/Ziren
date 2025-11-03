@@ -41,7 +41,6 @@ pub struct MiscInstrColumns<T: Copy> {
     pub misc_specific_columns: MiscSpecificCols<T>,
 
     /// Misc Instruction Selectors.
-    pub is_wsbh: T,
     pub is_sext: T,
     pub is_ins: T,
     pub is_ext: T,
