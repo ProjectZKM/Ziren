@@ -42,7 +42,7 @@ impl CpuProver {
         // Generate the shrink proof.
         let shrink_proof = self.prover.shrink(proof, opts.zkm_prover_opts)?;
 
-        // Genenerate the wrap proof.
+        // Generate the wrap proof.
         let outer_proof = self.prover.wrap_bn254(shrink_proof, opts.zkm_prover_opts)?;
 
         let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
@@ -128,7 +128,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
         // Generate the shrink proof.
         let compress_proof = self.prover.shrink(reduce_proof, opts.zkm_prover_opts)?;
 
-        // Genenerate the wrap proof.
+        // Generate the wrap proof.
         let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
 
         if kind == ZKMProofKind::Plonk {

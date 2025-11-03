@@ -71,7 +71,7 @@ impl CudaProver {
         // Generate the shrink proof.
         let compress_proof = self.cuda_prover.shrink(reduce_proof)?;
 
-        // Genenerate the wrap proof.
+        // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(compress_proof)?;
 
         if kind == ZKMProofKind::Plonk {
@@ -122,7 +122,7 @@ impl CudaProver {
         // Generate the shrink proof.
         let shrink_proof = self.cuda_prover.shrink(proof)?;
 
-        // Genenerate the wrap proof.
+        // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
 
         let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
