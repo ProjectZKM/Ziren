@@ -281,7 +281,7 @@ impl MiscEvent {
 
 /// Misc Instruction Event.
 ///
-/// This object encapsulated the information needed to prove a MIPS misc operation.
+/// This object encapsulated the information needed to prove a MIPS MovCond and WSBH operation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct MovCondEvent {

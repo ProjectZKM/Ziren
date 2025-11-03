@@ -32,14 +32,14 @@ fn main() {
     // For each maximal shape, generate all small shapes by varying the memory heights.
     let mut small_shapes = Vec::new();
     for (log2_shard_size, shapes) in maximal_shapes.iter() {
-        if *log2_shard_size > 23 {
+        if *log2_shard_size > 22 {
             continue;
         }
         for shape in shapes.iter() {
             for log2_memory_height in args.log2_memory_heights.iter() {
                 let mut small_shape = shape.clone();
-                let log2_gap_from_23 = 23 - small_shape.log2_height(&MipsAirId::Cpu).unwrap();
-                let min_log2_height_threshold = 16 - log2_gap_from_23;
+                let log2_gap_from_22 = 22 - small_shape.log2_height(&MipsAirId::Cpu).unwrap();
+                let min_log2_height_threshold = 16 - log2_gap_from_22;
                 for air in MipsAirId::core() {
                     let current_log2_height =
                         small_shape.log2_height(&air.clone()).unwrap_or_default();
