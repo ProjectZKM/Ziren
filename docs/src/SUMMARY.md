@@ -5,7 +5,6 @@
     - [Quickstart](./introduction/quickstart.md)
     - [Performance](./introduction/performance.md)
     - [Use Cases](./dev/use-cases.md)
-    - [Independent Evaluations](./dev/independent-evaluations.md)
 - [MIPS VM](./mips-vm/mips-vm.md)
     - [MIPS ISA](./mips-vm/mips-isa.md)
 - [Developer Tutorial](./dev/overview.md)
