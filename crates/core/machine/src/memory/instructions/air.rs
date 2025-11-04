@@ -253,9 +253,7 @@ impl MemoryInstructionsChip {
             + local.is_lwl
             + local.is_lwr;
 
-        builder
-            .when(mem_value_is_pos)
-            .assert_word_eq(local.unsigned_mem_val, local.op_a_value);
+        builder.when(mem_value_is_pos).assert_word_eq(local.unsigned_mem_val, local.op_a_value);
     }
 
     /// Evaluates constraints related to storing to memory.
