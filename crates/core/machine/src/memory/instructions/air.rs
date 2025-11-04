@@ -243,23 +243,18 @@ impl MemoryInstructionsChip {
             local.mem_value_is_neg,
         );
 
-        // Assert that correct value of `mem_value_is_pos`.
-        // SAFETY: If it's a store instruction or a padding row, `mem_value_is_pos = 0`.
-        // If it's an unsigned instruction (LBU, LHU, LW), then `mem_value_is_pos = 1`.
-        // If it's signed instruction (LB, LH), then `most_sig_bit` will be constrained correctly, and same for `mem_value_is_pos`.
-        let mem_value_is_pos = (local.is_lb + local.is_lh) * (AB::Expr::one() - local.most_sig_bit)
+        // When the memory value is not negtive, assert that op_a value is
+        // equal to the unsigned memory value.
+        let mem_value_is_pos = (local.is_lb + local.is_lh - local.mem_value_is_neg)
             + local.is_lbu
             + local.is_lhu
             + local.is_lw
             + local.is_ll
             + local.is_lwl
             + local.is_lwr;
-        builder.assert_eq(local.mem_value_is_pos, mem_value_is_pos);
 
-        // When the memory value is not positive and not writing to x0, assert that op_a value is
-        // equal to the unsigned memory value.
         builder
-            .when(local.mem_value_is_pos)
+            .when(mem_value_is_pos)
             .assert_word_eq(local.unsigned_mem_val, local.op_a_value);
     }
 
