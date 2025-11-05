@@ -10,7 +10,7 @@ use zkm_stark::shape::Shape;
 struct Args {
     #[clap(short, long)]
     maximal_shapes_json: PathBuf,
-    #[clap(short, long, value_delimiter = ',')]
+    #[clap(short, long, value_delimiter = ' ')]
     log2_memory_heights: Vec<usize>,
     #[clap(short, long, default_value = "small_shapes.json")]
     output: PathBuf,
