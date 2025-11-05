@@ -64,8 +64,7 @@ pub fn main() {
 }
 ```
 
-### Go Example: [Simple-Go]
-(https://github.com/ProjectZKM/Ziren/blob/main/examples/simple-go/guest/main.go)
+### Go Example: [Simple-Go](https://github.com/ProjectZKM/Ziren/blob/main/examples/simple-go/guest/main.go)
 
 ```go
 //! A simple program that takes a number `n` as input, and writes the `n`
