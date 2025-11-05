@@ -14,7 +14,7 @@ template<class F>
 __ZKM_HOSTDEV__ void populate_shard_clk(const CpuEventFfi& event, const uint32_t shard, CpuCols<F>& cols) {
     cols.shard = F::from_canonical_u32(shard);
 
-    const uint16_t clk_16bit_limb = (uint16_t)event.clk;
+    const uint16_t clk_16bit_limb = (uint16_t)(event.clk & 0xffff);
     const uint8_t clk_8bit_limb = (uint8_t)(event.clk >> 16 & 0xff);
     cols.clk_16bit_limb = F::from_canonical_u16(clk_16bit_limb);
     cols.clk_8bit_limb = F::from_canonical_u8(clk_8bit_limb);
@@ -55,13 +55,10 @@ __ZKM_HOSTDEV__ void event_to_row(
             || is_branch_instruction(instruction)
     );
 
-    cols.is_memory = F::from_bool(
-        is_memory_load_instruction(instruction)
-            || is_memory_store_instruction(instruction)
-    );
-
     cols.is_rw_a = F::from_bool(is_rw_a_instruction(instruction));
-    cols.is_write_hi = F::from_bool(is_mult_div_instruction(instruction));
+    cols.is_check_memory = F::from_bool(
+        is_mult_div_instruction(instruction) || is_check_memory_instruction(instruction)
+    );
 
     write_word_from_u32_v2<F>(cols.op_a_value, event.a);
     if (event.hi.tag == OptionValTag::Some) {
@@ -72,10 +69,7 @@ __ZKM_HOSTDEV__ void event_to_row(
     write_word_from_u32_v2<F>(cols.op_b_access.access.value, event.b);
     write_word_from_u32_v2<F>(cols.op_c_access.access.value, event.c);
 
-    if (is_memory_load_instruction(instruction)
-            || is_memory_store_instruction(instruction)
-            || is_rw_a_instruction(instruction)
-            || is_mult_div_instruction(instruction)) {
+    if (is_check_memory_instruction(instruction) || is_mult_div_instruction(instruction)) {
         cols.shard_to_send = cols.shard;
         cols.clk_to_send = F::from_canonical_u32(event.clk);
     }

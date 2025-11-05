@@ -5,12 +5,7 @@
 namespace zkm_core_machine_sys::cpu {
 
 __ZKM_HOSTDEV__ bool is_syscall_instruction(const InstructionFfi& instruction) {
-    switch (instruction.opcode) {
-        case Opcode::SYSCALL:
-            return true;
-        default:
-            return false;
-    }
+    return instruction.opcode == Opcode::SYSCALL;
 }
 
 __ZKM_HOSTDEV__ bool is_branch_instruction(const InstructionFfi& instruction) {
@@ -32,6 +27,33 @@ __ZKM_HOSTDEV__ bool is_jump_instruction(const InstructionFfi& instruction) {
         case Opcode::Jump:
         case Opcode::Jumpi:
         case Opcode::JumpDirect:
+            return true;
+        default:
+            return false;
+    }
+}
+
+__ZKM_HOSTDEV__ bool is_check_memory_instruction(const InstructionFfi& instruction) {
+    switch (instruction.opcode) {
+        case Opcode::SYSCALL:
+        case Opcode::MADDU:
+        case Opcode::MSUBU:
+        case Opcode::MADD:
+        case Opcode::MSUB:
+        case Opcode::LH:
+        case Opcode::LWL:
+        case Opcode::LW:
+        case Opcode::LBU:
+        case Opcode::LHU:
+        case Opcode::LWR:
+        case Opcode::SB:
+        case Opcode::SH:
+        case Opcode::SWL:
+        case Opcode::SW:
+        case Opcode::SWR:
+        case Opcode::LL:
+        case Opcode::SC:
+        case Opcode::LB:
             return true;
         default:
             return false;
@@ -91,6 +113,20 @@ __ZKM_HOSTDEV__ bool is_rw_a_instruction(const InstructionFfi& instruction) {
         case Opcode::MSUB:
         case Opcode::MEQ:
         case Opcode::MNE:
+        case Opcode::LH:
+        case Opcode::LWL:
+        case Opcode::LW:
+        case Opcode::LBU:
+        case Opcode::LHU:
+        case Opcode::LWR:
+        case Opcode::SB:
+        case Opcode::SH:
+        case Opcode::SWL:
+        case Opcode::SW:
+        case Opcode::SWR:
+        case Opcode::LL:
+        case Opcode::SC:
+        case Opcode::LB:
             return true;
         default:
             return false;
