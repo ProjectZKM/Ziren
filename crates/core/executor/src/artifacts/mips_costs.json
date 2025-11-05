@@ -45,7 +45,7 @@
   "Bls12381FpOpAssign": 1048,
   "Cpu": 119,
   "ShaCompress": 40480,
-  "MemoryInstrs": 110,
+  "MemoryInstrs": 109,
   "MiscInstrs": 148,
   "Secp256k1DoubleAssign": 4492
 }

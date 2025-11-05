@@ -93,7 +93,4 @@ pub struct MemoryInstructionsColumns<T> {
     /// Flag for load memory instructions that contains bool value of
     /// (memory value is neg).
     pub mem_value_is_neg: T,
-    /// Flag for load memory instructions that contains bool value of
-    /// (memory value is pos).
-    pub mem_value_is_pos: T,
 }
