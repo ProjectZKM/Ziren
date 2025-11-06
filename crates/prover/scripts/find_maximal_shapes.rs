@@ -27,9 +27,9 @@ struct Args {
     #[clap(short, long)]
     stdin: Option<PathBuf>,
     #[clap(short, long, default_value = "0")]
-    start_block: u64,
+    start_block: Option<u64>,
     #[clap(short, long, default_value = "1000000000")]
-    end_block: u64,
+    end_block: Option<u64>,
 }
 
 fn main() {
@@ -72,12 +72,14 @@ fn main() {
     let (tx, rx) = mpsc::sync_channel(10);
 
     if args.reth || args.geth {
+        let start_block = args.start_block.expect("start block must be provided for reth/geth");
+        let end_block = args.end_block.expect("end block must be provided for reth/geth");
         let stdin_dir = args.stdin.expect("stdin path must be provided for reth/geth");
         let stdin_dir = stdin_dir.to_str().expect("convert path to str err").to_owned();
         let elf_path = args.elf.expect("elf path must be provided for reth/geth");
         let elf = std::fs::read(&elf_path).expect("failed to read elf file");
 
-        for block in args.start_block..=args.end_block {
+        for block in start_block..=end_block {
             // Read the program and stdin.
             let stdin = if args.reth {
                 let stdin_path = stdin_dir.clone() + format!("/{block}-stdin.bin").as_ref();
