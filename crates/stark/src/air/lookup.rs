@@ -1,6 +1,6 @@
 use crate::lookup::LookupKind;
 
-/// An Lookup is a cross-table lookup.
+/// A Lookup is a cross-table lookup.
 pub struct AirLookup<E> {
     /// The values of the Lookup.
     pub values: Vec<E>,
