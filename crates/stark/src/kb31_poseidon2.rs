@@ -306,7 +306,7 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
-    /// Implement serialization manually instead of using serde to avoid cloing the config.
+    /// Implement serialization manually instead of using serde to avoid cloning the config.
     impl Serialize for KoalaBearPoseidon2 {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
