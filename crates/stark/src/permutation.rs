@@ -266,7 +266,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
         // trace except the last column.
         for (entry, chunk) in perm_local[0..perm_local.len() - 1].iter().zip(lookup_chunks) {
             // First, we calculate the random linear combinations and multiplicities with the correct
-            // sign depending on wetther the lookup is a send or a receive.
+            // sign depending on whether the lookup is a send or a receive.
             let mut rlcs: Vec<AB::ExprEF> = Vec::with_capacity(batch_size);
             let mut multiplicities: Vec<AB::Expr> = Vec::with_capacity(batch_size);
             for (lookup, is_send) in chunk {
