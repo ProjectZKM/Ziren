@@ -95,6 +95,36 @@ where
     }
 }
 
+/// The syscall code is the read-in value of op_a at the start of the instruction.
+/// We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
+
+#[inline(always)]
+fn get_syscall_id<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Expr {
+    // syscall id is stored in byte 0, 1.
+    let syscall_code = local.prev_a_value;
+    syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256)
+}
+
+#[inline(always)]
+fn get_send_table<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Var {
+    // send_to_table is stored in byte 2
+    let syscall_code = local.prev_a_value;
+    syscall_code[2]
+}
+
+#[inline(always)]
+fn get_num_extra_cycles<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Var {
+    // num_extra_cycles is stored in byte 3.
+    let syscall_code = local.prev_a_value;
+    syscall_code[3]
+}
+
+#[inline(always)]
+fn is_send_table<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Expr {
+    // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
+    local.is_sys_linux + get_send_table::<AB>(local)
+}
+
 impl SyscallInstrsChip {
     /// Constraints related to the SYSCALL opcode.
     ///
@@ -106,15 +136,10 @@ impl SyscallInstrsChip {
         builder: &mut AB,
         local: &SyscallInstrColumns<AB::Var>,
     ) {
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.prev_a_value;
+        let syscall_id = get_syscall_id::<AB>(local);
+        let send_to_table = is_send_table::<AB>(local);
 
-        // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
-        // with different information.
-        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
-        let send_to_table = syscall_code[2] + local.is_sys_linux;
-
-        builder.assert_bool(syscall_code[2]);
+        builder.assert_bool(get_send_table::<AB>(local));
         builder.assert_bool(local.is_sys_linux);
         builder.assert_bool(send_to_table.clone());
 
@@ -183,7 +208,7 @@ impl SyscallInstrsChip {
             .assert_word_eq(local.op_a_value, local.prev_a_value);
 
         // when the syscall is not LINUX SYSCALL， prev op_a[1] is zero
-        builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(syscall_code[1]);
+        builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(local.prev_a_value[1]);
         // SAFETY: This leaves the case where syscall is `HINT_LEN`.
         // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.
         // This is due to `op_a_val` being connected to the CpuChip.
@@ -317,11 +342,7 @@ impl SyscallInstrsChip {
         local: &SyscallInstrColumns<AB::Var>,
     ) {
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
-
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.prev_a_value;
-
-        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
+        let syscall_id = get_syscall_id::<AB>(local);
 
         // Compute whether this syscall is HALT.
         let is_halt = {
@@ -360,10 +381,7 @@ impl SyscallInstrsChip {
         builder: &mut AB,
         local: &SyscallInstrColumns<AB::Var>,
     ) -> (AB::Expr, AB::Expr) {
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.prev_a_value;
-
-        let syscall_id = syscall_code[0] + syscall_code[1] * AB::Expr::from_canonical_u32(256);
+        let syscall_id = get_syscall_id::<AB>(local);
 
         // Compute whether this syscall is COMMIT.
         let is_commit = {
@@ -398,10 +416,7 @@ impl SyscallInstrsChip {
         &self,
         local: &SyscallInstrColumns<AB::Var>,
     ) -> AB::Expr {
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.prev_a_value;
-
-        let num_extra_cycles = syscall_code[3];
+        let num_extra_cycles = get_num_extra_cycles::<AB>(local);
 
         // If `is_real = 0`, then the return value is `0` regardless of `num_extra_cycles`.
         // If `is_real = 1`, then `num_extra_cycles` will be correct.

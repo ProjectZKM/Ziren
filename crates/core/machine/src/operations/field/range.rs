@@ -61,6 +61,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
 }
 
 impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
+    /// Assumes all limbs are valid byte values
     pub fn eval<
         AB: ZKMAirBuilder<Var = V>,
         E1: Into<Polynomial<AB::Expr>> + Clone,
