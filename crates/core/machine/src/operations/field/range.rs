@@ -18,7 +18,7 @@ use zkm_derive::AlignedBorrow;
 #[derive(Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct FieldLtCols<T, P: FieldParameters> {
-    /// Boolean flags to indicate the first byte in which the element is smaller than the modulus.
+    /// Boolean flags to indicate the first byte in which the element of lhs is smaller than element of rhs.
     pub(crate) byte_flags: Limbs<T, P::Limbs>,
 
     pub(crate) lhs_comparison_byte: T,

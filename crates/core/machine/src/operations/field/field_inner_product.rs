@@ -23,7 +23,7 @@ use crate::air::WordAirBuilder;
 #[derive(Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct FieldInnerProductCols<T, P: FieldParameters> {
-    /// The result of `a inner product b`, where a, b are field elements
+    /// The result of `a inner product b`, where a, b are vectors of field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
     pub(crate) witness_low: Limbs<T, P::Witness>,
