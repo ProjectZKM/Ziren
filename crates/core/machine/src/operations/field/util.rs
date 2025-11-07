@@ -2,6 +2,7 @@ use num::BigUint;
 use p3_field::PrimeField32;
 use zkm_stark::air::Polynomial;
 
+// Converts a BigUint into a field element regardless of its size.
 fn biguint_to_field<F: PrimeField32>(num: BigUint) -> F {
     let mut x = F::ZERO;
     let mut power = F::from_canonical_u32(1u32);
