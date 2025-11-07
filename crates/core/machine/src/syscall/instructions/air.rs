@@ -95,8 +95,8 @@ where
     }
 }
 
-/// The syscall code is the read-in value of op_a at the start of the instruction.
-/// We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
+// The syscall code is the read-in value of op_a at the start of the instruction.
+// We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
 
 #[inline(always)]
 fn get_syscall_id<AB: ZKMAirBuilder>(local: &SyscallInstrColumns<AB::Var>) -> AB::Expr {
