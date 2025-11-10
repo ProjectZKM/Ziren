@@ -28,7 +28,7 @@ pub trait FieldHasher<F: Field> {
     fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest;
 }
 
-pub trait Posedion2KoalaBearHasherVariable<C: CircuitConfig> {
+pub trait Poseidon2KoalaBearHasherVariable<C: CircuitConfig> {
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         state: [Felt<C::F>; PERMUTATION_WIDTH],
@@ -80,7 +80,7 @@ impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear>> Posedion2KoalaBearHasherVariable<C> for KoalaBearPoseidon2 {
+impl<C: CircuitConfig<F = KoalaBear>> Poseidon2KoalaBearHasherVariable<C> for KoalaBearPoseidon2 {
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         input: [Felt<<C>::F>; PERMUTATION_WIDTH],
@@ -89,7 +89,7 @@ impl<C: CircuitConfig<F = KoalaBear>> Posedion2KoalaBearHasherVariable<C> for Ko
     }
 }
 
-impl<C: CircuitConfig> Posedion2KoalaBearHasherVariable<C> for KoalaBearPoseidon2Outer {
+impl<C: CircuitConfig> Poseidon2KoalaBearHasherVariable<C> for KoalaBearPoseidon2Outer {
     fn poseidon2_permute(
         builder: &mut Builder<C>,
         state: [Felt<<C>::F>; PERMUTATION_WIDTH],
@@ -106,7 +106,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     type DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE];
 
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
-        <Self as Posedion2KoalaBearHasherVariable<C>>::poseidon2_hash(builder, input)
+        <Self as Poseidon2KoalaBearHasherVariable<C>>::poseidon2_hash(builder, input)
     }
 
     fn compress(
