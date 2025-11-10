@@ -1084,8 +1084,6 @@ impl<'a> Executor<'a> {
             self.emit_branch_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
         } else if instruction.is_jump_instruction() {
             self.emit_jump_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
-        } else if instruction.is_syscall_instruction() {
-            self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
         } else if instruction.is_misc_instruction() {
             self.emit_misc_event(
                 clk,
@@ -1096,6 +1094,8 @@ impl<'a> Executor<'a> {
                 hi_or_prev_a.unwrap_or(0),
                 record.hi,
             );
+        } else if instruction.is_syscall_instruction() {
+            self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
         } else {
             log::debug!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -1423,7 +1423,9 @@ impl<'a> Executor<'a> {
         let mut next_pc = self.state.next_pc;
         let mut next_next_pc = self.state.next_pc.wrapping_add(4);
 
-        let (a, mut b, mut c): (u32, u32, u32);
+        let mut a = 0;
+        let mut b = 0;
+        let mut c = 0;
         let mut hi_or_prev_a = None;
         let mut syscall_code = 0u32;
 
@@ -1436,256 +1438,175 @@ impl<'a> Executor<'a> {
         if !self.unconstrained {
             self.report.opcode_counts[instruction.opcode] += 1;
             self.local_counts.event_counts[instruction.opcode] += 1;
-            match instruction.opcode {
-                Opcode::LB
-                | Opcode::LH
-                | Opcode::LW
-                | Opcode::LBU
-                | Opcode::LHU
-                | Opcode::LWL
-                | Opcode::LWR
-                | Opcode::LL => {
-                    self.local_counts.event_counts[Opcode::ADD] += 2;
-                }
-                Opcode::JumpDirect => {
-                    self.local_counts.event_counts[Opcode::ADD] += 1;
-                }
-                Opcode::BEQ | Opcode::BNE => {
-                    self.local_counts.event_counts[Opcode::ADD] += 1;
-                }
-                Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ => {
-                    self.local_counts.event_counts[Opcode::ADD] += 1;
-                    self.local_counts.event_counts[Opcode::SLT] += 2;
-                }
-                Opcode::DIV => {
-                    self.local_counts.event_counts[Opcode::MULT] += 2;
-                    self.local_counts.event_counts[Opcode::ADD] += 2;
-                    self.local_counts.event_counts[Opcode::SLTU] += 1;
-                }
-                Opcode::DIVU => {
-                    self.local_counts.event_counts[Opcode::MULTU] += 2;
-                    self.local_counts.event_counts[Opcode::ADD] += 2;
-                    self.local_counts.event_counts[Opcode::SLTU] += 1;
-                }
-                Opcode::CLZ | Opcode::CLO => {
-                    self.local_counts.event_counts[Opcode::SRL] += 1;
-                }
-                Opcode::MADDU | Opcode::MSUBU => {
-                    self.local_counts.event_counts[Opcode::MULTU] += 1;
-                }
-                Opcode::MADD | Opcode::MSUB => {
-                    self.local_counts.event_counts[Opcode::MULT] += 1;
-                }
-                Opcode::EXT => {
-                    self.local_counts.event_counts[Opcode::SLL] += 1;
-                    self.local_counts.event_counts[Opcode::SRL] += 1;
-                }
-                Opcode::INS => {
-                    self.local_counts.event_counts[Opcode::ROR] += 2;
-                    self.local_counts.event_counts[Opcode::SLL] += 1;
-                    self.local_counts.event_counts[Opcode::SRL] += 1;
-                    self.local_counts.event_counts[Opcode::ADD] += 1;
-                }
-                _ => {}
-            };
+            if instruction.is_memory_load_instruction() {
+                self.local_counts.event_counts[Opcode::ADD] += 2;
+            } else if instruction.is_branch_cmp_instruction() {
+                self.local_counts.event_counts[Opcode::ADD] += 1;
+                self.local_counts.event_counts[Opcode::SLT] += 2;
+            } else if instruction.is_mov_cond_instruction() {
+                self.local_counts.event_counts[Opcode::ADD] += 1;
+            } else if instruction.opcode == Opcode::EXT {
+                self.local_counts.event_counts[Opcode::SLL] += 1;
+                self.local_counts.event_counts[Opcode::SRL] += 1;
+            } else if instruction.is_cloclz_instruction() {
+                self.local_counts.event_counts[Opcode::SRL] += 1;
+            } else if instruction.is_maddsubu_instruction() {
+                self.local_counts.event_counts[Opcode::MULTU] += 1;
+            } else if instruction.opcode == Opcode::INS {
+                self.local_counts.event_counts[Opcode::ROR] += 2;
+                self.local_counts.event_counts[Opcode::SLL] += 1;
+                self.local_counts.event_counts[Opcode::SRL] += 1;
+                self.local_counts.event_counts[Opcode::ADD] += 1;
+            } else if instruction.opcode == Opcode::DIV {
+                self.local_counts.event_counts[Opcode::MULT] += 2;
+                self.local_counts.event_counts[Opcode::ADD] += 2;
+                self.local_counts.event_counts[Opcode::SLTU] += 1;
+            } else if instruction.opcode == Opcode::DIVU {
+                self.local_counts.event_counts[Opcode::MULTU] += 2;
+                self.local_counts.event_counts[Opcode::ADD] += 2;
+                self.local_counts.event_counts[Opcode::SLTU] += 1;
+            } else if instruction.is_maddsub_instruction() {
+                self.local_counts.event_counts[Opcode::MULT] += 1;
+            } else if instruction.opcode == Opcode::JumpDirect {
+                self.local_counts.event_counts[Opcode::ADD] += 1;
+            }
         }
 
-        match instruction.opcode {
-            // syscall.
-            Opcode::SYSCALL => {
-                let syscall_id = self.register(Register::V0);
-                c = self.rr_cpu(Register::A1, MemoryAccessPosition::C);
-                b = self.rr_cpu(Register::A0, MemoryAccessPosition::B);
-                let syscall = SyscallCode::from_u32(syscall_id);
-                let mut prev_a = syscall_id;
-                log::trace!(
-                    "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
-                    self.state.pc,
-                    syscall_id,
-                    b,
-                    c
-                );
-
-                if self.print_report && !self.unconstrained {
-                    self.report.syscall_counts[syscall] += 1;
-                }
-
-                // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
-                // Other syscalls are not allowed because they can lead to non-deterministic
-                // behavior, especially since many syscalls modify memory in place,
-                // which is not permitted in unconstrained mode. This will result in
-                // non-zero memory lookups when generating a proof.
-
-                if self.unconstrained
-                    && (syscall != SyscallCode::EXIT_UNCONSTRAINED && syscall != SyscallCode::WRITE)
-                {
-                    return Err(ExecutionError::InvalidSyscallUsage(syscall_id as u64));
-                }
-
-                // Update the syscall counts.
-                let syscall_for_count = syscall.count_map();
-                let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
-                *syscall_count += 1;
-
-                let syscall_impl = self.get_syscall(syscall).cloned();
-                syscall_code = syscall.syscall_id();
-                let mut precompile_rt = SyscallContext::new(self);
-                let (precompile_next_pc, precompile_cycles, returned_exit_code) =
-                    if let Some(syscall_impl) = syscall_impl {
-                        // Executing a syscall optionally returns a value to write to the t0
-                        // register. If it returns None, we just keep the
-                        // syscall_id in t0.
-                        let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c);
-                        if let Some(r0) = res {
-                            a = r0;
-                        } else {
-                            a = syscall_id;
-                        }
-
-                        // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                        if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
-                            return Err(ExecutionError::HaltWithNonZeroExitCode(
-                                precompile_rt.exit_code,
-                            ));
-                        }
-
-                        (
-                            precompile_rt.next_pc,
-                            syscall_impl.num_extra_cycles(),
-                            precompile_rt.exit_code,
-                        )
-                    } else {
-                        return Err(ExecutionError::UnsupportedSyscall(syscall_id));
-                    };
-
-                if syscall == SyscallCode::HALT && returned_exit_code == 0 {
-                    self.state.exited = true;
-                }
-
-                // If the syscall is `EXIT_UNCONSTRAINED`, the memory was restored to pre-unconstrained code
-                // in the execute function, so we need to re-read from A0 and A1.  Just do a peek on the
-                // registers.
-                if syscall == SyscallCode::EXIT_UNCONSTRAINED {
-                    b = self.register(Register::A0);
-                    c = self.register(Register::A1);
-                    prev_a = self.register(Register::V0);
-                }
-
-                // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)
-                clk = self.state.clk;
-                pc = self.state.pc;
-
-                self.rw_cpu(Register::V0, a, MemoryAccessPosition::A);
-                next_pc = precompile_next_pc;
-                next_next_pc = precompile_next_pc + 4;
-                self.state.clk += precompile_cycles;
-                exit_code = returned_exit_code;
-                hi_or_prev_a = Some(prev_a);
-            }
-
-            // Arithmetic instructions
-            Opcode::ADD
-            | Opcode::SUB
-            | Opcode::MULT
-            | Opcode::MULTU
-            | Opcode::MUL
-            | Opcode::DIV
-            | Opcode::DIVU
-            | Opcode::SLL
-            | Opcode::SRL
-            | Opcode::SRA
-            | Opcode::ROR
-            | Opcode::SLT
-            | Opcode::SLTU
-            | Opcode::AND
-            | Opcode::OR
-            | Opcode::XOR
-            | Opcode::NOR
-            | Opcode::CLZ
-            | Opcode::CLO
-            | Opcode::MOD
-            | Opcode::MODU => {
-                (hi_or_prev_a, a, b, c) = self.execute_alu(instruction);
-            }
-
-            // Load instructions.
-            Opcode::LB
-            | Opcode::LH
-            | Opcode::LW
-            | Opcode::LWL
-            | Opcode::LBU
-            | Opcode::LHU
-            | Opcode::LWR
-            | Opcode::LL => {
-                (hi_or_prev_a, a, b, c) = self.execute_load(instruction)?;
-            }
-
-            // Store instructions.
-            Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SWL | Opcode::SWR | Opcode::SC => {
-                (hi_or_prev_a, a, b, c) = self.execute_store(instruction)?;
-            }
-
-            // Branch instructions.
-            Opcode::BEQ
-            | Opcode::BNE
-            | Opcode::BGEZ
-            | Opcode::BLEZ
-            | Opcode::BGTZ
-            | Opcode::BLTZ => {
-                (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
-                self.state.next_is_delayslot = true;
-            }
-
+        if instruction.is_alu_instruction() {
+            (hi_or_prev_a, a, b, c) = self.execute_alu(instruction);
+        } else if instruction.is_memory_load_instruction() {
+            (hi_or_prev_a, a, b, c) = self.execute_load(instruction)?;
+        } else if instruction.is_memory_store_instruction() {
+            (hi_or_prev_a, a, b, c) = self.execute_store(instruction)?;
+        } else if instruction.is_branch_instruction() {
+            (a, b, c, next_next_pc) = self.execute_branch(instruction, next_pc, next_next_pc);
+            self.state.next_is_delayslot = true;
+        } else if instruction.is_jump_instruction() {
             // Jump instructions.
-            Opcode::Jump => {
-                (a, b, c, next_next_pc) = self.execute_jump(instruction);
-                self.state.next_is_delayslot = true;
-            }
-            Opcode::Jumpi => {
-                (a, b, c, next_next_pc) = self.execute_jumpi(instruction);
-                self.state.next_is_delayslot = true;
-            }
-            Opcode::JumpDirect => {
-                (a, b, c, next_next_pc) = self.execute_jump_direct(instruction);
-                self.state.next_is_delayslot = true;
-            }
-
-            // Misc instructions.
-            Opcode::MEQ | Opcode::MNE => {
-                (hi_or_prev_a, a, b, c) = self.execute_condmov(instruction);
-            }
-            Opcode::MADDU => {
+            (a, b, c, next_next_pc) = if instruction.opcode == Opcode::Jump {
+                self.execute_jump(instruction)
+            } else if instruction.opcode == Opcode::Jumpi {
+                self.execute_jumpi(instruction)
+            } else {
+                self.execute_jump_direct(instruction)
+            };
+            self.state.next_is_delayslot = true;
+        } else if instruction.is_mov_cond_instruction() {
+            (hi_or_prev_a, a, b, c) = self.execute_condmov(instruction);
+        } else if instruction.is_misc_instruction() {
+            if instruction.opcode == Opcode::WSBH {
+                (a, b, c) = self.execute_wsbh(instruction);
+            } else if instruction.opcode == Opcode::EXT {
+                (a, b, c) = self.execute_ext(instruction);
+            } else if instruction.opcode == Opcode::MADDU {
                 (hi_or_prev_a, a, b, c) = self.execute_maddu(instruction);
-            }
-            Opcode::MSUBU => {
+            } else if instruction.opcode == Opcode::INS {
+                (hi_or_prev_a, a, b, c) = self.execute_ins(instruction);
+            } else if instruction.opcode == Opcode::SEXT {
+                (a, b, c) = self.execute_sext(instruction);
+            } else if instruction.opcode ==Opcode::TEQ {
+                (a, b, c) = self.execute_teq(instruction);
+            } else if instruction.opcode == Opcode::MSUBU {
                 (hi_or_prev_a, a, b, c) = self.execute_msubu(instruction);
-            }
-            Opcode::MADD => {
+            } else if instruction.opcode == Opcode::MADD {
                 (hi_or_prev_a, a, b, c) = self.execute_madd(instruction);
-            }
-            Opcode::MSUB => {
+            } else if instruction.opcode == Opcode::MSUB {
                 (hi_or_prev_a, a, b, c) = self.execute_msub(instruction);
             }
-            Opcode::TEQ => {
-                (a, b, c) = self.execute_teq(instruction);
-            }
-            Opcode::SEXT => {
-                (a, b, c) = self.execute_sext(instruction);
-            }
-            Opcode::WSBH => {
-                (a, b, c) = self.execute_wsbh(instruction);
-            }
-            Opcode::EXT => {
-                (a, b, c) = self.execute_ext(instruction);
-            }
-            Opcode::INS => {
-                (hi_or_prev_a, a, b, c) = self.execute_ins(instruction);
+        } else if instruction.opcode == Opcode::SYSCALL {
+            let syscall_id = self.register(Register::V0);
+            c = self.rr_cpu(Register::A1, MemoryAccessPosition::C);
+            b = self.rr_cpu(Register::A0, MemoryAccessPosition::B);
+            let syscall = SyscallCode::from_u32(syscall_id);
+            let mut prev_a = syscall_id;
+            log::trace!(
+                "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
+                self.state.pc,
+                syscall_id,
+                b,
+                c
+            );
+
+            if self.print_report && !self.unconstrained {
+                self.report.syscall_counts[syscall] += 1;
             }
 
-            Opcode::UNIMPL => {
-                log::error!("{:X}: {:X}", self.state.pc, instruction.op_c);
-                return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
+            // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
+            // Other syscalls are not allowed because they can lead to non-deterministic
+            // behavior, especially since many syscalls modify memory in place,
+            // which is not permitted in unconstrained mode. This will result in
+            // non-zero memory lookups when generating a proof.
+
+            if self.unconstrained
+                && (syscall != SyscallCode::EXIT_UNCONSTRAINED && syscall != SyscallCode::WRITE)
+            {
+                return Err(ExecutionError::InvalidSyscallUsage(syscall_id as u64));
             }
+
+            // Update the syscall counts.
+            let syscall_for_count = syscall.count_map();
+            let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
+            *syscall_count += 1;
+
+            let syscall_impl = self.get_syscall(syscall).cloned();
+            syscall_code = syscall.syscall_id();
+            let mut precompile_rt = SyscallContext::new(self);
+            let (precompile_next_pc, precompile_cycles, returned_exit_code) =
+                if let Some(syscall_impl) = syscall_impl {
+                    // Executing a syscall optionally returns a value to write to the t0
+                    // register. If it returns None, we just keep the
+                    // syscall_id in t0.
+                    let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c);
+                    if let Some(r0) = res {
+                        a = r0;
+                    } else {
+                        a = syscall_id;
+                    }
+
+                    // If the syscall is `HALT` and the exit code is non-zero, return an error.
+                    if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
+                        return Err(ExecutionError::HaltWithNonZeroExitCode(
+                            precompile_rt.exit_code,
+                        ));
+                    }
+
+                    (
+                        precompile_rt.next_pc,
+                        syscall_impl.num_extra_cycles(),
+                        precompile_rt.exit_code,
+                    )
+                } else {
+                    return Err(ExecutionError::UnsupportedSyscall(syscall_id));
+                };
+
+            if syscall == SyscallCode::HALT && returned_exit_code == 0 {
+                self.state.exited = true;
+            }
+
+            // If the syscall is `EXIT_UNCONSTRAINED`, the memory was restored to pre-unconstrained code
+            // in the execute function, so we need to re-read from A0 and A1.  Just do a peek on the
+            // registers.
+            if syscall == SyscallCode::EXIT_UNCONSTRAINED {
+                b = self.register(Register::A0);
+                c = self.register(Register::A1);
+                prev_a = self.register(Register::V0);
+            }
+
+            // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)
+            clk = self.state.clk;
+            pc = self.state.pc;
+
+            self.rw_cpu(Register::V0, a, MemoryAccessPosition::A);
+            next_pc = precompile_next_pc;
+            next_next_pc = precompile_next_pc + 4;
+            self.state.clk += precompile_cycles;
+            exit_code = returned_exit_code;
+            hi_or_prev_a = Some(prev_a);
+        } else if instruction.opcode == Opcode::UNIMPL {
+            log::error!("{:X}: {:X}", self.state.pc, instruction.op_c);
+            return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
+        } else {
+            unreachable!()
         }
 
         // Emit the CPU event for this cycle.
