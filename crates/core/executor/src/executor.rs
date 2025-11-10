@@ -1504,7 +1504,7 @@ impl<'a> Executor<'a> {
                 (hi_or_prev_a, a, b, c) = self.execute_ins(instruction);
             } else if instruction.opcode == Opcode::SEXT {
                 (a, b, c) = self.execute_sext(instruction);
-            } else if instruction.opcode ==Opcode::TEQ {
+            } else if instruction.opcode == Opcode::TEQ {
                 (a, b, c) = self.execute_teq(instruction);
             } else if instruction.opcode == Opcode::MSUBU {
                 (hi_or_prev_a, a, b, c) = self.execute_msubu(instruction);
@@ -1519,13 +1519,7 @@ impl<'a> Executor<'a> {
             b = self.rr_cpu(Register::A0, MemoryAccessPosition::B);
             let syscall = SyscallCode::from_u32(syscall_id);
             let mut prev_a = syscall_id;
-            log::trace!(
-                "pc: {:X} syscall {}, a0: {:X}, a1: {:X}",
-                self.state.pc,
-                syscall_id,
-                b,
-                c
-            );
+            log::trace!("pc: {:X} syscall {}, a0: {:X}, a1: {:X}", self.state.pc, syscall_id, b, c);
 
             if self.print_report && !self.unconstrained {
                 self.report.syscall_counts[syscall] += 1;

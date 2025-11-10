@@ -238,40 +238,28 @@ impl Instruction {
     #[must_use]
     #[inline]
     pub const fn is_branch_cmp_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ
-        )
+        matches!(self.opcode, Opcode::BLTZ | Opcode::BGEZ | Opcode::BLEZ | Opcode::BGTZ)
     }
 
     /// Returns if the instruction is a clz or clo instruction.
     #[must_use]
     #[inline]
     pub const fn is_cloclz_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::CLZ | Opcode::CLO
-        )
+        matches!(self.opcode, Opcode::CLZ | Opcode::CLO)
     }
 
     /// Returns if the instruction is a maddu or msubu instruction.
     #[must_use]
     #[inline]
     pub const fn is_maddsubu_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::MADDU | Opcode::MSUBU
-        )
+        matches!(self.opcode, Opcode::MADDU | Opcode::MSUBU)
     }
 
-        /// Returns if the instruction is a madd or msub instruction.
+    /// Returns if the instruction is a madd or msub instruction.
     #[must_use]
     #[inline]
     pub const fn is_maddsub_instruction(&self) -> bool {
-        matches!(
-            self.opcode,
-            Opcode::MADD | Opcode::MSUB
-        )
+        matches!(self.opcode, Opcode::MADD | Opcode::MSUB)
     }
     /// Returns if the instruction is a mult/div instruction.
     #[must_use]

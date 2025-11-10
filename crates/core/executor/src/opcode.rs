@@ -24,8 +24,8 @@ pub enum Opcode {
     MOD = 7,   // DIVREM
     MODU = 8,  // DIVREM
     SLL = 9,   // SLL
-    SRL = 10,   // SR
-    SRA = 11,   // SR
+    SRL = 10,  // SR
+    SRA = 11,  // SR
     ROR = 12,  // SR
     SLT = 13,  // LT
     SLTU = 14, // LT
@@ -45,7 +45,7 @@ pub enum Opcode {
     Jump = 27,       // JUMP
     Jumpi = 28,      // JUMP
     JumpDirect = 29, // JUMP
-    SYSCALL = 30, // SYSCALL
+    SYSCALL = 30,    // SYSCALL
     // Memory Op
     LB = 31,  // LOAD
     LBU = 32, // LOAD
@@ -75,7 +75,6 @@ pub enum Opcode {
     SEXT = 55,  // SEXT
 
     // Syscall
-    
     UNIMPL = 0xff,
 }
 
