@@ -359,7 +359,7 @@ mod tests {
 
         let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
 
-        let row_batches = inputs
+        let row_batches = input
             .add_sub_events
             .par_chunks(chunk_size)
             .map(|events| {
