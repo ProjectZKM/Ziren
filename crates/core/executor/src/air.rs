@@ -229,12 +229,7 @@ impl FromIterator<Shape<MipsAirId>> for MaximalShapes {
         for shape in iter {
             let mut maximal_shape = EnumMap::<MipsAirId, u32>::default();
             for (air, height) in shape {
-                #[allow(irrefutable_let_patterns)]
-                if let Ok(core_air) = MipsAirId::try_from(air) {
-                    maximal_shape[core_air] = height as u32;
-                } else {
-                    tracing::warn!("Invalid core air: {air}");
-                }
+                maximal_shape[air] = height as u32;
             }
             maximal_shapes.push(maximal_shape);
         }

@@ -9,14 +9,12 @@ use std::{
     io::{
         Seek, {self},
     },
-    str::FromStr,
     sync::{mpsc::sync_channel, Arc, Mutex},
 };
 use thiserror::Error;
 use web_time::Instant;
 use zkm_stark::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape, MachineProvingKey,
-    MachineVerificationError,
+    koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey, MachineVerificationError,
 };
 
 use p3_field::PrimeField32;

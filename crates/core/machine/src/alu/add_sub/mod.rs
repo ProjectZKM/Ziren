@@ -72,7 +72,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows =
-            next_power_of_two(input.add_events.len(), input.fixed_log2_rows::<F, _>(self));
+            next_power_of_two(input.add_sub_events.len(), input.fixed_log2_rows::<F, _>(self));
         Some(nb_rows)
     }
 
@@ -82,7 +82,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         _: &mut ExecutionRecord,
     ) -> RowMajorMatrix<F> {
         // Generate the rows for the trace.
-        let chunk_size = std::cmp::max(input.add_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
         let padded_nb_rows = <AddSubChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_ADD_SUB_COLS);
 
@@ -92,9 +92,9 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut AddSubCols<F> = row.borrow_mut();
 
-                    if idx < input.add_events.len() {
+                    if idx < input.add_sub_events.len() {
                         let mut byte_lookup_events = Vec::new();
-                        let event = &input.add_events[idx];
+                        let event = &input.add_sub_events[idx];
                         self.event_to_row(event, cols, &mut byte_lookup_events);
                     }
                 });
@@ -106,10 +106,10 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     }
 
     fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
-        let chunk_size = std::cmp::max(input.add_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
-            .add_events
+            .add_sub_events
             .chunks(chunk_size)
             .par_bridge()
             .map(|events| {
@@ -130,7 +130,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         if let Some(shape) = shard.shape.as_ref() {
             shape.included::<F, _>(self)
         } else {
-            !shard.add_events.is_empty()
+            !shard.add_sub_events.is_empty()
         }
     }
 
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn generate_trace() {
         let mut shard = ExecutionRecord::default();
-        shard.add_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)];
+        shard.add_sub_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)];
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default());
@@ -279,13 +279,25 @@ mod tests {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             let result = operand_1.wrapping_add(operand_2);
-            shard.add_events.push(AluEvent::new(i << 2, Opcode::ADD, result, operand_1, operand_2));
+            shard.add_sub_events.push(AluEvent::new(
+                i << 2,
+                Opcode::ADD,
+                result,
+                operand_1,
+                operand_2,
+            ));
         }
         for i in 0..255 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             let result = operand_1.wrapping_sub(operand_2);
-            shard.add_events.push(AluEvent::new(i << 2, Opcode::SUB, result, operand_1, operand_2));
+            shard.add_sub_events.push(AluEvent::new(
+                i << 2,
+                Opcode::SUB,
+                result,
+                operand_1,
+                operand_2,
+            ));
         }
 
         let chip = AddSubChip::default();
@@ -301,7 +313,7 @@ mod tests {
     /// Consists of random `ADD` and `SUB` instructions.
     #[cfg(feature = "sys")]
     static SHARD: LazyLock<ExecutionRecord> = LazyLock::new(|| {
-        let add_events = (0..1)
+        let add_sub_events = (0..1)
             .flat_map(|i| {
                 [{
                     let operand_1 = 1u32;
@@ -321,7 +333,7 @@ mod tests {
                 }]
             })
             .collect::<Vec<_>>();
-        ExecutionRecord { add_events, ..Default::default() }
+        ExecutionRecord { add_sub_events, ..Default::default() }
     });
 
     #[cfg(feature = "sys")]
@@ -345,10 +357,10 @@ mod tests {
 
         type F = KoalaBear;
 
-        let chunk_size = std::cmp::max(input.add_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
 
         let row_batches = inputs
-            .add_events
+            .add_sub_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let rows = events

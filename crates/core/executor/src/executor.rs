@@ -1179,7 +1179,7 @@ impl<'a> Executor<'a> {
 
         match opcode {
             Opcode::ADD | Opcode::SUB => {
-                self.record.add_events.push(event);
+                self.record.add_sub_events.push(event);
             }
             Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => {
                 self.record.bitwise_events.push(event);

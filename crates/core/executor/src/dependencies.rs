@@ -22,7 +22,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
     }
 
     if c_neg == 1 {
-        executor.record.add_events.push(AluEvent {
+        executor.record.add_sub_events.push(AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::ADD,
@@ -33,7 +33,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         });
     }
     if rem_neg == 1 {
-        executor.record.add_events.push(AluEvent {
+        executor.record.add_sub_events.push(AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::ADD,
@@ -138,7 +138,7 @@ pub fn emit_memory_dependencies(
         b: event.b,
         c: event.c,
     };
-    executor.record.add_events.push(add_event);
+    executor.record.add_sub_events.push(add_event);
     let addr_offset = (memory_addr % 4_u32) as u8;
     let mem_value = memory_record.value;
 
@@ -172,7 +172,7 @@ pub fn emit_memory_dependencies(
                 b: unsigned_mem_val,
                 c: sign_value,
             };
-            executor.record.add_events.push(sub_event);
+            executor.record.add_sub_events.push(sub_event);
         }
     }
 }
@@ -222,7 +222,7 @@ pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
             b: event.next_pc,
             c: event.c,
         };
-        executor.record.add_events.push(add_event);
+        executor.record.add_sub_events.push(add_event);
     }
 }
 
@@ -240,7 +240,7 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
                 b: event.next_pc,
                 c: event.b,
             };
-            executor.record.add_events.push(add_event);
+            executor.record.add_sub_events.push(add_event);
         }
         Opcode::Jump | Opcode::Jumpi => {}
         _ => unreachable!(),
@@ -359,7 +359,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             b: srl_val,
             c: sll_val,
         };
-        executor.record.add_events.push(add_event);
+        executor.record.add_sub_events.push(add_event);
 
         let ror_event2 = AluEvent {
             pc: UNUSED_PC,

@@ -455,7 +455,7 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::MemoryInstrs, record.memory_instr_events.len()),
             (MipsAirId::SyscallInstrs, record.syscall_events.len()),
             (MipsAirId::DivRem, record.divrem_events.len()),
-            (MipsAirId::AddSub, record.add_events.len()),
+            (MipsAirId::AddSub, record.add_sub_events.len()),
             (MipsAirId::Bitwise, record.bitwise_events.len()),
             (MipsAirId::Mul, record.mul_events.len()),
             (MipsAirId::ShiftRight, record.shift_right_events.len()),
