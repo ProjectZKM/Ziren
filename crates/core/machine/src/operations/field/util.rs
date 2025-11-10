@@ -2,6 +2,7 @@ use num::BigUint;
 use p3_field::PrimeField32;
 use zkm_stark::air::Polynomial;
 
+// Converts a BigUint into a field element regardless of its size.
 fn biguint_to_field<F: PrimeField32>(num: BigUint) -> F {
     let mut x = F::ZERO;
     let mut power = F::from_canonical_u32(1u32);
@@ -38,7 +39,7 @@ pub fn compute_root_quotient_and_shift<F: PrimeField32>(
     let p_quotient = p_vanishing.root_quotient(root_monomial);
     debug_assert_eq!(p_quotient.degree(), p_vanishing.degree() - 1);
 
-    // Sanity Check #1: For all i, |w_i| < 2^20 to prevent overflows.
+    // Sanity Check #1: For all i, |w_i| < offset to prevent overflows.
     let offset_u64 = offset as u64;
     for c in p_quotient.coefficients().iter() {
         debug_assert!(c.neg().as_canonical_u64() < offset_u64 || c.as_canonical_u64() < offset_u64);
