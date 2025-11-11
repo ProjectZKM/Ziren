@@ -609,7 +609,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         inputs
     }
 
-    /// Reduce shards proofs to a single shard proof using the recursion prover.
+    /// Reduce shard proofs to a single shard proof using the recursion prover.
     #[instrument(name = "compress", level = "info", skip_all)]
     pub fn compress(
         &self,

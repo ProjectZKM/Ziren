@@ -333,7 +333,7 @@ where
                 // If `committed_value_digest` is not zero, then `public_values.committed_value_digest
                 // should be the current.
 
-                // Set a flags to indicate whether `committed_value_digest` is non-zero. The flags
+                // Set flags to indicate whether `committed_value_digest` is non-zero. The flags
                 // are given by the elements of the array, and they will be used as filters to
                 // constrain the equality.
                 let mut is_non_zero_flags = vec![];
