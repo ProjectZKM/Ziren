@@ -120,7 +120,7 @@ pub fn decompress(compressed_point: &CompressedEdwardsY) -> AffinePoint<Ed25519>
 
     let y = &BigUint::from_bytes_le(&point_bytes);
     let yy = &((y * y) % modulus);
-    let u = (yy - BigUint::one()) % modulus; // u =  y²-1
+    let u = (yy - BigUint::one()) % modulus; // u = y²-1
     let v = &((yy * &Ed25519Parameters::d_biguint()) + &BigUint::one()) % modulus; // v = dy²+1
 
     let v_inv = v.modpow(&(modulus - BigUint::from(2u64)), modulus);
