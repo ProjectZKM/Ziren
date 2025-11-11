@@ -185,7 +185,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 let panic_tx = panic_tx.clone();
                 s.spawn(move || {
                     while let Ok((i, shape)) = shape_rx.lock().unwrap().recv() {
-                        println!("shape {i} is {shape:?}");
+                        tracing::info!("shape {i} is {shape:?}");
                         let program = catch_unwind(AssertUnwindSafe(|| {
                             prover.program_from_shape(shape.clone(), None)
                         }));
