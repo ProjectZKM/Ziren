@@ -17,6 +17,7 @@ func SyscallHintRead(ptr []byte, len int)
 func SyscallCommit(index int, word uint32)
 func SyscallExit(code int)
 func SyscallKeccakSponge(input unsafe.Pointer, result unsafe.Pointer)
+func SyscallVerifyZkmProof(vkDigest *[8]uint32, pvDigest *[32]byte)
 
 var PublicValuesHasher hash.Hash = sha256.New()
 
@@ -125,6 +126,13 @@ func Keccak256(data []byte) [32]byte {
 	}
 
 	return result
+}
+
+// VerifyZkmProof verifies a ZK proof using the VERIFY_ZKM_PROOF syscall
+// vkDigest: 8 uint32 values representing the verification key digest
+// pvDigest: 32-byte SHA256 hash of the public values
+func VerifyZkmProof(vkDigest [8]uint32, pvDigest [32]byte) {
+	SyscallVerifyZkmProof(&vkDigest, &pvDigest)
 }
 
 func init() {
