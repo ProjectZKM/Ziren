@@ -228,6 +228,9 @@ pub enum ExecutionError {
     /// The program ended in unconstrained mode.
     #[error("program ended in unconstrained mode")]
     EndInUnconstrained(),
+
+    #[error("Null Pointer Reference")]
+    NullPointerReference(),
 }
 
 impl<'a> Executor<'a> {
@@ -1104,6 +1107,7 @@ impl<'a> Executor<'a> {
 
     /// Emit a CPU event.
     #[allow(clippy::too_many_arguments)]
+    #[inline]
     fn emit_cpu(
         &mut self,
         clk: u32,
@@ -1421,7 +1425,7 @@ impl<'a> Executor<'a> {
         let mut exit_code = 0u32; // use in halt code
 
         let mut next_pc = self.state.next_pc;
-        let mut next_next_pc = self.state.next_pc.wrapping_add(4);
+        let mut next_next_pc = self.state.next_pc + 4;
 
         let mut a = 0;
         let mut b = 0;
@@ -1601,6 +1605,11 @@ impl<'a> Executor<'a> {
             return Err(ExecutionError::UnsupportedInstruction(instruction.op_c));
         } else {
             unreachable!()
+        }
+
+        if next_next_pc == 0 {
+            log::error!("Null pointer reference {:X}: {:X}", self.state.pc, instruction.op_c);
+            return Err(ExecutionError::NullPointerReference());
         }
 
         // Emit the CPU event for this cycle.
