@@ -43,6 +43,7 @@ pub enum Register {
 }
 
 impl From<u8> for Register {
+    #[inline]
     fn from(value: u8) -> Self {
         match value {
             0 => Register::ZERO,

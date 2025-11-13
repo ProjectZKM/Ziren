@@ -178,6 +178,7 @@ impl Program {
     }
 
     #[must_use]
+    #[inline]
     /// Fetch the instruction at the given program counter.
     pub fn fetch(&self, pc: u32) -> Instruction {
         let idx = ((pc - self.pc_base) / 4) as usize;
