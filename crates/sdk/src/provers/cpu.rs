@@ -17,13 +17,13 @@ pub struct CpuProver {
 }
 
 impl CpuProver {
-    /// Creates a new [LocalProver].
+    /// Creates a new [CpuProver].
     pub fn new() -> Self {
         let prover = ZKMProver::new();
         Self { prover }
     }
 
-    /// Creates a new [LocalProver] from an existing [ZKMProver].
+    /// Creates a new [CpuProver] from an existing [ZKMProver].
     pub fn from_prover(prover: ZKMProver<DefaultProverComponents>) -> Self {
         Self { prover }
     }
