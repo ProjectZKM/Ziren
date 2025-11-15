@@ -46,7 +46,7 @@ Two kinds of allocators are provided to rust guest program
 |   .bss	    |            |.bss size         |     ro      |   toolchain   |
 | Heap (contains program I/O) |	_end | 0x7f000000 - _end | rw | runtime     | 
 
- - embeded allocator： Program I/O address space is reserved and split from heap address space. A [TLS heap](https://github.com/rust-embedded/embedded-alloc) is used for heap management.
+ - embedded allocator： Program I/O address space is reserved and split from heap address space. A [TLS heap](https://github.com/rust-embedded/embedded-alloc) is used for heap management.
 
 |   Section	  |    Start	 |     Size	        |   Access		| Controlled-by |	
 | ----------- | ---------- | ---------------- | ----------- | ------------- |
@@ -61,7 +61,7 @@ Two kinds of allocators are provided to rust guest program
 | Heap        |	_end       | 0x3f000000 - _end | rw         |    runtime    | 
 
 ### Go guest program
-Go guest program is similar to embeded-mode rust guest program, except that the initial args is set by VM at the top of the stack. The memory layout is as follows:
+Go guest program is similar to embedded-mode rust guest program, except that the initial args is set by VM at the top of the stack. The memory layout is as follows:
 
 |   Section	  |    Start	 |     Size	        |   Access		| Controlled-by |	
 | ----------- | ---------- | ---------------- | ----------- | ------------- |

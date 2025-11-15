@@ -243,7 +243,7 @@ impl MemoryInstructionsChip {
             local.mem_value_is_neg,
         );
 
-        // When the memory value is not negtive, assert that op_a value is
+        // When the memory value is not negative, assert that op_a value is
         // equal to the unsigned memory value.
         let mem_value_is_pos = (local.is_lb + local.is_lh - local.mem_value_is_neg)
             + local.is_lbu
