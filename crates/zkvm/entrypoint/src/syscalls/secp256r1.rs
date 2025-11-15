@@ -1,7 +1,7 @@
 #[cfg(target_os = "zkvm")]
 use core::arch::asm;
 
-/// Adds two Secp256k1 points.
+/// Adds two Secp256r1 points.
 ///
 /// The result is stored in the first point.
 ///
@@ -9,7 +9,7 @@ use core::arch::asm;
 ///
 /// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
 /// byte boundary. Additionally, the caller must ensure that `p` and `q` are valid points on the
-/// secp256k1 curve, and that `p` and `q` are not equal to each other.
+/// secp256r1 curve, and that `p` and `q` are not equal to each other.
 #[allow(unused_variables)]
 #[no_mangle]
 pub extern "C" fn syscall_secp256r1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
@@ -27,7 +27,7 @@ pub extern "C" fn syscall_secp256r1_add(p: *mut [u32; 16], q: *mut [u32; 16]) {
     unreachable!()
 }
 
-/// Double a Secp256k1 point.
+/// Double a Secp256r1 point.
 ///
 /// The result is stored in-place in the supplied buffer.
 ///
@@ -52,7 +52,7 @@ pub extern "C" fn syscall_secp256r1_double(p: *mut [u32; 16]) {
     unreachable!()
 }
 
-/// Decompresses a compressed Secp256k1 point.
+/// Decompresses a compressed Secp256r1 point.
 ///
 /// The input array should be 64 bytes long, with the first 32 bytes containing the X coordinate in
 /// big-endian format. The second half of the input will be overwritten with the Y coordinate of the
