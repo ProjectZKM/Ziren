@@ -52,13 +52,13 @@ Multiset hashing maps a (multi-)set to a short string, making it computationally
 
 **Implementation on Elliptic Curve**
 
-Consider the group \\(G\\) as the set of points \\((x,y)\\) on the elliptic curve \\(y^2 = x^3 +Ax+B\\) (including the point at infinity). We can implement a hash-to-group approach. To hash a set element into a point on the elliptic curve, we first map the set element to the \\(x\\)-coordinate of the point. Since this may not be a valid \\(x\\)-coordinate on the elliptic curve, we add an 8-bit tweak \\(t\\). Additionally, we constrain the sign of the \\(y\\)-coordinate to prevent flipping, either by ensuring \\(y\\) is a quadratic residue or by adding range checks.
+Let \\(G\\) denote the group of points \\((x,y)\\) on the elliptic curve defined by \\(y^2 = x^3 +Ax+B\\), including the point at infinity. We adopt a hash-to-group approach following the framework described in [Constraint-Friendly Map-to-Elliptic-Curve-Group Relations and Their
+Applications](https://eprint.iacr.org/2025/1503.pdf). To map a set element to a point on the curve, we first assign it directly to the \\(x\\)-coordinate of a candidate point—without an intermediate hashing step. Since this \\(x\\)-value may not correspond to a valid point on the curve, we apply an 8-bit tweak \\(t\\) to adjust it. The sign of the resulting \\(y\\)-coordinate is constrained to prevent ambiguity, either by restricting \\(y\\) to be a quadratic residue or by imposing explicit range checks. Furthermore, the message length is bounded by 110 bits, and the base field of the curve operates over the 7th extension field of the KolearBear Prime to ensure a security level of at least 100 bits.
 
 In Ziren, the following parameters are used.
 - KoalaBear Prime field: \\(\mathbb{F}_P\\), with \\(P = 2^{31} - 2^{24} +1\\).
 - Septic extension field: Defined under irreducible polynomial \\( u^7 + 2u -8\\).
 - Elliptic curve: Defined with \\(A = 3*u , B= -3\\) (provides ≥102-bit security).
-- Hash algorithm: Poseidon2 is used as the hash algorithm.
 
 
 ## Elliptic Curve Selection over KoalaBear Prime Extension Field
