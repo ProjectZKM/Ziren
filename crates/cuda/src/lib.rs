@@ -184,7 +184,7 @@ impl ZKMCudaProver {
             tracing::info!("waiting for proving server to be ready");
             loop {
                 if start_time.elapsed() > timeout {
-                    return Err("Timeout: proving server did not become ready within 60 seconds. Please check your Docker container and network settings.".to_string());
+                    return Err("Timeout: proving server did not become ready within 300 seconds. Please check your Docker container and network settings.".to_string());
                 }
 
                 let request = ReadyRequest {};
