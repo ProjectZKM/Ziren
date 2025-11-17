@@ -159,10 +159,8 @@ impl Default for ZKMCoreOpts {
                     |_| DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY,
                     |s| s.parse::<usize>().unwrap_or(DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY),
                 ),
-            shape_check_frequency: env::var("SHAPE_CHECK_FREQUENCY").map_or_else(
-                |_| 16,
-                |s| s.parse::<u64>().unwrap_or(16),
-            ),
+            shape_check_frequency: env::var("SHAPE_CHECK_FREQUENCY")
+                .map_or_else(|_| 16, |s| s.parse::<u64>().unwrap_or(16)),
             reconstruct_commitments: true,
         };
 
@@ -225,10 +223,8 @@ impl ZKMCoreOpts {
                     |_| DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY,
                     |s| s.parse::<usize>().unwrap_or(DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY),
                 ),
-            shape_check_frequency: env::var("SHAPE_CHECK_FREQUENCY").map_or_else(
-                |_| 16,
-                |s| s.parse::<u64>().unwrap_or(16),
-            ),
+            shape_check_frequency: env::var("SHAPE_CHECK_FREQUENCY")
+                .map_or_else(|_| 16, |s| s.parse::<u64>().unwrap_or(16)),
             reconstruct_commitments: true,
         }
     }
