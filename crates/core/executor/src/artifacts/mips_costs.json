@@ -41,7 +41,7 @@
   "SyscallCore": 22,
   "SysLinux": 125,
   "Bn254Fp2AddSubAssign": 1382,
-  "MovCond": 38,
+  "MovCond": 48,
   "Bls12381FpOpAssign": 1048,
   "Cpu": 119,
   "ShaCompress": 40480,
