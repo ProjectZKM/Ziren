@@ -32,22 +32,27 @@ impl Syscall for WriteSyscall {
 pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) {
     let rt = &mut ctx.rt;
     if fd == FD_STDOUT {
-        let s = core::str::from_utf8(slice).unwrap();
-        match parse_cycle_tracker_command(s) {
-            Some(command) => handle_cycle_tracker_command(rt, command),
-            None => {
-                // If the string does not match any known command, print it to stdout.
-                let flush_s = update_io_buf(ctx, fd, s);
-                if !flush_s.is_empty() {
-                    flush_s.into_iter().for_each(|line| println!("stdout: {line}"));
+        if let Ok(s) = core::str::from_utf8(slice) {
+            match parse_cycle_tracker_command(s) {
+                Some(command) => handle_cycle_tracker_command(rt, command),
+                None => {
+                    let flush_s = update_io_buf(ctx, fd, s);
+                    if !flush_s.is_empty() {
+                        flush_s.into_iter().for_each(|line| println!("stdout: {line}"));
+                    }
                 }
             }
+        } else {
+            eprintln!("Warning: Stdout Received invalid UTF-8 data in slice: {:?}", slice);
         }
     } else if fd == FD_STDERR {
-        let s = core::str::from_utf8(slice).unwrap();
-        let flush_s = update_io_buf(ctx, fd, s);
-        if !flush_s.is_empty() {
-            flush_s.into_iter().for_each(|line| println!("stderr: {line}"));
+        if let Ok(s) = core::str::from_utf8(slice) {
+            let flush_s = update_io_buf(ctx, fd, s);
+            if !flush_s.is_empty() {
+                flush_s.into_iter().for_each(|line| println!("stderr: {line}"));
+            }
+        } else {
+            eprintln!("Warning: Stderr Received invalid UTF-8 data in slice: {:?}", slice);
         }
     } else if fd == FD_PUBLIC_VALUES {
         rt.state.public_values_stream.extend_from_slice(slice);
