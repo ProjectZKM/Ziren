@@ -1877,14 +1877,17 @@ impl<'a> Executor<'a> {
         // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
         let rt = self.register(rt_reg);
 
-        let virt_raw = rs_raw.wrapping_add(offset_ext);
-        let virt = virt_raw & 0xFFFF_FFFC;
+        let addr = rs_raw.wrapping_add(offset_ext);
+        let aligned_addr = addr & 0xFFFF_FFFC;
 
-        let mem = self.mr_cpu(virt);
-        let rs = virt_raw;
+        let mem = self.mr_cpu(aligned_addr);
+        let rs = addr;
 
         let val = match instruction.opcode {
             Opcode::LH => {
+                if addr & 1 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LH, addr));
+                }
                 let mem_fc = |i: u32| -> u32 { sign_extend::<16>((mem >> (i * 8)) & 0xffff) };
                 mem_fc(rs & 2)
             }
@@ -1896,12 +1899,20 @@ impl<'a> Executor<'a> {
                 };
                 out(rs & 3)
             }
-            Opcode::LW => mem,
+            Opcode::LW => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LW, addr));
+                }
+                mem
+            }
             Opcode::LBU => {
                 let out = |i: u32| -> u32 { (mem >> (i * 8)) & 0xff };
                 out(rs & 3)
             }
             Opcode::LHU => {
+                if addr & 1 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LHU, addr));
+                }
                 let mem_fc = |i: u32| -> u32 { (mem >> (i * 8)) & 0xffff };
                 mem_fc(rs & 2)
             }
@@ -1913,7 +1924,12 @@ impl<'a> Executor<'a> {
                 };
                 out(rs & 3)
             }
-            Opcode::LL => mem,
+            Opcode::LL => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LL, addr));
+                }
+                mem
+            }
             Opcode::LB => {
                 let out = |i: u32| -> u32 { sign_extend::<8>((mem >> (i * 8)) & 0xff) };
                 out(rs & 3)
@@ -1938,10 +1954,10 @@ impl<'a> Executor<'a> {
             self.rr_cpu(rt_reg, MemoryAccessPosition::A)
         };
 
-        let virt_raw = rs.wrapping_add(offset_ext);
-        let virt = virt_raw & 0xFFFF_FFFC;
+        let addr = rs.wrapping_add(offset_ext);
+        let aligned_addr = addr & 0xFFFF_FFFC;
 
-        let mem = self.word(virt);
+        let mem = self.word(aligned_addr);
 
         let val = match instruction.opcode {
             Opcode::SB => {
@@ -1950,15 +1966,18 @@ impl<'a> Executor<'a> {
                     let mask = 0xFFFFFFFF_u32 ^ (0xff << (i * 8));
                     (mem & mask) | val
                 };
-                out(virt_raw & 3)
+                out(addr & 3)
             }
             Opcode::SH => {
+                if addr & 1 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SH, addr));
+                }
                 let mem_fc = |i: u32| -> u32 {
                     let val = (rt & 0xffff) << (i * 8);
                     let mask = 0xFFFFFFFF_u32 ^ (0xffff << (i * 8));
                     (mem & mask) | val
                 };
-                mem_fc(virt_raw & 2)
+                mem_fc(addr & 2)
             }
             Opcode::SWL => {
                 let out = |i: u32| -> u32 {
@@ -1966,23 +1985,33 @@ impl<'a> Executor<'a> {
                     let mask = 0xFFFFFFFF_u32 >> (24 - i * 8);
                     (mem & (!mask)) | val
                 };
-                out(virt_raw & 3)
+                out(addr & 3)
             }
-            Opcode::SW => rt,
+            Opcode::SW => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SW, addr));
+                }
+                rt
+            }
             Opcode::SWR => {
                 let out = |i: u32| -> u32 {
                     let val = rt << (i * 8);
                     let mask = 0xFFFFFFFF_u32 << (i * 8);
                     (mem & (!mask)) | val
                 };
-                out(virt_raw & 3)
+                out(addr & 3)
             }
-            Opcode::SC => rt,
+            Opcode::SC => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SC, addr));
+                }
+                rt
+            }
             // Opcode::SDC1 => 0,
             _ => todo!(),
         };
         self.mw_cpu(
-            virt_raw & 0xFFFF_FFFC, // align addr
+            aligned_addr, // align addr
             val,
         );
         if instruction.opcode == Opcode::SC {
