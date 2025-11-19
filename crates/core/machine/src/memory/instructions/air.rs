@@ -153,7 +153,7 @@ impl MemoryInstructionsChip {
         // byte in the KoalaBearWordRangeChecker, and the least sig one in the AND byte lookup below.
         builder.slice_range_check_u8(&local.addr_word.0[1..3], is_real.clone());
 
-        // We check that `addr_word >= NUM_REGISTERS`, or `addr_word > NUM_REGISTERS` to avoid registers.
+        // We check that `addr_word >= NUM_REGISTERS`, or `addr_word > NUM_REGISTERS - 1` to avoid registers.
         // Check that if the most significant bytes are zero, then the least significant byte is at
         // least NUM_REGISTERS.
         builder.send_byte(
