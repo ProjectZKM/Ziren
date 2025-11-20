@@ -1,57 +1,128 @@
-use std::mem::size_of;
-use zkm_derive::AlignedBorrow;
+pub mod air;
+pub mod columns;
+// pub mod event;
+// pub mod opcode;
+pub mod trace;
+pub mod utils;
 
-use super::NUM_BYTE_OPS;
+use zkm_core_executor::{events::ByteLookupEvent, ByteOpcode};
 
-/// The number of main trace columns for `ByteChip`.
-pub const NUM_BYTE_PREPROCESSED_COLS: usize = size_of::<BytePreprocessedCols<u8>>();
+use core::borrow::BorrowMut;
+use std::marker::PhantomData;
 
-/// The number of multiplicity columns for `ByteChip`.
-pub const NUM_BYTE_MULT_COLS: usize = size_of::<ByteMultCols<u8>>();
+use itertools::Itertools;
+use p3_field::Field;
+use p3_matrix::dense::RowMajorMatrix;
 
-#[derive(Debug, Clone, Copy, AlignedBorrow)]
-#[repr(C)]
-pub struct BytePreprocessedCols<T> {
-    /// The first byte operand.
-    pub b: T,
+use self::{
+    columns::{BytePreprocessedCols, NUM_BYTE_PREPROCESSED_COLS},
+    utils::shr_carry,
+};
+use crate::{bytes::trace::NUM_ROWS, utils::zeroed_f_vec};
 
-    /// The second byte operand.
-    pub c: T,
+/// The number of different byte operations.
+pub const NUM_BYTE_OPS: usize = 10;
 
-    /// The result of the `AND` operation on `b` and `c`
-    pub and: T,
+/// A chip for computing byte operations.
+///
+/// The chip contains a preprocessed table of all possible byte operations. Other chips can then
+/// use lookups into this table to compute their own operations.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ByteChip<F>(PhantomData<F>);
 
-    /// The result of the `OR` operation on `b` and `c`
-    pub or: T,
+impl<F: Field> ByteChip<F> {
+    /// Creates the preprocessed byte trace.
+    ///
+    /// This function returns a `trace` which is a matrix containing all possible byte operations.
+    pub fn trace() -> RowMajorMatrix<F> {
+        // The trace containing all values, with all multiplicities set to zero.
+        let mut initial_trace = RowMajorMatrix::new(
+            zeroed_f_vec(NUM_ROWS * NUM_BYTE_PREPROCESSED_COLS),
+            NUM_BYTE_PREPROCESSED_COLS,
+        );
 
-    /// The result of the `XOR` operation on `b` and `c`
-    pub xor: T,
+        // Record all the necessary operations for each byte lookup.
+        let opcodes = ByteOpcode::all();
 
-    /// The result of the `NOR` operation on `b` and `c`
-    pub nor: T,
+        // Iterate over all options for pairs of bytes `b` and `c`.
+        for (row_index, (b, c)) in (0..=u8::MAX).cartesian_product(0..=u8::MAX).enumerate() {
+            let b = b as u8;
+            let c = c as u8;
+            let col: &mut BytePreprocessedCols<F> = initial_trace.row_mut(row_index).borrow_mut();
 
-    /// The result of the `SLL` operation on `b` and `c`
-    pub sll: T,
+            // Set the values of `b` and `c`.
+            col.b = F::from_canonical_u8(b);
+            col.c = F::from_canonical_u8(c);
 
-    /// The result of the `ShrCarry` operation on `b` and `c`.
-    pub shr: T,
-    pub shr_carry: T,
+            // Iterate over all operations for results and updating the table map.
+            for opcode in opcodes.iter() {
+                match opcode {
+                    ByteOpcode::AND => {
+                        let and = b & c;
+                        col.and = F::from_canonical_u8(and);
+                        ByteLookupEvent::new(*opcode, and as u16, 0, b, c)
+                    }
+                    ByteOpcode::OR => {
+                        let or = b | c;
+                        col.or = F::from_canonical_u8(or);
+                        ByteLookupEvent::new(*opcode, or as u16, 0, b, c)
+                    }
+                    ByteOpcode::XOR => {
+                        let xor = b ^ c;
+                        col.xor = F::from_canonical_u8(xor);
+                        ByteLookupEvent::new(*opcode, xor as u16, 0, b, c)
+                    }
+                    ByteOpcode::NOR => {
+                        let nor = !(b | c);
+                        col.nor = F::from_canonical_u8(nor);
+                        ByteLookupEvent::new(*opcode, nor as u16, 0, b, c)
+                    }
+                    ByteOpcode::SLL => {
+                        let sll = b << (c & 7);
+                        col.sll = F::from_canonical_u8(sll);
+                        ByteLookupEvent::new(*opcode, sll as u16, 0, b, c)
+                    }
+                    ByteOpcode::U8Range => ByteLookupEvent::new(*opcode, 0, 0, b, c),
+                    ByteOpcode::ShrCarry => {
+                        let (res, carry) = shr_carry(b, c);
+                        col.shr = F::from_canonical_u8(res);
+                        col.shr_carry = F::from_canonical_u8(carry);
+                        ByteLookupEvent::new(*opcode, res as u16, carry, b, c)
+                    }
+                    ByteOpcode::LTU => {
+                        let ltu = b < c;
+                        col.ltu = F::from_bool(ltu);
+                        ByteLookupEvent::new(*opcode, ltu as u16, 0, b, c)
+                    }
+                    ByteOpcode::MSB => {
+                        let msb = (b & 0b1000_0000) != 0;
+                        col.msb = F::from_bool(msb);
+                        ByteLookupEvent::new(*opcode, msb as u16, 0, b, 0)
+                    }
+                    ByteOpcode::U16Range => {
+                        let v = ((b as u32) << 8) + c as u32;
+                        col.value_u16 = F::from_canonical_u32(v);
+                        ByteLookupEvent::new(*opcode, v as u16, 0, 0, 0)
+                    }
+                };
+            }
+        }
 
-    /// The result of the `LTU` operation on `b` and `c`.
-    pub ltu: T,
-
-    /// The most significant bit of `b`.
-    pub msb: T,
-
-    /// A u16 value used for `U16Range`.
-    pub value_u16: T,
+        initial_trace
+    }
 }
 
-/// For each byte operation in the preprocessed table, a corresponding ByteMultCols row tracks the
-/// number of times the operation is used.
-#[derive(Debug, Clone, Copy, AlignedBorrow)]
-#[repr(C)]
-pub struct ByteMultCols<T> {
-    /// The multiplicities of each byte operation.
-    pub multiplicities: [T; NUM_BYTE_OPS],
+#[cfg(test)]
+mod tests {
+    use p3_koala_bear::KoalaBear;
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    pub fn test_trace_and_map() {
+        let start = Instant::now();
+        ByteChip::<KoalaBear>::trace();
+        println!("trace and map: {:?}", start.elapsed());
+    }
 }
