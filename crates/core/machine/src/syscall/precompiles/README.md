@@ -95,7 +95,7 @@ op.
 
 #### Add a new field for your chip's events
 
-In the `PrecompileEvent` enum, add a new variant for you precompile op.
+In the `PrecompileEvent` enum, add a new variant for your precompile op.
 
 ```rust
 #[derive(Clone, Debug, Serialize, Deserialize, EnumIter)]

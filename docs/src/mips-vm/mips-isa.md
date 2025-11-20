@@ -78,7 +78,7 @@ Instructions BEQ (branch if equal), BGEZ (branch if greater than or equal to zer
 Jump-related instructions, including Jump, Jumpi, and JumpDirect, are responsible for altering the execution flow by redirecting it to different parts of the program. They are used for implementing function calls, loops, and other control structures that require non-sequential execution, ensuring that the program can navigate its code dynamically.
 
 **Syscall Instructions**  
-SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompiles computation, such as do sha extend operation by `SHA_EXTEND` precompile. it also can be input/output operation such as `SYSHINTREADYSHINTREAD` and `WRITE`.
+SYSCALL triggers a system call, allowing the program to request services from the zkvm operating system. The service can be a precompile computation, such as do sha extend operation by `SHA_EXTEND` precompile. it also can be input/output operation such as `SYSHINTREADYSHINTREAD` and `WRITE`.
 
 **Misc Instructions**  
 This category includes other instructions. TEQ is typically used to test equality conditions between registers. MADDU/MSUBU is used for multiply accumulation. SEB/SEH is for data sign extended. EXT/INS is for bits extraction and insertion.

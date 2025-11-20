@@ -222,7 +222,7 @@ When deployed, the verifier logic is placed on Ethereum at a specific contract a
 
 The deployed contract points to the correct verifier implementation (e.g., `ZKMVerifierGroth16`), and users interact with it by calling the `verifyProof()` function.
 
-The prof lifecycle for EVM-based verification is as follows:
+The proof lifecycle for EVM-based verification is as follows:
 
 1. After proof generation, the proof bytes, verifying key, and public values are submitted in a transaction to the deployed verifier contract (e.g., `ZKMVerifierGroth16`).
 2. Full nodes execute the verifier contract, checking that the proof matches the verifying key, that the public values are consistent, and that all cryptographic constraints of the proof system hold.

@@ -1,7 +1,7 @@
 # Design
 
 
-As ​MIPS instruction set based zkVM, Ziren is designed to generate efficient zero-knowledge proofs for complex computations (e.g., smart contract execution). Its architecture integrates a ​modular state machine, ​custom chip design, and a ​hybrid proof system (STARK + SNARK). 
+As a MIPS instruction set based zkVM, Ziren is designed to generate efficient zero-knowledge proofs for complex computations (e.g., smart contract execution). Its architecture integrates a ​modular state machine, ​custom chip design, and a ​hybrid proof system (STARK + SNARK). 
 
 - Modular State Machine
 
