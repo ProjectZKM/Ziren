@@ -4,7 +4,7 @@ Get started with Ziren by executing, generating and verifying a proof for your c
 
 Overview of all the steps to create your Ziren proof: 
 
-1. Create a new project with using the Ziren project template or CLI
+1. Create a new project using the Ziren project template or CLI
 2. Compile and execute your guest program 
 3. Generate a ZK proof of your program locally or via the proving network 
 4. Verify the proof of your program, including on-chain verification  
@@ -102,7 +102,7 @@ contracts: contains the Solidity verifier smart contracts and test scripts for o
 - `contracts/src/Fibonacci.sol`: a sample Solidity contract demonstrating input/output structure for the Fibonacci program.
 - `IZKMVerifier.sol`: implemented Ziren interface for verifiers.
 - `fixtures/`: contains the public outputs, proof and verification keys in JSON format.
-- `v1.0.0/`: contains the Groth16 and PlONK verifier implementations and wrapper contracts.
+- `v1.0.0/`: contains the Groth16 and PLONK verifier implementations and wrapper contracts.
 - `contracts/script/`: contains forge scripts to deploy the verifier contracts.
 - `contracts/test/`: contains Foundry tests to validate verifier functionality.
 

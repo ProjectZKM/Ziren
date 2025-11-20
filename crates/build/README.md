@@ -1,5 +1,5 @@
 # zkm-build
-Lightweight crate used to build a Ziren programs.
+Lightweight crate used to build Ziren programs.
 
 Exposes `build_program`, which builds a Ziren program in the local environment or in a docker container with the specified parameters from `BuildArgs`.
 
