@@ -388,7 +388,7 @@ impl Drop for ZKMCudaProver {
     fn drop(&mut self) {
         if let Some(container) = &self.managed_container {
             if !container.cleaned_up.load(Ordering::SeqCst) {
-                tracing::debug!("dropping ZKMProverClient, cleaning up...");
+                tracing::debug!("Dropping ZKMCudaProver, cleaning up...");
                 cleanup_container(&container.name);
                 container.cleaned_up.store(true, Ordering::SeqCst);
             }
@@ -396,7 +396,7 @@ impl Drop for ZKMCudaProver {
     }
 }
 
-/// Cleans up the a docker container with the given name.
+/// Cleans up a Docker container with the given name.
 fn cleanup_container(container_name: &str) {
     if let Err(e) = Command::new("docker").args(["rm", "-f", container_name]).output() {
         eprintln!(
