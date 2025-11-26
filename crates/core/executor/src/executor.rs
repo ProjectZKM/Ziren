@@ -10,6 +10,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zkm_stark::ZKMCoreOpts;
+use super::program::MAX_MEMORY;
 
 use crate::{
     context::ZKMContext,
@@ -224,6 +225,10 @@ pub enum ExecutionError {
     /// The execution failed with exception or trap.
     #[error("exception/trap encountered")]
     ExceptionOrTrap(),
+
+    /// The execution failed with an exceeded cycle limit.
+    #[error("exceeded memory access bound of {0}")]
+    MemoryOutOfBoundsAccess(u64),
 
     /// The execution failed with an unimplemented feature.
     #[error("got unimplemented as opcode")]
@@ -1899,6 +1904,10 @@ impl<'a> Executor<'a> {
         let mem = self.mr_cpu(aligned_addr);
         let rs = addr;
 
+        if aligned_addr + 3 > MAX_MEMORY as u32 {
+            return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
+        }
+
         let val = match instruction.opcode {
             Opcode::LH => {
                 if addr & 1 != 0 {
@@ -2026,6 +2035,11 @@ impl<'a> Executor<'a> {
             // Opcode::SDC1 => 0,
             _ => todo!(),
         };
+
+        if aligned_addr + 3 > MAX_MEMORY as u32 {
+            return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
+        }
+
         self.mw_cpu(
             aligned_addr, // align addr
             val,
