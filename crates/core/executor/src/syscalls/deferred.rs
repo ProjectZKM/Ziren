@@ -14,6 +14,9 @@ impl Syscall for CommitDeferredSyscall {
     ) -> Result<Option<u32>, ExecutionError> {
         let rt = &mut ctx.rt;
 
+        if word_idx as usize >= rt.record.public_values.deferred_proofs_digest.len() {
+            return Err(ExecutionError::InvalidSyscallArgs());
+        }
         rt.record.public_values.deferred_proofs_digest[word_idx as usize] = word;
 
         Ok(None)
