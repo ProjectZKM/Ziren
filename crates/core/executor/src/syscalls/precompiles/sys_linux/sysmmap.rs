@@ -26,14 +26,14 @@ impl Syscall for SysMmapSyscall {
         let start_clk = rt.clk;
         if size & (PAGE_ADDR_MASK as u32) != 0 {
             // adjust size to align with page size
-            size += PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32));
+            size = size.wrapping_add(PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32)));
         }
 
         let a3_record = rt.rw_traced(Register::A3, 0);
 
         let (v0, write_records) = if a0 == 0 {
             let v0 = rt.rt.register(Register::HEAP);
-            let w_record = rt.rw_traced(Register::HEAP, v0 + size);
+            let w_record = rt.rw_traced(Register::HEAP, v0.wrapping_add(size));
             (v0, vec![a3_record, w_record])
         } else {
             (a0, vec![a3_record])
