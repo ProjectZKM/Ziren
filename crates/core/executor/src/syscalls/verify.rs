@@ -1,3 +1,5 @@
+use crate::program::MAX_MEMORY;
+
 use crate::{DeferredProofVerification, ExecutionError};
 
 use super::{Syscall, SyscallCode, SyscallContext};
@@ -18,9 +20,15 @@ impl Syscall for VerifySyscall {
         // Skip deferred proof verification if the corresponding runtime flag is set.
         if rt.deferred_proof_verification == DeferredProofVerification::Enabled {
             // vkey_ptr is a pointer to [u32; 8] which contains the verification key.
-            assert_eq!(vkey_ptr % 4, 0, "vkey_ptr must be word-aligned");
             // pv_digest_ptr is a pointer to [u32; 8] which contains the public values digest.
-            assert_eq!(pv_digest_ptr % 4, 0, "pv_digest_ptr must be word-aligned");
+
+            if vkey_ptr % 4 != 0 || pv_digest_ptr % 4 != 0 {
+                return Err(ExecutionError::InvalidSyscallArgs());
+            }
+
+            if vkey_ptr as usize + 32 > MAX_MEMORY || pv_digest_ptr as usize + 32 > MAX_MEMORY {
+                return Err(ExecutionError::InvalidSyscallArgs());
+            }
 
             let vkey = (0..8).map(|i| rt.word(vkey_ptr + i * 4)).collect::<Vec<u32>>();
 
@@ -37,15 +45,17 @@ impl Syscall for VerifySyscall {
             let pv_digest_bytes: [u32; 8] = pv_digest.try_into().unwrap();
 
             if let Some(verifier) = rt.subproof_verifier {
-                verifier
-                    .verify_deferred_proof(proof, proof_vk, vkey_bytes, pv_digest_bytes)
-                    .unwrap_or_else(|e| {
-                        panic!(
+                match verifier.verify_deferred_proof(proof, proof_vk, vkey_bytes, pv_digest_bytes) {
+                    Err(e) => {
+                        log::error!(
                             "Failed to verify proof {proof_index} with digest {}: {}",
                             hex::encode(bytemuck::cast_slice(&pv_digest_bytes)),
                             e
-                        )
-                    });
+                        );
+                        return Err(ExecutionError::ExceptionOrTrap());
+                    }
+                    Ok(_) => {}
+                }
             } else if rt.state.proof_stream_ptr == 1 {
                 tracing::info!("Not verifying sub proof during runtime");
             };
