@@ -6,6 +6,7 @@ use zkm_primitives::consts::{bytes_to_words_le, words_to_bytes_le_vec, WORD_SIZE
 use crate::{
     events::{PrecompileEvent, Uint256MulEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
+    ExecutionError,
 };
 
 pub(crate) struct Uint256MulSyscall;
@@ -17,7 +18,7 @@ impl Syscall for Uint256MulSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let clk = rt.clk;
 
         let x_ptr = arg1;
@@ -82,7 +83,7 @@ impl Syscall for Uint256MulSyscall {
             rt.rt.syscall_event(clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, sycall_event, event);
 
-        None
+        Ok(None)
     }
 
     fn num_extra_cycles(&self) -> u32 {

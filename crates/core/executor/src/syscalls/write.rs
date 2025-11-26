@@ -1,6 +1,6 @@
 use zkm_primitives::consts::num_to_comma_separated;
 
-use crate::{Executor, Register};
+use crate::{ExecutionError, Executor, Register};
 
 use super::{Syscall, SyscallCode, SyscallContext};
 
@@ -15,7 +15,7 @@ impl Syscall for WriteSyscall {
         _: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let a2 = Register::A2;
         let rt = &mut ctx.rt;
         let fd = arg1;
@@ -25,7 +25,7 @@ impl Syscall for WriteSyscall {
         let bytes = (0..nbytes).map(|i| rt.byte(write_buf + i)).collect::<Vec<u8>>();
         let slice = bytes.as_slice();
         write_fd(ctx, fd, slice);
-        None
+        Ok(None)
     }
 }
 

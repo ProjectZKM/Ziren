@@ -1,4 +1,4 @@
-use crate::DeferredProofVerification;
+use crate::{DeferredProofVerification, ExecutionError};
 
 use super::{Syscall, SyscallCode, SyscallContext};
 
@@ -12,7 +12,7 @@ impl Syscall for VerifySyscall {
         _: SyscallCode,
         vkey_ptr: u32,
         pv_digest_ptr: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let rt = &mut ctx.rt;
 
         // Skip deferred proof verification if the corresponding runtime flag is set.
@@ -51,6 +51,6 @@ impl Syscall for VerifySyscall {
             };
         }
 
-        None
+        Ok(None)
     }
 }

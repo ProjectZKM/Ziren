@@ -1,4 +1,5 @@
 use super::{Syscall, SyscallCode, SyscallContext};
+use crate::ExecutionError;
 
 pub(crate) struct HintLenSyscall;
 
@@ -9,7 +10,7 @@ impl Syscall for HintLenSyscall {
         _: SyscallCode,
         _arg1: u32,
         _arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
@@ -17,14 +18,20 @@ impl Syscall for HintLenSyscall {
                 ctx.rt.state.input_stream.len()
             );
         }
-        Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as u32)
+        Ok(Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as u32))
     }
 }
 
 pub(crate) struct HintReadSyscall;
 
 impl Syscall for HintReadSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, ptr: u32, len: u32) -> Option<u32> {
+    fn execute(
+        &self,
+        ctx: &mut SyscallContext,
+        _: SyscallCode,
+        ptr: u32,
+        len: u32,
+    ) -> Result<Option<u32>, ExecutionError> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
@@ -58,6 +65,6 @@ impl Syscall for HintReadSyscall {
                 .and_modify(|_| panic!("hint read address is initialized already"))
                 .or_insert(word);
         }
-        None
+        Ok(None)
     }
 }

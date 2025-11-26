@@ -10,6 +10,7 @@ use zkm_curves::{
 use crate::{
     events::{Fp2MulEvent, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
+    ExecutionError,
 };
 
 pub struct Fp2MulSyscall<P> {
@@ -29,7 +30,7 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let clk = rt.clk;
         let x_ptr = arg1;
         if !x_ptr.is_multiple_of(4) {
@@ -95,7 +96,7 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
                 PrecompileEvent::Bls12381Fp2Mul(event),
             ),
         };
-        None
+        Ok(None)
     }
 
     fn num_extra_cycles(&self) -> u32 {

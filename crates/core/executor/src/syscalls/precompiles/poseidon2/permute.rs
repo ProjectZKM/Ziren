@@ -1,5 +1,6 @@
 use crate::events::{Poseidon2PermuteEvent, PrecompileEvent};
 use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
+use crate::ExecutionError;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::Permutation;
@@ -16,7 +17,7 @@ impl Syscall for Poseidon2PermuteSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = ctx.clk;
         let state_ptr = arg1;
         if arg2 != 0 {
@@ -61,6 +62,6 @@ impl Syscall for Poseidon2PermuteSyscall {
         );
         ctx.add_precompile_event(syscall_code, syscall_event, event);
 
-        None
+        Ok(None)
     }
 }

@@ -1,7 +1,7 @@
+use super::program::MAX_MEMORY;
 use crate::register::NUM_REGISTERS;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use vec_map::VecMap;
-use super::program::MAX_MEMORY;
 
 /// A memory.
 ///

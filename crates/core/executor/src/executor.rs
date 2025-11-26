@@ -5,12 +5,12 @@ use std::{
     sync::Arc,
 };
 
+use super::program::MAX_MEMORY;
 use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zkm_stark::ZKMCoreOpts;
-use super::program::MAX_MEMORY;
 
 use crate::{
     context::ZKMContext,
@@ -229,6 +229,10 @@ pub enum ExecutionError {
     /// The execution failed with an exceeded cycle limit.
     #[error("exceeded memory access bound of {0}")]
     MemoryOutOfBoundsAccess(u64),
+
+    /// The execution failed with invalid syscall args.
+    #[error("invalid syscall args encountered")]
+    InvalidSyscallArgs(),
 
     /// The execution failed with an unimplemented feature.
     #[error("got unimplemented as opcode")]
@@ -1563,7 +1567,7 @@ impl<'a> Executor<'a> {
                     // Executing a syscall optionally returns a value to write to the t0
                     // register. If it returns None, we just keep the
                     // syscall_id in t0.
-                    let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c);
+                    let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c)?;
                     if let Some(r0) = res {
                         a = r0;
                     } else {

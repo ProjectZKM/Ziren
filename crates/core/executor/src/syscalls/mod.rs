@@ -53,7 +53,7 @@ use zkm_curves::{
     },
 };
 
-use crate::events::FieldOperation;
+use crate::{events::FieldOperation, ExecutionError};
 
 /// A system call in the Ziren zkVM.
 ///
@@ -71,7 +71,7 @@ pub trait Syscall: Send + Sync {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32>;
+    ) -> Result<Option<u32>, ExecutionError>;
 
     /// The number of extra cycles that the syscall takes to execute.
     ///

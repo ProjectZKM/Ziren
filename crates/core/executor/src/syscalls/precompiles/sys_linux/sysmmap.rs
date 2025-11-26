@@ -1,7 +1,7 @@
 use crate::{
     events::{LinuxEvent, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
-    Register,
+    ExecutionError, Register,
 };
 
 pub(crate) struct SysMmapSyscall;
@@ -21,7 +21,7 @@ impl Syscall for SysMmapSyscall {
         syscall_code: SyscallCode,
         a0: u32,
         a1: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let mut size = a1;
         let start_clk = rt.clk;
         if size & (PAGE_ADDR_MASK as u32) != 0 {
@@ -54,6 +54,6 @@ impl Syscall for SysMmapSyscall {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
-        Some(v0)
+        Ok(Some(v0))
     }
 }
