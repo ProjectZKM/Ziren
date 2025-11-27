@@ -6,14 +6,16 @@ Patching a crate refers to replacing the implementation of a specific interface 
 
 | **Crate Name**        | **Repository**                                               | **Versions** |
 | ----------------- | ------------------------------------------------------------ | ------------ |
-| revm | `revm = { git = "https://github.com/ProjectZKM/revm", branch = "zkm" }` | 6.0.0        |
 | sha2              | `sha2-v0-10-8 = { git = "https://github.com/ziren-patches/RustCrypto-hashes", package = "sha2", branch = "patch-sha2-0.10.8" }` | 0.10.8       |
 | curve25519-dalek  | `curve25519-dalek = { git = "https://github.com/ziren-patches/curve25519-dalek", branch = "patch-4.1.3" }` | 4.1.3        |
-| curve25519-dalek-ng | `curve25519-dalek-ng = { git = "https://github.com/ziren-patches/curve25519-dalek-ng", branch = "patch-4.1.1" } ` | 4.1.1 |
 | secp256k1 | `secp256k1 = { git = "https://github.com/ziren-patches/rust-secp256k1", branch = "patch-0.29.1" }` | 0.29.1 |
 | substrate-bn | `substrate-bn = { git = "https://github.com/ziren-patches/bn", branch = "patch-0.6.0" }` | 0.6.0 |
 | rsa               | `rsa = { git = "https://github.com/ziren-patches/RustCrypto-RSA.git", branch = "patch-rsa-0.9.6" }` | 0.9.6        |
+| ecdsa             | `ecdsa = { git = "https://github.com/ziren-patches/signatures", package = "ecdsa", branch = "patch-ecdsa-0.16.9" }` | 0.16.9       |
+| k256              | `k256 = { git = "https://github.com/ziren-patches/elliptic-curves", branch = "patch-k256-0.13.4" }` | 0.13.4       |
+| p256              | `p256 = { git = "https://github.com/ziren-patches/elliptic-curves", branch = "patch-p256-0.13.2" }` | 0.13.2       |
 
+Note: `revm` and `curve25519-dalek-ng` are not currently patched in this repository; references to them may apply to external projects or future work.
 
 ## Using Patched Crates
 
