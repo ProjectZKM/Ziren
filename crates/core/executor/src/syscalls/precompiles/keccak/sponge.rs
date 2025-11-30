@@ -1,6 +1,7 @@
 use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 
 use crate::events::{KeccakSpongeEvent, PrecompileEvent};
+use crate::ExecutionError;
 use tiny_keccak::keccakf;
 
 pub(crate) const STATE_SIZE_U64S: usize = 25;
@@ -21,7 +22,7 @@ impl Syscall for KeccakSpongeSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
         let input_ptr = arg1;
         let result_ptr = arg2;
@@ -91,6 +92,6 @@ impl Syscall for KeccakSpongeSyscall {
         let sponge_syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, sponge_syscall_event, sponge_event);
-        None
+        Ok(None)
     }
 }

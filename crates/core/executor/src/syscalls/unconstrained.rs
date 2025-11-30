@@ -1,13 +1,19 @@
 use hashbrown::HashMap;
 
-use crate::{state::ForkState, ExecutorMode};
+use crate::{state::ForkState, ExecutionError, ExecutorMode};
 
 use super::{Syscall, SyscallCode, SyscallContext};
 
 pub(crate) struct EnterUnconstrainedSyscall;
 
 impl Syscall for EnterUnconstrainedSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
+    fn execute(
+        &self,
+        ctx: &mut SyscallContext,
+        _: SyscallCode,
+        _: u32,
+        _: u32,
+    ) -> Result<Option<u32>, ExecutionError> {
         if ctx.rt.unconstrained {
             panic!("Unconstrained block is already active.");
         }
@@ -22,14 +28,20 @@ impl Syscall for EnterUnconstrainedSyscall {
             executor_mode: ctx.rt.executor_mode,
         };
         ctx.rt.executor_mode = ExecutorMode::Simple;
-        Some(1)
+        Ok(Some(1))
     }
 }
 
 pub(crate) struct ExitUnconstrainedSyscall;
 
 impl Syscall for ExitUnconstrainedSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
+    fn execute(
+        &self,
+        ctx: &mut SyscallContext,
+        _: SyscallCode,
+        _: u32,
+        _: u32,
+    ) -> Result<Option<u32>, ExecutionError> {
         // Reset the state of the runtime.
         if ctx.rt.unconstrained {
             ctx.rt.state.global_clk = ctx.rt.unconstrained_state.global_clk;
@@ -52,6 +64,6 @@ impl Syscall for ExitUnconstrainedSyscall {
             ctx.rt.unconstrained = false;
         }
         ctx.rt.unconstrained_state = ForkState::default();
-        Some(0)
+        Ok(Some(0))
     }
 }

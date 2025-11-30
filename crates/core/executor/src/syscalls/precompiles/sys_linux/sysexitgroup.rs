@@ -1,7 +1,7 @@
 use crate::{
     events::{LinuxEvent, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
-    Register,
+    ExecutionError, Register,
 };
 
 pub(crate) struct SysExitGroupSyscall;
@@ -17,7 +17,7 @@ impl Syscall for SysExitGroupSyscall {
         syscall_code: SyscallCode,
         a0: u32,
         a1: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
         rt.set_next_pc(0);
         rt.set_exit_code(a0);
@@ -38,6 +38,6 @@ impl Syscall for SysExitGroupSyscall {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
-        None
+        Ok(None)
     }
 }

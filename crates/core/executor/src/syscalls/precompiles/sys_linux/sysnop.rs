@@ -1,7 +1,7 @@
 use crate::{
     events::{LinuxEvent, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
-    Register,
+    ExecutionError, Register,
 };
 
 pub(crate) struct SysNopSyscall;
@@ -17,7 +17,7 @@ impl Syscall for SysNopSyscall {
         syscall_code: SyscallCode,
         a0: u32,
         a1: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let v0 = 0;
         let start_clk = rt.clk;
         let a3_record = rt.rw_traced(Register::A3, 0);
@@ -36,6 +36,6 @@ impl Syscall for SysNopSyscall {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
-        Some(v0)
+        Ok(Some(v0))
     }
 }

@@ -1,6 +1,7 @@
 use crate::{
     events::{PrecompileEvent, ShaCompressEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
+    ExecutionError,
 };
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
@@ -29,7 +30,7 @@ impl Syscall for Sha256CompressSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let w_ptr = arg1;
         let h_ptr = arg2;
         assert_ne!(w_ptr, h_ptr);
@@ -111,6 +112,6 @@ impl Syscall for Sha256CompressSyscall {
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, syscall_event, event);
 
-        None
+        Ok(None)
     }
 }

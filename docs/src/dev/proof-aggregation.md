@@ -4,7 +4,7 @@ With aggregation, multiple proofs can be combined together into a single aggrega
 
 In this example, multiple proofs proving the execution of a Fibonacci sequence for different values of `n` are combined into a single higher-level “aggregated” proof. This higher-level proof proves that the collection of all the other Fibonacci individual proofs are valid. 
 
-Instead of verifying each proof one by one, a verifier only needs to check a single aggregated proof. The batching  of many small computations into a single proof reduces verification costs and enables applications such as block aggregation, where many transactions in a block can be proven with one single succinct proof.  
+Instead of verifying each proof one by one, a verifier only needs to check a single aggregated proof. The batching of many small computations into a single proof reduces verification costs and enables applications such as block aggregation, where many transactions in a block can be proven with one single succinct proof.  
 
 The host generates individual proofs, the guest recursively verifies them, and the final output aggregated proof can be cheaply verified. 
 

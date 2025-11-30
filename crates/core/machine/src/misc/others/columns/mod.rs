@@ -2,14 +2,12 @@ mod ext;
 mod ins;
 mod maddsub;
 mod misc_specific;
-mod movcond;
 mod sext;
 
 pub use ext::*;
 pub use ins::*;
 pub use maddsub::*;
 pub use misc_specific::*;
-pub use movcond::*;
 pub use sext::*;
 
 use std::mem::size_of;

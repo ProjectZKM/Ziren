@@ -1,6 +1,7 @@
 use crate::{
     events::{PrecompileEvent, ShaExtendEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
+    ExecutionError,
 };
 
 pub(crate) struct Sha256ExtendSyscall;
@@ -16,7 +17,7 @@ impl Syscall for Sha256ExtendSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let clk_init = rt.clk;
         let w_ptr = arg1;
         assert!(arg2 == 0, "arg2 must be 0");
@@ -77,6 +78,6 @@ impl Syscall for Sha256ExtendSyscall {
             rt.rt.syscall_event(clk_init, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, syscall_event, event);
 
-        None
+        Ok(None)
     }
 }

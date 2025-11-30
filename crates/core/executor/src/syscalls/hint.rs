@@ -1,4 +1,6 @@
 use super::{Syscall, SyscallCode, SyscallContext};
+use crate::memory::Entry;
+use crate::ExecutionError;
 
 pub(crate) struct HintLenSyscall;
 
@@ -9,34 +11,54 @@ impl Syscall for HintLenSyscall {
         _: SyscallCode,
         _arg1: u32,
         _arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
-            panic!(
+            log::error!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
                 ctx.rt.state.input_stream_ptr,
                 ctx.rt.state.input_stream.len()
             );
+            return Err(ExecutionError::InvalidSyscallArgs());
         }
-        Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as u32)
+        Ok(Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as u32))
     }
 }
 
 pub(crate) struct HintReadSyscall;
 
 impl Syscall for HintReadSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _: SyscallCode, ptr: u32, len: u32) -> Option<u32> {
+    fn execute(
+        &self,
+        ctx: &mut SyscallContext,
+        _: SyscallCode,
+        ptr: u32,
+        len: u32,
+    ) -> Result<Option<u32>, ExecutionError> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
-            panic!(
+            log::error!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
                 ctx.rt.state.input_stream_ptr,
                 ctx.rt.state.input_stream.len()
             );
+            return Err(ExecutionError::InvalidSyscallArgs());
         }
         let vec = &ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr];
         ctx.rt.state.input_stream_ptr += 1;
-        assert!(!ctx.rt.unconstrained, "hint read should not be used in a unconstrained block");
-        assert_eq!(vec.len() as u32, len, "hint input stream read length mismatch");
-        assert_eq!(ptr % 4, 0, "hint read address not aligned to 4 bytes");
+        if ctx.rt.unconstrained {
+            log::error!("hint read should not be used in a unconstrained block");
+            return Err(ExecutionError::ExceptionOrTrap());
+        }
+
+        if vec.len() as u32 != len || !ptr.is_multiple_of(4) {
+            log::error!(
+                "Invalid hint read syscall arguments: ptr={}, len={}, vec_len={}",
+                ptr,
+                len,
+                vec.len()
+            );
+            return Err(ExecutionError::InvalidSyscallArgs());
+        }
+
         // Iterate through the vec in 4-byte chunks
         for i in (0..len).step_by(4) {
             // Get each byte in the chunk
@@ -51,13 +73,16 @@ impl Syscall for HintReadSyscall {
             // Save the data into runtime state so the runtime will use the desired data instead of
             // 0 when first reading/writing from this address.
             ctx.rt.uninitialized_memory_checkpoint.entry(ptr + i).or_insert_with(|| false);
-            ctx.rt
-                .state
-                .uninitialized_memory
-                .entry(ptr + i)
-                .and_modify(|_| panic!("hint read address is initialized already"))
-                .or_insert(word);
+            match ctx.rt.state.uninitialized_memory.entry(ptr + i) {
+                Entry::Occupied(_entry) => {
+                    log::error!("hint read address is initialized already");
+                    return Err(ExecutionError::InvalidSyscallArgs());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(word);
+                }
+            }
         }
-        None
+        Ok(None)
     }
 }

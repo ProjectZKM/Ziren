@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use super::program::MAX_MEMORY;
 use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
@@ -220,6 +221,18 @@ pub enum ExecutionError {
     /// The execution failed because the syscall was called in unconstrained mode.
     #[error("syscall called in unconstrained mode")]
     InvalidSyscallUsage(u64),
+
+    /// The execution failed with exception or trap.
+    #[error("exception/trap encountered")]
+    ExceptionOrTrap(),
+
+    /// The execution failed with an exceeded cycle limit.
+    #[error("exceeded memory access bound of {0}")]
+    MemoryOutOfBoundsAccess(u64),
+
+    /// The execution failed with invalid syscall args.
+    #[error("invalid syscall args encountered")]
+    InvalidSyscallArgs(),
 
     /// The execution failed with an unimplemented feature.
     #[error("got unimplemented as opcode")]
@@ -1477,7 +1490,7 @@ impl<'a> Executor<'a> {
         }
 
         if instruction.is_alu_instruction() {
-            (hi_or_prev_a, a, b, c) = self.execute_alu(instruction);
+            (hi_or_prev_a, a, b, c) = self.execute_alu(instruction)?;
         } else if instruction.is_memory_load_instruction() {
             (hi_or_prev_a, a, b, c) = self.execute_load(instruction)?;
         } else if instruction.is_memory_store_instruction() {
@@ -1509,7 +1522,7 @@ impl<'a> Executor<'a> {
             } else if instruction.opcode == Opcode::SEXT {
                 (a, b, c) = self.execute_sext(instruction);
             } else if instruction.opcode == Opcode::TEQ {
-                (a, b, c) = self.execute_teq(instruction);
+                (a, b, c) = self.execute_teq(instruction)?;
             } else if instruction.opcode == Opcode::MSUBU {
                 (hi_or_prev_a, a, b, c) = self.execute_msubu(instruction);
             } else if instruction.opcode == Opcode::MADD {
@@ -1554,7 +1567,7 @@ impl<'a> Executor<'a> {
                     // Executing a syscall optionally returns a value to write to the t0
                     // register. If it returns None, we just keep the
                     // syscall_id in t0.
-                    let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c);
+                    let res = syscall_impl.execute(&mut precompile_rt, syscall, b, c)?;
                     if let Some(r0) = res {
                         a = r0;
                     } else {
@@ -1651,7 +1664,7 @@ impl<'a> Executor<'a> {
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
         let addend = ((hi_val as u64) << 32) + lo_val as u64;
-        let out = multiply + addend;
+        let out = multiply.wrapping_add(addend);
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw_cpu(lo, out_lo, MemoryAccessPosition::A);
@@ -1671,7 +1684,7 @@ impl<'a> Executor<'a> {
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
         let addend = ((hi_val as u64) << 32) + lo_val as u64;
-        let out = addend - multiply;
+        let out = addend.wrapping_sub(multiply);
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw_cpu(lo, out_lo, MemoryAccessPosition::A);
@@ -1691,7 +1704,7 @@ impl<'a> Executor<'a> {
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
         let addend = ((hi_val as u64) << 32) + lo_val as u64;
-        let out = (multiply + (addend as i64)) as u64;
+        let out = multiply.wrapping_add(addend as i64) as u64;
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw_cpu(lo, out_lo, MemoryAccessPosition::A);
@@ -1711,7 +1724,7 @@ impl<'a> Executor<'a> {
         let lo_val = self.register(32.into());
         let hi_val = self.register(33.into());
         let addend = ((hi_val as u64) << 32) + lo_val as u64;
-        let out = ((addend as i64) - multiply) as u64;
+        let out = (addend as i64).wrapping_sub(multiply) as u64;
         let out_lo = out as u32;
         let out_hi = (out >> 32) as u32;
         self.rw_cpu(lo, out_lo, MemoryAccessPosition::A);
@@ -1767,16 +1780,19 @@ impl<'a> Executor<'a> {
         (Some(prev_a), a, b, c)
     }
 
-    fn execute_teq(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+    fn execute_teq(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(u32, u32, u32), ExecutionError> {
         let (rs, rt) = (instruction.op_a.into(), (instruction.op_b as u8).into());
 
         let src2 = self.rr_cpu(rt, MemoryAccessPosition::B);
         let src1 = self.rr_cpu(rs, MemoryAccessPosition::A);
 
         if src1 == src2 {
-            panic!("Trap Error");
+            return Err(ExecutionError::ExceptionOrTrap());
         }
-        (src1, src2, 0)
+        Ok((src1, src2, 0))
     }
 
     fn execute_condmov(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
@@ -1802,8 +1818,17 @@ impl<'a> Executor<'a> {
         (Some(prev_a), a, b, c)
     }
 
-    fn execute_alu(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
+    fn execute_alu(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(Option<u32>, u32, u32, u32), ExecutionError> {
         let (rd, b, c) = self.alu_rr(instruction);
+        if matches!(instruction.opcode, Opcode::DIV | Opcode::DIVU | Opcode::MOD | Opcode::MODU)
+            && c == 0
+        {
+            return Err(ExecutionError::ExceptionOrTrap());
+        }
+
         let (a, hi) = match instruction.opcode {
             Opcode::ADD => (b.overflowing_add(c).0, 0),
             Opcode::SUB => (b.overflowing_sub(c).0, 0),
@@ -1863,7 +1888,7 @@ impl<'a> Executor<'a> {
             }
         };
 
-        self.alu_rw(instruction, rd, hi, a, b, c)
+        Ok(self.alu_rw(instruction, rd, hi, a, b, c))
     }
 
     fn execute_load(
@@ -1877,14 +1902,21 @@ impl<'a> Executor<'a> {
         // and we could use the `prev_value` of the MemoryWriteRecord in the circuit.
         let rt = self.register(rt_reg);
 
-        let virt_raw = rs_raw.wrapping_add(offset_ext);
-        let virt = virt_raw & 0xFFFF_FFFC;
+        let addr = rs_raw.wrapping_add(offset_ext);
+        let aligned_addr = addr & 0xFFFF_FFFC;
 
-        let mem = self.mr_cpu(virt);
-        let rs = virt_raw;
+        let mem = self.mr_cpu(aligned_addr);
+        let rs = addr;
+
+        if aligned_addr + 3 > MAX_MEMORY as u32 {
+            return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
+        }
 
         let val = match instruction.opcode {
             Opcode::LH => {
+                if addr & 1 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LH, addr));
+                }
                 let mem_fc = |i: u32| -> u32 { sign_extend::<16>((mem >> (i * 8)) & 0xffff) };
                 mem_fc(rs & 2)
             }
@@ -1896,12 +1928,20 @@ impl<'a> Executor<'a> {
                 };
                 out(rs & 3)
             }
-            Opcode::LW => mem,
+            Opcode::LW => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LW, addr));
+                }
+                mem
+            }
             Opcode::LBU => {
                 let out = |i: u32| -> u32 { (mem >> (i * 8)) & 0xff };
                 out(rs & 3)
             }
             Opcode::LHU => {
+                if addr & 1 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LHU, addr));
+                }
                 let mem_fc = |i: u32| -> u32 { (mem >> (i * 8)) & 0xffff };
                 mem_fc(rs & 2)
             }
@@ -1913,7 +1953,12 @@ impl<'a> Executor<'a> {
                 };
                 out(rs & 3)
             }
-            Opcode::LL => mem,
+            Opcode::LL => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LL, addr));
+                }
+                mem
+            }
             Opcode::LB => {
                 let out = |i: u32| -> u32 { sign_extend::<8>((mem >> (i * 8)) & 0xff) };
                 out(rs & 3)
@@ -1938,10 +1983,10 @@ impl<'a> Executor<'a> {
             self.rr_cpu(rt_reg, MemoryAccessPosition::A)
         };
 
-        let virt_raw = rs.wrapping_add(offset_ext);
-        let virt = virt_raw & 0xFFFF_FFFC;
+        let addr = rs.wrapping_add(offset_ext);
+        let aligned_addr = addr & 0xFFFF_FFFC;
 
-        let mem = self.word(virt);
+        let mem = self.word(aligned_addr);
 
         let val = match instruction.opcode {
             Opcode::SB => {
@@ -1950,15 +1995,18 @@ impl<'a> Executor<'a> {
                     let mask = 0xFFFFFFFF_u32 ^ (0xff << (i * 8));
                     (mem & mask) | val
                 };
-                out(virt_raw & 3)
+                out(addr & 3)
             }
             Opcode::SH => {
+                if addr & 1 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SH, addr));
+                }
                 let mem_fc = |i: u32| -> u32 {
                     let val = (rt & 0xffff) << (i * 8);
                     let mask = 0xFFFFFFFF_u32 ^ (0xffff << (i * 8));
                     (mem & mask) | val
                 };
-                mem_fc(virt_raw & 2)
+                mem_fc(addr & 2)
             }
             Opcode::SWL => {
                 let out = |i: u32| -> u32 {
@@ -1966,23 +2014,38 @@ impl<'a> Executor<'a> {
                     let mask = 0xFFFFFFFF_u32 >> (24 - i * 8);
                     (mem & (!mask)) | val
                 };
-                out(virt_raw & 3)
+                out(addr & 3)
             }
-            Opcode::SW => rt,
+            Opcode::SW => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SW, addr));
+                }
+                rt
+            }
             Opcode::SWR => {
                 let out = |i: u32| -> u32 {
                     let val = rt << (i * 8);
                     let mask = 0xFFFFFFFF_u32 << (i * 8);
                     (mem & (!mask)) | val
                 };
-                out(virt_raw & 3)
+                out(addr & 3)
             }
-            Opcode::SC => rt,
+            Opcode::SC => {
+                if addr & 3 != 0 {
+                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SC, addr));
+                }
+                rt
+            }
             // Opcode::SDC1 => 0,
             _ => todo!(),
         };
+
+        if aligned_addr + 3 > MAX_MEMORY as u32 {
+            return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
+        }
+
         self.mw_cpu(
-            virt_raw & 0xFFFF_FFFC, // align addr
+            aligned_addr, // align addr
             val,
         );
         if instruction.opcode == Opcode::SC {

@@ -122,10 +122,10 @@ impl<F: Field> GlobalLookupOperation<F> {
 
         // Constrain that `(x, y)` is a valid point on the curve.
         let y2 = y.square();
-        let x3_2x_26z5 = SepticCurve::<AB::Expr>::curve_formula(x);
-        builder.assert_septic_ext_eq(y2, x3_2x_26z5);
+        let x3_3zx_m3 = SepticCurve::<AB::Expr>::curve_formula(x);
+        builder.assert_septic_ext_eq(y2, x3_3zx_m3);
 
-        // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^24`.
+        // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^23`.
         // Decompose `y6_value` into 30 bits, and then constrain that the top 7 bits cannot be all 1.
         // To do this, check that the sum of the top 7 bits is not equal to 7, which can be done by providing an inverse.
         let mut y6_value = AB::Expr::zero();

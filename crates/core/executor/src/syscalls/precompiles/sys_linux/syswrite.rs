@@ -3,7 +3,7 @@ use std::vec;
 use crate::{
     events::{LinuxEvent, PrecompileEvent},
     syscalls::{write::write_fd, Syscall, SyscallCode, SyscallContext},
-    Register,
+    ExecutionError, Register,
 };
 
 pub(crate) struct SysWriteSyscall;
@@ -19,7 +19,7 @@ impl Syscall for SysWriteSyscall {
         syscall_code: SyscallCode,
         a0: u32,
         a1: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
         let a2 = Register::A2;
         let (record, v0) = rt.rr_traced(a2);
@@ -46,6 +46,6 @@ impl Syscall for SysWriteSyscall {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
-        Some(v0)
+        Ok(Some(v0))
     }
 }

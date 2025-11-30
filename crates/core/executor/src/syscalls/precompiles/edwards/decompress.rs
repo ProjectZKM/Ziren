@@ -10,6 +10,7 @@ use zkm_primitives::consts::{bytes_to_words_le, words_to_bytes_le};
 use crate::{
     events::{EdDecompressEvent, MemoryReadRecord, MemoryWriteRecord, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
+    ExecutionError,
 };
 
 pub(crate) struct EdwardsDecompressSyscall<E: EdwardsParameters> {
@@ -30,7 +31,7 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         syscall_code: SyscallCode,
         arg1: u32,
         sign: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
         let slice_ptr = arg1;
         assert!(slice_ptr.is_multiple_of(4), "Pointer must be 4-byte aligned.");
@@ -79,7 +80,7 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, sign);
         rt.add_precompile_event(syscall_code, syscall_event, PrecompileEvent::EdDecompress(event));
-        None
+        Ok(None)
     }
 
     fn num_extra_cycles(&self) -> u32 {

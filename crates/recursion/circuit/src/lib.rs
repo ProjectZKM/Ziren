@@ -4,7 +4,7 @@ use challenger::{
     CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
     MultiField32ChallengerVariable, SpongeChallengerShape,
 };
-use hash::{FieldHasherVariable, Posedion2KoalaBearHasherVariable};
+use hash::{FieldHasherVariable, Poseidon2KoalaBearHasherVariable};
 use itertools::izip;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::FieldAlgebra;
@@ -90,7 +90,7 @@ pub trait KoalaBearFriConfig:
 }
 
 pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
-    KoalaBearFriConfig + FieldHasherVariable<C> + Posedion2KoalaBearHasherVariable<C>
+    KoalaBearFriConfig + FieldHasherVariable<C> + Poseidon2KoalaBearHasherVariable<C>
 {
     type FriChallengerVariable: FieldChallengerVariable<C, <C as CircuitConfig>::Bit>
         + CanObserveVariable<C, <Self as FieldHasherVariable<C>>::DigestVariable>

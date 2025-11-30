@@ -1,4 +1,5 @@
 use super::{Syscall, SyscallCode, SyscallContext};
+use crate::ExecutionError;
 
 pub(crate) struct CommitSyscall;
 
@@ -10,12 +11,15 @@ impl Syscall for CommitSyscall {
         _: SyscallCode,
         word_idx: u32,
         public_values_digest_word: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let rt = &mut ctx.rt;
 
+        if word_idx as usize >= rt.record.public_values.committed_value_digest.len() {
+            return Err(ExecutionError::InvalidSyscallArgs());
+        }
         rt.record.public_values.committed_value_digest[word_idx as usize] =
             public_values_digest_word;
 
-        None
+        Ok(None)
     }
 }

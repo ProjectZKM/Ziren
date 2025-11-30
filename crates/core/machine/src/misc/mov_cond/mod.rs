@@ -21,6 +21,8 @@ use zkm_stark::{
 
 use crate::air::WordAirBuilder;
 
+use crate::operations::IsZeroWordOperation;
+
 use crate::utils::{next_power_of_two, zeroed_f_vec};
 
 /// The number of main trace columns for `MovCondChip`.
@@ -47,7 +49,7 @@ pub struct MovCondCols<T> {
     pub op_c_value: Word<T>,
 
     /// Whether c equals 0.
-    pub c_eq_0: T,
+    pub c_eq_0: IsZeroWordOperation<T>,
 
     /// Flag indicating whether the opcode is `MNE`.
     pub is_mne: T,
@@ -133,7 +135,7 @@ impl MovCondChip {
         cols.op_c_value = event.c.into();
         cols.prev_a_value = event.prev_a.into();
 
-        cols.c_eq_0 = F::from_bool(event.c == 0);
+        cols.c_eq_0.populate(event.c);
 
         cols.is_meq = F::from_bool(matches!(event.opcode, Opcode::MEQ));
         cols.is_mne = F::from_bool(matches!(event.opcode, Opcode::MNE));
@@ -181,7 +183,12 @@ where
             is_real.clone(),
         );
 
-        builder.when(is_real.clone() * local.c_eq_0).assert_word_zero(local.op_c_value);
+        IsZeroWordOperation::<AB::F>::eval(
+            builder,
+            local.op_c_value.map(|x| x.into()),
+            local.c_eq_0,
+            is_real.clone(),
+        );
 
         // Constraints for condition move result:
         // op_a = op_b, when condition is true.
@@ -189,22 +196,22 @@ where
         {
             builder
                 .when(local.is_meq)
-                .when(local.c_eq_0)
+                .when(local.c_eq_0.result)
                 .assert_word_eq(local.op_a_value, local.op_b_value);
 
             builder
                 .when(local.is_meq)
-                .when_not(local.c_eq_0)
+                .when_not(local.c_eq_0.result)
                 .assert_word_eq(local.op_a_value, local.prev_a_value);
 
             builder
                 .when(local.is_mne)
-                .when_not(local.c_eq_0)
+                .when_not(local.c_eq_0.result)
                 .assert_word_eq(local.op_a_value, local.op_b_value);
 
             builder
                 .when(local.is_mne)
-                .when(local.c_eq_0)
+                .when(local.c_eq_0.result)
                 .assert_word_eq(local.op_a_value, local.prev_a_value);
         }
 

@@ -1,7 +1,7 @@
 use crate::{
     events::{LinuxEvent, PrecompileEvent},
     syscalls::{Syscall, SyscallCode, SyscallContext},
-    Register,
+    ExecutionError, Register,
 };
 
 pub(crate) struct SysMmapSyscall;
@@ -21,19 +21,19 @@ impl Syscall for SysMmapSyscall {
         syscall_code: SyscallCode,
         a0: u32,
         a1: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let mut size = a1;
         let start_clk = rt.clk;
         if size & (PAGE_ADDR_MASK as u32) != 0 {
             // adjust size to align with page size
-            size += PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32));
+            size = size.wrapping_add(PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32)));
         }
 
         let a3_record = rt.rw_traced(Register::A3, 0);
 
         let (v0, write_records) = if a0 == 0 {
             let v0 = rt.rt.register(Register::HEAP);
-            let w_record = rt.rw_traced(Register::HEAP, v0 + size);
+            let w_record = rt.rw_traced(Register::HEAP, v0.wrapping_add(size));
             (v0, vec![a3_record, w_record])
         } else {
             (a0, vec![a3_record])
@@ -54,6 +54,6 @@ impl Syscall for SysMmapSyscall {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
-        Some(v0)
+        Ok(Some(v0))
     }
 }
