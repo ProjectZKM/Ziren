@@ -266,7 +266,7 @@ pub mod tests {
 
     use std::{iter::once, sync::Arc};
 
-    use machine::RecursionAir;
+    use crate::machine::RecursionAir;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
         Field, FieldAlgebra, FieldExtensionAlgebra,
@@ -276,8 +276,13 @@ pub mod tests {
     use zkm_core_machine::utils::run_test_machine;
     use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
-    // TODO expand glob import
-    use crate::{runtime::instruction as instr, *};
+    use crate::{
+        runtime::{
+            instruction as instr, BaseAluOpcode, ExtAluOpcode, Instruction, RecursionProgram,
+            Runtime,
+        },
+        MemAccessKind, D,
+    };
 
     type SC = KoalaBearPoseidon2;
     type F = <SC as StarkGenericConfig>::Val;
