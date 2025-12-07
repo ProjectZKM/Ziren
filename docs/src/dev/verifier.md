@@ -11,10 +11,14 @@ For zkVMs, both the proving and verifying keys are generated from the compiled E
 
 Verification then checks that the proof, verifying key, inputs, and outputs are consistent. If the verification function `V(vk, x, y, π)` evaluates to true, the proof is accepted; otherwise, it is rejected.
 
-The verifying key is produced during the key generation phase, alongside the proving key used by the prover. A 32-byte verifying key hash serves as a unique identifier, binding the proof to a specific compiled guest program and preventing it from being validated under another program’s key. You can retrieve a program’s verifying key with:
+The verifying key is produced during the key generation phase, alongside the proving key used by the prover. A 32-byte verifying key hash serves as a unique identifier, binding the proof to a specific compiled guest program and preventing it from being validated under another program’s key. Retrieve a program’s verifying key hash in code using the SDK:
 
-```bash
-cargo run --release --bin vkey
+```rust
+use zkm_sdk::ProverClient;
+
+let client = ProverClient::new();
+let (_pk, vk) = client.setup(ELF);
+let vkey_hash = vk.bytes32(); // 32-byte program verifying key hash
 ```
 
 ## On-chain verification
