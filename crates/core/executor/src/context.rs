@@ -5,6 +5,7 @@ use hashbrown::HashMap;
 use crate::{
     hook::{hookify, BoxedHook, HookEnv, HookRegistry},
     subproof::SubproofVerifier,
+    ExecutionError,
 };
 
 /// Context to run a program inside Ziren.
@@ -88,7 +89,7 @@ impl<'a> ZKMContextBuilder<'a> {
     pub fn hook(
         &mut self,
         fd: u32,
-        f: impl FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>> + Send + Sync + 'a,
+        f: impl FnMut(HookEnv, &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> + Send + Sync + 'a,
     ) -> &mut Self {
         self.hook_registry_entries.push((fd, hookify(f)));
         self
