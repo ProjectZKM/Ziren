@@ -8632,6 +8632,8 @@ dependencies = [
  "rug",
  "serde",
  "snowbridge-amcl",
+ "thiserror 1.0.69",
+ "tracing",
  "typenum",
  "zkm-primitives 1.2.3",
  "zkm-stark",

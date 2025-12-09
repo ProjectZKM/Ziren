@@ -10,6 +10,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use zkm_curves::CurveError;
 use zkm_stark::ZKMCoreOpts;
 
 use crate::{
@@ -276,6 +277,10 @@ pub enum ExecutionError {
     /// property: (root * root) % modulus != qr.
     #[error("{0} * {0}) % {1} != {2}")]
     NqrNotQuadratic(String, String, String),
+
+    /// The execution failed due to an error in the underlying elliptic curve operation.
+    #[error("curve error: {0}")]
+    CurveError(CurveError),
 }
 
 impl<'a> Executor<'a> {

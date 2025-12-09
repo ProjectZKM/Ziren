@@ -3,7 +3,10 @@ use std::fmt::Debug;
 use num::BigUint;
 use p3_air::AirBuilder;
 use p3_field::PrimeField32;
-use zkm_curves::params::{limbs_from_vec, FieldParameters, Limbs};
+use zkm_curves::{
+    params::{limbs_from_vec, FieldParameters, Limbs},
+    CurveError,
+};
 use zkm_derive::AlignedBorrow;
 
 use zkm_core_executor::{
@@ -43,11 +46,11 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
         &mut self,
         record: &mut impl ByteRecord,
         a: &BigUint,
-        sqrt_fn: impl Fn(&BigUint) -> BigUint,
-    ) -> BigUint {
+        sqrt_fn: impl Fn(&BigUint) -> Result<BigUint, CurveError>,
+    ) -> Result<BigUint, CurveError> {
         let modulus = P::modulus();
         assert!(a < &modulus);
-        let sqrt = sqrt_fn(a);
+        let sqrt = sqrt_fn(a)?;
 
         // Use FieldOpCols to compute result * result.
         let sqrt_squared = self.multiplication.populate(record, &sqrt, &sqrt, FieldOperation::Mul);
@@ -86,7 +89,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
                 .as_slice(),
         );
 
-        sqrt
+        Ok(sqrt)
     }
 }
 
@@ -220,7 +223,7 @@ mod tests {
                     let mut row = [F::ZERO; NUM_TEST_COLS];
                     let cols: &mut TestCols<F, P> = row.as_mut_slice().borrow_mut();
                     cols.a = P::to_limbs_field::<F, _>(a);
-                    cols.sqrt.populate(&mut blu_events, a, ed25519_sqrt);
+                    cols.sqrt.populate(&mut blu_events, a, ed25519_sqrt).unwrap();
                     output.add_byte_lookup_events(blu_events);
                     row
                 })

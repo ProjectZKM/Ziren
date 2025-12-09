@@ -22,6 +22,7 @@ use zkm_curves::{
         EdwardsParameters, WordsFieldElement,
     },
     params::{limbs_from_vec, FieldParameters, Limbs},
+    CurveError,
 };
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
@@ -64,7 +65,7 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         &mut self,
         event: EdDecompressEvent,
         record: &mut ExecutionRecord,
-    ) {
+    ) -> Result<(), CurveError> {
         let mut new_byte_lookup_events = Vec::new();
         self.is_real = F::from_bool(true);
         self.shard = F::from_canonical_u32(event.shard);
@@ -77,16 +78,17 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         }
 
         let y = &BigUint::from_bytes_le(&event.y_bytes);
-        self.populate_field_ops::<E>(&mut new_byte_lookup_events, y);
+        self.populate_field_ops::<E>(&mut new_byte_lookup_events, y)?;
 
         record.add_byte_lookup_events(new_byte_lookup_events);
+        Ok(())
     }
 
     fn populate_field_ops<E: EdwardsParameters>(
         &mut self,
         blu_events: &mut Vec<ByteLookupEvent>,
         y: &BigUint,
-    ) {
+    ) -> Result<(), CurveError> {
         let one = BigUint::one();
         self.y_range.populate(blu_events, y, &Ed25519BaseField::modulus());
         let yy = self.yy.populate(blu_events, y, y, FieldOperation::Mul);
@@ -94,8 +96,9 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         let dyy = self.dyy.populate(blu_events, &E::d_biguint(), &yy, FieldOperation::Mul);
         let v = self.v.populate(blu_events, &one, &dyy, FieldOperation::Add);
         let u_div_v = self.u_div_v.populate(blu_events, &u, &v, FieldOperation::Div);
-        let x = self.x.populate(blu_events, &u_div_v, ed25519_sqrt);
+        let x = self.x.populate(blu_events, &u_div_v, ed25519_sqrt)?;
         self.neg_x.populate(blu_events, &BigUint::ZERO, &x, FieldOperation::Sub);
+        Ok(())
     }
 }
 
@@ -221,7 +224,7 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
             };
             let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
             let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate::<E::BaseField, E>(event.clone(), output);
+            cols.populate::<E::BaseField, E>(event.clone(), output).unwrap();
 
             rows.push(row);
         }
@@ -232,7 +235,7 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
                 let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
                 let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
                 let zero = BigUint::ZERO;
-                cols.populate_field_ops::<E>(&mut vec![], &zero);
+                cols.populate_field_ops::<E>(&mut vec![], &zero).unwrap();
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
