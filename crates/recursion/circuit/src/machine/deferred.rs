@@ -202,7 +202,7 @@ where
 
         // Set the public values.
 
-        // Set initial_pc, end_pc, initial_shard, and end_shard to be the hitned values.
+        // Set initial_pc, end_pc, initial_shard, and end_shard to be the hinted values.
         deferred_public_values.start_pc = end_pc;
         deferred_public_values.next_pc = end_pc;
         deferred_public_values.start_shard = end_shard;
@@ -215,12 +215,12 @@ where
         deferred_public_values.previous_finalize_addr_bits = finalize_addr_bits;
         deferred_public_values.last_finalize_addr_bits = finalize_addr_bits;
 
-        // Set the zkm_vk_digest to be the hitned value.
+        // Set the zkm_vk_digest to be the hinted value.
         deferred_public_values.zkm_vk_digest = zkm_vk_digest;
 
-        // Set the committed value digest to be the hitned value.
+        // Set the committed value digest to be the hinted value.
         deferred_public_values.committed_value_digest = committed_value_digest;
-        // Set the deferred proof digest to be the hitned value.
+        // Set the deferred proof digest to be the hinted value.
         deferred_public_values.deferred_proofs_digest = deferred_proofs_digest;
 
         // Set the exit code to be zero for now.
