@@ -137,7 +137,7 @@ where
         let mut finalize_addr_bits: [Felt<_>; 32] =
             core::array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
 
-        // Initialize a flag to denote if the any of the recursive proofs represents a shard range
+        // Initialize a flag to denote if any of the recursive proofs represents a shard range
         // where at least once of the shards is an execution shard (i.e. contains cpu).
         let mut contains_execution_shard: Felt<_> = builder.eval(C::F::ZERO);
 
