@@ -49,7 +49,7 @@ use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed};
+use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed, CoreChipError};
 
 /// The number of main trace columns for `ShiftLeft`.
 pub const NUM_SHIFT_LEFT_COLS: usize = size_of::<ShiftLeftCols<u8>>();
@@ -104,6 +104,8 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "ShiftLeft".to_string()
     }
@@ -112,7 +114,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_SHIFT_LEFT_COLS]> = vec![];
         let shift_left_events = input.shift_left_events.clone();
@@ -152,10 +154,14 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             trace.values[i] = padded_row_template[i % NUM_SHIFT_LEFT_COLS];
         }
 
-        trace
+        Ok(trace)
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let chunk_size = std::cmp::max(input.shift_left_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -173,6 +179,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -418,7 +425,7 @@ mod tests {
         shard.shift_left_events = vec![AluEvent::new(0, Opcode::SLL, 16, 8, 1)];
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
@@ -462,7 +469,7 @@ mod tests {
         shard.shift_left_events = shift_events;
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

@@ -36,6 +36,10 @@ pub mod utils;
 pub use cpu::*;
 pub use mips::*;
 
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use zkm_curves::CurveError;
+
 /// The global version for all components of Ziren.
 ///
 /// This string should be updated whenever any step in verifying a Ziren proof changes, including
@@ -49,4 +53,12 @@ pub const ZKM_CIRCUIT_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 // enable crates that depend on zkm_core_machine to import the `ZKMReduceProof` type directly.
 pub mod reduce {
     pub use zkm_core_executor::ZKMReduceProof;
+}
+
+/// Errors that the [``Air``] can throw.
+#[derive(Error, Debug, Serialize, Deserialize)]
+pub enum CoreChipError {
+    /// The execution failed due to an error in the underlying elliptic curve operation.
+    #[error("curve error: {0}")]
+    CurveError(CurveError),
 }

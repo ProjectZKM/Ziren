@@ -168,6 +168,7 @@ mod tests {
     use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::FieldSqrtCols;
+    use crate::CoreChipError;
 
     #[derive(AlignedBorrow, Debug)]
     pub struct TestCols<T, P: FieldParameters> {
@@ -192,6 +193,8 @@ mod tests {
 
         type Program = Program;
 
+        type Error = CoreChipError;
+
         fn name(&self) -> String {
             "EdSqrtChip".to_string()
         }
@@ -200,7 +203,7 @@ mod tests {
             &self,
             _: &ExecutionRecord,
             output: &mut ExecutionRecord,
-        ) -> RowMajorMatrix<F> {
+        ) -> Result<RowMajorMatrix<F>, Self::Error> {
             let mut rng = thread_rng();
             let num_rows = 1 << 8;
             let mut operands: Vec<BigUint> = (0..num_rows - 2)
@@ -235,7 +238,7 @@ mod tests {
             // Pad the trace to a power of two.
             pad_to_power_of_two::<NUM_TEST_COLS, F>(&mut trace.values);
 
-            trace
+            Ok(trace)
         }
 
         fn included(&self, _: &Self::Record) -> bool {
@@ -269,7 +272,7 @@ mod tests {
         let chip: EdSqrtChip<Ed25519BaseField> = EdSqrtChip::new();
         let shard = ExecutionRecord::default();
         let _: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         // println!("{:?}", trace.values)
     }
 
@@ -281,7 +284,7 @@ mod tests {
         let chip: EdSqrtChip<Ed25519BaseField> = EdSqrtChip::new();
         let shard = ExecutionRecord::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

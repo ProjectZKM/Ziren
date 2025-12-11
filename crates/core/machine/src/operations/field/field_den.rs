@@ -155,6 +155,7 @@ mod tests {
     use super::{FieldDenCols, Limbs};
 
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
+    use crate::CoreChipError;
     use core::{
         borrow::{Borrow, BorrowMut},
         mem::size_of,
@@ -193,6 +194,8 @@ mod tests {
 
         type Program = Program;
 
+        type Error = CoreChipError;
+
         fn name(&self) -> String {
             "FieldDen".to_string()
         }
@@ -201,7 +204,7 @@ mod tests {
             &self,
             _: &ExecutionRecord,
             output: &mut ExecutionRecord,
-        ) -> RowMajorMatrix<F> {
+        ) -> Result<RowMajorMatrix<F>, Self::Error> {
             let mut rng = thread_rng();
             let num_rows = 1 << 8;
             let mut operands: Vec<(BigUint, BigUint)> = (0..num_rows - 4)
@@ -237,7 +240,7 @@ mod tests {
 
             // Note we do not pad the trace here because we cannot just pad with all 0s.
 
-            RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS)
+            Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_TEST_COLS))
         }
 
         fn included(&self, _: &Self::Record) -> bool {
@@ -269,7 +272,7 @@ mod tests {
         let shard = ExecutionRecord::default();
         let chip: FieldDenChip<Ed25519BaseField> = FieldDenChip::new(true);
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
@@ -282,7 +285,7 @@ mod tests {
 
         let chip: FieldDenChip<Ed25519BaseField> = FieldDenChip::new(true);
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         // This it to test that the proof DOESN'T work if messed up.
         // let row = trace.row_mut(0);
         // row[0] = KoalaBear::from_canonical_u8(0);

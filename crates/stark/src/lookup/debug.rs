@@ -69,7 +69,7 @@ pub fn debug_lookups<SC: StarkGenericConfig, A: MachineAir<Val<SC>>>(
     let mut key_to_vec_data = BTreeMap::new();
     let mut key_to_count = BTreeMap::new();
 
-    let trace = chip.generate_trace(record, &mut A::Record::default());
+    let trace = chip.generate_trace(record, &mut A::Record::default()).unwrap();
     let mut pre_traces = pkey.traces.clone();
     let mut preprocessed_trace =
         pkey.chip_ordering.get(&chip.name()).map(|&index| pre_traces.get_mut(index).unwrap());

@@ -48,12 +48,19 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
     type Program = RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         format!("Poseidon2WideDeg{DEGREE}")
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -70,7 +77,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         &self,
         input: &ExecutionRecord<F>,
         _output: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = &input.poseidon2_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
         let num_columns = <Self as BaseAir<F>>::width(self);
@@ -96,7 +103,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, num_columns)
+        Ok(RowMajorMatrix::new(values, num_columns))
     }
 
     #[cfg(feature = "sys")]
@@ -105,7 +112,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         &self,
         input: &ExecutionRecord<F>,
         _output: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -150,10 +157,10 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(
+        Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             num_columns,
-        )
+        ))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -446,7 +453,7 @@ mod tests {
         };
         let chip_3 = Poseidon2WideChip::<3>;
         let trace: RowMajorMatrix<F> =
-            chip_3.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip_3.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
 
         assert_eq!(trace, generate_trace_reference::<3>(&shard, &mut ExecutionRecord::default()));
     }
@@ -471,7 +478,7 @@ mod tests {
         };
         let chip_9 = Poseidon2WideChip::<9>;
         let trace: RowMajorMatrix<F> =
-            chip_9.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip_9.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
 
         assert_eq!(trace, generate_trace_reference::<9>(&shard, &mut ExecutionRecord::default()));
     }

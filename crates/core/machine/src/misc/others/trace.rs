@@ -11,7 +11,10 @@ use zkm_core_executor::{
 };
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::utils::{next_power_of_two, zeroed_f_vec};
+use crate::{
+    utils::{next_power_of_two, zeroed_f_vec},
+    CoreChipError,
+};
 
 use super::{
     columns::{MiscInstrColumns, NUM_MISC_INSTR_COLS},
@@ -23,6 +26,8 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "MiscInstrs".to_string()
     }
@@ -31,7 +36,7 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.misc_events.len()) / num_cpus::get(), 1);
         let nb_rows = input.misc_events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
@@ -60,7 +65,7 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_MISC_INSTR_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_MISC_INSTR_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

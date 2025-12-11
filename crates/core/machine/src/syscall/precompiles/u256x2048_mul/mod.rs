@@ -185,7 +185,7 @@ mod tests {
         let execution_record = generate_test_execution_record(true);
         let chip = U256x2048MulChip::new();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&execution_record, &mut ExecutionRecord::default());
+            chip.generate_trace(&execution_record, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut config.challenger(), trace);
         verify(&config, &chip, &mut config.challenger(), &proof).unwrap();
     }
@@ -197,7 +197,7 @@ mod tests {
             let execution_record = generate_test_execution_record(false);
             let chip = U256x2048MulChip::new();
             let trace: RowMajorMatrix<KoalaBear> =
-                chip.generate_trace(&execution_record, &mut ExecutionRecord::default());
+                chip.generate_trace(&execution_record, &mut ExecutionRecord::default()).unwrap();
             let proof =
                 prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut config.challenger(), trace);
             let result = verify(&config, &chip, &mut config.challenger(), &proof);

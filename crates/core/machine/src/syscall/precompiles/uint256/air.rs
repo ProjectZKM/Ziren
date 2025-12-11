@@ -1,6 +1,7 @@
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
     operations::field::field_op::FieldOpCols,
+    CoreChipError,
 };
 
 use crate::{
@@ -92,6 +93,7 @@ pub struct Uint256MulCols<T> {
 impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "Uint256MulMod".to_string()
@@ -101,7 +103,7 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows & corresponding records for each chunk of events concurrently.
         let rows_and_records = input
             .get_precompile_events(SyscallCode::UINT256_MUL)
@@ -202,7 +204,7 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

@@ -75,7 +75,7 @@ use zkm_core_executor::{
     Program,
 };
 
-use crate::memory::MemoryReadWriteCols;
+use crate::{memory::MemoryReadWriteCols, CoreChipError};
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, Word};
@@ -201,6 +201,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "DivRem".to_string()
     }
@@ -209,7 +211,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_DIVREM_COLS]> = vec![];
         let divrem_events = input.divrem_events.clone();
@@ -344,7 +346,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             input.fixed_log2_rows::<F, _>(self),
         );
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -761,7 +763,7 @@ mod tests {
         shard.divrem_events = vec![CompAluEvent::new(0, Opcode::DIVU, 2, 17, 3)];
         let chip = DivRemChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 }

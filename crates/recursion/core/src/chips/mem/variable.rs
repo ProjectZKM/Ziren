@@ -48,6 +48,8 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
     type Program = crate::RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "MemoryVar".to_string()
     }
@@ -95,11 +97,20 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         Some(RowMajorMatrix::new(values, NUM_MEM_PREPROCESSED_INIT_COLS))
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let mut rows = input
             .mem_var_events
@@ -118,7 +129,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -170,7 +181,7 @@ mod tests {
         };
         let chip = MemoryChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 

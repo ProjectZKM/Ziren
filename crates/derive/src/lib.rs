@@ -92,7 +92,14 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(
     MachineAir,
-    attributes(zkm_core_path, execution_record_path, program_path, builder_path, eval_trait_bound)
+    attributes(
+        zkm_core_path,
+        execution_record_path,
+        program_path,
+        builder_path,
+        error_path,
+        eval_trait_bound
+    )
 )]
 pub fn machine_air_derive(input: TokenStream) -> TokenStream {
     let ast: syn::DeriveInput = syn::parse(input).unwrap();
@@ -101,6 +108,7 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
     let generics = &ast.generics;
     let execution_record_path = find_execution_record_path(&ast.attrs);
     let program_path = find_program_path(&ast.attrs);
+    let error_path = find_error_path(&ast.attrs);
     let builder_path = find_builder_path(&ast.attrs);
     let eval_trait_bound = find_eval_trait_bound(&ast.attrs);
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -204,6 +212,8 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
 
                     type Program = #program_path;
 
+                    type Error = #error_path;
+
                     fn name(&self) -> String {
                         match self {
                             #(#name_arms,)*
@@ -229,7 +239,7 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                         &self,
                         input: &#execution_record_path,
                         output: &mut #execution_record_path,
-                    ) -> p3_matrix::dense::RowMajorMatrix<F> {
+                    ) -> Result<p3_matrix::dense::RowMajorMatrix<F>, Self::Error> {
                         match self {
                             #(#generate_trace_arms,)*
                         }
@@ -239,7 +249,7 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                         &self,
                         input: &#execution_record_path,
                         output: &mut #execution_record_path,
-                    ) {
+                    ) -> Result<(), Self::Error> {
                         match self {
                             #(#generate_dependencies_arms,)*
                         }
@@ -360,6 +370,21 @@ fn find_program_path(attrs: &[syn::Attribute]) -> syn::Path {
         }
     }
     parse_quote!(zkm_core_executor::Program)
+}
+
+fn find_error_path(attrs: &[syn::Attribute]) -> syn::Path {
+    for attr in attrs {
+        if attr.path.is_ident("error_path") {
+            if let Ok(syn::Meta::NameValue(meta)) = attr.parse_meta() {
+                if let syn::Lit::Str(lit_str) = &meta.lit {
+                    if let Ok(path) = lit_str.parse::<syn::Path>() {
+                        return path;
+                    }
+                }
+            }
+        }
+    }
+    parse_quote!(crate::CoreChipError)
 }
 
 fn find_builder_path(attrs: &[syn::Attribute]) -> syn::Path {

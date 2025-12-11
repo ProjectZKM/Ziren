@@ -4,7 +4,11 @@ use core::{
 };
 use std::fmt::Debug;
 
-use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec};
+use crate::{
+    air::MemoryAirBuilder,
+    utils::{pad_rows_fixed_with_err, zeroed_f_vec},
+    CoreChipError,
+};
 use generic_array::GenericArray;
 use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -34,7 +38,7 @@ use crate::{
         field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
         field_sqrt::FieldSqrtCols, range::FieldLtCols,
     },
-    utils::{bytes_to_words_le_vec, limbs_from_access, limbs_from_prev_access, pad_rows_fixed},
+    utils::{bytes_to_words_le_vec, limbs_from_access, limbs_from_prev_access},
 };
 
 pub const fn num_weierstrass_decompress_cols<P: FieldParameters + NumWords>() -> usize {
@@ -143,6 +147,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
 {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         match E::CURVE_TYPE {
@@ -157,7 +162,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = match E::CURVE_TYPE {
             CurveType::Secp256k1 => input.get_precompile_events(SyscallCode::SECP256K1_DECOMPRESS),
             CurveType::Secp256r1 => input.get_precompile_events(SyscallCode::SECP256R1_DECOMPRESS),
@@ -252,7 +257,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
         output.add_byte_lookup_events(new_byte_lookup_events);
 
-        pad_rows_fixed(
+        pad_rows_fixed_with_err(
             &mut rows,
             || {
                 let mut row = zeroed_f_vec(width);
@@ -267,13 +272,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                     cols.x_access[i].access.value = words[i].into();
                 }
 
-                Self::populate_field_ops(&mut vec![], cols, dummy_value).unwrap();
-                row
+                Self::populate_field_ops(&mut vec![], cols, dummy_value)
+                    .map_err(CoreChipError::CurveError)?;
+                Ok(row)
             },
             input.fixed_log2_rows::<F, _>(self),
-        );
+        )?;
 
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), width)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), width))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

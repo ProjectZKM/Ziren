@@ -15,12 +15,14 @@ use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use tracing::instrument;
 
 use super::{columns::NUM_CPU_COLS, CpuChip};
-use crate::{cpu::columns::CpuCols, memory::MemoryCols, utils::zeroed_f_vec};
+use crate::{cpu::columns::CpuCols, memory::MemoryCols, utils::zeroed_f_vec, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for CpuChip {
     type Record = ExecutionRecord;
 
     type Program = Program;
+
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         self.id().to_string()
@@ -42,7 +44,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let padded_nb_rows = <CpuChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_CPU_COLS);
         let shard = input.public_values.execution_shard;
@@ -69,11 +71,15 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_CPU_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_CPU_COLS))
     }
 
     #[instrument(name = "generate cpu dependencies", level = "debug", skip_all)]
-    fn generate_dependencies(&self, input: &ExecutionRecord, output: &mut ExecutionRecord) {
+    fn generate_dependencies(
+        &self,
+        input: &ExecutionRecord,
+        output: &mut ExecutionRecord,
+    ) -> Result<(), Self::Error> {
         // Generate the trace rows for each event.
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
         let shard = input.public_values.execution_shard;
@@ -95,6 +101,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

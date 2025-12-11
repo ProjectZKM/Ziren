@@ -45,6 +45,8 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
     type Program = crate::RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "Select".to_string()
     }
@@ -136,8 +138,13 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         ))
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -146,7 +153,11 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
     }
 
     #[cfg(not(feature = "sys"))]
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = &input.select_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * SELECT_COLS];
@@ -161,11 +172,15 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, SELECT_COLS)
+        Ok(RowMajorMatrix::new(values, SELECT_COLS))
     }
 
     #[cfg(feature = "sys")]
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -192,10 +207,10 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(
+        Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<_>>(values) },
             SELECT_COLS,
-        )
+        ))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -273,7 +288,8 @@ mod tests {
             ..Default::default()
         };
         let chip = SelectChip;
-        let trace: RowMajorMatrix<F> = chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 

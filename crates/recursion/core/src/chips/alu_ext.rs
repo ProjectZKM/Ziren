@@ -67,6 +67,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
 
     type Program = crate::RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "ExtAlu".to_string()
     }
@@ -170,8 +172,13 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         ))
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -185,7 +192,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
     }
 
     #[cfg(not(feature = "sys"))]
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = &input.ext_alu_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_COLS];
@@ -200,11 +211,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_EXT_ALU_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_EXT_ALU_COLS))
     }
 
     #[cfg(feature = "sys")]
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -231,10 +246,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(
+        Ok(RowMajorMatrix::new(
             unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(values) },
             NUM_EXT_ALU_COLS,
-        )
+        ))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -315,7 +330,8 @@ mod tests {
             ..Default::default()
         };
         let chip = ExtAluChip;
-        let trace: RowMajorMatrix<F> = chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 

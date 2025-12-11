@@ -53,6 +53,7 @@ use crate::{
     alu::mul::utils::get_msb,
     memory::{MemoryCols, MemoryReadWriteCols},
     utils::{next_power_of_two, zeroed_f_vec},
+    CoreChipError,
 };
 
 /// The number of main trace columns for `MulChip`.
@@ -139,6 +140,8 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "Mul".to_string()
     }
@@ -147,7 +150,7 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
         let nb_rows = input.mul_events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
@@ -172,10 +175,14 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
 
         // Convert the trace to a row major matrix.
 
-        RowMajorMatrix::new(values, NUM_MUL_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_MUL_COLS))
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let chunk_size = std::cmp::max(input.mul_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -193,6 +200,7 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect::<Vec<_>>());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -515,7 +523,7 @@ mod tests {
         shard.mul_events = mul_events;
         let chip = MulChip::default();
         let _trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
     }
 
     #[test]
@@ -554,7 +562,7 @@ mod tests {
         shard.mul_events = mul_events;
         let chip = MulChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();
