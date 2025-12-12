@@ -4,6 +4,7 @@
   "MovCond": 48,
   "CloClz": 46,
   "Cpu": 119,
+  "BooleanCircuitGarble": 590,
   "KeccakSponge": 102216,
   "Bn254FpOpAssign": 704,
   "Uint256MulMod": 880,
