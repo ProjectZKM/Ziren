@@ -13,16 +13,16 @@ pub mod curve25519_dalek {
 pub use k256;
 pub use p256;
 
+pub use num::{BigUint, Integer, One, Zero};
 use params::{FieldParameters, NumWords};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt::{Debug, Display, Formatter, Result},
     ops::{Add, Neg},
 };
+use thiserror::Error;
 use typenum::Unsigned;
 use zkm_primitives::consts::WORD_SIZE;
-
-pub use num::{BigUint, Integer, One, Zero};
-use serde::{de::DeserializeOwned, Serialize};
 
 pub const NUM_WORDS_FIELD_ELEMENT: usize = 8;
 pub const NUM_BYTES_FIELD_ELEMENT: usize = NUM_WORDS_FIELD_ELEMENT * WORD_SIZE;
@@ -31,6 +31,47 @@ pub const COMPRESSED_POINT_BYTES: usize = 32;
 /// Number of words needed to represent a point on an elliptic curve. This is twice the number of
 /// words needed to represent a field element as a point consists of the x and y coordinates.
 pub const NUM_WORDS_EC_POINT: usize = 2 * NUM_WORDS_FIELD_ELEMENT;
+
+/// Errors that the [``Curves``] can throw.
+#[derive(Error, Debug, Serialize, Deserialize)]
+pub enum CurveError {
+    /// The execution failed while attempting to decompress a point on an elliptic curve from
+    /// its compact byte representation, indicating the provided data does not represent a valid point.
+    #[error("decompress point err, big-endian bytes: {:?}, sign: {1}", 0)]
+    InvalidAffinePoint(Vec<u8>, u32),
+
+    /// The execution failed while converting a slice to an array.
+    #[error("failed to convert slice {0} to array")]
+    IntoArrayError(String),
+
+    /// The execution failed while attempting to parse a G1 point from its byte representation.
+    #[error("g1 {:?} is invalid", 0)]
+    InvalidG1(Vec<u8>),
+
+    /// The execution failed while attempting to parse a big integer from a string representation.
+    #[error("parse bit int {0} err: {1}")]
+    ParseBigIntError(String, String),
+
+    /// The execution failed because the point is the identity point (point at infinity),
+    /// which is invalid for the current operation.
+    #[error("this point is the identity point")]
+    IdentityPoint(String),
+
+    /// The execution failed while creating a field element from its byte representation,
+    /// indicating the provided data does not represent a valid field element.
+    #[error("create filed element from bytes {:?} error", 0)]
+    FieldElementFromBytesError(Vec<u8>),
+
+    /// The execution failed because the field element has no square root in the current field,
+    /// which is required for the current operation.
+    #[error("element {:?} has no square root", 0)]
+    NoSquareRootExists(Vec<u8>),
+
+    /// The execution failed because the specified elliptic curve is not supported
+    /// by the current implementation.
+    #[error("unsupported curve: {0}")]
+    UnsupportedCurve(String),
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CurveType {

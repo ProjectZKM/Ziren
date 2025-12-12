@@ -77,12 +77,19 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
 
     type Program = RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "ExpReverseBitsLen".to_string()
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn preprocessed_width(&self) -> usize {
@@ -210,7 +217,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut overall_rows = Vec::new();
         input.exp_reverse_bits_len_events.iter().for_each(|event| {
             let mut rows = vec![vec![F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
@@ -261,7 +268,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             trace.height()
         );
 
-        trace
+        Ok(trace)
     }
 
     #[cfg(feature = "sys")]
@@ -270,7 +277,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -336,7 +343,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             trace.height()
         );
 
-        trace
+        Ok(trace)
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -532,7 +539,8 @@ mod tests {
             ..Default::default()
         };
         let chip = ExpReverseBitsLenChip::<3>;
-        let trace: RowMajorMatrix<F> = chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 }

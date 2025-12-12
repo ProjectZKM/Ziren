@@ -11,7 +11,10 @@ use zkm_core_executor::{
 };
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::utils::{next_power_of_two, zeroed_f_vec};
+use crate::{
+    utils::{next_power_of_two, zeroed_f_vec},
+    CoreChipError,
+};
 
 use super::{BranchChip, BranchColumns, NUM_BRANCH_COLS};
 
@@ -19,6 +22,8 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
     type Record = ExecutionRecord;
 
     type Program = Program;
+
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "Branch".to_string()
@@ -28,7 +33,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.branch_events.len()) / num_cpus::get(), 1);
         let nb_rows = input.branch_events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
@@ -57,7 +62,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_BRANCH_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_BRANCH_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

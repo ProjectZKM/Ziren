@@ -200,7 +200,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 .collect::<Vec<_>>();
             let mut traces = chips
                 .par_iter()
-                .map(|chip| chip.generate_trace(shard, &mut A::Record::default()))
+                .map(|chip| chip.generate_trace(shard, &mut A::Record::default()).unwrap())
                 .zip(pre_traces)
                 .collect::<Vec<_>>();
 
@@ -560,7 +560,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         records: &mut [A::Record],
         _opts: &<A::Record as MachineRecord>::Config,
         chips_filter: Option<&[String]>,
-    ) {
+    ) -> Result<(), A::Error> {
         let chips = self
             .chips
             .iter()
@@ -573,15 +573,24 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .collect::<Vec<_>>();
 
-        records.iter_mut().for_each(|record| {
-            chips.iter().for_each(|chip| {
-                tracing::debug_span!("chip dependencies", chip = chip.name()).in_scope(|| {
-                    let mut output = A::Record::default();
-                    chip.generate_dependencies(record, &mut output);
-                    record.append(&mut output);
-                });
-            });
-        });
+        for record in records.iter_mut() {
+            for chip in chips.iter() {
+                let span = tracing::debug_span!("chip dependencies", chip = chip.name());
+                let _enter = span.enter();
+
+                let mut output = A::Record::default();
+                if let Err(e) = chip.generate_dependencies(record, &mut output) {
+                    tracing::error!(
+                        "Error generating dependencies for chip {}: {:?}",
+                        chip.name(),
+                        e
+                    );
+                    return Err(e);
+                }
+                record.append(&mut output);
+            }
+        }
+        Ok(())
     }
 
     /// Verify that a proof is complete and valid given a verifying key and a claimed digest.

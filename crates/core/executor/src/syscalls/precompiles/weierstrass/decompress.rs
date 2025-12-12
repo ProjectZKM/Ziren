@@ -27,7 +27,8 @@ impl<E: EllipticCurve> Syscall for WeierstrassDecompressSyscall<E> {
         arg1: u32,
         arg2: u32,
     ) -> Result<Option<u32>, ExecutionError> {
-        let event = create_ec_decompress_event::<E>(rt, arg1, arg2);
+        let event =
+            create_ec_decompress_event::<E>(rt, arg1, arg2).map_err(ExecutionError::CurveError)?;
         let syscall_event =
             rt.rt.syscall_event(event.clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         match E::CURVE_TYPE {

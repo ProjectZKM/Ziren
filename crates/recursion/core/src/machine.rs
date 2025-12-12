@@ -34,6 +34,7 @@ use crate::{
 #[execution_record_path = "crate::ExecutionRecord<F>"]
 #[program_path = "crate::RecursionProgram<F>"]
 #[builder_path = "crate::builder::ZKMRecursionAirBuilder<F = F>"]
+#[error_path = "crate::RecursionChipError"]
 #[eval_trait_bound = "AB::Var: 'static"]
 pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> {
     MemoryConst(MemoryConstChip<F>),

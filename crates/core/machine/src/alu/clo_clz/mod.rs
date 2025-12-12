@@ -25,7 +25,7 @@ use zkm_core_executor::{
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::MachineAir, Word};
 
-use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed};
+use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed, CoreChipError};
 
 /// The number of main trace columns for `CloClzChip`.
 pub const NUM_CLOCLZ_COLS: usize = size_of::<CloClzCols<u8>>();
@@ -77,6 +77,8 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "CloClz".to_string()
     }
@@ -85,7 +87,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_CLOCLZ_COLS]> = vec![];
         let cloclz_events = input.cloclz_events.clone();
@@ -154,7 +156,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             trace.values[i] = padded_row_template[i % NUM_CLOCLZ_COLS];
         }
 
-        trace
+        Ok(trace)
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -294,7 +296,7 @@ mod tests {
         ];
         let chip = CloClzChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
@@ -326,7 +328,7 @@ mod tests {
         shard.cloclz_events = cloclz_events;
         let chip = CloClzChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof =
             uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 

@@ -3,6 +3,7 @@ use crate::{
     memory::{value_as_limbs, MemoryCols, MemoryReadCols, MemoryWriteCols},
     operations::field::field_op::FieldOpCols,
     utils::{limbs_from_access, pad_rows_fixed, words_to_bytes_le},
+    CoreChipError,
 };
 
 use num::{BigUint, One};
@@ -89,6 +90,7 @@ pub struct U256x2048MulCols<T> {
 impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "U256XU2048Mul".to_string()
@@ -98,7 +100,7 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Implement trace generation logic.
         let rows_and_records = input
             .get_precompile_events(SyscallCode::U256XU2048_MUL)
@@ -229,7 +231,7 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

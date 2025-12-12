@@ -4,7 +4,7 @@ use core::{
 };
 use std::{fmt::Debug, marker::PhantomData};
 
-use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec};
+use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -144,6 +144,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
 {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         match E::CURVE_TYPE {
@@ -155,7 +156,11 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let events = match E::CURVE_TYPE {
             CurveType::Secp256k1 => &input.get_precompile_events(SyscallCode::SECP256K1_DOUBLE),
             CurveType::Secp256r1 => &input.get_precompile_events(SyscallCode::SECP256R1_DOUBLE),
@@ -191,13 +196,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         for blu in blu_events {
             output.add_byte_lookup_events(blu);
         }
+        Ok(())
     }
 
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // collects the events based on the curve type.
         let events = match E::CURVE_TYPE {
             CurveType::Secp256k1 => input.get_precompile_events(SyscallCode::SECP256K1_DOUBLE),
@@ -254,7 +260,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         });
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, num_weierstrass_double_cols::<E::BaseField>())
+        Ok(RowMajorMatrix::new(values, num_weierstrass_double_cols::<E::BaseField>()))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

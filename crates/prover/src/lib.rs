@@ -731,18 +731,37 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
                             // Generate the dependencies.
                             let mut records = vec![record];
-                            tracing::debug_span!("generate dependencies").in_scope(|| {
-                                self.compress_prover.machine().generate_dependencies(
+                            tracing::debug_span!("generate dependencies").in_scope(|| -> Result<(), ZKMRecursionProverError> {
+                                match self.compress_prover.machine().generate_dependencies(
                                     &mut records,
                                     &opts.recursion_opts,
                                     None,
-                                )
-                            });
+                                ) {
+                                    Ok(_) => Ok(()),
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "Failed to generate dependencies for recursion proof: {}",
+                                            e
+                                        );
+                                        Err(ZKMRecursionProverError::DependenciesGenerationError)
+                                    }
+                                }
+                            })?;
 
                             // Generate the traces.
                             let record = records.into_iter().next().unwrap();
                             let traces = tracing::debug_span!("generate traces")
                                 .in_scope(|| self.compress_prover.generate_traces(&record));
+                            let traces = match traces {
+                                Ok(traces) => traces,
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to generate traces for recursion proof: {}",
+                                        e
+                                    );
+                                    return Err(ZKMRecursionProverError::TracesGenerationError);
+                                }
+                            };
 
                             // Wait for our turn to update the state.
                             record_and_trace_sync.wait_for_turn(index);
@@ -757,7 +776,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             // Advance the turn.
                             record_and_trace_sync.advance_turn();
                         } else {
-                            break;
+                            break Ok(());
                         }
                     }
                 });

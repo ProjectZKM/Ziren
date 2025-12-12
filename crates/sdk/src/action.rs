@@ -1,4 +1,4 @@
-use zkm_core_executor::{ExecutionReport, HookEnv, ZKMContextBuilder};
+use zkm_core_executor::{ExecutionError, ExecutionReport, HookEnv, ZKMContextBuilder};
 use zkm_core_machine::io::ZKMStdin;
 use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::{components::DefaultProverComponents, ZKMProvingKey};
@@ -46,7 +46,7 @@ impl<'a> Execute<'a> {
     pub fn with_hook(
         mut self,
         fd: u32,
-        f: impl FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>> + Send + Sync + 'a,
+        f: impl FnMut(HookEnv, &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> + Send + Sync + 'a,
     ) -> Self {
         self.context_builder.hook(fd, f);
         self
@@ -172,7 +172,7 @@ impl<'a> Prove<'a> {
     pub fn with_hook(
         mut self,
         fd: u32,
-        f: impl FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>> + Send + Sync + 'a,
+        f: impl FnMut(HookEnv, &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> + Send + Sync + 'a,
     ) -> Self {
         self.context_builder.hook(fd, f);
         self

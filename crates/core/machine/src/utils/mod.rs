@@ -11,7 +11,7 @@ pub use span::*;
 pub use tracer::*;
 use zkm_curves::params::Limbs;
 
-use crate::memory::MemoryCols;
+use crate::{memory::MemoryCols, CoreChipError};
 use generic_array::ArrayLength;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 
@@ -53,6 +53,29 @@ pub fn limbs_from_access<T: Copy, N: ArrayLength, M: MemoryCols<T>>(cols: &[M]) 
 
     let sized = vec.try_into().unwrap_or_else(|_| panic!("failed to convert to limbs"));
     Limbs(sized)
+}
+
+/// Pad to a power of two, with an option to specify the power.
+//
+// The `rows` argument represents the rows of a matrix stored in row-major order. The function will
+// pad the rows using `row_fn` to create the padded rows. The padding will be to the next power of
+// of two of `size_log_2` is `None`, or to the specified `size_log_2` if it is not `None`. The
+// function will panic of the number of rows is larger than the specified `size_log2`
+pub fn pad_rows_fixed_with_err<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> Result<R, CoreChipError>,
+    size_log2: Option<usize>,
+) -> Result<(), CoreChipError> {
+    let nb_rows = rows.len();
+    let dummy_row = match row_fn() {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!("failed to generate dummy row for padding: {}", e);
+            return Err(e);
+        }
+    };
+    rows.resize(next_power_of_two(nb_rows, size_log2), dummy_row);
+    Ok(())
 }
 
 /// Pad to a power of two, with an option to specify the power.

@@ -19,7 +19,7 @@ use zkm_stark::{
     Word,
 };
 
-use crate::utils::pad_rows_fixed;
+use crate::{utils::pad_rows_fixed, CoreChipError};
 
 /// The number of main trace columns for `BitwiseChip`.
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
@@ -63,6 +63,8 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "Bitwise".to_string()
     }
@@ -71,7 +73,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut rows = input
             .bitwise_events
             .par_iter()
@@ -92,10 +94,14 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_BITWISE_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_BITWISE_COLS))
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let chunk_size = std::cmp::max(input.bitwise_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -113,6 +119,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -251,7 +258,7 @@ mod tests {
         ];
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
@@ -270,7 +277,7 @@ mod tests {
         .repeat(1000);
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof =
             uni_stark_prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 

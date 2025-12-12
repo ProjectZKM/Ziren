@@ -651,7 +651,7 @@ pub mod tests {
         let (pk, _) = prover.setup(&program);
 
         // Try to generate traces.
-        let main_traces = prover.generate_traces(&record);
+        let main_traces = prover.generate_traces(&record).unwrap();
 
         // Try to commit the traces.
         let main_data = prover.commit(&record, main_traces);

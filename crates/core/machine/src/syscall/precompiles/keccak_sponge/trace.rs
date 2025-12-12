@@ -5,6 +5,7 @@ use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
     KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
 };
+use crate::CoreChipError;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -22,12 +23,17 @@ use zkm_stark::{MachineAir, Word};
 impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "KeccakSponge".to_string()
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let events = input.get_precompile_events(SyscallCode::KECCAK_SPONGE);
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
@@ -48,9 +54,14 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
-    fn generate_trace(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let rows = Vec::new();
 
         let mut wrapped_rows = Some(rows);
@@ -80,7 +91,10 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
             rows.push(dummy_row);
         }
 
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_KECCAK_SPONGE_COLS)
+        Ok(RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_KECCAK_SPONGE_COLS,
+        ))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

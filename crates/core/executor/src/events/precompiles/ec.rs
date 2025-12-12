@@ -7,7 +7,7 @@ use zkm_curves::{
         bls12_381::bls12381_decompress, secp256k1::secp256k1_decompress,
         secp256r1::secp256r1_decompress,
     },
-    AffinePoint, CurveType, EllipticCurve,
+    AffinePoint, CurveError, CurveType, EllipticCurve,
 };
 use zkm_primitives::consts::{bytes_to_words_le_vec, words_to_bytes_le_vec};
 
@@ -183,7 +183,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
     rt: &mut SyscallContext,
     slice_ptr: u32,
     sign_bit: u32,
-) -> EllipticCurveDecompressEvent {
+) -> Result<EllipticCurveDecompressEvent, CurveError> {
     let start_clk = rt.clk;
     assert!(slice_ptr.is_multiple_of(4), "slice_ptr must be 4-byte aligned");
     assert!(sign_bit <= 1, "is_odd must be 0 or 1");
@@ -202,10 +202,10 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
         CurveType::Secp256k1 => secp256k1_decompress::<E>,
         CurveType::Secp256r1 => secp256r1_decompress::<E>,
         CurveType::Bls12381 => bls12381_decompress::<E>,
-        _ => panic!("Unsupported curve"),
+        _ => return Err(CurveError::UnsupportedCurve(E::CURVE_TYPE.to_string())),
     };
 
-    let computed_point: AffinePoint<E> = decompress_fn(&x_bytes_be, sign_bit);
+    let computed_point: AffinePoint<E> = decompress_fn(&x_bytes_be, sign_bit)?;
 
     let mut decompressed_y_bytes = computed_point.y.to_bytes_le();
     decompressed_y_bytes.resize(num_limbs, 0u8);
@@ -213,7 +213,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
 
     let y_memory_records = rt.mw_slice(slice_ptr, &y_words);
 
-    EllipticCurveDecompressEvent {
+    Ok(EllipticCurveDecompressEvent {
         shard: rt.current_shard(),
         clk: start_clk,
         ptr: slice_ptr,
@@ -223,5 +223,5 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
         x_memory_records,
         y_memory_records,
         local_mem_access: rt.postprocess(),
-    }
+    })
 }

@@ -19,7 +19,7 @@ use zkm_stark::{
     Word,
 };
 
-use crate::air::WordAirBuilder;
+use crate::{air::WordAirBuilder, CoreChipError};
 
 use crate::operations::IsZeroWordOperation;
 
@@ -66,6 +66,8 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "MovCond".to_string()
     }
@@ -74,7 +76,7 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.movcond_events.len()) / num_cpus::get(), 1);
         let nb_rows = input.movcond_events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
@@ -103,7 +105,7 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_MOV_COND_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_MOV_COND_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

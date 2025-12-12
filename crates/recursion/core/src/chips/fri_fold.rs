@@ -93,12 +93,19 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
 
     type Program = RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "FriFold".to_string()
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn preprocessed_width(&self) -> usize {
@@ -264,7 +271,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut rows = input
             .fri_fold_events
             .iter()
@@ -300,7 +307,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         #[cfg(debug_assertions)]
         println!("fri fold trace dims is width: {:?}, height: {:?}", trace.width(), trace.height());
 
-        trace
+        Ok(trace)
     }
 
     #[cfg(feature = "sys")]
@@ -309,7 +316,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -352,7 +359,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         #[cfg(debug_assertions)]
         println!("fri fold trace dims is width: {:?}, height: {:?}", trace.width(), trace.height());
 
-        trace
+        Ok(trace)
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -674,7 +681,8 @@ mod tests {
             ..Default::default()
         };
         let chip = FriFoldChip::<3>::default();
-        let trace: RowMajorMatrix<F> = chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 }

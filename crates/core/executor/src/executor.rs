@@ -10,6 +10,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use zkm_curves::CurveError;
 use zkm_stark::ZKMCoreOpts;
 
 use crate::{
@@ -244,6 +245,42 @@ pub enum ExecutionError {
 
     #[error("Null Pointer Reference")]
     NullPointerReference(),
+
+    /// The execution failed because a buffer length did not match the expected size.
+    #[error("invalid buffer length: expected {0}, got {1}")]
+    InvalidBufferLength(usize, usize),
+
+    /// The execution failed because a buffer length was smaller than the minimum required.
+    #[error("buffer length {1} must be greater than or equal to {0}")]
+    BufferLengthTooSmall(usize, usize),
+
+    /// The execution failed while converting a slice to an array due to size mismatch.
+    #[error("failed to convert slice {0} to array")]
+    IntoArrayError(String),
+
+    /// The execution failed because a finite field element was not in canonical form
+    /// (i.e., not properly reduced modulo the field's modulus).
+    #[error("element {0} must be less than modulus {1}")]
+    ElementNotCanonical(String, String),
+
+    /// The execution failed because a finite field element was zero where a non-zero
+    /// value was required.
+    #[error("element {0} must be non-zero")]
+    ElementZero(String),
+
+    /// The execution failed because a quadratic non-residue (NQR) was not in the
+    /// valid range (non-zero and less than the modulus).
+    #[error("NQR {0} must be non-zero and less then modulus {1}")]
+    NqrNotCanonical(String, String),
+
+    /// The execution failed because a value did not satisfy the quadratic residue
+    /// property: (root * root) % modulus != qr.
+    #[error("{0} * {0}) % {1} != {2}")]
+    NqrNotQuadratic(String, String, String),
+
+    /// The execution failed due to an error in the underlying elliptic curve operation.
+    #[error("curve error: {0}")]
+    CurveError(CurveError),
 }
 
 impl<'a> Executor<'a> {
@@ -331,7 +368,7 @@ impl<'a> Executor<'a> {
     ///
     /// If the file descriptor is not found in the [``HookRegistry``], this function will return an
     /// error.
-    pub fn hook(&self, fd: u32, buf: &[u8]) -> eyre::Result<Vec<Vec<u8>>> {
+    pub fn hook(&self, fd: u32, buf: &[u8]) -> eyre::Result<Result<Vec<Vec<u8>>, ExecutionError>> {
         Ok(self
             .hook_registry
             .get(fd)

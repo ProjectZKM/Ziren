@@ -222,6 +222,10 @@ pub enum ZKMReduceProofWrapper {
 pub enum ZKMRecursionProverError {
     #[error("Runtime error: {0}")]
     RuntimeError(String),
+    #[error("Generate traces error")]
+    TracesGenerationError,
+    #[error("Generate dependencies error")]
+    DependenciesGenerationError,
 }
 
 #[allow(clippy::large_enum_variant)]

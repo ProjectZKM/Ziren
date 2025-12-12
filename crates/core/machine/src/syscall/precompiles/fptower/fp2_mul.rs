@@ -3,7 +3,7 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec};
+use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use itertools::Itertools;
 use num::BigUint;
@@ -124,6 +124,8 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         match P::FIELD_TYPE {
             FieldType::Bn254 => "Bn254Fp2MulAssign".to_string(),
@@ -131,7 +133,11 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
         }
     }
 
-    fn generate_trace(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = match P::FIELD_TYPE {
             FieldType::Bn254 => input.get_precompile_events(SyscallCode::BN254_FP2_MUL),
             FieldType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_FP2_MUL),
@@ -197,7 +203,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), num_fp2_mul_cols::<P>())
+        Ok(RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            num_fp2_mul_cols::<P>(),
+        ))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

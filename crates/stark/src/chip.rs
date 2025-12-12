@@ -198,6 +198,8 @@ where
 
     type Program = A::Program;
 
+    type Error = A::Error;
+
     fn name(&self) -> String {
         self.air.name()
     }
@@ -218,12 +220,20 @@ where
         <A as MachineAir<F>>::num_rows(&self.air, input)
     }
 
-    fn generate_trace(&self, input: &A::Record, output: &mut A::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &A::Record,
+        output: &mut A::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         self.air.generate_trace(input, output)
     }
 
-    fn generate_dependencies(&self, input: &A::Record, output: &mut A::Record) {
-        self.air.generate_dependencies(input, output);
+    fn generate_dependencies(
+        &self,
+        input: &A::Record,
+        output: &mut A::Record,
+    ) -> Result<(), Self::Error> {
+        self.air.generate_dependencies(input, output)
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

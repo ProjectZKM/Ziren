@@ -16,7 +16,7 @@ use typenum::{U32, U62};
 use super::{SwCurve, WeierstrassParameters};
 use crate::{
     params::{FieldParameters, NumLimbs},
-    AffinePoint, CurveType, EllipticCurve, EllipticCurveParameters,
+    AffinePoint, CurveError, CurveType, EllipticCurve, EllipticCurveParameters,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -98,23 +98,41 @@ impl WeierstrassParameters for Secp256r1Parameters {
     }
 }
 
-pub fn secp256r1_decompress<E: EllipticCurve>(bytes_be: &[u8], sign: u32) -> AffinePoint<E> {
-    let computed_point =
-        p256::AffinePoint::decompress(bytes_be.into(), Choice::from(sign as u8)).unwrap();
+pub fn secp256r1_decompress<E: EllipticCurve>(
+    bytes_be: &[u8],
+    sign: u32,
+) -> Result<AffinePoint<E>, CurveError> {
+    let computed_point = if let Some(point) =
+        p256::AffinePoint::decompress(bytes_be.into(), Choice::from(sign as u8)).into_option()
+    {
+        point
+    } else {
+        return Err(CurveError::InvalidAffinePoint(bytes_be.to_vec(), sign));
+    };
     let point = computed_point.to_encoded_point(false);
 
-    let x = BigUint::from_bytes_be(point.x().unwrap());
-    let y = BigUint::from_bytes_be(point.y().unwrap());
-    AffinePoint::<E>::new(x, y)
+    let x = BigUint::from_bytes_be(
+        point.x().ok_or_else(|| CurveError::IdentityPoint(point.to_string()))?,
+    );
+    let y = BigUint::from_bytes_be(
+        point.y().ok_or_else(|| CurveError::IdentityPoint(point.to_string()))?,
+    );
+    Ok(AffinePoint::<E>::new(x, y))
 }
 
-pub fn secp256r1_sqrt(n: &BigUint) -> BigUint {
+pub fn secp256r1_sqrt(n: &BigUint) -> Result<BigUint, CurveError> {
     let be_bytes = n.to_be_bytes();
     let mut bytes = [0_u8; 32];
     bytes[32 - be_bytes.len()..].copy_from_slice(&be_bytes);
-    let fe = FieldElement::from_bytes(&bytes.into()).unwrap();
-    let result_bytes = fe.sqrt().unwrap().to_bytes();
-    BigUint::from_be_bytes(&result_bytes as &[u8])
+    let fe = FieldElement::from_bytes(&bytes.into())
+        .into_option()
+        .ok_or_else(|| CurveError::FieldElementFromBytesError(bytes.to_vec()))?;
+    let result_bytes = fe
+        .sqrt()
+        .into_option()
+        .ok_or_else(|| CurveError::NoSquareRootExists(bytes.to_vec()))?
+        .to_bytes();
+    Ok(BigUint::from_be_bytes(&result_bytes as &[u8]))
 }
 
 #[cfg(test)]
@@ -138,7 +156,7 @@ mod tests {
             // We use x^2 since not all field elements have a square root
             let x = rng.gen_biguint(256) % Secp256r1BaseField::modulus();
             let x_2 = (&x * &x) % Secp256r1BaseField::modulus(); // x^2
-            let sqrt = secp256r1_sqrt(&x_2); //sqrt(x^2) = x
+            let sqrt = secp256r1_sqrt(&x_2).unwrap(); //sqrt(x^2) = x
             let sqrt_2 = (&sqrt * &sqrt) % Secp256r1BaseField::modulus();
 
             assert_eq!(sqrt_2, x_2);

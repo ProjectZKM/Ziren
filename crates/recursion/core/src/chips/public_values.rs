@@ -59,12 +59,19 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
     type Program = RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "PublicValues".to_string()
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn preprocessed_width(&self) -> usize {
@@ -185,7 +192,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         if input.commit_pv_hash_events.len() != 1 {
             tracing::warn!("Expected exactly one CommitPVHash event.");
         }
@@ -212,7 +219,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_PUBLIC_VALUES_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_PUBLIC_VALUES_COLS))
     }
 
     #[cfg(feature = "sys")]
@@ -220,7 +227,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -260,14 +267,14 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(
+        Ok(RowMajorMatrix::new(
             unsafe {
                 std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
                     rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
                 )
             },
             NUM_PUBLIC_VALUES_COLS,
-        )
+        ))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -372,7 +379,8 @@ mod tests {
             ..Default::default()
         };
         let chip = PublicValuesChip;
-        let trace: RowMajorMatrix<F> = chip.generate_trace(&shard, &mut ExecutionRecord::default());
+        let trace: RowMajorMatrix<F> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 }

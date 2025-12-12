@@ -49,6 +49,10 @@ pub enum ZKMCoreProverError {
     IoError(io::Error),
     #[error("serialization error: {0}")]
     SerializationError(bincode::Error),
+    #[error("traces generation error")]
+    TracesGenerationError,
+    #[error("dependencies generation error")]
+    DependenciesGenerationError,
 }
 
 pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -237,7 +241,7 @@ where
             let handle = s.spawn(move || {
                 let _span = span.enter();
                 tracing::debug_span!("phase 2 trace generation").in_scope(|| {
-                    loop {
+                    let _: () = loop {
                         // Receive the latest checkpoint.
                         let received = { checkpoints_rx.lock().unwrap().recv() };
                         if let Ok((index, mut checkpoint, done, num_cycles)) = received {
@@ -322,14 +326,23 @@ where
 
                                 // Generate the dependencies.
                                 tracing::debug_span!("generate dependencies", index).in_scope(
-                                    || {
-                                        prover.machine().generate_dependencies(
+                                    || -> Result<(), ZKMCoreProverError> {
+                                        match prover.machine().generate_dependencies(
                                             &mut records_clone,
                                             &opts,
                                             None,
-                                        );
+                                        ) {
+                                            Ok(()) => Ok(()),
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "Error generating dependencies: {:?}",
+                                                    e
+                                                );
+                                                Err(ZKMCoreProverError::DependenciesGenerationError)
+                                            }
+                                        }
                                     },
-                                );
+                                )?;
 
                                 // Let another worker update the state.
                                 record_gen_sync.advance_turn();
@@ -375,14 +388,23 @@ where
 
                                 // Generate the dependencies.
                                 tracing::debug_span!("generate dependencies", index).in_scope(
-                                    || {
-                                        prover.machine().generate_dependencies(
+                                    || -> Result<(), ZKMCoreProverError> {
+                                        match prover.machine().generate_dependencies(
                                             &mut records,
                                             &opts,
                                             None,
-                                        );
+                                        ) {
+                                            Ok(()) => Ok(()),
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "Error generating dependencies: {:?}",
+                                                    e
+                                                );
+                                                Err(ZKMCoreProverError::DependenciesGenerationError)
+                                            }
+                                        }
                                     },
-                                );
+                                )?;
 
                                 // Let another worker update the state.
                                 record_gen_sync.advance_turn();
@@ -401,13 +423,27 @@ where
                             #[cfg(feature = "debug")]
                             all_records_tx.send(records.clone()).unwrap();
 
-                            let mut main_traces = Vec::new();
-                            tracing::debug_span!("generate main traces", index).in_scope(|| {
-                                main_traces = records
-                                    .par_iter()
-                                    .map(|record| prover.generate_traces(record))
-                                    .collect::<Vec<_>>();
-                            });
+                            let main_traces_results: Vec<Result<_, _>> =
+                                tracing::debug_span!("generate main traces", index).in_scope(
+                                    || {
+                                        records
+                                            .par_iter()
+                                            .map(|record| prover.generate_traces(record))
+                                            .collect()
+                                    },
+                                );
+                            let (successes, errors): (Vec<_>, Vec<_>) =
+                                main_traces_results.into_iter().partition(Result::is_ok);
+                            let main_traces = successes.into_iter().map(Result::unwrap).collect();
+                            if !errors.is_empty() {
+                                tracing::error!("Failed to generate {} traces", errors.len());
+                                for error in errors {
+                                    if let Err(e) = error {
+                                        tracing::error!("Trace generation error: {:?}", e);
+                                        return Err(ZKMCoreProverError::TracesGenerationError);
+                                    }
+                                }
+                            }
 
                             trace_gen_sync.wait_for_turn(index);
 
@@ -429,7 +465,8 @@ where
                         } else {
                             break;
                         }
-                    }
+                    };
+                    Ok(())
                 })
             });
             p2_record_and_trace_gen_handles.push(handle);
@@ -489,10 +526,12 @@ where
         });
 
         // Wait until the checkpoint generator handle has fully finished.
-        let public_values_stream = checkpoint_generator_handle.join().unwrap().unwrap();
+        let public_values_stream = checkpoint_generator_handle.join().unwrap()?;
 
         // Wait until the records and traces have been fully generated for phase 2.
-        p2_record_and_trace_gen_handles.into_iter().for_each(|handle| handle.join().unwrap());
+        for handle in p2_record_and_trace_gen_handles {
+            handle.join().unwrap()?;
+        }
 
         // Wait until the phase 2 prover has finished.
         let shard_proofs = p2_prover_handle.join().unwrap();

@@ -22,6 +22,7 @@ use zkm_stark::{
 use crate::{
     operations::AddOperation,
     utils::{next_power_of_two, zeroed_f_vec},
+    CoreChipError,
 };
 
 /// The number of main trace columns for `AddSubChip`.
@@ -66,6 +67,8 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "AddSub".to_string()
     }
@@ -80,7 +83,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the rows for the trace.
         let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
         let padded_nb_rows = <AddSubChip as MachineAir<F>>::num_rows(self, input).unwrap();
@@ -102,10 +105,14 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_ADD_SUB_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_ADD_SUB_COLS))
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let chunk_size = std::cmp::max(input.add_sub_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -124,6 +131,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -265,7 +273,7 @@ mod tests {
         shard.add_sub_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)];
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 
@@ -302,7 +310,7 @@ mod tests {
 
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

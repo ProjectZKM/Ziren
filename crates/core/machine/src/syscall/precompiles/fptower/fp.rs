@@ -4,7 +4,7 @@ use std::{
     mem::size_of,
 };
 
-use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec};
+use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use itertools::Itertools;
 use num::BigUint;
@@ -78,6 +78,8 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         match P::FIELD_TYPE {
             FieldType::Bn254 => "Bn254FpOpAssign".to_string(),
@@ -85,7 +87,11 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
         }
     }
 
-    fn generate_trace(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // All the fp events for a given curve are coalesce to the curve's Add operation.  Only retrieve
         // precompile events for that operation.
         // TODO:  Fix this.
@@ -155,7 +161,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
         );
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), num_fp_cols::<P>())
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), num_fp_cols::<P>()))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

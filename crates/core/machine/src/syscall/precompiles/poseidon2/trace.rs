@@ -3,6 +3,7 @@ use crate::operations::poseidon2::WIDTH;
 use crate::syscall::precompiles::poseidon2::columns::{Poseidon2MemCols, NUM_COLS};
 use crate::syscall::precompiles::poseidon2::Poseidon2PermuteChip;
 use crate::utils::pad_rows_fixed;
+use crate::CoreChipError;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
@@ -20,6 +21,7 @@ use zkm_stark::MachineAir;
 impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "Poseidon2Permute".to_string()
@@ -29,7 +31,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = input.get_precompile_events(SyscallCode::POSEIDON2_PERMUTE);
 
         let mut rows = events
@@ -53,10 +55,14 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         pad_rows_fixed(&mut rows, || dummy_row, input.fixed_log2_rows::<F, _>(self));
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let events = input.get_precompile_events(SyscallCode::POSEIDON2_PERMUTE);
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
@@ -79,6 +85,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

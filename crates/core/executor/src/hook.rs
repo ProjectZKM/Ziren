@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use hashbrown::HashMap;
 use zkm_curves::{BigUint, One, Zero};
 
-use crate::Executor;
+use crate::{ExecutionError, Executor};
 
 pub use zkm_primitives::consts::fd::*;
 
@@ -17,12 +17,12 @@ pub type BoxedHook<'a> = Arc<RwLock<dyn Hook + Send + Sync + 'a>>;
 pub trait Hook {
     /// Invoke the runtime hook with a standard environment and arbitrary data.
     /// Returns the computed data.
-    fn invoke_hook(&mut self, env: HookEnv, buf: &[u8]) -> Vec<Vec<u8>>;
+    fn invoke_hook(&mut self, env: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError>;
 }
 
-impl<F: FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>>> Hook for F {
+impl<F: FnMut(HookEnv, &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError>> Hook for F {
     /// Invokes the function `self` as a hook.
-    fn invoke_hook(&mut self, env: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
+    fn invoke_hook(&mut self, env: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
         self(env, buf)
     }
 }
@@ -31,7 +31,7 @@ impl<F: FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>>> Hook for F {
 ///
 /// Note: the Send + Sync requirement may be logically extraneous. Requires further investigation.
 pub fn hookify<'a>(
-    f: impl FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>> + Send + Sync + 'a,
+    f: impl FnMut(HookEnv, &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> + Send + Sync + 'a,
 ) -> BoxedHook<'a> {
     Arc::new(RwLock::new(f))
 }
@@ -115,9 +115,11 @@ pub struct HookEnv<'a, 'b: 'a> {
 ///
 /// Returns vec![vec![1], `y`, `r_inv`] if the point is decompressable
 /// and vec![vec![0],`nqr_hint`] if not.
-#[must_use]
-pub fn hook_ecrecover(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
-    assert!(buf.len() == 64 + 1, "ecrecover should have length 65");
+pub fn hook_ecrecover(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
+    if buf.len() != 64 + 1 {
+        tracing::error!("ecrecover should have length 65");
+        return Err(ExecutionError::InvalidBufferLength(65, buf.len()));
+    }
 
     let curve_id = buf[0] & 0b0111_1111;
     let r_is_y_odd = buf[0] & 0b1000_0000 != 0;
@@ -126,8 +128,8 @@ pub fn hook_ecrecover(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
     let alpha_bytes: [u8; 32] = buf[33..65].try_into().unwrap();
 
     match curve_id {
-        1 => ecrecover::handle_secp256k1(r_bytes, alpha_bytes, r_is_y_odd),
-        2 => ecrecover::handle_secp256r1(r_bytes, alpha_bytes, r_is_y_odd),
+        1 => Ok(ecrecover::handle_secp256k1(r_bytes, alpha_bytes, r_is_y_odd)),
+        2 => Ok(ecrecover::handle_secp256r1(r_bytes, alpha_bytes, r_is_y_odd)),
         _ => unimplemented!("Unsupported curve id: {}", curve_id),
     }
 }
@@ -218,6 +220,10 @@ fn pad_to_be(val: &BigUint, len: usize) -> Vec<u8> {
 }
 
 mod fp_ops {
+    use std::array::TryFromSliceError;
+
+    use crate::ExecutionError;
+
     use super::{pad_to_be, BigUint, HookEnv, One, Zero};
 
     /// Compute the inverse of a field element.
@@ -235,20 +241,32 @@ mod fp_ops {
     /// # Panics:
     /// - If the buffer length is not valid.
     /// - If the element is zero.
-    pub fn hook_fp_inverse(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
-        let len: usize = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
+    pub fn hook_fp_inverse(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
+        if buf.len() < 4 {
+            return Err(ExecutionError::BufferLengthTooSmall(4, buf.len()));
+        }
+        let len_bytes: [u8; 4] = buf[0..4]
+            .try_into()
+            .map_err(|e: TryFromSliceError| ExecutionError::IntoArrayError(e.to_string()))?;
+        let len = u32::from_be_bytes(len_bytes) as usize;
 
-        assert!(buf.len() == 4 + 2 * len, "FpOp: Invalid buffer length");
+        if buf.len() != 4 + 2 * len {
+            tracing::error!("FpOp: Invalid buffer length");
+            return Err(ExecutionError::InvalidBufferLength(4 + 2 * len, buf.len()));
+        }
 
         let buf = &buf[4..];
         let element = BigUint::from_bytes_be(&buf[..len]);
         let modulus = BigUint::from_bytes_be(&buf[len..2 * len]);
 
-        assert!(!element.is_zero(), "FpOp: Inverse called with zero");
+        if element.is_zero() {
+            tracing::error!("FpOp: Inverse called with zero");
+            return Err(ExecutionError::ElementZero(element.to_string()));
+        }
 
         let inverse = element.modpow(&(&modulus - BigUint::from(2u64)), &modulus);
 
-        vec![pad_to_be(&inverse, len)]
+        Ok(vec![pad_to_be(&inverse, len)])
     }
 
     /// Compute the square root of a field element.
@@ -278,39 +296,56 @@ mod fp_ops {
     /// - If the element is not less than the modulus.
     /// - If the nqr is not less than the modulus.
     /// - If the element is zero.
-    pub fn hook_fp_sqrt(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
-        let len: usize = u32::from_be_bytes(buf[0..4].try_into().unwrap()) as usize;
+    pub fn hook_fp_sqrt(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
+        if buf.len() < 4 {
+            return Err(ExecutionError::BufferLengthTooSmall(4, buf.len()));
+        }
+        let len_bytes: [u8; 4] = buf[0..4]
+            .try_into()
+            .map_err(|e: TryFromSliceError| ExecutionError::IntoArrayError(e.to_string()))?;
+        let len = u32::from_be_bytes(len_bytes) as usize;
 
-        assert!(buf.len() == 4 + 3 * len, "FpOp: Invalid buffer length");
+        if buf.len() != 4 + 3 * len {
+            tracing::error!("FpOp: Invalid buffer length");
+            return Err(ExecutionError::InvalidBufferLength(4 + 3 * len, buf.len()));
+        }
 
         let buf = &buf[4..];
         let element = BigUint::from_bytes_be(&buf[..len]);
         let modulus = BigUint::from_bytes_be(&buf[len..2 * len]);
         let nqr = BigUint::from_bytes_be(&buf[2 * len..3 * len]);
 
-        assert!(
-            element < modulus,
-            "Element is not less than modulus, the hook only accepts canonical representations"
-        );
-        assert!(
-            nqr < modulus,
-            "NQR is zero or non-canonical, the hook only accepts canonical representations"
-        );
+        if element >= modulus {
+            tracing::error!(
+                "Element is not less than modulus, the hook only accepts canonical representations"
+            );
+            return Err(ExecutionError::ElementNotCanonical(
+                element.to_string(),
+                modulus.to_string(),
+            ));
+        }
+
+        if nqr >= modulus {
+            tracing::error!(
+                "NQR is zero or non-canonical, the hook only accepts canonical representations"
+            );
+            return Err(ExecutionError::NqrNotCanonical(nqr.to_string(), modulus.to_string()));
+        }
 
         // The sqrt of zero is zero.
         if element.is_zero() {
-            return vec![vec![1], vec![0; len]];
+            return Ok(vec![vec![1], vec![0; len]]);
         }
 
         // Compute the square root of the element using the general Tonelli-Shanks algorithm.
         // The implementation can be used for any field as it is field-agnostic.
         if let Some(root) = sqrt_fp(&element, &modulus, &nqr) {
-            vec![vec![1], pad_to_be(&root, len)]
+            Ok(vec![vec![1], pad_to_be(&root, len)])
         } else {
             let qr = (&nqr * &element) % &modulus;
             let root = sqrt_fp(&qr, &modulus, &nqr).unwrap();
 
-            vec![vec![0], pad_to_be(&root, len)]
+            Ok(vec![vec![0], pad_to_be(&root, len)])
         }
     }
 
@@ -461,6 +496,8 @@ mod fp_ops {
 }
 
 mod bls {
+    use crate::ExecutionError;
+
     use super::{pad_to_be, BigUint, HookEnv};
     use zkm_curves::{params::FieldParameters, weierstrass::bls12_381::Bls12381BaseField, Zero};
 
@@ -482,13 +519,16 @@ mod bls {
     ///   vec![sqrt(fe)]  ]`.
     /// - If the field element (fe) is not a quadratic residue, this function returns `vec![vec![0],
     ///   vec![sqrt(``NQR_BLS12_381`` * fe)]]`.
-    pub fn hook_bls12_381_sqrt(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
+    pub fn hook_bls12_381_sqrt(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
+        if buf.len() < 48 {
+            return Err(ExecutionError::BufferLengthTooSmall(48, buf.len()));
+        }
         let field_element = BigUint::from_bytes_be(&buf[..48]);
 
         // This should be checked in the VM as its easier than dispatching a hook call.
         // But for completeness we include this happy path also.
         if field_element.is_zero() {
-            return vec![vec![1], vec![0; 48]];
+            return Ok(vec![vec![1], vec![0; 48]]);
         }
 
         let modulus = BigUint::from_bytes_le(BLS12_381_MODULUS);
@@ -511,29 +551,42 @@ mod bls {
             // We pass this root back to the VM to constrain the "failure" case.
             let root = qr.modpow(&exp, &modulus);
 
-            assert!((&root * &root) % &modulus == qr, "NQR sanity check failed, this is a bug.");
+            if (&root * &root) % &modulus != qr {
+                tracing::error!("NQR sanity check failed, this is a bug.");
+                return Err(ExecutionError::NqrNotQuadratic(
+                    root.to_string(),
+                    modulus.to_string(),
+                    qr.to_string(),
+                ));
+            }
 
-            return vec![vec![0], pad_to_be(&root, 48)];
+            return Ok(vec![vec![0], pad_to_be(&root, 48)]);
         }
 
-        vec![vec![1], pad_to_be(&sqrt, 48)]
+        Ok(vec![vec![1], pad_to_be(&sqrt, 48)])
     }
 
     /// Given a field element, in big endian, this function computes the inverse.
     ///
     /// This function will panic if the additive identity is passed in.
-    pub fn hook_bls12_381_inverse(_: HookEnv, buf: &[u8]) -> Vec<Vec<u8>> {
+    pub fn hook_bls12_381_inverse(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
+        if buf.len() < 48 {
+            return Err(ExecutionError::BufferLengthTooSmall(48, buf.len()));
+        }
         let field_element = BigUint::from_bytes_be(&buf[..48]);
 
         // Zero is not invertible, and we don't want to have to return a status from here.
-        assert!(!field_element.is_zero(), "Field element is the additive identity");
+        if field_element.is_zero() {
+            tracing::error!("Field element is the additive identity");
+            return Err(ExecutionError::ElementZero(field_element.to_string()));
+        }
 
         let modulus = BigUint::from_bytes_le(BLS12_381_MODULUS);
 
         // Compute the inverse using Fermat's little theorem, ie, a^(p-2) = a^-1 mod p.
         let inverse = field_element.modpow(&(&modulus - BigUint::from(2u64)), &modulus);
 
-        vec![pad_to_be(&inverse, 48)]
+        Ok(vec![pad_to_be(&inverse, 48)])
     }
 }
 

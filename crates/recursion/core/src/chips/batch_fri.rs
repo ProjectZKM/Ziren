@@ -66,12 +66,19 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
 
     type Program = RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         "BatchFRI".to_string()
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn preprocessed_width(&self) -> usize {
@@ -192,7 +199,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut rows = input
             .batch_fri_events
             .iter()
@@ -220,7 +227,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             trace.height()
         );
 
-        trace
+        Ok(trace)
     }
 
     #[cfg(feature = "sys")]
@@ -229,7 +236,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         &self,
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -273,7 +280,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             trace.height()
         );
 
-        trace
+        Ok(trace)
     }
 
     fn included(&self, _record: &Self::Record) -> bool {

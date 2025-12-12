@@ -11,12 +11,16 @@ use zkm_core_executor::{
 };
 use zkm_stark::air::MachineAir;
 
+use crate::CoreChipError;
+
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
 
 impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
     type Record = ExecutionRecord;
 
     type Program = Program;
+
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "ShaExtend".to_string()
@@ -26,7 +30,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let rows = Vec::new();
 
         let mut new_byte_lookup_events = Vec::new();
@@ -51,10 +55,14 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         }
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SHA_EXTEND_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SHA_EXTEND_COLS))
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let events = input.get_precompile_events(SyscallCode::SHA_EXTEND);
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
@@ -75,6 +83,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

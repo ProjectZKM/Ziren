@@ -3,7 +3,10 @@ use std::fmt::Debug;
 use num::BigUint;
 use p3_air::AirBuilder;
 use p3_field::PrimeField32;
-use zkm_curves::params::{limbs_from_vec, FieldParameters, Limbs};
+use zkm_curves::{
+    params::{limbs_from_vec, FieldParameters, Limbs},
+    CurveError,
+};
 use zkm_derive::AlignedBorrow;
 
 use zkm_core_executor::{
@@ -43,11 +46,11 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
         &mut self,
         record: &mut impl ByteRecord,
         a: &BigUint,
-        sqrt_fn: impl Fn(&BigUint) -> BigUint,
-    ) -> BigUint {
+        sqrt_fn: impl Fn(&BigUint) -> Result<BigUint, CurveError>,
+    ) -> Result<BigUint, CurveError> {
         let modulus = P::modulus();
         assert!(a < &modulus);
-        let sqrt = sqrt_fn(a);
+        let sqrt = sqrt_fn(a)?;
 
         // Use FieldOpCols to compute result * result.
         let sqrt_squared = self.multiplication.populate(record, &sqrt, &sqrt, FieldOperation::Mul);
@@ -86,7 +89,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
                 .as_slice(),
         );
 
-        sqrt
+        Ok(sqrt)
     }
 }
 
@@ -165,6 +168,7 @@ mod tests {
     use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::FieldSqrtCols;
+    use crate::CoreChipError;
 
     #[derive(AlignedBorrow, Debug)]
     pub struct TestCols<T, P: FieldParameters> {
@@ -189,6 +193,8 @@ mod tests {
 
         type Program = Program;
 
+        type Error = CoreChipError;
+
         fn name(&self) -> String {
             "EdSqrtChip".to_string()
         }
@@ -197,7 +203,7 @@ mod tests {
             &self,
             _: &ExecutionRecord,
             output: &mut ExecutionRecord,
-        ) -> RowMajorMatrix<F> {
+        ) -> Result<RowMajorMatrix<F>, Self::Error> {
             let mut rng = thread_rng();
             let num_rows = 1 << 8;
             let mut operands: Vec<BigUint> = (0..num_rows - 2)
@@ -220,7 +226,7 @@ mod tests {
                     let mut row = [F::ZERO; NUM_TEST_COLS];
                     let cols: &mut TestCols<F, P> = row.as_mut_slice().borrow_mut();
                     cols.a = P::to_limbs_field::<F, _>(a);
-                    cols.sqrt.populate(&mut blu_events, a, ed25519_sqrt);
+                    cols.sqrt.populate(&mut blu_events, a, ed25519_sqrt).unwrap();
                     output.add_byte_lookup_events(blu_events);
                     row
                 })
@@ -232,7 +238,7 @@ mod tests {
             // Pad the trace to a power of two.
             pad_to_power_of_two::<NUM_TEST_COLS, F>(&mut trace.values);
 
-            trace
+            Ok(trace)
         }
 
         fn included(&self, _: &Self::Record) -> bool {
@@ -266,7 +272,7 @@ mod tests {
         let chip: EdSqrtChip<Ed25519BaseField> = EdSqrtChip::new();
         let shard = ExecutionRecord::default();
         let _: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         // println!("{:?}", trace.values)
     }
 
@@ -278,7 +284,7 @@ mod tests {
         let chip: EdSqrtChip<Ed25519BaseField> = EdSqrtChip::new();
         let shard = ExecutionRecord::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

@@ -19,7 +19,7 @@ use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 use zkm_stark::LookupKind;
 
-use crate::utils::next_power_of_two;
+use crate::{utils::next_power_of_two, CoreChipError};
 
 /// The number of main trace columns for `SyscallChip`.
 pub const NUM_SYSCALL_COLS: usize = size_of::<SyscallCols<u8>>();
@@ -80,11 +80,17 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         format!("Syscall{}", self.shard_kind).to_string()
     }
 
-    fn generate_dependencies(&self, input: &ExecutionRecord, output: &mut ExecutionRecord) {
+    fn generate_dependencies(
+        &self,
+        input: &ExecutionRecord,
+        output: &mut ExecutionRecord,
+    ) -> Result<(), Self::Error> {
         let events = match self.shard_kind {
             SyscallShardKind::Core => &input
                 .syscall_events
@@ -111,6 +117,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             })
             .collect_vec();
         output.global_lookup_events.extend(events);
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -132,7 +139,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         &self,
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let row_fn = |syscall_event: &SyscallEvent, _: bool| {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
@@ -172,7 +179,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             [F::zero(); NUM_SYSCALL_COLS],
         );
 
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYSCALL_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYSCALL_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

@@ -9,7 +9,7 @@ use typenum::{U32, U62};
 use crate::{
     edwards::{EdwardsCurve, EdwardsParameters},
     params::{FieldParameters, NumLimbs},
-    AffinePoint, CurveType, EllipticCurveParameters,
+    AffinePoint, CurveError, CurveType, EllipticCurveParameters,
 };
 
 pub type Ed25519 = EdwardsCurve<Ed25519Parameters>;
@@ -72,7 +72,7 @@ impl EdwardsParameters for Ed25519Parameters {
 ///
 /// This function always returns the nonnegative square root, in the sense that the least
 /// significant bit of the result is always 0.
-pub fn ed25519_sqrt(a: &BigUint) -> BigUint {
+pub fn ed25519_sqrt(a: &BigUint) -> Result<BigUint, CurveError> {
     let modulus = Ed25519BaseField::modulus();
     // The exponent is (modulus+3)/8;
     let mut beta = a.modpow(
@@ -100,7 +100,8 @@ pub fn ed25519_sqrt(a: &BigUint) -> BigUint {
     let flipped_sign_sqrt = beta_squared == neg_a;
 
     if !correct_sign_sqrt && !flipped_sign_sqrt {
-        panic!("a is not a square");
+        tracing::error!("a is not a square");
+        return Err(CurveError::NoSquareRootExists(a.to_bytes_be()));
     }
 
     let beta_bytes = beta.to_bytes_le();
@@ -108,10 +109,12 @@ pub fn ed25519_sqrt(a: &BigUint) -> BigUint {
         beta = (&modulus - &beta) % &modulus;
     }
 
-    beta
+    Ok(beta)
 }
 
-pub fn decompress(compressed_point: &CompressedEdwardsY) -> AffinePoint<Ed25519> {
+pub fn decompress(
+    compressed_point: &CompressedEdwardsY,
+) -> Result<AffinePoint<Ed25519>, CurveError> {
     let mut point_bytes = *compressed_point.as_bytes();
     let sign = point_bytes[31] >> 7 == 1;
     // mask out the sign bit
@@ -126,7 +129,7 @@ pub fn decompress(compressed_point: &CompressedEdwardsY) -> AffinePoint<Ed25519>
     let v_inv = v.modpow(&(modulus - BigUint::from(2u64)), modulus);
     let u_div_v = (u * &v_inv) % modulus;
 
-    let mut x = ed25519_sqrt(&u_div_v);
+    let mut x = ed25519_sqrt(&u_div_v)?;
 
     // sqrt always returns the nonnegative square root,
     // so we negate according to the supplied sign bit.
@@ -134,7 +137,7 @@ pub fn decompress(compressed_point: &CompressedEdwardsY) -> AffinePoint<Ed25519>
         x = modulus - &x;
     }
 
-    AffinePoint::new(x, y.clone())
+    Ok(AffinePoint::new(x, y.clone()))
 }
 
 #[cfg(test)]
@@ -170,7 +173,7 @@ mod tests {
 
                 CompressedEdwardsY(compressed)
             };
-            assert_eq!(point, decompress(&compressed_point));
+            assert_eq!(point, decompress(&compressed_point).unwrap());
 
             // Double the point to create a "random" point for the next iteration.
             point = point.clone() + point.clone();
