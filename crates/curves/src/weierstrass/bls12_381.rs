@@ -66,7 +66,7 @@ impl EllipticCurveParameters for Bls12381Parameters {
 }
 
 impl WeierstrassParameters for Bls12381Parameters {
-    // The values of `A` and `B` has been taken from py_ecc python library by Ethereum Foundation.
+    // The values of `A` and `B` have been taken from py_ecc python library by Ethereum Foundation.
     // https://github.com/ethereum/py_ecc/blob/7b9e1b3/py_ecc/bls12_381/bls12_381_curve.py#L31
     const A: GenericArray<u8, U48> = GenericArray::from_array([
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
