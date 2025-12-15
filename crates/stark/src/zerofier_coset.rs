@@ -52,7 +52,7 @@ impl<F: TwoAdicField> ZerofierOnCoset<F> {
         packed
     }
 
-    /// Evaluate the Langrange basis polynomial, `L_i(x) = Z_H(x) / (x - g_H^i)`, on our coset `s K`.
+    /// Evaluate the Lagrange basis polynomial, `L_i(x) = Z_H(x) / (x - g_H^i)`, on our coset `s K`.
     /// Here `L_i(x)` is unnormalized in the sense that it evaluates to some nonzero value at `g_H^i`,
     /// not necessarily 1.
     pub fn lagrange_basis_unnormalized(&self, i: usize) -> Vec<F> {
