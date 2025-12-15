@@ -23,4 +23,4 @@ zkm-build = { workspace = true }
 zkm-sdk = { workspace = true }
 zkm-core-machine = { workspace = true }
 yansi = "1.0.1"
-cargo_metadata = "0.18.1"
+cargo_metadata = "0.23.1"

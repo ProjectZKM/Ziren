@@ -147,7 +147,7 @@ pub fn generate_elf_paths(
             .ok_or_else(|| anyhow::anyhow!("cannot find package for {program_crate}"))?;
 
         for bin_target in program.targets.iter().filter(|t| {
-            t.kind.contains(&"bin".to_owned()) && t.crate_types.contains(&"bin".to_owned())
+            t.kind.contains(&"bin".into()) && t.crate_types.contains(&"bin".into())
         }) {
             // Filter out irrelevant targets if `--bin` is used.
             if let Some(args) = args {
