@@ -5,60 +5,65 @@ pub enum Opcode {
     // ALU
     ADD = 0,         // ADDSUB
     SUB = 1,         // ADDSUB
-    MULT = 2,        // MUL
-    MULTU = 3,       // MUL
-    MUL = 4,         // MUL
+    MUL = 2,         // MUL
+    MULT = 3,        // MUL
+    MULTU = 4,       // MUL
     DIV = 5,         // DIVREM
     DIVU = 6,        // DIVREM
-    SLL = 7,         // SLL
-    SRL = 8,         // SR
-    SRA = 9,         // SR
-    ROR = 10,        // SR
-    SLT = 11,        // LT
-    SLTU = 12,       // LT
-    AND = 13,        // BITWISE
-    OR = 14,         // BITWISE
-    XOR = 15,        // BITWISE
-    NOR = 16,        // BITWISE
-    CLZ = 17,        // CLO_CLZ
-    CLO = 18,        // CLO_CLZ
-    // Control Flow
-    BEQ = 19,        // BRANCH
-    BGEZ = 20,       // BRANCH
-    BGTZ = 21,       // BRANCH
-    BLEZ = 22,       // BRANCH
-    BLTZ = 23,       // BRANCH
-    BNE = 24,        // BRANCH
-    Jump = 25,       // JUMP
-    Jumpi = 26,      // JUMP
-    JumpDirect = 27, // JUMP
+    MOD = 7,         // DIVREM
+    MODU = 8,        // DIVREM
+    SLL = 9,         // SLL
+    SRL = 10,        // SR
+    SRA = 11,        // SR
+    ROR = 12,        // SR
+    SLT = 13,        // LT
+    SLTU = 14,       // LT
+    AND = 15,        // BITWISE
+    OR = 16,         // BITWISE
+    XOR = 17,        // BITWISE
+    NOR = 18,        // BITWISE
+    CLZ = 19,        // CLO_CLZ
+    CLO = 20,        // CLO_CLZ
+    // Control FLow
+    BEQ = 21,        // BRANCH
+    BGEZ = 22,       // BRANCH
+    BGTZ = 23,       // BRANCH
+    BLEZ = 24,       // BRANCH
+    BLTZ = 25,       // BRANCH
+    BNE = 26,        // BRANCH
+    Jump = 27,       // JUMP
+    Jumpi = 28,      // JUMP
+    JumpDirect = 29, // JUMP
+    SYSCALL = 30,    // SYSCALL
     // Memory Op
-    LB = 28,         // LOAD
-    LBU = 29,        // LOAD
-    LH = 30,         // LOAD
-    LHU = 31,        // LOAD
-    LW = 32,         // LOAD
-    LWL = 33,        // LOAD
-    LWR = 34,        // LOAD
-    LL = 35,         // LOAD
-    SB = 36,         // STORE
-    SH = 37,         // STORE
-    SW = 38,         // STORE
-    SWL = 39,        // STORE
-    SWR = 40,        // STORE
-    SC = 41,         // STORE
-    // Syscall
-    SYSCALL = 42,    // SYSCALL
+    LB = 31,         // LOAD
+    LBU = 32,        // LOAD
+    LH = 33,         // LOAD
+    LHU = 34,        // LOAD
+    LW = 35,         // LOAD
+    LWL = 36,        // LOAD
+    LWR = 37,        // LOAD
+    LL = 38,         // LOAD
+    SB = 39,         // STORE
+    SH = 40,         // STORE
+    SW = 41,         // STORE
+    SWL = 42,        // STORE
+    SWR = 43,        // STORE
+    SC = 44,         // STORE
     // Misc
-    MEQ = 43,        // MOVCOND
-    MNE = 44,        // MOVCOND
-    TEQ = 45,        // MOVCOND
-    SEXT = 46,       // SEXT
-    WSBH = 47,       // MISC
-    EXT = 48,        // EXT
-    MADDU = 49,      // MADDSUB
-    MSUBU = 50,      // MADDSUB
-    INS = 51,        // INS
+    INS = 45,        // INS
+    MADDU = 46,      // MADDSUB
+    MSUBU = 47,      // MADDSUB
+    MADD = 48,       // MADDSUB
+    MSUB = 49,       // MADDSUB
+    MEQ = 50,        // MOVCOND
+    MNE = 51,        // MOVCOND
+    WSBH = 52,       // WSBH
+    EXT = 53,        // EXT
+    TEQ = 54,        // TEQ
+    SEXT = 55,       // SEXT
+
+    // Syscall
     UNIMPL = 0xff,
 }
 ```
