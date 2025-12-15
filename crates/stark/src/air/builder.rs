@@ -380,7 +380,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
     }
 }
 
-/// A builder that can operation on septic extension elements.
+/// A builder that can operate on septic extension elements.
 pub trait SepticExtensionAirBuilder: BaseAirBuilder {
     /// Asserts that the two field extensions are equal.
     fn assert_septic_ext_eq<I: Into<Self::Expr>>(
@@ -394,7 +394,7 @@ pub trait SepticExtensionAirBuilder: BaseAirBuilder {
     }
 }
 
-/// A builder that can operation on extension elements.
+/// A builder that can operate on extension elements.
 pub trait ExtensionAirBuilder: BaseAirBuilder {
     /// Asserts that the two field extensions are equal.
     fn assert_ext_eq<I: Into<Self::Expr>>(
