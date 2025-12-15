@@ -61,7 +61,7 @@ where
     F: Field,
     A: BaseAir<F>,
 {
-    /// Records the lookups and constraint degree from the air and crates a new chip.
+    /// Records the lookups and constraint degree from the air and creates a new chip.
     pub fn new(air: A) -> Self
     where
         A: MachineAir<F> + Air<LookupBuilder<F>> + Air<SymbolicAirBuilder<F>>,
