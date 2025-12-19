@@ -1,9 +1,7 @@
 use std::marker::PhantomData;
 
 use num::BigUint;
-use typenum::Unsigned;
 use zkm_curves::{
-    params::NumWords,
     weierstrass::{FieldType, FpOpField},
 };
 
@@ -13,17 +11,17 @@ use crate::{
     ExecutionError,
 };
 
-pub struct Fp2MulSyscall<P> {
+pub struct Fp2MulSyscall<P, const S: usize> {
     _marker: PhantomData<P>,
 }
 
-impl<P> Fp2MulSyscall<P> {
+impl<P, const S: usize> Fp2MulSyscall<P, S> {
     pub const fn new() -> Self {
         Self { _marker: PhantomData }
     }
 }
 
-impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
+impl<P: FpOpField, const S: usize> Syscall for Fp2MulSyscall<P, S> {
     fn execute(
         &self,
         rt: &mut SyscallContext,
@@ -41,10 +39,10 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
             panic!();
         }
 
-        let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
+        //let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
 
-        let x = rt.slice_unsafe(x_ptr, num_words);
-        let (y_memory_records, y) = rt.mr_slice(y_ptr, num_words);
+        let x = rt.slice_unsafe::<S>(x_ptr);
+        let (y_memory_records, y) = rt.mr_array::<S>(y_ptr);
         rt.clk += 1;
 
         let (ac0, ac1) = x.split_at(x.len() / 2);
@@ -64,9 +62,9 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
         let c1 = ((ac0 * bc1) % modulus + (ac1 * bc0) % modulus) % modulus;
 
         let mut result = c0.to_u32_digits();
-        result.resize(num_words / 2, 0);
+        result.resize(S / 2, 0);
         result.extend_from_slice(&c1.to_u32_digits());
-        result.resize(num_words, 0);
+        result.resize(S, 0);
 
         let x_memory_records = rt.mw_slice(x_ptr, &result);
 
@@ -75,11 +73,11 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
             shard,
             clk,
             x_ptr,
-            x,
+            x: x.to_vec(),
             y_ptr,
-            y,
+            y: y.to_vec(),
             x_memory_records,
-            y_memory_records,
+            y_memory_records: y_memory_records.to_vec(),
             local_mem_access: rt.postprocess(),
         };
         let syscall_event =

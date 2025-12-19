@@ -74,6 +74,18 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
         (record, record.value)
     }
 
+    /// Read an array of words from memory.
+    pub fn mr_array<const SIZE: usize>(&mut self, addr: u32) -> ([MemoryReadRecord; SIZE], [u32; SIZE]) {
+        let mut records = [MemoryReadRecord::default(); SIZE];
+        let mut values = [0u32; SIZE];
+        for i in 0..SIZE {
+            let (record, value) = self.mr(addr + i as u32 * 4);
+            records[i] = record;
+            values[i] = value;
+        }
+        (records, values)
+    }
+
     /// Read a slice of words from memory.
     pub fn mr_slice(&mut self, addr: u32, len: usize) -> (Vec<MemoryReadRecord>, Vec<u32>) {
         let mut records = Vec::new();
@@ -167,10 +179,10 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
 
     /// Get a slice of words, but doesn't use a memory record.
     #[must_use]
-    pub fn slice_unsafe(&mut self, addr: u32, len: usize) -> Vec<u32> {
-        let mut values = Vec::new();
-        for i in 0..len {
-            values.push(self.rt.word(addr + i as u32 * 4));
+    pub fn slice_unsafe<const SIZE: usize>(&mut self, addr: u32) -> [u32; SIZE] {
+        let mut values = [0u32; SIZE];
+        for i in 0..SIZE {
+            values[i] = self.rt.word(addr + i as u32 * 4);
         }
         values
     }

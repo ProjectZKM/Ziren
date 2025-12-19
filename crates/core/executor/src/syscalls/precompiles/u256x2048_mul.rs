@@ -32,8 +32,8 @@ impl Syscall for U256xU2048MulSyscall {
         let (lo_ptr_memory, lo_ptr) = rt.rr_traced(A2);
         let (hi_ptr_memory, hi_ptr) = rt.rr_traced(A3);
 
-        let (a_memory_records, a) = rt.mr_slice(a_ptr, U256_NUM_WORDS);
-        let (b_memory_records, b) = rt.mr_slice(b_ptr, U2048_NUM_WORDS);
+        let (a_memory_records, a) = rt.mr_array::<U256_NUM_WORDS>(a_ptr);
+        let (b_memory_records, b) = rt.mr_array::<U2048_NUM_WORDS>(b_ptr);
         let uint256_a = BigUint::from_bytes_le(&words_to_bytes_le_vec(&a));
         let uint2048_b = BigUint::from_bytes_le(&words_to_bytes_le_vec(&b));
 
@@ -61,17 +61,17 @@ impl Syscall for U256xU2048MulSyscall {
             shard,
             clk,
             a_ptr,
-            a,
+            a: a.to_vec(),
             b_ptr,
-            b,
+            b: b.to_vec(),
             lo_ptr,
             lo: lo_words.to_vec(),
             hi_ptr,
             hi: hi_words.to_vec(),
             lo_ptr_memory,
             hi_ptr_memory,
-            a_memory_records,
-            b_memory_records,
+            a_memory_records: a_memory_records.to_vec(),
+            b_memory_records: b_memory_records.to_vec(),
             lo_memory_records,
             hi_memory_records,
             local_mem_access: rt.postprocess(),

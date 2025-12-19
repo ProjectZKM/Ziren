@@ -93,7 +93,7 @@ pub struct EllipticCurveDecompressEvent {
 /// The generic parameter `N` is the number of u32 words in the point representation. For example,
 /// for the secp256k1 curve, `N` would be 16 (64 bytes) because the x and y coordinates are 32 bytes
 /// each.
-pub fn create_ec_add_event<E: EllipticCurve>(
+pub fn create_ec_add_event<E: EllipticCurve, const S: usize>(
     rt: &mut SyscallContext,
     arg1: u32,
     arg2: u32,
@@ -108,11 +108,11 @@ pub fn create_ec_add_event<E: EllipticCurve>(
         panic!();
     }
 
-    let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+//    const S: usize = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
 
-    let p = rt.slice_unsafe(p_ptr, num_words);
+    let p = rt.slice_unsafe::<S>(p_ptr);
 
-    let (q_memory_records, q) = rt.mr_slice(q_ptr, num_words);
+    let (q_memory_records, q) = rt.mr_array::<S>(q_ptr);
 
     // When we write to p, we want the clk to be incremented because p and q could be the same.
     rt.clk += 1;
@@ -129,11 +129,11 @@ pub fn create_ec_add_event<E: EllipticCurve>(
         shard: rt.current_shard(),
         clk: start_clk,
         p_ptr,
-        p,
+        p: p.to_vec(),
         q_ptr,
-        q,
+        q: q.to_vec(),
         p_memory_records,
-        q_memory_records,
+        q_memory_records: q_memory_records.to_vec(),
         local_mem_access: rt.postprocess(),
     }
 }
@@ -142,7 +142,7 @@ pub fn create_ec_add_event<E: EllipticCurve>(
 ///
 /// It takes a pointer to a memory location, reads the point from memory, doubles it, and writes the
 /// result back to the memory location.
-pub fn create_ec_double_event<E: EllipticCurve>(
+pub fn create_ec_double_event<E: EllipticCurve, const S: usize>(
     rt: &mut SyscallContext,
     arg1: u32,
     _: u32,
@@ -153,9 +153,9 @@ pub fn create_ec_double_event<E: EllipticCurve>(
         panic!();
     }
 
-    let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+//    let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
 
-    let p = rt.slice_unsafe(p_ptr, num_words);
+    let p = rt.slice_unsafe::<S>(p_ptr);
 
     let p_affine = AffinePoint::<E>::from_words_le(&p);
 
@@ -169,7 +169,7 @@ pub fn create_ec_double_event<E: EllipticCurve>(
         shard: rt.current_shard(),
         clk: start_clk,
         p_ptr,
-        p,
+        p: p.to_vec(),
         p_memory_records,
         local_mem_access: rt.postprocess(),
     }
@@ -179,7 +179,7 @@ pub fn create_ec_double_event<E: EllipticCurve>(
 ///
 /// It takes a pointer to a memory location, reads the point from memory, decompresses it, and
 /// writes the result back to the memory location.
-pub fn create_ec_decompress_event<E: EllipticCurve>(
+pub fn create_ec_decompress_event<E: EllipticCurve, const S: usize>(
     rt: &mut SyscallContext,
     slice_ptr: u32,
     sign_bit: u32,
@@ -188,11 +188,11 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
     assert!(slice_ptr.is_multiple_of(4), "slice_ptr must be 4-byte aligned");
     assert!(sign_bit <= 1, "is_odd must be 0 or 1");
 
-    let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
-    let num_words_field_element = num_limbs / 4;
+    //let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
+    //let num_words_field_element = num_limbs / 4;
 
     let (x_memory_records, x_vec) =
-        rt.mr_slice(slice_ptr + (num_limbs as u32), num_words_field_element);
+        rt.mr_slice(slice_ptr + (S as u32), S/4);
 
     let x_bytes = words_to_bytes_le_vec(&x_vec);
     let mut x_bytes_be = x_bytes.clone();
@@ -208,7 +208,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
     let computed_point: AffinePoint<E> = decompress_fn(&x_bytes_be, sign_bit);
 
     let mut decompressed_y_bytes = computed_point.y.to_bytes_le();
-    decompressed_y_bytes.resize(num_limbs, 0u8);
+    decompressed_y_bytes.resize(S, 0u8);
     let y_words = bytes_to_words_le_vec(&decompressed_y_bytes);
 
     let y_memory_records = rt.mw_slice(slice_ptr, &y_words);

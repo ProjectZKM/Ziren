@@ -12,18 +12,18 @@ use crate::{
     ExecutionError,
 };
 
-pub struct FpOpSyscall<P> {
+pub struct FpOpSyscall<P, const S: usize> {
     op: FieldOperation,
     _marker: PhantomData<P>,
 }
 
-impl<P> FpOpSyscall<P> {
+impl<P, const S: usize> FpOpSyscall<P, S> {
     pub const fn new(op: FieldOperation) -> Self {
         Self { op, _marker: PhantomData }
     }
 }
 
-impl<P: FpOpField> Syscall for FpOpSyscall<P> {
+impl<P: FpOpField, const S: usize> Syscall for FpOpSyscall<P, S> {
     fn execute(
         &self,
         rt: &mut SyscallContext,
@@ -41,10 +41,10 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
             panic!();
         }
 
-        let num_words = <P as NumWords>::WordsFieldElement::USIZE;
+        //let num_words = <P as NumWords>::WordsFieldElement::USIZE;
 
-        let x = rt.slice_unsafe(x_ptr, num_words);
-        let (y_memory_records, y) = rt.mr_slice(y_ptr, num_words);
+        let x = rt.slice_unsafe::<S>(x_ptr);
+        let (y_memory_records, y) = rt.mr_array::<S>(y_ptr);
 
         let modulus = &BigUint::from_bytes_le(P::MODULUS);
         let a = BigUint::from_slice(&x) % modulus;
@@ -57,7 +57,7 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
             _ => panic!("Unsupported operation"),
         };
         let mut result = result.to_u32_digits();
-        result.resize(num_words, 0);
+        result.resize(S, 0);
 
         rt.clk += 1;
         let x_memory_records = rt.mw_slice(x_ptr, &result);
@@ -67,12 +67,12 @@ impl<P: FpOpField> Syscall for FpOpSyscall<P> {
             shard,
             clk,
             x_ptr,
-            x,
+            x: x.to_vec(),
             y_ptr,
-            y,
+            y: y.to_vec(),
             op: self.op,
             x_memory_records,
-            y_memory_records,
+            y_memory_records: y_memory_records.to_vec(),
             local_mem_access: rt.postprocess(),
         };
 

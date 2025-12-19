@@ -38,7 +38,7 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         assert!(sign <= 1, "Sign bit must be 0 or 1.");
 
         let (y_memory_records_vec, y_vec) =
-            rt.mr_slice(slice_ptr + (COMPRESSED_POINT_BYTES as u32), WORDS_FIELD_ELEMENT);
+            rt.mr_array::<WORDS_FIELD_ELEMENT>(slice_ptr + (COMPRESSED_POINT_BYTES as u32));
         let y_memory_records: [MemoryReadRecord; 8] = y_memory_records_vec.try_into().unwrap();
 
         let sign_bool = sign != 0;

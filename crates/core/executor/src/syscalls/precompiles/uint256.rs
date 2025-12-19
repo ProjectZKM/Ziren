@@ -32,14 +32,14 @@ impl Syscall for Uint256MulSyscall {
 
         // First read the words for the x value. We can read a slice_unsafe here because we write
         // the computed result to x later.
-        let x = rt.slice_unsafe(x_ptr, WORDS_FIELD_ELEMENT);
+        let x = rt.slice_unsafe::<WORDS_FIELD_ELEMENT>(x_ptr);
 
         // Read the y value.
-        let (y_memory_records, y) = rt.mr_slice(y_ptr, WORDS_FIELD_ELEMENT);
+        let (y_memory_records, y) = rt.mr_array::<WORDS_FIELD_ELEMENT>(y_ptr);
 
         // The modulus is stored after the y value. We increment the pointer by the number of words.
         let modulus_ptr = y_ptr + WORDS_FIELD_ELEMENT as u32 * WORD_SIZE as u32;
-        let (modulus_memory_records, modulus) = rt.mr_slice(modulus_ptr, WORDS_FIELD_ELEMENT);
+        let (modulus_memory_records, modulus) = rt.mr_array::<WORDS_FIELD_ELEMENT>(modulus_ptr);
 
         // Get the BigUint values for x, y, and the modulus.
         let uint256_x = BigUint::from_bytes_le(&words_to_bytes_le_vec(&x));
@@ -70,13 +70,13 @@ impl Syscall for Uint256MulSyscall {
             shard,
             clk,
             x_ptr,
-            x,
+            x: x.to_vec(),
             y_ptr,
-            y,
-            modulus,
+            y: y.to_vec(),
+            modulus: modulus.to_vec(),
             x_memory_records,
-            y_memory_records,
-            modulus_memory_records,
+            y_memory_records: y_memory_records.to_vec(),
+            modulus_memory_records: modulus_memory_records.to_vec(),
             local_mem_access: rt.postprocess(),
         });
         let sycall_event =

@@ -29,7 +29,7 @@ impl Syscall for Poseidon2PermuteSyscall {
 
         // First read the words for the state. We can read a slice_unsafe here because we write
         // the post-state to state_ptr later.
-        let pre_state = ctx.slice_unsafe(state_ptr, STATE_SIZE);
+        let pre_state = ctx.slice_unsafe::<STATE_SIZE>(state_ptr);
         let pre_state: [u32; 16] = pre_state.as_slice().try_into().unwrap();
 
         let mut state = pre_state.map(KoalaBear::from_canonical_u32);
