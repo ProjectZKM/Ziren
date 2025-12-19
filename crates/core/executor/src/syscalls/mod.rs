@@ -45,7 +45,7 @@ use verify::VerifySyscall;
 use write::WriteSyscall;
 use zkm_curves::{
     edwards::ed25519::{Ed25519, Ed25519BaseField, Ed25519Parameters},
-    params::NumWords,
+    params::{NumLimbs, NumWords},
     weierstrass::{
         bls12_381::{Bls12381, Bls12381BaseField},
         bn254::{Bn254, Bn254BaseField},
@@ -87,9 +87,12 @@ const WORD_SIZE_BN254: usize = <Bn254BaseField as NumWords>::WordsCurvePoint::US
 const FIELD_SIZE_BN254: usize = <Bn254BaseField as NumWords>::WordsFieldElement::USIZE;
 const WORD_SIZE_BLS12381: usize = <Bls12381BaseField as NumWords>::WordsCurvePoint::USIZE;
 const FIELD_SIZE_BLS12381: usize = <Bls12381BaseField as NumWords>::WordsFieldElement::USIZE;
+const LIMB_SIZE_BLS12381: usize = <Bls12381BaseField as NumLimbs>::Limbs::USIZE;
 const WORD_SIZE_ED25519: usize = <Ed25519BaseField as NumWords>::WordsCurvePoint::USIZE;
 const WORD_SIZE_SECP256K1: usize = <Secp256k1BaseField as NumWords>::WordsCurvePoint::USIZE;
+const LIMB_SIZE_SECP256K1: usize = <Secp256k1BaseField as NumLimbs>::Limbs::USIZE;
 const WORD_SIZE_SECP256R1: usize = <Secp256r1BaseField as NumWords>::WordsCurvePoint::USIZE;
+const LIMB_SIZE_SECP256R1: usize = <Secp256r1BaseField as NumLimbs>::Limbs::USIZE;
 
 /// Creates the default syscall map.
 #[must_use]
@@ -129,7 +132,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(
         SyscallCode::SECP256K1_DECOMPRESS,
-        Arc::new(WeierstrassDecompressSyscall::<Secp256k1, WORD_SIZE_SECP256K1>::new()),
+        Arc::new(WeierstrassDecompressSyscall::<Secp256k1, LIMB_SIZE_SECP256K1>::new()),
     );
 
     syscall_map.insert(
@@ -144,7 +147,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(
         SyscallCode::SECP256R1_DECOMPRESS,
-        Arc::new(WeierstrassDecompressSyscall::<Secp256r1, WORD_SIZE_SECP256R1>::new()),
+        Arc::new(WeierstrassDecompressSyscall::<Secp256r1, LIMB_SIZE_SECP256R1>::new()),
     );
 
     syscall_map.insert(
@@ -255,7 +258,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(
         SyscallCode::BLS12381_DECOMPRESS,
-        Arc::new(WeierstrassDecompressSyscall::<Bls12381, WORD_SIZE_BLS12381>::new()),
+        Arc::new(WeierstrassDecompressSyscall::<Bls12381, LIMB_SIZE_BLS12381>::new()),
     );
 
     syscall_map.insert(SyscallCode::SYS_BRK, Arc::new(SysBrkSyscall));

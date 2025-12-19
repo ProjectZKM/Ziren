@@ -178,7 +178,7 @@ pub fn create_ec_double_event<E: EllipticCurve, const S: usize>(
 ///
 /// It takes a pointer to a memory location, reads the point from memory, decompresses it, and
 /// writes the result back to the memory location.
-pub fn create_ec_decompress_event<E: EllipticCurve, const SS: usize>(
+pub fn create_ec_decompress_event<E: EllipticCurve, const S: usize>(
     rt: &mut SyscallContext,
     slice_ptr: u32,
     sign_bit: u32,
@@ -187,11 +187,11 @@ pub fn create_ec_decompress_event<E: EllipticCurve, const SS: usize>(
     assert!(slice_ptr.is_multiple_of(4), "slice_ptr must be 4-byte aligned");
     assert!(sign_bit <= 1, "is_odd must be 0 or 1");
 
-    let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
-    let num_words_field_element = num_limbs / 4;
+    //let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
+    //let num_words_field_element = num_limbs / 4;
 
     let (x_memory_records, x_vec) =
-        rt.mr_slice(slice_ptr + (num_limbs as u32), num_words_field_element);
+        rt.mr_slice(slice_ptr + (S as u32), S / 4);
 
     let x_bytes = words_to_bytes_le_vec(&x_vec);
     let mut x_bytes_be = x_bytes.clone();
@@ -207,7 +207,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve, const SS: usize>(
     let computed_point: AffinePoint<E> = decompress_fn(&x_bytes_be, sign_bit);
 
     let mut decompressed_y_bytes = computed_point.y.to_bytes_le();
-    decompressed_y_bytes.resize(num_limbs, 0u8);
+    decompressed_y_bytes.resize(S, 0u8);
     let y_words = bytes_to_words_le_vec(&decompressed_y_bytes);
 
     let y_memory_records = rt.mw_slice(slice_ptr, &y_words);
