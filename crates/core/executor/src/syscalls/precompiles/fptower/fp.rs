@@ -1,8 +1,6 @@
 use num::BigUint;
 use std::marker::PhantomData;
-use typenum::Unsigned;
 use zkm_curves::{
-    params::NumWords,
     weierstrass::{FieldType, FpOpField},
 };
 

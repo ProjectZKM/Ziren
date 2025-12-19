@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use typenum::Unsigned;
 use zkm_curves::{
-    params::{NumLimbs, NumWords},
     weierstrass::{
         bls12_381::bls12381_decompress, secp256k1::secp256k1_decompress,
         secp256r1::secp256r1_decompress,
