@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use typenum::Unsigned;
 use zkm_curves::{
-    AffinePoint, CurveType, EllipticCurve, params::NumLimbs, weierstrass::{
+    params::NumLimbs,
+    weierstrass::{
         bls12_381::bls12381_decompress, secp256k1::secp256k1_decompress,
         secp256r1::secp256r1_decompress,
-    }
+    },
+    AffinePoint, CurveType, EllipticCurve,
 };
 use zkm_primitives::consts::{bytes_to_words_le_vec, words_to_bytes_le_vec};
 
@@ -105,7 +107,7 @@ pub fn create_ec_add_event<E: EllipticCurve, const S: usize>(
         panic!();
     }
 
-//    const S: usize = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+    //    const S: usize = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
 
     let p = rt.slice_unsafe::<S>(p_ptr);
 
@@ -150,7 +152,7 @@ pub fn create_ec_double_event<E: EllipticCurve, const S: usize>(
         panic!();
     }
 
-//    let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+    //    let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
 
     let p = rt.slice_unsafe::<S>(p_ptr);
 

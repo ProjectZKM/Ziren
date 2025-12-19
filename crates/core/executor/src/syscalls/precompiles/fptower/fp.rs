@@ -1,8 +1,6 @@
 use num::BigUint;
 use std::marker::PhantomData;
-use zkm_curves::{
-    weierstrass::{FieldType, FpOpField},
-};
+use zkm_curves::weierstrass::{FieldType, FpOpField};
 
 use crate::{
     events::{FieldOperation, FpOpEvent, PrecompileEvent},

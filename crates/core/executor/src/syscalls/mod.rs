@@ -44,12 +44,14 @@ use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
 use verify::VerifySyscall;
 use write::WriteSyscall;
 use zkm_curves::{
-    edwards::{ed25519::{Ed25519, Ed25519BaseField, Ed25519Parameters}}, params::NumWords, weierstrass::{
+    edwards::ed25519::{Ed25519, Ed25519BaseField, Ed25519Parameters},
+    params::NumWords,
+    weierstrass::{
         bls12_381::{Bls12381, Bls12381BaseField},
         bn254::{Bn254, Bn254BaseField},
         secp256k1::{Secp256k1, Secp256k1BaseField},
         secp256r1::{Secp256r1, Secp256r1BaseField},
-    }
+    },
 };
 
 use crate::{events::FieldOperation, ExecutionError};
@@ -82,7 +84,9 @@ pub trait Syscall: Send + Sync {
 
 use typenum::Unsigned;
 const WORD_SIZE_BN254: usize = <Bn254BaseField as NumWords>::WordsCurvePoint::USIZE;
+const FIELD_SIZE_BN254: usize = <Bn254BaseField as NumWords>::WordsFieldElement::USIZE;
 const WORD_SIZE_BLS12381: usize = <Bls12381BaseField as NumWords>::WordsCurvePoint::USIZE;
+const FIELD_SIZE_BLS12381: usize = <Bls12381BaseField as NumWords>::WordsFieldElement::USIZE;
 const WORD_SIZE_ED25519: usize = <Ed25519BaseField as NumWords>::WordsCurvePoint::USIZE;
 const WORD_SIZE_SECP256K1: usize = <Secp256k1BaseField as NumWords>::WordsCurvePoint::USIZE;
 const WORD_SIZE_SECP256R1: usize = <Secp256r1BaseField as NumWords>::WordsCurvePoint::USIZE;
@@ -97,7 +101,10 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(SyscallCode::SHA_COMPRESS, Arc::new(Sha256CompressSyscall));
 
-    syscall_map.insert(SyscallCode::ED_ADD, Arc::new(EdwardsAddAssignSyscall::<Ed25519, WORD_SIZE_ED25519>::new()));
+    syscall_map.insert(
+        SyscallCode::ED_ADD,
+        Arc::new(EdwardsAddAssignSyscall::<Ed25519, WORD_SIZE_ED25519>::new()),
+    );
 
     syscall_map.insert(
         SyscallCode::ED_DECOMPRESS,
@@ -140,8 +147,10 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
         Arc::new(WeierstrassDecompressSyscall::<Secp256r1, WORD_SIZE_SECP256R1>::new()),
     );
 
-    syscall_map
-        .insert(SyscallCode::BN254_ADD, Arc::new(WeierstrassAddAssignSyscall::<Bn254, WORD_SIZE_BN254>::new()));
+    syscall_map.insert(
+        SyscallCode::BN254_ADD,
+        Arc::new(WeierstrassAddAssignSyscall::<Bn254, WORD_SIZE_BN254>::new()),
+    );
 
     syscall_map.insert(
         SyscallCode::BN254_DOUBLE,
@@ -164,45 +173,51 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(
         SyscallCode::BLS12381_FP_ADD,
-        Arc::new(FpOpSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(FieldOperation::Add)),
+        Arc::new(FpOpSyscall::<Bls12381BaseField, FIELD_SIZE_BLS12381>::new(FieldOperation::Add)),
     );
 
     syscall_map.insert(
         SyscallCode::BLS12381_FP_SUB,
-        Arc::new(FpOpSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(FieldOperation::Sub)),
+        Arc::new(FpOpSyscall::<Bls12381BaseField, FIELD_SIZE_BLS12381>::new(FieldOperation::Sub)),
     );
 
     syscall_map.insert(
         SyscallCode::BLS12381_FP_MUL,
-        Arc::new(FpOpSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(FieldOperation::Mul)),
+        Arc::new(FpOpSyscall::<Bls12381BaseField, FIELD_SIZE_BLS12381>::new(FieldOperation::Mul)),
     );
 
     syscall_map.insert(
         SyscallCode::BLS12381_FP2_ADD,
-        Arc::new(Fp2AddSubSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(FieldOperation::Add)),
+        Arc::new(Fp2AddSubSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(
+            FieldOperation::Add,
+        )),
     );
 
     syscall_map.insert(
         SyscallCode::BLS12381_FP2_SUB,
-        Arc::new(Fp2AddSubSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(FieldOperation::Sub)),
+        Arc::new(Fp2AddSubSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new(
+            FieldOperation::Sub,
+        )),
     );
 
-    syscall_map
-        .insert(SyscallCode::BLS12381_FP2_MUL, Arc::new(Fp2MulSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new()));
+    syscall_map.insert(
+        SyscallCode::BLS12381_FP2_MUL,
+        Arc::new(Fp2MulSyscall::<Bls12381BaseField, WORD_SIZE_BLS12381>::new()),
+    );
 
     syscall_map.insert(
         SyscallCode::BN254_FP_ADD,
-        Arc::new(FpOpSyscall::<Bn254BaseField, WORD_SIZE_BN254>::new(FieldOperation::Add)),
+        Arc::new(FpOpSyscall::<Bn254BaseField, FIELD_SIZE_BN254>::new(FieldOperation::Add)),
     );
 
     syscall_map.insert(
         SyscallCode::BN254_FP_SUB,
-        Arc::new(FpOpSyscall::<Bn254BaseField, WORD_SIZE_BN254>::new(FieldOperation::Sub)),
+        Arc::new(FpOpSyscall::<Bn254BaseField, FIELD_SIZE_BN254>::new(FieldOperation::Sub)),
     );
 
     syscall_map.insert(
         SyscallCode::BN254_FP_MUL,
-        Arc::new(FpOpSyscall::<Bn254BaseField, WORD_SIZE_BN254>::new(FieldOperation::Mul)),
+        Arc::new(FpOpSyscall::<Bn254BaseField, FIELD_SIZE_BN254>::new(FieldOperation::Mul)),
     );
 
     syscall_map.insert(
@@ -215,8 +230,10 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
         Arc::new(Fp2AddSubSyscall::<Bn254BaseField, WORD_SIZE_BN254>::new(FieldOperation::Sub)),
     );
 
-    syscall_map
-        .insert(SyscallCode::BN254_FP2_MUL, Arc::new(Fp2MulSyscall::<Bn254BaseField, WORD_SIZE_BN254>::new()));
+    syscall_map.insert(
+        SyscallCode::BN254_FP2_MUL,
+        Arc::new(Fp2MulSyscall::<Bn254BaseField, WORD_SIZE_BN254>::new()),
+    );
 
     syscall_map.insert(SyscallCode::ENTER_UNCONSTRAINED, Arc::new(EnterUnconstrainedSyscall));
 

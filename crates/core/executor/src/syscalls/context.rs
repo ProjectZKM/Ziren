@@ -75,7 +75,10 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
     }
 
     /// Read an array of words from memory.
-    pub fn mr_array<const SIZE: usize>(&mut self, addr: u32) -> ([MemoryReadRecord; SIZE], [u32; SIZE]) {
+    pub fn mr_array<const SIZE: usize>(
+        &mut self,
+        addr: u32,
+    ) -> ([MemoryReadRecord; SIZE], [u32; SIZE]) {
         let mut records = [MemoryReadRecord::default(); SIZE];
         let mut values = [0u32; SIZE];
         for i in 0..SIZE {

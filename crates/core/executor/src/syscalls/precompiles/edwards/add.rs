@@ -19,7 +19,9 @@ impl<E: EllipticCurve + EdwardsParameters, const S: usize> EdwardsAddAssignSysca
     }
 }
 
-impl<E: EllipticCurve + EdwardsParameters, const S: usize> Syscall for EdwardsAddAssignSyscall<E, S> {
+impl<E: EllipticCurve + EdwardsParameters, const S: usize> Syscall
+    for EdwardsAddAssignSyscall<E, S>
+{
     fn num_extra_cycles(&self) -> u32 {
         1
     }
