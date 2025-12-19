@@ -80,3 +80,4 @@ sha2-v0-10-8 = { git = "https://github.com/ziren-patches/RustCrypto-hashes", pac
 substrate-bn = { git = "https://github.com/ziren-patches/bn", branch = "patch-0.6.0" }
 k256 = { git = "https://github.com/ziren-patches/elliptic-curves", branch = "patch-k256-0.13.4" }
 p256 = { git = "https://github.com/ziren-patches/elliptic-curves", branch = "patch-p256-0.13.2" }
+camino = { git = "https://github.com/camino-rs/camino", rev = "28e15dbd8a51c086d244e70f7f77eeee7d0b25cb" }

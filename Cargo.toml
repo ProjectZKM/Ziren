@@ -125,3 +125,6 @@ test-artifacts = { path = "crates/test-artifacts" }
 
 # misc
 hashbrown = "0.14.5"
+
+[patch.crates-io]
+camino = { git = "https://github.com/camino-rs/camino", rev = "28e15dbd8a51c086d244e70f7f77eeee7d0b25cb" }
