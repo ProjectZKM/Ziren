@@ -12,6 +12,7 @@ use cfg_if::cfg_if;
 use std::env;
 use zkm_cuda::ZKMGpuServer;
 
+#[cfg(feature = "network")]
 pub mod network;
 pub mod proof;
 pub mod provers;
@@ -21,7 +22,7 @@ pub use proof::*;
 pub use provers::ZKMVerificationError;
 use zkm_prover::components::DefaultProverComponents;
 
-#[cfg(feature = "network")]
+//#[cfg(feature = "network")]
 pub use provers::{CpuProver, MockProver, Prover};
 
 pub use zkm_build::include_elf;
@@ -34,7 +35,11 @@ pub use zkm_prover::{
 };
 
 // Re-export the utilities.
-use crate::{provers::CudaProver, utils::block_on};
+#[cfg(feature = "network")]
+use crate::utils::block_on;
+
+use crate::provers::CudaProver;
+
 pub use utils::setup_logger;
 
 /// A client for interacting with Ziren.
