@@ -36,7 +36,7 @@ impl<F: Field> AddOperation<F> {
             self.carry[1] = F::ONE;
         }
         if (a[2] as u32) + (b[2] as u32) + (carry[1] as u32) > 255 {
-            carry[2] = 1;
+            //carry[2] = 1;
             self.carry[2] = F::ONE;
         }
 

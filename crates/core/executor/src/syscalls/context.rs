@@ -76,8 +76,8 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
 
     /// Read a slice of words from memory.
     pub fn mr_slice(&mut self, addr: u32, len: usize) -> (Vec<MemoryReadRecord>, Vec<u32>) {
-        let mut records = Vec::new();
-        let mut values = Vec::new();
+        let mut records = Vec::with_capacity(len);
+        let mut values = Vec::with_capacity(len);
         for i in 0..len {
             let (record, value) = self.mr(addr + i as u32 * 4);
             records.push(record);
@@ -93,7 +93,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
 
     /// Write a slice of words to memory.
     pub fn mw_slice(&mut self, addr: u32, values: &[u32]) -> Vec<MemoryWriteRecord> {
-        let mut records = Vec::new();
+        let mut records = Vec::with_capacity(values.len());
         #[allow(clippy::needless_range_loop)]
         for i in 0..values.len() {
             let record = self.mw(addr + i as u32 * 4, values[i]);
@@ -168,7 +168,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
     /// Get a slice of words, but doesn't use a memory record.
     #[must_use]
     pub fn slice_unsafe(&mut self, addr: u32, len: usize) -> Vec<u32> {
-        let mut values = Vec::new();
+        let mut values = Vec::with_capacity(len);
         for i in 0..len {
             values.push(self.rt.word(addr + i as u32 * 4));
         }
@@ -176,6 +176,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
     }
 
     /// Set the next program counter.
+    #[inline]
     pub fn set_next_pc(&mut self, next_pc: u32) {
         self.next_pc = next_pc;
     }

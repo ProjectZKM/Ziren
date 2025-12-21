@@ -58,7 +58,7 @@ impl<F: Field> AddDoubleOperation<F> {
         }
 
         if (a[6] as u32) + (b[6] as u32) + (carry[5] as u32) > 255 {
-            carry[6] = 1;
+            //carry[6] = 1;
             self.carry[6] = F::ONE;
         }
 
