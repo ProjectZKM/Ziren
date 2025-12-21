@@ -1,3 +1,5 @@
+use std::array::TryFromSliceError;
+
 use amcl::bls381::{big::Big, bls381::utils::deserialize_g1, fp::FP};
 use generic_array::GenericArray;
 use num::{BigUint, Num};
@@ -7,7 +9,7 @@ use typenum::{U48, U94};
 use super::{FieldType, FpOpField, SwCurve, WeierstrassParameters};
 use crate::{
     params::{FieldParameters, NumLimbs},
-    CurveType, EllipticCurveParameters,
+    CurveError, CurveType, EllipticCurveParameters,
 };
 
 /// Bls12-381 curve parameter
@@ -111,8 +113,13 @@ impl WeierstrassParameters for Bls12381Parameters {
     }
 }
 
-pub fn bls12381_decompress<E: EllipticCurve>(bytes_be: &[u8], sign_bit: u32) -> AffinePoint<E> {
-    let mut g1_bytes_be: [u8; 48] = bytes_be.try_into().unwrap();
+pub fn bls12381_decompress<E: EllipticCurve>(
+    bytes_be: &[u8],
+    sign_bit: u32,
+) -> Result<AffinePoint<E>, CurveError> {
+    let mut g1_bytes_be: [u8; 48] = bytes_be
+        .try_into()
+        .map_err(|e: TryFromSliceError| CurveError::IntoArrayError(e.to_string()))?;
     let mut flags = COMPRESSION_FLAG;
     if sign_bit == 1 {
         flags |= Y_IS_ODD_FLAG;
@@ -120,22 +127,26 @@ pub fn bls12381_decompress<E: EllipticCurve>(bytes_be: &[u8], sign_bit: u32) -> 
 
     // set sign and compression flag
     g1_bytes_be[0] |= flags;
-    let point = deserialize_g1(&g1_bytes_be).unwrap();
+    let point =
+        deserialize_g1(&g1_bytes_be).map_err(|_| CurveError::InvalidG1(g1_bytes_be.to_vec()))?;
 
     let x_str = point.getx().to_string();
-    let x = BigUint::from_str_radix(x_str.as_str(), 16).unwrap();
+    let x = BigUint::from_str_radix(x_str.as_str(), 16)
+        .map_err(|e| CurveError::ParseBigIntError(x_str.to_string(), e.to_string()))?;
     let y_str = point.gety().to_string();
-    let y = BigUint::from_str_radix(y_str.as_str(), 16).unwrap();
+    let y = BigUint::from_str_radix(y_str.as_str(), 16)
+        .map_err(|e| CurveError::ParseBigIntError(y_str.to_string(), e.to_string()))?;
 
-    AffinePoint::new(x, y)
+    Ok(AffinePoint::new(x, y))
 }
 
-pub fn bls12381_sqrt(a: &BigUint) -> BigUint {
+pub fn bls12381_sqrt(a: &BigUint) -> Result<BigUint, CurveError> {
     let a_big = Big::from_bytes(a.to_bytes_be().as_slice());
 
     let a_sqrt = FP::new_big(a_big).sqrt();
 
-    BigUint::from_str_radix(a_sqrt.to_string().as_str(), 16).unwrap()
+    BigUint::from_str_radix(a_sqrt.to_string().as_str(), 16)
+        .map_err(|e| CurveError::ParseBigIntError(a_sqrt.to_string(), e.to_string()))
 }
 
 #[cfg(test)]
@@ -185,7 +196,7 @@ mod tests {
 
                 (result, is_odd)
             };
-            assert_eq!(point, bls12381_decompress(&compressed_point, is_odd));
+            assert_eq!(point, bls12381_decompress(&compressed_point, is_odd).unwrap());
 
             // Double the point to create a "random" point for the next iteration.
             point = point.clone().sw_double();
@@ -200,7 +211,7 @@ mod tests {
             // We use x^2 since not all field elements have a square root
             let x = rng.gen_biguint(256) % Bls12381BaseField::modulus();
             let x_2 = (&x * &x) % Bls12381BaseField::modulus();
-            let sqrt = bls12381_sqrt(&x_2);
+            let sqrt = bls12381_sqrt(&x_2).unwrap();
             let sqrt_2 = (&sqrt * &sqrt) % Bls12381BaseField::modulus();
             assert_eq!(sqrt_2, x_2);
         }

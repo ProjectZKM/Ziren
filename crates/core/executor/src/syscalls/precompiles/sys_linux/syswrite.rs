@@ -28,7 +28,7 @@ impl Syscall for SysWriteSyscall {
         let nbytes = v0;
         let bytes = (0..nbytes).map(|i| rt.rt.byte(write_buf + i)).collect::<Vec<u8>>();
         let slice = bytes.as_slice();
-        write_fd(rt, fd, slice);
+        write_fd(rt, fd, slice)?;
 
         let a3_record = rt.rw_traced(Register::A3, 0);
         let shard = rt.current_shard();

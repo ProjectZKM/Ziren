@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
@@ -16,6 +18,9 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     /// The program that defines the control flow of the machine.
     type Program: MachineProgram<F>;
 
+    /// The type used for error handling.
+    type Error: Error + Send + Sync;
+
     /// A unique identifier for this AIR as part of a machine.
     fn name(&self) -> String;
 
@@ -29,11 +34,20 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     /// - `input` is the execution record containing the events to be written to the trace.
     /// - `output` is the execution record containing events that the `MachineAir` can add to the
     ///   record such as byte lookup requests.
-    fn generate_trace(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F>;
+    fn generate_trace(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<RowMajorMatrix<F>, Self::Error>;
 
     /// Generate the dependencies for a given execution record.
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
-        self.generate_trace(input, output);
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
+        self.generate_trace(input, output)?;
+        Ok(())
     }
 
     /// Whether this execution record contains events for this air.

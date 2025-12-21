@@ -388,6 +388,7 @@ mod tests {
     use super::{FieldOpCols, FieldOperation, Limbs};
 
     use crate::utils::{pad_to_power_of_two, uni_stark_prove as prove, uni_stark_verify as verify};
+    use crate::CoreChipError;
     use core::borrow::{Borrow, BorrowMut};
     use num::bigint::RandBigInt;
     use p3_air::Air;
@@ -428,6 +429,8 @@ mod tests {
 
         type Program = Program;
 
+        type Error = CoreChipError;
+
         fn name(&self) -> String {
             format!("FieldOp{:?}", self.operation)
         }
@@ -436,7 +439,7 @@ mod tests {
             &self,
             _: &ExecutionRecord,
             output: &mut ExecutionRecord,
-        ) -> RowMajorMatrix<F> {
+        ) -> Result<RowMajorMatrix<F>, Self::Error> {
             let mut rng = thread_rng();
             let num_rows = 1 << 8;
             let mut operands: Vec<(BigUint, BigUint)> = (0..num_rows - 5)
@@ -477,7 +480,7 @@ mod tests {
             // Pad the trace to a power of two.
             pad_to_power_of_two::<NUM_TEST_COLS, F>(&mut trace.values);
 
-            trace
+            Ok(trace)
         }
 
         fn included(&self, _: &Self::Record) -> bool {
@@ -511,7 +514,7 @@ mod tests {
             let chip: FieldOpChip<Ed25519BaseField> = FieldOpChip::new(*op);
             let shard = ExecutionRecord::default();
             let _: RowMajorMatrix<KoalaBear> =
-                chip.generate_trace(&shard, &mut ExecutionRecord::default());
+                chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
             // println!("{:?}", trace.values)
         }
     }
@@ -531,7 +534,7 @@ mod tests {
             let chip: FieldOpChip<Ed25519BaseField> = FieldOpChip::new(*op);
             let shard = ExecutionRecord::default();
             let trace: RowMajorMatrix<KoalaBear> =
-                chip.generate_trace(&shard, &mut ExecutionRecord::default());
+                chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
             let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
             let mut challenger = config.challenger();

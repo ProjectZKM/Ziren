@@ -66,28 +66,45 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn pk_to_host(&self, pk: &Self::DeviceProvingKey) -> StarkProvingKey<SC>;
 
     /// Generate the main traces.
-    fn generate_traces(&self, record: &A::Record) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+    #[allow(clippy::type_complexity)]
+    fn generate_traces(
+        &self,
+        record: &A::Record,
+    ) -> Result<Vec<(String, RowMajorMatrix<Val<SC>>)>, A::Error> {
         let shard_chips = self.shard_chips(record).collect::<Vec<_>>();
 
         // For each chip, generate the trace.
         let parent_span = tracing::debug_span!("generate traces for shard");
-        parent_span.in_scope(|| {
+        let traces = parent_span.in_scope(|| {
             shard_chips
                 .par_iter()
                 .map(|chip| {
                     let chip_name = chip.name();
                     let begin = Instant::now();
-                    let trace = chip.generate_trace(record, &mut A::Record::default());
+                    let trace = match chip.generate_trace(record, &mut A::Record::default()) {
+                        Ok(trace) => trace,
+                        Err(e) => {
+                            tracing::error!(
+                                parent: &parent_span,
+                                "failed to generate trace for chip {} in {:?}: {:?}",
+                                chip_name,
+                                begin.elapsed(),
+                                e
+                            );
+                            return Err(e);
+                        }
+                    };
                     tracing::debug!(
                         parent: &parent_span,
                         "generated trace for chip {} in {:?}",
                         chip_name,
                         begin.elapsed()
                     );
-                    (chip_name, trace)
+                    Ok((chip_name, trace))
                 })
-                .collect::<Vec<_>>()
-        })
+                .collect::<Result<Vec<_>, A::Error>>()
+        })?;
+        Ok(traces)
     }
 
     /// Commit to the main traces.
@@ -651,7 +668,9 @@ where
         A: for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>,
     {
         // Generate dependencies.
-        self.machine().generate_dependencies(&mut records, &opts, None);
+        self.machine()
+            .generate_dependencies(&mut records, &opts, None)
+            .map_err(|_| Self::Error {})?;
 
         // Observe the preprocessed commitment.
         pk.observe_into(challenger);
@@ -660,7 +679,10 @@ where
             records
                 .into_par_iter()
                 .map(|record| {
-                    let named_traces = self.generate_traces(&record);
+                    let named_traces = self.generate_traces(&record).map_err(|e| {
+                        tracing::error!("generate traces error: {:?}", e);
+                        Self::Error {}
+                    })?;
                     let shard_data = self.commit(&record, named_traces);
                     self.open(pk, shard_data, &mut challenger.clone())
                 })

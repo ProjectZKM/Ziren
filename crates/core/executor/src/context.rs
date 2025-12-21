@@ -5,6 +5,7 @@ use hashbrown::HashMap;
 use crate::{
     hook::{hookify, BoxedHook, HookEnv, HookRegistry},
     subproof::SubproofVerifier,
+    ExecutionError,
 };
 
 /// Context to run a program inside Ziren.
@@ -88,7 +89,7 @@ impl<'a> ZKMContextBuilder<'a> {
     pub fn hook(
         &mut self,
         fd: u32,
-        f: impl FnMut(HookEnv, &[u8]) -> Vec<Vec<u8>> + Send + Sync + 'a,
+        f: impl FnMut(HookEnv, &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> + Send + Sync + 'a,
     ) -> &mut Self {
         self.hook_registry_entries.push((fd, hookify(f)));
         self
@@ -147,14 +148,14 @@ mod tests {
     #[test]
     fn with_custom_hook() {
         let ZKMContext { hook_registry, .. } =
-            ZKMContext::builder().hook(30, |_, _| vec![]).build();
+            ZKMContext::builder().hook(30, |_, _| Ok(vec![])).build();
         assert!(hook_registry.unwrap().table.contains_key(&30));
     }
 
     #[test]
     fn without_default_hooks_with_custom_hook() {
         let ZKMContext { hook_registry, .. } =
-            ZKMContext::builder().without_default_hooks().hook(30, |_, _| vec![]).build();
+            ZKMContext::builder().without_default_hooks().hook(30, |_, _| Ok(vec![])).build();
         assert_eq!(&hook_registry.unwrap().table.into_keys().collect::<Vec<_>>(), &[30]);
     }
 

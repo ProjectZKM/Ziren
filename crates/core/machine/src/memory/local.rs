@@ -18,7 +18,10 @@ use zkm_stark::{
     LookupKind, Word,
 };
 
-use crate::utils::{next_power_of_two, zeroed_f_vec};
+use crate::{
+    utils::{next_power_of_two, zeroed_f_vec},
+    CoreChipError,
+};
 
 pub const NUM_LOCAL_MEMORY_ENTRIES_PER_ROW: usize = 4;
 pub(crate) const NUM_MEMORY_LOCAL_INIT_COLS: usize = size_of::<MemoryLocalCols<u8>>();
@@ -85,11 +88,17 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "MemoryLocal".to_string()
     }
 
-    fn generate_dependencies(&self, input: &ExecutionRecord, output: &mut ExecutionRecord) {
+    fn generate_dependencies(
+        &self,
+        input: &ExecutionRecord,
+        output: &mut ExecutionRecord,
+    ) -> Result<(), Self::Error> {
         let mut events = Vec::new();
 
         input.get_local_mem_events().for_each(|mem_event| {
@@ -122,6 +131,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         });
 
         output.global_lookup_events.extend(events);
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -135,7 +145,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         &self,
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
         let events = input.get_local_mem_events().collect::<Vec<_>>();
         let nb_rows = nb_rows(events.len());
@@ -171,7 +181,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         });
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(values, NUM_MEMORY_LOCAL_INIT_COLS)
+        Ok(RowMajorMatrix::new(values, NUM_MEMORY_LOCAL_INIT_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -288,7 +298,7 @@ mod tests {
         let chip: MemoryLocalChip = MemoryLocalChip::new();
 
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values);
 
         for mem_event in shard.global_memory_finalize_events {
@@ -307,7 +317,7 @@ mod tests {
             MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
-        machine.generate_dependencies(&mut runtime.records, &opts, None);
+        machine.generate_dependencies(&mut runtime.records, &opts, None).unwrap();
 
         let shards = runtime.records;
         for shard in shards.clone() {
@@ -338,7 +348,7 @@ mod tests {
         let machine = MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
-        machine.generate_dependencies(&mut runtime.records, &opts, None);
+        machine.generate_dependencies(&mut runtime.records, &opts, None).unwrap();
 
         let shards = runtime.records;
         for shard in shards.clone() {

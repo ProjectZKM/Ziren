@@ -5,7 +5,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{ByteOpcode, ExecutionRecord, Program};
 use zkm_stark::air::MachineAir;
 
-use crate::utils::zeroed_f_vec;
+use crate::{utils::zeroed_f_vec, CoreChipError};
 
 use super::{
     columns::{ByteMultCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
@@ -18,6 +18,8 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
     type Record = ExecutionRecord;
 
     type Program = Program;
+
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "Byte".to_string()
@@ -32,15 +34,20 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
         Some(trace)
     }
 
-    fn generate_dependencies(&self, _input: &ExecutionRecord, _output: &mut ExecutionRecord) {
+    fn generate_dependencies(
+        &self,
+        _input: &ExecutionRecord,
+        _output: &mut ExecutionRecord,
+    ) -> Result<(), Self::Error> {
         // Do nothing since this chip has no dependencies.
+        Ok(())
     }
 
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut trace =
             RowMajorMatrix::new(zeroed_f_vec(NUM_BYTE_MULT_COLS * NUM_ROWS), NUM_BYTE_MULT_COLS);
 
@@ -56,7 +63,7 @@ impl<F: PrimeField32> MachineAir<F> for ByteChip<F> {
             cols.multiplicities[index] += F::from_canonical_usize(*mult);
         }
 
-        trace
+        Ok(trace)
     }
 
     fn included(&self, _shard: &Self::Record) -> bool {

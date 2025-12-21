@@ -1,5 +1,8 @@
+use std::fmt::Display;
+
 use p3_field::PrimeField64;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use zkm_derive::AlignedBorrow;
 
 use crate::air::{Block, RecursionPublicValues};
@@ -20,6 +23,15 @@ pub use runtime::*;
 // pub use zkm_recursion_core::stark;
 
 use crate::chips::poseidon2_skinny::WIDTH;
+
+#[derive(Error, Debug, Serialize, Deserialize)]
+pub struct RecursionChipError;
+
+impl Display for RecursionChipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RecursionChipError")
+    }
+}
 
 #[derive(
     AlignedBorrow, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default,

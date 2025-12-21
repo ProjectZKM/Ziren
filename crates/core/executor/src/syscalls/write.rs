@@ -24,12 +24,12 @@ impl Syscall for WriteSyscall {
         // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes).map(|i| rt.byte(write_buf + i)).collect::<Vec<u8>>();
         let slice = bytes.as_slice();
-        write_fd(ctx, fd, slice);
+        write_fd(ctx, fd, slice)?;
         Ok(None)
     }
 }
 
-pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) {
+pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) -> Result<(), ExecutionError> {
     let rt = &mut ctx.rt;
     if fd == FD_STDOUT {
         if let Ok(s) = core::str::from_utf8(slice) {
@@ -59,13 +59,14 @@ pub fn write_fd(ctx: &mut SyscallContext, fd: u32, slice: &[u8]) {
     } else if fd == FD_HINT {
         rt.state.input_stream.push(slice.to_vec());
     } else if let Some(mut hook) = rt.hook_registry.get(fd) {
-        let res = hook.invoke_hook(rt.hook_env(), slice);
+        let res = hook.invoke_hook(rt.hook_env(), slice)?;
         // Add result vectors to the beginning of the stream.
         let ptr = rt.state.input_stream_ptr;
         rt.state.input_stream.splice(ptr..ptr, res);
     } else {
         tracing::warn!("tried to write to unknown file descriptor {fd}");
     }
+    Ok(())
 }
 
 /// An enum representing the different cycle tracker commands.

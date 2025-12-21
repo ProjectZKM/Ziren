@@ -22,6 +22,7 @@ use zkm_stark::{
 use crate::{
     operations::{AssertLtColsBits, IsZeroOperation, KoalaBearBitDecomposition},
     utils::next_power_of_two,
+    CoreChipError,
 };
 
 use super::MemoryChipType;
@@ -49,6 +50,8 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         match self.kind {
             MemoryChipType::Initialize => "MemoryGlobalInit".to_string(),
@@ -56,7 +59,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         }
     }
 
-    fn generate_dependencies(&self, input: &ExecutionRecord, output: &mut ExecutionRecord) {
+    fn generate_dependencies(
+        &self,
+        input: &ExecutionRecord,
+        output: &mut ExecutionRecord,
+    ) -> Result<(), Self::Error> {
         let mut memory_events = match self.kind {
             MemoryChipType::Initialize => input.global_memory_initialize_events.clone(),
             MemoryChipType::Finalize => input.global_memory_finalize_events.clone(),
@@ -87,6 +94,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             }
         });
         output.global_lookup_events.extend(events);
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -104,7 +112,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         &self,
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut memory_events = match self.kind {
             MemoryChipType::Initialize => input.global_memory_initialize_events.clone(),
             MemoryChipType::Finalize => input.global_memory_finalize_events.clone(),
@@ -173,7 +181,10 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             [F::zero(); NUM_MEMORY_INIT_COLS],
         );
 
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEMORY_INIT_COLS)
+        Ok(RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_MEMORY_INIT_COLS,
+        ))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
@@ -457,12 +468,12 @@ mod tests {
         let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Initialize);
 
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values);
 
         let chip: MemoryGlobalChip = MemoryGlobalChip::new(MemoryChipType::Finalize);
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values);
 
         for mem_event in shard.global_memory_finalize_events {
@@ -481,7 +492,7 @@ mod tests {
             MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
-        machine.generate_dependencies(&mut runtime.records, &opts, None);
+        machine.generate_dependencies(&mut runtime.records, &opts, None).unwrap();
 
         let shards = runtime.records;
         for shard in shards.clone() {
@@ -512,7 +523,7 @@ mod tests {
         let machine = MipsAir::machine(KoalaBearPoseidon2::new());
         let (pkey, _) = machine.setup(&program_clone);
         let opts = ZKMCoreOpts::default();
-        machine.generate_dependencies(&mut runtime.records, &opts, None);
+        machine.generate_dependencies(&mut runtime.records, &opts, None).unwrap();
 
         let shards = runtime.records;
         debug_lookups_with_all_chips::<KoalaBearPoseidon2, MipsAir<KoalaBear>>(

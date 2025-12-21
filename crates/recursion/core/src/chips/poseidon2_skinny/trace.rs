@@ -51,12 +51,19 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
     type Program = RecursionProgram<F>;
 
+    type Error = crate::RecursionChipError;
+
     fn name(&self) -> String {
         format!("Poseidon2SkinnyDeg{DEGREE}")
     }
 
-    fn generate_dependencies(&self, _: &Self::Record, _: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        _: &Self::Record,
+        _: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         // This is a no-op.
+        Ok(())
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
@@ -70,7 +77,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         &self,
         input: &ExecutionRecord<F>,
         _output: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let mut rows = Vec::new();
 
         for event in &input.poseidon2_events {
@@ -129,7 +136,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         rows.resize(self.num_rows(input).unwrap(), [F::ZERO; NUM_POSEIDON2_COLS]);
 
         // Convert the trace to a row major matrix.
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_POSEIDON2_COLS)
+        Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_POSEIDON2_COLS))
     }
 
     #[cfg(feature = "sys")]
@@ -138,7 +145,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         &self,
         input: &ExecutionRecord<F>,
         _output: &mut ExecutionRecord<F>,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         assert_eq!(
             std::any::TypeId::of::<F>(),
             std::any::TypeId::of::<KoalaBear>(),
@@ -168,14 +175,14 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         // This will need to be adjusted when the AIR constraints are implemented.
         rows.resize(self.num_rows(input).unwrap(), [KoalaBear::ZERO; NUM_POSEIDON2_COLS]);
 
-        RowMajorMatrix::new(
+        Ok(RowMajorMatrix::new(
             unsafe {
                 std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(
                     rows.into_iter().flatten().collect::<Vec<KoalaBear>>(),
                 )
             },
             NUM_POSEIDON2_COLS,
-        )
+        ))
     }
 
     fn included(&self, _record: &Self::Record) -> bool {
@@ -431,6 +438,7 @@ mod tests {
             ..Default::default()
         };
         let chip_9 = Poseidon2SkinnyChip::<9>::default();
-        let _: RowMajorMatrix<F> = chip_9.generate_trace(&shard, &mut ExecutionRecord::default());
+        let _: RowMajorMatrix<F> =
+            chip_9.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
     }
 }

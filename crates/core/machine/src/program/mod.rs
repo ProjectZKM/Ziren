@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::{
     air::ProgramAirBuilder,
     utils::{next_power_of_two, pad_rows_fixed, zeroed_f_vec},
+    CoreChipError,
 };
 use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::PrimeField32;
@@ -54,6 +55,8 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
 
     type Program = Program;
 
+    type Error = CoreChipError;
+
     fn name(&self) -> String {
         "Program".to_string()
     }
@@ -96,15 +99,20 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
         Some(RowMajorMatrix::new(values, NUM_PROGRAM_PREPROCESSED_COLS))
     }
 
-    fn generate_dependencies(&self, _input: &ExecutionRecord, _output: &mut ExecutionRecord) {
+    fn generate_dependencies(
+        &self,
+        _input: &ExecutionRecord,
+        _output: &mut ExecutionRecord,
+    ) -> Result<(), Self::Error> {
         // Do nothing since this chip has no dependencies.
+        Ok(())
     }
 
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
 
         // Collect the number of times each instruction is called from the cpu events.
@@ -138,7 +146,10 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
             input.fixed_log2_rows::<F, _>(self),
         );
 
-        RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_PROGRAM_MULT_COLS)
+        Ok(RowMajorMatrix::new(
+            rows.into_iter().flatten().collect::<Vec<_>>(),
+            NUM_PROGRAM_MULT_COLS,
+        ))
     }
 
     fn included(&self, _: &Self::Record) -> bool {
@@ -206,7 +217,7 @@ mod tests {
         };
         let chip = ProgramChip::new();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         println!("{:?}", trace.values)
     }
 }
