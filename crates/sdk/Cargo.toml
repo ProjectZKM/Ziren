@@ -27,7 +27,7 @@ zkm-core-machine = { workspace = true }
 zkm-build = { workspace = true }
 futures = "0.3.30"
 bincode = "1.3.3"
-ethers = "2.0.14"
+ethers = { version ="2.0.14", optional = true }
 tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal"], optional = true }
 uuid = { version = "1.2", features = ["v4", "fast-rng", "macro-diagnostics"] }
 p3-field = { workspace = true }
@@ -76,6 +76,7 @@ network = [
   "dep:reqwest",
   "dep:twirp",
   "dep:tonic",
+  "dep:ethers",
 #  "dep:reqwest-middleware",
 ]
 network-v2 = [
@@ -91,6 +92,7 @@ network-v2 = [
   "dep:reqwest-middleware",
   "dep:tonic",
   "dep:backoff",
+  "dep:ethers",
 ]
 
 [build-dependencies]
