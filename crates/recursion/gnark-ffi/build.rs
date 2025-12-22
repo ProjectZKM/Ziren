@@ -44,8 +44,17 @@ fn main() {
 
             // Generate bindings using bindgen
             let header_path = dest_path.join(format!("lib{lib_name}.h"));
+
+            let sysroot = Command::new("rustc")
+                .args(["--print", "sysroot"])
+                .output()
+                .expect("rustc not found");
+            let sysroot = String::from_utf8(sysroot.stdout).unwrap();
+            let include = format!("{}/lib/mips-zkm-elf/include", sysroot.trim());
+
             let bindings = bindgen::Builder::default()
                 .header(header_path.to_str().unwrap())
+                .clang_arg(format!("-I{}", include))
                 .generate()
                 .expect("Unable to generate bindings");
 
