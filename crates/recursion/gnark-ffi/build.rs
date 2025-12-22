@@ -54,7 +54,7 @@ fn main() {
 
             let bindings = bindgen::Builder::default()
                 .header(header_path.to_str().unwrap())
-                .clang_arg(format!("-I{}", include))
+                .clang_arg(format!("-I{include}"))
                 .generate()
                 .expect("Unable to generate bindings");
 
