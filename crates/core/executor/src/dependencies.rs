@@ -325,7 +325,8 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
         };
         executor.record.shift_right_events.push(ror_event);
 
-        let srl_val = ror_val >> (msb - lsb + 1);
+        let width = msb - lsb + 1;
+        let srl_val = if width == 32 { 0 } else { ror_val >> width };
         let srl_event = AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
@@ -333,7 +334,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             hi: 0,
             a: srl_val,
             b: ror_val,
-            c: msb - lsb + 1,
+            c: width,
         };
         executor.record.shift_right_events.push(srl_event);
 

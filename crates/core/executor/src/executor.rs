@@ -1796,7 +1796,8 @@ impl<'a> Executor<'a> {
         let b = self.rr_cpu(rt, MemoryAccessPosition::B);
         let msbd = c >> 5;
         let lsb = c & 0x1f;
-        let mask_msb = (1 << (msbd + lsb + 1)) - 1;
+        let mask_msb =
+            if msbd + lsb + 1 == 32 { 0xFFFFFFFF } else { (1u32 << (msbd + lsb + 1)) - 1 };
         let a = (b & mask_msb) >> lsb;
         self.rw_cpu(rd, a, MemoryAccessPosition::A);
         (a, b, c)
@@ -1810,7 +1811,7 @@ impl<'a> Executor<'a> {
         let prev_a = a;
         let msb = c >> 5;
         let lsb = c & 0x1f;
-        let mask = (1 << (msb - lsb + 1)) - 1;
+        let mask = if msb - lsb + 1 == 32 { 0xFFFFFFFF } else { (1u32 << (msb - lsb + 1)) - 1 };
         let mask_field = mask << lsb;
         let a = (a & !mask_field) | ((b << lsb) & mask_field);
         self.rw_cpu(rd, a, MemoryAccessPosition::A);
