@@ -216,7 +216,7 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
                 | "internal/runtime/exithook.Run" => {
                     patch_list.insert(
                         symbol.st_value as u32,
-                        0x03e00008, // jalr $ra, $zero
+                        0x03e00008, // jr $ra
                     );
                     patch_list.insert(
                         (symbol.st_value + 4) as u32,
@@ -240,7 +240,7 @@ pub fn patch_elf(f: &elf::ElfBytes<LittleEndian>, patch_list: &mut BTreeMap<u32,
                     if name.contains("sys_common") && name.contains("thread_info") {
                         patch_list.insert(
                             symbol.st_value as u32,
-                            0x03e00008, // jalr $ra, $zero
+                            0x03e00008,
                         );
                         patch_list.insert(
                             (symbol.st_value + 4) as u32,
