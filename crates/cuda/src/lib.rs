@@ -315,7 +315,7 @@ impl ZKMCudaProver {
         Ok(proof)
     }
 
-    /// Executes the [zkm_prover::ZKMProver::prove_core] method inside the container.
+    /// Executes the [zkm_prover::ZKMProver::stateless_prove_core] method inside the container.
     ///
     /// You will need at least 24GB of VRAM to run this method.
     pub fn prove_core_stateless(
