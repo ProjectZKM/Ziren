@@ -501,7 +501,7 @@ mod tests {
         utils::setup_logger();
         let client = ProverClient::cpu();
         let elf = test_artifacts::FIBONACCI_ELF;
-        let (pk, vk) = client.setup(elf);
+        let (pk, _vk) = client.setup(elf);
         let mut stdin = ZKMStdin::new();
         stdin.write(&10usize);
 

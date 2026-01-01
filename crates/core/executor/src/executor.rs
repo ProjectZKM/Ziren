@@ -51,15 +51,6 @@ pub const DEFAULT_PC_INC: u32 = 4;
 /// A valid pc should be divisible by 4, so we use 1 to indicate that the pc is not used.
 pub const UNUSED_PC: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Whether to verify deferred proofs during execution.
-pub enum DeferredProofVerification {
-    /// Verify deferred proofs during execution.
-    Enabled,
-    /// Skip verification of deferred proofs
-    Disabled,
-}
-
 /// An executor for the MIPS zkVM.
 ///
 /// The executor is responsible for executing a user program and tracing important events which
@@ -113,10 +104,6 @@ pub struct Executor<'a> {
 
     /// The maximum number of cpu cycles to use for execution.
     pub max_cycles: Option<u64>,
-
-    /// Skip deferred proof verification. This check is informational only, not related to circuit
-    /// correctness.
-    pub deferred_proof_verification: DeferredProofVerification,
 
     /// The state of the execution.
     pub state: ExecutionState,
@@ -346,11 +333,6 @@ impl<'a> Executor<'a> {
             hook_registry,
             opts,
             max_cycles: context.max_cycles,
-            deferred_proof_verification: if context.skip_deferred_proof_verification {
-                DeferredProofVerification::Disabled
-            } else {
-                DeferredProofVerification::Enabled
-            },
             memory_checkpoint: Memory::default(),
             uninitialized_memory_checkpoint: Memory::default(),
             local_memory_access: HashMap::new(),
@@ -387,9 +369,6 @@ impl<'a> Executor<'a> {
     pub fn recover(program: Program, state: ExecutionState, opts: ZKMCoreOpts) -> Self {
         let mut runtime = Self::new(program, opts);
         runtime.state = state;
-        // Disable deferred proof verification since we're recovering from a checkpoint, and the
-        // checkpoint creator already had a chance to check the proofs.
-        runtime.deferred_proof_verification = DeferredProofVerification::Disabled;
         runtime
     }
 
