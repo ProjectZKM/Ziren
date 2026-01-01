@@ -44,7 +44,7 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
         Self::new(limbs.try_into().unwrap())
     }
 
-    /// Creates a new [`AffinePoint`] from the given bytes in big endian.
+    /// Returns the little-endian byte representation of this [`AffinePoint`].
     fn to_le_bytes(&self) -> Vec<u8> {
         let le_bytes = words_to_bytes_le(self.limbs_ref());
         debug_assert!(le_bytes.len() == N * 4);
