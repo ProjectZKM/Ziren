@@ -1,5 +1,4 @@
-//! The air module contains the AIR constraints for the poseidon2 chip.
-//! At the moment, we're only including memory constraints to test the new memory argument.
+//! The air module contains the AIR constraints for the Poseidon2 skinny chip.
 
 use std::{array, borrow::Borrow};
 
@@ -44,7 +43,7 @@ where
         let rhs = (0..DEGREE).map(|_| local_row.state_var[0].into()).product::<AB::Expr>();
         builder.assert_eq(lhs, rhs);
 
-        // For now, include only memory constraints.
+        // Enforce the memory argument for the state words.
         (0..WIDTH).for_each(|i| {
             builder.send_single(
                 prep_local.memory_preprocessed[i].addr,
