@@ -1,6 +1,5 @@
-use std::{borrow::Borrow, path::PathBuf};
-
 use p3_koala_bear::KoalaBear;
+use std::{borrow::Borrow, fs::metadata, path::PathBuf};
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_recursion_circuit::{
@@ -18,7 +17,7 @@ pub use zkm_recursion_core::stark::zkm_dev_mode;
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
-use zkm_recursion_gnark_ffi::{Groth16Bn254Prover, PlonkBn254Prover};
+use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
 use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
@@ -48,6 +47,48 @@ pub fn try_build_groth16_bn254_artifacts_dev(
     build_dir
 }
 
+/// Tries to build the dv-snark bn254 artifacts in the current environment.
+pub fn try_build_dvsnark_bn254_artifacts_dev(
+    template_vk: &StarkVerifyingKey<OuterSC>,
+    template_proof: &ShardProof<OuterSC>,
+    store_dir: &PathBuf,
+) -> PathBuf {
+    tracing::info!("build dvsnark artifacts dev");
+    let build_dir = dvsnark_bn254_artifacts_dev_dir();
+
+    let r1cs_to_dvsnark_path = store_dir.join("r1cs_to_dvsnark");
+    let r1cs_cached_path = store_dir.join("r1cs_cached");
+
+    let mut r1cs_to_dvsnark_content_exist = false;
+    if r1cs_to_dvsnark_path.exists() {
+        let md = metadata(r1cs_to_dvsnark_path).unwrap();
+        let filesize = md.len();
+        if filesize > 1024 {
+            // > 1 KB
+            r1cs_to_dvsnark_content_exist = true
+        }
+    }
+
+    let mut r1cs_cached_content_exist = false;
+    if r1cs_cached_path.exists() {
+        let md = metadata(r1cs_cached_path).unwrap();
+        let filesize = md.len();
+        if filesize > 1024 {
+            // > 1 KB
+            r1cs_cached_content_exist = true
+        }
+    }
+
+    if r1cs_cached_content_exist && r1cs_to_dvsnark_content_exist {
+        println!("[zkm] build dir contains cached r1cs");
+        return build_dir; // early return if content already exist
+    }
+
+    println!("[zkm] building dv-snark bn254 artifacts in development mode");
+    build_dvsnark_bn254_artifacts(template_vk, template_proof, &build_dir, store_dir);
+    build_dir
+}
+
 /// Gets the directory where the PLONK artifacts are installed in development mode.
 pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
@@ -55,6 +96,11 @@ pub fn plonk_bn254_artifacts_dev_dir() -> PathBuf {
 
 /// Gets the directory where the groth16 artifacts are installed in development mode.
 pub fn groth16_bn254_artifacts_dev_dir() -> PathBuf {
+    dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
+}
+
+/// Gets the directory where the dv-snark artifacts are installed in development mode.
+pub fn dvsnark_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
 }
 
@@ -82,6 +128,22 @@ pub fn build_groth16_bn254_artifacts(
     std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
     let (constraints, witness) = build_constraints_and_witness(template_vk, template_proof);
     Groth16Bn254Prover::build(constraints, witness, build_dir);
+}
+
+/// Build the dv-snark bn254 artifacts to the given directory for the given verification key and
+/// template proof.
+pub fn build_dvsnark_bn254_artifacts(
+    template_vk: &StarkVerifyingKey<OuterSC>,
+    template_proof: &ShardProof<OuterSC>,
+    build_dir: impl Into<PathBuf>,
+    store_dir: impl Into<PathBuf>,
+) {
+    let build_dir = build_dir.into();
+    let store_dir = store_dir.into();
+    std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
+    std::fs::create_dir_all(&store_dir).expect("failed to create store directory");
+    let (constraints, witness) = build_constraints_and_witness(template_vk, template_proof);
+    DvSnarkBn254Prover::build(constraints, witness, build_dir, store_dir);
 }
 
 /// Builds the plonk bn254 artifacts to the given directory.
