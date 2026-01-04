@@ -1,3 +1,9 @@
+//! Utility helpers for recursion circuits.
+//!
+//! Some public helpers in this module are currently unused within this crate,
+//! but are intentionally kept as part of the public API or for future circuit
+//! variants and downstream consumers.
+
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
