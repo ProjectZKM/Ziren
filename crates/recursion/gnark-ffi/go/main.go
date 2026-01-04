@@ -15,6 +15,12 @@ typedef struct {
 	char *EncodedProof;
 	char *RawProof;
 } C_Groth16Bn254Proof;
+
+typedef struct {
+	char *PublicInputs[2];
+	char *EncodedProof;
+	char *RawProof;
+} C_DvSnarkBn254Proof;
 */
 import "C"
 import (
@@ -173,6 +179,36 @@ func TestGroth16Bn254(witnessJson *C.char, constraintsJson *C.char) *C.char {
 		return C.CString(err.Error())
 	}
 	return nil
+}
+
+//export ProveDvSnarkBn254
+func ProveDvSnarkBn254(dataDir *C.char, witnessPath *C.char, storeDir *C.char) *C.C_DvSnarkBn254Proof {
+	dataDirString := C.GoString(dataDir)
+	witnessPathString := C.GoString(witnessPath)
+    storeDirString := C.GoString(storeDir)
+
+	zkmDvSnarkBn254Proof := zkm.ProveDvSnark(dataDirString, witnessPathString, storeDirString)
+
+	ms := C.malloc(C.sizeof_C_DvSnarkBn254Proof)
+	if ms == nil {
+		return nil
+	}
+
+	structPtr := (*C.C_DvSnarkBn254Proof)(ms)
+	structPtr.PublicInputs[0] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[0])
+	structPtr.PublicInputs[1] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[1])
+	structPtr.EncodedProof = C.CString(zkmDvSnarkBn254Proof.EncodedProof)
+	structPtr.RawProof = C.CString(zkmDvSnarkBn254Proof.RawProof)
+	return structPtr
+}
+
+//export BuildDvSnarkBn254
+func BuildDvSnarkBn254(dataDir *C.char, storeDir *C.char) {
+	// Sanity check the required arguments have been provided.
+	dataDirString := C.GoString(dataDir)
+	storeDirString := C.GoString(storeDir)
+
+	zkm.BuildDvSnark(dataDirString, storeDirString)
 }
 
 func TestMain() error {

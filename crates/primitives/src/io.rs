@@ -16,7 +16,7 @@ impl ZKMPublicValues {
     }
 
     pub fn raw(&self) -> String {
-        format!("0x{}", hex::encode(self.buffer.data.clone()))
+        format!("0x{}", hex::encode(self.as_slice()))
     }
 
     /// Create a `ZKMPublicValues` from a slice of bytes.

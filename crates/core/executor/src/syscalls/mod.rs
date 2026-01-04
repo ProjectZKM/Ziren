@@ -22,6 +22,7 @@ pub use code::*;
 pub use context::*;
 use hint::{HintLenSyscall, HintReadSyscall};
 use precompiles::{
+    boolean_circuit::garble::BooleanCircuitGarbleSyscall,
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{Fp2AddSubSyscall, Fp2MulSyscall, FpOpSyscall},
     keccak::sponge::KeccakSpongeSyscall,
@@ -103,6 +104,8 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::POSEIDON2_PERMUTE, Arc::new(Poseidon2PermuteSyscall));
 
     syscall_map.insert(SyscallCode::KECCAK_SPONGE, Arc::new(KeccakSpongeSyscall));
+
+    syscall_map.insert(SyscallCode::BOOLEAN_CIRCUIT_GARBLE, Arc::new(BooleanCircuitGarbleSyscall));
 
     syscall_map.insert(
         SyscallCode::SECP256K1_ADD,
