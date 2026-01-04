@@ -126,7 +126,7 @@ impl<F: PrimeField32> SepticCurve<F> {
     /// Lift an x coordinate into an elliptic curve.
     /// As an x-coordinate may not be a valid one, we allow an additional value in `[0, 256)` to the hash input.
     /// Also, we always return the curve point with y-coordinate within `[1, (p-1)/2]`, where p is the characteristic.
-    /// The returned values are the curve point, the offset used, and the hash input and output.
+    /// The returned values are the curve point and the offset used.
     pub fn lift_x(m: SepticExtension<F>) -> (Self, u8) {
         for offset in 0..=255 {
             let x_trial = SepticExtension::from_base_slice(&[
@@ -186,7 +186,7 @@ impl<T> SepticCurve<T> {
     }
 }
 
-/// A septic elliptic curve point on y^2 = x^3 + 2x + 26z^5 over field `F_{p^7} = F_p[z]/(z^7 - 2z - 5)`, including the point at infinity.
+/// A septic elliptic curve point on y^2 = x^3 + 3z*x - 3 over field `F_{p^7} = F_p[z]/(z^7 + 2z - 8)`, including the point at infinity.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SepticCurveComplete<T> {
     /// The point at infinity.

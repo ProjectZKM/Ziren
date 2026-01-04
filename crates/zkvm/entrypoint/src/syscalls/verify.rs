@@ -27,14 +27,12 @@ pub extern "C" fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8
         }
 
         // Update digest to p2_hash(prev_digest[0..8] || vkey_digest[0..8] || pv_digest[0..32])
-        let mut hash_input = Vec::with_capacity(48);
         // First 8 elements are previous hash (initially zero)
         let deferred_proofs_digest;
         // SAFETY: we have sole access because zkvm is single threaded.
         unsafe {
             deferred_proofs_digest = DEFERRED_PROOFS_DIGEST.as_mut().unwrap();
         }
-        hash_input.extend_from_slice(deferred_proofs_digest);
 
         // Next 8 elements are vkey_digest
         let vk_digest_koalabear =

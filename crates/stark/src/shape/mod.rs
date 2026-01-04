@@ -27,7 +27,7 @@ pub struct Shape<K: Clone + Eq + Hash> {
 }
 
 impl<K: Clone + Eq + Hash + FromStr> Shape<K> {
-    /// Create a new empty shape.
+    /// Create a new shape from an existing map of log2 heights.
     #[must_use]
     pub fn new(inner: HashMap<K, usize>) -> Self {
         Self { inner }
