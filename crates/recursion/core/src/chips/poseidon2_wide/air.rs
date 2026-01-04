@@ -1,5 +1,4 @@
-//! The air module contains the AIR constraints for the poseidon2 chip.
-//! At the moment, we're only including memory constraints to test the new memory argument.
+//! The air module contains the AIR constraints for the Poseidon2 wide chip.
 
 use std::{array, borrow::Borrow};
 
@@ -52,7 +51,7 @@ where
             .product::<AB::Expr>();
         builder.assert_eq(lhs, rhs);
 
-        // For now, include only memory constraints.
+        // Enforce the memory argument for input and output words.
         (0..WIDTH).for_each(|i| {
             builder.send_single(
                 prep_local.input[i],
