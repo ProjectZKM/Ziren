@@ -19,17 +19,21 @@ available [system calls & precompiles](https://github.com/ProjectZKM/Ziren/blob/
 
 pub mod bls12381;
 pub mod bn254;
-pub mod boolean_circuit_garble;
+#[cfg(feature = "ecdsa")]
+pub mod ecdsa;
+
 pub mod ed25519;
-pub mod hasher;
 pub mod io;
-pub mod keccak;
+pub mod keccak256;
+pub mod poseidon2;
 pub mod secp256k1;
 pub mod secp256r1;
+pub mod sha3;
 pub mod unconstrained;
 pub mod utils;
 #[cfg(feature = "verify")]
 pub mod verify;
+
 extern "C" {
     /// Halts the program with the given exit code.
     pub fn syscall_halt(exit_code: u8) -> !;
@@ -52,7 +56,7 @@ extern "C" {
     /// Executes an Ed25519 curve decompression on the given point.
     pub fn syscall_ed_decompress(point: &mut [u8; 64]);
 
-    /// Executes an Secp256k1 curve addition on the given points.
+    /// Executes an Sepc256k1 curve addition on the given points.
     pub fn syscall_secp256k1_add(p: *mut [u32; 16], q: *const [u32; 16]);
 
     /// Executes an Secp256k1 curve doubling on the given point.
@@ -101,6 +105,7 @@ extern "C" {
         lo: *mut [u32; 64],
         hi: *mut [u32; 8],
     );
+
     /// Enters unconstrained mode.
     pub fn syscall_enter_unconstrained() -> bool;
 
@@ -166,6 +171,16 @@ extern "C" {
 
     /// Executes a BN254 Fp2 multiplication on the given inputs.
     pub fn syscall_bn254_fp2_mulmod(p: *mut u32, q: *const u32);
+
+    /// Reads a buffer from the input stream.
+    pub fn read_vec_raw() -> ReadVecResult;
+}
+
+#[repr(C)]
+pub struct ReadVecResult {
+    pub ptr: *mut u8,
+    pub len: usize,
+    pub capacity: usize,
 }
 ```
 

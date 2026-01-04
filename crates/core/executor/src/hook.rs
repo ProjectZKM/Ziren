@@ -238,9 +238,10 @@ mod fp_ops {
     /// # Returns:
     /// A single 32 byte vector containing the inverse.
     ///
-    /// # Panics:
-    /// - If the buffer length is not valid.
-    /// - If the element is zero.
+    /// # Errors
+    /// Returns an [`ExecutionError`] if:
+    /// - the buffer length is not valid.
+    /// - the element is zero.
     pub fn hook_fp_inverse(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
         if buf.len() < 4 {
             return Err(ExecutionError::BufferLengthTooSmall(4, buf.len()));
@@ -291,11 +292,13 @@ mod fp_ops {
     /// If the status is 0, this is the root of NQR * element.
     /// If the status is 1, this is the root of element.
     ///
-    /// # Panics:
-    /// - If the buffer length is not valid.
-    /// - If the element is not less than the modulus.
-    /// - If the nqr is not less than the modulus.
-    /// - If the element is zero.
+    /// # Errors
+    /// Returns an [`ExecutionError`] if:
+    /// - the buffer length is not valid.
+    /// - the element is not less than the modulus.
+    /// - the nqr is not less than the modulus.
+    ///
+    /// If the element is zero, this function returns status `1` and a zero root.
     pub fn hook_fp_sqrt(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
         if buf.len() < 4 {
             return Err(ExecutionError::BufferLengthTooSmall(4, buf.len()));
@@ -568,7 +571,8 @@ mod bls {
 
     /// Given a field element, in big endian, this function computes the inverse.
     ///
-    /// This function will panic if the additive identity is passed in.
+    /// If the additive identity is passed in, this function logs an error and
+    /// returns [`ExecutionError::ElementZero`].
     pub fn hook_bls12_381_inverse(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionError> {
         if buf.len() < 48 {
             return Err(ExecutionError::BufferLengthTooSmall(48, buf.len()));
