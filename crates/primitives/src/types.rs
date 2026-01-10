@@ -26,7 +26,10 @@ impl Buffer {
         Self { data: data.to_vec(), ptr: 0 }
     }
 
-    /// Set the position ptr to the beginning of the buffer.                                      
+    /// Set the position ptr to the beginning of the buffer.                                              
+    #[deprecated(
+        note = "Unused in the current codebase and scheduled for removal in a future release."
+    )]
     pub fn head(&mut self) {
         self.ptr = 0;
     }
