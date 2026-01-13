@@ -373,8 +373,9 @@ pub fn count_permutation_constraints<F: Field>(
         count += local_permutation_width - 1;
 
         // One assert that cumulative sum is initialized to `phi_local` on the first row.
-        // Two asserts that the cumulative sum is constrained to `phi_next - phi_local` on the transition
+        // One assert that the cumulative sum is constrained to `phi_next - phi_local` on the transition
         // rows.
+        // One assert that the cumulative sum on the last row matches `local_cumulative_sum`.
         count += 3;
     }
 
