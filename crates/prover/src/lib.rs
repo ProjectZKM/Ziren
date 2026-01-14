@@ -1409,7 +1409,7 @@ pub mod tests {
         let vk_digest_bn254 = zkm_vkey_digest_bn254(&wrapped_bn254_proof);
         assert_eq!(vk_digest_bn254, vk.hash_bn254());
 
-        tracing::info!("Test the outer Plonk circuit");
+        tracing::info!("Test the outer circuit");
         let (constraints, witness) =
             build_constraints_and_witness(&wrapped_bn254_proof.vk, &wrapped_bn254_proof.proof);
         // test
