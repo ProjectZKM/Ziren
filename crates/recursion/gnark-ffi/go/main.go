@@ -173,12 +173,66 @@ func TestGroth16Bn254(witnessJson *C.char, constraintsJson *C.char) *C.char {
 	os.Setenv("WITNESS_JSON", witnessPathString)
 	os.Setenv("CONSTRAINTS_JSON", constraintsJsonString)
 	os.Setenv("GROTH16", "1")
-	err := TestMain()
+	err := TestMainGroth16()
 	testMutex.Unlock()
 	if err != nil {
 		return C.CString(err.Error())
 	}
 	return nil
+}
+func TestMainGroth16() error {
+    // Get the file name from an environment variable.
+	fileName := os.Getenv("WITNESS_JSON")
+	if fileName == "" {
+		fileName = "groth16_witness.json"
+	}
+
+    // Read the file.
+    data, err := os.ReadFile(fileName)
+    if err != nil {
+        return err
+    }
+
+    // Deserialize the JSON data into a slice of Instruction structs
+    var inputs zkm.WitnessInput
+    err = json.Unmarshal(data, &inputs)
+    if err != nil {
+        return err
+    }
+
+    // Compile the circuit.
+	circuit := zkm.NewCircuit(inputs)
+	builder := r1cs.NewBuilder
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] gnark verifier constraints:", r1cs.GetNbConstraints())
+
+	// Run the dummy setup.
+    var pk groth16.ProvingKey
+    pk, err = groth16.DummySetup(r1cs)
+    if err != nil {
+        return err
+    }
+    fmt.Println("[zkm] run the dummy setup done")
+
+    // Generate witness.
+    assignment := zkm.NewCircuit(inputs)
+    witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+   	if err != nil {
+   		return err
+   	}
+    fmt.Println("[zkm] generate witness done")
+
+    // Generate the proof.
+    _, err = groth16.Prove(r1cs, pk, witness)
+    if err != nil {
+        return err
+    }
+    fmt.Println("[zkm] generate the proof done")
+
+    return nil
 }
 
 //export ProveDvSnarkBn254
