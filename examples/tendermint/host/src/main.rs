@@ -44,7 +44,7 @@ pub fn main() {
     let client = ProverClient::new();
     let (pk, vk) = client.setup(TENDERMINT_ELF);
 
-    let (_, report) = client.execute(TENDERMINT_ELF, stdin.clone()).run().unwrap();
+    let (_, report) = client.execute(TENDERMINT_ELF, &stdin).run().unwrap();
     println!("executed program with {} cycles", report.total_instruction_count());
 
     let proof = client.prove(&pk, stdin).run().expect("proving failed");

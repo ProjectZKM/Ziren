@@ -8,7 +8,7 @@ fn main() {
 
     let client = ProverClient::new();
     let (public_values, report) =
-        client.execute(ELF, stdin.clone()).run().expect("failed to prove");
+        client.execute(ELF, &stdin).run().expect("failed to prove");
 
     println!("report: {}", report);
     println!("public_values: {:?}", public_values);
