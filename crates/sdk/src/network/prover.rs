@@ -205,7 +205,7 @@ impl NetworkProver {
             match Status::from_i32(get_status_response.status) {
                 Some(Status::Computing) => {
                     match Step::from_i32(get_status_response.step) {
-                        Some(step) => log::info!("Generate_proof: {step}"),
+                        Some(step) => log::info!("proof_id: {proof_id}, step: {step}"),
                         None => todo!(),
                     }
                     sleep(Duration::from_millis(self.poll_interval)).await;
@@ -232,8 +232,14 @@ impl NetworkProver {
                     return Ok((proof, public_values, cycles));
                 }
                 _ => {
-                    log::error!("generate_proof failed status: {}", get_status_response.status);
-                    bail!("generate_proof failed status: {}", get_status_response.status);
+                    log::error!(
+                        "generate_proof failed status: {}, proof_id: {proof_id}",
+                        get_status_response.status
+                    );
+                    bail!(
+                        "generate_proof failed status: {}, proof_id: {proof_id}",
+                        get_status_response.status
+                    );
                 }
             }
         }
