@@ -15,6 +15,12 @@ typedef struct {
 	char *EncodedProof;
 	char *RawProof;
 } C_Groth16Bn254Proof;
+
+typedef struct {
+	char *PublicInputs[2];
+	char *EncodedProof;
+	char *RawProof;
+} C_DvSnarkBn254Proof;
 */
 import "C"
 import (
@@ -167,12 +173,96 @@ func TestGroth16Bn254(witnessJson *C.char, constraintsJson *C.char) *C.char {
 	os.Setenv("WITNESS_JSON", witnessPathString)
 	os.Setenv("CONSTRAINTS_JSON", constraintsJsonString)
 	os.Setenv("GROTH16", "1")
-	err := TestMain()
+	err := TestMainGroth16()
 	testMutex.Unlock()
 	if err != nil {
 		return C.CString(err.Error())
 	}
 	return nil
+}
+func TestMainGroth16() error {
+    // Get the file name from an environment variable.
+	fileName := os.Getenv("WITNESS_JSON")
+	if fileName == "" {
+		fileName = "groth16_witness.json"
+	}
+
+    // Read the file.
+    data, err := os.ReadFile(fileName)
+    if err != nil {
+        return err
+    }
+
+    // Deserialize the JSON data into a slice of Instruction structs
+    var inputs zkm.WitnessInput
+    err = json.Unmarshal(data, &inputs)
+    if err != nil {
+        return err
+    }
+
+    // Compile the circuit.
+	circuit := zkm.NewCircuit(inputs)
+	builder := r1cs.NewBuilder
+	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] gnark verifier constraints:", r1cs.GetNbConstraints())
+
+	// Run the dummy setup.
+    var pk groth16.ProvingKey
+    pk, err = groth16.DummySetup(r1cs)
+    if err != nil {
+        return err
+    }
+    fmt.Println("[zkm] run the dummy setup done")
+
+    // Generate witness.
+    assignment := zkm.NewCircuit(inputs)
+    witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+   	if err != nil {
+   		return err
+   	}
+    fmt.Println("[zkm] generate witness done")
+
+    // Generate the proof.
+    _, err = groth16.Prove(r1cs, pk, witness)
+    if err != nil {
+        return err
+    }
+    fmt.Println("[zkm] generate the proof done")
+
+    return nil
+}
+
+//export ProveDvSnarkBn254
+func ProveDvSnarkBn254(dataDir *C.char, witnessPath *C.char, storeDir *C.char) *C.C_DvSnarkBn254Proof {
+	dataDirString := C.GoString(dataDir)
+	witnessPathString := C.GoString(witnessPath)
+    storeDirString := C.GoString(storeDir)
+
+	zkmDvSnarkBn254Proof := zkm.ProveDvSnark(dataDirString, witnessPathString, storeDirString)
+
+	ms := C.malloc(C.sizeof_C_DvSnarkBn254Proof)
+	if ms == nil {
+		return nil
+	}
+
+	structPtr := (*C.C_DvSnarkBn254Proof)(ms)
+	structPtr.PublicInputs[0] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[0])
+	structPtr.PublicInputs[1] = C.CString(zkmDvSnarkBn254Proof.PublicInputs[1])
+	structPtr.EncodedProof = C.CString(zkmDvSnarkBn254Proof.EncodedProof)
+	structPtr.RawProof = C.CString(zkmDvSnarkBn254Proof.RawProof)
+	return structPtr
+}
+
+//export BuildDvSnarkBn254
+func BuildDvSnarkBn254(dataDir *C.char, storeDir *C.char) {
+	// Sanity check the required arguments have been provided.
+	dataDirString := C.GoString(dataDir)
+	storeDirString := C.GoString(storeDir)
+
+	zkm.BuildDvSnark(dataDirString, storeDirString)
 }
 
 func TestMain() error {

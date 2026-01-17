@@ -73,8 +73,10 @@ use zkm_recursion_core::{
     stark::KoalaBearPoseidon2Outer,
     RecursionProgram, Runtime as RecursionRuntime,
 };
-pub use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
-use zkm_recursion_gnark_ffi::{groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover};
+pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
+use zkm_recursion_gnark_ffi::{
+    groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover, DvSnarkBn254Prover,
+};
 use zkm_stark::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
     ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts, ZKMProverOpts,
@@ -1127,6 +1129,30 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof
     }
 
+    /// Wrap the STARK proven over a SNARK-friendly field into a DV-SNARK proof.
+    #[instrument(name = "wrap_dvsnark_bn254", level = "info", skip_all)]
+    pub fn wrap_dvsnark_bn254(
+        &self,
+        proof: ZKMReduceProof<OuterSC>,
+        build_dir: &Path,
+        store_dir: &Path,
+    ) -> DvSnarkBn254Proof {
+        let input = ZKMCompressWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
+            is_complete: true,
+        };
+        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
+
+        let mut witness = Witness::default();
+        input.write(&mut witness);
+        witness.write_committed_values_digest(committed_values_digest);
+        witness.write_vkey_hash(vkey_hash);
+
+        let prover = DvSnarkBn254Prover::new();
+        prover.prove(witness, build_dir.to_path_buf(), store_dir.to_path_buf())
+    }
+
     /// Accumulate deferred proofs into a single digest.
     pub fn hash_deferred_proofs(
         prev_digest: [Val<CoreSC>; DIGEST_SIZE],
@@ -1383,11 +1409,14 @@ pub mod tests {
         let vk_digest_bn254 = zkm_vkey_digest_bn254(&wrapped_bn254_proof);
         assert_eq!(vk_digest_bn254, vk.hash_bn254());
 
-        tracing::info!("Test the outer Plonk circuit");
+        tracing::info!("Test the outer circuit");
         let (constraints, witness) =
             build_constraints_and_witness(&wrapped_bn254_proof.vk, &wrapped_bn254_proof.proof);
-        PlonkBn254Prover::test(constraints, witness);
-        tracing::info!("Circuit test succeeded");
+        // test
+        PlonkBn254Prover::test(constraints.clone(), witness.clone());
+        tracing::info!("Circuit PLONK test succeeded");
+        Groth16Bn254Prover::test(constraints, witness);
+        tracing::info!("Circuit GROTH16 test succeeded");
 
         if test_kind == Test::CircuitTest {
             return Ok(());

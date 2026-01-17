@@ -15,7 +15,7 @@ use p3_koala_bear::KoalaBear;
 use zkm_prover::{
     components::DefaultProverComponents,
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
-    Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
+    DvSnarkBn254Proof, Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
 use zkm_stark::septic_digest::SepticDigest;
 
@@ -143,6 +143,17 @@ impl Prover<DefaultProverComponents> for MockProver {
                             raw_proof: "".to_string(),
                             groth16_vkey_hash: [0; 32],
                         }),
+                        public_values,
+                        zkm_version: self.version().to_string(),
+                    },
+                    0,
+                ))
+            }
+            ZKMProofKind::DvSnark => {
+                let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
+                Ok((
+                    ZKMProofWithPublicValues {
+                        proof: ZKMProof::DvSnark(DvSnarkBn254Proof {}),
                         public_values,
                         zkm_version: self.version().to_string(),
                     },
