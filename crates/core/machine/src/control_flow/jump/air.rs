@@ -69,7 +69,7 @@ where
             local.next_pc.reduce::<AB>() + AB::F::from_canonical_u32(4),
         );
 
-        // Range check op_a, pc, and next_pc.
+        // Range check op_a, next_pc, and next_next_pc.
         // SAFETY: `is_real` is already checked to be boolean.
         // `op_a_value` is checked to be a valid word, as it matches the one in the CpuChip.
         // In the CpuChip's `eval_registers`, it's checked that this is valid word saved in op_a when `op_a_0 = 0`
