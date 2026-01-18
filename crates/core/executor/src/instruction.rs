@@ -440,13 +440,9 @@ impl Instruction {
                 }
             }
             // J: target is unsigned (not sign-extended) per MIPS spec.
-            (0x02, _) => {
-                Ok(Self::new(Opcode::Jumpi, 0u8, target << 2, 0, true, true))
-            }
+            (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target << 2, 0, true, true)),
             // JAL: target is unsigned (not sign-extended) per MIPS spec.
-            (0x03, _) => {
-                Ok(Self::new(Opcode::Jumpi, 31u8, target << 2, 0, true, true))
-            }
+            (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target << 2, 0, true, true)),
             // BEQ
             (0x04, _) => Ok(Self::new(
                 Opcode::BEQ,
