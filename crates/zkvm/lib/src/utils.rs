@@ -86,25 +86,23 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
     /// a_bits_le and b_bits_le should be in little endian order.
     fn multi_scalar_multiplication(
         a_bits_le: &[bool],
-        a: Self,
+        mut a: Self,
         b_bits_le: &[bool],
-        b: Self,
+        mut b: Self,
     ) -> Self {
         // The length of the bit vectors must be the same.
         debug_assert!(a_bits_le.len() == b_bits_le.len());
 
         let mut res: Self = Self::identity();
-        let mut temp_a = a.clone();
-        let mut temp_b = b.clone();
         for (a_bit, b_bit) in a_bits_le.iter().zip(b_bits_le.iter()) {
             if *a_bit {
-                res.complete_add_assign(&temp_a);
+                res.complete_add_assign(&a);
             }
             if *b_bit {
-                res.complete_add_assign(&temp_b);
+                res.complete_add_assign(&b);
             }
-            temp_a.double();
-            temp_b.double();
+            a.double();
+            b.double();
         }
         res
     }
