@@ -319,7 +319,6 @@ impl Instruction {
         let offset = insn & 0xffff; // as known as imm
         let offset_ext16 = sign_extend::<16>(offset);
         let target = insn & 0x3ffffff;
-        let target_ext = sign_extend::<26>(target);
         log::trace!("op {opcode}, func {func}, rt {rt}, rs {rs}, rd {rd}");
         log::trace!("decode: insn {insn:X}, opcode {opcode:X}, func {func:X}");
 
@@ -440,15 +439,10 @@ impl Instruction {
                     Ok(Self::new_with_raw(Opcode::UNIMPL, 0, 0, insn, true, true, insn))
                 }
             }
-            // J
-            (0x02, _) => {
-                // Ignore the upper 4 most significant bits，since they are always 0 currently.
-                Ok(Self::new(Opcode::Jumpi, 0u8, target_ext.overflowing_shl(2).0, 0, true, true))
-            }
-            // JAL
-            (0x03, _) => {
-                Ok(Self::new(Opcode::Jumpi, 31u8, target_ext.overflowing_shl(2).0, 0, true, true))
-            }
+            // J: target is unsigned (not sign-extended) per MIPS spec.
+            (0x02, _) => Ok(Self::new(Opcode::Jumpi, 0u8, target << 2, 0, true, true)),
+            // JAL: target is unsigned (not sign-extended) per MIPS spec.
+            (0x03, _) => Ok(Self::new(Opcode::Jumpi, 31u8, target << 2, 0, true, true)),
             // BEQ
             (0x04, _) => Ok(Self::new(
                 Opcode::BEQ,
