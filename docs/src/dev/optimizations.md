@@ -9,13 +9,17 @@ There are various ways to optimize your program, including:
 
 ### Testing Your Program
 
-It is best practice to test your program and check its outputs prior to generating proofs and save on proof generation costs and time. To execute your program without generating a proof, use the following command: 
+It is best practice to test your program and check its outputs prior to generating proofs and save on proof generation costs and time.
+
+To execute your program without generating a proof, run it from the host using the `ProverClient::execute` API instead of generating a proof:
 
 ```rust
-cargo run --release -- --execute
+let client = ProverClient::new();
+let (_, report) = client.execute(ELF, stdin).run().unwrap();
+println!("executed program with {} cycles", report.total_instruction_count());
 ```
 
-You can also determine the public inputs with `<zkm_zkvm::io::commit>` to commit to the public values of the program. 
+You can also determine the public inputs with `zkm_zkvm::io::commit` to commit to the public values of the program. 
 
 ### Acceleration Options
 
@@ -31,7 +35,12 @@ An example on using these crates for proving the execution of EVM blocks using R
 
 **Acceleration via Hardware** 
 
-Ziren provides hardware acceleration support through AVX on Intel x86 CPUs via Plonky3. To activate AVX256/AVX512, view the guide [here](https://docs.zkm.io/dev/prover.html). 
+Ziren provides hardware acceleration support for proof generation via both GPU and CPU:
+
+- CUDA-based GPU prover, selectable via the `ZKM_PROVER=cuda` environment variable or the `ProverClient::cuda()` constructor.
+- AVX2/AVX512 optimizations on x86 CPUs via Plonky3, enabled through appropriate `RUSTFLAGS` settings.
+
+For detailed setup and examples, see the [Prover](./prover.md) documentation.
 
 ### Cycle Tracking
 

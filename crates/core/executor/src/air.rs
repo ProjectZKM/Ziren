@@ -63,9 +63,9 @@ pub enum MipsAirId {
     Bls12831Fp2AddSubAssign = 20,
     /// The bls12-831 fp2 mul assign chip.
     Bls12831Fp2MulAssign = 21,
-    /// The bn254 fp2 add sub assign chip.
-    Bn254FpOpAssign = 22,
     /// The bn254 fp op assign chip.
+    Bn254FpOpAssign = 22,
+    /// The bn254 fp2 add sub assign chip.
     Bn254Fp2AddSubAssign = 23,
     /// The bn254 fp2 mul assign chip.
     Bn254Fp2MulAssign = 24,

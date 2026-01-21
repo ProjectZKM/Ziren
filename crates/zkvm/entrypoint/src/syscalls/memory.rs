@@ -43,7 +43,7 @@ pub unsafe extern "C" fn sys_alloc_aligned(bytes: usize, align: usize) -> *mut u
     let (heap_pos, overflowed) = heap_pos.overflowing_add(bytes);
 
     if overflowed || MAX_MEMORY < heap_pos {
-        panic!("Memory limit exceeded (0xC000000)");
+        panic!("Memory limit exceeded ({MAX_MEMORY:#x})");
     }
 
     unsafe { HEAP_POS = heap_pos };

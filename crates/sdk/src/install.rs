@@ -67,7 +67,7 @@ pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
 /// Install the latest circuit artifacts.
 ///
 /// This function will download the latest circuit artifacts from the S3 bucket and extract them
-/// to the directory specified by [`groth16_bn254_artifacts_dir()`].
+/// to the directory specified by the provided `build_dir`.
 #[cfg(feature = "network")]
 #[allow(clippy::needless_pass_by_value)]
 pub fn install_circuit_artifacts(build_dir: PathBuf, artifacts_type: &str) {

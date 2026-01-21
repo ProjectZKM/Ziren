@@ -36,13 +36,13 @@ impl Syscall for VerifySyscall {
         if proof_index >= rt.state.proof_stream.len() {
             panic!("Not enough proofs were written to the runtime.");
         }
-        let (proof, proof_vk) = &rt.state.proof_stream[proof_index].clone();
         rt.state.proof_stream_ptr += 1;
 
         let vkey_bytes: [u32; 8] = vkey.try_into().unwrap();
         let pv_digest_bytes: [u32; 8] = pv_digest.try_into().unwrap();
 
         if let Some(verifier) = rt.subproof_verifier {
+            let (proof, proof_vk) = &rt.state.proof_stream[proof_index];
             if let Err(e) =
                 verifier.verify_deferred_proof(proof, proof_vk, vkey_bytes, pv_digest_bytes)
             {
