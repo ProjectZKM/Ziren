@@ -281,11 +281,6 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(keccak_sponge.name(), 24 * keccak_sponge.cost());
         chips.push(keccak_sponge);
 
-        let boolean_circuit_garble =
-            Chip::new(MipsAir::<F>::BooleanCircuitGarble(BooleanCircuitGarbleChip::default()));
-        costs.insert(boolean_circuit_garble.name(), boolean_circuit_garble.cost());
-        chips.push(boolean_circuit_garble);
-
         let bn254_add_assign = Chip::new(MipsAir::Bn254Add(WeierstrassAddAssignChip::<
             SwCurve<Bn254Parameters>,
         >::new()));
@@ -443,6 +438,11 @@ impl<F: PrimeField32> MipsAir<F> {
         let movcond_instrs = Chip::new(MipsAir::MovCond(MovCondChip::default()));
         costs.insert(movcond_instrs.name(), movcond_instrs.cost());
         chips.push(movcond_instrs);
+
+        let boolean_circuit_garble =
+            Chip::new(MipsAir::<F>::BooleanCircuitGarble(BooleanCircuitGarbleChip::default()));
+        costs.insert(boolean_circuit_garble.name(), boolean_circuit_garble.cost());
+        chips.push(boolean_circuit_garble);
 
         (chips, costs)
     }
