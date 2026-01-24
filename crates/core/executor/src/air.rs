@@ -115,6 +115,8 @@ pub enum MipsAirId {
     SysLinux = 47,
     /// The MovCondChip.
     MovCond = 49,
+    // The BooleanCircuitGarble chip.
+    BooleanCircuitGarble = 50,
 }
 
 impl MipsAirId {
@@ -195,6 +197,7 @@ impl MipsAirId {
             Self::Byte => "Byte",
             Self::SysLinux => "SysLinux",
             Self::MovCond => "MovCond",
+            Self::BooleanCircuitGarble => "BooleanCircuitGarble",
         }
     }
 }

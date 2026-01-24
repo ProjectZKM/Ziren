@@ -68,6 +68,7 @@ impl ZKMProverOpts {
         opts.core_opts.split_opts.keccak /= divisor;
         opts.core_opts.split_opts.sha_extend /= divisor;
         opts.core_opts.split_opts.sha_compress /= divisor;
+        opts.core_opts.split_opts.boolean_circuit_garble /= divisor;
         opts.core_opts.split_opts.memory /= divisor;
 
         opts.recursion_opts.shard_batch_size = 2;
@@ -175,6 +176,7 @@ impl Default for ZKMCoreOpts {
         opts.split_opts.keccak /= divisor;
         opts.split_opts.sha_extend /= divisor;
         opts.split_opts.sha_compress /= divisor;
+        opts.split_opts.boolean_circuit_garble /= divisor;
         opts.split_opts.memory /= divisor;
 
         opts
@@ -241,6 +243,8 @@ pub struct SplitOpts {
     pub sha_extend: usize,
     /// The threshold for sha compress events.
     pub sha_compress: usize,
+    /// The threshold for Boolean Circuit Garble events
+    pub boolean_circuit_garble: usize,
     /// The threshold for memory events.
     pub memory: usize,
     /// The threshold for combining the memory init/finalize events in to the current shard in
@@ -257,6 +261,7 @@ impl SplitOpts {
             keccak: 8 * deferred_split_threshold / 24,
             sha_extend: 32 * deferred_split_threshold / 48,
             sha_compress: 32 * deferred_split_threshold / 80,
+            boolean_circuit_garble: deferred_split_threshold / 8,
             memory: 64 * deferred_split_threshold,
             combine_memory_threshold: 1 << 17,
         }

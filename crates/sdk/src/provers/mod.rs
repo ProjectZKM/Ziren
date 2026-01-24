@@ -211,7 +211,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     },
                 )
                 .map_err(ZKMVerificationError::Groth16),
-            ZKMProof::CompressToGroth16 => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }

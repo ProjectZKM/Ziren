@@ -176,6 +176,14 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             }
 
             // No shape found, so return an error.
+            tracing::info!(
+                "No shape found for core record with heights: {:?}",
+                heights
+                    .into_iter()
+                    .map(|(air, height)| (air.to_string(), log2_ceil_usize(height)))
+                    .collect::<HashMap<_, _>>()
+            );
+
             return Err(CoreShapeError::ShapeError(record.stats()));
         }
 

@@ -24,6 +24,7 @@ var plonkPkPath string = "plonk_pk.bin"
 var groth16PkPath string = "groth16_pk.bin"
 var plonkWitnessPath string = "plonk_witness.json"
 var groth16WitnessPath string = "groth16_witness.json"
+var dvsnarkWitnessPath string = "dvsnark_witness.json"
 
 type Circuit struct {
 	VkeyHash              frontend.Variable `gnark:",public"`

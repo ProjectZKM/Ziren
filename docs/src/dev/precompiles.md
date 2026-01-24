@@ -92,6 +92,9 @@ extern "C" {
     /// Executes the Poseidon2 permutation
     pub fn syscall_poseidon2_permute(state: *mut [u32; 16]);
 
+    /// Executes a Boolean Circuit Garble operation.
+    pub fn syscall_boolean_circuit_garble(input: *const u8, output: *mut u32);
+
     /// Executes an uint256 multiplication on the given inputs.
     pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
 

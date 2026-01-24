@@ -142,43 +142,68 @@ impl ExecutionRecord {
                 SyscallCode::KECCAK_SPONGE => opts.keccak,
                 SyscallCode::SHA_EXTEND => opts.sha_extend,
                 SyscallCode::SHA_COMPRESS => opts.sha_compress,
+                SyscallCode::BOOLEAN_CIRCUIT_GARBLE => opts.boolean_circuit_garble,
                 _ => opts.deferred,
             };
 
             let mut shards_input = Vec::new();
-            let remainder = if syscall_code == SyscallCode::KECCAK_SPONGE {
-                let mut current_shard = Vec::new();
-                let mut current_len = 0;
+            let remainder = match syscall_code {
+                SyscallCode::KECCAK_SPONGE => {
+                    let mut current_shard = Vec::new();
+                    let mut current_len = 0;
 
-                for (syscall_event, event) in events {
-                    if let PrecompileEvent::KeccakSponge(event) = &event {
-                        // Here, input_len_u32s must be a multiple of GENERAL_BLOCK_SIZE_U32S.
-                        let input_len = event.input_len_u32s as usize / GENERAL_BLOCK_SIZE_U32S;
+                    for (syscall_event, event) in events {
+                        if let PrecompileEvent::KeccakSponge(event) = &event {
+                            // Here, input_len_u32s must be a multiple of GENERAL_BLOCK_SIZE_U32S.
+                            let input_len = event.input_len_u32s as usize / GENERAL_BLOCK_SIZE_U32S;
 
-                        if current_len + input_len > threshold && !current_shard.is_empty() {
-                            let mut record = ExecutionRecord::new(self.program.clone());
-                            record.precompile_events.insert(syscall_code, current_shard);
-                            shards_input.push(record);
-                            current_shard = Vec::new();
-                            current_len = 0;
+                            if current_len + input_len > threshold && !current_shard.is_empty() {
+                                let mut record = ExecutionRecord::new(self.program.clone());
+                                record.precompile_events.insert(syscall_code, current_shard);
+                                shards_input.push(record);
+                                current_shard = Vec::new();
+                                current_len = 0;
+                            }
+                            current_len += input_len;
                         }
-                        current_len += input_len;
+                        current_shard.push((syscall_event, event));
                     }
-                    current_shard.push((syscall_event, event));
+                    current_shard
                 }
+                SyscallCode::BOOLEAN_CIRCUIT_GARBLE => {
+                    let mut current_shard = Vec::new();
+                    let mut current_len = 0;
 
-                current_shard
-            } else {
-                let chunks = events.chunks_exact(threshold);
-                let remainder = chunks.remainder().to_vec();
-                for chunk in chunks {
-                    let mut record = ExecutionRecord::new(self.program.clone());
-                    record.precompile_events.insert(syscall_code, chunk.to_vec());
-                    shards_input.push(record);
+                    for (syscall_event, event) in events {
+                        if let PrecompileEvent::BooleanCircuitGarble(event) = &event {
+                            // Here, input_len_u32s must be a multiple of GENERAL_BLOCK_SIZE_U32S.
+                            let input_len = event.num_gates() + 1;
+
+                            if current_len + input_len > threshold && !current_shard.is_empty() {
+                                let mut record = ExecutionRecord::new(self.program.clone());
+                                record.precompile_events.insert(syscall_code, current_shard);
+                                shards_input.push(record);
+                                current_shard = Vec::new();
+                                current_len = 0;
+                            }
+                            current_len += input_len;
+                        }
+                        current_shard.push((syscall_event, event));
+                    }
+                    current_shard
                 }
-
-                remainder
+                _ => {
+                    let chunks = events.chunks_exact(threshold);
+                    let remainder = chunks.remainder().to_vec();
+                    for chunk in chunks {
+                        let mut record = ExecutionRecord::new(self.program.clone());
+                        record.precompile_events.insert(syscall_code, chunk.to_vec());
+                        shards_input.push(record);
+                    }
+                    remainder
+                }
             };
+
             if !remainder.is_empty() {
                 if last {
                     let mut record = ExecutionRecord::new(self.program.clone());

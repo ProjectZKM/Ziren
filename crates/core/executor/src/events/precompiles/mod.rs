@@ -1,3 +1,4 @@
+mod boolean_circuit_garble;
 mod ec;
 mod edwards;
 mod fptower;
@@ -8,9 +9,9 @@ mod sha256_compress;
 mod sha256_extend;
 mod u256x2048_mul;
 mod uint256;
-
 use super::{MemoryLocalEvent, SyscallEvent};
 use crate::syscalls::SyscallCode;
+pub use boolean_circuit_garble::*;
 pub use ec::*;
 pub use edwards::*;
 pub use fptower::*;
@@ -82,6 +83,7 @@ pub enum PrecompileEvent {
     Poseidon2Permute(Poseidon2PermuteEvent),
     /// linux precompile event.
     Linux(LinuxEvent),
+    BooleanCircuitGarble(BooleanCircuitGarbleEvent),
 }
 
 /// Trait to retrieve all the local memory events from a vec of precompile events.
@@ -146,6 +148,9 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Linux(e) => {
+                    iterators.push(e.local_mem_access.iter());
+                }
+                PrecompileEvent::BooleanCircuitGarble(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
             }

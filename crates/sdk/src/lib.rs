@@ -497,6 +497,20 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_dvsnark_r1cs_witness() {
+        utils::setup_logger();
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let (pk, _vk) = client.setup(elf);
+        let mut stdin = ZKMStdin::new();
+        stdin.write(&10usize);
+
+        // Generate proof.
+        let proof = client.prove(&pk, stdin).dvsnark().run().unwrap();
+        tracing::info!("proof public values {:?}", proof.public_values);
+    }
+
+    #[test]
     fn test_e2e_prove_plonk_mock() {
         utils::setup_logger();
         let client = ProverClient::mock();

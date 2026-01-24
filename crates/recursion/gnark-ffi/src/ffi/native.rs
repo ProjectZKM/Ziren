@@ -5,7 +5,7 @@
 //! Although we cast to *mut c_char because the Go signatures can't be immutable, the Go functions
 //! should not modify the strings.
 
-use crate::{Groth16Bn254Proof, PlonkBn254Proof};
+use crate::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
 use cfg_if::cfg_if;
 use std::{
     ffi::{c_char, CStr, CString},
@@ -22,18 +22,21 @@ use bind::*;
 enum ProofSystem {
     Plonk,
     Groth16,
+    DvSnark,
 }
 
 enum ProofResult {
     Plonk(*mut C_PlonkBn254Proof),
     Groth16(*mut C_Groth16Bn254Proof),
+    DvSnark(*mut C_DvSnarkBn254Proof),
 }
 
 impl ProofSystem {
-    fn build_fn(&self) -> unsafe extern "C" fn(*mut c_char) {
+    fn build_fn(&self) -> BuildFunction {
         match self {
-            ProofSystem::Plonk => bind::BuildPlonkBn254,
-            ProofSystem::Groth16 => bind::BuildGroth16Bn254,
+            ProofSystem::Plonk => BuildFunction::Plonk(bind::BuildPlonkBn254),
+            ProofSystem::Groth16 => BuildFunction::Groth16(bind::BuildGroth16Bn254),
+            ProofSystem::DvSnark => BuildFunction::DvSnark(bind::BuildDvSnarkBn254),
         }
     }
 
@@ -41,6 +44,7 @@ impl ProofSystem {
         match self {
             ProofSystem::Plonk => ProveFunction::Plonk(bind::ProvePlonkBn254),
             ProofSystem::Groth16 => ProveFunction::Groth16(bind::ProveGroth16Bn254),
+            ProofSystem::DvSnark => ProveFunction::DvSnark(bind::ProveDvSnarkBn254),
         }
     }
 
@@ -51,6 +55,7 @@ impl ProofSystem {
         match self {
             ProofSystem::Plonk => bind::VerifyPlonkBn254,
             ProofSystem::Groth16 => bind::VerifyGroth16Bn254,
+            _ => unreachable!(),
         }
     }
 
@@ -58,6 +63,7 @@ impl ProofSystem {
         match self {
             ProofSystem::Plonk => bind::TestPlonkBn254,
             ProofSystem::Groth16 => bind::TestGroth16Bn254,
+            _ => unreachable!(),
         }
     }
 }
@@ -65,16 +71,36 @@ impl ProofSystem {
 enum ProveFunction {
     Plonk(unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut C_PlonkBn254Proof),
     Groth16(unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut C_Groth16Bn254Proof),
+    DvSnark(
+        unsafe extern "C" fn(*mut c_char, *mut c_char, *mut c_char) -> *mut C_DvSnarkBn254Proof,
+    ),
 }
 
-fn build(system: ProofSystem, data_dir: &str) {
+enum BuildFunction {
+    Plonk(unsafe extern "C" fn(*mut c_char)),
+    Groth16(unsafe extern "C" fn(*mut c_char)),
+    DvSnark(unsafe extern "C" fn(*mut c_char, *mut c_char)),
+}
+
+fn build(system: ProofSystem, data_dir: &str, store_dir: &str) {
     let data_dir = CString::new(data_dir).expect("CString::new failed");
     unsafe {
-        (system.build_fn())(data_dir.as_ptr() as *mut c_char);
+        match system.build_fn() {
+            BuildFunction::Plonk(func) => {
+                func(data_dir.as_ptr() as *mut c_char);
+            }
+            BuildFunction::Groth16(func) => {
+                func(data_dir.as_ptr() as *mut c_char);
+            }
+            BuildFunction::DvSnark(func) => {
+                let store_dir = CString::new(store_dir).expect("CString::new failed");
+                func(data_dir.as_ptr() as *mut c_char, store_dir.as_ptr() as *mut c_char);
+            }
+        }
     }
 }
 
-fn prove(system: ProofSystem, data_dir: &str, witness_path: &str) -> ProofResult {
+fn prove(system: ProofSystem, data_dir: &str, witness_path: &str, store_dir: &str) -> ProofResult {
     let data_dir = CString::new(data_dir).expect("CString::new failed");
     let witness_path = CString::new(witness_path).expect("CString::new failed");
 
@@ -89,6 +115,15 @@ fn prove(system: ProofSystem, data_dir: &str, witness_path: &str) -> ProofResult
                 let proof =
                     func(data_dir.as_ptr() as *mut c_char, witness_path.as_ptr() as *mut c_char);
                 ProofResult::Groth16(proof)
+            }
+            ProveFunction::DvSnark(func) => {
+                let store_dir = CString::new(store_dir).expect("CString::new failed");
+                let proof = func(
+                    data_dir.as_ptr() as *mut c_char,
+                    witness_path.as_ptr() as *mut c_char,
+                    store_dir.as_ptr() as *mut c_char,
+                );
+                ProofResult::DvSnark(proof)
             }
         }
     }
@@ -143,11 +178,11 @@ fn test(system: ProofSystem, witness_json: &str, constraints_json: &str) {
 // Public API functions
 
 pub fn build_plonk_bn254(data_dir: &str) {
-    build(ProofSystem::Plonk, data_dir)
+    build(ProofSystem::Plonk, data_dir, "")
 }
 
 pub fn prove_plonk_bn254(data_dir: &str, witness_path: &str) -> PlonkBn254Proof {
-    match prove(ProofSystem::Plonk, data_dir, witness_path) {
+    match prove(ProofSystem::Plonk, data_dir, witness_path, "") {
         ProofResult::Plonk(proof) => unsafe { PlonkBn254Proof::from_raw(proof) },
         _ => unreachable!(),
     }
@@ -167,11 +202,11 @@ pub fn test_plonk_bn254(witness_json: &str, constraints_json: &str) {
 }
 
 pub fn build_groth16_bn254(data_dir: &str) {
-    build(ProofSystem::Groth16, data_dir)
+    build(ProofSystem::Groth16, data_dir, "")
 }
 
 pub fn prove_groth16_bn254(data_dir: &str, witness_path: &str) -> Groth16Bn254Proof {
-    match prove(ProofSystem::Groth16, data_dir, witness_path) {
+    match prove(ProofSystem::Groth16, data_dir, witness_path, "") {
         ProofResult::Groth16(proof) => unsafe { Groth16Bn254Proof::from_raw(proof) },
         _ => unreachable!(),
     }
@@ -188,6 +223,21 @@ pub fn verify_groth16_bn254(
 
 pub fn test_groth16_bn254(witness_json: &str, constraints_json: &str) {
     test(ProofSystem::Groth16, witness_json, constraints_json)
+}
+
+pub fn build_dvsnark_bn254(data_dir: &str, store_dir: &str) {
+    build(ProofSystem::DvSnark, data_dir, store_dir)
+}
+
+pub fn prove_dvsnark_bn254(
+    data_dir: &str,
+    witness_path: &str,
+    store_dir: &str,
+) -> DvSnarkBn254Proof {
+    match prove(ProofSystem::DvSnark, data_dir, witness_path, store_dir) {
+        ProofResult::DvSnark(proof) => DvSnarkBn254Proof {},
+        _ => unreachable!(),
+    }
 }
 
 pub fn test_koalabear_poseidon2() {
