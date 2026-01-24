@@ -17,7 +17,7 @@ fn main() {
     let (pk, vk) = client.setup(BTC_ELF);
 
     // Execute the guest using the `ProverClient.execute` method, without generating a proof.
-    let (_, report) = client.execute(BTC_ELF, stdin.clone()).run().unwrap();
+    let (_, report) = client.execute(BTC_ELF, &stdin).run().unwrap();
     println!("executed program with {} cycles", report.total_instruction_count());
 
     let proof = client.prove(&pk, stdin).run().expect("proving failed");
