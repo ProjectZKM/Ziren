@@ -17,8 +17,7 @@ jobs:
       - run: export PATH=~/.cargo/bin:$PATH
       - run: |
           source ~/.zkm-toolchain/env
-          for pkg in zkm-core-machine zkm-sdk zkm-verifier; do
-            cargo test -r -p $pkg
+          cargo test -r -p zkm-core-machine
+          for pkg in zkm-sdk zkm-verifier; do
+            RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
           done
-        env:
-          RUSTFLAGS: "-C target-cpu=native"
