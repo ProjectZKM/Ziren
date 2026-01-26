@@ -94,7 +94,7 @@ impl Syscall for Sha256CompressSyscall {
             h_write_records.push(record);
         }
 
-        // Push the SHA extend event.
+        // Push the SHA compress event.
         let shard = rt.current_shard();
         let event = PrecompileEvent::ShaCompress(ShaCompressEvent {
             shard,

@@ -3,7 +3,6 @@
 use enum_map::Enum;
 use p3_field::Field;
 use std::fmt::Display;
-// use p3_field::Field;
 use serde::{Deserialize, Serialize};
 
 /// An opcode (short for "operation code") specifies the operation to be performed by the processor.

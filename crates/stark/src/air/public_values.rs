@@ -176,7 +176,7 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
 mod tests {
     use crate::air::public_values;
 
-    /// Check that the [`PI_DIGEST_NUM_WORDS`] number match the zkVM crate's.
+    /// Check that the [`PV_DIGEST_NUM_WORDS`] number match the zkVM crate's.
     #[test]
     fn test_public_values_digest_num_words_consistency_zkvm() {
         assert_eq!(public_values::PV_DIGEST_NUM_WORDS, zkm_zkvm::PV_DIGEST_NUM_WORDS);
