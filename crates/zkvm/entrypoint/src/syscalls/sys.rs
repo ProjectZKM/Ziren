@@ -22,7 +22,7 @@ static SYS_RAND_WARNING: std::sync::Once = std::sync::Once::new();
 ///
 /// # Safety
 ///
-/// Make sure that `buf` has at least `nwords` words.
+/// The caller must ensure that `recv_buf` is valid for writes of at least `words` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
     SYS_RAND_WARNING.call_once(|| {
