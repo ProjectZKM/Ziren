@@ -29,9 +29,9 @@ jobs:
   build:
     runs-on: self-hosted
     env:
-      MDBOOK_VERSION: 0.4.36
+      MDBOOK_VERSION: 0.4.52
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v5
