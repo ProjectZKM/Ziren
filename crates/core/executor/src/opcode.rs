@@ -2,8 +2,8 @@
 
 use enum_map::Enum;
 use p3_field::Field;
-use std::fmt::Display;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 /// An opcode (short for "operation code") specifies the operation to be performed by the processor.
 #[allow(non_camel_case_types)]
