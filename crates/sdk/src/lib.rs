@@ -199,9 +199,9 @@ impl ProverClient {
     /// stdin.write(&10usize);
     ///
     /// // Execute the program on the inputs.
-    /// let (public_values, report) = client.execute(elf, stdin).run().unwrap();
+    /// let (public_values, report) = client.execute(elf, &stdin).run().unwrap();
     /// ```
-    pub fn execute<'a>(&'a self, elf: &'a [u8], stdin: ZKMStdin) -> action::Execute<'a> {
+    pub fn execute<'a>(&'a self, elf: &'a [u8], stdin: &'a ZKMStdin) -> action::Execute<'a> {
         action::Execute::new(self.prover.as_ref(), elf, stdin)
     }
 
@@ -397,7 +397,7 @@ mod tests {
         let elf = test_artifacts::FIBONACCI_ELF;
         let mut stdin = ZKMStdin::new();
         stdin.write(&10usize);
-        let (_, _report) = client.execute(elf, stdin).run().unwrap();
+        let (_, _report) = client.execute(elf, &stdin).run().unwrap();
         // tracing::info!("gas = {}", report.estimate_gas());
     }
 
@@ -409,7 +409,7 @@ mod tests {
         let elf = test_artifacts::PANIC_ELF;
         let mut stdin = ZKMStdin::new();
         stdin.write(&10usize);
-        client.execute(elf, stdin).run().unwrap();
+        client.execute(elf, &stdin).run().unwrap();
     }
 
     #[should_panic]
@@ -420,7 +420,7 @@ mod tests {
         let elf = test_artifacts::PANIC_ELF;
         let mut stdin = ZKMStdin::new();
         stdin.write(&10usize);
-        client.execute(elf, stdin).max_cycles(1).run().unwrap();
+        client.execute(elf, &stdin).max_cycles(1).run().unwrap();
     }
 
     #[test]

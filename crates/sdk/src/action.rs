@@ -15,7 +15,7 @@ pub struct Execute<'a> {
     prover: &'a dyn Prover<DefaultProverComponents>,
     context_builder: ZKMContextBuilder<'a>,
     elf: &'a [u8],
-    stdin: ZKMStdin,
+    stdin: &'a ZKMStdin,
 }
 
 impl<'a> Execute<'a> {
@@ -26,7 +26,7 @@ impl<'a> Execute<'a> {
     pub fn new(
         prover: &'a dyn Prover<DefaultProverComponents>,
         elf: &'a [u8],
-        stdin: ZKMStdin,
+        stdin: &'a ZKMStdin,
     ) -> Self {
         Self { prover, elf, stdin, context_builder: Default::default() }
     }
@@ -35,7 +35,7 @@ impl<'a> Execute<'a> {
     pub fn run(self) -> Result<(ZKMPublicValues, ExecutionReport)> {
         let Self { prover, elf, stdin, mut context_builder } = self;
         let context = context_builder.build();
-        Ok(prover.zkm_prover().execute(elf, &stdin, context)?)
+        Ok(prover.zkm_prover().execute(elf, stdin, context)?)
     }
 
     /// Add a runtime [Hook](super::Hook) into the context.
