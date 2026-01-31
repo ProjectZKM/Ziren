@@ -1,5 +1,5 @@
-use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 use std::time::Instant;
+use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_bytes!("/tmp/keeper.elf");
@@ -27,7 +27,11 @@ fn prove_keeper(path: &str) {
     let end = Instant::now();
     let duration = end.duration_since(start);
 
-    println!("executed program with {} cycles, {} seconds", report.total_instruction_count(), duration.as_secs_f64());
+    println!(
+        "executed program with {} cycles, {} seconds",
+        report.total_instruction_count(),
+        duration.as_secs_f64()
+    );
 
     // Generate the proof for the given guest and input.
     let (pk, vk) = client.setup(ELF);

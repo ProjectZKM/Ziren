@@ -1,6 +1,6 @@
-use std::path::{PathBuf};
-use std::process::Command;
 use std::env;
+use std::path::PathBuf;
+use std::process::Command;
 
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -45,7 +45,7 @@ fn main() {
 
     let keeper_path = geth_dir.join("cmd/keeper/keeper");
     let elf_dest_dir = "/tmp/keeper.elf";
-    std::fs::copy(&keeper_path, &elf_dest_dir).unwrap(); 
+    std::fs::copy(&keeper_path, &elf_dest_dir).unwrap();
 
     println!("cargo:rerun-if-changed=build.rs");
 }
