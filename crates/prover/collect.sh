@@ -1,9 +1,11 @@
 # Generate Shapes
 
 #---------------Usage---------------
+# mkdir workspace && cd workspace
+# $ git clone https://github.com/ProjectZKM/ziren-shape-bin
+# $ git clone https://github.com/ProjectZKM/Ziren
 # $ ls -l
-# Ziren
-# ziren-shape-bin
+# Ziren ziren-shape-bin
 
 # $ cd Ziren
 # $ bash crates/prover/collect.sh

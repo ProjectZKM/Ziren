@@ -1,0 +1,40 @@
+[package]
+name = "keeper-host"
+version = { workspace = true }
+edition = { workspace = true }
+default-run = "keeper-host"
+publish = false
+
+[dependencies]
+serde = { version = "1.0.144", features = ["derive"] }
+serde_json = "1.0"
+byteorder = "1.5.0"
+hex = "0.4.3"
+zkm-sdk = { workspace = true }
+dotenv = "0.15.0"
+
+[build-dependencies]
+zkm-build = { workspace = true }
+
+[[bin]]
+name = "plonk_bn254"
+path = "bin/plonk_bn254.rs"
+
+[[bin]]
+name = "groth16_bn254"
+path = "bin/groth16_bn254.rs"
+
+[[bin]]
+name = "compressed"
+path = "bin/compressed.rs"
+
+[[bin]]
+name = "execute"
+path = "bin/execute.rs"
+
+[[bin]]
+name = "keeper-host"
+path = "src/main.rs"
+
+# [features]
+# cuda = ["zkm-sdk/cuda"]
