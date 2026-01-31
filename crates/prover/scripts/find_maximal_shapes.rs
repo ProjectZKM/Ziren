@@ -68,8 +68,12 @@ fn main() {
         );
     }
 
+    use std::thread::available_parallelism;
     // For each program, collect the maximal shapes.
-    let (tx, rx) = mpsc::sync_channel(10);
+    let channel_size =
+        available_parallelism().unwrap_or(std::num::NonZeroUsize::new(11).unwrap()).get();
+    tracing::info!("using channel size: {}", channel_size);
+    let (tx, rx) = mpsc::sync_channel(channel_size - 1);
 
     if args.reth || args.geth {
         let start_block = args.start_block.expect("start block must be provided for reth/geth");
@@ -127,6 +131,7 @@ fn main() {
     } else {
         let program_list = args.list;
         for path in program_list {
+            tracing::info!("running for program at path: {}", path);
             // Read the program and stdin.
             let elf = std::fs::read(path.clone() + "/program.bin").expect("failed to read program");
             let stdin = std::fs::read(path.clone() + "/stdin.bin").expect("failed to read stdin");
