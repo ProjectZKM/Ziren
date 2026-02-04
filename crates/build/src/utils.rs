@@ -24,8 +24,7 @@ pub(crate) fn cargo_rerun_if_changed(metadata: &Metadata, program_dir: &Path) {
                 println!("cargo::rerun-if-changed={}", canonical_path.display());
             } else {
                 println!(
-                    "cargo::warning=Could not canonicalize path: {:?}, using original path",
-                    dir
+                    "cargo::warning=Could not canonicalize path: {dir:?}, using original path"
                 );
                 println!("cargo::rerun-if-changed={}", dir.display());
             }
