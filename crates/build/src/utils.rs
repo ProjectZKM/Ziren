@@ -20,8 +20,14 @@ pub(crate) fn cargo_rerun_if_changed(metadata: &Metadata, program_dir: &Path) {
     ];
     for dir in dirs {
         if dir.exists() {
-            if let Ok(path) = dir.canonicalize() {
-                println!("cargo::rerun-if-changed={}", path.display());
+            if let Ok(canonical_path) = dir.canonicalize() {
+                println!("cargo::rerun-if-changed={}", canonical_path.display());
+            } else {
+                println!(
+                    "cargo::warning=Could not canonicalize path: {:?}, using original path",
+                    dir
+                );
+                println!("cargo::rerun-if-changed={}", dir.display());
             }
         }
     }
