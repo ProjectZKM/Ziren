@@ -195,7 +195,7 @@ impl Display for PicusExpr {
         use PicusExpr::{Add, Const, Div, Mul, Neg, Pow, Sub, Var};
         match self {
             Const(v) => write!(f, "{v}"),
-            Var(id) => write!(f, "{id}"),
+            Var(id) => write!(f, "x_{id}"),
             Add(a, b) => write!(f, "(+ {a} {b})"),
             Sub(a, b) => write!(f, "(- {a} {b})"),
             Mul(a, b) => write!(f, "(* {a} {b})"),
