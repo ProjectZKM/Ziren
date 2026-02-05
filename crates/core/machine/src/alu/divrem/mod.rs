@@ -76,9 +76,12 @@ use zkm_core_executor::{
 };
 
 use crate::{memory::MemoryReadWriteCols, CoreChipError};
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{
+    air::{MachineAir, PicusInfo},
+    Word,
+};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
@@ -101,7 +104,7 @@ const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 pub struct DivRemChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DivRemCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -139,15 +142,19 @@ pub struct DivRemCols<T> {
     pub is_c_0: IsZeroWordOperation<T>,
 
     /// Flag to indicate whether the opcode is DIV.
+    #[picus(selector)]
     pub is_div: T,
 
     /// Flag to indicate whether the opcode is DIVU.
+    #[picus(selector)]
     pub is_divu: T,
 
     /// Flag to indicate whether the opcode is MOD.
+    #[picus(selector)]
     pub is_mod: T,
 
     /// Flag to indicate whether the opcode is MODU.
+    #[picus(selector)]
     pub is_modu: T,
 
     /// Flag to indicate whether the division operation overflows.

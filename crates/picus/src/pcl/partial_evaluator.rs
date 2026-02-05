@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::pcl::{current_modulus, reduce_mod, PicusCall, PicusConstraint, PicusExpr, PicusVar};
+use crate::pcl::{current_modulus, reduce_mod, PicusCall, PicusConstraint, PicusExpr, PicusAtom};
 
 // === Helpers ===
 
@@ -55,7 +55,7 @@ fn pow_simplify(k: u64, base: PicusExpr) -> PicusExpr {
 
 // === Expression substitution/simplification ===
 // substitutes variables with constants in `e` from `env` and performs partial evaluation
-fn subst_expr(e: &PicusExpr, env: &BTreeMap<PicusVar, u64>) -> PicusExpr {
+fn subst_expr(e: &PicusExpr, env: &BTreeMap<usize, u64>) -> PicusExpr {
     use crate::PicusExpr::*;
     match e {
         Const(c) => Const(mod_reduce_u64(*c)),
@@ -87,7 +87,7 @@ fn subst_expr(e: &PicusExpr, env: &BTreeMap<PicusVar, u64>) -> PicusExpr {
 // === Call substitution/simplification ===
 /// This function replaces variables in `call` with constants in `env`
 /// and then simplifies.
-pub fn subst_call(call: &PicusCall, env: &BTreeMap<PicusVar, u64>) -> PicusCall {
+pub fn subst_call(call: &PicusCall, env: &BTreeMap<usize, u64>) -> PicusCall {
     let mut new_inputs = Vec::new();
     let mut new_outputs = Vec::new();
     for input in &call.inputs {
@@ -104,7 +104,7 @@ pub fn subst_call(call: &PicusCall, env: &BTreeMap<PicusVar, u64>) -> PicusCall 
 /// and then simplifies.
 pub fn subst_constraint(
     c: &PicusConstraint,
-    env: &BTreeMap<PicusVar, u64>,
+    env: &BTreeMap<usize, u64>,
 ) -> Option<PicusConstraint> {
     use PicusConstraint::*;
     let keep = |cc: PicusConstraint| Some(cc);
@@ -238,7 +238,7 @@ pub fn subst_constraint(
 /// after substituting those variables with constants and partial evaluating
 pub fn partial_evaluate(
     constraints: &[PicusConstraint],
-    env: &BTreeMap<PicusVar, u64>,
+    env: &BTreeMap<usize, u64>,
 ) -> Vec<PicusConstraint> {
     let mut out_constraints = Vec::with_capacity(constraints.len());
     for c in constraints {
@@ -255,7 +255,7 @@ pub fn partial_evaluate(
 
 pub fn partial_evaluate_calls(
     calls: &[PicusCall],
-    env: &BTreeMap<PicusVar, u64>,
+    env: &BTreeMap<usize, u64>,
 ) -> Vec<PicusCall> {
     let mut out_calls = Vec::with_capacity(calls.len());
     for call in calls {

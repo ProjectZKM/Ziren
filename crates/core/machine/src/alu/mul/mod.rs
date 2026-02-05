@@ -86,7 +86,6 @@ pub struct MulCols<T> {
     pub hi: Word<T>,
 
     /// The output operand.
-    #[picus(output)]
     pub a: Word<T>,
 
     /// The first input operand.
@@ -125,8 +124,6 @@ pub struct MulCols<T> {
     #[picus(selector)]
     pub is_multu: T,
 
-    /// Selector to know whether this row is enabled.
-    #[picus(selector)]
     pub is_real: T,
 
     /// Access to hi register
@@ -405,11 +402,11 @@ where
         let product = {
             for i in 0..PRODUCT_SIZE {
                 if i == 0 {
-                    builder.assert_eq(local.product[i], m[i].clone() - local.carry[i] * base);
+                    builder.assert_eq(m[i].clone(), local.carry[i] * base + local.product[i]);
                 } else {
                     builder.assert_eq(
-                        local.product[i],
-                        m[i].clone() + local.carry[i - 1] - local.carry[i] * base,
+                        local.product[i] + local.carry[i] * base - local.carry[i - 1],
+                        m[i].clone(),
                     );
                 }
             }

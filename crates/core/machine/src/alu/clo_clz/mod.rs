@@ -22,8 +22,8 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed, CoreChipError};
 
@@ -39,7 +39,7 @@ const BYTE_SIZE: usize = 8;
 pub struct CloClzChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CloClzCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -63,9 +63,11 @@ pub struct CloClzCols<T> {
     pub sr1: Word<T>,
 
     /// Flag to indicate whether the opcode is CLZ.
+    #[picus(selector)]
     pub is_clz: T,
 
     /// Flag to indicate whether the opcode is CLO.
+    #[picus(selector)]
     pub is_clo: T,
 
     /// Selector to know whether this row is enabled.
@@ -81,6 +83,10 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
 
     fn name(&self) -> String {
         "CloClz".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        CloClzCols::<u8>::picus_info()
     }
 
     fn generate_trace(

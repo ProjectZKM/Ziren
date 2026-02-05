@@ -29,11 +29,19 @@ pub fn initialize_fresh_var_ctr(val: usize) {
     let _ = FRESH_VAR_CTR.set(AtomicUsize::new(val));
 }
 
-// update the counter
-pub fn fresh_picus_var() -> PicusExpr {
+pub fn fresh_picus_var_id() -> usize {
     let cur_var = ctr().load(Ordering::Relaxed);
     ctr().store(cur_var + 1, Ordering::Relaxed);
-    PicusExpr::Var(PicusVar::new(cur_var))
+    cur_var
+}
+
+pub fn fresh_picus_var() -> PicusAtom {
+    PicusAtom::new_var(fresh_picus_var_id())
+}
+
+// update the counter
+pub fn fresh_picus_expr() -> PicusExpr {
+    PicusExpr::Var(fresh_picus_var_id())
 }
 
 use p3_field::{FieldAlgebra, PrimeField32};
@@ -73,7 +81,7 @@ pub enum PicusExpr {
     Const(u64),
     /// Variable identified by `(name, index, tag)`, printed as `name_index_tag`. NOTE: Tag might
     /// be droppable
-    Var(PicusVar),
+    Var(usize),
     /// Add.
     Add(Box<PicusExpr>, Box<PicusExpr>),
     /// Sub.
@@ -95,30 +103,39 @@ impl Default for PicusExpr {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub struct PicusVar {
-    pub id: usize,
+pub enum PicusAtom {
+    Const(u64),
+    Var(usize),
 }
 
-impl PicusVar {
-    pub fn new(id: usize) -> Self {
-        PicusVar { id }
+impl PicusAtom {
+    pub fn new_var(id: usize) -> Self {
+        Self::Var(id)
     }
 }
 
-impl Display for PicusVar {
+impl Display for PicusAtom {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if let Some(lock) = PICUS_NAMES_GLOBAL.get() {
-            if let Some(name) = lock.read().unwrap().get(&self.id) {
-                return f.write_str(name);
+        match self {
+            Self::Const(c) => write!(f, "{c}"),
+            Self::Var(id) => {
+                if let Some(lock) = PICUS_NAMES_GLOBAL.get() {
+                    if let Some(name) = lock.read().unwrap().get(id) {
+                        return f.write_str(name);
+                    }
+                }
+                write!(f, "v{}", id)
             }
         }
-        write!(f, "v{}", self.id)
     }
 }
 
-impl From<PicusVar> for PicusExpr {
-    fn from(value: PicusVar) -> Self {
-        PicusExpr::Var(value.clone())
+impl From<PicusAtom> for PicusExpr {
+    fn from(value: PicusAtom) -> Self {
+        match value {
+            PicusAtom::Const(c) => PicusExpr::Const(c),
+            PicusAtom::Var(id) => PicusExpr::Var(id),
+        }
     }
 }
 
@@ -128,7 +145,7 @@ impl From<Felt> for PicusExpr {
     }
 }
 
-impl Add<Felt> for PicusVar {
+impl Add<Felt> for PicusAtom {
     type Output = PicusExpr;
 
     fn add(self, rhs: Felt) -> Self::Output {
@@ -136,15 +153,15 @@ impl Add<Felt> for PicusVar {
     }
 }
 
-impl Add<PicusVar> for PicusVar {
+impl Add<PicusAtom> for PicusAtom {
     type Output = PicusExpr;
 
-    fn add(self, rhs: PicusVar) -> Self::Output {
+    fn add(self, rhs: PicusAtom) -> Self::Output {
         PicusExpr::Add(Box::new(self.into()), Box::new(rhs.into()))
     }
 }
 
-impl Add<PicusExpr> for PicusVar {
+impl Add<PicusExpr> for PicusAtom {
     type Output = PicusExpr;
 
     fn add(self, rhs: PicusExpr) -> Self::Output {
@@ -153,7 +170,7 @@ impl Add<PicusExpr> for PicusVar {
     }
 }
 
-impl Sub<Felt> for PicusVar {
+impl Sub<Felt> for PicusAtom {
     type Output = PicusExpr;
 
     fn sub(self, rhs: Felt) -> Self::Output {
@@ -162,17 +179,17 @@ impl Sub<Felt> for PicusVar {
     }
 }
 
-impl Sub<PicusVar> for PicusVar {
+impl Sub<PicusAtom> for PicusAtom {
     type Output = PicusExpr;
 
-    fn sub(self, rhs: PicusVar) -> Self::Output {
+    fn sub(self, rhs: PicusAtom) -> Self::Output {
         let self_expr: PicusExpr = self.into();
         let rhs_expr: PicusExpr = rhs.into();
         self_expr - rhs_expr
     }
 }
 
-impl Sub<PicusExpr> for PicusVar {
+impl Sub<PicusExpr> for PicusAtom {
     type Output = PicusExpr;
 
     fn sub(self, rhs: PicusExpr) -> Self::Output {
@@ -181,17 +198,17 @@ impl Sub<PicusExpr> for PicusVar {
     }
 }
 
-impl Mul<PicusVar> for PicusVar {
+impl Mul<PicusAtom> for PicusAtom {
     type Output = PicusExpr;
 
-    fn mul(self, rhs: PicusVar) -> Self::Output {
+    fn mul(self, rhs: PicusAtom) -> Self::Output {
         let self_expr: PicusExpr = self.into();
         let rhs_expr: PicusExpr = rhs.into();
         self_expr * rhs_expr
     }
 }
 
-impl Mul<Felt> for PicusVar {
+impl Mul<Felt> for PicusAtom {
     type Output = PicusExpr;
 
     fn mul(self, rhs: Felt) -> Self::Output {
@@ -200,7 +217,7 @@ impl Mul<Felt> for PicusVar {
     }
 }
 
-impl Mul<PicusExpr> for PicusVar {
+impl Mul<PicusExpr> for PicusAtom {
     type Output = PicusExpr;
 
     fn mul(self, rhs: PicusExpr) -> Self::Output {
@@ -246,7 +263,7 @@ impl PicusExpr {
     }
     /// Helper to construct a `Var` with a column index.
     pub fn var(idx: usize) -> Self {
-        PicusExpr::Var(PicusVar { id: idx })
+        PicusExpr::Var(idx)
     }
     #[must_use]
     /// Convenience for exponentiating by a non-negative `u32` power.
@@ -314,10 +331,10 @@ impl Add<Felt> for PicusExpr {
     }
 }
 
-impl Add<PicusVar> for PicusExpr {
+impl Add<PicusAtom> for PicusExpr {
     type Output = PicusExpr;
 
-    fn add(self, rhs: PicusVar) -> Self::Output {
+    fn add(self, rhs: PicusAtom) -> Self::Output {
         let rhs_expr: Self = rhs.into();
         self + rhs_expr
     }
@@ -363,10 +380,10 @@ impl Sub<Felt> for PicusExpr {
     }
 }
 
-impl Sub<PicusVar> for PicusExpr {
+impl Sub<PicusAtom> for PicusExpr {
     type Output = PicusExpr;
 
-    fn sub(self, rhs: PicusVar) -> Self::Output {
+    fn sub(self, rhs: PicusAtom) -> Self::Output {
         let rhs_expr: Self = rhs.into();
         self - rhs_expr
     }
@@ -418,10 +435,10 @@ impl Mul<Felt> for PicusExpr {
     }
 }
 
-impl Mul<PicusVar> for PicusExpr {
+impl Mul<PicusAtom> for PicusExpr {
     type Output = PicusExpr;
 
-    fn mul(self, rhs: PicusVar) -> Self::Output {
+    fn mul(self, rhs: PicusAtom) -> Self::Output {
         let rhs_expr: PicusExpr = rhs.into();
         self * rhs_expr
     }
@@ -541,6 +558,12 @@ impl PicusConstraint {
         PicusConstraint::Eq(Box::new(left - right))
     }
 
+    #[must_use]
+    /// Builds a bit constraint
+    pub fn new_bit(left: PicusExpr) -> PicusConstraint {
+        PicusConstraint::Eq(Box::new(left.clone() * (left.clone() - PicusExpr::Const(1u64))))
+    }
+
     /// Build a comparison constraint `left < right`
     #[must_use]
     pub fn new_lt(left: PicusExpr, right: PicusExpr) -> PicusConstraint {
@@ -571,5 +594,63 @@ impl PicusConstraint {
     pub fn in_range(e: PicusExpr, l: usize, u: usize) -> Vec<PicusConstraint> {
         assert!(l < u);
         vec![PicusConstraint::new_geq(e.clone(), l.into()), PicusConstraint::new_leq(e, u.into())]
+    }
+
+    #[must_use]
+    pub fn apply_multiplier(&self, multiplier: PicusExpr) -> PicusConstraint {
+        use PicusConstraint::*;
+        if let PicusExpr::Const(1) = multiplier {
+            return self.clone();
+        }
+        match self {
+            And(l, r) => {
+                let new_left = l.apply_multiplier(multiplier.clone());
+                let new_right = r.apply_multiplier(multiplier);
+                PicusConstraint::And(Box::new(new_left), Box::new(new_right))
+            }
+            Lt(l, r) => {
+                let new_left = multiplier.clone() * (*l.clone());
+                let new_right = multiplier.clone() * (*r.clone());
+                PicusConstraint::Lt(Box::new(new_left), Box::new(new_right))
+            }
+            Leq(l, r) => {
+                let new_left = multiplier.clone() * (*l.clone());
+                let new_right = multiplier.clone() * (*r.clone());
+                PicusConstraint::Leq(Box::new(new_left), Box::new(new_right))
+            }
+            Gt(l, r) => {
+                let new_left = multiplier.clone() * (*l.clone());
+                let new_right = multiplier.clone() * (*r.clone());
+                PicusConstraint::Gt(Box::new(new_left), Box::new(new_right))
+            }
+            Geq(l, r) => {
+                let new_left = multiplier.clone() * (*l.clone());
+                let new_right = multiplier.clone() * (*r.clone());
+                PicusConstraint::Geq(Box::new(new_left), Box::new(new_right))
+            }
+            Implies(l, r) => {
+                let new_left = l.apply_multiplier(multiplier.clone());
+                let new_right = r.apply_multiplier(multiplier);
+                PicusConstraint::Implies(Box::new(new_left), Box::new(new_right))
+            }
+            Not(c) => {
+                let new_c = c.apply_multiplier(multiplier.clone());
+                PicusConstraint::Not(Box::new(new_c))
+            }
+            Iff(l, r) => {
+                let new_left = l.apply_multiplier(multiplier.clone());
+                let new_right = r.apply_multiplier(multiplier);
+                PicusConstraint::Iff(Box::new(new_left), Box::new(new_right))
+            }
+            Or(l, r) => {
+                let new_left = l.apply_multiplier(multiplier.clone());
+                let new_right = r.apply_multiplier(multiplier);
+                PicusConstraint::Or(Box::new(new_left), Box::new(new_right))
+            }
+            Eq(e) => {
+                let new_e = multiplier.clone() * (*e.clone());
+                PicusConstraint::Eq(Box::new(new_e))
+            }
+        }
     }
 }
