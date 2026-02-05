@@ -180,7 +180,7 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
     for field in fields.iter() {
         let f_ident = field.ident.as_ref().unwrap();
         let f_name = f_ident.to_string();
-
+        println!("f_name: {f_name}");
         // Collect flags
         let mut flags = PicusArgs::default();
         for attr in &field.attrs {
@@ -204,6 +204,7 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
         let push_name = {
             quote! {
                 if width > 0 {
+                    info.name_to_colrange.insert((#f_name).to_string(), (cur, cur+width));
                     for x in cur..(cur+width) {
                         info.col_to_name.insert(x, format!("{}_{}", #f_name, x));
                     }
@@ -224,8 +225,22 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
 
         let push_sel = if flags.selector {
             quote! {
-                debug_assert_eq!(width, 1, "selector `{}` must have width 1", #f_name);
-                info.selector_indices.push((cur, #f_name.to_string()));
+                if width > 0 {
+                    for i in 0..width {
+                        info.selector_indices.push((cur + i, #f_name.to_string()));
+                    }
+                }
+
+            }
+        } else {
+            quote!()
+        };
+        // If the field name is "is_real" then add that mark it in PicusInfo
+        let push_is_real = if f_name == "is_real" {
+            quote! {
+                if width > 0 {
+                    info.is_real_index = Some(cur);
+                }
             }
         } else {
             quote!()
@@ -237,6 +252,7 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
             #push_in
             #push_out
             #push_sel
+            #push_is_real
             cur += width;
         }});
     }

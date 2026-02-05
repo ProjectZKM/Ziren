@@ -5,12 +5,12 @@ use p3_air::{Air, BaseAir};
 use zkm_core_machine::MipsAir;
 use zkm_picus::{
     pcl::{
-        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusExpr, PicusModule,
-        PicusProgram, PicusVar,
+        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusAtom, PicusModule,
+        PicusProgram,
     },
     picus_builder::PicusBuilder,
 };
-use zkm_stark::{MachineAir, ZKM_PROOF_NUM_PV_ELTS};
+use zkm_stark::{Chip, MachineAir};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -33,6 +33,68 @@ struct Args {
     ///
     /// Can be overridden with PICUS_OUT_DIR.
     pub picus_out_dir: PathBuf,
+}
+
+/// Analyze a single chip and process all its deferred sub-chip tasks.
+/// This replaces direct recursion in `MessageBuilder::send()`.
+fn analyze_chip<'chips, A>(
+    chip: &'chips Chip<Felt, A>,
+    chips: &'chips [Chip<Felt, A>],
+    picus_builder: Option<&mut PicusBuilder<'chips, A>>,
+) -> (PicusModule, BTreeMap<String, PicusModule>)
+where
+    A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder<'chips, A>>,
+{
+    println!("Analyzing chip: {}", chip.name());
+
+    let mut builder = if let Some(builder) = picus_builder {
+        builder
+    } else {
+        &mut PicusBuilder::new(chip, PicusModule::new(chip.name()), chips, None, None)
+    };
+    chip.air.eval(&mut builder);
+
+    // Process deferred tasks recursively
+    while let Some(task) = builder.pending_tasks.pop() {
+        let target_chip = builder.get_chip(&task.chip_name);
+        let target_picus_info = target_chip.picus_info();
+
+        let mut sub_builder = PicusBuilder::new(
+            target_chip,
+            PicusModule::new(task.chip_name.clone()),
+            builder.chips,
+            Some(task.main_vars.clone()),
+            Some(task.multiplicity.clone()),
+        );
+
+        let (mut sub_module, aux_modules) =
+            analyze_chip(target_chip, builder.chips, Some(&mut sub_builder));
+        // Merge submodules
+        builder.aux_modules.extend(aux_modules.into_iter());
+
+        sub_module.apply_multiplier(task.multiplicity);
+        // partially evaluate
+
+        let selector_col = target_picus_info.name_to_colrange.get(&task.selector).unwrap().0;
+        let mut env = BTreeMap::new();
+        // Set `is_real = 1` if it is set in `picus_info`
+        if let Some(id) = target_picus_info.is_real_index {
+            env.insert(id, 1);
+        }
+        env.insert(selector_col, 1);
+        for (other_selector_col, _) in &target_picus_info.selector_indices {
+            if selector_col == *other_selector_col {
+                continue;
+            }
+            env.insert(*other_selector_col, 0);
+        }
+        let updated_picus_module = sub_module.partial_eval(&env);
+        println!("Updated module: {updated_picus_module}");
+        builder.picus_module.constraints.extend_from_slice(&updated_picus_module.constraints);
+        builder.picus_module.postconditions.extend_from_slice(&sub_module.postconditions);
+    }
+
+    (builder.picus_module.clone(), builder.aux_modules.clone())
 }
 
 fn main() {
@@ -64,31 +126,10 @@ fn main() {
     // Initialize the Picus program
     let mut picus_program = PicusProgram::new(koala_prime);
 
-    // Allocate Picus program consisting of a single module that corresponds to the chip.
-    let mut picus_module = PicusModule::new(chip.name());
-
-    // Specify the input columns
-    for (start, end, _) in &picus_info.input_ranges {
-        for col in *start..*end {
-            picus_module.inputs.push(PicusExpr::Var(PicusVar { id: col }));
-        }
-    }
-    // Specify the output columns
-    for (start, end, _) in &picus_info.output_ranges {
-        for col in *start..=*end {
-            picus_module.outputs.push(PicusExpr::Var(PicusVar { id: col }));
-        }
-    }
     // Build the Picus program which will have a single module with the chip constraints
     println!("Generating Picus program for {} chip.....", chip.name());
-    let mut picus_builder = PicusBuilder::new(
-        chip.preprocessed_width(),
-        chip.air.width(),
-        ZKM_PROOF_NUM_PV_ELTS,
-        picus_module,
-    );
-    chip.air.eval(&mut picus_builder);
-    picus_program.add_modules(&mut picus_builder.aux_modules);
+    let (picus_module, mut aux_modules) = analyze_chip(chip, &chips, None);
+    picus_program.add_modules(&mut aux_modules);
     // At this point, we've built a module directly from the constraints. However, this isn't super amenable to verification
     // because the selectors introduce a lot of nonlinearity. So what we do instead is generate distinct Picus modules
     // each of which correspond to a selector being enabled. The selectors are mutually exclusive.
@@ -97,20 +138,24 @@ fn main() {
     if picus_info.selector_indices.is_empty() {
         panic!("PicusBuilder needs at least one selector to be enabled!")
     }
-    println!("Picus Info: {:?}", picus_info);
     println!("Applying selectors program.....");
+    println!("PicusInfo: {:?}", picus_info.clone());
     for (selector_col, _) in &picus_info.selector_indices {
         let mut env = BTreeMap::new();
-        env.insert(PicusVar { id: *selector_col }, 1);
+        // Set `is_real = 1` if it is set in `picus_info`
+        if let Some(id) = picus_info.is_real_index {
+            env.insert(id, 1);
+        }
+        env.insert(*selector_col, 1);
         for (other_selector_col, _) in &picus_info.selector_indices {
             if selector_col == other_selector_col {
                 continue;
             }
-            env.insert(PicusVar { id: *other_selector_col }, 0);
+            env.insert(*other_selector_col, 0);
         }
         // We generate a new Picus module by partially evaluating our original Picus module with respect
         // to the environment map.
-        let updated_picus_module = picus_builder.picus_module.partial_eval(&env);
+        let updated_picus_module = picus_module.partial_eval(&env);
         selector_modules.insert(updated_picus_module.name.clone(), updated_picus_module);
     }
 

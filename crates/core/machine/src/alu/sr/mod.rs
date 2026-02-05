@@ -57,9 +57,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
@@ -83,7 +83,7 @@ const BYTE_SIZE: usize = 8;
 pub struct ShiftRightChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftRightCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -124,12 +124,15 @@ pub struct ShiftRightCols<T> {
     pub c_least_sig_byte: [T; BYTE_SIZE],
 
     /// If the opcode is SRL.
+    #[picus(selector)]
     pub is_srl: T,
 
     /// If the opcode is ROR.
+    #[picus(selector)]
     pub is_ror: T,
 
     /// If the opcode is SRA.
+    #[picus(selector)]
     pub is_sra: T,
 
     /// Selector to know whether this row is enabled.
@@ -145,6 +148,10 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
 
     fn name(&self) -> String {
         "ShiftRight".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        ShiftRightCols::<u8>::picus_info()
     }
 
     fn generate_trace(

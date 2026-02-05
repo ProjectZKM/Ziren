@@ -1,14 +1,13 @@
+use crate::pcl::{
+    expr::{PicusConstraint, PicusExpr},
+    partial_evaluate, partial_evaluate_calls, PicusAtom,
+};
 use std::{
     collections::BTreeMap,
     fmt::{self, Display, Formatter},
     fs::File,
     io::{self, Write},
     path::Path,
-};
-
-use crate::pcl::{
-    expr::{PicusConstraint, PicusExpr},
-    partial_evaluate, partial_evaluate_calls, PicusVar,
 };
 
 /// A call to another Picus module (by name).
@@ -32,6 +31,12 @@ pub struct PicusCall {
     /// Expressions that are *passed* to the callee.
     /// (Printed last in the call s-expression.)
     pub inputs: Vec<PicusExpr>,
+}
+
+impl PicusCall {
+    pub fn new(mod_name: String, outputs: &[PicusExpr], inputs: &[PicusExpr]) -> PicusCall {
+        return PicusCall { mod_name, outputs: outputs.into(), inputs: inputs.into() };
+    }
 }
 
 /// A single Picus module and its contents.
@@ -76,10 +81,46 @@ impl PicusModule {
         }
     }
 
+    /// builds an empty picus module with `num_inputs` inputs and `num_outputs` outputs
+    pub fn build_empty(name: String, num_inputs: usize, num_outputs: usize) -> Self {
+        let mut inputs = Vec::with_capacity(num_inputs);
+        let mut outputs = Vec::with_capacity(num_inputs);
+        for i in 0..num_inputs {
+            inputs.push(PicusExpr::Var(i));
+        }
+        for i in 0..num_outputs {
+            outputs.push(PicusExpr::Var(num_inputs + i));
+        }
+        PicusModule {
+            name,
+            inputs,
+            outputs,
+            constraints: Vec::new(),
+            postconditions: Vec::new(),
+            assume_deterministic: Vec::new(),
+            calls: Vec::new(),
+        }
+    }
+
+    // Applies the multiplier across the constraints
+    pub fn apply_multiplier(&mut self, multiplier: PicusExpr) {
+        let mut constraints = Vec::with_capacity(self.constraints.len());
+        let mut post_conditions = Vec::with_capacity(self.postconditions.len());
+        for constraint in &self.constraints {
+            constraints.push(constraint.apply_multiplier(multiplier.clone()));
+        }
+
+        for postcond in &self.postconditions {
+            post_conditions.push(postcond.apply_multiplier(multiplier.clone()));
+        }
+        self.constraints = constraints;
+        self.postconditions = post_conditions;
+    }
+
     #[must_use]
     /// Construct a new Picus module by partially evaluating the module's constraints
     /// with the given values
-    pub fn partial_eval(&self, env: &BTreeMap<PicusVar, u64>) -> Self {
+    pub fn partial_eval(&self, env: &BTreeMap<usize, u64>) -> Self {
         let mut name = self.name.clone();
         for (k, v) in env {
             name += &format!("{k}_{v}");
