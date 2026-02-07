@@ -28,7 +28,7 @@ use std::{
     sync::Arc,
 };
 
-use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{ExtensionField, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_koala_bear::Poseidon2ExternalLayerKoalaBear;
 use p3_poseidon2::Poseidon2;
 use p3_symmetric::{CryptographicPermutation, Permutation};
@@ -127,7 +127,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// Entries for dealing with the Poseidon2 hash state.
     perm: Option<
         Poseidon2<
-            <F as Field>::Packing,
+            F::Packing,
             Poseidon2ExternalLayerKoalaBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
@@ -173,7 +173,7 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
 impl<F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'_, F, EF, Diffusion>
 where
     Poseidon2<
-        <F as Field>::Packing,
+        F::Packing,
         Poseidon2ExternalLayerKoalaBear<16>,
         Diffusion,
         PERMUTATION_WIDTH,
@@ -183,7 +183,7 @@ where
     pub fn new(
         program: Arc<RecursionProgram<F>>,
         perm: Poseidon2<
-            <F as Field>::Packing,
+            F::Packing,
             Poseidon2ExternalLayerKoalaBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
