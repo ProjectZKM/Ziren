@@ -4,7 +4,11 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+    time::Instant,
 };
 
 use eyre::Result;
@@ -156,11 +160,17 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let height = dummy_set.len().next_power_of_two().ilog2() as usize;
         (dummy_set, vec![], height)
     } else {
+        let start_time = Instant::now();
         let (vk_tx, vk_rx) = channel::unbounded();
         let (shape_tx, shape_rx) =
             channel::bounded::<(usize, ZKMCompressProgramShape)>(num_compiler_workers);
         let (program_tx, program_rx) = channel::bounded(num_setup_workers);
         let (panic_tx, panic_rx) = channel::unbounded();
+
+        let compile_total_ns = AtomicU64::new(0);
+        let compile_count = AtomicUsize::new(0);
+        let setup_total_ns = AtomicU64::new(0);
+        let setup_count = AtomicUsize::new(0);
 
         let indices_set = indices.map(|indices| indices.into_iter().collect::<HashSet<_>>());
         let all_shapes =
@@ -177,14 +187,20 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             for _ in 0..num_compiler_workers {
                 let program_tx = program_tx.clone();
                 let shape_rx = shape_rx.clone();
-                let prover = &prover;
                 let panic_tx = panic_tx.clone();
+                let compile_total_ns = &compile_total_ns;
+                let compile_count = &compile_count;
                 s.spawn(move || {
+                    let prover = ZKMProver::<C>::new();
                     while let Ok((i, shape)) = shape_rx.recv() {
                         tracing::info!("shape {i} is {shape:?}");
+                        let compile_start = Instant::now();
                         let program = catch_unwind(AssertUnwindSafe(|| {
                             prover.program_from_shape(shape.clone(), None)
                         }));
+                        let compile_ns = compile_start.elapsed().as_nanos() as u64;
+                        compile_total_ns.fetch_add(compile_ns, Ordering::Relaxed);
+                        compile_count.fetch_add(1, Ordering::Relaxed);
                         let is_shrink = matches!(shape, ZKMCompressProgramShape::Shrink(_));
                         match program {
                             Ok(program) => program_tx.send((i, program, is_shrink)).unwrap(),
@@ -206,10 +222,13 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             for _ in 0..num_setup_workers {
                 let vk_tx = vk_tx.clone();
                 let program_rx = program_rx.clone();
-                let prover = &prover;
+                let setup_total_ns = &setup_total_ns;
+                let setup_count = &setup_count;
                 s.spawn(move || {
+                    let prover = ZKMProver::<C>::new();
                     let mut done = 0;
                     while let Ok((i, program, is_shrink)) = program_rx.recv() {
+                        let setup_start = Instant::now();
                         let vk = tracing::debug_span!("setup for program {}", i).in_scope(|| {
                             if is_shrink {
                                 prover.shrink_prover.setup(&program).1
@@ -217,6 +236,9 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                                 prover.compress_prover.setup(&program).1
                             }
                         });
+                        let setup_ns = setup_start.elapsed().as_nanos() as u64;
+                        setup_total_ns.fetch_add(setup_ns, Ordering::Relaxed);
+                        setup_count.fetch_add(1, Ordering::Relaxed);
                         done += 1;
 
                         let vk_digest = vk.hash_koalabear();
@@ -260,6 +282,23 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                     tracing::info!("panic shape {}: {:?}", i, shape);
                 }
             }
+
+            let total_ms = start_time.elapsed().as_millis();
+            let compile_cnt = compile_count.load(Ordering::Relaxed).max(1);
+            let setup_cnt = setup_count.load(Ordering::Relaxed).max(1);
+            let compile_ms =
+                compile_total_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+            let setup_ms = setup_total_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+            tracing::info!(
+                "vk_map stats: total={}ms, compile: count={}, avg={:.2}ms, total={:.2}ms; setup: count={}, avg={:.2}ms, total={:.2}ms",
+                total_ms,
+                compile_cnt,
+                compile_ms / compile_cnt as f64,
+                compile_ms,
+                setup_cnt,
+                setup_ms / setup_cnt as f64,
+                setup_ms
+            );
 
             (vk_set, panic_indices, height)
         })
