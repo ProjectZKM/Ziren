@@ -4,11 +4,12 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use eyre::Result;
 use thiserror::Error;
+use crossbeam_channel as channel;
 
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
@@ -65,13 +66,11 @@ pub fn check_shapes<C: ZKMProverComponents>(
     prover: &ZKMProver<C>,
 ) -> bool {
     let (shape_tx, shape_rx) =
-        std::sync::mpsc::sync_channel::<ZKMCompressProgramShape>(num_compiler_workers);
-    let (panic_tx, panic_rx) = std::sync::mpsc::channel();
+        channel::bounded::<ZKMCompressProgramShape>(num_compiler_workers);
+    let (panic_tx, panic_rx) = channel::unbounded();
     let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
-
-    let shape_rx = Mutex::new(shape_rx);
 
     let all_maximal_shapes = ZKMProofShape::generate_maximal_shapes(
         core_shape_config,
@@ -89,11 +88,11 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let compress_ok = std::thread::scope(|s| {
         // Initialize compiler workers.
         for _ in 0..num_compiler_workers {
-            let shape_rx = &shape_rx;
+            let shape_rx = shape_rx.clone();
             let prover = &prover;
             let panic_tx = panic_tx.clone();
             s.spawn(move || {
-                while let Ok(shape) = shape_rx.lock().unwrap().recv() {
+                while let Ok(shape) = shape_rx.recv() {
                     tracing::info!("shape is {:?}", shape);
                     let program = catch_unwind(AssertUnwindSafe(|| {
                         // Try to build the recursion program from the given shape.
@@ -157,14 +156,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let height = dummy_set.len().next_power_of_two().ilog2() as usize;
         (dummy_set, vec![], height)
     } else {
-        let (vk_tx, vk_rx) = std::sync::mpsc::channel();
+        let (vk_tx, vk_rx) = channel::unbounded();
         let (shape_tx, shape_rx) =
-            std::sync::mpsc::sync_channel::<(usize, ZKMCompressProgramShape)>(num_compiler_workers);
-        let (program_tx, program_rx) = std::sync::mpsc::sync_channel(num_setup_workers);
-        let (panic_tx, panic_rx) = std::sync::mpsc::channel();
-
-        let shape_rx = Mutex::new(shape_rx);
-        let program_rx = Mutex::new(program_rx);
+            channel::bounded::<(usize, ZKMCompressProgramShape)>(num_compiler_workers);
+        let (program_tx, program_rx) = channel::bounded(num_setup_workers);
+        let (panic_tx, panic_rx) = channel::unbounded();
 
         let indices_set = indices.map(|indices| indices.into_iter().collect::<HashSet<_>>());
         let all_shapes =
@@ -180,11 +176,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             // Initialize compiler workers.
             for _ in 0..num_compiler_workers {
                 let program_tx = program_tx.clone();
-                let shape_rx = &shape_rx;
+                let shape_rx = shape_rx.clone();
                 let prover = &prover;
                 let panic_tx = panic_tx.clone();
                 s.spawn(move || {
-                    while let Ok((i, shape)) = shape_rx.lock().unwrap().recv() {
+                    while let Ok((i, shape)) = shape_rx.recv() {
                         tracing::info!("shape {i} is {shape:?}");
                         let program = catch_unwind(AssertUnwindSafe(|| {
                             prover.program_from_shape(shape.clone(), None)
@@ -209,11 +205,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             // Initialize setup workers.
             for _ in 0..num_setup_workers {
                 let vk_tx = vk_tx.clone();
-                let program_rx = &program_rx;
+                let program_rx = program_rx.clone();
                 let prover = &prover;
                 s.spawn(move || {
                     let mut done = 0;
-                    while let Ok((i, program, is_shrink)) = program_rx.lock().unwrap().recv() {
+                    while let Ok((i, program, is_shrink)) = program_rx.recv() {
                         let vk = tracing::debug_span!("setup for program {}", i).in_scope(|| {
                             if is_shrink {
                                 prover.shrink_prover.setup(&program).1
