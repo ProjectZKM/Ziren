@@ -187,11 +187,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             for _ in 0..num_compiler_workers {
                 let program_tx = program_tx.clone();
                 let shape_rx = shape_rx.clone();
+                let prover = &prover;
                 let panic_tx = panic_tx.clone();
                 let compile_total_ns = &compile_total_ns;
                 let compile_count = &compile_count;
                 s.spawn(move || {
-                    let prover = ZKMProver::<C>::new();
                     while let Ok((i, shape)) = shape_rx.recv() {
                         tracing::info!("shape {i} is {shape:?}");
                         let compile_start = Instant::now();
@@ -222,10 +222,10 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             for _ in 0..num_setup_workers {
                 let vk_tx = vk_tx.clone();
                 let program_rx = program_rx.clone();
+                let prover = &prover;
                 let setup_total_ns = &setup_total_ns;
                 let setup_count = &setup_count;
                 s.spawn(move || {
-                    let prover = ZKMProver::<C>::new();
                     let mut done = 0;
                     while let Ok((i, program, is_shrink)) = program_rx.recv() {
                         let setup_start = Instant::now();
