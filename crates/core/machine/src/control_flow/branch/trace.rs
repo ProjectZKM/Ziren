@@ -30,7 +30,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-       BranchColumns::<u8>::picus_info()
+        BranchColumns::<u8>::picus_info()
     }
 
     fn generate_trace(

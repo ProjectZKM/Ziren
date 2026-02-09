@@ -143,7 +143,7 @@ impl PicusModule {
         }
         let constraints = partial_evaluate(&self.constraints, env);
         let calls = partial_evaluate_calls(&self.calls, env);
-        let postconditions = partial_evaluate(&self.postconditions, &env);
+        let postconditions = partial_evaluate(&self.postconditions, env);
         PicusModule {
             name,
             inputs: self.inputs.clone(),
