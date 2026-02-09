@@ -194,7 +194,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     //    - values[10-13] -> b (input)
     //    - values[14-17] -> c (input)
     //    - TODO (Add high and low)
-    fn handle_receive_instruction(&mut self, multiplicity: PicusExpr, values: &Vec<PicusExpr>) {
+    fn handle_receive_instruction(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         // Creating a fresh var because picus outputs need to be variables.
         // When performing partial evaluation,
         let next_pc_out = fresh_picus_expr();
@@ -214,20 +214,20 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         // parameter `a` is an output. `b` and `c` are at indexes 10-13 and 14-17 in `values` whereas
         // `a` is at indexes 6-9. As in the code above, we need to create variables for the outputs since
         // Picus requires the inputs and outputs to be variables.
-        for i in 6..=9 {
+        for value in values.iter().take(10).skip(6) {
             let a_var = fresh_picus_expr();
             self.picus_module.outputs.push(a_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[i], &a_var));
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &a_var));
         }
-        for i in 10..=13 {
+        for value in values.iter().take(14).skip(10) {
             let b_var = fresh_picus_expr();
             self.picus_module.inputs.push(b_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[i], &b_var));
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &b_var));
         }
-        for i in 14..=17 {
+        for value in values.iter().take(18).skip(14) {
             let c_var = fresh_picus_expr();
             self.picus_module.inputs.push(c_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[i], &c_var));
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &c_var));
         }
     }
 
@@ -247,9 +247,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let target_picus_info = target_chip.picus_info();
         println!("Target picus info: {target_picus_info:?}");
         for (slice, name) in opcode_spec.arg_to_colname {
-            println!("Name: {:?}", name);
+            println!("Name: {name}");
             let colrange = target_picus_info.name_to_colrange.get(*name).unwrap();
-            match slice.clone() {
+            match *slice {
                 IndexSlice::Range { start, end } => {
                     assert!(colrange.1 - colrange.0 >= end - start);
                     for i in start..end {
@@ -281,18 +281,18 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 }
             }
         }
-        println!("Target main vals: {:?}", target_main_vals);
+        println!("Target main vals: {target_main_vals:?}");
         Some(target_main_vals)
     }
 }
 
-impl<'a, 'chips, A: MachineAir<Felt>> PairBuilder for PicusBuilder<'chips, A> {
+impl<'chips, A: MachineAir<Felt>> PairBuilder for PicusBuilder<'chips, A> {
     fn preprocessed(&self) -> Self::M {
         todo!()
     }
 }
 
-impl<'a, 'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'chips, A> {
+impl<'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'chips, A> {
     type PublicVar = PicusAtom;
 
     fn public_values(&self) -> &[Self::PublicVar] {
@@ -300,9 +300,7 @@ impl<'a, 'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilde
     }
 }
 
-impl<'a, 'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>>
-    for PicusBuilder<'chips, A>
-{
+impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder<'chips, A> {
     fn send(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
         match message.kind {
             LookupKind::Byte => {
@@ -322,18 +320,18 @@ impl<'a, 'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>>
                 let target_chip = self.get_chip(opcode_spec.chip);
                 println!("OPCODE SPEC: {:?}", opcode_spec.chip);
                 let main_vars = self.get_main_vars_for_call(&message.values);
-                if main_vars.is_none() {
+                if let Some(vars) = main_vars {
+                    self.concrete_pending_tasks.push(ConcretePendingTask {
+                        chip_name: target_chip.name(),
+                        main_vars: vars,
+                        multiplicity: message.multiplicity,
+                        selector: opcode_spec.selector.to_string(),
+                    });
+                } else {
                     self.symbolic_pending_tasks.push(SymbolicPendingTask {
                         selector: message.values[6].clone(),
                         multiplicity: message.multiplicity,
                     })
-                } else {
-                    self.concrete_pending_tasks.push(ConcretePendingTask {
-                        chip_name: target_chip.name(),
-                        main_vars: main_vars.unwrap(),
-                        multiplicity: message.multiplicity,
-                        selector: opcode_spec.selector.to_string(),
-                    });
                 }
             }
             _ => todo!("handle send: {}", message.kind),
@@ -355,7 +353,7 @@ impl<'a, 'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>>
     }
 }
 
-impl<'a, 'chips, A: MachineAir<Felt>> AirBuilder for PicusBuilder<'chips, A> {
+impl<'chips, A: MachineAir<Felt>> AirBuilder for PicusBuilder<'chips, A> {
     type F = Felt;
     type Var = PicusAtom;
     type Expr = PicusExpr;
