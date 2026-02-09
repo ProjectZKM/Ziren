@@ -47,7 +47,7 @@ where
 {
     println!("Analyzing chip: {}", chip.name());
 
-    let mut builder = if let Some(builder) = picus_builder {
+    let builder = if let Some(builder) = picus_builder {
         builder
     } else {
         &mut PicusBuilder::new(chip, PicusModule::new(chip.name()), chips, None, None)
