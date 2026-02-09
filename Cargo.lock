@@ -7600,6 +7600,7 @@ dependencies = [
  "cbindgen",
  "cc",
  "cfg-if",
+ "crossbeam-channel",
  "elliptic-curve",
  "generic-array 1.3.5",
  "glob",

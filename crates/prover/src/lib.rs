@@ -26,7 +26,6 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::sync_channel,
         Arc, Mutex, OnceLock,
     },
     thread,
@@ -646,7 +645,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             // Spawn a worker that sends the first layer inputs to a bounded channel.
             let input_sync = Arc::new(TurnBasedSync::new());
-            let (input_tx, input_rx) = sync_channel::<(usize, usize, ZKMCircuitWitness)>(
+            let (input_tx, input_rx) = crossbeam_channel::bounded::<(usize, usize, ZKMCircuitWitness)>(
                 opts.recursion_opts.checkpoints_channel_capacity,
             );
             let input_tx = Arc::new(Mutex::new(input_tx));
@@ -665,7 +664,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // Spawn workers who generate the records and traces.
             let record_and_trace_sync = Arc::new(TurnBasedSync::new());
             let (record_and_trace_tx, record_and_trace_rx) =
-                sync_channel::<(
+                crossbeam_channel::bounded::<(
                     usize,
                     usize,
                     Arc<RecursionProgram<KoalaBear>>,
@@ -787,7 +786,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // Spawn workers who generate the compress proofs.
             let proofs_sync = Arc::new(TurnBasedSync::new());
             let (proofs_tx, proofs_rx) =
-                sync_channel::<(usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>)>(
+                crossbeam_channel::bounded::<(usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>)>(
                     num_first_layer_inputs * 2,
                 );
             let proofs_tx = Arc::new(Mutex::new(proofs_tx));
