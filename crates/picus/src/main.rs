@@ -8,7 +8,7 @@ use zkm_picus::{
         initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusModule,
         PicusProgram,
     },
-    picus_builder::{PendingTask, PicusBuilder},
+    picus_builder::PicusBuilder,
 };
 use zkm_stark::{Chip, MachineAir};
 

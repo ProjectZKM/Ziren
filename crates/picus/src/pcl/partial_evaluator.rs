@@ -253,10 +253,7 @@ pub fn partial_evaluate(
     out_constraints
 }
 
-pub fn partial_evaluate_calls(
-    calls: &[PicusCall],
-    env: &BTreeMap<usize, u64>,
-) -> Vec<PicusCall> {
+pub fn partial_evaluate_calls(calls: &[PicusCall], env: &BTreeMap<usize, u64>) -> Vec<PicusCall> {
     let mut out_calls = Vec::with_capacity(calls.len());
     for call in calls {
         out_calls.push(subst_call(call, env))

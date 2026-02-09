@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{Word, PicusInfo};
+use zkm_stark::{PicusInfo, Word};
 
 use crate::operations::KoalaBearWordRangeChecker;
 
