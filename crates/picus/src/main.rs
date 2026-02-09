@@ -52,7 +52,7 @@ where
     } else {
         &mut PicusBuilder::new(chip, PicusModule::new(chip.name()), chips, None, None)
     };
-    chip.air.eval(&mut builder);
+    chip.air.eval(builder);
 
     // Process deferred tasks recursively
     while let Some(task) = builder.concrete_pending_tasks.pop() {
@@ -165,7 +165,7 @@ fn main() {
     let res =
         picus_program.write_to_path(args.picus_out_dir.join(format!("{}.picus", chip.name())));
     if res.is_err() {
-        panic!("Failed to write picus file: {:?}", res);
+        panic!("Failed to write picus file: {res:?}");
     }
     println!("Successfully extracted Picus program");
 }
