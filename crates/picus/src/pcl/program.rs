@@ -35,17 +35,17 @@ pub struct PicusCall {
 
 impl PicusCall {
     pub fn new(mod_name: String, outputs: &[PicusExpr], inputs: &[PicusExpr]) -> PicusCall {
-        return PicusCall { mod_name, outputs: outputs.into(), inputs: inputs.into() };
+        PicusCall { mod_name, outputs: outputs.into(), inputs: inputs.into() }
     }
 
     pub fn apply_multiplier(&self, multiplier: PicusExpr) -> PicusCall {
         let new_inputs: Vec<PicusExpr> =
             self.inputs.iter().map(|x| multiplier.clone() * (*x).clone()).collect();
-        return PicusCall {
+        PicusCall {
             mod_name: self.mod_name.clone(),
             outputs: self.outputs.clone(),
             inputs: new_inputs,
-        };
+        }
     }
 }
 
@@ -141,7 +141,7 @@ impl PicusModule {
         for (k, v) in env {
             name += &format!("{k}_{v}");
         }
-        let constraints = partial_evaluate(&self.constraints, &env);
+        let constraints = partial_evaluate(&self.constraints, env);
         let calls = partial_evaluate_calls(&self.calls, env);
         let postconditions = partial_evaluate(&self.postconditions, &env);
         PicusModule {

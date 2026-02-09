@@ -7,7 +7,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc, OnceLock, RwLock,
     },
-    u64,
 };
 
 /// Mapping from column ids to variable names. This mapping should be derived in the `PicusInfo` struct
@@ -124,7 +123,7 @@ impl Display for PicusAtom {
                         return f.write_str(name);
                     }
                 }
-                write!(f, "v{}", id)
+                write!(f, "v{id}")
             }
         }
     }
@@ -230,7 +229,7 @@ impl Sum for PicusExpr {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         let mut output: PicusExpr = 0.into();
         for item in iter {
-            output = output + item;
+            output += item;
         }
         output
     }
@@ -240,7 +239,7 @@ impl Product for PicusExpr {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
         let mut output: PicusExpr = 1.into();
         for item in iter {
-            output = output * item;
+            output *= item;
         }
         output
     }

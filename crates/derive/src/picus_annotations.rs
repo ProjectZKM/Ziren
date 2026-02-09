@@ -180,7 +180,6 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
     for field in fields.iter() {
         let f_ident = field.ident.as_ref().unwrap();
         let f_name = f_ident.to_string();
-        println!("f_name: {f_name}");
         // Collect flags
         let mut flags = PicusArgs::default();
         for attr in &field.attrs {
