@@ -1,7 +1,7 @@
 mod expr;
-mod program;
 mod partial_evaluator;
+mod program;
 
 pub use expr::*;
-pub use program::*;
 pub use partial_evaluator::*;
+pub use program::*;
