@@ -1,6 +1,6 @@
 use crate::pcl::{
     expr::{PicusConstraint, PicusExpr},
-    partial_evaluate, partial_evaluate_calls, PicusAtom,
+    partial_evaluate, partial_evaluate_calls,
 };
 use std::{
     collections::BTreeMap,
@@ -36,6 +36,16 @@ pub struct PicusCall {
 impl PicusCall {
     pub fn new(mod_name: String, outputs: &[PicusExpr], inputs: &[PicusExpr]) -> PicusCall {
         return PicusCall { mod_name, outputs: outputs.into(), inputs: inputs.into() };
+    }
+
+    pub fn apply_multiplier(&self, multiplier: PicusExpr) -> PicusCall {
+        let new_inputs: Vec<PicusExpr> =
+            self.inputs.iter().map(|x| multiplier.clone() * (*x).clone()).collect();
+        return PicusCall {
+            mod_name: self.mod_name.clone(),
+            outputs: self.outputs.clone(),
+            inputs: new_inputs,
+        };
     }
 }
 
@@ -106,8 +116,13 @@ impl PicusModule {
     pub fn apply_multiplier(&mut self, multiplier: PicusExpr) {
         let mut constraints = Vec::with_capacity(self.constraints.len());
         let mut post_conditions = Vec::with_capacity(self.postconditions.len());
+        let mut calls = Vec::with_capacity(self.calls.len());
         for constraint in &self.constraints {
             constraints.push(constraint.apply_multiplier(multiplier.clone()));
+        }
+
+        for call in &self.calls {
+            calls.push(call.apply_multiplier(multiplier.clone()));
         }
 
         for postcond in &self.postconditions {
@@ -115,6 +130,7 @@ impl PicusModule {
         }
         self.constraints = constraints;
         self.postconditions = post_conditions;
+        self.calls = calls;
     }
 
     #[must_use]

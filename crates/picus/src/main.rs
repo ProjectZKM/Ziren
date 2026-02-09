@@ -5,10 +5,10 @@ use p3_air::{Air, BaseAir};
 use zkm_core_machine::MipsAir;
 use zkm_picus::{
     pcl::{
-        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusAtom, PicusModule,
+        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusModule,
         PicusProgram,
     },
-    picus_builder::PicusBuilder,
+    picus_builder::{PendingTask, PicusBuilder},
 };
 use zkm_stark::{Chip, MachineAir};
 
@@ -55,8 +55,9 @@ where
     chip.air.eval(&mut builder);
 
     // Process deferred tasks recursively
-    while let Some(task) = builder.pending_tasks.pop() {
+    while let Some(task) = builder.concrete_pending_tasks.pop() {
         let target_chip = builder.get_chip(&task.chip_name);
+        println!("Target chip: {:?}", &task.chip_name);
         let target_picus_info = target_chip.picus_info();
 
         let mut sub_builder = PicusBuilder::new(
@@ -91,6 +92,7 @@ where
         let updated_picus_module = sub_module.partial_eval(&env);
         println!("Updated module: {updated_picus_module}");
         builder.picus_module.constraints.extend_from_slice(&updated_picus_module.constraints);
+        builder.picus_module.calls.extend_from_slice(&updated_picus_module.calls);
         builder.picus_module.postconditions.extend_from_slice(&sub_module.postconditions);
     }
 

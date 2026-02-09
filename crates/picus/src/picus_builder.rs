@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    opcode_spec::{IndexSlice, spec_for},
+    opcode_spec::{spec_for, IndexSlice},
     pcl::{
-        Felt, PicusAtom, PicusCall, PicusConstraint, PicusExpr, PicusModule, fresh_picus_expr, fresh_picus_var, fresh_picus_var_id
+        fresh_picus_expr, fresh_picus_var, fresh_picus_var_id, Felt, PicusAtom, PicusCall,
+        PicusConstraint, PicusExpr, PicusModule,
     },
 };
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
@@ -22,15 +23,22 @@ pub struct PicusBuilder<'chips, A: MachineAir<Felt>> {
     pub chips: &'chips [Chip<Felt, A>],
     pub extract_modularly: bool,
     pub multiplier: PicusExpr,
-    pub pending_tasks: Vec<PendingTask>,
+    pub concrete_pending_tasks: Vec<ConcretePendingTask>,
+    pub symbolic_pending_tasks: Vec<SymbolicPendingTask>,
 }
 
 #[derive(Clone)]
-pub struct PendingTask {
+pub struct ConcretePendingTask {
     pub chip_name: String,
     pub main_vars: Vec<PicusAtom>,
     pub multiplicity: PicusExpr,
     pub selector: String,
+}
+
+#[derive(Clone)]
+pub struct SymbolicPendingTask {
+    pub selector: PicusExpr,
+    pub multiplicity: PicusExpr,
 }
 
 impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
@@ -67,7 +75,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             chips,
             multiplier,
             extract_modularly: false,
-            pending_tasks: Vec::new(),
+            concrete_pending_tasks: Vec::new(),
+            symbolic_pending_tasks: Vec::new(),
         }
     }
 
@@ -222,14 +231,14 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
     }
 
-    fn get_main_vars_for_call(&mut self, message_values: &[PicusExpr]) -> Vec<PicusAtom> {
+    fn get_main_vars_for_call(&mut self, message_values: &[PicusExpr]) -> Option<Vec<PicusAtom>> {
         println!("MESSAGE VALUES: {message_values:?}");
-        let opcode_spec = match message_values[5].clone() {
+        let opcode_spec = match message_values[6].clone() {
             PicusExpr::Const(v) => {
                 assert!(v < Opcode::UNIMPL as u64);
                 spec_for(Opcode::try_from(v as u8).unwrap())
             }
-            _ => panic!("Expected opcode val to be a constant: Got: {}", message_values[5]),
+            _ => return None,
         };
         let target_chip = self.get_chip(opcode_spec.chip);
         let mut target_main_vals: Vec<PicusAtom> =
@@ -273,7 +282,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             }
         }
         println!("Target main vals: {:?}", target_main_vals);
-        target_main_vals
+        Some(target_main_vals)
     }
 }
 
@@ -303,22 +312,29 @@ impl<'a, 'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>>
                 // TODO: fill in
             }
             LookupKind::Instruction => {
-                let opcode_spec = match message.values[5].clone() {
+                let opcode_spec = match message.values[6].clone() {
                     PicusExpr::Const(v) => {
                         assert!(v < Opcode::UNIMPL as u64);
                         spec_for(Opcode::try_from(v as u8).unwrap())
                     }
-                    _ => panic!("Expected opcode val to be a constant: Got: {}", message.values[5]),
+                    _ => panic!("Expected opcode val to be a constant: Got: {}", message.values[6]),
                 };
                 let target_chip = self.get_chip(opcode_spec.chip);
-
+                println!("OPCODE SPEC: {:?}", opcode_spec.chip);
                 let main_vars = self.get_main_vars_for_call(&message.values);
-                self.pending_tasks.push(PendingTask {
-                    chip_name: target_chip.name(),
-                    main_vars,
-                    multiplicity: message.multiplicity,
-                    selector: opcode_spec.selector.to_string(),
-                })
+                if main_vars.is_none() {
+                    self.symbolic_pending_tasks.push(SymbolicPendingTask {
+                        selector: message.values[6].clone(),
+                        multiplicity: message.multiplicity,
+                    })
+                } else {
+                    self.concrete_pending_tasks.push(ConcretePendingTask {
+                        chip_name: target_chip.name(),
+                        main_vars: main_vars.unwrap(),
+                        multiplicity: message.multiplicity,
+                        selector: opcode_spec.selector.to_string(),
+                    });
+                }
             }
             _ => todo!("handle send: {}", message.kind),
         }
