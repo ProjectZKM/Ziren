@@ -226,7 +226,6 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                 let setup_total_ns = &setup_total_ns;
                 let setup_count = &setup_count;
                 s.spawn(move || {
-                    let mut done = 0;
                     while let Ok((i, program, is_shrink)) = program_rx.recv() {
                         let setup_start = Instant::now();
                         let vk = tracing::debug_span!("setup for program {}", i).in_scope(|| {
@@ -238,8 +237,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                         });
                         let setup_ns = setup_start.elapsed().as_nanos() as u64;
                         setup_total_ns.fetch_add(setup_ns, Ordering::Relaxed);
-                        setup_count.fetch_add(1, Ordering::Relaxed);
-                        done += 1;
+                        let done = setup_count.fetch_add(1, Ordering::Relaxed) + 1;
 
                         let vk_digest = vk.hash_koalabear();
                         tracing::info!(
