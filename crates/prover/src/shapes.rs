@@ -5,15 +5,15 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
     sync::{
-        Arc,
         atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
     },
     time::Instant,
 };
 
+use crossbeam_channel as channel;
 use eyre::Result;
 use thiserror::Error;
-use crossbeam_channel as channel;
 
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
@@ -69,8 +69,7 @@ pub fn check_shapes<C: ZKMProverComponents>(
     num_compiler_workers: usize,
     prover: &ZKMProver<C>,
 ) -> bool {
-    let (shape_tx, shape_rx) =
-        channel::bounded::<ZKMCompressProgramShape>(num_compiler_workers);
+    let (shape_tx, shape_rx) = channel::bounded::<ZKMCompressProgramShape>(num_compiler_workers);
     let (panic_tx, panic_rx) = channel::unbounded();
     let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
     let recursion_shape_config =
@@ -284,8 +283,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             let total_ms = start_time.elapsed().as_millis();
             let compile_cnt = compile_count.load(Ordering::Relaxed).max(1);
             let setup_cnt = setup_count.load(Ordering::Relaxed).max(1);
-            let compile_ms =
-                compile_total_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+            let compile_ms = compile_total_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
             let setup_ms = setup_total_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0;
             tracing::info!(
                 "vk_map stats: total={}ms, compile: count={}, avg={:.2}ms, total={:.2}ms; setup: count={}, avg={:.2}ms, total={:.2}ms",

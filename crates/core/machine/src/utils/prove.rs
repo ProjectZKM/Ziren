@@ -1,9 +1,9 @@
 use crate::mips::MipsAir;
+use crossbeam_channel::bounded;
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
 use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
-use crossbeam_channel::bounded;
 use std::thread::ScopedJoinHandle;
 use std::{
     fs::File,
@@ -453,9 +453,7 @@ where
                                 .into_iter()
                                 .zip(chunked_main_traces.into_iter())
                                 .for_each(|(records, main_traces)| {
-                                    records_and_traces_tx
-                                        .send((records, main_traces))
-                                        .unwrap();
+                                    records_and_traces_tx.send((records, main_traces)).unwrap();
                                 });
 
                             trace_gen_sync.advance_turn();
