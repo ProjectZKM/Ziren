@@ -77,7 +77,7 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        let chunk_size = std::cmp::max((input.movcond_events.len()) / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(input.movcond_events.len() / num_cpus::get(), 1);
         let nb_rows = input.movcond_events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
         let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
