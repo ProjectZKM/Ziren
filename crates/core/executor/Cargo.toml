@@ -46,6 +46,9 @@ vec_map = { version = "0.8.2", features = ["serde"] }
 enum-map = { version = "2.7.3", features = ["serde"] }
 sha2 = { workspace = true }
 anyhow = { workspace = true }
+tracing-subscriber = "0.3.19"
+env_logger = "0.11.6"
+num_enum = "0.7.5"
 
 [dev-dependencies]
 test-artifacts = { path = "../../test-artifacts" }
