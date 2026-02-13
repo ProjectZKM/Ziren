@@ -64,7 +64,7 @@ impl NetworkProver {
         );
         let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
         let ssl_key_path = env::var("SSL_KEY_PATH").ok();
-        let ssl_config = if ca_cert_path.as_ref().is_none() {
+        let ssl_config = if ssl_cert_path.is_none() || ssl_key_path.is_none() {
             None
         } else {
             let (ca_cert, identity) = get_cert_and_identity(
