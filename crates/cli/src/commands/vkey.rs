@@ -41,6 +41,8 @@ impl VkeyCmd {
             unreachable!()
         };
 
+        let prover = ProverClient::new();
+
         for (target, elf_path) in elf_paths {
             // Read the elf file contents
             let mut file = File::open(elf_path)?;
@@ -48,7 +50,6 @@ impl VkeyCmd {
             file.read_to_end(&mut elf)?;
 
             // Get the verification key
-            let prover = ProverClient::new();
             let (_, vk) = prover.setup(&elf);
 
             // Print the verification key hash
