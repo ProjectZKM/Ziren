@@ -39,7 +39,9 @@ fn prove_keeper(path: &str) {
 
     println!("generated proof");
     // Verify proof and public values
-    client.verify(&proof, &vk).expect("verification failed");
+    if let Err(err) = client.verify(&proof, &vk) {
+        panic!("verification error: {err:?}");
+    }
 
     // Test a round trip of proof serialization and deserialization.
     proof.save("proof-with-pis.bin").expect("saving proof failed");
