@@ -1,4 +1,4 @@
-use std::{
+     use std::{
     fs::File,
     io::{BufWriter, Write},
     str::FromStr,
@@ -40,10 +40,6 @@ use crate::{
 /// The maximum number of instructions in a program.
 pub const MAX_PROGRAM_SIZE: usize = 1 << 22;
 
-/// The costs for the airs.
-pub const MIPS_COSTS: &str = include_str!("./artifacts/mips_costs.json");
-
-/// Whether to verify deferred proofs during execution.
 /// The default increment for the program counter.  Is used for all instructions except
 /// for branches and jumps.
 pub const DEFAULT_PC_INC: u32 = 4;
@@ -305,9 +301,7 @@ impl<'a> Executor<'a> {
 
         let hook_registry = context.hook_registry.unwrap_or_default();
 
-        let costs: HashMap<String, usize> = serde_json::from_str(MIPS_COSTS).unwrap();
-        let costs: HashMap<MipsAirId, usize> =
-            costs.into_iter().map(|(k, v)| (MipsAirId::from_str(&k).unwrap(), v)).collect();
+        let costs = crate::mips_costs();
 
         Self {
             record,
