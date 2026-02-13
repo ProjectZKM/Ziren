@@ -44,8 +44,8 @@ fn main() {
     }
 
     let keeper_path = geth_dir.join("cmd/keeper/keeper");
-    let elf_dest_dir = "/tmp/keeper.elf";
-    std::fs::copy(&keeper_path, &elf_dest_dir).unwrap();
+    let elf_dest_path = out_dir.join("keeper.elf");
+    std::fs::copy(&keeper_path, &elf_dest_path).unwrap();
 
     println!("cargo:rerun-if-changed=build.rs");
 }

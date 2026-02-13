@@ -7,7 +7,7 @@ See more [Keeper - geth as a zkvm guest](https://github.com/ethereum/go-ethereum
 Generate keeper payload files (`*_payload.rlp`) from Ethereum JSON-RPC:
 
 ```bash
-cd examples/keeper/host/scripts/payloadgen
+cd examples/keeper/host/payloadgen
 ```
 
 Single block:

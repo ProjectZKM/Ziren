@@ -2,7 +2,7 @@ use std::time::Instant;
 use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 
 /// The ELF we want to execute inside the zkVM.
-const ELF: &[u8] = include_bytes!("/tmp/keeper.elf");
+const ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/keeper.elf"));
 
 use std::env;
 use std::fs::File;
