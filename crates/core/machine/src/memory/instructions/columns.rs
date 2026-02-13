@@ -58,10 +58,11 @@ pub struct MemoryInstructionsColumns<T> {
     /// Whether this is a sc instruction.
     pub is_sc: T,
 
-    /// The relationships among addr_word, addr_aligned, and addr_offset is as follows:
-    /// addr_aligned = addr_word - addr_offset
-    /// addr_ls_two_bits = addr_word % 4
-    /// Note that this all needs to be verified in the AIR
+    /// The relationships among `addr_word`, `addr_aligned`, and `addr_ls_two_bits` are as follows:
+    /// `addr_ls_two_bits` is the least significant two bits of the unaligned address.
+    /// `addr_aligned` is the aligned base address.
+    /// In the AIR, we constrain `reduce(addr_word) = addr_aligned + addr_ls_two_bits` and
+    /// constrain `addr_ls_two_bits` via a byte lookup (`addr_ls_two_bits = addr_word[0] & 0b11`).
     pub addr_word: Word<T>,
 
     /// The aligned address.
