@@ -41,6 +41,7 @@ thiserror = "1.0.63"
 rayon = "1.10.0"
 lru = "0.12.4"
 eyre = "0.6.12"
+crossbeam-channel = "0.5.12"
 
 [dev-dependencies]
 test-artifacts = { workspace = true }
