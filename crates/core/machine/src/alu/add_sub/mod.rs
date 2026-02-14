@@ -336,7 +336,7 @@ mod tests {
                 [{
                     let operand_1 = thread_rng().gen_range(0..u32::MAX);
                     let operand_2 = thread_rng().gen_range(0..u32::MAX);
-                    let result = operand_1.wrapping_add(operand_2);
+                    let result = operand_1.wrapping_sub(operand_2);
                     AluEvent::new(i % 2, Opcode::SUB, result, operand_1, operand_2)
                 }]
             })
