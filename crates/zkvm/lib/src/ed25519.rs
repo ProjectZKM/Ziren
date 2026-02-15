@@ -24,7 +24,7 @@ impl AffinePoint<N> for Ed25519AffinePoint {
     }
 
     fn identity() -> Self {
-        Self::identity()
+        Self(Self::IDENTITY)
     }
 
     fn limbs_ref(&self) -> &[u32; N] {
