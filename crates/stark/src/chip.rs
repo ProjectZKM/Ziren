@@ -168,7 +168,7 @@ where
         1 << self.log_quotient_degree
     }
 
-    /// Returns the log2 of the batch size.
+    /// Returns the batch size.
     #[inline]
     pub const fn logup_batch_size(&self) -> usize {
         1 << self.log_quotient_degree
