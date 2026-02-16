@@ -42,3 +42,10 @@ TEXT ·SyscallKeccakSponge(SB), $0-8
 	MOVW result+4(FP), R5  // a1 = result pointer
 	SYSCALL
 	RET
+
+TEXT ·SyscallVerifyZkmProof(SB), $0-8
+	MOVW $0x1B, R2              // v0 = VERIFY_ZKM_PROOF syscall (0x00_00_00_1B)
+	MOVW vkDigest+0(FP), R4     // a0 = vkDigest pointer (pointer to [8]uint32)
+	MOVW pvDigest+4(FP), R5     // a1 = pvDigest pointer (pointer to [32]byte)
+	SYSCALL
+	RET
