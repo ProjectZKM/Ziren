@@ -376,6 +376,16 @@ impl ZKMCudaProver {
         let proof: ZKMReduceProof<OuterSC> = bincode::deserialize(&response.result).unwrap();
         Ok(proof)
     }
+
+    /// Executes the BLS12-381 wrap flow inside the container.
+    ///
+    /// This currently uses the same container endpoint as `wrap_bn254`.
+    pub fn wrap_bls12381(
+        &self,
+        reduced_proof: ZKMReduceProof<InnerSC>,
+    ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
+        self.wrap_bn254(reduced_proof)
+    }
 }
 
 impl Default for ZKMCudaProver {

@@ -1,5 +1,10 @@
 use std::fmt::Display;
 
+#[cfg(all(feature = "bn254", feature = "bls12381"))]
+compile_error!("features `bn254` and `bls12381` are mutually exclusive");
+#[cfg(not(any(feature = "bn254", feature = "bls12381")))]
+compile_error!("either feature `bn254` or `bls12381` must be enabled");
+
 use p3_field::PrimeField64;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

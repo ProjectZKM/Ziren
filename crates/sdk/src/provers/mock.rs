@@ -5,17 +5,26 @@ use zkm_core_machine::io::ZKMStdin;
 use zkm_stark::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
 
 use crate::{
-    Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
-    ZKMVerifyingKey,
+    utils::committed_public_values, Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues,
+    ZKMProvingKey, ZKMVerificationError, ZKMVerifyingKey,
 };
 use anyhow::Result;
 use p3_field::{FieldAlgebra, PrimeField};
 use p3_fri::FriProof;
 use p3_koala_bear::KoalaBear;
 use zkm_prover::{
-    components::DefaultProverComponents,
-    verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
-    DvSnarkBn254Proof, Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
+    components::DefaultProverComponents, verify::verify_plonk_bn254_public_inputs,
+    DvSnarkBn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
+};
+#[cfg(feature = "bls12381")]
+use zkm_prover::{
+    verify::verify_groth16_bls12381_public_inputs as verify_groth16_public_inputs,
+    Groth16Bls12381Proof as Groth16Proof,
+};
+#[cfg(feature = "bn254")]
+use zkm_prover::{
+    verify::verify_groth16_bn254_public_inputs as verify_groth16_public_inputs,
+    Groth16Bn254Proof as Groth16Proof,
 };
 use zkm_stark::septic_digest::SepticDigest;
 
@@ -132,12 +141,16 @@ impl Prover<DefaultProverComponents> for MockProver {
             }
             ZKMProofKind::Groth16 => {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
+                #[cfg(feature = "bn254")]
+                let pv_hash = public_values.hash_bn254().to_string();
+                #[cfg(feature = "bls12381")]
+                let pv_hash = committed_public_values(public_values.as_slice());
                 Ok((
                     ZKMProofWithPublicValues {
-                        proof: ZKMProof::Groth16(Groth16Bn254Proof {
+                        proof: ZKMProof::Groth16(Groth16Proof {
                             public_inputs: [
                                 pk.vk.hash_bn254().as_canonical_biguint().to_string(),
-                                public_values.hash_bn254().to_string(),
+                                pv_hash,
                             ],
                             encoded_proof: "".to_string(),
                             raw_proof: "".to_string(),
@@ -174,8 +187,8 @@ impl Prover<DefaultProverComponents> for MockProver {
                 verify_plonk_bn254_public_inputs(vkey, &bundle.public_values, public_inputs)
                     .map_err(ZKMVerificationError::Plonk)
             }
-            ZKMProof::Groth16(Groth16Bn254Proof { public_inputs, .. }) => {
-                verify_groth16_bn254_public_inputs(vkey, &bundle.public_values, public_inputs)
+            ZKMProof::Groth16(Groth16Proof { public_inputs, .. }) => {
+                verify_groth16_public_inputs(vkey, &bundle.public_values, public_inputs)
                     .map_err(ZKMVerificationError::Groth16)
             }
             _ => Ok(()),

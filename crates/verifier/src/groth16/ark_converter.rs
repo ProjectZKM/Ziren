@@ -1,10 +1,17 @@
 use anyhow::Result;
-use ark_bn254::{Bn254, Config, Fr, FrConfig, G1Affine, G2Affine};
+use ark_bls12_381::{
+    Bls12_381, Fq as Bls12381Fq, Fq2 as Bls12381Fq2, Fr as Bls12381Fr,
+    G1Affine as Bls12381G1Affine, G2Affine as Bls12381G2Affine,
+};
+use ark_bn254::{
+    Bn254, Config, Fr as Bn254Fr, FrConfig, G1Affine as Bn254G1Affine, G2Affine as Bn254G2Affine,
+};
 use ark_ec::bn::Bn;
 use ark_ec::AffineRepr;
 use ark_ff::{Fp, MontBackend, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, Compress, Validate};
+use core::cmp::Ordering;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -17,6 +24,11 @@ const GNARK_MASK: u8 = 0b11 << 6;
 const GNARK_COMPRESSED_POSITIVE: u8 = 0b10 << 6;
 const GNARK_COMPRESSED_NEGATIVE: u8 = 0b11 << 6;
 const GNARK_COMPRESSED_INFINITY: u8 = 0b01 << 6;
+const GNARK_BLS_MASK: u8 = 0b111 << 5;
+const GNARK_BLS_COMPRESSED_SMALLEST: u8 = 0b100 << 5;
+const GNARK_BLS_COMPRESSED_LARGEST: u8 = 0b101 << 5;
+const GNARK_BLS_COMPRESSED_INFINITY: u8 = 0b110 << 5;
+const GNARK_BLS_UNCOMPRESSED_INFINITY: u8 = 0b010 << 5;
 
 const ARK_MASK: u8 = 0b11 << 6;
 const ARK_COMPRESSED_POSITIVE: u8 = 0b00 << 6;
@@ -48,6 +60,13 @@ pub struct ArkProof {
     pub groth16_vk: PreparedVerifyingKey<Bn<Config>>,
     pub proof: Proof<Bn<Config>>,
     pub public_inputs: [Fp<MontBackend<FrConfig, 4>, 4>; 2],
+}
+
+#[derive(Debug, Clone)]
+pub struct ArkBls12381Proof {
+    pub groth16_vk: PreparedVerifyingKey<Bls12_381>,
+    pub proof: Proof<Bls12_381>,
+    pub public_inputs: [Bls12381Fr; 2],
 }
 
 pub fn convert_ark(
@@ -87,6 +106,37 @@ pub fn convert_ark(
     })
 }
 
+pub fn convert_ark_bls12381(
+    proof_with_pub_values: &ZKMProofWithPublicValues,
+    vkey_hash: &str,
+    groth16_vk: &[u8],
+) -> Result<ArkBls12381Proof, ArkGroth16Error> {
+    let proof = proof_with_pub_values.bytes();
+    let public_inputs = proof_with_pub_values.public_values.to_vec();
+
+    let groth16_vk_hash: [u8; 4] = Sha256::digest(groth16_vk)[..4]
+        .try_into()
+        .map_err(|_| ArkGroth16Error::GeneralError(Error::InvalidData))?;
+
+    if groth16_vk_hash != proof[..4] {
+        return Err(ArkGroth16Error::Groth16VkeyHashMismatch);
+    }
+
+    let ark_proof = load_ark_proof_from_bytes_bls12381(&proof[4..])?;
+    let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes_bls12381(groth16_vk)?;
+    let committed_values_digest: [u8; 32] = Sha256::digest(&public_inputs).into();
+    let ark_public_inputs = load_ark_public_inputs_from_bytes_bls12381(
+        &decode_zkm_vkey_hash(&vkey_hash)?,
+        &committed_values_digest,
+    );
+
+    Ok(ArkBls12381Proof {
+        groth16_vk: ark_groth16_vk.into(),
+        proof: ark_proof,
+        public_inputs: ark_public_inputs,
+    })
+}
+
 /// Convert the endianness of a byte array, chunk by chunk.
 ///
 /// Taken from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L176-L189
@@ -104,13 +154,11 @@ fn convert_endianness<const CHUNK_SIZE: usize, const ARRAY_SIZE: usize>(
     reversed
 }
 
-/// Decompress a G1 point.
-///
-/// Taken from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L219
-fn decompress_g1(g1_bytes: &[u8; 32]) -> Result<G1Affine, ArkGroth16Error> {
+/// Decompress a BN254 G1 point.
+fn decompress_g1_bn254(g1_bytes: &[u8; 32]) -> Result<Bn254G1Affine, ArkGroth16Error> {
     let g1_bytes = gnark_compressed_x_to_ark_compressed_x(g1_bytes)?;
     let g1_bytes = convert_endianness::<32, 32>(&g1_bytes.as_slice().try_into().unwrap());
-    let decompressed_g1 = G1Affine::deserialize_with_mode(
+    let decompressed_g1 = Bn254G1Affine::deserialize_with_mode(
         convert_endianness::<32, 32>(&g1_bytes).as_slice(),
         Compress::Yes,
         Validate::No,
@@ -119,19 +167,84 @@ fn decompress_g1(g1_bytes: &[u8; 32]) -> Result<G1Affine, ArkGroth16Error> {
     Ok(decompressed_g1)
 }
 
-/// Decompress a G2 point.
-///
-/// Adapted from https://github.com/anza-xyz/agave/blob/c54d840/curves/bn254/src/compression.rs#L255
-fn decompress_g2(g2_bytes: &[u8; 64]) -> Result<G2Affine, ArkGroth16Error> {
+/// Decompress a BN254 G2 point.
+fn decompress_g2_bn254(g2_bytes: &[u8; 64]) -> Result<Bn254G2Affine, ArkGroth16Error> {
     let g2_bytes = gnark_compressed_x_to_ark_compressed_x(g2_bytes)?;
     let g2_bytes = convert_endianness::<64, 64>(&g2_bytes.as_slice().try_into().unwrap());
-    let decompressed_g2 = G2Affine::deserialize_with_mode(
+    let decompressed_g2 = Bn254G2Affine::deserialize_with_mode(
         convert_endianness::<64, 64>(&g2_bytes).as_slice(),
         Compress::Yes,
         Validate::No,
     )
     .map_err(|_| ArkGroth16Error::G2CompressionError)?;
     Ok(decompressed_g2)
+}
+
+/// Decompress a BLS12-381 G1 point.
+fn decompress_g1_bls12381(g1_bytes: &[u8; 48]) -> Result<Bls12381G1Affine, ArkGroth16Error> {
+    let mut gnark = *g1_bytes;
+    let metadata = gnark[0] & GNARK_BLS_MASK;
+    gnark[0] &= !GNARK_BLS_MASK;
+
+    if metadata == GNARK_BLS_COMPRESSED_INFINITY && gnark == [0u8; 48] {
+        return Ok(Bls12381G1Affine::zero());
+    }
+
+    let x = Bls12381Fq::from_be_bytes_mod_order(&gnark);
+    let (y0, y1) =
+        Bls12381G1Affine::get_ys_from_x_unchecked(x).ok_or(ArkGroth16Error::G1CompressionError)?;
+    let want_largest = match metadata {
+        GNARK_BLS_COMPRESSED_SMALLEST => false,
+        GNARK_BLS_COMPRESSED_LARGEST => true,
+        _ => return Err(ArkGroth16Error::InvalidInput),
+    };
+    let y = if gnark_is_largest_fq(&y0) == want_largest {
+        y0
+    } else {
+        y1
+    };
+    Ok(Bls12381G1Affine::new_unchecked(x, y))
+}
+
+/// Decompress a BLS12-381 G2 point.
+fn decompress_g2_bls12381(g2_bytes: &[u8; 96]) -> Result<Bls12381G2Affine, ArkGroth16Error> {
+    let mut gnark = *g2_bytes;
+    let metadata = gnark[0] & GNARK_BLS_MASK;
+    gnark[0] &= !GNARK_BLS_MASK;
+
+    if metadata == GNARK_BLS_COMPRESSED_INFINITY && gnark == [0u8; 96] {
+        return Ok(Bls12381G2Affine::zero());
+    }
+
+    // gnark compressed X stores A1||A0 in big-endian limbs.
+    let x_a1 = Bls12381Fq::from_be_bytes_mod_order(&gnark[..48]);
+    let x_a0 = Bls12381Fq::from_be_bytes_mod_order(&gnark[48..96]);
+    let x = Bls12381Fq2::new(x_a0, x_a1);
+    let (y0, y1) =
+        Bls12381G2Affine::get_ys_from_x_unchecked(x).ok_or(ArkGroth16Error::G2CompressionError)?;
+    let want_largest = match metadata {
+        GNARK_BLS_COMPRESSED_SMALLEST => false,
+        GNARK_BLS_COMPRESSED_LARGEST => true,
+        _ => return Err(ArkGroth16Error::InvalidInput),
+    };
+    let y = if gnark_is_largest_fq2(&y0) == want_largest {
+        y0
+    } else {
+        y1
+    };
+    Ok(Bls12381G2Affine::new_unchecked(x, y))
+}
+
+fn gnark_is_largest_fq(x: &Bls12381Fq) -> bool {
+    x.into_bigint().cmp(&(-*x).into_bigint()) == Ordering::Greater
+}
+
+fn gnark_is_largest_fq2(x: &Bls12381Fq2) -> bool {
+    if x.c1.into_bigint() != Bls12381Fq::from(0u64).into_bigint() {
+        gnark_is_largest_fq(&x.c1)
+    } else {
+        gnark_is_largest_fq(&x.c0)
+    }
 }
 
 fn gnark_flag_to_ark_flag(msb: u8) -> Result<u8, ArkGroth16Error> {
@@ -150,7 +263,7 @@ fn gnark_flag_to_ark_flag(msb: u8) -> Result<u8, ArkGroth16Error> {
 }
 
 fn gnark_compressed_x_to_ark_compressed_x(x: &[u8]) -> Result<Vec<u8>, ArkGroth16Error> {
-    if x.len() != 32 && x.len() != 64 {
+    if x.len() != 32 && x.len() != 48 && x.len() != 64 && x.len() != 96 {
         return Err(ArkGroth16Error::InvalidInput);
     }
     let mut x_copy = x.to_owned();
@@ -163,14 +276,14 @@ fn gnark_compressed_x_to_ark_compressed_x(x: &[u8]) -> Result<Vec<u8>, ArkGroth1
 }
 
 /// Deserialize a gnark decompressed affine G1 point to an arkworks decompressed affine G1 point.
-fn gnark_decompressed_g1_to_ark_decompressed_g1(
+fn gnark_decompressed_g1_to_ark_decompressed_g1_bn254(
     buf: &[u8; 64],
-) -> Result<G1Affine, ArkGroth16Error> {
+) -> Result<Bn254G1Affine, ArkGroth16Error> {
     let buf = convert_endianness::<32, 64>(buf);
     if buf == [0u8; 64] {
-        return Ok(G1Affine::zero());
+        return Ok(Bn254G1Affine::zero());
     }
-    let g1 = G1Affine::deserialize_with_mode(
+    let g1 = Bn254G1Affine::deserialize_with_mode(
         &*[&buf[..], &[0u8][..]].concat(),
         Compress::No,
         Validate::Yes,
@@ -180,14 +293,14 @@ fn gnark_decompressed_g1_to_ark_decompressed_g1(
 }
 
 /// Deserialize a gnark decompressed affine G2 point to an arkworks decompressed affine G2 point.
-fn gnark_decompressed_g2_to_ark_decompressed_g2(
+fn gnark_decompressed_g2_to_ark_decompressed_g2_bn254(
     buf: &[u8; 128],
-) -> Result<G2Affine, ArkGroth16Error> {
+) -> Result<Bn254G2Affine, ArkGroth16Error> {
     let buf = convert_endianness::<64, 128>(buf);
     if buf == [0u8; 128] {
-        return Ok(G2Affine::zero());
+        return Ok(Bn254G2Affine::zero());
     }
-    let g2 = G2Affine::deserialize_with_mode(
+    let g2 = Bn254G2Affine::deserialize_with_mode(
         &*[&buf[..], &[0u8][..]].concat(),
         Compress::No,
         Validate::Yes,
@@ -196,12 +309,75 @@ fn gnark_decompressed_g2_to_ark_decompressed_g2(
     Ok(g2)
 }
 
+/// Deserialize a gnark decompressed affine G1 point to an arkworks decompressed affine G1 point.
+fn gnark_decompressed_g1_to_ark_decompressed_g1_bls12381(
+    buf: &[u8; 96],
+) -> Result<Bls12381G1Affine, ArkGroth16Error> {
+    let mut gnark = *buf;
+    let metadata = gnark[0] & GNARK_BLS_MASK;
+    gnark[0] &= !GNARK_BLS_MASK;
+
+    if metadata == GNARK_BLS_UNCOMPRESSED_INFINITY && gnark == [0u8; 96] {
+        return Ok(Bls12381G1Affine::zero());
+    }
+    let x = Bls12381Fq::from_be_bytes_mod_order(&gnark[..48]);
+    let y = Bls12381Fq::from_be_bytes_mod_order(&gnark[48..96]);
+    let g1 = Bls12381G1Affine::new_unchecked(x, y);
+    if !g1.is_on_curve() || !g1.is_in_correct_subgroup_assuming_on_curve() {
+        return Err(ArkGroth16Error::G1CompressionError);
+    }
+    Ok(g1)
+}
+
+/// Deserialize a gnark decompressed affine G2 point to an arkworks decompressed affine G2 point.
+fn gnark_decompressed_g2_to_ark_decompressed_g2_bls12381(
+    buf: &[u8; 192],
+) -> Result<Bls12381G2Affine, ArkGroth16Error> {
+    let mut gnark = *buf;
+    let metadata = gnark[0] & GNARK_BLS_MASK;
+    gnark[0] &= !GNARK_BLS_MASK;
+
+    if metadata == GNARK_BLS_UNCOMPRESSED_INFINITY && gnark == [0u8; 192] {
+        return Ok(Bls12381G2Affine::zero());
+    }
+
+    // gnark raw stores Fp2 as A1||A0 for each coordinate.
+    let x_a1 = Bls12381Fq::from_be_bytes_mod_order(&gnark[..48]);
+    let x_a0 = Bls12381Fq::from_be_bytes_mod_order(&gnark[48..96]);
+    let y_a1 = Bls12381Fq::from_be_bytes_mod_order(&gnark[96..144]);
+    let y_a0 = Bls12381Fq::from_be_bytes_mod_order(&gnark[144..192]);
+    let x = Bls12381Fq2::new(x_a0, x_a1);
+    let y = Bls12381Fq2::new(y_a0, y_a1);
+    let g2 = Bls12381G2Affine::new_unchecked(x, y);
+    if !g2.is_on_curve() || !g2.is_in_correct_subgroup_assuming_on_curve() {
+        return Err(ArkGroth16Error::G2CompressionError);
+    }
+    Ok(g2)
+}
+
 /// Load a Groth16 proof from bytes in the arkworks format.
 pub fn load_ark_proof_from_bytes(buffer: &[u8]) -> Result<Proof<Bn254>, ArkGroth16Error> {
     Ok(Proof::<Bn254> {
-        a: gnark_decompressed_g1_to_ark_decompressed_g1(buffer[..64].try_into().unwrap())?,
-        b: gnark_decompressed_g2_to_ark_decompressed_g2(buffer[64..192].try_into().unwrap())?,
-        c: gnark_decompressed_g1_to_ark_decompressed_g1(&buffer[192..256].try_into().unwrap())?,
+        a: gnark_decompressed_g1_to_ark_decompressed_g1_bn254(buffer[..64].try_into().unwrap())?,
+        b: gnark_decompressed_g2_to_ark_decompressed_g2_bn254(buffer[64..192].try_into().unwrap())?,
+        c: gnark_decompressed_g1_to_ark_decompressed_g1_bn254(
+            &buffer[192..256].try_into().unwrap(),
+        )?,
+    })
+}
+
+/// Load a Groth16(BLS12-381) proof from bytes in the arkworks format.
+pub fn load_ark_proof_from_bytes_bls12381(
+    buffer: &[u8],
+) -> Result<Proof<Bls12_381>, ArkGroth16Error> {
+    Ok(Proof::<Bls12_381> {
+        a: gnark_decompressed_g1_to_ark_decompressed_g1_bls12381(buffer[..96].try_into().unwrap())?,
+        b: gnark_decompressed_g2_to_ark_decompressed_g2_bls12381(
+            buffer[96..288].try_into().unwrap(),
+        )?,
+        c: gnark_decompressed_g1_to_ark_decompressed_g1_bls12381(
+            &buffer[288..384].try_into().unwrap(),
+        )?,
     })
 }
 
@@ -210,16 +386,16 @@ pub fn load_ark_groth16_verifying_key_from_bytes(
     buffer: &[u8],
 ) -> Result<VerifyingKey<Bn254>, ArkGroth16Error> {
     // Note that g1_beta and g1_delta are not used in the verification process.
-    let alpha_g1 = decompress_g1(buffer[..32].try_into().unwrap())?;
-    let beta_g2 = decompress_g2(buffer[64..128].try_into().unwrap())?;
-    let gamma_g2 = decompress_g2(buffer[128..192].try_into().unwrap())?;
-    let delta_g2 = decompress_g2(buffer[224..288].try_into().unwrap())?;
+    let alpha_g1 = decompress_g1_bn254(buffer[..32].try_into().unwrap())?;
+    let beta_g2 = decompress_g2_bn254(buffer[64..128].try_into().unwrap())?;
+    let gamma_g2 = decompress_g2_bn254(buffer[128..192].try_into().unwrap())?;
+    let delta_g2 = decompress_g2_bn254(buffer[224..288].try_into().unwrap())?;
 
     let num_k = u32::from_be_bytes([buffer[288], buffer[289], buffer[290], buffer[291]]);
     let mut k = Vec::new();
     let mut offset = 292;
     for _ in 0..num_k {
-        let point = decompress_g1(&buffer[offset..offset + 32].try_into().unwrap())?;
+        let point = decompress_g1_bn254(&buffer[offset..offset + 32].try_into().unwrap())?;
         k.push(point);
         offset += 32;
     }
@@ -247,12 +423,69 @@ pub fn load_ark_groth16_verifying_key_from_bytes(
     Ok(VerifyingKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1: k })
 }
 
+/// Load a Groth16(BLS12-381) verifying key from bytes in the arkworks format.
+pub fn load_ark_groth16_verifying_key_from_bytes_bls12381(
+    buffer: &[u8],
+) -> Result<VerifyingKey<Bls12_381>, ArkGroth16Error> {
+    // Note that g1_beta and g1_delta are not used in the verification process.
+    let alpha_g1 = decompress_g1_bls12381(buffer[..48].try_into().unwrap())?;
+    let beta_g2 = decompress_g2_bls12381(buffer[96..192].try_into().unwrap())?;
+    let gamma_g2 = decompress_g2_bls12381(buffer[192..288].try_into().unwrap())?;
+    let delta_g2 = decompress_g2_bls12381(buffer[336..432].try_into().unwrap())?;
+
+    let num_k = u32::from_be_bytes([buffer[432], buffer[433], buffer[434], buffer[435]]);
+    let mut k = Vec::new();
+    let mut offset = 436;
+    for _ in 0..num_k {
+        let point = decompress_g1_bls12381(&buffer[offset..offset + 48].try_into().unwrap())?;
+        k.push(point);
+        offset += 48;
+    }
+
+    let num_of_array_of_public_and_commitment_committed = u32::from_be_bytes([
+        buffer[offset],
+        buffer[offset + 1],
+        buffer[offset + 2],
+        buffer[offset + 3],
+    ]);
+    offset += 4;
+    for _ in 0..num_of_array_of_public_and_commitment_committed {
+        let num = u32::from_be_bytes([
+            buffer[offset],
+            buffer[offset + 1],
+            buffer[offset + 2],
+            buffer[offset + 3],
+        ]);
+        offset += 4;
+        for _ in 0..num {
+            offset += 4;
+        }
+    }
+
+    Ok(VerifyingKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1: k })
+}
+
+fn load_ark_public_inputs_from_bytes_generic<F: PrimeField>(
+    vkey_hash: &[u8; 32],
+    committed_values_digest: &[u8; 32],
+) -> [F; 2] {
+    [F::from_be_bytes_mod_order(vkey_hash), F::from_be_bytes_mod_order(committed_values_digest)]
+}
+
 /// Load the public inputs from the bytes in the arkworks format.
 ///
 /// This reads the vkey hash and the committed values digest as big endian Fr elements.
 pub fn load_ark_public_inputs_from_bytes(
     vkey_hash: &[u8; 32],
     committed_values_digest: &[u8; 32],
-) -> [Fr; 2] {
-    [Fr::from_be_bytes_mod_order(vkey_hash), Fr::from_be_bytes_mod_order(committed_values_digest)]
+) -> [Bn254Fr; 2] {
+    load_ark_public_inputs_from_bytes_generic(vkey_hash, committed_values_digest)
+}
+
+/// Load the public inputs from the bytes in the arkworks format for BLS12-381.
+pub fn load_ark_public_inputs_from_bytes_bls12381(
+    vkey_hash: &[u8; 32],
+    committed_values_digest: &[u8; 32],
+) -> [Bls12381Fr; 2] {
+    load_ark_public_inputs_from_bytes_generic(vkey_hash, committed_values_digest)
 }

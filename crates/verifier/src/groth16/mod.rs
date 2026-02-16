@@ -16,6 +16,8 @@ use error::Groth16Error;
 #[cfg(feature = "ark")]
 use crate::ArkGroth16Error;
 #[cfg(feature = "ark")]
+use ark_bls12_381::Bls12_381;
+#[cfg(feature = "ark")]
 use ark_bn254::Bn254;
 #[cfg(feature = "ark")]
 use ark_groth16::{r1cs_to_qap::LibsnarkReduction, Groth16};
@@ -88,6 +90,22 @@ impl Groth16Verifier {
         let ark_proof = crate::convert_ark(proof_with_pub_values, vkey_hash, groth16_vk)?;
 
         Groth16::<Bn254, LibsnarkReduction>::verify_proof(
+            &ark_proof.groth16_vk,
+            &ark_proof.proof,
+            &ark_proof.public_inputs,
+        )
+        .map_err(|_| ArkGroth16Error::ProofVerificationFailed)
+    }
+
+    #[cfg(feature = "ark")]
+    pub fn ark_verify_bls12381(
+        proof_with_pub_values: &ZKMProofWithPublicValues,
+        vkey_hash: &str,
+        groth16_vk: &[u8],
+    ) -> Result<bool, ArkGroth16Error> {
+        let ark_proof = crate::convert_ark_bls12381(proof_with_pub_values, vkey_hash, groth16_vk)?;
+
+        Groth16::<Bls12_381, LibsnarkReduction>::verify_proof(
             &ark_proof.groth16_vk,
             &ark_proof.proof,
             &ark_proof.public_inputs,

@@ -20,6 +20,12 @@ typedef struct {
 	char *PublicInputs[2];
 	char *EncodedProof;
 	char *RawProof;
+} C_Groth16Bls12381Proof;
+
+typedef struct {
+	char *PublicInputs[2];
+	char *EncodedProof;
+	char *RawProof;
 } C_DvSnarkBn254Proof;
 */
 import "C"
@@ -30,6 +36,9 @@ import (
 	"sync"
 	"unsafe"
 
+	zkm "github.com/ProjectZKM/zkm-recursion-gnark/zkm"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/poseidon2"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
@@ -37,9 +46,6 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
 	"github.com/consensys/gnark/test/unsafekzg"
-	zkm "github.com/ProjectZKM/zkm-recursion-gnark/zkm"
-	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
-	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/poseidon2"
 )
 
 func main() {}
@@ -180,27 +186,102 @@ func TestGroth16Bn254(witnessJson *C.char, constraintsJson *C.char) *C.char {
 	}
 	return nil
 }
+
+//export ProveGroth16Bls12381
+func ProveGroth16Bls12381(dataDir *C.char, witnessPath *C.char) *C.C_Groth16Bls12381Proof {
+	dataDirString := C.GoString(dataDir)
+	witnessPathString := C.GoString(witnessPath)
+
+	zkmGroth16Bls12381Proof := zkm.ProveGroth16Bls12381(dataDirString, witnessPathString)
+
+	ms := C.malloc(C.sizeof_C_Groth16Bls12381Proof)
+	if ms == nil {
+		return nil
+	}
+
+	structPtr := (*C.C_Groth16Bls12381Proof)(ms)
+	structPtr.PublicInputs[0] = C.CString(zkmGroth16Bls12381Proof.PublicInputs[0])
+	structPtr.PublicInputs[1] = C.CString(zkmGroth16Bls12381Proof.PublicInputs[1])
+	structPtr.EncodedProof = C.CString(zkmGroth16Bls12381Proof.EncodedProof)
+	structPtr.RawProof = C.CString(zkmGroth16Bls12381Proof.RawProof)
+	return structPtr
+}
+
+//export FreeGroth16Bls12381Proof
+func FreeGroth16Bls12381Proof(proof *C.C_Groth16Bls12381Proof) {
+	C.free(unsafe.Pointer(proof.EncodedProof))
+	C.free(unsafe.Pointer(proof.RawProof))
+	C.free(unsafe.Pointer(proof.PublicInputs[0]))
+	C.free(unsafe.Pointer(proof.PublicInputs[1]))
+	C.free(unsafe.Pointer(proof))
+}
+
+//export BuildGroth16Bls12381
+func BuildGroth16Bls12381(dataDir *C.char) {
+	dataDirString := C.GoString(dataDir)
+	zkm.BuildGroth16Bls12381(dataDirString)
+}
+
+//export VerifyGroth16Bls12381
+func VerifyGroth16Bls12381(
+	dataDir *C.char,
+	proof *C.char,
+	vkeyHash *C.char,
+	committedValuesDigest *C.char,
+) *C.char {
+	dataDirString := C.GoString(dataDir)
+	proofString := C.GoString(proof)
+	vkeyHashString := C.GoString(vkeyHash)
+	committedValuesDigestString := C.GoString(committedValuesDigest)
+
+	err := zkm.VerifyGroth16Bls12381(
+		dataDirString,
+		proofString,
+		vkeyHashString,
+		committedValuesDigestString,
+	)
+	if err != nil {
+		return C.CString(err.Error())
+	}
+	return nil
+}
+
+//export TestGroth16Bls12381
+func TestGroth16Bls12381(witnessJson *C.char, constraintsJson *C.char) *C.char {
+	testMutex.Lock()
+	witnessPathString := C.GoString(witnessJson)
+	constraintsJsonString := C.GoString(constraintsJson)
+	os.Setenv("WITNESS_JSON", witnessPathString)
+	os.Setenv("CONSTRAINTS_JSON", constraintsJsonString)
+	os.Setenv("GROTH16", "1")
+	err := TestMainGroth16Bls12381()
+	testMutex.Unlock()
+	if err != nil {
+		return C.CString(err.Error())
+	}
+	return nil
+}
 func TestMainGroth16() error {
-    // Get the file name from an environment variable.
+	// Get the file name from an environment variable.
 	fileName := os.Getenv("WITNESS_JSON")
 	if fileName == "" {
 		fileName = "groth16_witness.json"
 	}
 
-    // Read the file.
-    data, err := os.ReadFile(fileName)
-    if err != nil {
-        return err
-    }
+	// Read the file.
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return err
+	}
 
-    // Deserialize the JSON data into a slice of Instruction structs
-    var inputs zkm.WitnessInput
-    err = json.Unmarshal(data, &inputs)
-    if err != nil {
-        return err
-    }
+	// Deserialize the JSON data into a slice of Instruction structs
+	var inputs zkm.WitnessInput
+	err = json.Unmarshal(data, &inputs)
+	if err != nil {
+		return err
+	}
 
-    // Compile the circuit.
+	// Compile the circuit.
 	circuit := zkm.NewCircuit(inputs)
 	builder := r1cs.NewBuilder
 	r1cs, err := frontend.Compile(ecc.BN254.ScalarField(), builder, &circuit)
@@ -210,36 +291,84 @@ func TestMainGroth16() error {
 	fmt.Println("[zkm] gnark verifier constraints:", r1cs.GetNbConstraints())
 
 	// Run the dummy setup.
-    var pk groth16.ProvingKey
-    pk, err = groth16.DummySetup(r1cs)
-    if err != nil {
-        return err
-    }
-    fmt.Println("[zkm] run the dummy setup done")
+	var pk groth16.ProvingKey
+	pk, err = groth16.DummySetup(r1cs)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] run the dummy setup done")
 
-    // Generate witness.
-    assignment := zkm.NewCircuit(inputs)
-    witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
-   	if err != nil {
-   		return err
-   	}
-    fmt.Println("[zkm] generate witness done")
+	// Generate witness.
+	assignment := zkm.NewCircuit(inputs)
+	witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] generate witness done")
 
-    // Generate the proof.
-    _, err = groth16.Prove(r1cs, pk, witness)
-    if err != nil {
-        return err
-    }
-    fmt.Println("[zkm] generate the proof done")
+	// Generate the proof.
+	_, err = groth16.Prove(r1cs, pk, witness)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] generate the proof done")
 
-    return nil
+	return nil
+}
+
+func TestMainGroth16Bls12381() error {
+	fileName := os.Getenv("WITNESS_JSON")
+	if fileName == "" {
+		fileName = "groth16_witness.json"
+	}
+
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return err
+	}
+
+	var inputs zkm.WitnessInput
+	err = json.Unmarshal(data, &inputs)
+	if err != nil {
+		return err
+	}
+
+	circuit := zkm.NewCircuit(inputs)
+	builder := r1cs.NewBuilder
+	r1cs, err := frontend.Compile(ecc.BLS12_381.ScalarField(), builder, &circuit)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] gnark verifier constraints:", r1cs.GetNbConstraints())
+
+	var pk groth16.ProvingKey
+	pk, err = groth16.DummySetup(r1cs)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] run the dummy setup done")
+
+	assignment := zkm.NewCircuit(inputs)
+	witness, err := frontend.NewWitness(&assignment, ecc.BLS12_381.ScalarField())
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] generate witness done")
+
+	_, err = groth16.Prove(r1cs, pk, witness)
+	if err != nil {
+		return err
+	}
+	fmt.Println("[zkm] generate the proof done")
+
+	return nil
 }
 
 //export ProveDvSnarkBn254
 func ProveDvSnarkBn254(dataDir *C.char, witnessPath *C.char, storeDir *C.char) *C.C_DvSnarkBn254Proof {
 	dataDirString := C.GoString(dataDir)
 	witnessPathString := C.GoString(witnessPath)
-    storeDirString := C.GoString(storeDir)
+	storeDirString := C.GoString(storeDir)
 
 	zkmDvSnarkBn254Proof := zkm.ProveDvSnark(dataDirString, witnessPathString, storeDirString)
 

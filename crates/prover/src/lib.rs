@@ -11,6 +11,11 @@
 #![allow(clippy::new_without_default)]
 #![allow(clippy::collapsible_else_if)]
 
+#[cfg(all(feature = "bn254", feature = "bls12381"))]
+compile_error!("features `bn254` and `bls12381` are mutually exclusive");
+#[cfg(not(any(feature = "bn254", feature = "bls12381")))]
+compile_error!("either feature `bn254` or `bls12381` must be enabled");
+
 pub mod build;
 pub mod components;
 pub mod shapes;
@@ -73,9 +78,12 @@ use zkm_recursion_core::{
     stark::KoalaBearPoseidon2Outer,
     RecursionProgram, Runtime as RecursionRuntime,
 };
-pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
+pub use zkm_recursion_gnark_ffi::proof::{
+    DvSnarkBn254Proof, Groth16Bls12381Proof, Groth16Bn254Proof, PlonkBn254Proof,
+};
 use zkm_recursion_gnark_ffi::{
-    groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover, DvSnarkBn254Prover,
+    groth16_bls12381::Groth16Bls12381Prover, groth16_bn254::Groth16Bn254Prover,
+    plonk_bn254::PlonkBn254Prover, DvSnarkBn254Prover,
 };
 use zkm_stark::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
@@ -1059,6 +1067,60 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Ok(ZKMReduceProof { vk: wrap_vk, proof: wrap_proof.shard_proofs.pop().unwrap() })
     }
 
+    /// Wrap a reduce proof for the BLS12-381 Groth16 pipeline.
+    ///
+    /// This currently reuses the same recursion wrap circuit/proof shape as `wrap_bn254`.
+    #[instrument(name = "wrap_bls12381", level = "info", skip_all)]
+    pub fn wrap_bls12381(
+        &self,
+        compressed_proof: ZKMReduceProof<InnerSC>,
+        opts: ZKMProverOpts,
+    ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
+        let input = ZKMCompressWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, compressed_proof)],
+            is_complete: true,
+        };
+        let input_with_vk = self.make_merkle_proofs(input);
+
+        let program = self.wrap_program();
+
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            program.clone(),
+            self.shrink_prover.config().perm.clone(),
+        );
+
+        let mut witness_stream = Vec::new();
+        Witnessable::<InnerConfig>::write(&input_with_vk, &mut witness_stream);
+        runtime.witness_stream = witness_stream.into();
+
+        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+
+        runtime.print_stats();
+        tracing::debug!("wrap_bls12381 program executed successfully");
+
+        let (wrap_pk, wrap_vk) = tracing::debug_span!("setup wrap_bls12381")
+            .in_scope(|| self.wrap_prover.setup(&program));
+
+        if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
+            tracing::debug!("wrap verifier key set");
+        }
+
+        let mut wrap_challenger = self.wrap_prover.config().challenger();
+        let time = std::time::Instant::now();
+        let mut wrap_proof = self
+            .wrap_prover
+            .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
+            .unwrap();
+        let elapsed = time.elapsed();
+        tracing::debug!("wrap_bls12381 proving time: {:?}", elapsed);
+        let mut wrap_challenger = self.wrap_prover.config().challenger();
+        self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
+        tracing::info!("wrap_bls12381 successful");
+
+        Ok(ZKMReduceProof { vk: wrap_vk, proof: wrap_proof.shard_proofs.pop().unwrap() })
+    }
+
     /// Wrap the STARK proven over a SNARK-friendly field into a PLONK proof.
     #[instrument(name = "wrap_plonk_bn254", level = "info", skip_all)]
     pub fn wrap_plonk_bn254(
@@ -1117,6 +1179,40 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let proof = prover.prove(witness, build_dir.to_path_buf());
 
         // Verify the proof.
+        prover
+            .verify(
+                &proof,
+                &vkey_hash.as_canonical_biguint(),
+                &committed_values_digest.as_canonical_biguint(),
+                build_dir,
+            )
+            .unwrap();
+
+        proof
+    }
+
+    /// Wrap the STARK proven over a SNARK-friendly field into a Groth16(BLS12-381) proof.
+    #[instrument(name = "wrap_groth16_bls12381", level = "info", skip_all)]
+    pub fn wrap_groth16_bls12381(
+        &self,
+        proof: ZKMReduceProof<OuterSC>,
+        build_dir: &Path,
+    ) -> Groth16Bls12381Proof {
+        let input = ZKMCompressWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
+            is_complete: true,
+        };
+        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
+
+        let mut witness = Witness::default();
+        input.write(&mut witness);
+        witness.write_committed_values_digest(committed_values_digest);
+        witness.write_vkey_hash(vkey_hash);
+
+        let prover = Groth16Bls12381Prover::new();
+        let proof = prover.prove(witness, build_dir.to_path_buf());
+
         prover
             .verify(
                 &proof,
@@ -1268,9 +1364,14 @@ pub mod tests {
 
     use super::*;
 
+    #[cfg(feature = "bn254")]
     use crate::build::try_build_plonk_bn254_artifacts_dev;
     use anyhow::Result;
-    use build::{build_constraints_and_witness, try_build_groth16_bn254_artifacts_dev};
+    use build::build_constraints_and_witness;
+    #[cfg(feature = "bls12381")]
+    use build::try_build_groth16_bls12381_artifacts_dev;
+    #[cfg(feature = "bn254")]
+    use build::try_build_groth16_bn254_artifacts_dev;
     use p3_field::PrimeField32;
 
     use shapes::ZKMProofShape;
@@ -1377,8 +1478,11 @@ pub mod tests {
             return Ok(());
         }
 
-        tracing::info!("wrap bn254");
+        tracing::info!("wrap");
+        #[cfg(feature = "bn254")]
         let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
+        #[cfg(feature = "bls12381")]
+        let wrapped_bn254_proof = prover.wrap_bls12381(shrink_proof, opts)?;
         let bytes = bincode::serialize(&wrapped_bn254_proof).unwrap();
 
         // Save the proof.
@@ -1413,41 +1517,74 @@ pub mod tests {
         let (constraints, witness) =
             build_constraints_and_witness(&wrapped_bn254_proof.vk, &wrapped_bn254_proof.proof);
         // test
-        PlonkBn254Prover::test(constraints.clone(), witness.clone());
-        tracing::info!("Circuit PLONK test succeeded");
-        Groth16Bn254Prover::test(constraints, witness);
-        tracing::info!("Circuit GROTH16 test succeeded");
+        #[cfg(feature = "bn254")]
+        {
+            PlonkBn254Prover::test(constraints.clone(), witness.clone());
+            tracing::info!("Circuit PLONK test succeeded");
+            Groth16Bn254Prover::test(constraints, witness);
+            tracing::info!("Circuit GROTH16 BN254 test succeeded");
+        }
+        #[cfg(feature = "bls12381")]
+        {
+            Groth16Bls12381Prover::test(constraints, witness);
+            tracing::info!("Circuit GROTH16 BLS12-381 test succeeded");
+        }
 
         if test_kind == Test::CircuitTest {
             return Ok(());
         }
 
-        tracing::info!("generate plonk bn254 proof");
-        let artifacts_dir = try_build_plonk_bn254_artifacts_dev(
-            &wrapped_bn254_proof.vk,
-            &wrapped_bn254_proof.proof,
-        );
-        let plonk_bn254_proof =
-            prover.wrap_plonk_bn254(wrapped_bn254_proof.clone(), &artifacts_dir);
-        println!("{plonk_bn254_proof:?}");
+        #[cfg(feature = "bn254")]
+        {
+            tracing::info!("generate plonk bn254 proof");
+            let artifacts_dir = try_build_plonk_bn254_artifacts_dev(
+                &wrapped_bn254_proof.vk,
+                &wrapped_bn254_proof.proof,
+            );
+            let plonk_bn254_proof =
+                prover.wrap_plonk_bn254(wrapped_bn254_proof.clone(), &artifacts_dir);
+            println!("{plonk_bn254_proof:?}");
 
-        prover.verify_plonk_bn254(&plonk_bn254_proof, &vk, &public_values, &artifacts_dir)?;
+            prover.verify_plonk_bn254(&plonk_bn254_proof, &vk, &public_values, &artifacts_dir)?;
 
-        tracing::info!("generate groth16 bn254 proof");
-        let artifacts_dir = try_build_groth16_bn254_artifacts_dev(
-            &wrapped_bn254_proof.vk,
-            &wrapped_bn254_proof.proof,
-        );
-        let groth16_bn254_proof = prover.wrap_groth16_bn254(wrapped_bn254_proof, &artifacts_dir);
-        println!("{groth16_bn254_proof:?}");
+            tracing::info!("generate groth16 bn254 proof");
+            let artifacts_dir = try_build_groth16_bn254_artifacts_dev(
+                &wrapped_bn254_proof.vk,
+                &wrapped_bn254_proof.proof,
+            );
+            let groth16_bn254_proof =
+                prover.wrap_groth16_bn254(wrapped_bn254_proof, &artifacts_dir);
+            println!("{groth16_bn254_proof:?}");
 
-        if verify {
-            prover.verify_groth16_bn254(
-                &groth16_bn254_proof,
-                &vk,
-                &public_values,
-                &artifacts_dir,
-            )?;
+            if verify {
+                prover.verify_groth16_bn254(
+                    &groth16_bn254_proof,
+                    &vk,
+                    &public_values,
+                    &artifacts_dir,
+                )?;
+            }
+        }
+
+        #[cfg(feature = "bls12381")]
+        {
+            tracing::info!("generate groth16 bls12381 proof");
+            let artifacts_dir = try_build_groth16_bls12381_artifacts_dev(
+                &wrapped_bn254_proof.vk,
+                &wrapped_bn254_proof.proof,
+            );
+            let groth16_bls12381_proof =
+                prover.wrap_groth16_bls12381(wrapped_bn254_proof, &artifacts_dir);
+            println!("{groth16_bls12381_proof:?}");
+
+            if verify {
+                prover.verify_groth16_bls12381(
+                    &groth16_bls12381_proof,
+                    &vk,
+                    &public_values,
+                    &artifacts_dir,
+                )?;
+            }
         }
 
         Ok(())
@@ -1544,8 +1681,11 @@ pub mod tests {
         tracing::info!("verify shrink");
         prover.verify_shrink(&shrink_proof, &verify_vk)?;
 
-        tracing::info!("wrap bn254");
+        tracing::info!("wrap");
+        #[cfg(feature = "bn254")]
         let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
+        #[cfg(feature = "bls12381")]
+        let wrapped_bn254_proof = prover.wrap_bls12381(shrink_proof, opts)?;
 
         tracing::info!("verify wrap bn254");
         println!("verify wrap bn254 {:#?}", wrapped_bn254_proof.vk.commit);

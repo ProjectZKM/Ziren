@@ -198,6 +198,7 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     },
                 )
                 .map_err(ZKMVerificationError::Plonk),
+            #[cfg(feature = "bn254")]
             ZKMProof::Groth16(proof) => self
                 .zkm_prover()
                 .verify_groth16_bn254(
@@ -206,6 +207,20 @@ pub trait Prover<C: ZKMProverComponents>: Send + Sync {
                     &bundle.public_values,
                     &if zkm_prover::build::zkm_dev_mode() {
                         zkm_prover::build::groth16_bn254_artifacts_dev_dir()
+                    } else {
+                        try_install_circuit_artifacts("groth16")
+                    },
+                )
+                .map_err(ZKMVerificationError::Groth16),
+            #[cfg(feature = "bls12381")]
+            ZKMProof::Groth16(proof) => self
+                .zkm_prover()
+                .verify_groth16_bls12381(
+                    proof,
+                    vkey,
+                    &bundle.public_values,
+                    &if zkm_prover::build::zkm_dev_mode() {
+                        zkm_prover::build::groth16_bls12381_artifacts_dev_dir()
                     } else {
                         try_install_circuit_artifacts("groth16")
                     },

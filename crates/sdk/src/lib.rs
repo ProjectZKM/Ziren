@@ -496,6 +496,20 @@ mod tests {
         client.verify(&proof, &vk).unwrap();
     }
 
+    #[cfg(feature = "bls12381")]
+    #[test]
+    fn test_e2e_prove_groth16_bls12381() {
+        utils::setup_logger();
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_ELF;
+        let (pk, vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let proof = client.prove(&pk, stdin).groth16().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+    }
+
     #[test]
     fn test_generate_dvsnark_r1cs_witness() {
         utils::setup_logger();

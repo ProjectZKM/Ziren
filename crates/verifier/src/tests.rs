@@ -1,9 +1,16 @@
 use std::fs::File;
 use std::io::Read;
+use std::path::PathBuf;
 use test_artifacts::HELLO_WORLD_ELF;
-use zkm_prover::build::groth16_bn254_artifacts_dev_dir;
 use zkm_sdk::install::try_install_circuit_artifacts;
 use zkm_sdk::{HashableKey, ProverClient, ZKMStdin};
+
+fn groth16_artifacts_dev_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").expect("HOME env var is not set"))
+        .join(".zkm")
+        .join("circuits")
+        .join("dev")
+}
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
@@ -104,7 +111,7 @@ fn test_e2e_verify_groth16() {
 
     let mut groth16_vk_bytes = Vec::new();
     let groth16_vk_path =
-        format!("{}/groth16_vk.bin", groth16_bn254_artifacts_dev_dir().to_str().unwrap());
+        format!("{}/groth16_vk.bin", groth16_artifacts_dev_dir().to_str().unwrap());
     File::open(groth16_vk_path).unwrap().read_to_end(&mut groth16_vk_bytes).unwrap();
 
     crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &groth16_vk_bytes)
@@ -134,4 +141,41 @@ fn test_vkeys() {
     let s3_vkey_path = plonk_path.join("plonk_vk.bin");
     let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
     assert_eq!(s3_vkey_bytes, *crate::PLONK_VK_BYTES);
+}
+
+// ZKM_DEV=true RUST_LOG=debug cargo test -r test_e2e_verify_groth16_bls12381 --features "ark bls12381" -- --nocapture
+#[cfg(all(feature = "ark", feature = "bls12381"))]
+#[test]
+#[ignore]
+fn test_e2e_verify_groth16_bls12381() {
+    // Set up the pk and vk.
+    let client = ProverClient::cpu();
+    let (pk, vk) = client.setup(HELLO_WORLD_ELF);
+
+    // Generate the Groth16(BLS12-381) proof.
+    std::env::set_var("ZKM_DEV", "true");
+    let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
+
+    client.verify(&zkm_proof_with_public_values, &vk).unwrap();
+
+    // Get the vkey hash.
+    let vkey_hash = vk.bytes32();
+
+    let mut groth16_vk_bytes = Vec::new();
+    let groth16_vk_path =
+        format!("{}/groth16_bls12381_vk.bin", groth16_artifacts_dev_dir().to_str().unwrap());
+    File::open(groth16_vk_path).unwrap().read_to_end(&mut groth16_vk_bytes).unwrap();
+
+    let proof_bytes = zkm_proof_with_public_values.bytes();
+    crate::load_ark_proof_from_bytes_bls12381(&proof_bytes[4..]).expect("BLS12-381 proof decode failed");
+    crate::load_ark_groth16_verifying_key_from_bytes_bls12381(&groth16_vk_bytes)
+        .expect("BLS12-381 vk decode failed");
+
+    let valid = crate::Groth16Verifier::ark_verify_bls12381(
+        &zkm_proof_with_public_values,
+        &vkey_hash,
+        &groth16_vk_bytes,
+    )
+    .expect("Groth16(BLS12-381) proof is invalid");
+    assert!(valid);
 }

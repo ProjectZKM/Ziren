@@ -20,7 +20,7 @@ reqwest = { version = "0.11", default-features = false, features = [
   "stream",
 ], optional = true }
 anyhow = "1.0.83"
-zkm-prover = { workspace = true }
+zkm-prover = { path = "../prover", default-features = false }
 zkm-core-machine = { workspace = true }
 zkm-build = { workspace = true }
 futures = "0.3.30"
@@ -45,7 +45,7 @@ hashbrown = { workspace = true }
 zkm-core-executor = { workspace = true }
 zkm-stark = { workspace = true }
 zkm-primitives = { workspace = true }
-zkm-cuda = { workspace = true }
+zkm-cuda = { path = "../cuda", default-features = false }
 itertools = { workspace = true }
 tonic = { version = "0.8.1", features = ["tls", "tls-roots", "transport"]}
 alloy-signer = { version = "1.0" }
@@ -57,9 +57,11 @@ serde_json = "1.0.140"
 test-artifacts = { workspace = true }
 
 [features]
-default = ["network"]
+default = ["network", "native-gnark", "bn254"]
 pre-alloc = [ "zkm-core-executor/pre-alloc" ]
-native-gnark = ["zkm-prover/native-gnark"]
+native-gnark = ["zkm-prover/native-gnark", "zkm-cuda/native-gnark"]
+bn254 = ["zkm-prover/bn254", "zkm-cuda/bn254"]
+bls12381 = ["zkm-prover/bls12381", "zkm-cuda/bls12381"]
 network = [
   "dep:prost",
   "dep:alloy-primitives",
@@ -76,4 +78,3 @@ vergen = { version = "8", default-features = false, features = [
   "git2",
 ] }
 tonic-build = "0.8.0"
-

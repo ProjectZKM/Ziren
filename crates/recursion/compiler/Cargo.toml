@@ -11,11 +11,12 @@ categories = { workspace = true }
 
 [dependencies]
 p3-bn254-fr = { workspace = true }
+p3-bls12381-fr = { workspace = true, optional = true }
 p3-koala-bear = { workspace = true }
 p3-field = { workspace = true }
 p3-symmetric = { workspace = true }
 
-zkm-recursion-core = { workspace = true }
+zkm-recursion-core = { workspace = true, default-features = false }
 zkm-recursion-derive = { workspace = true }
 
 itertools = { workspace = true }
@@ -35,5 +36,7 @@ p3-merkle-tree = { workspace = true }
 rand = "0.8.5"
 
 [features]
-default = ["debug"]
+default = ["debug", "bn254"]
+bn254 = ["zkm-recursion-core/bn254"]
+bls12381 = ["dep:p3-bls12381-fr", "zkm-recursion-core/bls12381"]
 debug = []

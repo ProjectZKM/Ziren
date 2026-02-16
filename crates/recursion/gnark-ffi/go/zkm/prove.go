@@ -6,24 +6,28 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
+	fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/plonk"
 	"github.com/consensys/gnark/constraint"
-	"github.com/consensys/gnark/frontend"
 	bcs "github.com/consensys/gnark/constraint/bn254"
-    fr "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	"github.com/consensys/gnark/frontend"
 )
 
 var globalMutex sync.RWMutex
-var globalR1cs constraint.ConstraintSystem = groth16.NewCS(ecc.BN254)
-var globalR1csInitialized = false
-var globalPk groth16.ProvingKey = groth16.NewProvingKey(ecc.BN254)
-var globalPkInitialized = false
+var globalR1csBn254 constraint.ConstraintSystem = groth16.NewCS(ecc.BN254)
+var globalR1csBn254Initialized = false
+var globalPkBn254 groth16.ProvingKey = groth16.NewProvingKey(ecc.BN254)
+var globalPkBn254Initialized = false
+var globalR1csBls12381 constraint.ConstraintSystem = groth16.NewCS(ecc.BLS12_381)
+var globalR1csBls12381Initialized = false
+var globalPkBls12381 groth16.ProvingKey = groth16.NewProvingKey(ecc.BLS12_381)
+var globalPkBls12381Initialized = false
 
 func ProvePlonk(dataDir string, witnessPath string) Proof {
 	// Sanity check the required arguments have been provided.
@@ -99,7 +103,7 @@ func ProvePlonk(dataDir string, witnessPath string) Proof {
 	return NewZKMPlonkBn254Proof(&proof, witnessInput)
 }
 
-func ProveGroth16(dataDir string, witnessPath string) Proof {
+func ProveGroth16Bn254(dataDir string, witnessPath string) Proof {
 	// Sanity check the required arguments have been provided.
 	if dataDir == "" {
 		panic("dataDirStr is required")
@@ -112,32 +116,32 @@ func ProveGroth16(dataDir string, witnessPath string) Proof {
 
 	// Read the R1CS.
 	globalMutex.Lock()
-	if !globalR1csInitialized {
+	if !globalR1csBn254Initialized {
 		start = time.Now()
 		r1csFile, err := os.Open(dataDir + "/" + groth16CircuitPath)
 		if err != nil {
 			panic(err)
 		}
 		r1csReader := bufio.NewReaderSize(r1csFile, 1024*1024)
-		globalR1cs.ReadFrom(r1csReader)
+		globalR1csBn254.ReadFrom(r1csReader)
 		defer r1csFile.Close()
-		globalR1csInitialized = true
+		globalR1csBn254Initialized = true
 		fmt.Printf("Reading R1CS took %s\n", time.Since(start))
 	}
 	globalMutex.Unlock()
 
 	// Read the proving key.
 	globalMutex.Lock()
-	if !globalPkInitialized {
+	if !globalPkBn254Initialized {
 		start = time.Now()
 		pkFile, err := os.Open(dataDir + "/" + groth16PkPath)
 		if err != nil {
 			panic(err)
 		}
 		pkReader := bufio.NewReaderSize(pkFile, 1024*1024)
-		globalPk.ReadDump(pkReader)
+		globalPkBn254.ReadDump(pkReader)
 		defer pkFile.Close()
-		globalPkInitialized = true
+		globalPkBn254Initialized = true
 		fmt.Printf("Reading proving key took %s\n", time.Since(start))
 	}
 	globalMutex.Unlock()
@@ -170,19 +174,97 @@ func ProveGroth16(dataDir string, witnessPath string) Proof {
 
 	start = time.Now()
 	// Generate the proof.
-	proof, err := groth16.Prove(globalR1cs, globalPk, witness)
+	proof, err := groth16.Prove(globalR1csBn254, globalPkBn254, witness)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		panic(err)
 	}
 	fmt.Printf("Generating proof took %s\n", time.Since(start))
 
-	return NewZKMGroth16Proof(&proof, witnessInput)
+	return NewZKMGroth16Bn254Proof(&proof, witnessInput)
+}
+
+func ProveGroth16(dataDir string, witnessPath string) Proof {
+	return ProveGroth16Bn254(dataDir, witnessPath)
+}
+
+func ProveGroth16Bls12381(dataDir string, witnessPath string) Proof {
+	if dataDir == "" {
+		panic("dataDirStr is required")
+	}
+
+	start := time.Now()
+	os.Setenv("CONSTRAINTS_JSON", dataDir+"/"+constraintsJsonFile)
+	os.Setenv("GROTH16", "1")
+	fmt.Printf("Setting environment variables took %s\n", time.Since(start))
+
+	globalMutex.Lock()
+	if !globalR1csBls12381Initialized {
+		start = time.Now()
+		r1csFile, err := os.Open(dataDir + "/" + groth16Bls12381CircuitPath)
+		if err != nil {
+			panic(err)
+		}
+		r1csReader := bufio.NewReaderSize(r1csFile, 1024*1024)
+		globalR1csBls12381.ReadFrom(r1csReader)
+		defer r1csFile.Close()
+		globalR1csBls12381Initialized = true
+		fmt.Printf("Reading R1CS took %s\n", time.Since(start))
+	}
+	globalMutex.Unlock()
+
+	globalMutex.Lock()
+	if !globalPkBls12381Initialized {
+		start = time.Now()
+		pkFile, err := os.Open(dataDir + "/" + groth16Bls12381PkPath)
+		if err != nil {
+			panic(err)
+		}
+		pkReader := bufio.NewReaderSize(pkFile, 1024*1024)
+		globalPkBls12381.ReadDump(pkReader)
+		defer pkFile.Close()
+		globalPkBls12381Initialized = true
+		fmt.Printf("Reading proving key took %s\n", time.Since(start))
+	}
+	globalMutex.Unlock()
+
+	start = time.Now()
+	data, err := os.ReadFile(witnessPath)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Reading witness file took %s\n", time.Since(start))
+
+	start = time.Now()
+	var witnessInput WitnessInput
+	err = json.Unmarshal(data, &witnessInput)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Deserializing JSON data took %s\n", time.Since(start))
+
+	start = time.Now()
+	assignment := NewCircuit(witnessInput)
+	witness, err := frontend.NewWitness(&assignment, ecc.BLS12_381.ScalarField())
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Generating witness took %s\n", time.Since(start))
+
+	start = time.Now()
+	proof, err := groth16.Prove(globalR1csBls12381, globalPkBls12381, witness)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		panic(err)
+	}
+	fmt.Printf("Generating proof took %s\n", time.Since(start))
+
+	return NewZKMGroth16Bls12381Proof(&proof, witnessInput)
 }
 
 func SaveWitnessToFile(witnessPath string, storedDir string) {
-    fmt.Printf("witnessPATH: %s\n", witnessPath)
-    r1csFilePath := filepath.Join(storedDir, "r1cs_cached")
+	fmt.Printf("witnessPATH: %s\n", witnessPath)
+	r1csFilePath := filepath.Join(storedDir, "r1cs_cached")
 	file, err := os.Open(r1csFilePath)
 	if err != nil {
 		log.Fatalf("Failed to open file: %v", err)

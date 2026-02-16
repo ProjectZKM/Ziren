@@ -11,9 +11,9 @@ categories = { workspace = true }
 
 [dependencies]
 p3-matrix = { workspace = true }
-zkm-recursion-compiler = { workspace = true }
-zkm-recursion-core = { workspace = true }
-zkm-recursion-circuit = { workspace = true }
+zkm-recursion-compiler = { workspace = true, default-features = false }
+zkm-recursion-core = { workspace = true, default-features = false }
+zkm-recursion-circuit = { workspace = true, default-features = false }
 zkm-recursion-gnark-ffi = { workspace = true }
 zkm-core-machine = { workspace = true }
 zkm-stark = { workspace = true }
@@ -24,6 +24,7 @@ p3-field = { workspace = true }
 p3-challenger = { workspace = true }
 p3-koala-bear = { workspace = true }
 p3-bn254-fr = { workspace = true }
+p3-bls12381-fr = { workspace = true, optional = true }
 p3-commit = { workspace = true }
 p3-util = { workspace = true }
 bincode = "1.3.3"
@@ -32,6 +33,7 @@ itertools = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 clap = { version = "4.5.9", features = ["derive", "env"] }
 anyhow = "1.0.83"
 dirs = "5.0.1"
@@ -52,6 +54,10 @@ path = "scripts/build_plonk_bn254.rs"
 [[bin]]
 name = "build_groth16_bn254"
 path = "scripts/build_groth16_bn254.rs"
+
+[[bin]]
+name = "build_groth16_bls12381"
+path = "scripts/build_groth16_bls12381.rs"
 
 [[bin]]
 name = "build_compress_vks"
@@ -82,6 +88,13 @@ name = "test_shape_fixing"
 path = "scripts/test_shape_fixing.rs"
 
 [features]
-default = ["native-gnark"]
+default = ["native-gnark", "bn254"]
+bn254 = ["zkm-recursion-core/bn254", "zkm-recursion-compiler/bn254", "zkm-recursion-circuit/bn254"]
+bls12381 = [
+    "dep:p3-bls12381-fr",
+    "zkm-recursion-core/bls12381",
+    "zkm-recursion-compiler/bls12381",
+    "zkm-recursion-circuit/bls12381",
+]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
 debug = ["zkm-core-machine/debug"]

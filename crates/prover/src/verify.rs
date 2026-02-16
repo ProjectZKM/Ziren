@@ -4,6 +4,7 @@ use anyhow::Result;
 use num_bigint::BigUint;
 use p3_field::{FieldAlgebra, PrimeField};
 use p3_koala_bear::KoalaBear;
+use sha2::{Digest, Sha256};
 use zkm_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
 use zkm_core_machine::cpu::MAX_CPU_LOG_DEGREE;
 use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
@@ -12,7 +13,8 @@ use thiserror::Error;
 use zkm_recursion_circuit::machine::RootPublicValues;
 use zkm_recursion_core::{air::RecursionPublicValues, stark::KoalaBearPoseidon2Outer};
 use zkm_recursion_gnark_ffi::{
-    Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
+    Groth16Bls12381Proof, Groth16Bls12381Prover, Groth16Bn254Proof, Groth16Bn254Prover,
+    PlonkBn254Proof, PlonkBn254Prover,
 };
 use zkm_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
@@ -22,7 +24,9 @@ use zkm_stark::{
 
 use crate::{
     components::ZKMProverComponents,
-    utils::{is_recursion_public_values_valid, is_root_public_values_valid},
+    utils::{
+        is_recursion_public_values_valid, is_root_public_values_valid, koalabear_bytes_to_bn254,
+    },
     CoreSC, HashableKey, OuterSC, ZKMCoreProofData, ZKMProver, ZKMVerifyingKey,
 };
 
@@ -442,6 +446,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         Ok(())
     }
+
+    /// Verifies a Groth16(BLS12-381) proof using the circuit artifacts in the build directory.
+    pub fn verify_groth16_bls12381(
+        &self,
+        proof: &Groth16Bls12381Proof,
+        vk: &ZKMVerifyingKey,
+        public_values: &ZKMPublicValues,
+        build_dir: &Path,
+    ) -> Result<()> {
+        let prover = Groth16Bls12381Prover::new();
+
+        let vkey_hash = BigUint::from_str(&proof.public_inputs[0])?;
+        let committed_values_digest = BigUint::from_str(&proof.public_inputs[1])?;
+
+        prover.verify(proof, &vkey_hash, &committed_values_digest, build_dir)?;
+
+        verify_groth16_bls12381_public_inputs(vk, public_values, &proof.public_inputs)?;
+
+        Ok(())
+    }
 }
 
 /// Verify the vk_hash and public_values_hash in the public inputs of the PlonkBn254Proof match the
@@ -484,6 +508,33 @@ pub fn verify_groth16_bn254_public_inputs(
 
     let public_values_hash = public_values.hash_bn254();
     if public_values_hash != expected_public_values_hash {
+        return Err(Groth16VerificationError::InvalidPublicValues.into());
+    }
+
+    Ok(())
+}
+
+/// Verify the vk_hash and public_values_hash in the public inputs of the Groth16Bls12381Proof
+/// match the expected values.
+pub fn verify_groth16_bls12381_public_inputs(
+    vk: &ZKMVerifyingKey,
+    public_values: &ZKMPublicValues,
+    groth16_bls12381_public_inputs: &[String],
+) -> Result<()> {
+    let expected_vk_hash = BigUint::from_str(&groth16_bls12381_public_inputs[0])?;
+    let expected_public_values_hash = BigUint::from_str(&groth16_bls12381_public_inputs[1])?;
+
+    let vk_hash = vk.hash_bn254().as_canonical_biguint();
+    if vk_hash != expected_vk_hash {
+        return Err(Groth16VerificationError::InvalidVerificationKey.into());
+    }
+
+    // The committed public-values digest in Groth16(BLS12-381) is interpreted as a field element.
+    // So we must compare against the digest mapped into the outer SNARK field, not the raw 256-bit hash.
+    let hash_result: [u8; 32] = Sha256::digest(public_values.as_slice()).into();
+    let committed_values_digest_bytes = hash_result.map(KoalaBear::from_canonical_u8);
+    let public_values_hash = koalabear_bytes_to_bn254(&committed_values_digest_bytes);
+    if public_values_hash.as_canonical_biguint() != expected_public_values_hash {
         return Err(Groth16VerificationError::InvalidPublicValues.into());
     }
 

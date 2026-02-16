@@ -493,7 +493,7 @@ mod tests {
         let chip = Poseidon2WideChip::<DEGREE>;
         let padded_nb_rows = chip.num_rows(input).unwrap();
         let num_columns = <Poseidon2WideChip<DEGREE> as BaseAir<F>>::width(&chip);
-        let mut values = vec![F::zero(); padded_nb_rows * num_columns];
+        let mut values = vec![F::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
@@ -506,8 +506,8 @@ mod tests {
                 )
             },
             || {
-                let mut dummy_row = vec![F::zero(); num_columns];
-                populate_perm::<F, DEGREE>([F::zero(); WIDTH], None, &mut dummy_row);
+                let mut dummy_row = vec![F::ZERO; num_columns];
+                populate_perm::<F, DEGREE>([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
                     .for_each(|row| row.copy_from_slice(&dummy_row))

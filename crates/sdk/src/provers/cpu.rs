@@ -44,8 +44,12 @@ impl CpuProver {
         let shrink_proof = self.prover.shrink(proof, opts.zkm_prover_opts)?;
 
         // Generate the wrap proof.
+        #[cfg(feature = "bn254")]
         let outer_proof = self.prover.wrap_bn254(shrink_proof, opts.zkm_prover_opts)?;
+        #[cfg(feature = "bls12381")]
+        let outer_proof = self.prover.wrap_bls12381(shrink_proof, opts.zkm_prover_opts)?;
 
+        #[cfg(feature = "bn254")]
         let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
             zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
                 &outer_proof.vk,
@@ -54,8 +58,20 @@ impl CpuProver {
         } else {
             try_install_circuit_artifacts("groth16")
         };
+        #[cfg(feature = "bls12381")]
+        let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+            zkm_prover::build::try_build_groth16_bls12381_artifacts_dev(
+                &outer_proof.vk,
+                &outer_proof.proof,
+            )
+        } else {
+            try_install_circuit_artifacts("groth16")
+        };
 
+        #[cfg(feature = "bn254")]
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+        #[cfg(feature = "bls12381")]
+        let proof = self.prover.wrap_groth16_bls12381(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
             public_values,
@@ -130,7 +146,10 @@ impl Prover<DefaultProverComponents> for CpuProver {
         let compress_proof = self.prover.shrink(reduce_proof, opts.zkm_prover_opts)?;
 
         // Generate the wrap proof.
+        #[cfg(feature = "bn254")]
         let outer_proof = self.prover.wrap_bn254(compress_proof, opts.zkm_prover_opts)?;
+        #[cfg(feature = "bls12381")]
+        let outer_proof = self.prover.wrap_bls12381(compress_proof, opts.zkm_prover_opts)?;
 
         if kind == ZKMProofKind::Plonk {
             let plonk_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
@@ -152,6 +171,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                 cycles,
             ));
         } else if kind == ZKMProofKind::Groth16 {
+            #[cfg(feature = "bn254")]
             let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
                 zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
                     &outer_proof.vk,
@@ -160,8 +180,20 @@ impl Prover<DefaultProverComponents> for CpuProver {
             } else {
                 try_install_circuit_artifacts("groth16")
             };
+            #[cfg(feature = "bls12381")]
+            let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+                zkm_prover::build::try_build_groth16_bls12381_artifacts_dev(
+                    &outer_proof.vk,
+                    &outer_proof.proof,
+                )
+            } else {
+                try_install_circuit_artifacts("groth16")
+            };
 
+            #[cfg(feature = "bn254")]
             let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+            #[cfg(feature = "bls12381")]
+            let proof = self.prover.wrap_groth16_bls12381(outer_proof, &groth16_bn254_artifacts);
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Groth16(proof),

@@ -245,8 +245,7 @@ where
         // If the modulus is zero, then we don't perform the modulus operation.
         // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
         // not overflow because we are summing 32 bytes.
-        let modulus_byte_sum =
-            modulus_limbs.0.iter().fold(AB::Expr::zero(), |acc, &limb| acc + limb);
+        let modulus_byte_sum = modulus_limbs.0.iter().fold(AB::Expr::zero(), |acc, &limb| acc + limb);
         IsZeroOperation::<AB::F>::eval(
             builder,
             modulus_byte_sum,

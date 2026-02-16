@@ -1,6 +1,7 @@
 package poseidon2
 
 import (
+	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/frontend"
 )
 
@@ -13,9 +14,17 @@ type Poseidon2Chip struct {
 	api                   frontend.API
 	internal_linear_layer [width]frontend.Variable
 	zero                  frontend.Variable
+	rc3                   *[numExternalRounds + numInternalRounds][width]frontend.Variable
 }
 
 func NewChip(api frontend.API) *Poseidon2Chip {
+	field := api.Compiler().Field()
+	var rc *[numExternalRounds + numInternalRounds][width]frontend.Variable
+	if field.Cmp(ecc.BLS12_381.ScalarField()) == 0 {
+		rc = &rc3Bls12381
+	} else {
+		rc = &rc3Bn254
+	}
 	return &Poseidon2Chip{
 		api: api,
 		internal_linear_layer: [width]frontend.Variable{
@@ -24,6 +33,7 @@ func NewChip(api frontend.API) *Poseidon2Chip {
 			frontend.Variable(2),
 		},
 		zero: frontend.Variable(0),
+		rc3:  rc,
 	}
 }
 
@@ -35,7 +45,7 @@ func (p *Poseidon2Chip) PermuteMut(state *[width]frontend.Variable) {
 	rounds := numExternalRounds + numInternalRounds
 	rounds_f_beginning := numExternalRounds / 2
 	for r := 0; r < rounds_f_beginning; r++ {
-		p.addRc(state, rc3[r])
+		p.addRc(state, p.rc3[r])
 		p.sbox(state)
 		p.matrixPermuteMut(state)
 	}
@@ -43,14 +53,14 @@ func (p *Poseidon2Chip) PermuteMut(state *[width]frontend.Variable) {
 	// The internal rounds.
 	p_end := rounds_f_beginning + numInternalRounds
 	for r := rounds_f_beginning; r < p_end; r++ {
-		state[0] = p.api.Add(state[0], rc3[r][0])
+		state[0] = p.api.Add(state[0], p.rc3[r][0])
 		state[0] = p.sboxP(state[0])
 		p.diffusionPermuteMut(state)
 	}
 
 	// The second half of the external rounds.
 	for r := p_end; r < rounds; r++ {
-		p.addRc(state, rc3[r])
+		p.addRc(state, p.rc3[r])
 		p.sbox(state)
 		p.matrixPermuteMut(state)
 	}

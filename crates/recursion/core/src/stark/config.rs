@@ -1,4 +1,7 @@
-use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
+#[cfg(feature = "bls12381")]
+use p3_bls12381_fr::{Bls12381Fr as FR, Poseidon2Bls12381 as PB};
+#[cfg(feature = "bn254")]
+use p3_bn254_fr::{Bn254Fr as FR, Poseidon2Bn254 as PB};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
@@ -22,18 +25,17 @@ pub const OUTER_MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 /// A configuration for outer recursion.
 pub type OuterVal = KoalaBear;
 pub type OuterChallenge = BinomialExtensionField<OuterVal, 4>;
-pub type OuterPerm = Poseidon2Bn254<3>;
-pub type OuterHash =
-    MultiField32PaddingFreeSponge<OuterVal, Bn254Fr, OuterPerm, 3, 16, DIGEST_SIZE>;
-pub type OuterDigestHash = Hash<OuterVal, Bn254Fr, DIGEST_SIZE>;
-pub type OuterDigest = [Bn254Fr; DIGEST_SIZE];
+pub type OuterPerm = PB<3>;
+pub type OuterHash = MultiField32PaddingFreeSponge<OuterVal, FR, OuterPerm, 3, 16, DIGEST_SIZE>;
+pub type OuterDigestHash = Hash<OuterVal, FR, DIGEST_SIZE>;
+pub type OuterDigest = [FR; DIGEST_SIZE];
 pub type OuterCompress = TruncatedPermutation<OuterPerm, 2, 1, 3>;
-pub type OuterValMmcs = MerkleTreeMmcs<KoalaBear, Bn254Fr, OuterHash, OuterCompress, 1>;
+pub type OuterValMmcs = MerkleTreeMmcs<KoalaBear, FR, OuterHash, OuterCompress, 1>;
 pub type OuterChallengeMmcs = ExtensionMmcs<OuterVal, OuterChallenge, OuterValMmcs>;
 pub type OuterDft = Radix2DitParallel<OuterVal>;
 pub type OuterChallenger = MultiField32Challenger<
     OuterVal,
-    Bn254Fr,
+    FR,
     OuterPerm,
     OUTER_MULTI_FIELD_CHALLENGER_WIDTH,
     OUTER_MULTI_FIELD_CHALLENGER_RATE,
@@ -176,7 +178,7 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
 
 impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
     fn zero_commitment(&self) -> Com<KoalaBearPoseidon2Outer> {
-        OuterDigestHash::from([Bn254Fr::ZERO; DIGEST_SIZE])
+        OuterDigestHash::from([FR::ZERO; DIGEST_SIZE])
     }
 }
 

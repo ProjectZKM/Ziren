@@ -5,7 +5,7 @@
 //! Although we cast to *mut c_char because the Go signatures can't be immutable, the Go functions
 //! should not modify the strings.
 
-use crate::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
+use crate::{DvSnarkBn254Proof, Groth16Bls12381Proof, Groth16Bn254Proof, PlonkBn254Proof};
 use cfg_if::cfg_if;
 use std::{
     ffi::{c_char, CStr, CString},
@@ -21,13 +21,15 @@ use bind::*;
 
 enum ProofSystem {
     Plonk,
-    Groth16,
+    Groth16Bn254,
+    Groth16Bls12381,
     DvSnark,
 }
 
 enum ProofResult {
     Plonk(*mut C_PlonkBn254Proof),
-    Groth16(*mut C_Groth16Bn254Proof),
+    Groth16Bn254(*mut C_Groth16Bn254Proof),
+    Groth16Bls12381(*mut C_Groth16Bls12381Proof),
     DvSnark(*mut C_DvSnarkBn254Proof),
 }
 
@@ -35,7 +37,10 @@ impl ProofSystem {
     fn build_fn(&self) -> BuildFunction {
         match self {
             ProofSystem::Plonk => BuildFunction::Plonk(bind::BuildPlonkBn254),
-            ProofSystem::Groth16 => BuildFunction::Groth16(bind::BuildGroth16Bn254),
+            ProofSystem::Groth16Bn254 => BuildFunction::Groth16Bn254(bind::BuildGroth16Bn254),
+            ProofSystem::Groth16Bls12381 => {
+                BuildFunction::Groth16Bls12381(bind::BuildGroth16Bls12381)
+            }
             ProofSystem::DvSnark => BuildFunction::DvSnark(bind::BuildDvSnarkBn254),
         }
     }
@@ -43,7 +48,10 @@ impl ProofSystem {
     fn prove_fn(&self) -> ProveFunction {
         match self {
             ProofSystem::Plonk => ProveFunction::Plonk(bind::ProvePlonkBn254),
-            ProofSystem::Groth16 => ProveFunction::Groth16(bind::ProveGroth16Bn254),
+            ProofSystem::Groth16Bn254 => ProveFunction::Groth16Bn254(bind::ProveGroth16Bn254),
+            ProofSystem::Groth16Bls12381 => {
+                ProveFunction::Groth16Bls12381(bind::ProveGroth16Bls12381)
+            }
             ProofSystem::DvSnark => ProveFunction::DvSnark(bind::ProveDvSnarkBn254),
         }
     }
@@ -54,7 +62,8 @@ impl ProofSystem {
     {
         match self {
             ProofSystem::Plonk => bind::VerifyPlonkBn254,
-            ProofSystem::Groth16 => bind::VerifyGroth16Bn254,
+            ProofSystem::Groth16Bn254 => bind::VerifyGroth16Bn254,
+            ProofSystem::Groth16Bls12381 => bind::VerifyGroth16Bls12381,
             _ => unreachable!(),
         }
     }
@@ -62,7 +71,8 @@ impl ProofSystem {
     fn test_fn(&self) -> unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut c_char {
         match self {
             ProofSystem::Plonk => bind::TestPlonkBn254,
-            ProofSystem::Groth16 => bind::TestGroth16Bn254,
+            ProofSystem::Groth16Bn254 => bind::TestGroth16Bn254,
+            ProofSystem::Groth16Bls12381 => bind::TestGroth16Bls12381,
             _ => unreachable!(),
         }
     }
@@ -70,7 +80,8 @@ impl ProofSystem {
 
 enum ProveFunction {
     Plonk(unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut C_PlonkBn254Proof),
-    Groth16(unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut C_Groth16Bn254Proof),
+    Groth16Bn254(unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut C_Groth16Bn254Proof),
+    Groth16Bls12381(unsafe extern "C" fn(*mut c_char, *mut c_char) -> *mut C_Groth16Bls12381Proof),
     DvSnark(
         unsafe extern "C" fn(*mut c_char, *mut c_char, *mut c_char) -> *mut C_DvSnarkBn254Proof,
     ),
@@ -78,7 +89,8 @@ enum ProveFunction {
 
 enum BuildFunction {
     Plonk(unsafe extern "C" fn(*mut c_char)),
-    Groth16(unsafe extern "C" fn(*mut c_char)),
+    Groth16Bn254(unsafe extern "C" fn(*mut c_char)),
+    Groth16Bls12381(unsafe extern "C" fn(*mut c_char)),
     DvSnark(unsafe extern "C" fn(*mut c_char, *mut c_char)),
 }
 
@@ -89,7 +101,10 @@ fn build(system: ProofSystem, data_dir: &str, store_dir: &str) {
             BuildFunction::Plonk(func) => {
                 func(data_dir.as_ptr() as *mut c_char);
             }
-            BuildFunction::Groth16(func) => {
+            BuildFunction::Groth16Bn254(func) => {
+                func(data_dir.as_ptr() as *mut c_char);
+            }
+            BuildFunction::Groth16Bls12381(func) => {
                 func(data_dir.as_ptr() as *mut c_char);
             }
             BuildFunction::DvSnark(func) => {
@@ -111,10 +126,15 @@ fn prove(system: ProofSystem, data_dir: &str, witness_path: &str, store_dir: &st
                     func(data_dir.as_ptr() as *mut c_char, witness_path.as_ptr() as *mut c_char);
                 ProofResult::Plonk(proof)
             }
-            ProveFunction::Groth16(func) => {
+            ProveFunction::Groth16Bn254(func) => {
                 let proof =
                     func(data_dir.as_ptr() as *mut c_char, witness_path.as_ptr() as *mut c_char);
-                ProofResult::Groth16(proof)
+                ProofResult::Groth16Bn254(proof)
+            }
+            ProveFunction::Groth16Bls12381(func) => {
+                let proof =
+                    func(data_dir.as_ptr() as *mut c_char, witness_path.as_ptr() as *mut c_char);
+                ProofResult::Groth16Bls12381(proof)
             }
             ProveFunction::DvSnark(func) => {
                 let store_dir = CString::new(store_dir).expect("CString::new failed");
@@ -202,12 +222,12 @@ pub fn test_plonk_bn254(witness_json: &str, constraints_json: &str) {
 }
 
 pub fn build_groth16_bn254(data_dir: &str) {
-    build(ProofSystem::Groth16, data_dir, "")
+    build(ProofSystem::Groth16Bn254, data_dir, "")
 }
 
 pub fn prove_groth16_bn254(data_dir: &str, witness_path: &str) -> Groth16Bn254Proof {
-    match prove(ProofSystem::Groth16, data_dir, witness_path, "") {
-        ProofResult::Groth16(proof) => unsafe { Groth16Bn254Proof::from_raw(proof) },
+    match prove(ProofSystem::Groth16Bn254, data_dir, witness_path, "") {
+        ProofResult::Groth16Bn254(proof) => unsafe { Groth16Bn254Proof::from_raw(proof) },
         _ => unreachable!(),
     }
 }
@@ -218,11 +238,35 @@ pub fn verify_groth16_bn254(
     vkey_hash: &str,
     committed_values_digest: &str,
 ) -> Result<(), String> {
-    verify(ProofSystem::Groth16, data_dir, proof, vkey_hash, committed_values_digest)
+    verify(ProofSystem::Groth16Bn254, data_dir, proof, vkey_hash, committed_values_digest)
 }
 
 pub fn test_groth16_bn254(witness_json: &str, constraints_json: &str) {
-    test(ProofSystem::Groth16, witness_json, constraints_json)
+    test(ProofSystem::Groth16Bn254, witness_json, constraints_json)
+}
+
+pub fn build_groth16_bls12381(data_dir: &str) {
+    build(ProofSystem::Groth16Bls12381, data_dir, "")
+}
+
+pub fn prove_groth16_bls12381(data_dir: &str, witness_path: &str) -> Groth16Bls12381Proof {
+    match prove(ProofSystem::Groth16Bls12381, data_dir, witness_path, "") {
+        ProofResult::Groth16Bls12381(proof) => unsafe { Groth16Bls12381Proof::from_raw(proof) },
+        _ => unreachable!(),
+    }
+}
+
+pub fn verify_groth16_bls12381(
+    data_dir: &str,
+    proof: &str,
+    vkey_hash: &str,
+    committed_values_digest: &str,
+) -> Result<(), String> {
+    verify(ProofSystem::Groth16Bls12381, data_dir, proof, vkey_hash, committed_values_digest)
+}
+
+pub fn test_groth16_bls12381(witness_json: &str, constraints_json: &str) {
+    test(ProofSystem::Groth16Bls12381, witness_json, constraints_json)
 }
 
 pub fn build_dvsnark_bn254(data_dir: &str, store_dir: &str) {
@@ -298,6 +342,22 @@ impl Groth16Bn254Proof {
             groth16_vkey_hash: [0; 32],
         };
         bind::FreeGroth16Bn254Proof(c_proof);
+        proof
+    }
+}
+
+impl Groth16Bls12381Proof {
+    unsafe fn from_raw(c_proof: *mut C_Groth16Bls12381Proof) -> Self {
+        let proof = Groth16Bls12381Proof {
+            public_inputs: [
+                ptr_to_string_cloned((*c_proof).PublicInputs[0]),
+                ptr_to_string_cloned((*c_proof).PublicInputs[1]),
+            ],
+            encoded_proof: ptr_to_string_cloned((*c_proof).EncodedProof),
+            raw_proof: ptr_to_string_cloned((*c_proof).RawProof),
+            groth16_vkey_hash: [0; 32],
+        };
+        bind::FreeGroth16Bls12381Proof(c_proof);
         proof
     }
 }

@@ -1,12 +1,20 @@
 //! Copied from [`zkm_recursion_program`].
 
+#[cfg(all(feature = "bn254", feature = "bls12381"))]
+compile_error!("features `bn254` and `bls12381` are mutually exclusive");
+#[cfg(not(any(feature = "bn254", feature = "bls12381")))]
+compile_error!("either feature `bn254` or `bls12381` must be enabled");
+
 use challenger::{
     CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
     MultiField32ChallengerVariable, SpongeChallengerShape,
 };
 use hash::{FieldHasherVariable, Poseidon2KoalaBearHasherVariable};
 use itertools::izip;
-use p3_bn254_fr::Bn254Fr;
+#[cfg(feature = "bls12381")]
+use p3_bls12381_fr::Bls12381Fr as FR;
+#[cfg(feature = "bn254")]
+use p3_bn254_fr::Bn254Fr as FR;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::RowMajorMatrix;
 use std::iter::{repeat, zip};
@@ -607,7 +615,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriConfigV
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBearFriConfigVariable<C>
+impl<C: CircuitConfig<F = KoalaBear, N = FR, Bit = Var<FR>>> KoalaBearFriConfigVariable<C>
     for KoalaBearPoseidon2Outer
 {
     type FriChallengerVariable = MultiField32ChallengerVariable<C>;

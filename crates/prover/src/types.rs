@@ -2,7 +2,10 @@ use std::{fs::File, path::Path};
 
 use anyhow::Result;
 use clap::ValueEnum;
-use p3_bn254_fr::Bn254Fr;
+#[cfg(feature = "bls12381")]
+use p3_bls12381_fr::Bls12381Fr as FR;
+#[cfg(feature = "bn254")]
+use p3_bn254_fr::Bn254Fr as FR;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
@@ -14,7 +17,7 @@ use zkm_recursion_circuit::machine::{
     ZKMCompressWitnessValues, ZKMDeferredWitnessValues, ZKMRecursionWitnessValues,
 };
 
-use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
+use zkm_recursion_gnark_ffi::proof::{Groth16Bls12381Proof, Groth16Bn254Proof, PlonkBn254Proof};
 
 use thiserror::Error;
 use zkm_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
@@ -47,7 +50,7 @@ pub trait HashableKey {
     /// Hash the key into a digest of  u32 elements.
     fn hash_u32(&self) -> [u32; DIGEST_SIZE];
 
-    fn hash_bn254(&self) -> Bn254Fr {
+    fn hash_bn254(&self) -> FR {
         koalabears_to_bn254(&self.hash_koalabear())
     }
 
@@ -149,6 +152,9 @@ pub type ZKMPlonkBn254Proof = ZKMProofWithMetadata<ZKMPlonkBn254ProofData>;
 /// A Ziren proof that has been wrapped into a single Groth16 proof and can be verified onchain.
 pub type ZKMGroth16Bn254Proof = ZKMProofWithMetadata<ZKMGroth16Bn254ProofData>;
 
+/// A Ziren proof that has been wrapped into a single Groth16(BLS12-381) proof.
+pub type ZKMGroth16Bls12381Proof = ZKMProofWithMetadata<ZKMGroth16Bls12381ProofData>;
+
 /// A Ziren proof that has been wrapped into a single proof and can be verified onchain.
 pub type ZKMProof = ZKMProofWithMetadata<ZKMBn254ProofData>;
 
@@ -163,6 +169,9 @@ pub struct ZKMPlonkBn254ProofData(pub PlonkBn254Proof);
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZKMGroth16Bn254ProofData(pub Groth16Bn254Proof);
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ZKMGroth16Bls12381ProofData(pub Groth16Bls12381Proof);
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum ZKMBn254ProofData {

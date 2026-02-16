@@ -17,7 +17,9 @@ pub use zkm_recursion_core::stark::zkm_dev_mode;
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
-use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
+use zkm_recursion_gnark_ffi::{
+    DvSnarkBn254Prover, Groth16Bls12381Prover, Groth16Bn254Prover, PlonkBn254Prover,
+};
 use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
@@ -44,6 +46,17 @@ pub fn try_build_groth16_bn254_artifacts_dev(
     let build_dir = groth16_bn254_artifacts_dev_dir();
     println!("[zkm] building groth16 bn254 artifacts in development mode");
     build_groth16_bn254_artifacts(template_vk, template_proof, &build_dir);
+    build_dir
+}
+
+/// Tries to build the groth16 bls12-381 artifacts in the current environment.
+pub fn try_build_groth16_bls12381_artifacts_dev(
+    template_vk: &StarkVerifyingKey<OuterSC>,
+    template_proof: &ShardProof<OuterSC>,
+) -> PathBuf {
+    let build_dir = groth16_bls12381_artifacts_dev_dir();
+    println!("[zkm] building groth16 bls12-381 artifacts in development mode");
+    build_groth16_bls12381_artifacts(template_vk, template_proof, &build_dir);
     build_dir
 }
 
@@ -99,6 +112,11 @@ pub fn groth16_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
 }
 
+/// Gets the directory where the groth16 bls12-381 artifacts are installed in development mode.
+pub fn groth16_bls12381_artifacts_dev_dir() -> PathBuf {
+    dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
+}
+
 /// Gets the directory where the dv-snark artifacts are installed in development mode.
 pub fn dvsnark_bn254_artifacts_dev_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits").join("dev")
@@ -128,6 +146,19 @@ pub fn build_groth16_bn254_artifacts(
     std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
     let (constraints, witness) = build_constraints_and_witness(template_vk, template_proof);
     Groth16Bn254Prover::build(constraints, witness, build_dir);
+}
+
+/// Build the groth16 bls12-381 artifacts to the given directory for the given verification key and
+/// template proof.
+pub fn build_groth16_bls12381_artifacts(
+    template_vk: &StarkVerifyingKey<OuterSC>,
+    template_proof: &ShardProof<OuterSC>,
+    build_dir: impl Into<PathBuf>,
+) {
+    let build_dir = build_dir.into();
+    std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
+    let (constraints, witness) = build_constraints_and_witness(template_vk, template_proof);
+    Groth16Bls12381Prover::build(constraints, witness, build_dir);
 }
 
 /// Build the dv-snark bn254 artifacts to the given directory for the given verification key and
@@ -178,6 +209,23 @@ pub fn build_groth16_bn254_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
     let wrap_vk = bincode::deserialize(&wrap_vk_bytes).unwrap();
     let wrapped_proof = bincode::deserialize(&wrapped_proof_bytes).unwrap();
     crate::build::build_groth16_bn254_artifacts(&wrap_vk, &wrapped_proof, build_dir.into());
+}
+
+/// Builds the groth16 bls12-381 artifacts to the given directory.
+///
+/// This may take a while as it needs to first generate a dummy proof and then it needs to compile
+/// the circuit.
+pub fn build_groth16_bls12381_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
+    let (wrap_vk, wrapped_proof) = dummy_proof();
+    let wrap_vk_bytes = bincode::serialize(&wrap_vk).unwrap();
+    let wrapped_proof_bytes = bincode::serialize(&wrapped_proof).unwrap();
+    std::fs::write("wrap_vk.bin", wrap_vk_bytes).unwrap();
+    std::fs::write("wrapped_proof.bin", wrapped_proof_bytes).unwrap();
+    let wrap_vk_bytes = std::fs::read("wrap_vk.bin").unwrap();
+    let wrapped_proof_bytes = std::fs::read("wrapped_proof.bin").unwrap();
+    let wrap_vk = bincode::deserialize(&wrap_vk_bytes).unwrap();
+    let wrapped_proof = bincode::deserialize(&wrapped_proof_bytes).unwrap();
+    crate::build::build_groth16_bls12381_artifacts(&wrap_vk, &wrapped_proof, build_dir.into());
 }
 
 /// Build the verifier constraints and template witness for the circuit.
@@ -233,7 +281,10 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     let shrink_proof = prover.shrink(compressed_proof, opts).unwrap();
 
     tracing::info!("wrap");
+    #[cfg(feature = "bn254")]
     let wrapped_proof = prover.wrap_bn254(shrink_proof, opts).unwrap();
+    #[cfg(feature = "bls12381")]
+    let wrapped_proof = prover.wrap_bls12381(shrink_proof, opts).unwrap();
 
     (wrapped_proof.vk, wrapped_proof.proof)
 }

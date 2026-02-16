@@ -78,6 +78,16 @@ impl ZKMPublicValues {
         // Return the masked hash as a BigUint.
         BigUint::from_bytes_be(&hash)
     }
+
+    /// Hash the public values and return the full 256-bit digest as a BigUint.
+    ///
+    /// This is used by the Groth16(BLS12-381) wrapping flow.
+    pub fn hash_bls12381(&self) -> BigUint {
+        let mut hasher = Sha256::new();
+        hasher.update(self.buffer.data.as_slice());
+        let hash_result = hasher.finalize();
+        BigUint::from_bytes_be(hash_result.as_slice())
+    }
 }
 
 impl AsRef<[u8]> for ZKMPublicValues {
@@ -101,6 +111,21 @@ mod tests {
 
         let expected_hash = "1ce987d0a7fcc2636fe87e69295ba12b1cc46c256b369ae7401c51b805ee91bd";
         let expected_hash_biguint = BigUint::from_bytes_be(&hex::decode(expected_hash).unwrap());
+
+        assert_eq!(hash, expected_hash_biguint);
+    }
+
+    #[test]
+    fn test_hash_public_values_bls12381() {
+        let test_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let test_bytes = hex::decode(test_hex).unwrap();
+
+        let mut public_values = ZKMPublicValues::new();
+        public_values.write_slice(&test_bytes);
+        let hash = public_values.hash_bls12381();
+
+        let expected_hash = Sha256::digest(test_bytes);
+        let expected_hash_biguint = BigUint::from_bytes_be(&expected_hash);
 
         assert_eq!(hash, expected_hash_biguint);
     }

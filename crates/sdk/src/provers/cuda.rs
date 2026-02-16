@@ -73,7 +73,10 @@ impl CudaProver {
         let compress_proof = self.cuda_prover.shrink(reduce_proof)?;
 
         // Generate the wrap proof.
+        #[cfg(feature = "bn254")]
         let outer_proof = self.cuda_prover.wrap_bn254(compress_proof)?;
+        #[cfg(feature = "bls12381")]
+        let outer_proof = self.cuda_prover.wrap_bls12381(compress_proof)?;
 
         if kind == ZKMProofKind::Plonk {
             let plonk_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
@@ -92,6 +95,7 @@ impl CudaProver {
             };
             return Ok((proof_with_pv, cycles));
         } else if kind == ZKMProofKind::Groth16 {
+            #[cfg(feature = "bn254")]
             let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
                 zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
                     &outer_proof.vk,
@@ -100,8 +104,21 @@ impl CudaProver {
             } else {
                 try_install_circuit_artifacts("groth16")
             };
+            #[cfg(feature = "bls12381")]
+            let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+                zkm_prover::build::try_build_groth16_bls12381_artifacts_dev(
+                    &outer_proof.vk,
+                    &outer_proof.proof,
+                )
+            } else {
+                try_install_circuit_artifacts("groth16")
+            };
 
+            #[cfg(feature = "bn254")]
             let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+            #[cfg(feature = "bls12381")]
+            let proof =
+                self.cpu_prover.wrap_groth16_bls12381(outer_proof, &groth16_bn254_artifacts);
             let proof_with_pv = ZKMProofWithPublicValues {
                 proof: ZKMProof::Groth16(proof),
                 public_values,
@@ -143,8 +160,12 @@ impl CudaProver {
         let shrink_proof = self.cuda_prover.shrink(proof)?;
 
         // Generate the wrap proof.
+        #[cfg(feature = "bn254")]
         let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
+        #[cfg(feature = "bls12381")]
+        let outer_proof = self.cuda_prover.wrap_bls12381(shrink_proof)?;
 
+        #[cfg(feature = "bn254")]
         let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
             zkm_prover::build::try_build_groth16_bn254_artifacts_dev(
                 &outer_proof.vk,
@@ -153,8 +174,20 @@ impl CudaProver {
         } else {
             try_install_circuit_artifacts("groth16")
         };
+        #[cfg(feature = "bls12381")]
+        let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
+            zkm_prover::build::try_build_groth16_bls12381_artifacts_dev(
+                &outer_proof.vk,
+                &outer_proof.proof,
+            )
+        } else {
+            try_install_circuit_artifacts("groth16")
+        };
 
+        #[cfg(feature = "bn254")]
         let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
+        #[cfg(feature = "bls12381")]
+        let proof = self.cpu_prover.wrap_groth16_bls12381(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
             public_values,

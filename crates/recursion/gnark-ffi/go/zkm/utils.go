@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/hex"
 
+	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
 	groth16 "github.com/consensys/gnark/backend/groth16"
 	groth16_bn254 "github.com/consensys/gnark/backend/groth16/bn254"
 	plonk "github.com/consensys/gnark/backend/plonk"
 	plonk_bn254 "github.com/consensys/gnark/backend/plonk/bn254"
 	"github.com/consensys/gnark/frontend"
-	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
 )
 
 func NewZKMPlonkBn254Proof(proof *plonk.Proof, witnessInput WitnessInput) Proof {
@@ -33,7 +33,7 @@ func NewZKMPlonkBn254Proof(proof *plonk.Proof, witnessInput WitnessInput) Proof 
 	}
 }
 
-func NewZKMGroth16Proof(proof *groth16.Proof, witnessInput WitnessInput) Proof {
+func NewZKMGroth16Bn254Proof(proof *groth16.Proof, witnessInput WitnessInput) Proof {
 	var buf bytes.Buffer
 	(*proof).WriteRawTo(&buf)
 	proofBytes := buf.Bytes()
@@ -51,6 +51,23 @@ func NewZKMGroth16Proof(proof *groth16.Proof, witnessInput WitnessInput) Proof {
 		PublicInputs: publicInputs,
 		EncodedProof: hex.EncodeToString(encodedProof),
 		RawProof:     hex.EncodeToString(proofBytes),
+	}
+}
+
+func NewZKMGroth16Bls12381Proof(proof *groth16.Proof, witnessInput WitnessInput) Proof {
+	var buf bytes.Buffer
+	(*proof).WriteRawTo(&buf)
+	proofBytes := buf.Bytes()
+
+	var publicInputs [2]string
+	publicInputs[0] = witnessInput.VkeyHash
+	publicInputs[1] = witnessInput.CommittedValuesDigest
+
+	raw := hex.EncodeToString(proofBytes)
+	return Proof{
+		PublicInputs: publicInputs,
+		EncodedProof: raw,
+		RawProof:     raw,
 	}
 }
 
