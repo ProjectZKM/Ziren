@@ -134,24 +134,3 @@ test-artifacts = { path = "crates/test-artifacts" }
 
 # misc
 hashbrown = "0.14.5"
-blake3 = "1.5"
-criterion = "0.5.1"
-ff = "0.13"
-gcd = "2.3.0"
-generic-array = "1.0"
-halo2curves = "0.7.0"
-hex-literal = "0.4.1"
-modinverse = "0.1.1"
-num = "0.4.0"
-num-bigint = { version = "0.4.3", default-features = false }
-num-integer = "0.1.46"
-num-traits = { version = "0.2.19", default-features = false }
-nums = "0.1.0"
-postcard = { version = "1.0.0", default-features = false }
-rand_chacha = "0.3.1"
-rand_xoshiro = "0.6.0"
-rayon = "1.7.0"
-sha3 = "0.10.8"
-tiny-keccak = "2.0.2"
-transpose = "0.2.3"
-zkhash = { git = "https://github.com/HorizenLabs/poseidon2" }
