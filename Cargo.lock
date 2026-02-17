@@ -7529,7 +7529,6 @@ dependencies = [
  "vergen",
  "yansi 1.0.1",
  "zkm-build",
- "zkm-core-machine",
  "zkm-sdk",
 ]
 
