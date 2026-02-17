@@ -37,9 +37,9 @@ Ziren is the world's first MIPS-based zkVM, achieving the industry-leading perfo
 
   Ziren partitions circuit constraints into highly segmented chips, strategically minimizing the total layout area while preserving logical completeness. This fine-grained decomposition enables compact polynomial representations with reduced commitment and evaluation overhead, thereby directly optimizing ZKP proof generation efficiency.
 
-- Multiset Hashing for Memory Consistency Checking
+- LtHash-Based Memory Consistency Checking
 
-  Replaces MerkleTree hashing with [Multiset Hashing](/design/memory-checking.md) for memory consistency checks, significantly reducing witness data and enabling parallel verification.
+  Replaces MerkleTree hashing with [LtHash-based multiset hashing](/design/memory-checking.md) for memory consistency checks, significantly reducing witness data and enabling parallel verification.
  
 - KoalaBear Prime Field
 

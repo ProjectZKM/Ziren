@@ -22,7 +22,7 @@ Core Components:
   
 - ​Memory Chips
   
-  Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. Ziren use multiset hashing based offline memory consistency checking in the main operation of its memory argument with several memory tables.  
+  Memory chips are responsible for the values in the a, b, and c operand columns in CPU chip come from (or write to) the right memory addresses specified in the instruction. Ziren uses LtHash-based offline memory consistency checking in the main operation of its memory argument with several memory tables.  
 
 - Global Chip
 

@@ -33,7 +33,7 @@ Key Lookup Relationships:
 | 7     | CPU                | Bytes               | Operand range verification              |
 | 8     | Syscall            | Precompiles         | Syscall/precompiled function execution  |
 
-<small>* In the latest implementation, Ziren employs multiset-hashing to ensure memory consistency checking, enhancing proof efficiency and modularity.</small>
+<small>* In the latest implementation, Ziren employs LtHash-based multiset hashing to ensure memory consistency checking, enhancing proof efficiency and modularity.</small>
 
 
 ## Range Check Implementation Example
@@ -81,4 +81,3 @@ LogUp ensures that if the final cumulative sums in both tables match (which is e
 \sum_{i=0}^{M-1} \frac{1}{f_i - \alpha} = \sum_{i=0}^{N-1} \frac{m_i}{t_i - \alpha}
 \\]
 ), then with high probability every \\(f_i\\) originates from table \\(T\\) (i.e., falls within 0-255 range).
-
