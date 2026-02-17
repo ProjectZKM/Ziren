@@ -140,15 +140,15 @@ This appendix provides a stricter, reduction-style argument for the current LtHa
 - Verifier accepts only if all STARK/AIR/lookup constraints are satisfied and final boundary checks pass.
 - Security goal (memory soundness): except with negligible probability, an accepted proof implies the read/write multisets are equal after prescribed initialization and post-processing rules.
 
-Formally, let \\(\mathsf{Acc}\\) denote the event "verifier accepts" and let \\(\mathsf{BadMem}\\) denote "offline memory relation is false" (i.e., final \\(RS \neq WS\\) as multisets of tuples). We need:
+Formally, let \\(\mathrm{Acc}\\) denote the event "verifier accepts" and let \\(\mathrm{BadMem}\\) denote "offline memory relation is false" (i.e., final \\(RS \neq WS\\) as multisets of tuples). We need:
 \\[
-\Pr\left[\mathsf{Acc} \wedge \mathsf{BadMem}\right] \le \varepsilon_{\text{total}}
+\Pr\left[\mathrm{Acc} \wedge \mathrm{BadMem}\right] \le \varepsilon_{\mathrm{total}}
 \\]
-for negligible \\(\varepsilon_{\text{total}}\\).
+for negligible \\(\varepsilon_{\mathrm{total}}\\).
 
 ### A.2 LtHash Assumption (Explicit)
 
-Define encoded-event map \\(\mathsf{Enc}: \mathcal{D}\to \mathbb{F}_p^{10}\\) and linear map \\(H:\mathbb{F}_p^{10}\to\mathbb{F}_p^{24}\\):
+Define encoded-event map \\(E: D \to \mathbb{F}_p^{10}\\) and linear map \\(H: \mathbb{F}_p^{10} \to \mathbb{F}_p^{24}\\):
 \\[
 H(m)_i = \sum_{j=0}^{9} c_{i,j} m_j
 \\]
@@ -156,10 +156,10 @@ with fixed deterministic coefficients \\(c_{i,j}\\).
 
 For a signed multiset difference \\(\Delta=\{(\sigma_k,m_k)\}_k\\), \\(\sigma_k\in\{+1,-1\}\\), define:
 \\[
-\mathsf{Agg}(\Delta)=\sum_k \sigma_k H(m_k)\in\mathbb{F}_p^{24}.
+\mathrm{Agg}(\Delta)=\sum_k \sigma_k H(m_k)\in\mathbb{F}_p^{24}.
 \\]
 
-Assumption (LtHash collision resistance on domain \\(\mathcal{D}\\)): finding non-empty \\(\Delta\\) with \\(\mathsf{Agg}(\Delta)=0\\) is computationally infeasible, except probability \\(\varepsilon_{\text{LtHash}}\\).
+Assumption (LtHash collision resistance on domain \\(D\\)): finding non-empty \\(\Delta\\) with \\(\mathrm{Agg}(\Delta)=0\\) is computationally infeasible, except probability \\(\varepsilon_{\mathrm{LtHash}}\\).
 
 ### A.3 Constraint Soundness Lemma
 
@@ -175,8 +175,8 @@ By induction over rows, cumulative columns equal the exact segmented accumulatio
 ### A.4 Reduction from Memory Forgery to LtHash Collision
 
 Lemma 2. Assume lookup constraints correctly enforce local event semantics (send/receive typing, message format, and membership constraints). If verifier accepts and \\(RS \neq WS\\), then either:
-- a constraint system soundness failure occurs (probability \\(\varepsilon_{\text{STARK}}\\)), or
-- a non-empty signed difference \\(\Delta\\) with \\(\mathsf{Agg}(\Delta)=0\\) exists (LtHash collision event).
+- a constraint system soundness failure occurs (probability \\(\varepsilon_{\mathrm{STARK}}\\)), or
+- a non-empty signed difference \\(\Delta\\) with \\(\mathrm{Agg}(\Delta)=0\\) exists (LtHash collision event).
 
 Reason:
 1. Under valid local constraints, all emitted rows correspond to well-formed encoded events.
@@ -200,12 +200,12 @@ Thus segmentation changes representation/efficiency, not the underlying reductio
 ### A.6 Main Soundness Theorem
 
 Theorem. Under:
-- STARK/AIR/lookup soundness with error \\(\varepsilon_{\text{STARK}}\\),
-- LtHash collision-resistance assumption on encoded domain with error \\(\varepsilon_{\text{LtHash}}\\),
+- STARK/AIR/lookup soundness with error \\(\varepsilon_{\mathrm{STARK}}\\),
+- LtHash collision-resistance assumption on encoded domain with error \\(\varepsilon_{\mathrm{LtHash}}\\),
 
 the memory-checking protocol satisfies:
 \\[
-\Pr\left[\mathsf{Acc} \wedge \mathsf{BadMem}\right] \le \varepsilon_{\text{STARK}} + \varepsilon_{\text{LtHash}}.
+\Pr\left[\mathrm{Acc} \wedge \mathrm{BadMem}\right] \le \varepsilon_{\mathrm{STARK}} + \varepsilon_{\mathrm{LtHash}}.
 \\]
 
 Proof:
@@ -215,18 +215,18 @@ Apply Lemma 2 and union bound over the two bad events.
 
 Under the random-matrix heuristic for \\(C=(c_{i,j})\\):
 \\[
-\varepsilon_{\text{LtHash}} \approx p^{-24}.
+\varepsilon_{\mathrm{LtHash}} \approx p^{-24}.
 \\]
 With \\(p \approx 2^{31}\\):
 \\[
-\varepsilon_{\text{LtHash}} \approx 2^{-744}.
+\varepsilon_{\mathrm{LtHash}} \approx 2^{-744}.
 \\]
 Hence:
 \\[
-\varepsilon_{\text{total}} \lesssim \varepsilon_{\text{STARK}} + 2^{-744}.
+\varepsilon_{\mathrm{total}} \lesssim \varepsilon_{\mathrm{STARK}} + 2^{-744}.
 \\]
 
-This term is dominated by \\(\varepsilon_{\text{STARK}}\\) in practical deployments.
+This term is dominated by \\(\varepsilon_{\mathrm{STARK}}\\) in practical deployments.
 
 ## Deprecated: EC-Based Multiset Hashing (Historical)
 
