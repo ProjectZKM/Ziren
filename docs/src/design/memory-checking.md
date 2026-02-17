@@ -90,12 +90,14 @@ For each row, the AIR enforces:
 - exact LtHash coordinate computation from message columns and fixed coefficients;
 - signed hash relation:
   \\[
-  \text{lt\_signed\_hash}=(\text{is\_receive}-\text{is\_send})\cdot \text{lt\_hash}
+  h_t^{(i)} = (r_t - s_t)\cdot u_t^{(i)}
   \\]
+  where \\(r_t,s_t\in\{0,1\}\\) are receive/send flags and \\(u_t^{(i)}\\) is the unsigned LtHash coordinate;
 - segmented running-sum transition:
   \\[
-  S_{t+1}^{(seg,i)} = S_t^{(seg,i)} + \mathbf{1}_{seg,t+1}\cdot \text{lt\_signed\_hash}_{t+1,i}
+  S_{t+1}^{(s,i)} = S_t^{(s,i)} + b_{t+1}^{(s)} \cdot h_{t+1}^{(i)}
   \\]
+  where \\(b_{t+1}^{(s)} \in \{0,1\}\\) is the one-hot segment selector and \\(h_{t+1}^{(i)}\\) is the signed LtHash coordinate at row \\(t+1\\);
   with first-row initialization constrained consistently.
 
 ### Security Proof Sketch
@@ -112,7 +114,7 @@ Suppose an adversary outputs a proof accepted by the verifier while the final re
 - some lookup/AIR constraint is violated (contradicting proof validity), or
 - a non-trivial LtHash collision is found:
   \\[
-  \sum_k \sigma_k H(m_k)=0,\;\sigma_k\in\{+1,-1\},
+  \sum_k \sigma_k H(m_k)=0,\;\sigma_k\in\{+1,-1\}
   \]
   for a non-empty unmatched multiset difference.
 
@@ -122,7 +124,7 @@ So protocol soundness reduces to constraint soundness plus LtHash collision resi
 
 Under the standard heuristic that the coefficient matrix \\(C=(c_{i,j})\\) behaves like a random matrix over \\(\mathbb{F}_p\\), for any fixed non-zero aggregate difference \\(\Delta\), the probability that \\(C\Delta=0\\) is approximately:
 \\[
-\Pr[C\Delta=0]\approx p^{-N}
+\Pr\left[C\Delta=0\right]\approx p^{-N}
 \\]
 With current parameters \\(p\approx 2^{31}\\), \\(N=24\\), this is about \\(2^{-744}\\) per fixed attempt.
 
@@ -140,7 +142,7 @@ This appendix provides a stricter, reduction-style argument for the current LtHa
 
 Formally, let \\(\mathsf{Acc}\\) denote the event "verifier accepts" and let \\(\mathsf{BadMem}\\) denote "offline memory relation is false" (i.e., final \\(RS \neq WS\\) as multisets of tuples). We need:
 \\[
-\Pr[\mathsf{Acc} \wedge \mathsf{BadMem}] \le \varepsilon_{\text{total}}
+\Pr\left[\mathsf{Acc} \wedge \mathsf{BadMem}\right] \le \varepsilon_{\text{total}}
 \\]
 for negligible \\(\varepsilon_{\text{total}}\\).
 
@@ -167,7 +169,7 @@ Proof sketch:
 1. First-row constraints bind initial cumulative value to first-row signed delta.
 2. Transition constraints enforce next cumulative = current cumulative + current-row delta contribution (for the selected segment).
 3. One-hot segment selector guarantees exactly one segment receives each real event contribution.
-4. Coordinate constraints bind each per-row \\(\text{lt\_hash}\\) to the fixed linear function \\(H(m)\\).
+4. Coordinate constraints bind each per-row \\(u_t^{(i)}\\) to the fixed linear function \\(H(m)\\).
 By induction over rows, cumulative columns equal the exact segmented accumulation.
 
 ### A.4 Reduction from Memory Forgery to LtHash Collision
@@ -203,7 +205,7 @@ Theorem. Under:
 
 the memory-checking protocol satisfies:
 \\[
-\Pr[\mathsf{Acc} \wedge \mathsf{BadMem}] \le \varepsilon_{\text{STARK}} + \varepsilon_{\text{LtHash}}.
+\Pr\left[\mathsf{Acc} \wedge \mathsf{BadMem}\right] \le \varepsilon_{\text{STARK}} + \varepsilon_{\text{LtHash}}.
 \\]
 
 Proof:
