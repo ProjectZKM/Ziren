@@ -6,9 +6,8 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 pub use outer::*;
 pub use stark::*;
 use zkm_stark::{
-    septic_curve::SepticCurve, septic_digest::SepticDigest, septic_extension::SepticExtension,
-    ChipOpenedValues, Com, InnerChallenge, InnerVal, OpeningProof, ShardCommitment,
-    ShardOpenedValues, ShardProof,
+    global_cumulative_sum::GlobalCumulativeSum, ChipOpenedValues, Com, InnerChallenge, InnerVal,
+    OpeningProof, ShardCommitment, ShardOpenedValues, ShardProof,
 };
 
 use crate::{
@@ -195,19 +194,17 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
 }
 
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
-    for SepticDigest<InnerVal>
+    for GlobalCumulativeSum<InnerVal>
 {
-    type WitnessVariable = SepticDigest<Felt<C::F>>;
+    type WitnessVariable = GlobalCumulativeSum<Felt<C::F>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let x = self.0.x.0.read(builder);
-        let y = self.0.y.0.read(builder);
-        SepticDigest(SepticCurve { x: SepticExtension(x), y: SepticExtension(y) })
+        let coords = self.coords.read(builder);
+        GlobalCumulativeSum { coords }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.0.x.0.write(witness);
-        self.0.y.0.write(witness);
+        self.coords.write(witness);
     }
 }
 

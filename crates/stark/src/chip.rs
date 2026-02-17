@@ -85,7 +85,6 @@ where
             max_constraint_degree = max_constraint_degree.max(3);
         }
         let log_quotient_degree = log2_ceil_usize(max_constraint_degree - 1);
-
         Self { air, sends, receives, log_quotient_degree }
     }
 

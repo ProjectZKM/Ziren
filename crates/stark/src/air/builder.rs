@@ -11,7 +11,8 @@ use strum_macros::{Display, EnumIter};
 
 use super::{lookup::AirLookup, BinomialExtension};
 use crate::{
-    lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension, Word,
+    global_cumulative_sum::GlobalCumulativeSum, lookup::LookupKind,
+    septic_extension::SepticExtension, Word,
 };
 
 /// The default increment for the program counter.  Is used for all instructions except
@@ -444,7 +445,7 @@ pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
     fn local_cumulative_sum(&self) -> &'a Self::LocalSum;
 
     /// Returns the global cumulative sum of the permutation.
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum>;
+    fn global_cumulative_sum(&self) -> &'a GlobalCumulativeSum<Self::GlobalSum>;
 }
 
 /// A trait that contains the common helper methods for building `Ziren recursion` and Ziren machine

@@ -4,7 +4,7 @@ use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{septic_digest::SepticDigest, MachineRecord};
+use crate::{global_cumulative_sum::GlobalCumulativeSum, MachineRecord};
 
 pub use zkm_derive::MachineAir;
 
@@ -85,5 +85,5 @@ pub trait MachineProgram<F>: Send + Sync {
     fn pc_start(&self) -> F;
 
     /// Gets the initial global cumulative sum.
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F>;
+    fn initial_global_cumulative_sum(&self) -> GlobalCumulativeSum<F>;
 }

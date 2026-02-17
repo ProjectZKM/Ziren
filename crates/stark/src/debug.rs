@@ -20,7 +20,7 @@ use p3_maybe_rayon::prelude::ParallelIterator;
 use super::{MachineChip, StarkGenericConfig, Val};
 use crate::{
     air::{EmptyMessageBuilder, MachineAir, MultiTableAirBuilder},
-    septic_digest::SepticDigest,
+    global_cumulative_sum::GlobalCumulativeSum,
 };
 
 /// Checks that the constraints of the given AIR are satisfied, including the permutation trace.
@@ -35,7 +35,7 @@ pub fn debug_constraints<SC, A>(
     perm_challenges: &[SC::Challenge],
     public_values: &[Val<SC>],
     local_cumulative_sum: &SC::Challenge,
-    global_cumulative_sum: &SepticDigest<Val<SC>>,
+    global_cumulative_sum: &GlobalCumulativeSum<Val<SC>>,
 ) where
     SC: StarkGenericConfig,
     Val<SC>: PrimeField32,
@@ -136,7 +136,7 @@ pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) main: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
     pub(crate) perm: VerticalPair<RowMajorMatrixView<'a, EF>, RowMajorMatrixView<'a, EF>>,
     pub(crate) local_cumulative_sum: &'a EF,
-    pub(crate) global_cumulative_sum: &'a SepticDigest<F>,
+    pub(crate) global_cumulative_sum: &'a GlobalCumulativeSum<F>,
     pub(crate) perm_challenges: &'a [EF],
     pub(crate) is_first_row: F,
     pub(crate) is_last_row: F,
@@ -270,7 +270,7 @@ where
         self.local_cumulative_sum
     }
 
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+    fn global_cumulative_sum(&self) -> &'a GlobalCumulativeSum<Self::GlobalSum> {
         self.global_cumulative_sum
     }
 }

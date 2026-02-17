@@ -1,5 +1,6 @@
 use crate::{
     air::{LookupScope, MultiTableAirBuilder},
+    global_cumulative_sum::{flatten_global_cumulative_sum, GLOBAL_CUMULATIVE_SUM_COLS},
     lookup::Lookup,
 };
 use hashbrown::HashMap;
@@ -335,13 +336,11 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     // Handle global permutations.
     let global_cumulative_sum = builder.global_cumulative_sum();
     if commit_scope == LookupScope::Global {
-        for i in 0..7 {
+        let flat = flatten_global_cumulative_sum(global_cumulative_sum);
+        for i in 0..GLOBAL_CUMULATIVE_SUM_COLS {
             builder
                 .when_last_row()
-                .assert_eq(main_local[main_local.len() - 14 + i], global_cumulative_sum.0.x.0[i]);
-            builder
-                .when_last_row()
-                .assert_eq(main_local[main_local.len() - 7 + i], global_cumulative_sum.0.y.0[i]);
+                .assert_eq(main_local[main_local.len() - GLOBAL_CUMULATIVE_SUM_COLS + i], flat[i]);
         }
     }
 }
@@ -382,7 +381,7 @@ pub fn count_permutation_constraints<F: Field>(
     // If the chip's scope is `LookupScope::Global`, 14 asserts that
     // the last row's final 14 columns is equal to the global cumulative sum.
     if commit_scope == LookupScope::Global {
-        count += 14;
+        count += GLOBAL_CUMULATIVE_SUM_COLS;
     }
 
     count

@@ -5,7 +5,7 @@ use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 
-use crate::{air::MachineAir, septic_digest::SepticDigest};
+use crate::{air::MachineAir, global_cumulative_sum::GlobalCumulativeSum};
 
 use super::{
     folder::ProverConstraintFolder, Chip, Domain, PackedChallenge, PackedVal, StarkGenericConfig,
@@ -19,7 +19,7 @@ use super::{
 pub fn quotient_values<SC, A, Mat>(
     chip: &Chip<Val<SC>, A>,
     local_cumulative_sum: &SC::Challenge,
-    global_cumulative_sum: &SepticDigest<Val<SC>>,
+    global_cumulative_sum: &GlobalCumulativeSum<Val<SC>>,
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,
     preprocessed_trace_on_quotient_domain: Option<Mat>,

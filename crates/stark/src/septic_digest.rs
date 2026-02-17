@@ -1,4 +1,5 @@
 //! Elliptic Curve digests with a starting point to avoid weierstrass addition exceptions.
+use crate::global_digest::GlobalDigest;
 use crate::septic_curve::SepticCurve;
 use crate::septic_extension::SepticExtension;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
@@ -55,6 +56,16 @@ impl<F: Field> SepticDigest<F> {
     /// Checks that the digest is zero, the starting point of the accumulation.
     pub fn is_zero(&self) -> bool {
         *self == SepticDigest::<F>::zero()
+    }
+}
+
+impl<F: Field> GlobalDigest<F> for SepticDigest<F> {
+    fn zero() -> Self {
+        SepticDigest::<F>::zero()
+    }
+
+    fn is_zero(&self) -> bool {
+        self.is_zero()
     }
 }
 

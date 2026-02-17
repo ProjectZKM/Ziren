@@ -12,7 +12,10 @@ use std::{
 };
 use zkm_core_machine::utils::indices_arr;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
+use zkm_stark::{
+    air::POSEIDON_NUM_WORDS, global_cumulative_sum::GlobalCumulativeSum, Word,
+    PROOF_MAX_NUM_PVS,
+};
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
@@ -127,7 +130,7 @@ pub struct RecursionPublicValues<T> {
 
     /// Current cumulative sum of lookup bus. Note that for recursive proofs for core proofs, this
     /// contains the global cumulative sum.  
-    pub global_cumulative_sum: SepticDigest<T>,
+    pub global_cumulative_sum: GlobalCumulativeSum<T>,
 
     /// Whether the proof completely proves the program execution.
     pub is_complete: T,

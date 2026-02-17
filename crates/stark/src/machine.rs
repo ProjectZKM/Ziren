@@ -18,11 +18,12 @@ use crate::PROOF_MAX_NUM_PVS;
 use crate::{
     air::{LookupScope, MachineAir, MachineProgram},
     count_permutation_constraints,
+    global_cumulative_sum::GlobalCumulativeSum,
+    global_cumulative_sum::{
+        observe_global_cumulative_sum, parse_global_cumulative_sum_from_main_row,
+    },
     lookup::{debug_lookups_with_all_chips, LookupKind},
     record::MachineRecord,
-    septic_curve::SepticCurve,
-    septic_digest::SepticDigest,
-    septic_extension::SepticExtension,
     DebugConstraintBuilder, ShardProof, VerifierConstraintFolder,
 };
 
@@ -61,7 +62,7 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// The start pc of the program.
     pub pc_start: Val<SC>,
     /// The starting global digest of the program, after incorporating the initial memory.
-    pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
+    pub initial_global_cumulative_sum: GlobalCumulativeSum<Val<SC>>,
     /// The preprocessed traces.
     pub traces: Vec<RowMajorMatrix<Val<SC>>>,
     /// The pcs data for the preprocessed traces.
@@ -79,8 +80,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
+        observe_global_cumulative_sum(challenger, &self.initial_global_cumulative_sum);
         // Observe the padding.
         challenger.observe(Val::<SC>::ZERO);
     }
@@ -96,7 +96,7 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     /// The start pc of the program.
     pub pc_start: Val<SC>,
     /// The starting global digest of the program, after incorporating the initial memory.
-    pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
+    pub initial_global_cumulative_sum: GlobalCumulativeSum<Val<SC>>,
     /// The chip information.
     pub chip_information: Vec<(String, Dom<SC>, Dimensions)>,
     /// The chip ordering.
@@ -108,8 +108,7 @@ impl<SC: StarkGenericConfig> StarkVerifyingKey<SC> {
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
+        observe_global_cumulative_sum(challenger, &self.initial_global_cumulative_sum);
         // Observe the padding.
         challenger.observe(Val::<SC>::ZERO);
     }
@@ -218,23 +217,20 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                             &permutation_challenges,
                         );
                         let global_sum = if chip.commit_scope() == LookupScope::Local {
-                            SepticDigest::<Val<SC>>::zero()
+                            GlobalCumulativeSum::<Val<SC>>::zero()
                         } else {
-                            let main_trace_size = main_trace.height() * main_trace.width();
-                            let last_row =
-                                &main_trace.values[main_trace_size - 14..main_trace_size];
-                            SepticDigest(SepticCurve {
-                                x: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i]),
-                                y: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i + 7]),
-                            })
+                            let last_row = main_trace.row_slice(main_trace.height() - 1);
+                            parse_global_cumulative_sum_from_main_row(&last_row)
                         };
                         (trace, (global_sum, local_sum))
                     })
                     .unzip_into_vecs(&mut permutation_traces, &mut chip_cumulative_sums);
             });
 
-            let global_cumulative_sum =
-                chip_cumulative_sums.iter().map(|sums| sums.0).sum::<SepticDigest<Val<SC>>>();
+            let global_cumulative_sum = chip_cumulative_sums
+                .iter()
+                .map(|sums| sums.0)
+                .sum::<GlobalCumulativeSum<Val<SC>>>();
             global_cumulative_sums.push(global_cumulative_sum);
 
             let local_cumulative_sum =
@@ -294,7 +290,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
 
         tracing::info!("Constraints verified successfully");
 
-        let global_cumulative_sum: SepticDigest<Val<SC>> =
+        let global_cumulative_sum: GlobalCumulativeSum<Val<SC>> =
             global_cumulative_sums.iter().copied().sum();
 
         // If the global cumulative sum is not zero, debug the lookups.
@@ -312,7 +308,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             tracing::warn!(
                 "Global cumulative sum: {:?}, should be: {:?}",
                 global_cumulative_sum,
-                SepticDigest::<Val<SC>>::zero(),
+                GlobalCumulativeSum::<Val<SC>>::zero(),
             );
             panic!("Global cumulative sum is not zero");
         }
@@ -443,7 +439,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     pub fn setup_core(
         &self,
         program: &A::Program,
-        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
+        initial_global_cumulative_sum: GlobalCumulativeSum<Val<SC>>,
     ) -> (StarkProvingKey<SC>, StarkVerifyingKey<SC>) {
         let parent_span = tracing::debug_span!("generate preprocessed traces");
         let (named_preprocessed_traces, num_constraints): (Vec<_>, Vec<_>) =
@@ -643,7 +639,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 .iter()
                 .map(ShardProof::global_cumulative_sum)
                 .chain(once(vk.initial_global_cumulative_sum))
-                .sum::<SepticDigest<Val<SC>>>();
+                .sum::<GlobalCumulativeSum<Val<SC>>>();
 
             if !sum.is_zero() {
                 tracing::error!("global cumulative sum: {:?}", sum);

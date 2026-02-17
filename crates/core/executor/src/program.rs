@@ -8,16 +8,15 @@ use elf::{endian::LittleEndian, file::Class, ElfBytes};
 use std::str::FromStr;
 
 use p3_field::Field;
-use p3_field::FieldExtensionAlgebra;
 use p3_field::PrimeField32;
-use p3_maybe_rayon::prelude::IntoParallelIterator;
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use p3_maybe_rayon::prelude::ParallelIterator;
 use serde::{Deserialize, Serialize};
 use zkm_stark::air::{MachineAir, MachineProgram};
-use zkm_stark::septic_curve::{SepticCurve, SepticCurveComplete};
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::septic_extension::SepticExtension;
+use zkm_stark::global_cumulative_sum::{
+    add_signed_lthash_event, global_lthash_coords_for_message, GlobalCumulativeSum,
+    GLOBAL_LTHASH_SEGMENTS, GLOBAL_LTHASH_SEGMENT_LOG2_BOUND,
+};
 use zkm_stark::shape::Shape;
 use zkm_stark::LookupKind;
 
@@ -330,30 +329,32 @@ impl<F: PrimeField32> MachineProgram<F> for Program {
         F::from_canonical_u32(self.pc_start)
     }
 
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        let mut digests: Vec<SepticCurveComplete<F>> = self
-            .image
-            .iter()
-            .par_bridge()
-            .map(|(&addr, &word)| {
-                let values = [
-                    (LookupKind::Memory as u32) << 16,
-                    0,
-                    addr,
-                    word & 255,
-                    (word >> 8) & 255,
-                    (word >> 16) & 255,
-                    (word >> 24) & 255,
-                ];
-                let x_start =
-                    SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values[i]));
-                let (point, _) = SepticCurve::<F>::lift_x(x_start);
-                SepticCurveComplete::Affine(point.neg())
-            })
-            .collect();
-        digests.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
-        SepticDigest(
-            digests.into_par_iter().reduce(|| SepticCurveComplete::Infinity, |a, b| a + b).point(),
-        )
+    fn initial_global_cumulative_sum(&self) -> GlobalCumulativeSum<F> {
+        let mut digest = GlobalCumulativeSum::<F>::zero();
+        for (&addr, &word) in self.image.iter() {
+            let clk = 0usize;
+            let seg = clk >> GLOBAL_LTHASH_SEGMENT_LOG2_BOUND;
+            assert!(
+                seg < GLOBAL_LTHASH_SEGMENTS,
+                "program image exceeds supported LtHash segmented bound"
+            );
+
+            // Match the message shape used by global lookup events.
+            let message = [
+                0, // shard
+                0, // clk
+                addr,
+                word & 255,
+                (word >> 8) & 255,
+                (word >> 16) & 255,
+                (word >> 24) & 255,
+                0, // reserved
+                0, // reserved
+                LookupKind::Memory as u32,
+            ];
+            let coords = global_lthash_coords_for_message(message);
+            add_signed_lthash_event(&mut digest, seg, &coords, false);
+        }
+        digest
     }
 }

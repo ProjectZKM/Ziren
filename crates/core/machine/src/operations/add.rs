@@ -41,7 +41,10 @@ impl<F: Field> AddOperation<F> {
         }
 
         let base = 256u32;
-        let overflow = a[3].wrapping_add(b[3]).wrapping_sub(expected.to_le_bytes()[3]) as u32;
+        let overflow = (a[3] as u32)
+            .wrapping_add(b[3] as u32)
+            .wrapping_add(carry[2] as u32)
+            .wrapping_sub(expected.to_le_bytes()[3] as u32);
         debug_assert_eq!(overflow.wrapping_mul(overflow.wrapping_sub(base)), 0);
 
         // Range check

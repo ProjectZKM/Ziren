@@ -12,7 +12,7 @@ use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use super::{Challenge, PackedChallenge, PackedVal, StarkGenericConfig, Val};
 use crate::{
     air::{EmptyMessageBuilder, MultiTableAirBuilder},
-    septic_digest::SepticDigest,
+    global_cumulative_sum::GlobalCumulativeSum,
 };
 
 /// A folder for prover constraints.
@@ -32,7 +32,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     /// The local cumulative sum for the permutation.
     pub local_cumulative_sum: &'a PackedChallenge<SC>,
     /// The global cumulative sum for the permutation.
-    pub global_cumulative_sum: &'a SepticDigest<Val<SC>>,
+    pub global_cumulative_sum: &'a GlobalCumulativeSum<Val<SC>>,
     /// The selector for the first row.
     pub is_first_row: PackedVal<SC>,
     /// The selector for the last row.
@@ -127,7 +127,7 @@ impl<'a, SC: StarkGenericConfig> MultiTableAirBuilder<'a> for ProverConstraintFo
         self.local_cumulative_sum
     }
 
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+    fn global_cumulative_sum(&self) -> &'a GlobalCumulativeSum<Self::GlobalSum> {
         self.global_cumulative_sum
     }
 }
@@ -171,7 +171,7 @@ pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
     /// The local cumulative sum of the permutation.
     pub local_cumulative_sum: &'a Var,
     /// The global cumulative sum of the permutation.
-    pub global_cumulative_sum: &'a SepticDigest<PubVar>,
+    pub global_cumulative_sum: &'a GlobalCumulativeSum<PubVar>,
     /// The selector for the first row.
     pub is_first_row: Var,
     /// The selector for the last row.
@@ -367,7 +367,7 @@ where
         self.local_cumulative_sum
     }
 
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+    fn global_cumulative_sum(&self) -> &'a GlobalCumulativeSum<Self::GlobalSum> {
         self.global_cumulative_sum
     }
 }

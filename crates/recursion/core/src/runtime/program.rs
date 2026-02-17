@@ -3,7 +3,7 @@ use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use shape::RecursionShape;
 use zkm_stark::air::{MachineAir, MachineProgram};
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_stark::global_cumulative_sum::GlobalCumulativeSum;
 
 use crate::*;
 
@@ -21,8 +21,8 @@ impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
         F::ZERO
     }
 
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
-        SepticDigest::<F>::zero()
+    fn initial_global_cumulative_sum(&self) -> GlobalCumulativeSum<F> {
+        GlobalCumulativeSum::<F>::zero()
     }
 }
 

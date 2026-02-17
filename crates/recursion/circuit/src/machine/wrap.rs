@@ -6,7 +6,7 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_stark::{air::MachineAir, StarkMachine};
+use zkm_stark::{air::MachineAir, flatten_global_cumulative_sum, StarkMachine};
 
 use crate::{
     challenger::CanObserveVariable,
@@ -62,8 +62,10 @@ where
         // Observe the vk and start pc.
         challenger.observe(builder, vk.commitment);
         challenger.observe(builder, vk.pc_start);
-        challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
+        challenger.observe_slice(
+            builder,
+            flatten_global_cumulative_sum(&vk.initial_global_cumulative_sum),
+        );
         // Observe the padding.
         let zero: Felt<_> = builder.eval(C::F::ZERO);
         challenger.observe(builder, zero);

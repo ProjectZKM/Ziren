@@ -2,13 +2,14 @@
 
 use std::iter::repeat;
 
-use itertools::Itertools;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
+use zkm_stark::global_cumulative_sum::{
+    GlobalCumulativeSum, GLOBAL_LTHASH_N, GLOBAL_LTHASH_SEGMENTS,
+};
 use zkm_stark::septic_curve::SepticCurve;
-use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::septic_extension::SepticExtension;
 
 use crate::prelude::*;
@@ -39,14 +40,20 @@ pub trait CircuitV2Builder<C: Config> {
         point1: SepticCurve<Felt<C::F>>,
         point2: SepticCurve<Felt<C::F>>,
     ) -> SepticCurve<Felt<C::F>>;
-    fn assert_digest_zero_v2(&mut self, is_real: Felt<C::F>, digest: SepticDigest<Felt<C::F>>);
-    fn sum_digest_v2(&mut self, digests: Vec<SepticDigest<Felt<C::F>>>)
-        -> SepticDigest<Felt<C::F>>;
+    fn assert_digest_zero_v2(
+        &mut self,
+        is_real: Felt<C::F>,
+        digest: GlobalCumulativeSum<Felt<C::F>>,
+    );
+    fn sum_digest_v2(
+        &mut self,
+        digests: Vec<GlobalCumulativeSum<Felt<C::F>>>,
+    ) -> GlobalCumulativeSum<Felt<C::F>>;
     fn select_global_cumulative_sum(
         &mut self,
         is_first_shard: Felt<C::F>,
-        vk_digest: SepticDigest<Felt<C::F>>,
-    ) -> SepticDigest<Felt<C::F>>;
+        vk_digest: GlobalCumulativeSum<Felt<C::F>>,
+    ) -> GlobalCumulativeSum<Felt<C::F>>;
     fn commit_public_values_v2(&mut self, public_values: RecursionPublicValues<Felt<C::F>>);
     fn cycle_tracker_v2_enter(&mut self, name: String);
     fn cycle_tracker_v2_exit(&mut self);
@@ -242,16 +249,16 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         point
     }
 
-    /// Asserts that the SepticDigest is zero.
-    fn assert_digest_zero_v2(&mut self, is_real: Felt<C::F>, digest: SepticDigest<Felt<C::F>>) {
-        let zero = SepticDigest::<SymbolicFelt<C::F>>::zero();
-        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0.into_iter())
-        {
-            self.assert_felt_eq(is_real * digest_limb_x, is_real * zero_limb_x);
-        }
-        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0.into_iter())
-        {
-            self.assert_felt_eq(is_real * digest_limb_y, is_real * zero_limb_y);
+    /// Asserts that the global cumulative sum is zero.
+    fn assert_digest_zero_v2(
+        &mut self,
+        is_real: Felt<C::F>,
+        digest: GlobalCumulativeSum<Felt<C::F>>,
+    ) {
+        for segment in digest.coords {
+            for limb in segment {
+                self.assert_felt_eq(is_real * limb, C::F::ZERO);
+            }
         }
     }
 
@@ -259,45 +266,37 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
     fn select_global_cumulative_sum(
         &mut self,
         is_first_shard: Felt<C::F>,
-        vk_digest: SepticDigest<Felt<C::F>>,
-    ) -> SepticDigest<Felt<C::F>> {
-        let zero = SepticDigest::<SymbolicFelt<C::F>>::zero();
+        vk_digest: GlobalCumulativeSum<Felt<C::F>>,
+    ) -> GlobalCumulativeSum<Felt<C::F>> {
         let one: Felt<C::F> = self.constant(C::F::ONE);
-        let x = SepticExtension(core::array::from_fn(|i| {
-            self.eval(is_first_shard * vk_digest.0.x.0[i] + (one - is_first_shard) * zero.0.x.0[i])
-        }));
-        let y = SepticExtension(core::array::from_fn(|i| {
-            self.eval(is_first_shard * vk_digest.0.y.0[i] + (one - is_first_shard) * zero.0.y.0[i])
-        }));
-        SepticDigest(SepticCurve { x, y })
+        GlobalCumulativeSum {
+            coords: core::array::from_fn(|seg| {
+                core::array::from_fn(|idx| {
+                    self.eval(
+                        is_first_shard * vk_digest.coords[seg][idx]
+                            + (one - is_first_shard) * C::F::ZERO,
+                    )
+                })
+            }),
+        }
     }
 
     // Sums the digests into one.
     fn sum_digest_v2(
         &mut self,
-        digests: Vec<SepticDigest<Felt<C::F>>>,
-    ) -> SepticDigest<Felt<C::F>> {
-        let mut convert_to_felt =
-            |point: SepticCurve<C::F>| SepticCurve::convert(point, |value| self.eval(value));
-
-        let start = convert_to_felt(SepticDigest::starting_digest().0);
-        let zero_digest = convert_to_felt(SepticDigest::zero().0);
-
-        if digests.is_empty() {
-            return SepticDigest(zero_digest);
-        }
-
-        let neg_start = convert_to_felt(SepticDigest::starting_digest().0.neg());
-        let neg_zero_digest = convert_to_felt(SepticDigest::zero().0.neg());
-
-        let mut ret = start;
-        for (i, digest) in digests.clone().into_iter().enumerate() {
-            ret = self.add_curve_v2(ret, digest.0);
-            if i != digests.len() - 1 {
-                ret = self.add_curve_v2(ret, neg_zero_digest)
+        digests: Vec<GlobalCumulativeSum<Felt<C::F>>>,
+    ) -> GlobalCumulativeSum<Felt<C::F>> {
+        let mut ret = GlobalCumulativeSum {
+            coords: core::array::from_fn(|_| core::array::from_fn(|_| self.eval(C::F::ZERO))),
+        };
+        for digest in digests {
+            for seg in 0..GLOBAL_LTHASH_SEGMENTS {
+                for idx in 0..GLOBAL_LTHASH_N {
+                    ret.coords[seg][idx] = self.eval(ret.coords[seg][idx] + digest.coords[seg][idx]);
+                }
             }
         }
-        SepticDigest(self.add_curve_v2(ret, neg_start))
+        ret
     }
 
     // Commits public values.

@@ -18,6 +18,7 @@ use super::{
 };
 use crate::{
     air::{LookupScope, MachineAir},
+    global_cumulative_sum::observe_global_cumulative_sum,
     MachineChip,
 };
 
@@ -96,8 +97,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             let global_sum = opening.global_cumulative_sum;
 
             challenger.observe_slice(local_sum.as_base_slice());
-            challenger.observe_slice(&global_sum.0.x.0);
-            challenger.observe_slice(&global_sum.0.y.0);
+            observe_global_cumulative_sum(challenger, &global_sum);
 
             if chip.commit_scope() == LookupScope::Local && !global_sum.is_zero() {
                 return Err(VerificationError::CumulativeSumsError(

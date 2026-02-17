@@ -1,6 +1,7 @@
-use crate::septic_curve::SepticCurve;
-use crate::septic_digest::SepticDigest;
-use crate::septic_extension::SepticExtension;
+use crate::global_cumulative_sum::GlobalCumulativeSum;
+use crate::global_cumulative_sum::{
+    observe_global_cumulative_sum, parse_global_cumulative_sum_from_main_row,
+};
 use core::fmt::Display;
 use itertools::Itertools;
 use serde::{de::DeserializeOwned, Serialize};
@@ -192,7 +193,7 @@ pub trait MachineProvingKey<SC: StarkGenericConfig>: Send + Sync {
     fn pc_start(&self) -> Val<SC>;
 
     /// The initial global cumulative sum.
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<Val<SC>>;
+    fn initial_global_cumulative_sum(&self) -> GlobalCumulativeSum<Val<SC>>;
 
     /// Observe itself in the challenger.
     fn observe_into(&self, challenger: &mut Challenger<SC>);
@@ -350,14 +351,10 @@ where
                         &local_permutation_challenges,
                     );
                     let global_sum = if chip.commit_scope() == LookupScope::Local {
-                        SepticDigest::<Val<SC>>::zero()
+                        GlobalCumulativeSum::<Val<SC>>::zero()
                     } else {
-                        let main_trace_size = main_trace.height() * main_trace.width();
-                        let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                        SepticDigest(SepticCurve {
-                            x: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i]),
-                            y: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i + 7]),
-                        })
+                        let last_row = main_trace.row_slice(main_trace.height() - 1);
+                        parse_global_cumulative_sum_from_main_row(&last_row)
                     };
                     ((perm_trace, preprocessed_trace), (global_sum, local_sum))
                 })
@@ -408,8 +405,7 @@ where
             local_cumulative_sums.iter().zip(global_cumulative_sums.iter())
         {
             challenger.observe_slice(local_sum.as_base_slice());
-            challenger.observe_slice(&global_sum.0.x.0);
-            challenger.observe_slice(&global_sum.0.y.0);
+            observe_global_cumulative_sum(challenger, global_sum);
         }
 
         // Compute the quotient polynomial for all chips.
@@ -707,15 +703,14 @@ where
         self.pc_start
     }
 
-    fn initial_global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
+    fn initial_global_cumulative_sum(&self) -> GlobalCumulativeSum<Val<SC>> {
         self.initial_global_cumulative_sum
     }
 
     fn observe_into(&self, challenger: &mut Challenger<SC>) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
+        observe_global_cumulative_sum(challenger, &self.initial_global_cumulative_sum);
         let zero = Val::<SC>::ZERO;
         challenger.observe(zero);
     }

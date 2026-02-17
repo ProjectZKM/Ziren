@@ -17,7 +17,10 @@ use zkm_recursion_circuit::machine::{
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
 use thiserror::Error;
-use zkm_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
+use zkm_stark::{
+    flatten_global_cumulative_sum, global_cumulative_sum::GLOBAL_CUMULATIVE_SUM_COLS, ShardProof,
+    StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE,
+};
 
 use crate::{
     utils::{koalabears_to_bn254, words_to_bytes_be},
@@ -79,12 +82,11 @@ where
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         let prep_domains = self.chip_information.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + 14 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 1 + GLOBAL_CUMULATIVE_SUM_COLS + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
         inputs.push(self.pc_start);
-        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
-        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
+        inputs.extend(flatten_global_cumulative_sum(&self.initial_global_cumulative_sum));
         for domain in prep_domains {
             inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
             let size = 1 << domain.log_n;

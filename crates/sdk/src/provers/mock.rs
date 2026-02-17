@@ -17,7 +17,7 @@ use zkm_prover::{
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
     DvSnarkBn254Proof, Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_stark::global_cumulative_sum::GlobalCumulativeSum;
 
 use super::{ProofOpts, ProverType};
 
@@ -94,7 +94,7 @@ impl Prover<DefaultProverComponents> for MockProver {
                     pc_start: KoalaBear::ZERO,
                     chip_information: vec![],
                     chip_ordering: HashMap::new(),
-                    initial_global_cumulative_sum: SepticDigest::zero(),
+                    initial_global_cumulative_sum: GlobalCumulativeSum::zero(),
                 };
 
                 let proof = ZKMProof::Compressed(Box::new(ZKMReduceProof {

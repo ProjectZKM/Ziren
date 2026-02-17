@@ -13,10 +13,10 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_stark::septic_curve::SepticCurve;
-use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS},
+    global_cumulative_sum::GlobalCumulativeSum,
+    flatten_global_cumulative_sum,
     koala_bear_poseidon2::KoalaBearPoseidon2,
     Dom, ShardProof, StarkMachine, StarkVerifyingKey, Word,
 };
@@ -155,8 +155,10 @@ where
             // Observe the vk and start pc.
             challenger.observe(builder, vk.commitment);
             challenger.observe(builder, vk.pc_start);
-            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
-            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
+            challenger.observe_slice(
+                builder,
+                flatten_global_cumulative_sum(&vk.initial_global_cumulative_sum),
+            );
             // Observe the padding.
             let zero: Felt<_> = builder.eval(C::F::ZERO);
             challenger.observe(builder, zero);
@@ -232,10 +234,9 @@ where
         // Set the `contains_execution_shard` flag.
         deferred_public_values.contains_execution_shard = builder.eval(C::F::ZERO);
         // Set the cumulative sum to zero.
-        deferred_public_values.global_cumulative_sum =
-            SepticDigest(SepticCurve::convert(SepticDigest::<C::F>::zero().0, |value| {
-                builder.eval(value)
-            }));
+        deferred_public_values.global_cumulative_sum = GlobalCumulativeSum {
+            coords: core::array::from_fn(|_| core::array::from_fn(|_| builder.eval(C::F::ZERO))),
+        };
         // Set the vk root from the witness.
         deferred_public_values.vk_root = vk_root;
         // Set the digest according to the previous values.

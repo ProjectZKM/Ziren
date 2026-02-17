@@ -1,23 +1,23 @@
 use std::{borrow::Borrow, mem::transmute};
 
-use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::PrimeField32;
+use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge,
-    ParallelIterator,
-};
-use rayon_scan::ScanParallelIterator;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::borrow::BorrowMut;
 use zkm_core_executor::{
-    events::{ByteLookupEvent, ByteRecord, GlobalLookupEvent},
+    events::{ByteLookupEvent, ByteRecord},
     ExecutionRecord, Program,
 };
 use zkm_stark::{
     air::{AirLookup, LookupScope, MachineAir},
-    septic_curve::{SepticCurve, SepticCurveComplete},
-    septic_digest::SepticDigest,
-    septic_extension::{SepticBlock, SepticExtension},
+    global_cumulative_sum::{
+        add_signed_lthash_event, flatten_global_cumulative_sum, global_lthash_coeff,
+        global_lthash_coords_for_message, global_lthash_max_events_per_shard, GlobalCumulativeSum,
+        GLOBAL_CUMULATIVE_SUM_COLS, GLOBAL_LTHASH_N, GLOBAL_LTHASH_SEGMENTS,
+        GLOBAL_LTHASH_SEGMENT_LOG2_BOUND,
+    },
+    septic_extension::SepticBlock,
     LookupKind, ZKMAirBuilder,
 };
 
@@ -29,6 +29,9 @@ use crate::{
 use zkm_derive::AlignedBorrow;
 
 const NUM_GLOBAL_COLS: usize = size_of::<GlobalCols<u8>>();
+const LT_HASH_N: usize = GLOBAL_LTHASH_N;
+const LT_HASH_SEGMENTS: usize = GLOBAL_LTHASH_SEGMENTS;
+const LT_HASH_SEGMENT_LOG2_BOUND: usize = GLOBAL_LTHASH_SEGMENT_LOG2_BOUND;
 
 /// Creates the column map for the CPU.
 const fn make_col_map() -> GlobalCols<usize> {
@@ -60,6 +63,10 @@ pub struct GlobalCols<T: Copy> {
     pub is_send: T,
     pub is_real: T,
     pub accumulation: GlobalAccumulationOperation<T, 1>,
+    pub lt_hash: [T; LT_HASH_N],
+    pub lt_signed_hash: [T; LT_HASH_N],
+    pub lt_segment: [T; LT_HASH_SEGMENTS],
+    pub lt_cumulative_sum: [T; GLOBAL_CUMULATIVE_SUM_COLS],
 }
 
 impl<F: PrimeField32> MachineAir<F> for GlobalChip {
@@ -117,80 +124,64 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
         let nb_rows = events.len();
         let padded_nb_rows = <GlobalChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_GLOBAL_COLS);
-        let chunk_size = std::cmp::max(nb_rows / num_cpus::get(), 0) + 1;
 
-        let mut chunks = values[..nb_rows * NUM_GLOBAL_COLS]
-            .chunks_mut(chunk_size * NUM_GLOBAL_COLS)
-            .collect::<Vec<_>>();
+        let mut lt_sum = GlobalCumulativeSum::<F>::zero();
+        for idx in 0..padded_nb_rows {
+            let row = &mut values[idx * NUM_GLOBAL_COLS..(idx + 1) * NUM_GLOBAL_COLS];
+            let cols: &mut GlobalCols<F> = row.borrow_mut();
 
-        let point_chunks = chunks
-            .par_iter_mut()
-            .enumerate()
-            .map(|(i, rows)| {
-                let mut point_chunks = Vec::with_capacity(chunk_size * NUM_GLOBAL_COLS + 1);
-                if i == 0 {
-                    point_chunks.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
-                }
-                rows.chunks_mut(NUM_GLOBAL_COLS).enumerate().for_each(|(j, row)| {
-                    let idx = i * chunk_size + j;
-                    let cols: &mut GlobalCols<F> = row.borrow_mut();
-                    let event: &GlobalLookupEvent = &events[idx];
-                    cols.message = event.message.map(F::from_canonical_u32);
-                    cols.kind = F::from_canonical_u8(event.kind);
-                    cols.lookup.populate(
-                        SepticBlock(event.message),
-                        event.is_receive,
-                        true,
-                        event.kind,
-                    );
-                    cols.is_real = F::ONE;
-                    if event.is_receive {
-                        cols.is_receive = F::ONE;
-                    } else {
-                        cols.is_send = F::ONE;
-                    }
-                    point_chunks.push(SepticCurveComplete::Affine(SepticCurve {
-                        x: SepticExtension(cols.lookup.x_coordinate.0),
-                        y: SepticExtension(cols.lookup.y_coordinate.0),
-                    }));
+            if idx < nb_rows {
+                let event = &events[idx];
+                cols.message = event.message.map(F::from_canonical_u32);
+                cols.kind = F::from_canonical_u8(event.kind);
+                cols.lookup.populate(
+                    SepticBlock(event.message),
+                    event.is_receive,
+                    true,
+                    event.kind,
+                );
+                cols.is_real = F::ONE;
+                cols.is_receive = F::from_bool(event.is_receive);
+                cols.is_send = F::from_bool(!event.is_receive);
+
+                let clk = event.message[1] as usize;
+                let seg = clk >> LT_HASH_SEGMENT_LOG2_BOUND;
+                assert!(
+                    seg < LT_HASH_SEGMENTS,
+                    "global lookup clk exceeds supported LtHash segmented bound: clk={} max_events={}",
+                    clk,
+                    global_lthash_max_events_per_shard()
+                );
+                cols.lt_segment.fill(F::ZERO);
+                cols.lt_segment[seg] = F::ONE;
+
+                let message = [
+                    event.message[0],
+                    event.message[1],
+                    event.message[2],
+                    event.message[3],
+                    event.message[4],
+                    event.message[5],
+                    event.message[6],
+                    0,
+                    0,
+                    u32::from(event.kind),
+                ];
+                cols.lt_hash = global_lthash_coords_for_message(message);
+                cols.lt_signed_hash = core::array::from_fn(|i| {
+                    if event.is_receive { cols.lt_hash[i] } else { -cols.lt_hash[i] }
                 });
-                point_chunks
-            })
-            .collect::<Vec<_>>();
+                add_signed_lthash_event(&mut lt_sum, seg, &cols.lt_hash, event.is_receive);
+            } else {
+                cols.lookup.populate_dummy();
+                cols.accumulation = GlobalAccumulationOperation::default();
+                cols.lt_hash.fill(F::ZERO);
+                cols.lt_signed_hash.fill(F::ZERO);
+                cols.lt_segment.fill(F::ZERO);
+            }
 
-        let points = point_chunks.into_iter().flatten().collect::<Vec<_>>();
-        let cumulative_sum = points
-            .into_par_iter()
-            .with_min_len(1 << 15)
-            .scan(|a, b| *a + *b, SepticCurveComplete::Infinity)
-            .collect::<Vec<SepticCurveComplete<F>>>();
-
-        let final_digest = match cumulative_sum.last() {
-            Some(digest) => digest.point(),
-            None => SepticCurve::<F>::dummy(),
-        };
-        let dummy = SepticCurve::<F>::dummy();
-        let final_sum_checker = SepticCurve::<F>::sum_checker_x(final_digest, dummy, final_digest);
-
-        let chunk_size = std::cmp::max(padded_nb_rows / num_cpus::get(), 0) + 1;
-        values.chunks_mut(chunk_size * NUM_GLOBAL_COLS).enumerate().par_bridge().for_each(
-            |(i, rows)| {
-                rows.chunks_mut(NUM_GLOBAL_COLS).enumerate().for_each(|(j, row)| {
-                    let idx = i * chunk_size + j;
-                    let cols: &mut GlobalCols<F> = row.borrow_mut();
-                    if idx < nb_rows {
-                        cols.accumulation.populate_real(
-                            &cumulative_sum[idx..idx + 2],
-                            final_digest,
-                            final_sum_checker,
-                        );
-                    } else {
-                        cols.lookup.populate_dummy();
-                        cols.accumulation.populate_dummy(final_digest, final_sum_checker);
-                    }
-                });
-            },
-        );
+            cols.lt_cumulative_sum = flatten_global_cumulative_sum(&lt_sum);
+        }
 
         Ok(RowMajorMatrix::new(values, NUM_GLOBAL_COLS))
     }
@@ -260,15 +251,56 @@ where
             local.kind,
         );
 
-        // Evaluate the accumulation.
-        GlobalAccumulationOperation::<AB::F, 1>::eval_accumulation(
-            builder,
-            [local.lookup],
-            [local.is_real],
-            [next.is_real],
-            local.accumulation,
-            next.accumulation,
-        );
+        builder.assert_bool(local.is_send);
+        builder.assert_bool(local.is_receive);
+        builder.assert_bool(local.is_real);
+        builder.assert_eq(local.is_send + local.is_receive, local.is_real);
+
+        let mut seg_sum = AB::Expr::zero();
+        for seg in 0..LT_HASH_SEGMENTS {
+            builder.assert_bool(local.lt_segment[seg]);
+            seg_sum = seg_sum + local.lt_segment[seg];
+        }
+        builder.assert_eq(seg_sum, local.is_real.into());
+
+        let message = [
+            local.message[0].into(),
+            local.message[1].into(),
+            local.message[2].into(),
+            local.message[3].into(),
+            local.message[4].into(),
+            local.message[5].into(),
+            local.message[6].into(),
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            local.kind.into(),
+        ];
+        for i in 0..LT_HASH_N {
+            let mut expected = AB::Expr::zero();
+            for (j, value) in message.iter().enumerate() {
+                let coeff = AB::F::from_wrapped_u32(global_lthash_coeff(i, j));
+                expected = expected + value.clone() * coeff;
+            }
+            builder.assert_eq(local.lt_hash[i], expected);
+            builder.assert_eq(
+                local.lt_signed_hash[i],
+                (local.is_receive.into() - local.is_send.into()) * local.lt_hash[i].into(),
+            );
+        }
+
+        for seg in 0..LT_HASH_SEGMENTS {
+            for i in 0..LT_HASH_N {
+                let idx = seg * LT_HASH_N + i;
+                let local_cum: AB::Expr = local.lt_cumulative_sum[idx].into();
+                let next_cum: AB::Expr = next.lt_cumulative_sum[idx].into();
+                let delta_local =
+                    local.lt_segment[seg].into() * local.lt_signed_hash[i].into();
+                let delta_next = next.lt_segment[seg].into() * next.lt_signed_hash[i].into();
+
+                builder.when_first_row().assert_eq(local_cum.clone(), delta_local);
+                builder.when_transition().assert_eq(next_cum, local_cum + delta_next);
+            }
+        }
     }
 }
 

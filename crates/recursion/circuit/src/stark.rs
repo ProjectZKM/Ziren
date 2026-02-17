@@ -14,11 +14,11 @@ use zkm_recursion_compiler::{
     ir::{Builder, Config, DslIr, Ext, ExtConst},
     prelude::Felt,
 };
-use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
-    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, ShardCommitment,
-    ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
+    flatten_global_cumulative_sum, global_cumulative_sum::GlobalCumulativeSum, AirOpenedValues,
+    Challenger, Chip, ChipOpenedValues, InnerChallenge, ShardCommitment, ShardOpenedValues,
+    ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
 use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
@@ -158,7 +158,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     let vk = StarkVerifyingKey {
         commit: dummy_hash(),
         pc_start: KoalaBear::ZERO,
-        initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
+        initial_global_cumulative_sum: GlobalCumulativeSum::<KoalaBear>::zero(),
         chip_information: preprocessed_chip_information,
         chip_ordering: preprocessed_chip_ordering,
     };
@@ -195,7 +195,7 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
         main,
         permutation,
         quotient,
-        global_cumulative_sum: SepticDigest::<F>::zero(),
+        global_cumulative_sum: GlobalCumulativeSum::<F>::zero(),
         local_cumulative_sum: EF::ZERO,
         log_degree,
     }
@@ -302,8 +302,7 @@ where
             let global_sum = opening.global_cumulative_sum;
 
             challenger.observe_slice(builder, local_sum);
-            challenger.observe_slice(builder, global_sum.0.x.0);
-            challenger.observe_slice(builder, global_sum.0.y.0);
+            challenger.observe_slice(builder, flatten_global_cumulative_sum(&global_sum));
 
             if chip.commit_scope() == LookupScope::Local {
                 let is_real: Felt<C::F> = builder.uninit();

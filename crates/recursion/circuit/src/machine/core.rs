@@ -22,6 +22,7 @@ use zkm_stark::air::LookupScope;
 use zkm_stark::air::MachineAir;
 use zkm_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
+    flatten_global_cumulative_sum,
     koala_bear_poseidon2::KoalaBearPoseidon2,
     shape::OrderedShape,
     Dom, StarkMachine, Word,
@@ -274,8 +275,10 @@ where
             // Observe the vk and start pc.
             challenger.observe(builder, vk.commitment);
             challenger.observe(builder, vk.pc_start);
-            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
-            challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
+            challenger.observe_slice(
+                builder,
+                flatten_global_cumulative_sum(&vk.initial_global_cumulative_sum),
+            );
             // Observe the padding.
             let zero: Felt<_> = builder.eval(C::F::ZERO);
             challenger.observe(builder, zero);

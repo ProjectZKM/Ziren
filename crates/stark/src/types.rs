@@ -8,7 +8,7 @@ use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use serde::{Deserialize, Serialize};
 
 use super::{Challenge, Com, OpeningProof, StarkGenericConfig, Val};
-use crate::septic_digest::SepticDigest;
+use crate::global_cumulative_sum::GlobalCumulativeSum;
 use crate::shape::OrderedShape;
 
 pub type QuotientOpenedValues<T> = Vec<T>;
@@ -57,7 +57,7 @@ pub struct ChipOpenedValues<F, EF> {
     pub main: AirOpenedValues<EF>,
     pub permutation: AirOpenedValues<EF>,
     pub quotient: Vec<Vec<EF>>,
-    pub global_cumulative_sum: SepticDigest<F>,
+    pub global_cumulative_sum: GlobalCumulativeSum<F>,
     pub local_cumulative_sum: EF,
     pub log_degree: usize,
 }
@@ -67,10 +67,13 @@ pub struct ShardOpenedValues<F, EF> {
     pub chips: Vec<ChipOpenedValues<F, EF>>,
 }
 
-/// The maximum number of elements that can be stored in the public values vec.  Both Ziren and
-/// recursive proofs need to pad their public values vec to this length.  This is required since the
-/// recursion verification program expects the public values vec to be fixed length.
-pub const PROOF_MAX_NUM_PVS: usize = 231;
+/// The maximum number of elements that can be stored in the public values vec. Both core and
+/// recursive proofs pad their public values vec to this length so the recursion verifier can use a
+/// fixed-size layout.
+///
+/// Previous layout used 14 limbs for `global_cumulative_sum`; LtHash uses
+/// `GLOBAL_CUMULATIVE_SUM_COLS` limbs.
+pub const PROOF_MAX_NUM_PVS: usize = 231 - 14 + crate::global_cumulative_sum::GLOBAL_CUMULATIVE_SUM_COLS;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -102,7 +105,7 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
         self.opened_values.chips.iter().map(|c| c.local_cumulative_sum).sum()
     }
 
-    pub fn global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
+    pub fn global_cumulative_sum(&self) -> GlobalCumulativeSum<Val<SC>> {
         self.opened_values.chips.iter().map(|c| c.global_cumulative_sum).sum()
     }
 
