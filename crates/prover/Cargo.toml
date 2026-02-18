@@ -35,7 +35,6 @@ serde_json = { workspace = true }
 clap = { version = "4.5.9", features = ["derive", "env"] }
 anyhow = "1.0.83"
 dirs = "5.0.1"
-serial_test = "3.1.1"
 num-bigint = "0.4.6"
 thiserror = "1.0.63"
 rayon = "1.10.0"
@@ -44,6 +43,7 @@ eyre = "0.6.12"
 
 [dev-dependencies]
 test-artifacts = { workspace = true }
+serial_test = "3.1.1"
 
 [[bin]]
 name = "build_plonk_bn254"
