@@ -71,7 +71,7 @@ Multiset hashing maps a (multi-)set to a short digest. In Ziren, this is impleme
   \\]
 - Per-event LtHash coordinates:
   \\[
-  H(m)_i=\sum_{j=0}^{9} c_{i,j}\cdot m_j,\quad i=0,\dots,N-1
+  H^{(i)}(m)=\sum_{j=0}^{9} c_{i,j} \cdot m^{(j)},\quad i=0,\dots,N-1
   \\]
 - Signed accumulation rule:
   - receive event: add \\(+H(m)\\)
@@ -115,14 +115,14 @@ Suppose an adversary outputs a proof accepted by the verifier while the final re
 - a non-trivial LtHash collision is found:
   \\[
   \sum_k \sigma_k H(m_k)=0,\;\sigma_k\in\{+1,-1\}
-  \]
+  \\]
   for a non-empty unmatched multiset difference.
 
 So protocol soundness reduces to constraint soundness plus LtHash collision resistance for the encoded event domain.
 
 #### Collision Bound (Random-Matrix Heuristic)
 
-Under the standard heuristic that the coefficient matrix \\(C=(c_{i,j})\\) behaves like a random matrix over \\(\mathbb{F}_p\\), for any fixed non-zero aggregate difference \\(\Delta\), the probability that \\(C\Delta=0\\) is approximately:
+Under the standard heuristic that the coefficient matrix \\(C=(c_{i,j})\\) behaves like a random matrix over \\(\mathbb{F}_p\\), for any fixed non-zero aggregate difference \\(\Delta\\), the probability that \\(C\Delta=0\\) is approximately:
 \\[
 \Pr\left[C\Delta=0\right]\approx p^{-N}
 \\]
@@ -136,7 +136,7 @@ This appendix provides a stricter, reduction-style argument for the current LtHa
 
 ### A.1 Threat Model and Security Goal
 
-- Adversary model: probabilistic polynomial-time prover \\(\mathcal{P}^*\\).
+- Adversary model: probabilistic polynomial-time prover \\(\mathcal{P}^{*}\\).
 - Verifier accepts only if all STARK/AIR/lookup constraints are satisfied and final boundary checks pass.
 - Security goal (memory soundness): except with negligible probability, an accepted proof implies the read/write multisets are equal after prescribed initialization and post-processing rules.
 
@@ -148,9 +148,13 @@ for negligible \\(\varepsilon_{\mathrm{total}}\\).
 
 ### A.2 LtHash Assumption (Explicit)
 
+<<<<<<< HEAD
 Define encoded-event map \\(E: D \to \mathbb{F}_p^{10}\\) and linear map \\(H: \mathbb{F}_p^{10} \to \mathbb{F}_p^{24}\\):
+=======
+Define encoded-event map \\(Enc: D \rightarrow F_p^{10}\\) and linear map \\(H: F_p^{10} \rightarrow F_p^{24}\\) over the base field.
+>>>>>>> 18cbfa6 (fix: formular in memory check)
 \\[
-H(m)_i = \sum_{j=0}^{9} c_{i,j} m_j
+H^{(i)}(m) = \sum_{j=0}^{9} c_{i,j} m^{(j)}
 \\]
 with fixed deterministic coefficients \\(c_{i,j}\\).
 
