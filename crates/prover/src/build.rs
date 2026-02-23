@@ -60,22 +60,16 @@ pub fn try_build_dvsnark_bn254_artifacts_dev(
     let r1cs_cached_path = store_dir.join("r1cs_cached");
 
     let mut r1cs_to_dvsnark_content_exist = false;
-    if r1cs_to_dvsnark_path.exists() {
-        let md = metadata(r1cs_to_dvsnark_path).unwrap();
-        let filesize = md.len();
-        if filesize > 1024 {
-            // > 1 KB
-            r1cs_to_dvsnark_content_exist = true
+    if let Ok(md) = metadata(&r1cs_to_dvsnark_path) {
+        if md.len() > 1024 {
+            r1cs_to_dvsnark_content_exist = true;
         }
     }
 
     let mut r1cs_cached_content_exist = false;
-    if r1cs_cached_path.exists() {
-        let md = metadata(r1cs_cached_path).unwrap();
-        let filesize = md.len();
-        if filesize > 1024 {
-            // > 1 KB
-            r1cs_cached_content_exist = true
+    if let Ok(md) = metadata(&r1cs_cached_path) {
+        if md.len() > 1024 {
+            r1cs_cached_content_exist = true;
         }
     }
 
