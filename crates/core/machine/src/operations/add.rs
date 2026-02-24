@@ -72,7 +72,7 @@ impl<F: Field> AddOperation<F> {
         let overflow_2 = a[2] + b[2] - cols.value[2] + cols.carry[1];
         let overflow_3 = a[3] + b[3] - cols.value[3] + cols.carry[2];
 
-        builder_is_real.assert_zero(overflow_3.clone() * (overflow_3.clone() - base));
+        builder_is_real.assert_zero(overflow_3.clone() * (overflow_3 - base));
 
         // If the carry is one, then the overflow must be the base.
         builder_is_real.assert_zero(cols.carry[0] * (overflow_0.clone() - base));
@@ -80,9 +80,9 @@ impl<F: Field> AddOperation<F> {
         builder_is_real.assert_zero(cols.carry[2] * (overflow_2.clone() - base));
 
         // If the carry is not one, then the overflow must be zero.
-        builder_is_real.assert_zero((cols.carry[0] - one.clone()) * overflow_0.clone());
-        builder_is_real.assert_zero((cols.carry[1] - one.clone()) * overflow_1.clone());
-        builder_is_real.assert_zero((cols.carry[2] - one.clone()) * overflow_2.clone());
+        builder_is_real.assert_zero((cols.carry[0] - one.clone()) * overflow_0);
+        builder_is_real.assert_zero((cols.carry[1] - one.clone()) * overflow_1);
+        builder_is_real.assert_zero((cols.carry[2] - one) * overflow_2);
 
         // Assert that the carry is either zero or one.
         builder_is_real.assert_bool(cols.carry[0]);
