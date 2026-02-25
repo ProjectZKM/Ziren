@@ -12,7 +12,8 @@ fn main() {
         if #[cfg(feature = "native")] {
             println!("cargo:rerun-if-changed=go");
             // Define the output directory
-            let out_dir = env::var("OUT_DIR").unwrap();
+            let out_dir = env::var("OUT_DIR")
+                .expect("OUT_DIR not set by cargo");
             let dest_path = PathBuf::from(&out_dir);
             let lib_name = "zkmgnark";
             let dest = dest_path.join(format!("lib{lib_name}.a"));
@@ -49,11 +50,16 @@ fn main() {
                 .args(["--print", "sysroot"])
                 .output()
                 .expect("rustc not found");
-            let sysroot = String::from_utf8(sysroot.stdout).unwrap();
+            let sysroot = String::from_utf8(sysroot.stdout)
+                .expect("rustc sysroot output not valid utf8");
             let include = format!("{}/lib/mips-zkm-elf/include", sysroot.trim());
 
             let bindings = bindgen::Builder::default()
-                .header(header_path.to_str().unwrap())
+                .header(
+                    header_path
+                        .to_str()
+                        .expect("header path not valid utf8"),
+                )
                 .clang_arg(format!("-I{include}"))
                 .generate()
                 .expect("Unable to generate bindings");
