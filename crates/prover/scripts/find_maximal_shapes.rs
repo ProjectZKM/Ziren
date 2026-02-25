@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::BTreeMap, fs::File, io::Read, path::PathBuf, sync::mpsc};
+use std::{cmp::Ordering, collections::BTreeMap, fs::File, io::Read, path::PathBuf};
 
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
@@ -73,7 +73,7 @@ fn main() {
     let channel_size =
         available_parallelism().unwrap_or(std::num::NonZeroUsize::new(11).unwrap()).get();
     tracing::info!("using channel size: {}", channel_size);
-    let (tx, rx) = mpsc::sync_channel(channel_size - 1);
+    let (tx, rx) = crossbeam_channel::bounded(channel_size - 1);
 
     if args.reth || args.geth {
         let start_block = args.start_block.expect("start block must be provided for reth/geth");
