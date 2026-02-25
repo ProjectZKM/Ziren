@@ -1,0 +1,19 @@
+[package]
+name = "zkm-picus"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+zkm-core-machine = { workspace = true }
+zkm-core-executor = {workspace = true}
+zkm-stark = {workspace = true}
+p3-air = { workspace = true  }
+p3-matrix = { workspace = true  }
+p3-field = {workspace = true}
+p3-koala-bear = {workspace = true}
+
+clap = { version = "4.5.7", features = ["derive", "env"] }

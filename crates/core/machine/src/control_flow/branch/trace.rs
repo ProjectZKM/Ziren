@@ -9,7 +9,7 @@ use zkm_core_executor::{
     events::{BranchEvent, ByteLookupEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     utils::{next_power_of_two, zeroed_f_vec},
@@ -27,6 +27,10 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
 
     fn name(&self) -> String {
         "Branch".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        BranchColumns::<u8>::picus_info()
     }
 
     fn generate_trace(

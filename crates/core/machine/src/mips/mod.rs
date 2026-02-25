@@ -19,7 +19,7 @@ use zkm_core_executor::{
 };
 use zkm_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
 use zkm_stark::{
-    air::{LookupScope, MachineAir, ZKM_PROOF_NUM_PV_ELTS},
+    air::{LookupScope, MachineAir, PicusInfo, ZKM_PROOF_NUM_PV_ELTS},
     Chip, LookupKind, StarkGenericConfig, StarkMachine,
 };
 
