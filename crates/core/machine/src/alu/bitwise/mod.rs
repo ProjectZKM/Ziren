@@ -229,7 +229,7 @@ where
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
-        builder.assert_bool(local.is_xor);
+        builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real);
     }
 }
