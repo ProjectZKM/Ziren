@@ -286,8 +286,8 @@ where
         // Source: Jolt 5.3: Set Less Than (https://people.cs.georgetown.edu/jthaler/Jolt-paper.pdf)
 
         // We will compute SLTU(b_comp, c_comp) where `b_comp` and `c_comp` where:
-        // * if the operation is `STLU`, `b_comp = b` and `c_comp = c`
-        // * if the operation is `STL`, `b_comp = b & 0x7FFFFFFF` and `c_comp = c & 0x7FFFFFFF``
+        // * if the operation is `SLTU`, `b_comp = b` and `c_comp = c`
+        // * if the operation is `SLT`, `b_comp = b & 0x7FFFFFFF` and `c_comp = c & 0x7FFFFFFF``
         //
         // We will set booleans `b_bit` and `c_bit` so that:
         // * If the operation is `SLTU`, then `b_bit = 0` and `c_bit = 0`.
@@ -366,7 +366,7 @@ where
         builder.assert_bool(sum_flags.clone());
         builder.when(is_real.clone()).assert_eq(AB::Expr::one() - local.is_comp_eq, sum_flags);
 
-        // Constrain `local.sltu == STLU(b_comp, c_comp)`.
+        // Constrain `local.sltu == SLTU(b_comp, c_comp)`.
         //
         // We define bytes `b_comp_byte` and `c_comp_byte` as follows: If `b_comp == c_comp`, then
         // `b_comp_byte = c_comp_byte = 0`. Otherwise, we set `b_comp_byte` and `c_comp_byte` to
@@ -423,7 +423,7 @@ where
 
         // Now the value of `local.sltu` is equal to the same value for the comparison bytes.
         //
-        // Set `local.sltu = STLU(b_comp_byte, c_comp_byte)` via a lookup.
+        // Set `local.sltu = SLTU(b_comp_byte, c_comp_byte)` via a lookup.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
             local.sltu,
