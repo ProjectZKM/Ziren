@@ -1,6 +1,6 @@
 use crate::pcl::{
     expr::{PicusConstraint, PicusExpr},
-    partial_evaluate, partial_evaluate_calls,
+    partial_evaluate, partial_evaluate_assume_det, partial_evaluate_calls,
 };
 use std::{
     collections::BTreeMap,
@@ -144,13 +144,14 @@ impl PicusModule {
         let constraints = partial_evaluate(&self.constraints, env);
         let calls = partial_evaluate_calls(&self.calls, env);
         let postconditions = partial_evaluate(&self.postconditions, env);
+        let assume_deterministic = partial_evaluate_assume_det(&self.assume_deterministic, env);
         PicusModule {
             name,
             inputs: self.inputs.clone(),
             outputs: self.outputs.clone(),
             constraints,
             postconditions,
-            assume_deterministic: self.assume_deterministic.clone(),
+            assume_deterministic,
             calls,
         }
     }
@@ -303,6 +304,11 @@ impl PicusProgram {
     /// from the argument map and leaving it empty.
     pub fn add_modules(&mut self, modules: &mut BTreeMap<String, PicusModule>) {
         self.modules.append(modules);
+    }
+
+    pub fn add_module(&mut self, name: &str, module: PicusModule) {
+        assert!(!self.modules.contains_key(name));
+        self.modules.insert(name.to_string(), module);
     }
 
     /// Write the serialized program to any `Write` sink.

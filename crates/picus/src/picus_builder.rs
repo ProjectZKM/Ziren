@@ -182,7 +182,20 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             }
             // TODO: It might be fine if the first argument isn't a constant. We need to multiply the values
             // in the interaction with the multiplicities
-            _ => panic!("Byte interaction but first argument isn't a constant"),
+            _ => {
+                let byte_mod_name = "byte_interaction_mod".to_string();
+                if !self.aux_modules.contains_key(&byte_mod_name) {
+                    let byte_mod = PicusModule::build_empty(byte_mod_name.clone(), 2, 1);
+                    self.aux_modules.insert(byte_mod_name.clone(), byte_mod);
+                }
+                assert!(values.len() == 5);
+                println!("Values length: {}", values.len());
+                self.picus_module.calls.push(PicusCall::new(
+                    byte_mod_name.clone(),
+                    &values[1..2],
+                    &values[3..5],
+                ));
+            }
         }
     }
 
@@ -190,9 +203,10 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     // In particular, the following values correspond to inputs and outputs:
     //    - values[2] -> pc (input)
     //    - values[3] -> next_pc (output)
-    //    - values[6-9] -> a (output)
-    //    - values[10-13] -> b (input)
-    //    - values[14-17] -> c (input)
+    //    - values[6] -> opcode (assume deterministic)
+    //    - values[7-10] -> a (output)
+    //    - values[11-14] -> b (input)
+    //    - values[15-18] -> c (input)
     //    - TODO (Add high and low)
     fn handle_receive_instruction(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         // Creating a fresh var because picus outputs need to be variables.
@@ -203,6 +217,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         };
         self.picus_module.outputs.push(next_pc_out.clone());
         self.picus_module.constraints.push(eq_mul(&multiplicity, &values[3], &next_pc_out));
+        // We assume the opcode is deterministic
+        self.picus_module.assume_deterministic.push(values[6].clone());
         // If this is a sequential instruction then we can assume next-pc is deterministic as we will check its
         // determinism in the CPU chip. Otherwise, we have to prove it is deterministic. The flag for specifying the
         // if the instruction is sequential is stored at index 27.
@@ -211,20 +227,20 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
         // We need to mark some of the register values as inputs and other values as outputs.
         // In particular, the parameters `b` and `c` to `receive_instruction` are inputs and
-        // parameter `a` is an output. `b` and `c` are at indexes 10-13 and 14-17 in `values` whereas
-        // `a` is at indexes 6-9. As in the code above, we need to create variables for the outputs since
+        // parameter `a` is an output. `b` and `c` are at indexes 11-14 and 15-18 in `values` whereas
+        // `a` is at indexes 7-10. As in the code above, we need to create variables for the outputs since
         // Picus requires the inputs and outputs to be variables.
-        for value in values.iter().take(10).skip(6) {
+        for value in values.iter().take(11).skip(7) {
             let a_var = fresh_picus_expr();
             self.picus_module.outputs.push(a_var.clone());
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &a_var));
         }
-        for value in values.iter().take(14).skip(10) {
+        for value in values.iter().take(15).skip(11) {
             let b_var = fresh_picus_expr();
             self.picus_module.inputs.push(b_var.clone());
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &b_var));
         }
-        for value in values.iter().take(18).skip(14) {
+        for value in values.iter().take(19).skip(15) {
             let c_var = fresh_picus_expr();
             self.picus_module.inputs.push(c_var.clone());
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &c_var));
@@ -232,7 +248,6 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     }
 
     fn get_main_vars_for_call(&mut self, message_values: &[PicusExpr]) -> Option<Vec<PicusAtom>> {
-        println!("MESSAGE VALUES: {message_values:?}");
         let opcode_spec = match message_values[6].clone() {
             PicusExpr::Const(v) => {
                 assert!(v < Opcode::UNIMPL as u64);
@@ -245,9 +260,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             (0..target_chip.air.width()).map(|_| fresh_picus_var()).collect();
 
         let target_picus_info = target_chip.picus_info();
-        println!("Target picus info: {target_picus_info:?}");
         for (slice, name) in opcode_spec.arg_to_colname {
-            println!("Name: {name}");
             let colrange = target_picus_info.name_to_colrange.get(*name).unwrap();
             match *slice {
                 IndexSlice::Range { start, end } => {
@@ -281,7 +294,6 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 }
             }
         }
-        println!("Target main vals: {target_main_vals:?}");
         Some(target_main_vals)
     }
 }

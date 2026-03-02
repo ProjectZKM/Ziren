@@ -260,3 +260,14 @@ pub fn partial_evaluate_calls(calls: &[PicusCall], env: &BTreeMap<usize, u64>) -
     }
     out_calls
 }
+
+pub fn partial_evaluate_assume_det(
+    assume_dets: &[PicusExpr],
+    env: &BTreeMap<usize, u64>,
+) -> Vec<PicusExpr> {
+    let mut out_assume_det = Vec::with_capacity(assume_dets.len());
+    for assume_det in assume_dets {
+        out_assume_det.push(subst_expr(assume_det, env))
+    }
+    out_assume_det
+}

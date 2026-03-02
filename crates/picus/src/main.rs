@@ -5,8 +5,8 @@ use p3_air::{Air, BaseAir};
 use zkm_core_machine::MipsAir;
 use zkm_picus::{
     pcl::{
-        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusModule,
-        PicusProgram,
+        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusConstraint,
+        PicusExpr, PicusModule, PicusProgram,
     },
     picus_builder::PicusBuilder,
 };
@@ -28,11 +28,12 @@ struct Args {
         env = "PICUS_OUT_DIR",
         default_value = "picus_out"
     )]
-
-    /// Directory to write the extracted Picus program(s).
-    ///
-    /// Can be overridden with PICUS_OUT_DIR.
     pub picus_out_dir: PathBuf,
+
+    /// Assume selectors are mutually exclusive and force non-selected selectors to 0 during
+    /// selector-based partial evaluation.
+    #[arg(long = "assume-selectors-deterministic", default_value_t = false)]
+    pub assume_selectors_deterministic: bool,
 }
 
 /// Analyze a single chip and process all its deferred sub-chip tasks.
@@ -41,6 +42,7 @@ fn analyze_chip<'chips, A>(
     chip: &'chips Chip<Felt, A>,
     chips: &'chips [Chip<Felt, A>],
     picus_builder: Option<&mut PicusBuilder<'chips, A>>,
+    assume_selectors_deterministic: bool,
 ) -> (PicusModule, BTreeMap<String, PicusModule>)
 where
     A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder<'chips, A>>,
@@ -68,8 +70,12 @@ where
             Some(task.multiplicity.clone()),
         );
 
-        let (mut sub_module, aux_modules) =
-            analyze_chip(target_chip, builder.chips, Some(&mut sub_builder));
+        let (mut sub_module, aux_modules) = analyze_chip(
+            target_chip,
+            builder.chips,
+            Some(&mut sub_builder),
+            assume_selectors_deterministic,
+        );
         // Merge submodules
         builder.aux_modules.extend(aux_modules.into_iter());
 
@@ -83,11 +89,13 @@ where
             env.insert(id, 1);
         }
         env.insert(selector_col, 1);
-        for (other_selector_col, _) in &target_picus_info.selector_indices {
-            if selector_col == *other_selector_col {
-                continue;
+        if assume_selectors_deterministic {
+            for (other_selector_col, _) in &target_picus_info.selector_indices {
+                if selector_col == *other_selector_col {
+                    continue;
+                }
+                env.insert(*other_selector_col, 0);
             }
-            env.insert(*other_selector_col, 0);
         }
         let updated_picus_module = sub_module.partial_eval(&env);
         println!("Updated module: {updated_picus_module}");
@@ -130,7 +138,8 @@ fn main() {
 
     // Build the Picus program which will have a single module with the chip constraints
     println!("Generating Picus program for {} chip.....", chip.name());
-    let (picus_module, mut aux_modules) = analyze_chip(chip, &chips, None);
+    let (picus_module, mut aux_modules) =
+        analyze_chip(chip, &chips, None, args.assume_selectors_deterministic);
     picus_program.add_modules(&mut aux_modules);
     // At this point, we've built a module directly from the constraints. However, this isn't super amenable to verification
     // because the selectors introduce a lot of nonlinearity. So what we do instead is generate distinct Picus modules
@@ -140,8 +149,15 @@ fn main() {
     if picus_info.selector_indices.is_empty() {
         panic!("PicusBuilder needs at least one selector to be enabled!")
     }
+    // partially evaluate modules assuming `is_real = 1` (if the chip has that)
+    let mut picus_module_is_real_1 = if let Some(id) = picus_info.is_real_index {
+        let mut env = BTreeMap::new();
+        env.insert(id, 1);
+        picus_module.partial_eval(&env)
+    } else {
+        picus_module.clone()
+    };
     println!("Applying selectors program.....");
-    println!("PicusInfo: {:?}", picus_info.clone());
     for (selector_col, _) in &picus_info.selector_indices {
         let mut env = BTreeMap::new();
         // Set `is_real = 1` if it is set in `picus_info`
@@ -149,11 +165,13 @@ fn main() {
             env.insert(id, 1);
         }
         env.insert(*selector_col, 1);
-        for (other_selector_col, _) in &picus_info.selector_indices {
-            if selector_col == other_selector_col {
-                continue;
+        if args.assume_selectors_deterministic {
+            for (other_selector_col, _) in &picus_info.selector_indices {
+                if selector_col == other_selector_col {
+                    continue;
+                }
+                env.insert(*other_selector_col, 0);
             }
-            env.insert(*other_selector_col, 0);
         }
         // We generate a new Picus module by partially evaluating our original Picus module with respect
         // to the environment map.
@@ -162,6 +180,21 @@ fn main() {
     }
 
     picus_program.add_modules(&mut selector_modules);
+    if picus_info.selector_indices.len() > 0 {
+        picus_module_is_real_1.outputs.clear();
+        let mut one_hot_sum = PicusExpr::Const(0);
+        for (selector_col, _) in &picus_info.selector_indices {
+            let selector_var = PicusExpr::Var(*selector_col);
+            one_hot_sum += selector_var.clone();
+            picus_module_is_real_1.outputs.push(selector_var.clone());
+            picus_module_is_real_1.postconditions.push(PicusConstraint::new_bit(selector_var.clone()));
+            if args.assume_selectors_deterministic {
+                picus_module_is_real_1.assume_deterministic.push(selector_var);
+            }
+        }
+        picus_module_is_real_1.postconditions.push(PicusConstraint::new_lt(one_hot_sum, 2.into()))
+    }
+    picus_program.add_module("top", picus_module_is_real_1);
     let res =
         picus_program.write_to_path(args.picus_out_dir.join(format!("{}.picus", chip.name())));
     if res.is_err() {
