@@ -180,14 +180,16 @@ fn main() {
     }
 
     picus_program.add_modules(&mut selector_modules);
-    if picus_info.selector_indices.len() > 0 {
+    if !picus_info.selector_indices.is_empty() {
         picus_module_is_real_1.outputs.clear();
         let mut one_hot_sum = PicusExpr::Const(0);
         for (selector_col, _) in &picus_info.selector_indices {
             let selector_var = PicusExpr::Var(*selector_col);
             one_hot_sum += selector_var.clone();
             picus_module_is_real_1.outputs.push(selector_var.clone());
-            picus_module_is_real_1.postconditions.push(PicusConstraint::new_bit(selector_var.clone()));
+            picus_module_is_real_1
+                .postconditions
+                .push(PicusConstraint::new_bit(selector_var.clone()));
             if args.assume_selectors_deterministic {
                 picus_module_is_real_1.assume_deterministic.push(selector_var);
             }
