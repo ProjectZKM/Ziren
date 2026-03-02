@@ -43,7 +43,7 @@ pub trait WeierstrassParameters: EllipticCurveParameters {
     }
 
     fn nb_scalar_bits() -> usize {
-        Self::BaseField::NB_LIMBS * 16
+        Self::BaseField::NB_LIMBS * Self::BaseField::NB_BITS_PER_LIMB
     }
 }
 
