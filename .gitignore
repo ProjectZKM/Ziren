@@ -5,6 +5,8 @@ crates/test-artifacts/guests/Cargo.lock
 .vscode
 *.log
 bins
+*.s
+*.txt
 
 # Proofs
 **/proof-with-pis.bin
