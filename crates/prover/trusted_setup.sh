@@ -6,17 +6,23 @@
 echo "--------Prerequisites--------"
 make build-circuits
 
-#echo "--------Powers of Tau--------"
-#export NB_CONSTRAINTS_LOG2=23
-#wget https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau \
-#    -O powersOfTau28_hez_final.ptau
+echo "--------Powers of Tau--------"
+export NB_CONSTRAINTS_LOG2=23
+URL="https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau"
 
-#echo "--------Semaphore Install--------"
-#git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2 semaphore-mtb-setup
-#cd semaphore-mtb-setup
-#go build
-#cd ..
-#cp semaphore-mtb-setup/semaphore-mtb-setup semaphore-gnark-11
+if [ -s "$FILE" ]; then
+    echo "$FILE already exists, skip downloading."
+else
+    echo "Downloading $FILE ..."
+    wget "$URL" -O "$FILE"
+fi
+
+echo "--------Semaphore Install--------"
+git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2 semaphore-mtb-setup
+cd semaphore-mtb-setup
+go build
+cd ..
+cp semaphore-mtb-setup/semaphore-mtb-setup semaphore-gnark-11
 
 echo "--------Phase 1 Setup--------"
 mkdir -p trusted-setup
