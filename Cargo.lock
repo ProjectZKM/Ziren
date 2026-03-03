@@ -3350,7 +3350,7 @@ checksum = "ff7a39c8862fc1369215ccf0a8f12dd4598c7f6484704359f0351bd617034dbf"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.111",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -7932,7 +7932,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-picus"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "clap",
  "p3-air",
