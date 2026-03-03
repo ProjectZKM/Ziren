@@ -99,11 +99,18 @@ impl PlonkVerifier {
         public_inputs: &[[u8; 32]],
         plonk_vk: &[u8],
     ) -> Result<(), PlonkError> {
-        let plonk_vk = load_plonk_verifying_key_from_bytes(plonk_vk).unwrap();
-        let proof = load_plonk_proof_from_bytes(proof, plonk_vk.qcp.len()).unwrap();
+        let plonk_vk = load_plonk_verifying_key_from_bytes(plonk_vk)?;
+        let proof = load_plonk_proof_from_bytes(proof, plonk_vk.qcp.len())?;
 
-        let public_inputs =
-            public_inputs.iter().map(|input| Fr::from_slice(input).unwrap()).collect::<Vec<_>>();
+        let public_inputs = public_inputs
+            .iter()
+            .map(|input| {
+                Fr::from_slice(input).map_err(|e| {
+                    PlonkError::InputConversion(format!("Failed to convert public input: {e}"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         verify_plonk_algebraic(&plonk_vk, &proof, &public_inputs)
     }
 }
