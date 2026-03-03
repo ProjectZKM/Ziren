@@ -103,7 +103,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
 
     // Picus does not have native support for interactions so we need to convert the interaction
     // to Picus constructs. Most byte interactions appear to be range constraints
-    fn handle_byte_interaction(&mut self, multiplicity: PicusExpr, values: &Vec<PicusExpr>) {
+    fn handle_byte_interaction(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         match values[0] {
             PicusExpr::Const(v) => {
                 if v == (ByteOpcode::U8Range as u64) {
