@@ -2385,7 +2385,8 @@ impl<'a> Executor<'a> {
     #[inline]
     fn inc_shard_if_need(&mut self) -> bool {
         if self.executor_mode == ExecutorMode::Trace {
-            if !self.state.records_clk.is_empty()
+            let records_clk_index = self.state.records_clk_index as usize;
+            if records_clk_index < self.state.records_clk.len()
                 && self.state.clk >= self.state.records_clk[self.state.records_clk_index as usize]
             {
                 self.state.current_shard += 1;
