@@ -33,9 +33,9 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
             arg_to_colname: &[
                 (Single(2), "pc"),
                 (Single(3), "next_pc"),
-                (Range { start: 6, end: 10 }, "add_operation"),
-                (Range { start: 10, end: 14 }, "operand_1"),
-                (Range { start: 14, end: 18 }, "operand_2"),
+                (Range { start: 7, end: 11 }, "add_operation"),
+                (Range { start: 11, end: 15 }, "operand_1"),
+                (Range { start: 15, end: 19 }, "operand_2"),
             ],
         },
         Opcode::SUB => OpcodeSpec {
@@ -44,9 +44,9 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
             arg_to_colname: &[
                 (Single(2), "pc"),
                 (Single(3), "next_pc"),
-                (Range { start: 6, end: 10 }, "add_operation"),
-                (Range { start: 10, end: 14 }, "operand_1"),
-                (Range { start: 14, end: 18 }, "operand_2"),
+                (Range { start: 7, end: 11 }, "add_operation"),
+                (Range { start: 11, end: 15 }, "operand_1"),
+                (Range { start: 15, end: 19 }, "operand_2"),
             ],
         },
         Opcode::SRL => OpcodeSpec {
@@ -55,9 +55,9 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
             arg_to_colname: &[
                 (Single(2), "pc"),
                 (Single(3), "next_pc"),
-                (Range { start: 6, end: 10 }, "a"),
-                (Range { start: 10, end: 14 }, "b"),
-                (Range { start: 14, end: 18 }, "c"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
             ],
         },
         Opcode::SLT => OpcodeSpec {
@@ -66,9 +66,9 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
             arg_to_colname: &[
                 (Single(2), "pc"),
                 (Single(3), "next_pc"),
-                (Range { start: 6, end: 10 }, "a"),
-                (Range { start: 10, end: 14 }, "b"),
-                (Range { start: 14, end: 18 }, "c"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
             ],
         },
         _ => panic!("Unimplemented opcode {kind:#?}"),

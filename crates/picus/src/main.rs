@@ -42,7 +42,6 @@ fn analyze_chip<'chips, A>(
     chip: &'chips Chip<Felt, A>,
     chips: &'chips [Chip<Felt, A>],
     picus_builder: Option<&mut PicusBuilder<'chips, A>>,
-    assume_selectors_deterministic: bool,
 ) -> (PicusModule, BTreeMap<String, PicusModule>)
 where
     A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder<'chips, A>>,
@@ -59,7 +58,6 @@ where
     // Process deferred tasks recursively
     while let Some(task) = builder.concrete_pending_tasks.pop() {
         let target_chip = builder.get_chip(&task.chip_name);
-        println!("Target chip: {:?}", &task.chip_name);
         let target_picus_info = target_chip.picus_info();
 
         let mut sub_builder = PicusBuilder::new(
@@ -70,40 +68,37 @@ where
             Some(task.multiplicity.clone()),
         );
 
-        let (mut sub_module, aux_modules) = analyze_chip(
-            target_chip,
-            builder.chips,
-            Some(&mut sub_builder),
-            assume_selectors_deterministic,
-        );
+        let (mut sub_module, aux_modules) =
+            analyze_chip(target_chip, builder.chips, Some(&mut sub_builder));
         // Merge submodules
         builder.aux_modules.extend(aux_modules.into_iter());
 
-        sub_module.apply_multiplier(task.multiplicity);
+        sub_module.apply_multiplier(task.multiplicity.clone());
         // partially evaluate
 
-        let selector_col = target_picus_info.name_to_colrange.get(&task.selector).unwrap().0;
+        let selector_col = task.get_actual_var_num_for_col(
+            target_picus_info.name_to_colrange.get(&task.selector).unwrap().0,
+        );
         let mut env = BTreeMap::new();
         // Set `is_real = 1` if it is set in `picus_info`
         if let Some(id) = target_picus_info.is_real_index {
-            env.insert(id, 1);
+            let real_id_idx = task.get_actual_var_num_for_col(id);
+            env.insert(real_id_idx, 1);
         }
         env.insert(selector_col, 1);
-        if assume_selectors_deterministic {
-            for (other_selector_col, _) in &target_picus_info.selector_indices {
-                if selector_col == *other_selector_col {
-                    continue;
-                }
-                env.insert(*other_selector_col, 0);
+        for (other_selector_col, _) in &target_picus_info.selector_indices {
+            let other_actual_selector_col = task.get_actual_var_num_for_col(*other_selector_col);
+
+            if selector_col == other_actual_selector_col {
+                continue;
             }
+            env.insert(other_actual_selector_col, 0);
         }
         let updated_picus_module = sub_module.partial_eval(&env);
-        println!("Updated module: {updated_picus_module}");
         builder.picus_module.constraints.extend_from_slice(&updated_picus_module.constraints);
         builder.picus_module.calls.extend_from_slice(&updated_picus_module.calls);
         builder.picus_module.postconditions.extend_from_slice(&sub_module.postconditions);
     }
-
     (builder.picus_module.clone(), builder.aux_modules.clone())
 }
 
@@ -138,8 +133,7 @@ fn main() {
 
     // Build the Picus program which will have a single module with the chip constraints
     println!("Generating Picus program for {} chip.....", chip.name());
-    let (picus_module, mut aux_modules) =
-        analyze_chip(chip, &chips, None, args.assume_selectors_deterministic);
+    let (picus_module, mut aux_modules) = analyze_chip(chip, &chips, None);
     picus_program.add_modules(&mut aux_modules);
     // At this point, we've built a module directly from the constraints. However, this isn't super amenable to verification
     // because the selectors introduce a lot of nonlinearity. So what we do instead is generate distinct Picus modules
@@ -158,6 +152,7 @@ fn main() {
         picus_module.clone()
     };
     println!("Applying selectors program.....");
+    println!("selector indices: {:?}", picus_info.selector_indices);
     for (selector_col, _) in &picus_info.selector_indices {
         let mut env = BTreeMap::new();
         // Set `is_real = 1` if it is set in `picus_info`
@@ -165,13 +160,11 @@ fn main() {
             env.insert(id, 1);
         }
         env.insert(*selector_col, 1);
-        if args.assume_selectors_deterministic {
-            for (other_selector_col, _) in &picus_info.selector_indices {
-                if selector_col == other_selector_col {
-                    continue;
-                }
-                env.insert(*other_selector_col, 0);
+        for (other_selector_col, _) in &picus_info.selector_indices {
+            if selector_col == other_selector_col {
+                continue;
             }
+            env.insert(*other_selector_col, 0);
         }
         // We generate a new Picus module by partially evaluating our original Picus module with respect
         // to the environment map.

@@ -35,6 +35,18 @@ pub struct ConcretePendingTask {
     pub selector: String,
 }
 
+impl ConcretePendingTask {
+    // Gets the var number located at column `col_num` in the target chip
+    pub fn get_actual_var_num_for_col(&self, col_num: usize) -> usize {
+        assert!(col_num < self.main_vars.len());
+        let main_var = self.main_vars[col_num];
+        match main_var {
+            PicusAtom::Var(v) => v,
+            PicusAtom::Const(_) => panic!("Expected a variable not a constant"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SymbolicPendingTask {
     pub selector: PicusExpr,
@@ -100,9 +112,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             assert!(*v < 256);
                             continue;
                         } else {
-                            self.picus_module.constraints.push(PicusConstraint::new_lt(
+                            self.picus_module.constraints.push(PicusConstraint::new_leq(
                                 val.clone() * multiplicity.clone(),
-                                256.into(),
+                                255.into(),
                             ))
                         }
                     }
@@ -112,9 +124,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             assert!(*v < 65536);
                             continue;
                         } else {
-                            self.picus_module.constraints.push(PicusConstraint::new_lt(
+                            self.picus_module.constraints.push(PicusConstraint::new_leq(
                                 val.clone() * multiplicity.clone(),
-                                65536.into(),
+                                65535.into(),
                             ))
                         }
                     }
@@ -162,7 +174,6 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                         ]);
                     }
                 } else if v == (ByteOpcode::AND as u64) {
-                    println!("values: {values:#?}");
                     if let PicusExpr::Const(127) = values[4] {
                         let var_hi = fresh_picus_expr();
                         self.picus_module
@@ -189,7 +200,6 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                     self.aux_modules.insert(byte_mod_name.clone(), byte_mod);
                 }
                 assert!(values.len() == 5);
-                println!("Values length: {}", values.len());
                 self.picus_module.calls.push(PicusCall::new(
                     byte_mod_name.clone(),
                     &values[1..2],
@@ -211,19 +221,50 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     fn handle_receive_instruction(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         // Creating a fresh var because picus outputs need to be variables.
         // When performing partial evaluation,
-        let next_pc_out = fresh_picus_expr();
         let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
             PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
         };
-        self.picus_module.outputs.push(next_pc_out.clone());
-        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[3], &next_pc_out));
+        // handle pc constraints
+        {
+            // get the pc value
+            let pc_val = values[2].clone();
+            // make sure the pc is either a constant or variable
+            assert!(matches!(pc_val, PicusExpr::Const(_) | PicusExpr::Var(_)));
+            if let PicusExpr::Var(_) = pc_val {
+                // if the pc is a variable we mark it as an input
+                self.picus_module.inputs.push(pc_val.clone());
+            }
+            // allocate a fresh var for pc out
+            let next_pc_out = fresh_picus_expr();
+            // mark it as an output
+            self.picus_module.outputs.push(next_pc_out.clone());
+            // assign it conditionally to the corresponding element in the value array
+            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[3], &next_pc_out));
+            // the cpu table should constrain next_pc = pc + 4 always due to delay-slot semantics of MIPS
+            // so we add that constraint here
+            self.picus_module.constraints.push(PicusConstraint::new_equality(
+                values[3].clone(),
+                pc_val.clone() + PicusExpr::Const(4),
+            ));
+        }
         // We assume the opcode is deterministic
         self.picus_module.assume_deterministic.push(values[6].clone());
-        // If this is a sequential instruction then we can assume next-pc is deterministic as we will check its
-        // determinism in the CPU chip. Otherwise, we have to prove it is deterministic. The flag for specifying the
-        // if the instruction is sequential is stored at index 27.
-        if let PicusExpr::Const(1) = values[27].clone() {
-            self.picus_module.assume_deterministic.push(next_pc_out);
+        // the 27th value for determines if it is sequential or not
+        let is_sequential = matches!(values[27], PicusExpr::Const(1));
+        // Add the pc as an input
+        assert!(matches!(values[2].clone(), PicusExpr::Var(_) | PicusExpr::Const(_)));
+        if let PicusExpr::Var(_) = values[2].clone() {
+            self.picus_module.inputs.push(values[2].clone());
+        }
+        // if it is not sequential then we need to prove `next_next_pc_out` is deterministic
+        if !is_sequential {
+            let next_next_pc_out = fresh_picus_expr();
+            self.picus_module.constraints.push(eq_mul(
+                &multiplicity,
+                &values[4],
+                &next_next_pc_out,
+            ));
+            self.picus_module.outputs.push(next_next_pc_out);
         }
         // We need to mark some of the register values as inputs and other values as outputs.
         // In particular, the parameters `b` and `c` to `receive_instruction` are inputs and
@@ -232,7 +273,11 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         // Picus requires the inputs and outputs to be variables.
         for value in values.iter().take(11).skip(7) {
             let a_var = fresh_picus_expr();
-            self.picus_module.outputs.push(a_var.clone());
+            if is_sequential {
+                self.picus_module.outputs.push(a_var.clone());
+            } else {
+                self.picus_module.inputs.push(a_var.clone());
+            }
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &a_var));
         }
         for value in values.iter().take(15).skip(11) {
@@ -268,6 +313,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                     for i in start..end {
                         if let PicusExpr::Var(v) = message_values[i].clone() {
                             target_main_vals[colrange.0 + i - start] = PicusAtom::Var(v);
+                        } else if let PicusExpr::Const(c) = message_values[i].clone() {
+                            target_main_vals[colrange.0 + i - start] = PicusAtom::Const(c);
                         } else {
                             let id = fresh_picus_var_id();
                             let fresh_var = PicusAtom::Var(id);
@@ -330,7 +377,6 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
                     _ => panic!("Expected opcode val to be a constant: Got: {}", message.values[6]),
                 };
                 let target_chip = self.get_chip(opcode_spec.chip);
-                println!("OPCODE SPEC: {:?}", opcode_spec.chip);
                 let main_vars = self.get_main_vars_for_call(&message.values);
                 if let Some(vars) = main_vars {
                     self.concrete_pending_tasks.push(ConcretePendingTask {
