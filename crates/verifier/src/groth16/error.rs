@@ -12,4 +12,6 @@ pub enum Groth16Error {
     GeneralError(#[from] crate::error::Error),
     #[error("Groth16 vkey hash mismatch")]
     Groth16VkeyHashMismatch,
+    #[error("Failed to convert public input: {0}")]
+    InputConversion(String),
 }

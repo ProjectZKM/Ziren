@@ -28,6 +28,8 @@ pub enum PlonkError {
     TranscriptError,
     #[error("Plonk vkey hash mismatch")]
     PlonkVkeyHashMismatch,
+    #[error("Failed to convert public input: {0}")]
+    InputConversion(String),
     #[error("General error")]
     GeneralError(#[from] crate::error::Error),
 }

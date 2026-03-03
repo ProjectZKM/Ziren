@@ -7,11 +7,11 @@ pub fn boolean_circuit_garble(gates_info: &[u8]) -> bool {
 
     let num_gates = gates_info.len() / GATE_INFO_BYTES;
     let syscall_num = (num_gates - 1) / MAX_GATES_PER_SYSCALL + 1;
-    let base = num_gates / syscall_num;
+    let base = MAX_GATES_PER_SYSCALL;
     let remainder = num_gates - base * (syscall_num - 1);
 
     let base_bytes = base.to_le_bytes();
-    let remainder_bytes = base.to_le_bytes();
+    let remainder_bytes = remainder.to_le_bytes();
 
     let delta = &gates_info[0..16];
     let mut output = 0_u32;
