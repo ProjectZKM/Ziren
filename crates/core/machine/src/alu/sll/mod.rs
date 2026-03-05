@@ -96,7 +96,6 @@ pub struct ShiftLeftCols<T> {
     /// A boolean array whose `i`th element indicates whether `num_bytes_to_shift = i`.
     pub shift_by_n_bytes: [T; WORD_SIZE],
 
-    #[picus(selector)]
     pub is_real: T,
 }
 

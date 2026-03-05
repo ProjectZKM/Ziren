@@ -140,7 +140,7 @@ fn main() {
     // each of which correspond to a selector being enabled. The selectors are mutually exclusive.
     let mut selector_modules = BTreeMap::new();
 
-    if picus_info.selector_indices.is_empty() {
+    if picus_info.selector_indices.is_empty() && picus_info.is_real_index.is_none() {
         panic!("PicusBuilder needs at least one selector to be enabled!")
     }
     // partially evaluate modules assuming `is_real = 1` (if the chip has that)

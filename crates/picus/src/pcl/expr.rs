@@ -148,7 +148,8 @@ impl Add<Felt> for PicusAtom {
     type Output = PicusExpr;
 
     fn add(self, rhs: Felt) -> Self::Output {
-        PrimeField32::as_canonical_u32(&rhs).into()
+        let left_expr: PicusExpr = self.into();
+        PicusExpr::Add(Box::new(left_expr), Box::new(PrimeField32::as_canonical_u32(&rhs).into()))
     }
 }
 
