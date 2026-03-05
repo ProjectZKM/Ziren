@@ -1,6 +1,7 @@
 //! Opcodes for ZKM.
 
 use enum_map::Enum;
+use num_enum::TryFromPrimitive;
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -8,7 +9,18 @@ use std::fmt::Display;
 /// An opcode (short for "operation code") specifies the operation to be performed by the processor.
 #[allow(non_camel_case_types)]
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Enum,
+    TryFromPrimitive,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Enum,
 )]
 #[repr(u8)]
 pub enum Opcode {

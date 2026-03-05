@@ -2,14 +2,8 @@
 
 ## Full Generation
 
-```
-$ ls -l
-Ziren
-ziren-shape-bin
-
-$ cd Ziren
-```
-
+1. Prepare for the environment as per [Line 4 in collect.sh](./collect.sh#L4).
+2. Generate full shapes.
 ```
 WORKLOADS=(
     "../ziren-shape-bin/chess"
@@ -73,7 +67,7 @@ RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
     --end-block 9332491
 ```
 
-# Generate Shapes for the ETH Chain using RETH
+# Generate Shapes for keeper in Geth 
 
 ```
 $ ls ../ziren-shape-bin/reth/stdin
@@ -96,7 +90,7 @@ RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
 # Generate Shapes for the ETH Chain using GETH
 
 ```
-$ ls ../ziren-shape-bin/geth/
+$ ls ../ziren-shape-bin/geth/payloads
 
 119800_payload.rlp  11982d_payload.rlp  119859_payload.rlp  119884_payload.rlp  1198c9_payload.rlp
 ...
@@ -104,7 +98,7 @@ $ ls ../ziren-shape-bin/geth/
 
 ```
 RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
-    --initial "maximal_shapes.json" \
+    --initial "./crates/core/machine/src/shape/maximal_shapes.json" \
     --shard-sizes "17 18 19 20 21 22" \
     --geth \
     --elf "../ziren-shape-bin/geth/keeper" \

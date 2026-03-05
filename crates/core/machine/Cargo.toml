@@ -32,6 +32,7 @@ zkm-primitives = { workspace = true }
 zkm-core-executor = { workspace = true, default-features = true }
 zkm-curves = { workspace = true }
 
+crossbeam-channel = "0.5.12"
 rayon = "1.10.0"
 rayon-scan = "0.1.1"
 
