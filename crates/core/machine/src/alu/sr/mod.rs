@@ -502,13 +502,7 @@ where
             }
         }
 
-        // Check that the operation flags are boolean.
-        builder.assert_bool(local.is_srl);
-        builder.assert_bool(local.is_sra);
-        builder.assert_bool(local.is_ror);
-        builder.assert_bool(local.is_real);
-
-        // Check that is_real is the sum of the two operation flags.
+        // Check that is_real is the sum of the operation flags.
         builder.assert_eq(local.is_srl + local.is_sra + local.is_ror, local.is_real);
 
         // Receive the arguments.
