@@ -214,6 +214,10 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         "DivRem".to_string()
     }
 
+    fn picus_info(&self) -> PicusInfo {
+        DivRemCols::<u8>::picus_info()
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,

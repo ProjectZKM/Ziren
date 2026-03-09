@@ -25,7 +25,7 @@ fn ctr() -> &'static AtomicUsize {
 
 // set the fresh counter val to something
 pub fn initialize_fresh_var_ctr(val: usize) {
-    let _ = FRESH_VAR_CTR.set(AtomicUsize::new(val));
+    ctr().store(val, Ordering::Relaxed);
 }
 
 pub fn fresh_picus_var_id() -> usize {
@@ -66,7 +66,7 @@ pub fn current_modulus() -> Option<u64> {
 /// Given an integer reduce it into the field
 pub fn reduce_mod(c: i64) -> u64 {
     if let Some(p) = current_modulus() {
-        (c % (p as i64)) as u64
+        c.rem_euclid(p as i64) as u64
     } else {
         c as u64
     }
@@ -149,7 +149,8 @@ impl Add<Felt> for PicusAtom {
 
     fn add(self, rhs: Felt) -> Self::Output {
         let left_expr: PicusExpr = self.into();
-        PicusExpr::Add(Box::new(left_expr), Box::new(PrimeField32::as_canonical_u32(&rhs).into()))
+        let rhs_expr: PicusExpr = rhs.into();
+        left_expr + rhs_expr
     }
 }
 

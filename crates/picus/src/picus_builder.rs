@@ -3,14 +3,26 @@ use std::collections::BTreeMap;
 use crate::{
     opcode_spec::{spec_for, IndexSlice},
     pcl::{
-        fresh_picus_expr, fresh_picus_var, fresh_picus_var_id, Felt, PicusAtom, PicusCall,
-        PicusConstraint, PicusExpr, PicusModule,
+        fresh_picus_expr, fresh_picus_var, fresh_picus_var_id, partial_evaluate_expr, Felt,
+        PicusAtom, PicusCall, PicusConstraint, PicusExpr, PicusModule,
     },
 };
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
 use zkm_core_executor::{ByteOpcode, Opcode};
 use zkm_stark::{AirLookup, Chip, LookupKind, MachineAir, MessageBuilder, ZKM_PROOF_NUM_PV_ELTS};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SubmoduleMode {
+    /// Ignore instruction submodules entirely.
+    /// Use this when building the top module that proves selector determinism/shape
+    /// and should not recursively inline instruction chip constraints.
+    Ignore,
+    /// Recursively inline instruction submodule constraints into the current module.
+    Inline,
+    /// Keep instruction submodules separate (currently behaves like `Inline`).
+    Submodule,
+}
 
 /// Implementation `AirBuilder` which builds Picus programs
 #[derive(Clone)]
@@ -22,7 +34,10 @@ pub struct PicusBuilder<'chips, A: MachineAir<Felt>> {
     pub aux_modules: BTreeMap<String, PicusModule>,
     pub chips: &'chips [Chip<Felt, A>],
     pub extract_modularly: bool,
-    pub multiplier: PicusExpr,
+    pub submodule_mode: SubmoduleMode,
+    /// Fixed assignments used to specialize expressions during extraction.
+    /// This allows opcodes/selectors to fold to constants before dispatch logic.
+    pub specialization_env: BTreeMap<usize, u64>,
     pub concrete_pending_tasks: Vec<ConcretePendingTask>,
     pub symbolic_pending_tasks: Vec<SymbolicPendingTask>,
 }
@@ -60,23 +75,33 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         picus_module: PicusModule,
         chips: &'chips [Chip<Felt, A>],
         main_vars: Option<Vec<PicusAtom>>,
-        multiplier: Option<PicusExpr>,
+        specialization_env: Option<BTreeMap<usize, u64>>,
+        submodule_mode: Option<SubmoduleMode>,
     ) -> Self {
         let width = chip_to_analyze.air.width();
+        let specialization_env = specialization_env.unwrap_or_default();
         // Initialize the public values.
         let public_values = (0..ZKM_PROOF_NUM_PV_ELTS).map(PicusAtom::new_var).collect();
         // Initialize the preprocessed and main traces.
         let row: Vec<PicusAtom> =
             (0..chip_to_analyze.preprocessed_width()).map(PicusAtom::new_var).collect();
         let preprocessed = DenseMatrix::new_row(row);
-        let main = if let Some(vars) = main_vars {
+        let mut main = if let Some(vars) = main_vars {
             assert_eq!(vars.len(), width);
             vars
         } else {
             (0..width).map(PicusAtom::new_var).collect()
         };
-        let multiplier =
-            if let Some(expr) = multiplier { expr.clone() } else { PicusExpr::Const(1) };
+        // Specialize main-row variables to constants for this extraction pass.
+        // We key by variable id instead of column index so this also works for
+        // sub-chip builders whose main vars may be remapped.
+        for atom in &mut main {
+            if let PicusAtom::Var(v) = atom {
+                if let Some(value) = specialization_env.get(v) {
+                    *atom = PicusAtom::Const(*value);
+                }
+            }
+        }
         let aux_modules = BTreeMap::new();
         Self {
             preprocessed,
@@ -85,10 +110,19 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             picus_module,
             aux_modules,
             chips,
-            multiplier,
             extract_modularly: false,
+            submodule_mode: submodule_mode.unwrap_or(SubmoduleMode::Inline),
+            specialization_env,
             concrete_pending_tasks: Vec::new(),
             symbolic_pending_tasks: Vec::new(),
+        }
+    }
+
+    fn specialize_expr(&self, expr: &PicusExpr) -> PicusExpr {
+        if self.specialization_env.is_empty() {
+            expr.clone()
+        } else {
+            partial_evaluate_expr(expr, &self.specialization_env)
         }
     }
 
@@ -213,12 +247,17 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     // In particular, the following values correspond to inputs and outputs:
     //    - values[2] -> pc (input)
     //    - values[3] -> next_pc (output)
+    //    - values[4] -> next_next_pc (output)
     //    - values[6] -> opcode (assume deterministic)
-    //    - values[7-10] -> a (output)
+    //    - values[7-10] -> a (input iff op_a_immutable = 1, else output)
     //    - values[11-14] -> b (input)
     //    - values[15-18] -> c (input)
-    //    - TODO (Add high and low)
+    //    - values[19-22] -> hi (input iff is_rw_a = 1, else output)
     fn handle_receive_instruction(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        // Inactive receives should not contribute any constraints or ports.
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
         // Creating a fresh var because picus outputs need to be variables.
         // When performing partial evaluation,
         let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
@@ -249,34 +288,36 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
         // We assume the opcode is deterministic
         self.picus_module.assume_deterministic.push(values[6].clone());
-        // the 27th value for determines if it is sequential or not
-        let is_sequential = matches!(values[27], PicusExpr::Const(1));
-        // Add the pc as an input
-        assert!(matches!(values[2].clone(), PicusExpr::Var(_) | PicusExpr::Const(_)));
-        if let PicusExpr::Var(_) = values[2].clone() {
-            self.picus_module.inputs.push(values[2].clone());
-        }
-        // if it is not sequential then we need to prove `next_next_pc_out` is deterministic
-        if !is_sequential {
-            let next_next_pc_out = fresh_picus_expr();
-            self.picus_module.constraints.push(eq_mul(
-                &multiplicity,
-                &values[4],
-                &next_next_pc_out,
-            ));
-            self.picus_module.outputs.push(next_next_pc_out);
-        }
+        // values[23] is op_a_immutable and values[24] is is_rw_a.
+        // Require concrete booleans so I/O direction is unambiguous.
+        let op_a_immutable = match values[23] {
+            PicusExpr::Const(0) => false,
+            PicusExpr::Const(1) => true,
+            PicusExpr::Const(v) => panic!("Expected op_a_immutable to be 0 or 1, got {v}"),
+            _ => panic!("Expected op_a_immutable to be constant (0/1), got symbolic expression"),
+        };
+        let is_rw_a = match values[24] {
+            PicusExpr::Const(0) => false,
+            PicusExpr::Const(1) => true,
+            PicusExpr::Const(v) => panic!("Expected is_rw_a to be 0 or 1, got {v}"),
+            _ => panic!("Expected is_rw_a to be constant (0/1), got symbolic expression"),
+        };
+        // Always expose `next_next_pc` as an output; it is often zero but still part of the
+        // instruction interface.
+        let next_next_pc_out = fresh_picus_expr();
+        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[4], &next_next_pc_out));
+        self.picus_module.outputs.push(next_next_pc_out);
         // We need to mark some of the register values as inputs and other values as outputs.
         // In particular, the parameters `b` and `c` to `receive_instruction` are inputs and
-        // parameter `a` is an output. `b` and `c` are at indexes 11-14 and 15-18 in `values` whereas
+        // parameter `a` is an output when `is_sequential` is 1. `b` and `c` are at indexes 11-14 and 15-18 in `values` whereas
         // `a` is at indexes 7-10. As in the code above, we need to create variables for the outputs since
         // Picus requires the inputs and outputs to be variables.
         for value in values.iter().take(11).skip(7) {
             let a_var = fresh_picus_expr();
-            if is_sequential {
-                self.picus_module.outputs.push(a_var.clone());
-            } else {
+            if op_a_immutable {
                 self.picus_module.inputs.push(a_var.clone());
+            } else {
+                self.picus_module.outputs.push(a_var.clone());
             }
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &a_var));
         }
@@ -290,6 +331,57 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             self.picus_module.inputs.push(c_var.clone());
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &c_var));
         }
+        // Route HI values by is_rw_a.
+        for value in values.iter().take(23).skip(19) {
+            let hi_var = fresh_picus_expr();
+            if is_rw_a {
+                self.picus_module.inputs.push(hi_var.clone());
+            } else {
+                self.picus_module.outputs.push(hi_var.clone());
+            }
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &hi_var));
+        }
+    }
+
+    // Memory lookups are encoded as:
+    //   [shard/prev_shard, clk/prev_clk, addr, value_0, value_1, ...]
+    // For extraction we intentionally ignore shard/clk and only expose addr + value limbs.
+    // `send` corresponds to a read (input) while `receive` corresponds to a write (output).
+    fn handle_memory_interaction(
+        &mut self,
+        multiplicity: PicusExpr,
+        values: &[PicusExpr],
+        is_send: bool,
+    ) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+        assert!(values.len() >= 4, "Expected memory lookup to include addr + value limbs");
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
+        };
+
+        let addr_var = fresh_picus_expr();
+        if is_send {
+            self.picus_module.inputs.push(addr_var.clone());
+        } else {
+            self.picus_module.outputs.push(addr_var.clone());
+        }
+        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[2], &addr_var));
+
+        for value in values.iter().skip(3) {
+            let value_var = fresh_picus_expr();
+            if is_send {
+                self.picus_module.inputs.push(value_var.clone());
+                self.picus_module
+                    .constraints
+                    .push(PicusConstraint::new_lt(value_var.clone(), PicusExpr::Const(255)));
+            } else {
+                self.picus_module.outputs.push(value_var.clone());
+            }
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &value_var));
+        }
     }
 
     fn get_main_vars_for_call(&mut self, message_values: &[PicusExpr]) -> Option<Vec<PicusAtom>> {
@@ -298,7 +390,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 assert!(v < Opcode::UNIMPL as u64);
                 spec_for(Opcode::try_from(v as u8).unwrap())
             }
-            _ => return None,
+            _ => panic!("Opcode should be constant"),
         };
         let target_chip = self.get_chip(opcode_spec.chip);
         let mut target_main_vals: Vec<PicusAtom> =
@@ -361,34 +453,45 @@ impl<'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'c
 
 impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder<'chips, A> {
     fn send(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
+        // Apply specialization first so opcode routing can see concrete values whenever
+        // selector assignments make them decidable.
+        let specialized_values: Vec<PicusExpr> =
+            message.values.iter().map(|expr| self.specialize_expr(expr)).collect();
+        let specialized_multiplicity = self.specialize_expr(&message.multiplicity);
         match message.kind {
             LookupKind::Byte => {
-                self.handle_byte_interaction(message.multiplicity, &message.values);
+                self.handle_byte_interaction(specialized_multiplicity, &specialized_values);
             }
             LookupKind::Memory => {
-                // TODO: fill in
+                self.handle_memory_interaction(specialized_multiplicity, &specialized_values, true);
             }
             LookupKind::Instruction => {
-                let opcode_spec = match message.values[6].clone() {
+                if self.submodule_mode == SubmoduleMode::Ignore {
+                    return;
+                }
+                let opcode_spec = match specialized_values[6].clone() {
                     PicusExpr::Const(v) => {
                         assert!(v < Opcode::UNIMPL as u64);
                         spec_for(Opcode::try_from(v as u8).unwrap())
                     }
-                    _ => panic!("Expected opcode val to be a constant: Got: {}", message.values[6]),
+                    _ => panic!(
+                        "Expected opcode val to be a constant after specialization: Got: {}",
+                        specialized_values[6]
+                    ),
                 };
                 let target_chip = self.get_chip(opcode_spec.chip);
-                let main_vars = self.get_main_vars_for_call(&message.values);
+                let main_vars = self.get_main_vars_for_call(&specialized_values);
                 if let Some(vars) = main_vars {
                     self.concrete_pending_tasks.push(ConcretePendingTask {
                         chip_name: target_chip.name(),
                         main_vars: vars,
-                        multiplicity: message.multiplicity,
+                        multiplicity: specialized_multiplicity,
                         selector: opcode_spec.selector.to_string(),
                     });
                 } else {
                     self.symbolic_pending_tasks.push(SymbolicPendingTask {
-                        selector: message.values[6].clone(),
-                        multiplicity: message.multiplicity,
+                        selector: specialized_values[6].clone(),
+                        multiplicity: specialized_multiplicity,
                     })
                 }
             }
@@ -399,12 +502,23 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
     fn receive(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
         // initialize another chip
         // call eval with builder?
+        let specialized_values: Vec<PicusExpr> =
+            message.values.iter().map(|expr| self.specialize_expr(expr)).collect();
+        let specialized_multiplicity = self.specialize_expr(&message.multiplicity);
         match message.kind {
             LookupKind::Instruction => {
-                self.handle_receive_instruction(message.multiplicity, &message.values);
+                if self.submodule_mode == SubmoduleMode::Ignore {
+                    self.picus_module.assume_deterministic.push(specialized_values[6].clone());
+                    return;
+                }
+                self.handle_receive_instruction(specialized_multiplicity, &specialized_values);
             }
             LookupKind::Memory => {
-                // TODO: fill in
+                self.handle_memory_interaction(
+                    specialized_multiplicity,
+                    &specialized_values,
+                    false,
+                );
             }
             _ => todo!("handle receive: {}", message.kind),
         }

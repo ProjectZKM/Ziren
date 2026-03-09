@@ -84,6 +84,14 @@ fn subst_expr(e: &PicusExpr, env: &BTreeMap<usize, u64>) -> PicusExpr {
     }
 }
 
+/// Partially evaluate one expression under `env`.
+///
+/// This is used during extraction when we want lookups (e.g. opcodes) to become
+/// concrete before routing logic runs.
+pub fn partial_evaluate_expr(expr: &PicusExpr, env: &BTreeMap<usize, u64>) -> PicusExpr {
+    subst_expr(expr, env)
+}
+
 // === Call substitution/simplification ===
 /// This function replaces variables in `call` with constants in `env`
 /// and then simplifies.

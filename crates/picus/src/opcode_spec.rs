@@ -71,6 +71,53 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
                 (Range { start: 15, end: 19 }, "c"),
             ],
         },
+        Opcode::SLTU => OpcodeSpec {
+            selector: "is_sltu",
+            chip: "Lt",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+            ],
+        },
+        Opcode::MUL => OpcodeSpec {
+            selector: "is_mul",
+            chip: "Mul",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+                (Range { start: 19, end: 22 }, "hi"),
+            ],
+        },
+        Opcode::MULT => OpcodeSpec {
+            selector: "is_mult",
+            chip: "Mul",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+                (Range { start: 19, end: 22 }, "hi"),
+            ],
+        },
+        Opcode::MULTU => OpcodeSpec {
+            selector: "is_multu",
+            chip: "Mul",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+                (Range { start: 19, end: 22 }, "hi"),
+            ],
+        },
         _ => panic!("Unimplemented opcode {kind:#?}"),
     }
 }

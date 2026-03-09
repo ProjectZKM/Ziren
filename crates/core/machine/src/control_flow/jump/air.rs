@@ -80,6 +80,8 @@ where
             local.op_a_range_checker,
             is_real.clone(),
         );
+        builder.slice_range_check_u8(&local.op_a_value.0, is_real.clone());
+
         // SAFETY: `is_real` is already checked to be boolean.
         // `local.next_pc`, `local.next_next_pc` are checked to a valid word when relevant.
         // This is due to the ADD ALU table checking all inputs and outputs are valid words.
