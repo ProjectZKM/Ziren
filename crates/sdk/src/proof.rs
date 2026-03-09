@@ -64,9 +64,14 @@ impl ZKMProofWithPublicValues {
         }
     }
 
-    /// For Plonk or Groth16 proofs, returns the proof in a byte encoding the onchain verifier
-    /// accepts. The bytes consist of the first four bytes of Plonk vkey hash followed by the
-    /// encoded proof, in a form optimized for onchain verification.
+    /// Returns the proof encoded as bytes.
+    ///
+    /// Encoding depends on the proof variant:
+    /// - For [`ZKMProof::Compressed`], returns a `bincode` serialization of the [`ZKMProof`] enum.
+    ///   This format is used for off-chain STARK verification (e.g. `zkm_verifier::StarkVerifier`).
+    /// - For [`ZKMProof::Plonk`] and [`ZKMProof::Groth16`], returns an onchain-friendly encoding:
+    ///   the first 4 bytes of the corresponding verifier/vkey hash followed by the decoded proof
+    ///   bytes.
     pub fn bytes(&self) -> Vec<u8> {
         match &self.proof {
             ZKMProof::Compressed(_) => {
@@ -94,7 +99,9 @@ impl ZKMProofWithPublicValues {
                     hex::decode(&groth16_proof.encoded_proof).expect("Invalid Groth16 proof");
                 [groth16_proof.groth16_vkey_hash[..4].to_vec(), proof_bytes].concat()
             }
-            _ => unimplemented!("only Stark, Plonk and Groth16 proofs are verifiable onchain"),
+            _ => unimplemented!(
+                "only Compressed (STARK), Plonk and Groth16 proofs are supported by bytes()"
+            ),
         }
     }
 }
