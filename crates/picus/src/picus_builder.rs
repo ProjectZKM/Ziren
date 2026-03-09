@@ -263,6 +263,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
             PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
         };
+        let u8_range = |var: &PicusExpr| PicusConstraint::new_leq(var.clone(), PicusExpr::Const(255));
         // handle pc constraints
         {
             // get the pc value
@@ -320,6 +321,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 self.picus_module.outputs.push(a_var.clone());
             }
             self.picus_module.constraints.push(eq_mul(&multiplicity, value, &a_var));
+            // Mirrors CPU's limb range check: crates/core/machine/src/cpu/air/register.rs
+            // (`builder.slice_range_check_u8(&local.op_a_access.access.value.0, local.is_real)`).
+            self.picus_module.constraints.push(u8_range(&a_var));
         }
         for value in values.iter().take(15).skip(11) {
             let b_var = fresh_picus_expr();

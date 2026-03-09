@@ -502,7 +502,7 @@ where
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
-        builder.when_not(local.hi_record_is_real).assert_word_zero(local.hi);
+        builder.when(local.is_mul).assert_word_zero(local.hi);
     }
 }
 
