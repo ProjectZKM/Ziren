@@ -263,7 +263,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
             PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
         };
-        let u8_range = |var: &PicusExpr| PicusConstraint::new_leq(var.clone(), PicusExpr::Const(255));
+        let u8_range =
+            |var: &PicusExpr| PicusConstraint::new_leq(var.clone(), PicusExpr::Const(255));
         // handle pc constraints
         {
             // get the pc value
