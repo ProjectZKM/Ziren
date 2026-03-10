@@ -104,6 +104,9 @@ where
         self.eval_maddsub(builder, local);
         self.eval_sext(builder, local);
 
+        builder
+            .when(local.is_sext + local.is_ext + local.is_teq)
+            .assert_word_zero(local.prev_a_value);
         builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[2]);
         builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[3]);
     }
@@ -134,6 +137,10 @@ impl MiscInstrsChip {
 
         // op_c can be 0 (for seb) and 1(for seh).
         builder.when(local.is_sext).assert_bool(local.op_c_value[0]);
+        builder.when(local.is_sext).assert_bool(sext_cols.is_seb);
+        builder.when(local.is_sext).assert_bool(sext_cols.is_seh);
+        builder.when(local.is_sext).assert_one(sext_cols.is_seh + sext_cols.is_seb);
+
         builder.when(local.is_sext).when(sext_cols.is_seb).assert_zero(local.op_c_value[0]);
         builder.when(local.is_sext).when(sext_cols.is_seh).assert_one(local.op_c_value[0]);
 
@@ -259,7 +266,7 @@ impl MiscInstrsChip {
         //    ror_val = rotate_right(op_a, lsb)
         //    srl_val = ror_val >> (msb - lsb + 1)
         //    sll_val = op_b << (31 - msb + lsb)
-        //    add_val = srl_val + sll_val
+        //    add_valƒ= srl_val + sll_val
         //    result = rotate_right(op_a, 31 - msb)
         {
             builder.send_alu(

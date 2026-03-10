@@ -405,7 +405,7 @@ where
                     builder.assert_eq(m[i].clone(), local.carry[i] * base + local.product[i]);
                 } else {
                     builder.assert_eq(
-                        local.product[i] + local.carry[i] * base - local.carry[i - 1],
+                        local.product[i] - local.carry[i - 1] + local.carry[i] * base,
                         m[i].clone(),
                     );
                 }

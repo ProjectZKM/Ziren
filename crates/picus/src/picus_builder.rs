@@ -24,6 +24,14 @@ pub enum SubmoduleMode {
     Submodule,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShrCarrySummaryMode {
+    /// Keep ShrCarry abstract as a module call.
+    AbstractModule,
+    /// Lower ShrCarry into explicit case-split constraints.
+    Precise,
+}
+
 /// Implementation `AirBuilder` which builds Picus programs
 #[derive(Clone)]
 pub struct PicusBuilder<'chips, A: MachineAir<Felt>> {
@@ -35,6 +43,7 @@ pub struct PicusBuilder<'chips, A: MachineAir<Felt>> {
     pub chips: &'chips [Chip<Felt, A>],
     pub extract_modularly: bool,
     pub submodule_mode: SubmoduleMode,
+    pub shr_carry_summary_mode: ShrCarrySummaryMode,
     /// Fixed assignments used to specialize expressions during extraction.
     /// This allows opcodes/selectors to fold to constants before dispatch logic.
     pub specialization_env: BTreeMap<usize, u64>,
@@ -77,6 +86,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         main_vars: Option<Vec<PicusAtom>>,
         specialization_env: Option<BTreeMap<usize, u64>>,
         submodule_mode: Option<SubmoduleMode>,
+        shr_carry_summary_mode: Option<ShrCarrySummaryMode>,
     ) -> Self {
         let width = chip_to_analyze.air.width();
         let specialization_env = specialization_env.unwrap_or_default();
@@ -112,6 +122,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             chips,
             extract_modularly: false,
             submodule_mode: submodule_mode.unwrap_or(SubmoduleMode::Inline),
+            shr_carry_summary_mode: shr_carry_summary_mode
+                .unwrap_or(ShrCarrySummaryMode::AbstractModule),
             specialization_env,
             concrete_pending_tasks: Vec::new(),
             symbolic_pending_tasks: Vec::new(),
@@ -123,6 +135,71 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             expr.clone()
         } else {
             partial_evaluate_expr(expr, &self.specialization_env)
+        }
+    }
+
+    /// Precise summary for ByteOpcode::ShrCarry.
+    ///
+    /// Inputs/outputs follow byte interaction ordering:
+    /// - values[1] = out
+    /// - values[2] = carry
+    /// - values[3] = input
+    /// - values[4] = num_bits_to_shift
+    ///
+    /// Semantics:
+    /// - num_bits_to_shift in [0, 7]
+    /// - out, carry are bytes
+    /// - if shift = 0: out = input and carry = 0
+    /// - if shift = i > 0: input = out * 2^i + carry and carry < 2^i
+    fn summarize_shr_carry_precise(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        let out = values[1].clone();
+        let carry = values[2].clone();
+        let input = values[3].clone();
+        let num_bits_to_shift = values[4].clone();
+
+        // Base range constraints.
+        self.picus_module.constraints.push(PicusConstraint::new_leq(
+            out.clone() * multiplicity.clone(),
+            PicusExpr::Const(255),
+        ));
+        self.picus_module.constraints.push(PicusConstraint::new_leq(
+            input.clone() * multiplicity.clone(),
+            PicusExpr::Const(255),
+        ));
+        self.picus_module.constraints.push(PicusConstraint::new_leq(
+            carry.clone() * multiplicity.clone(),
+            PicusExpr::Const(255),
+        ));
+        self.picus_module.constraints.push(PicusConstraint::new_leq(
+            num_bits_to_shift.clone() * multiplicity.clone(),
+            PicusExpr::Const(7),
+        ));
+
+        // Case split by shift amount i in [0, 7].
+        for i in 0..8u64 {
+            let cond =
+                PicusConstraint::new_equality(num_bits_to_shift.clone(), PicusExpr::Const(i));
+            let consequence = if i == 0 {
+                PicusConstraint::And(
+                    Box::new(PicusConstraint::new_equality(out.clone(), input.clone())),
+                    Box::new(PicusConstraint::new_equality(carry.clone(), PicusExpr::Const(0))),
+                )
+            } else {
+                let p2 = 1u64 << i;
+                PicusConstraint::And(
+                    Box::new(PicusConstraint::new_equality(
+                        input.clone(),
+                        out.clone() * PicusExpr::Const(p2) + carry.clone(),
+                    )),
+                    Box::new(PicusConstraint::new_lt(
+                        carry.clone() * multiplicity.clone(),
+                        PicusExpr::Const(p2),
+                    )),
+                )
+            };
+            self.picus_module
+                .constraints
+                .push(PicusConstraint::Implies(Box::new(cond), Box::new(consequence)));
         }
     }
 
@@ -167,34 +244,46 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 } else if v == (ByteOpcode::MSB as u64) {
                     let msb = values[1].clone();
                     let bytes = [values[3].clone(), values[4].clone()];
-                    let picus128_const = PicusExpr::Const(128);
+                    let picus127_const = PicusExpr::Const(127);
                     for byte in &bytes {
                         if let PicusExpr::Const(0) = byte {
                             continue;
                         }
                         let fresh_picus_var: PicusExpr = fresh_picus_expr();
-                        self.picus_module.constraints.push(PicusConstraint::new_lt(
-                            fresh_picus_var.clone(),
-                            picus128_const.clone(),
+                        self.picus_module.constraints.push(PicusConstraint::new_leq(
+                            fresh_picus_var.clone() * multiplicity.clone(),
+                            picus127_const.clone(),
                         ));
                         self.picus_module.constraints.push(PicusConstraint::Eq(Box::new(
-                            msb.clone() * (msb.clone() - PicusExpr::Const(1)),
+                            multiplicity.clone()
+                                * msb.clone()
+                                * (msb.clone() - PicusExpr::Const(1)),
                         )));
                         let decomp =
-                            byte.clone() - (msb.clone() * picus128_const.clone() + fresh_picus_var);
-                        self.picus_module.constraints.push(PicusConstraint::Eq(Box::new(decomp)));
+                            byte.clone() - (msb.clone() * PicusExpr::Const(128) + fresh_picus_var);
+                        self.picus_module
+                            .constraints
+                            .push(PicusConstraint::Eq(Box::new(multiplicity.clone() * decomp)));
                     }
                 } else if v == (ByteOpcode::ShrCarry as u64) {
-                    if !self.aux_modules.contains_key("ShrCarry") {
-                        let carry_module = PicusModule::build_empty("ShrCarry".to_string(), 2, 2);
-                        self.aux_modules.insert("ShrCarry".to_string(), carry_module);
+                    match self.shr_carry_summary_mode {
+                        ShrCarrySummaryMode::AbstractModule => {
+                            if !self.aux_modules.contains_key("ShrCarry") {
+                                let carry_module =
+                                    PicusModule::build_empty("ShrCarry".to_string(), 2, 2);
+                                self.aux_modules.insert("ShrCarry".to_string(), carry_module);
+                            }
+                            let shrcarry = PicusCall::new(
+                                "ShrCarry".to_string(),
+                                &[values[1].clone(), values[2].clone()],
+                                &[values[3].clone(), values[4].clone()],
+                            );
+                            self.picus_module.calls.push(shrcarry);
+                        }
+                        ShrCarrySummaryMode::Precise => {
+                            self.summarize_shr_carry_precise(multiplicity.clone(), values);
+                        }
                     }
-                    let shrcarry = PicusCall::new(
-                        "ShrCarry".to_string(),
-                        &[values[1].clone(), values[2].clone()],
-                        &[values[3].clone(), values[4].clone()],
-                    );
-                    self.picus_module.calls.push(shrcarry);
                 } else if v == (ByteOpcode::LTU as u64) {
                     let lt_const = PicusConstraint::new_lt(values[2].clone(), values[3].clone());
                     if let PicusExpr::Const(1) = values[1] {
@@ -361,6 +450,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
         }
+        println!("MEMORY MULTIPLICITY: {multiplicity}");
         assert!(values.len() >= 4, "Expected memory lookup to include addr + value limbs");
 
         let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
@@ -427,6 +517,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                     assert_eq!(colrange.1 - colrange.0, 1);
                     if let PicusExpr::Var(v) = message_values[col].clone() {
                         target_main_vals[colrange.0] = PicusAtom::Var(v);
+                    } else if let PicusExpr::Const(c) = message_values[col].clone() {
+                        target_main_vals[colrange.0] = PicusAtom::Const(c);
                     } else {
                         let fresh_var = fresh_picus_var_id();
                         self.picus_module.constraints.push(PicusConstraint::new_equality(

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
-use clap::{Parser, ValueHint};
+use clap::{Parser, ValueEnum, ValueHint};
 use p3_air::{Air, BaseAir};
 use zkm_core_machine::MipsAir;
 use zkm_picus::{
@@ -8,7 +8,7 @@ use zkm_picus::{
         initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusAtom,
         PicusConstraint, PicusExpr, PicusModule, PicusProgram,
     },
-    picus_builder::{PicusBuilder, SubmoduleMode},
+    picus_builder::{PicusBuilder, ShrCarrySummaryMode, SubmoduleMode},
 };
 use zkm_stark::{Chip, MachineAir, PicusInfo};
 
@@ -34,6 +34,25 @@ struct Args {
     /// selector-based partial evaluation.
     #[arg(long = "assume-selectors-deterministic", default_value_t = false)]
     pub assume_selectors_deterministic: bool,
+
+    /// How to summarize ByteOpcode::ShrCarry during extraction.
+    #[arg(long = "shrcarry-summary", value_enum, default_value_t = ShrCarrySummaryModeArg::Abstract)]
+    pub shrcarry_summary: ShrCarrySummaryModeArg,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum ShrCarrySummaryModeArg {
+    Abstract,
+    Precise,
+}
+
+impl From<ShrCarrySummaryModeArg> for ShrCarrySummaryMode {
+    fn from(value: ShrCarrySummaryModeArg) -> Self {
+        match value {
+            ShrCarrySummaryModeArg::Abstract => ShrCarrySummaryMode::AbstractModule,
+            ShrCarrySummaryModeArg::Precise => ShrCarrySummaryMode::Precise,
+        }
+    }
 }
 
 /// Analyze a single chip and process all its deferred sub-chip tasks.
@@ -44,6 +63,7 @@ fn analyze_chip<'chips, A>(
     picus_builder: Option<&mut PicusBuilder<'chips, A>>,
     specialization_env: Option<BTreeMap<usize, u64>>,
     submodule_mode: SubmoduleMode,
+    shr_carry_summary_mode: ShrCarrySummaryMode,
 ) -> (PicusModule, BTreeMap<String, PicusModule>)
 where
     A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder<'chips, A>>,
@@ -67,6 +87,7 @@ where
             None,
             specialization_env,
             Some(submodule_mode),
+            Some(shr_carry_summary_mode),
         )
     };
     chip.air.eval(builder);
@@ -102,6 +123,7 @@ where
             Some(task.main_vars.clone()),
             Some(env.clone()),
             Some(SubmoduleMode::Inline),
+            Some(shr_carry_summary_mode),
         );
 
         let (mut sub_module, aux_modules) = analyze_chip(
@@ -110,6 +132,7 @@ where
             Some(&mut sub_builder),
             None,
             SubmoduleMode::Inline,
+            shr_carry_summary_mode,
         );
         // Merge submodules
         builder.aux_modules.extend(aux_modules.into_iter());
@@ -156,6 +179,7 @@ fn build_selector_env(
 
 fn main() {
     let args = Args::parse();
+    let shr_carry_summary_mode: ShrCarrySummaryMode = args.shrcarry_summary.into();
 
     if args.chip.is_none() {
         panic!("Chip name must be provided!");
@@ -196,12 +220,20 @@ fn main() {
 
     println!("Applying selector-specialized extraction.....");
     println!("selector indices: {:?}", picus_info.selector_indices);
+    println!("Name mapping: {:?}", picus_info.col_to_name);
     if picus_info.selector_indices.is_empty() {
         // No selector columns: still run one extraction pass (is_real specialized if present).
         let env = build_selector_env(&picus_info, None);
         initialize_fresh_var_ctr(fresh_var_ctr_base);
         let (base_module, mut aux_modules) =
-            analyze_chip(chip, &chips, None, Some(env.clone()), SubmoduleMode::Inline);
+            analyze_chip(
+                chip,
+                &chips,
+                None,
+                Some(env.clone()),
+                SubmoduleMode::Inline,
+                shr_carry_summary_mode,
+            );
         all_aux_modules.append(&mut aux_modules);
         let updated_module = base_module.partial_eval(&env);
         selector_modules.insert(updated_module.name.clone(), updated_module);
@@ -210,7 +242,14 @@ fn main() {
             let env = build_selector_env(&picus_info, Some(*selector_col));
             initialize_fresh_var_ctr(fresh_var_ctr_base);
             let (base_module, mut aux_modules) =
-                analyze_chip(chip, &chips, None, Some(env.clone()), SubmoduleMode::Inline);
+                analyze_chip(
+                    chip,
+                    &chips,
+                    None,
+                    Some(env.clone()),
+                    SubmoduleMode::Inline,
+                    shr_carry_summary_mode,
+                );
             all_aux_modules.append(&mut aux_modules);
             let updated_module = base_module.partial_eval(&env);
             selector_modules.insert(updated_module.name.clone(), updated_module);
@@ -224,7 +263,14 @@ fn main() {
     let top_env = build_selector_env(&picus_info, None);
     initialize_fresh_var_ctr(fresh_var_ctr_base);
     let (top_base_module, mut top_aux_modules) =
-        analyze_chip(chip, &chips, None, Some(top_env.clone()), SubmoduleMode::Ignore);
+        analyze_chip(
+            chip,
+            &chips,
+            None,
+            Some(top_env.clone()),
+            SubmoduleMode::Ignore,
+            shr_carry_summary_mode,
+        );
     picus_program.add_modules(&mut top_aux_modules);
     let mut top_module = top_base_module.partial_eval(&top_env);
     top_module.name = "top".to_string();

@@ -11,12 +11,12 @@ pub use misc_specific::*;
 pub use sext::*;
 
 use std::mem::size_of;
-use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{PicusInfo, Word};
 
 pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MiscInstrColumns<T: Copy> {
     /// The shard number.
@@ -39,12 +39,20 @@ pub struct MiscInstrColumns<T: Copy> {
     pub misc_specific_columns: MiscSpecificCols<T>,
 
     /// Misc Instruction Selectors.
+    #[picus(selector)]
     pub is_sext: T,
+    #[picus(selector)]
     pub is_ins: T,
+    #[picus(selector)]
     pub is_ext: T,
+    #[picus(selector)]
     pub is_maddu: T,
+    #[picus(selector)]
     pub is_msubu: T,
+    #[picus(selector)]
     pub is_madd: T,
+    #[picus(selector)]
     pub is_msub: T,
+    #[picus(selector)]
     pub is_teq: T,
 }

@@ -60,6 +60,29 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
                 (Range { start: 15, end: 19 }, "c"),
             ],
         },
+        Opcode::SLL => OpcodeSpec {
+            // ShiftLeft has no opcode selector column; use is_real for concrete dispatch.
+            selector: "is_real",
+            chip: "ShiftLeft",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+            ],
+        },
+        Opcode::ROR => OpcodeSpec {
+            selector: "is_ror",
+            chip: "ShiftRight",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+            ],
+        },
         Opcode::SLT => OpcodeSpec {
             selector: "is_slt",
             chip: "Lt",
@@ -91,7 +114,8 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
                 (Range { start: 7, end: 11 }, "a"),
                 (Range { start: 11, end: 15 }, "b"),
                 (Range { start: 15, end: 19 }, "c"),
-                (Range { start: 19, end: 22 }, "hi"),
+                (Range { start: 19, end: 23 }, "hi"),
+                (Single(25), "hi_record_is_real"),
             ],
         },
         Opcode::MULT => OpcodeSpec {
@@ -103,7 +127,8 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
                 (Range { start: 7, end: 11 }, "a"),
                 (Range { start: 11, end: 15 }, "b"),
                 (Range { start: 15, end: 19 }, "c"),
-                (Range { start: 19, end: 22 }, "hi"),
+                (Range { start: 19, end: 23 }, "hi"),
+                (Single(25), "hi_record_is_real"),
             ],
         },
         Opcode::MULTU => OpcodeSpec {
@@ -115,7 +140,8 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
                 (Range { start: 7, end: 11 }, "a"),
                 (Range { start: 11, end: 15 }, "b"),
                 (Range { start: 15, end: 19 }, "c"),
-                (Range { start: 19, end: 22 }, "hi"),
+                (Range { start: 19, end: 23 }, "hi"),
+                (Single(25), "hi_record_is_real"),
             ],
         },
         _ => panic!("Unimplemented opcode {kind:#?}"),
