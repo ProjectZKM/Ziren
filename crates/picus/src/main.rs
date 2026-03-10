@@ -225,15 +225,14 @@ fn main() {
         // No selector columns: still run one extraction pass (is_real specialized if present).
         let env = build_selector_env(&picus_info, None);
         initialize_fresh_var_ctr(fresh_var_ctr_base);
-        let (base_module, mut aux_modules) =
-            analyze_chip(
-                chip,
-                &chips,
-                None,
-                Some(env.clone()),
-                SubmoduleMode::Inline,
-                shr_carry_summary_mode,
-            );
+        let (base_module, mut aux_modules) = analyze_chip(
+            chip,
+            &chips,
+            None,
+            Some(env.clone()),
+            SubmoduleMode::Inline,
+            shr_carry_summary_mode,
+        );
         all_aux_modules.append(&mut aux_modules);
         let updated_module = base_module.partial_eval(&env);
         selector_modules.insert(updated_module.name.clone(), updated_module);
@@ -241,15 +240,14 @@ fn main() {
         for (selector_col, _) in &picus_info.selector_indices {
             let env = build_selector_env(&picus_info, Some(*selector_col));
             initialize_fresh_var_ctr(fresh_var_ctr_base);
-            let (base_module, mut aux_modules) =
-                analyze_chip(
-                    chip,
-                    &chips,
-                    None,
-                    Some(env.clone()),
-                    SubmoduleMode::Inline,
-                    shr_carry_summary_mode,
-                );
+            let (base_module, mut aux_modules) = analyze_chip(
+                chip,
+                &chips,
+                None,
+                Some(env.clone()),
+                SubmoduleMode::Inline,
+                shr_carry_summary_mode,
+            );
             all_aux_modules.append(&mut aux_modules);
             let updated_module = base_module.partial_eval(&env);
             selector_modules.insert(updated_module.name.clone(), updated_module);
@@ -262,15 +260,14 @@ fn main() {
     // This keeps top focused on selector determinism while still retaining chip-local constraints.
     let top_env = build_selector_env(&picus_info, None);
     initialize_fresh_var_ctr(fresh_var_ctr_base);
-    let (top_base_module, mut top_aux_modules) =
-        analyze_chip(
-            chip,
-            &chips,
-            None,
-            Some(top_env.clone()),
-            SubmoduleMode::Ignore,
-            shr_carry_summary_mode,
-        );
+    let (top_base_module, mut top_aux_modules) = analyze_chip(
+        chip,
+        &chips,
+        None,
+        Some(top_env.clone()),
+        SubmoduleMode::Ignore,
+        shr_carry_summary_mode,
+    );
     picus_program.add_modules(&mut top_aux_modules);
     let mut top_module = top_base_module.partial_eval(&top_env);
     top_module.name = "top".to_string();
