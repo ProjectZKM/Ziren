@@ -1,6 +1,7 @@
 use crate::events::{AES128EncryptEvent, PrecompileEvent, AES_128_BLOCK_U32S};
 use crate::syscalls::precompiles::aes128::utils::mul_md5;
 use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
+use crate::ExecutionError;
 
 pub(crate) struct AES128EncryptSyscall;
 
@@ -46,7 +47,7 @@ impl Syscall for AES128EncryptSyscall {
         syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>, ExecutionError> {
         let start_clk = rt.clk;
         let block_ptr = arg1;
         let key_ptr = arg2;
@@ -159,7 +160,7 @@ impl Syscall for AES128EncryptSyscall {
         let aes128_syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), arg1, arg2);
         rt.add_precompile_event(syscall_code, aes128_syscall_event, aes128_event);
-        None
+        Ok(None)
     }
 }
 

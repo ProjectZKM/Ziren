@@ -3,6 +3,7 @@ use std::borrow::BorrowMut;
 use super::{columns::NUM_AES128_ENCRYPTION_COLS, AES128EncryptChip};
 use crate::operations::round_key::ROUND_CONST;
 use crate::syscall::precompiles::aes128_encrypt::columns::AES128EncryptionCols;
+use crate::CoreChipError;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;
@@ -21,12 +22,17 @@ use zkm_stark::air::MachineAir;
 impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
     type Record = ExecutionRecord;
     type Program = Program;
+    type Error = CoreChipError;
 
     fn name(&self) -> String {
         "Aes128Encrypt".to_string()
     }
 
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
+    fn generate_dependencies(
+        &self,
+        input: &Self::Record,
+        output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
         let events = input.get_precompile_events(SyscallCode::AES128_ENCRYPT);
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
@@ -48,13 +54,14 @@ impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
             .collect::<Vec<_>>();
 
         output.add_byte_lookup_events_from_maps(blu_batches.iter().collect_vec());
+        Ok(())
     }
 
     fn generate_trace(
         &self,
         input: &Self::Record,
         _output: &mut Self::Record,
-    ) -> RowMajorMatrix<F> {
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let rows = Vec::new();
         log::info!("generate trace");
 
@@ -74,10 +81,10 @@ impl<F: PrimeField32> MachineAir<F> for AES128EncryptChip {
             let row = [F::ZERO; NUM_AES128_ENCRYPTION_COLS];
             rows.push(row);
         }
-        RowMajorMatrix::new(
+        Ok(RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_AES128_ENCRYPTION_COLS,
-        )
+        ))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {

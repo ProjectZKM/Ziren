@@ -69,6 +69,7 @@ impl ZKMProverOpts {
         opts.core_opts.split_opts.sha_extend /= divisor;
         opts.core_opts.split_opts.sha_compress /= divisor;
         opts.core_opts.split_opts.boolean_circuit_garble /= divisor;
+        opts.core_opts.split_opts.aes128_encrypt /= divisor;
         opts.core_opts.split_opts.memory /= divisor;
 
         opts.recursion_opts.shard_batch_size = 2;
@@ -177,6 +178,7 @@ impl Default for ZKMCoreOpts {
         opts.split_opts.sha_extend /= divisor;
         opts.split_opts.sha_compress /= divisor;
         opts.split_opts.boolean_circuit_garble /= divisor;
+        opts.split_opts.aes128_encrypt /= divisor;
         opts.split_opts.memory /= divisor;
 
         opts
@@ -264,7 +266,6 @@ impl SplitOpts {
             sha_extend: 32 * deferred_split_threshold / 48,
             sha_compress: 32 * deferred_split_threshold / 80,
             aes128_encrypt: 32 * deferred_split_threshold / 11,
-            aes128_encrypt: 8 * deferred_split_threshold / 11,
             boolean_circuit_garble: deferred_split_threshold / 8,
             memory: 64 * deferred_split_threshold,
             combine_memory_threshold: 1 << 17,

@@ -172,4 +172,4 @@ pub const POSEIDON2_PERMUTE: u32 = 0x00_01_00_30;
 pub const BOOLEAN_CIRCUIT_GARBLE: u32 = 0x00_01_00_31;
 
 /// Executes the `AES128_ENCRYPT` precompile.
-pub const AES128_ENCRYPT: u32 = 0x01_01_00_32;
+pub const AES128_ENCRYPT: u32 = 0x0101_0032;

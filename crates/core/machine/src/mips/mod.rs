@@ -1,9 +1,9 @@
-use crate::syscall::precompiles::boolean_circuit_garble::BooleanCircuitGarbleChip;
 use crate::{
     global::GlobalChip,
     memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     syscall::precompiles::{
         aes128_encrypt::AES128EncryptChip,
+        boolean_circuit_garble::BooleanCircuitGarbleChip,
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
     },

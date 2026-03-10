@@ -44,7 +44,7 @@ pub enum MipsAirId {
     /// The Poseidon2 Permute chip
     Poseidon2Permute = 46,
     /// The AES-128 Encrypt chip
-    Aes128Encrypt = 49,
+    Aes128Encrypt = 51,
     /// The Keccak sponge chip.
     KeccakSponge = 48,
     /// The bn254 add assign chip.

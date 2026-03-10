@@ -186,7 +186,7 @@ pub enum SyscallCode {
     SYS_LINUX = 4000, // not real syscall, used for represent all linux syscalls
 
     /// Executes the `AES128_ENCRYPT` precompile.
-    AES128_ENCRYPT = 0x01_01_00_31,
+    AES128_ENCRYPT = 0x0101_0032,
 
     UNIMPLEMENTED = 0xFF_FF_FF_FF,
 }
@@ -209,7 +209,7 @@ impl SyscallCode {
             0x01_01_00_07 => SyscallCode::ED_ADD,
             0x00_01_00_08 => SyscallCode::ED_DECOMPRESS,
             0x01_01_00_09 => SyscallCode::KECCAK_SPONGE,
-            0x01_01_00_31 => SyscallCode::AES128_ENCRYPT,
+            0x0101_0032 => SyscallCode::AES128_ENCRYPT,
             0x01_01_00_0A => SyscallCode::SECP256K1_ADD,
             0x00_01_00_0B => SyscallCode::SECP256K1_DOUBLE,
             0x00_01_00_0C => SyscallCode::SECP256K1_DECOMPRESS,
