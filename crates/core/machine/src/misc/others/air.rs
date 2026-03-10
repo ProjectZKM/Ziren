@@ -266,7 +266,7 @@ impl MiscInstrsChip {
         //    ror_val = rotate_right(op_a, lsb)
         //    srl_val = ror_val >> (msb - lsb + 1)
         //    sll_val = op_b << (31 - msb + lsb)
-        //    add_valƒ= srl_val + sll_val
+        //    add_val = srl_val + sll_val
         //    result = rotate_right(op_a, 31 - msb)
         {
             builder.send_alu(
