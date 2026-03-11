@@ -71,7 +71,10 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
+            // TEQ is a read-only instruction that must not modify register A.
+            // Setting op_a_immutable ensures the CPU constrains op_a's new value
+            // to equal its previous value, preventing malicious register writes.
+            local.is_teq,
             is_rw_a.clone(),
             is_check_memory.clone(),
             AB::Expr::zero(),
@@ -91,7 +94,8 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
+            // TEQ: op_a_immutable (see comment above).
+            local.is_teq,
             is_rw_a,
             AB::Expr::zero(),
             AB::Expr::zero(),

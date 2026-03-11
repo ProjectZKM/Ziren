@@ -5,7 +5,7 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     syscalls::SyscallCode,
     ByteOpcode::{self, U16Range},
-    ExecutionRecord, Instruction, Program,
+    ExecutionRecord, Instruction, Opcode, Program,
 };
 use zkm_stark::air::MachineAir;
 
@@ -132,9 +132,12 @@ impl CpuChip {
         cols.next_next_pc = F::from_canonical_u32(event.next_next_pc);
         cols.instruction.populate(instruction);
 
+        // TEQ is a read-only instruction: it compares two registers and traps if equal,
+        // but must not modify register A. Mark it immutable to prevent register writes.
         cols.op_a_immutable = F::from_bool(
             instruction.is_memory_store_instruction_except_sc()
-                || instruction.is_branch_instruction(),
+                || instruction.is_branch_instruction()
+                || instruction.opcode == Opcode::TEQ,
         );
 
         cols.is_rw_a = F::from_bool(instruction.is_rw_a_instruction());
