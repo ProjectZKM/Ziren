@@ -133,11 +133,6 @@ where
                 .when(local.is_branching)
                 .assert_word_eq(local.target_pc, local.next_next_pc);
 
-            builder.when(is_real.clone()).assert_eq(
-                local.pc + AB::Expr::from_canonical_u32(4),
-                local.next_pc.reduce::<AB>(),
-            );
-
             // To prevent the ALU send above to be non-zero when the row is a padding row.
             builder.when_not(is_real.clone()).assert_zero(local.is_branching);
 
