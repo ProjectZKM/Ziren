@@ -71,7 +71,7 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
+            local.is_teq,
             is_rw_a.clone(),
             is_check_memory.clone(),
             AB::Expr::zero(),
