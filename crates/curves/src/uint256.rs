@@ -21,7 +21,7 @@ impl FieldParameters for U256Field {
     /// A rough witness-offset estimate given the size of the limbs and the size of the field.
     const WITNESS_OFFSET: usize = 1usize << 14;
 
-    /// The modulus of Uint235 is 2^256.
+    /// The modulus of U256 is 2^256.
     fn modulus() -> BigUint {
         BigUint::one() << 256
     }
