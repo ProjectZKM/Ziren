@@ -1,6 +1,8 @@
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
 
+use crate::operations::IsEqualWordOperation;
+
 pub const NUM_SEXT_COLS: usize = size_of::<SextCols<u8>>();
 
 /// The column layout for branching.
@@ -14,7 +16,7 @@ pub struct SextCols<T> {
     pub sig_byte: T,
 
     /// Indicator whether operand a equals operand b. Used by teq
-    pub a_eq_b: T,
+    pub a_eq_b: IsEqualWordOperation<T>,
 
     /// SEB/SEH Instruction Selectors.
     pub is_seb: T,

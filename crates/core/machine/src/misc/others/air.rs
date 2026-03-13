@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use crate::memory::MemoryCols;
+use crate::{memory::MemoryCols, operations::IsEqualWordOperation};
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
@@ -102,7 +102,7 @@ where
         self.eval_ext(builder, local);
         self.eval_ins(builder, local);
         self.eval_maddsub(builder, local);
-        self.eval_sext(builder, local);
+        self.eval_sext(builder, local, &local.op_a_value, &local.op_b_value);
 
         builder
             .when(local.is_sext + local.is_ext + local.is_teq)
@@ -117,14 +117,23 @@ impl MiscInstrsChip {
         &self,
         builder: &mut AB,
         local: &MiscInstrColumns<AB::Var>,
+        a: &Word<AB::Var>, // to check a == b in teq
+        b: &Word<AB::Var>, // to check a == b in teq
     ) {
+        let local: &MiscInstrColumns<AB::Var> = (*local).borrow();
         let sext_cols = local.misc_specific_columns.sext();
 
-        builder
-            .when(local.is_teq * sext_cols.a_eq_b)
-            .assert_word_eq(local.op_a_value, local.op_b_value);
-
-        builder.when(local.is_teq).assert_zero(sext_cols.a_eq_b);
+        // Check that a == b when `is_teq` is enabled
+        IsEqualWordOperation::<AB::F>::eval(
+            builder,
+            a.map(|x| x.into()),
+            b.map(|x| x.into()),
+            sext_cols.a_eq_b,
+            local.is_teq.into(),
+        );
+        let a_eq_b = sext_cols.a_eq_b.is_diff_zero.result;
+        builder.when(local.is_teq * a_eq_b).assert_word_eq(local.op_a_value, local.op_b_value);
+        builder.when(local.is_teq).assert_zero(a_eq_b);
 
         // most_sig_bit is bit 7 of sig_byte.
         builder.send_byte(
