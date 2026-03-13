@@ -133,8 +133,7 @@ impl MiscInstrsChip {
         };
         sext_cols.most_sig_bit = F::from_canonical_u16(sig_bit);
         sext_cols.sig_byte = F::from_canonical_u8(sig_byte);
-
-        sext_cols.a_eq_b = F::from_bool(event.b == event.a);
+        sext_cols.a_eq_b.populate(event.a, event.b);
 
         if matches!(event.opcode, Opcode::SEXT) {
             blu.add_byte_lookup_event(ByteLookupEvent {

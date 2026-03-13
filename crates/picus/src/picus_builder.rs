@@ -138,6 +138,10 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
     }
 
+    fn is_selector_module_builder(&self) -> bool {
+        self.submodule_mode == SubmoduleMode::Ignore
+    }
+
     /// Precise summary for ByteOpcode::ShrCarry.
     ///
     /// Inputs/outputs follow byte interaction ordering:
@@ -201,6 +205,44 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 .constraints
                 .push(PicusConstraint::Implies(Box::new(cond), Box::new(consequence)));
         }
+    }
+
+    fn is_default_bitwise_byte_opcode(opcode: u64) -> bool {
+        matches!(
+            opcode,
+            x if x == ByteOpcode::AND as u64
+                || x == ByteOpcode::OR as u64
+                || x == ByteOpcode::XOR as u64
+                || x == ByteOpcode::NOR as u64
+        )
+    }
+
+    fn add_default_bitwise_byte_call(&mut self, values: &[PicusExpr]) {
+        let byte_mod_name = "byte_interaction_mod".to_string();
+        if !self.aux_modules.contains_key(&byte_mod_name) {
+            let byte_mod = PicusModule::build_empty(byte_mod_name.clone(), 2, 1);
+            self.aux_modules.insert(byte_mod_name.clone(), byte_mod);
+        }
+        assert!(values.len() == 5);
+        self.picus_module.calls.push(PicusCall::new(byte_mod_name, &values[1..2], &values[3..5]));
+    }
+
+    fn try_add_and_127_optimization(&mut self, values: &[PicusExpr]) -> bool {
+        if !matches!(values[0], PicusExpr::Const(v) if v == ByteOpcode::AND as u64) {
+            return false;
+        }
+        if !matches!(values[4], PicusExpr::Const(127)) {
+            return false;
+        }
+
+        let var_hi = fresh_picus_expr();
+        self.picus_module.constraints.push(PicusConstraint::new_lt(values[1].clone(), 128.into()));
+        self.picus_module.constraints.push(PicusConstraint::new_bit(var_hi.clone()));
+        self.picus_module.constraints.push(PicusConstraint::new_equality(
+            values[3].clone(),
+            var_hi * 128 + values[1].clone(),
+        ));
+        true
     }
 
     /// Gets a chip by name or panics if no chip is found. Kept as a slice since the number of chips is small
@@ -296,38 +338,25 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             bit_const,
                         ]);
                     }
-                } else if v == (ByteOpcode::AND as u64) {
-                    if let PicusExpr::Const(127) = values[4] {
-                        let var_hi = fresh_picus_expr();
-                        self.picus_module
-                            .constraints
-                            .push(PicusConstraint::new_lt(values[1].clone(), 128.into()));
-                        self.picus_module
-                            .constraints
-                            .push(PicusConstraint::new_bit(var_hi.clone()));
-                        self.picus_module.constraints.push(PicusConstraint::new_equality(
-                            values[3].clone(),
-                            var_hi * 128 + values[1].clone(),
-                        ));
-                    }
-                } else {
-                    panic!("Unhandled byte interaction")
+                } else if Self::is_default_bitwise_byte_opcode(v)
+                    && !self.try_add_and_127_optimization(values)
+                {
+                    self.add_default_bitwise_byte_call(values);
                 }
             }
             // TODO: It might be fine if the first argument isn't a constant. We need to multiply the values
             // in the interaction with the multiplicities
             _ => {
-                let byte_mod_name = "byte_interaction_mod".to_string();
-                if !self.aux_modules.contains_key(&byte_mod_name) {
-                    let byte_mod = PicusModule::build_empty(byte_mod_name.clone(), 2, 1);
-                    self.aux_modules.insert(byte_mod_name.clone(), byte_mod);
+                // if the interaction isn't constant then the only case that should happen
+                // is if we are building the selector module where our selectors are variables and not
+                // constants. As such, we don't care about these interactions since all the selector constraints
+                // are not interaction dependent.
+                if !self.is_selector_module_builder() {
+                    panic!(
+                        "byte lookup first argument is not a constant {:?}!",
+                        self.picus_module.name
+                    )
                 }
-                assert!(values.len() == 5);
-                self.picus_module.calls.push(PicusCall::new(
-                    byte_mod_name.clone(),
-                    &values[1..2],
-                    &values[3..5],
-                ));
             }
         }
     }
@@ -450,7 +479,6 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
         }
-        println!("MEMORY MULTIPLICITY: {multiplicity}");
         assert!(values.len() >= 4, "Expected memory lookup to include addr + value limbs");
 
         let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {

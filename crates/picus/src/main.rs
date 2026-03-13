@@ -220,7 +220,6 @@ fn main() {
 
     println!("Applying selector-specialized extraction.....");
     println!("selector indices: {:?}", picus_info.selector_indices);
-    println!("Name mapping: {:?}", picus_info.col_to_name);
     if picus_info.selector_indices.is_empty() {
         // No selector columns: still run one extraction pass (is_real specialized if present).
         let env = build_selector_env(&picus_info, None);
