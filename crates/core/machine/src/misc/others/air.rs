@@ -120,7 +120,7 @@ impl MiscInstrsChip {
     ) {
         let sext_cols = local.misc_specific_columns.sext();
 
-        // Check that a == b when `is_teq` is enabled
+        // Check that a != b when `is_teq` is enabled
         IsEqualWordOperation::<AB::F>::eval(
             builder,
             local.op_a_value.map(|x| x.into()),
