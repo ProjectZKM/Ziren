@@ -338,10 +338,10 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             bit_const,
                         ]);
                     }
-                } else if Self::is_default_bitwise_byte_opcode(v) {
-                    if !self.try_add_and_127_optimization(values) {
-                        self.add_default_bitwise_byte_call(values);
-                    }
+                } else if Self::is_default_bitwise_byte_opcode(v)
+                    && !self.try_add_and_127_optimization(values)
+                {
+                    self.add_default_bitwise_byte_call(values);
                 }
             }
             // TODO: It might be fine if the first argument isn't a constant. We need to multiply the values
