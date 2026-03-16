@@ -103,6 +103,13 @@ pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
         builder: &mut Builder<C>,
         public_values: RecursionPublicValues<Felt<C::F>>,
     );
+
+    fn commit_recursion_public_values_and_vk(
+        _builder: &mut Builder<C>,
+        _public_values: RecursionPublicValues<Felt<C::F>>,
+        _part_vk_hash: &Bn254Fr,
+    ) {
+    }
 }
 
 pub trait CircuitConfig: Config {
@@ -620,6 +627,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
         builder: &mut Builder<C>,
         public_values: RecursionPublicValues<Felt<<C>::F>>,
     ) {
+        println!("------------------commit_recursion_public_values------------------");
         let committed_values_digest_bytes_felts: [Felt<_>; 32] =
             words_to_bytes(&public_values.committed_value_digest).try_into().unwrap();
         let committed_values_digest_bytes: Var<_> =
@@ -627,6 +635,24 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
         builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);
 
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
+        builder.commit_vkey_hash_circuit(vkey_hash);
+    }
+
+    fn commit_recursion_public_values_and_vk(
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<<C>::F>>,
+        part_vk_hash: &Bn254Fr,
+    ) {
+        println!("------------------commit_recursion_public_values_and_vk------------------");
+        let committed_values_digest_bytes_felts: [Felt<_>; 32] =
+            words_to_bytes(&public_values.committed_value_digest).try_into().unwrap();
+        let committed_values_digest_bytes: Var<_> =
+            felt_bytes_to_bn254_var(builder, &committed_values_digest_bytes_felts);
+        builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);
+
+        let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
+        let part_vk_hash: Var<_> = builder.constant(*part_vk_hash);
+        let vkey_hash = builder.eval(vkey_hash + part_vk_hash);
         builder.commit_vkey_hash_circuit(vkey_hash);
     }
 }

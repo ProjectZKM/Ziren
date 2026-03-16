@@ -17,7 +17,10 @@ use zkm_recursion_circuit::machine::{
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
 use thiserror::Error;
-use zkm_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
+use zkm_stark::{
+    PartStarkVerifyingKey, ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey,
+    DIGEST_SIZE,
+};
 
 use crate::{
     utils::{koalabears_to_bn254, words_to_bytes_be},
@@ -104,6 +107,42 @@ where
             .collect::<Vec<_>>()
             .try_into()
             .unwrap()
+    }
+}
+
+impl<SC: StarkGenericConfig<Val = KoalaBear, Domain = TwoAdicMultiplicativeCoset<KoalaBear>>>
+    HashableKey for PartStarkVerifyingKey<SC>
+where
+    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[KoalaBear; DIGEST_SIZE]>,
+{
+    fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
+        let num_inputs = DIGEST_SIZE + 1;
+        let mut inputs = Vec::with_capacity(num_inputs);
+        inputs.extend(self.commit.as_ref());
+        inputs.push(self.pc_start);
+        poseidon2_hash(inputs)
+    }
+
+    fn hash_u32(&self) -> [u32; 8] {
+        self.hash_koalabear()
+            .into_iter()
+            .map(|n| n.as_canonical_u32())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    }
+
+    fn hash_bn254(&self) -> Bn254Fr {
+        koalabears_to_bn254(&self.hash_koalabear())
+    }
+
+    fn bytes32(&self) -> String {
+        let vkey_digest_bn254 = self.hash_bn254();
+        std::format!("0x{:0>64}", vkey_digest_bn254.as_canonical_biguint().to_str_radix(16))
+    }
+
+    fn hash_bytes(&self) -> [u8; DIGEST_SIZE * 4] {
+        words_to_bytes_be(&self.hash_u32())
     }
 }
 

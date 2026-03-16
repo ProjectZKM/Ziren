@@ -103,6 +103,16 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     pub chip_ordering: HashMap<String, usize>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(serialize = "Dom<SC>: Serialize"))]
+#[serde(bound(deserialize = "Dom<SC>: DeserializeOwned"))]
+pub struct PartStarkVerifyingKey<SC: StarkGenericConfig> {
+    /// The commitment to the preprocessed traces.
+    pub commit: Com<SC>,
+    /// The start pc of the program.
+    pub pc_start: Val<SC>,
+}
+
 impl<SC: StarkGenericConfig> StarkVerifyingKey<SC> {
     /// Observes the values of the verifying key into the challenger.
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
@@ -113,11 +123,21 @@ impl<SC: StarkGenericConfig> StarkVerifyingKey<SC> {
         // Observe the padding.
         challenger.observe(Val::<SC>::ZERO);
     }
+
+    pub fn part_vk(&self) -> PartStarkVerifyingKey<SC> {
+        PartStarkVerifyingKey { commit: self.commit.clone(), pc_start: self.pc_start }
+    }
 }
 
 impl<SC: StarkGenericConfig> Debug for StarkVerifyingKey<SC> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VerifyingKey").finish()
+    }
+}
+
+impl<SC: StarkGenericConfig> Debug for PartStarkVerifyingKey<SC> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PartVerifyingKey").finish()
     }
 }
 

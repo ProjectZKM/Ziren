@@ -14,6 +14,12 @@ lazy_static! {
 lazy_static! {
     /// The Groth16 verifying key for this Ziren version.
     pub static ref GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../bn254-vk/groth16_vk.bin");
+
+    /// The Groth16 verifying key.
+    pub static ref COMMON_GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../bn254-vk/common_groth16_vk.bin");
+
+    /// The partial STARK verifying key.
+    pub static ref PART_STARK_VK_BYTES: &'static [u8] = include_bytes!("../bn254-vk/part_stark_vk.bin");
 }
 
 mod constants;

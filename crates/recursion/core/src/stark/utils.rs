@@ -12,3 +12,19 @@ pub fn zkm_dev_mode() -> bool {
     }
     enabled
 }
+
+/// Returns whether the `ZKM_COMMON` environment variable is enabled or disabled.
+///
+/// This variable controls whether to use groth16 circuit that is not affected by Ziren upgrade,
+/// that is, to verify `vk_commitment` and `pc_start` in the circuit, but to place them in public
+/// inputs for verification.
+///
+/// By default, the variable is disabled.
+pub fn zkm_common_mode() -> bool {
+    let value = std::env::var("ZKM_COMMON").unwrap_or_else(|_| "false".to_string());
+    let enabled = value == "1" || value.to_lowercase() == "true";
+    if enabled {
+        tracing::warn!("ZKM_COMMON environment variable is enabled.");
+    }
+    enabled
+}

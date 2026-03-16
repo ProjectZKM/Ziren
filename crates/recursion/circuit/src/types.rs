@@ -23,6 +23,15 @@ pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriC
 }
 
 #[derive(Clone)]
+pub struct PartVerifyingKeyVariable<
+    C: CircuitConfig<F = SC::Val>,
+    SC: KoalaBearFriConfigVariable<C>,
+> {
+    pub commitment: SC::DigestVariable,
+    pub pc_start: Felt<C::F>,
+}
+
+#[derive(Clone)]
 pub struct FriProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub commit_phase_commits: Vec<H::DigestVariable>,
     pub query_proofs: Vec<FriQueryProofVariable<C, H>>,

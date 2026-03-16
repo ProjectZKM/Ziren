@@ -25,6 +25,12 @@ pub fn groth16_circuit_artifacts_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16").join(ZKM_CIRCUIT_VERSION)
 }
 
+/// The directory where the groth16 circuit artifacts will be stored.
+#[must_use]
+pub fn common_groth16_circuit_artifacts_dir() -> PathBuf {
+    dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16/common")
+}
+
 /// The directory where the plonk circuit artifacts will be stored.
 #[must_use]
 pub fn plonk_circuit_artifacts_dir() -> PathBuf {
@@ -35,7 +41,11 @@ pub fn plonk_circuit_artifacts_dir() -> PathBuf {
 #[must_use]
 pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
     let build_dir = if artifacts_type == "groth16" {
-        groth16_circuit_artifacts_dir()
+        if zkm_prover::build::zkm_common_mode() {
+            common_groth16_circuit_artifacts_dir()
+        } else {
+            groth16_circuit_artifacts_dir()
+        }
     } else if artifacts_type == "plonk" {
         plonk_circuit_artifacts_dir()
     } else {

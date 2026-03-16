@@ -46,7 +46,7 @@ use zkm_core_machine::{
     shape::CoreShapeConfig,
     utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
 };
-use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
+use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues, poseidon2_hash};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
@@ -85,7 +85,9 @@ use zkm_stark::{
 use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 
 pub use types::*;
-use utils::{words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254};
+use utils::{
+    koalabears_to_bn254, words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254,
+};
 
 use components::{DefaultProverComponents, ZKMProverComponents};
 
@@ -1107,6 +1109,48 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         };
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
+
+        let mut witness = Witness::default();
+        input.write(&mut witness);
+        witness.write_committed_values_digest(committed_values_digest);
+        witness.write_vkey_hash(vkey_hash);
+
+        let prover = Groth16Bn254Prover::new();
+        let proof = prover.prove(witness, build_dir.to_path_buf());
+
+        // Verify the proof.
+        prover
+            .verify(
+                &proof,
+                &vkey_hash.as_canonical_biguint(),
+                &committed_values_digest.as_canonical_biguint(),
+                build_dir,
+            )
+            .unwrap();
+
+        proof
+    }
+
+    /// Wrap the STARK into a Groth16 proof using the common Groth16 circuit.
+    #[instrument(name = "wrap_groth16_bn254_common", level = "info", skip_all)]
+    pub fn wrap_groth16_bn254_common(
+        &self,
+        proof: ZKMReduceProof<OuterSC>,
+        build_dir: &Path,
+    ) -> Groth16Bn254Proof {
+        let input = ZKMCompressWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
+            is_complete: true,
+        };
+        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
+
+        let serialized = bincode::serialize(&proof.vk.part_vk()).unwrap();
+        let part_vk_digest_bytes =
+            serialized.into_iter().map(KoalaBear::from_canonical_u8).collect();
+        let part_vk_hash = poseidon2_hash(part_vk_digest_bytes);
+        let part_vk_bn254 = koalabears_to_bn254(&part_vk_hash);
+        let vkey_hash = vkey_hash + part_vk_bn254;
 
         let mut witness = Witness::default();
         input.write(&mut witness);

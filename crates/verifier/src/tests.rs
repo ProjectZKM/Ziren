@@ -22,8 +22,13 @@ fn test_verify_groth16() {
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
 
-    crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &crate::GROTH16_VK_BYTES)
-        .expect("Groth16 proof is invalid");
+    crate::Groth16Verifier::verify(
+        &proof,
+        &public_inputs,
+        &vkey_hash,
+        &crate::COMMON_GROTH16_VK_BYTES,
+    )
+    .expect("Groth16 proof is invalid");
 
     #[cfg(feature = "ark")]
     {
@@ -35,6 +40,32 @@ fn test_verify_groth16() {
         .expect("Groth16 proof is invalid");
         assert!(valid);
     }
+}
+
+#[test]
+fn test_common_verify_groth16() {
+    // Set up the pk and vk.
+    let client = ProverClient::cpu();
+    let (pk, vk) = client.setup(HELLO_WORLD_ELF);
+
+    // Generate the Groth16 proof.
+    std::env::set_var("ZKM_COMMON", "1");
+    let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
+
+    // Extract the proof and public inputs.
+    let proof = zkm_proof_with_public_values.bytes();
+    let public_inputs = zkm_proof_with_public_values.public_values.to_vec();
+
+    // Get the vkey hash.
+    let vkey_hash = vk.bytes32();
+    crate::Groth16Verifier::common_verify(
+        &proof,
+        &public_inputs,
+        &vkey_hash,
+        &crate::COMMON_GROTH16_VK_BYTES,
+        &crate::PART_STARK_VK_BYTES,
+    )
+    .expect("Groth16 proof is invalid");
 }
 
 #[test]
