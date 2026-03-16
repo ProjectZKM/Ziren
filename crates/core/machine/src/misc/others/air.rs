@@ -293,12 +293,7 @@ impl MiscInstrsChip {
                 Opcode::SRL.as_field::<AB::F>(),
                 ins_cols.srl1_val,
                 ins_cols.ror_val,
-                Word([
-                    AB::Expr::one(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                ]),
+                Word([AB::Expr::one(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
                 local.is_ins,
             );
 
