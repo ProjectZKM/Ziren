@@ -1,83 +1,15 @@
 [workspace]
 members = [
-  "aggregation/guest",
-  "aggregation/host",
-  "bn254/guest",
-  "bn254/host",
-  "chess/guest",
-  "chess/host",
-  "cycle-tracking/guest",
-  "cycle-tracking/host",
-  "fibonacci/guest",
-  "fibonacci/host",
-  "fibonacci_c_lib/guest",
-  "fibonacci_c_lib/host",
-  "groth16/guest",
-  "groth16/host",
-  "bitcoin/host",
-  "bitcoin/guest",
-  "is-prime/guest",
-  "is-prime/host",
-  "json/lib",
-  "json/guest",
-  "json/host",
-  "keccak-precompile/guest",
-  "keccak-precompile/host",
-  "plonk/guest",
-  "plonk/host",
-  "poseidon2/guest",
-  "poseidon2/host",
-  "regex/guest",
-  "regex/host",
-  "rsa/guest",
-  "rsa/host",
-  "ssz-withdrawals/guest",
-  "ssz-withdrawals/host",
-  "tendermint/guest",
-  "tendermint/host",
-  "unconstrained/guest",
-  "unconstrained/host",
-  "large-sum/guest",
-  "large-sum/host",
-  "simple-go/host",
-  "keeper/host",
+    "guest",
+    "host",
 ]
 resolver = "2"
+default-members = ["host"]
 
-[workspace.package]
-version = "1.1.0"
-edition = "2021"
 
 [workspace.dependencies]
-zkm-build = { path = "../crates/build" }
-zkm-derive = { path = "../crates/derive" }
-zkm-core-executor = { path = "../crates/core/executor" }
-zkm-core-machine = { path = "../crates/core/machine" }
-zkm-cli = { path = "../crates/cli", default-features = false }
-zkm-eval = { path = "../crates/eval", default-features = false }
-zkm-helper = { path = "../crates/helper", default-features = false }
-zkm-primitives = { path = "../crates/primitives" }
-zkm-prover = { path = "../crates/prover" }
-zkm-recursion-compiler = { path = "../crates/recursion/compiler" }
-zkm-recursion-core = { path = "../crates/recursion/core", default-features = false }
-zkm-recursion-derive = { path = "../crates/recursion/derive", default-features = false }
-zkm-recursion-gnark-ffi = { path = "../crates/recursion/gnark-ffi", default-features = false }
-zkm-recursion-circuit = { path = "../crates/recursion/circuit", default-features = false }
-zkm-sdk = { path = "../crates/sdk" }
-zkm-lib = { path = "../crates/zkvm/lib", default-features = false }
-zkm-zkvm = { path = "../crates/zkvm/entrypoint", default-features = false }
+zkm-sdk = { path = "../../crates/sdk" }
+zkm-build = { path = "../../crates/build" }
+zkm-zkvm = { path = "../../crates/zkvm/entrypoint" }
 
-# misc
-serde = "1.0.204"
-serde_json = "1.0.132"
-tracing = "0.1.40"
-
-[patch.crates-io]
-curve25519-dalek = { git = "https://github.com/ziren-patches/curve25519-dalek", branch = "patch-4.1.3" }
-ecdsa-core = { git = "https://github.com/ziren-patches/signatures", package = "ecdsa", branch = "patch-ecdsa-0.16.9" }
-rsa = { git = "https://github.com/ziren-patches/RustCrypto-RSA.git", branch = "patch-rsa-0.9.6" }
-secp256k1 = { git = "https://github.com/ziren-patches/rust-secp256k1", branch = "patch-0.29.1" }
-sha2-v0-10-8 = { git = "https://github.com/ziren-patches/RustCrypto-hashes", package = "sha2", branch = "patch-sha2-0.10.8" }
-substrate-bn = { git = "https://github.com/ziren-patches/bn", branch = "patch-0.6.0" }
-k256 = { git = "https://github.com/ziren-patches/elliptic-curves", branch = "patch-k256-0.13.4" }
-p256 = { git = "https://github.com/ziren-patches/elliptic-curves", branch = "patch-p256-0.13.2" }
+clap = { version = "4.0", features = ["derive", "env"] }

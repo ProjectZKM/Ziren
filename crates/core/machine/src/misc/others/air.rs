@@ -262,12 +262,18 @@ impl MiscInstrsChip {
     ) {
         let ins_cols = local.misc_specific_columns.ins();
 
-        // Ins can be divided into 5 operations:
-        //    ror_val = rotate_right(op_a, lsb)
-        //    srl_val = ror_val >> (msb - lsb + 1)
-        //    sll_val = op_b << (31 - msb + lsb)
-        //    add_val = srl_val + sll_val
-        //    result = rotate_right(op_a, 31 - msb)
+        // Ins is decomposed into 6 ALU sub-operations:
+        //    ror_val  = rotate_right(prev_a, lsb)            [shift: lsb ∈ 0..31]
+        //    srl1_val = ror_val >> 1                          [shift: 1]
+        //    srl_val  = srl1_val >> (msb - lsb)               [shift: msb-lsb ∈ 0..31]
+        //    sll_val  = op_b << (31 - msb + lsb)              [shift: ∈ 0..31]
+        //    add_val  = srl_val + sll_val
+        //    result   = rotate_right(add_val, 31 - msb)       [shift: ∈ 0..31]
+        //
+        // The original single SRL by `width = msb - lsb + 1` is split into two
+        // steps (`>> 1` then `>> (msb - lsb)`) so that each shift amount is
+        // always in [0, 31], avoiding the ShiftRight chip's range limitation
+        // when width = 32. All multiplicities remain degree 1.
         {
             builder.send_alu(
                 Opcode::ROR.as_field::<AB::F>(),
@@ -282,12 +288,27 @@ impl MiscInstrsChip {
                 local.is_ins,
             );
 
+            // SRL step 1: shift right by 1 (always in range).
+            builder.send_alu(
+                Opcode::SRL.as_field::<AB::F>(),
+                ins_cols.srl1_val,
+                ins_cols.ror_val,
+                Word([
+                    AB::Expr::one(),
+                    AB::Expr::zero(),
+                    AB::Expr::zero(),
+                    AB::Expr::zero(),
+                ]),
+                local.is_ins,
+            );
+
+            // SRL step 2: shift right by msb - lsb (range [0, 31]).
             builder.send_alu(
                 Opcode::SRL.as_field::<AB::F>(),
                 ins_cols.srl_val,
-                ins_cols.ror_val,
+                ins_cols.srl1_val,
                 Word([
-                    AB::Expr::from_canonical_u32(1) + ins_cols.msb - ins_cols.lsb,
+                    AB::Expr::from_canonical_u32(0) + ins_cols.msb - ins_cols.lsb,
                     AB::Expr::zero(),
                     AB::Expr::zero(),
                     AB::Expr::zero(),
