@@ -263,9 +263,7 @@ where
         // which is equivalent to: is_clz = 1 implies is_real = 1.
         builder.assert_bool(local.is_clz);
         builder.assert_bool(local.is_real);
-        builder
-            .when(local.is_clz)
-            .assert_one(local.is_real);
+        builder.when(local.is_clz).assert_one(local.is_real);
     }
 }
 
