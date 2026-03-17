@@ -496,8 +496,9 @@ where
         );
 
         // Check hi_record_is_real.
-        // hi_record_is_real can only be set for MULT and MULTU instruction.
+        // hi_record_is_real can only be set for MULT and MULTU instruction when is_real = 1.
         // if hi_record_is_real = 0, both clk and shard should be zero.
+        builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
