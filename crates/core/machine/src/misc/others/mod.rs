@@ -60,4 +60,34 @@ mod tests {
         let program = Program::new(instructions, 0, 0);
         run_test::<CpuProver<_, _>>(program).unwrap();
     }
+
+    /// Test INS instruction with width=32 (lsb=0, msb=31), the edge case fixed
+    /// by splitting the SRL into two steps to keep each shift amount in [0, 31].
+    #[test]
+    fn test_ins_offset_32() {
+        utils::setup_logger();
+        // INS c encoding: lsb | (msb << 5)
+        // width = msb - lsb + 1
+        let instructions = vec![
+            // Set up source registers with non-trivial values.
+            Instruction::new(Opcode::ADD, 29, 0, 0xDEAD, false, true),
+            Instruction::new(Opcode::ADD, 28, 0, 0xBEEF, false, true),
+            // width=32: lsb=0, msb=31 -> c = 0 | (31 << 5) = 0x3E0
+            Instruction::new(Opcode::INS, 30, 29, 0x3E0, false, true),
+            // width=32 with different registers
+            Instruction::new(Opcode::INS, 31, 28, 0x3E0, false, true),
+            // width=32 with zero dest
+            Instruction::new(Opcode::INS, 0, 29, 0x3E0, false, true),
+            // width=31: lsb=0, msb=30 -> c = 0 | (30 << 5) = 0x3C0
+            Instruction::new(Opcode::INS, 30, 28, 0x3C0, false, true),
+            // width=1: lsb=0, msb=0 -> c = 0
+            Instruction::new(Opcode::INS, 30, 29, 0x0, false, true),
+            // width=1: lsb=31, msb=31 -> c = 31 | (31 << 5) = 0x3FF
+            Instruction::new(Opcode::INS, 30, 28, 0x3FF, false, true),
+            // width=16: lsb=8, msb=23 -> c = 8 | (23 << 5) = 0x2E8
+            Instruction::new(Opcode::INS, 30, 29, 0x2E8, false, true),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
 }
