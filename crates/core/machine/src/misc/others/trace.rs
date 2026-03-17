@@ -231,12 +231,14 @@ impl MiscInstrsChip {
         let lsb = event.c & 0x1f;
         let msb = event.c >> 5;
         let ror_val = event.prev_a.rotate_right(lsb);
-        let srl_val = ror_val >> (msb - lsb + 1);
+        let srl1_val = ror_val >> 1;
+        let srl_val = srl1_val >> (msb - lsb);
         let sll_val = event.b << (31 - msb + lsb);
         let add_val = srl_val + sll_val;
         ins_cols.lsb = F::from_canonical_u32(lsb);
         ins_cols.msb = F::from_canonical_u32(msb);
         ins_cols.ror_val = Word::from(ror_val);
+        ins_cols.srl1_val = Word::from(srl1_val);
         ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);
         ins_cols.add_val = Word::from(add_val);

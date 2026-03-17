@@ -325,16 +325,27 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
         };
         executor.record.shift_right_events.push(ror_event);
 
-        let width = msb - lsb + 1;
-        let srl_val = if width == 32 { 0 } else { ror_val >> width };
+        let srl1_val = ror_val >> 1;
+        let srl1_event = AluEvent {
+            pc: UNUSED_PC,
+            next_pc: UNUSED_PC + DEFAULT_PC_INC,
+            opcode: Opcode::SRL,
+            hi: 0,
+            a: srl1_val,
+            b: ror_val,
+            c: 1,
+        };
+        executor.record.shift_right_events.push(srl1_event);
+
+        let srl_val = srl1_val >> (msb - lsb);
         let srl_event = AluEvent {
             pc: UNUSED_PC,
             next_pc: UNUSED_PC + DEFAULT_PC_INC,
             opcode: Opcode::SRL,
             hi: 0,
             a: srl_val,
-            b: ror_val,
-            c: width,
+            b: srl1_val,
+            c: msb - lsb,
         };
         executor.record.shift_right_events.push(srl_event);
 
