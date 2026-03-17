@@ -273,7 +273,8 @@ where
 
         builder.assert_bool(local.is_clo);
         builder.assert_bool(local.is_clz);
-        builder.assert_one(local.is_clo + local.is_clz);
+        builder.assert_bool(local.is_real);
+        builder.assert_eq(local.is_real, local.is_clo + local.is_clz);
     }
 }
 
