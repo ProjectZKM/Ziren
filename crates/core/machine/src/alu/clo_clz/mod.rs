@@ -150,9 +150,9 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
             let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
-            // clz(0) = 32
+            // Padding rows: is_real=0, is_clo=0, is_clz=0, is_bb_zero=1, a=32.
+            // is_bb_zero=1 ensures send_alu for SRL has zero multiplicity.
             cols.a = Word::from(32);
-            cols.is_clz = F::ONE;
             cols.is_bb_zero = F::ONE;
 
             row
