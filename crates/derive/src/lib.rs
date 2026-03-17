@@ -356,9 +356,9 @@ pub fn cycle_tracker(_attr: TokenStream, item: TokenStream) -> TokenStream {
     result.into()
 }
 
-fn find_execution_record_path(attrs: &[syn::Attribute]) -> syn::Path {
+fn find_attr_path(attrs: &[syn::Attribute], name: &str, default: syn::Path) -> syn::Path {
     for attr in attrs {
-        if attr.path.is_ident("execution_record_path") {
+        if attr.path.is_ident(name) {
             if let Ok(syn::Meta::NameValue(meta)) = attr.parse_meta() {
                 if let syn::Lit::Str(lit_str) = &meta.lit {
                     if let Ok(path) = lit_str.parse::<syn::Path>() {
@@ -368,52 +368,23 @@ fn find_execution_record_path(attrs: &[syn::Attribute]) -> syn::Path {
             }
         }
     }
-    parse_quote!(zkm_core_executor::ExecutionRecord)
+    default
+}
+
+fn find_execution_record_path(attrs: &[syn::Attribute]) -> syn::Path {
+    find_attr_path(attrs, "execution_record_path", parse_quote!(zkm_core_executor::ExecutionRecord))
 }
 
 fn find_program_path(attrs: &[syn::Attribute]) -> syn::Path {
-    for attr in attrs {
-        if attr.path.is_ident("program_path") {
-            if let Ok(syn::Meta::NameValue(meta)) = attr.parse_meta() {
-                if let syn::Lit::Str(lit_str) = &meta.lit {
-                    if let Ok(path) = lit_str.parse::<syn::Path>() {
-                        return path;
-                    }
-                }
-            }
-        }
-    }
-    parse_quote!(zkm_core_executor::Program)
+    find_attr_path(attrs, "program_path", parse_quote!(zkm_core_executor::Program))
 }
 
 fn find_error_path(attrs: &[syn::Attribute]) -> syn::Path {
-    for attr in attrs {
-        if attr.path.is_ident("error_path") {
-            if let Ok(syn::Meta::NameValue(meta)) = attr.parse_meta() {
-                if let syn::Lit::Str(lit_str) = &meta.lit {
-                    if let Ok(path) = lit_str.parse::<syn::Path>() {
-                        return path;
-                    }
-                }
-            }
-        }
-    }
-    parse_quote!(crate::CoreChipError)
+    find_attr_path(attrs, "error_path", parse_quote!(crate::CoreChipError))
 }
 
 fn find_builder_path(attrs: &[syn::Attribute]) -> syn::Path {
-    for attr in attrs {
-        if attr.path.is_ident("builder_path") {
-            if let Ok(syn::Meta::NameValue(meta)) = attr.parse_meta() {
-                if let syn::Lit::Str(lit_str) = &meta.lit {
-                    if let Ok(path) = lit_str.parse::<syn::Path>() {
-                        return path;
-                    }
-                }
-            }
-        }
-    }
-    parse_quote!(crate::air::ZKMCoreAirBuilder<F = F>)
+    find_attr_path(attrs, "builder_path", parse_quote!(crate::air::ZKMCoreAirBuilder<F = F>))
 }
 
 fn find_eval_trait_bound(attrs: &[syn::Attribute]) -> Option<String> {
