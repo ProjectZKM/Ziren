@@ -8013,6 +8013,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "once_cell",
+ "p3-bn254-fr",
  "p3-commit",
  "p3-field",
  "p3-koala-bear",

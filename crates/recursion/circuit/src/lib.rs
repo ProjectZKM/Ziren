@@ -107,7 +107,8 @@ pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
     fn commit_recursion_public_values_and_vk(
         _builder: &mut Builder<C>,
         _public_values: RecursionPublicValues<Felt<C::F>>,
-        _part_vk_hash: &Bn254Fr,
+        _vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+        _pc_start: Felt<<C as Config>::F>
     ) {
     }
 }
@@ -641,7 +642,8 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
     fn commit_recursion_public_values_and_vk(
         builder: &mut Builder<C>,
         public_values: RecursionPublicValues<Felt<<C>::F>>,
-        part_vk_hash: &Bn254Fr,
+        vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+        pc_start: Felt<<C as Config>::F>
     ) {
         println!("------------------commit_recursion_public_values_and_vk------------------");
         let committed_values_digest_bytes_felts: [Felt<_>; 32] =
@@ -651,8 +653,9 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
         builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);
 
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
-        let part_vk_hash: Var<_> = builder.constant(*part_vk_hash);
-        let vkey_hash = builder.eval(vkey_hash + part_vk_hash);
+        let vk_commitment_var: Var<_> = vk_commitment[0];
+        let pc_start_var: Var<_> = builder.felt2var_circuit(pc_start);
+        let vkey_hash = builder.eval(vkey_hash + vk_commitment_var + pc_start_var);
         builder.commit_vkey_hash_circuit(vkey_hash);
     }
 }

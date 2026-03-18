@@ -1,5 +1,5 @@
 use p3_bn254_fr::Bn254Fr;
-use p3_field::FieldAlgebra;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use std::{
     borrow::Borrow,
@@ -9,7 +9,6 @@ use std::{
 };
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
-use zkm_primitives::poseidon2_hash;
 use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
     machine::{ZKMCompressWitnessValues, ZKMWrapVerifier},
@@ -214,6 +213,7 @@ pub fn build_constraints_and_witness(
         tracing::info_span!("wrap circuit").in_scope(|| build_outer_circuit(&template_input));
 
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
+    // In common mode, fold the vk_commitment and pc_start directly into the vkey hash.
     let vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
     let committed_values_digest_bytes: [KoalaBear; 32] =
         words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
@@ -234,21 +234,18 @@ pub fn build_common_constraints_and_witness(
     template_proof: &ShardProof<OuterSC>,
 ) -> (Vec<Constraint>, OuterWitness<OuterConfig>) {
     tracing::info!("building verifier constraints");
-    let serialized = bincode::serialize(&template_vk.part_vk()).unwrap();
-    let part_vk_digest_bytes = serialized.into_iter().map(KoalaBear::from_canonical_u8).collect();
-    let part_vk_hash = poseidon2_hash(part_vk_digest_bytes);
-    let part_vk_bn254 = koalabears_to_bn254(&part_vk_hash);
-
     let template_input = ZKMCompressWitnessValues {
         vks_and_proofs: vec![(template_vk.clone(), template_proof.clone())],
         is_complete: true,
     };
     let constraints = tracing::info_span!("wrap circuit")
-        .in_scope(|| build_common_outer_circuit(&template_input, &part_vk_bn254));
+        .in_scope(|| build_common_outer_circuit(&template_input));
 
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
     let vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
-    let vkey_hash = vkey_hash + part_vk_bn254;
+    let commitment: [Bn254Fr; 1] = template_vk.commit.into();
+    let pc_start_bn254 = Bn254Fr::from_canonical_u32(template_vk.pc_start.as_canonical_u32());
+    let vkey_hash = vkey_hash + commitment[0] + pc_start_bn254;
     let committed_values_digest_bytes: [KoalaBear; 32] =
         words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);
@@ -325,10 +322,7 @@ fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Ve
     operations
 }
 
-fn build_common_outer_circuit(
-    template_input: &ZKMCompressWitnessValues<OuterSC>,
-    part_vk_hash: &Bn254Fr,
-) -> Vec<Constraint> {
+fn build_common_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
@@ -338,7 +332,7 @@ fn build_common_outer_circuit(
     let input = template_input.read(&mut builder);
 
     // Verify the proof.
-    ZKMWrapVerifier::common_verify(&mut builder, &wrap_machine, input, &part_vk_hash);
+    ZKMWrapVerifier::common_verify(&mut builder, &wrap_machine, input);
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     let operations = backend.emit(builder.into_operations());

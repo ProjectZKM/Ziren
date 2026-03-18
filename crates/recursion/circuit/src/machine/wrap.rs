@@ -1,14 +1,12 @@
 use std::{borrow::Borrow, marker::PhantomData};
 
 use p3_air::Air;
-use p3_bn254_fr::Bn254Fr;
 use p3_commit::Mmcs;
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_recursion_core::DIGEST_SIZE;
-use zkm_stark::{air::MachineAir, PartStarkVerifyingKey, StarkMachine};
+use zkm_stark::{air::MachineAir, StarkMachine};
 
 use crate::{
     challenger::CanObserveVariable,
@@ -88,7 +86,6 @@ where
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
         input: ZKMCompressWitnessVariable<C, SC>,
-        part_vk_hash: &Bn254Fr,
     ) {
         // Read input.
         let ZKMCompressWitnessVariable { vks_and_proofs, .. } = input;
@@ -121,6 +118,6 @@ where
         assert_root_public_values_valid::<C, SC>(builder, public_values);
 
         // Reflect the public values to the next level.
-        SC::commit_recursion_public_values_and_vk(builder, public_values.inner, part_vk_hash);
+        SC::commit_recursion_public_values_and_vk(builder, public_values.inner, vk.commitment, vk.pc_start);
     }
 }

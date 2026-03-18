@@ -2,13 +2,15 @@ mod converter;
 pub mod error;
 mod verify;
 
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_bn254_fr::Bn254Fr;
+use p3_field::{PrimeField, PrimeField32};
 use substrate_bn::Fr;
 
 use alloc::vec::Vec;
 use p3_koala_bear::KoalaBear;
 use sha2::{Digest, Sha256};
-use zkm_primitives::poseidon2_hash;
+use zkm_recursion_core::stark::KoalaBearPoseidon2Outer;
+use zkm_stark::PartStarkVerifyingKey;
 
 use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
 pub(crate) use converter::{load_groth16_proof_from_bytes, load_groth16_verifying_key_from_bytes};
@@ -104,7 +106,8 @@ impl Groth16Verifier {
         }
 
         let zkm_vkey_hash = decode_zkm_vkey_hash(zkm_vkey_hash)?;
-        let zkm_vkey_hash = add_part_vk_hash(&zkm_vkey_hash, part_vk)?;
+        // In common mode, combine the base vkey hash with commitment + pc_start from part vk.
+        let zkm_vkey_hash = add_part_vk(&zkm_vkey_hash, part_vk)?;
         let zkm_public_inputs_hash = hash_public_inputs(zkm_public_inputs);
 
         let proof = load_groth16_proof_from_bytes(&proof[4..]).unwrap();
@@ -172,34 +175,36 @@ impl Groth16Verifier {
     }
 }
 
-fn add_part_vk_hash(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
+// Combine the base vkey hash with the vk_commitment and pc_start.
+fn add_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
     let mut zkm_vkey_fr = Fr::from_slice(zkm_vkey_hash)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
 
-    let part_vk_digest_bytes = part_vk.iter().copied().map(KoalaBear::from_canonical_u8).collect();
-    let part_vk_hash = poseidon2_hash(part_vk_digest_bytes);
-    let part_vk_fr = koalabears_to_fr(&part_vk_hash)?;
+    let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> =
+        bincode::deserialize(part_vk).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
+    let commitment: [Bn254Fr; 1] = part_vk.commit.into();
+    let commitment_fr = bn254fr_to_fr(commitment[0])?;
+    let pc_start_fr = koalabear_to_fr(part_vk.pc_start)?;
 
-    zkm_vkey_fr = zkm_vkey_fr + part_vk_fr;
+    zkm_vkey_fr = zkm_vkey_fr + commitment_fr + pc_start_fr;
 
     Ok(zkm_vkey_fr)
 }
 
-fn koalabears_to_fr(digest: &[KoalaBear; 8]) -> Result<Fr, Groth16Error> {
-    let mut result = Fr::zero();
-
-    let mut two_pow_31 = [0u8; 32];
-    two_pow_31[28..].copy_from_slice(&(1u32 << 31).to_be_bytes());
-    let two_pow_31 =
-        Fr::from_slice(&two_pow_31).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
-
-    for word in digest.iter() {
-        let mut word_bytes = [0u8; 32];
-        word_bytes[28..].copy_from_slice(&word.as_canonical_u32().to_be_bytes());
-        let word_fr = Fr::from_slice(&word_bytes)
-            .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
-        result = result * two_pow_31 + word_fr;
+fn bn254fr_to_fr(value: Bn254Fr) -> Result<Fr, Groth16Error> {
+    let big = value.as_canonical_biguint();
+    let big_bytes = big.to_bytes_be();
+    if big_bytes.len() > 32 {
+        return Err(Groth16Error::GeneralError(Error::InvalidData));
     }
 
-    Ok(result)
+    let mut bytes = [0u8; 32];
+    bytes[32 - big_bytes.len()..].copy_from_slice(&big_bytes);
+    Fr::from_slice(&bytes).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))
+}
+
+fn koalabear_to_fr(word: KoalaBear) -> Result<Fr, Groth16Error> {
+    let mut word_bytes = [0u8; 32];
+    word_bytes[28..].copy_from_slice(&word.as_canonical_u32().to_be_bytes());
+    Fr::from_slice(&word_bytes).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))
 }

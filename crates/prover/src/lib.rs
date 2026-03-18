@@ -33,6 +33,7 @@ use std::{
 };
 
 use lru::LruCache;
+use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
@@ -46,7 +47,7 @@ use zkm_core_machine::{
     shape::CoreShapeConfig,
     utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
 };
-use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues, poseidon2_hash};
+use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
@@ -86,7 +87,7 @@ use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 
 pub use types::*;
 use utils::{
-    koalabears_to_bn254, words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254,
+    words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254,
 };
 
 use components::{DefaultProverComponents, ZKMProverComponents};
@@ -1145,12 +1146,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
-        let serialized = bincode::serialize(&proof.vk.part_vk()).unwrap();
-        let part_vk_digest_bytes =
-            serialized.into_iter().map(KoalaBear::from_canonical_u8).collect();
-        let part_vk_hash = poseidon2_hash(part_vk_digest_bytes);
-        let part_vk_bn254 = koalabears_to_bn254(&part_vk_hash);
-        let vkey_hash = vkey_hash + part_vk_bn254;
+        // Common mode: fold vk_commitment + pc_start directly into the vkey hash.
+        let commitment: [Bn254Fr; 1] = proof.vk.commit.into();
+        let pc_start_bn254 = Bn254Fr::from_canonical_u32(proof.vk.pc_start.as_canonical_u32());
+        let vkey_hash = vkey_hash + commitment[0] + pc_start_bn254;
 
         let mut witness = Witness::default();
         input.write(&mut witness);
