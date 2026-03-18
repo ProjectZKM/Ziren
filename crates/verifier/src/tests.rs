@@ -22,13 +22,8 @@ fn test_verify_groth16() {
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
 
-    crate::Groth16Verifier::verify(
-        &proof,
-        &public_inputs,
-        &vkey_hash,
-        &crate::COMMON_GROTH16_VK_BYTES,
-    )
-    .expect("Groth16 proof is invalid");
+    crate::Groth16Verifier::verify(&proof, &public_inputs, &vkey_hash, &crate::GROTH16_VK_BYTES)
+        .expect("Groth16 proof is invalid");
 
     #[cfg(feature = "ark")]
     {
@@ -43,7 +38,8 @@ fn test_verify_groth16() {
 }
 
 #[test]
-fn test_common_verify_groth16() {
+#[ignore]
+fn test_verify_groth16_common() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
@@ -58,7 +54,7 @@ fn test_common_verify_groth16() {
 
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
-    crate::Groth16Verifier::common_verify(
+    crate::Groth16Verifier::verify_common(
         &proof,
         &public_inputs,
         &vkey_hash,

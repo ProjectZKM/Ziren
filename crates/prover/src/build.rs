@@ -239,7 +239,7 @@ pub fn build_common_constraints_and_witness(
         is_complete: true,
     };
     let constraints = tracing::info_span!("wrap circuit")
-        .in_scope(|| build_common_outer_circuit(&template_input));
+        .in_scope(|| build_outer_circuit_common(&template_input));
 
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
     let vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
@@ -322,7 +322,9 @@ fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Ve
     operations
 }
 
-fn build_common_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Vec<Constraint> {
+fn build_outer_circuit_common(
+    template_input: &ZKMCompressWitnessValues<OuterSC>,
+) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
@@ -332,7 +334,7 @@ fn build_common_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>
     let input = template_input.read(&mut builder);
 
     // Verify the proof.
-    ZKMWrapVerifier::common_verify(&mut builder, &wrap_machine, input);
+    ZKMWrapVerifier::verify_common(&mut builder, &wrap_machine, input);
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     let operations = backend.emit(builder.into_operations());

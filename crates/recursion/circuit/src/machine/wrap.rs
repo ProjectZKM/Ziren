@@ -82,7 +82,7 @@ where
         SC::commit_recursion_public_values(builder, public_values.inner);
     }
 
-    pub fn common_verify(
+    pub fn verify_common(
         builder: &mut Builder<C>,
         machine: &StarkMachine<SC, A>,
         input: ZKMCompressWitnessVariable<C, SC>,
@@ -118,6 +118,11 @@ where
         assert_root_public_values_valid::<C, SC>(builder, public_values);
 
         // Reflect the public values to the next level.
-        SC::commit_recursion_public_values_and_vk(builder, public_values.inner, vk.commitment, vk.pc_start);
+        SC::commit_recursion_public_values_common(
+            builder,
+            public_values.inner,
+            vk.commitment,
+            vk.pc_start,
+        );
     }
 }

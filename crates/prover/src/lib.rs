@@ -86,9 +86,7 @@ use zkm_stark::{
 use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 
 pub use types::*;
-use utils::{
-    words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254,
-};
+use utils::{words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254};
 
 use components::{DefaultProverComponents, ZKMProverComponents};
 

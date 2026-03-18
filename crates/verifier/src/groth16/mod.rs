@@ -84,7 +84,7 @@ impl Groth16Verifier {
         )
     }
 
-    pub fn common_verify(
+    pub fn verify_common(
         proof: &[u8],
         zkm_public_inputs: &[u8],
         zkm_vkey_hash: &str,
@@ -180,8 +180,8 @@ fn add_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Er
     let mut zkm_vkey_fr = Fr::from_slice(zkm_vkey_hash)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
 
-    let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> =
-        bincode::deserialize(part_vk).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
+    let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> = bincode::deserialize(part_vk)
+        .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
     let commitment: [Bn254Fr; 1] = part_vk.commit.into();
     let commitment_fr = bn254fr_to_fr(commitment[0])?;
     let pc_start_fr = koalabear_to_fr(part_vk.pc_start)?;
