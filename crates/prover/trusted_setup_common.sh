@@ -1,3 +1,4 @@
+# Build a groth16 vk that is not affected by Ziren upgrades.
 #---------------Usage---------------
 # cd Ziren/crates/prover
 # sh trusted_setup_common.sh

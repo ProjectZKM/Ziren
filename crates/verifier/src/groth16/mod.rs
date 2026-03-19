@@ -109,11 +109,11 @@ impl Groth16Verifier {
         // In common mode, combine the base vkey hash with commitment + pc_start from part vk.
         let zkm_vkey_hash = add_part_vk(&zkm_vkey_hash, part_vk)?;
         let zkm_public_inputs_hash = hash_public_inputs(zkm_public_inputs);
+        let public_inputs = [zkm_vkey_hash, Fr::from_slice(&zkm_public_inputs_hash).unwrap()];
 
         let proof = load_groth16_proof_from_bytes(&proof[4..]).unwrap();
         let groth16_vk = load_groth16_verifying_key_from_bytes(common_groth16_vk).unwrap();
 
-        let public_inputs = [zkm_vkey_hash, Fr::from_slice(&zkm_public_inputs_hash).unwrap()];
         verify_groth16_algebraic(&groth16_vk, &proof, &public_inputs)
     }
 
