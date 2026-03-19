@@ -41,13 +41,15 @@ fn test_verify_groth16() {
 
 #[test]
 #[ignore]
+// ZKM_COMMON=1 cargo test -r -- --ignored test_verify_groth16_common
+// or
+// cargo test -r --features common -- --ignored test_verify_groth16_common
 fn test_verify_groth16_common() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
 
     // Generate the Groth16 proof.
-    std::env::set_var("ZKM_COMMON", "1");
     let zkm_proof_with_public_values = client.prove(&pk, ZKMStdin::new()).groth16().run().unwrap();
 
     // Extract the proof and public inputs.

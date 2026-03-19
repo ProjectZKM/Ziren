@@ -21,4 +21,4 @@ jobs:
           for pkg in zkm-sdk zkm-verifier; do
             RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
           done
-          RUSTFLAGS="-C target-cpu=native" cargo test -r -- --ignored test_verify_groth16_common
+          RUSTFLAGS="-C target-cpu=native" cargo test -r --features common -- --ignored test_verify_groth16_common
