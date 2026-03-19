@@ -6,6 +6,7 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_core::stark::zkm_common_mode;
 use zkm_stark::{air::MachineAir, StarkMachine};
 
 use crate::{
@@ -79,50 +80,15 @@ where
         assert_root_public_values_valid::<C, SC>(builder, public_values);
 
         // Reflect the public values to the next level.
-        SC::commit_recursion_public_values(builder, public_values.inner);
-    }
-
-    pub fn verify_common(
-        builder: &mut Builder<C>,
-        machine: &StarkMachine<SC, A>,
-        input: ZKMCompressWitnessVariable<C, SC>,
-    ) {
-        // Read input.
-        let ZKMCompressWitnessVariable { vks_and_proofs, .. } = input;
-
-        // Assert that there is only one proof, and get the verification key and proof.
-        let [(vk, proof)] = vks_and_proofs.try_into().ok().unwrap();
-
-        // Verify the stark proof.
-
-        // Prepare a challenger.
-        let mut challenger = machine.config().challenger_variable(builder);
-
-        // Observe the vk and start pc.
-        challenger.observe(builder, vk.commitment);
-        challenger.observe(builder, vk.pc_start);
-        challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.x.0);
-        challenger.observe_slice(builder, vk.initial_global_cumulative_sum.0.y.0);
-        // Observe the padding.
-        let zero: Felt<_> = builder.eval(C::F::ZERO);
-        challenger.observe(builder, zero);
-
-        // Observe the main commitment and public values.
-        challenger
-            .observe_slice(builder, proof.public_values[0..machine.num_pv_elts()].iter().copied());
-
-        StarkVerifier::verify_shard(builder, &vk, machine, &mut challenger, &proof);
-
-        // Get the public values, and assert that they are valid.
-        let public_values: &RootPublicValues<Felt<C::F>> = proof.public_values.as_slice().borrow();
-        assert_root_public_values_valid::<C, SC>(builder, public_values);
-
-        // Reflect the public values to the next level.
-        SC::commit_recursion_public_values_common(
-            builder,
-            public_values.inner,
-            vk.commitment,
-            vk.pc_start,
-        );
+        if zkm_common_mode() {
+            SC::commit_recursion_public_values_common(
+                builder,
+                public_values.inner,
+                vk.commitment,
+                vk.pc_start,
+            );
+        } else {
+            SC::commit_recursion_public_values(builder, public_values.inner);
+        }
     }
 }

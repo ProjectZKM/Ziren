@@ -55,11 +55,7 @@ impl CpuProver {
             try_install_circuit_artifacts("groth16")
         };
 
-        let proof = if zkm_prover::build::zkm_common_mode() {
-            self.prover.wrap_groth16_bn254_common(outer_proof, &groth16_bn254_artifacts)
-        } else {
-            self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts)
-        };
+        let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
             public_values,
@@ -165,11 +161,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                 try_install_circuit_artifacts("groth16")
             };
 
-            let proof = if zkm_prover::build::zkm_common_mode() {
-                self.prover.wrap_groth16_bn254_common(outer_proof, &groth16_bn254_artifacts)
-            } else {
-                self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts)
-            };
+            let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
             return Ok((
                 ZKMProofWithPublicValues {
                     proof: ZKMProof::Groth16(proof),

@@ -1107,50 +1107,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = zkm_vkey_digest_bn254(&proof);
-        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
-
-        let mut witness = Witness::default();
-        input.write(&mut witness);
-        witness.write_committed_values_digest(committed_values_digest);
-        witness.write_vkey_hash(vkey_hash);
-
-        let prover = Groth16Bn254Prover::new();
-        let proof = prover.prove(witness, build_dir.to_path_buf());
-
-        // Verify the proof.
-        prover
-            .verify(
-                &proof,
-                &vkey_hash.as_canonical_biguint(),
-                &committed_values_digest.as_canonical_biguint(),
-                build_dir,
-            )
-            .unwrap();
-
-        proof
-    }
-
-    /// Wrap the STARK into a Groth16 proof using the common Groth16 circuit.
-    #[instrument(name = "wrap_groth16_bn254_common", level = "info", skip_all)]
-    pub fn wrap_groth16_bn254_common(
-        &self,
-        proof: ZKMReduceProof<OuterSC>,
-        build_dir: &Path,
-    ) -> Groth16Bn254Proof {
-        let input = ZKMCompressWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
-            is_complete: true,
-        };
-        let vkey_hash = zkm_vkey_digest_bn254(&proof);
-        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
+        let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
 
         // Common mode: hash vkey hash + vk_commitment + pc_start into a single value.
-        let commitment: [Bn254Fr; 1] = proof.vk.commit.into();
-        let pc_start_bn254 = Bn254Fr::from_canonical_u32(proof.vk.pc_start.as_canonical_u32());
-        let mut state = [vkey_hash, commitment[0], pc_start_bn254];
-        outer_perm().permute_mut(&mut state);
-        let vkey_hash = state[0];
+        if crate::build::zkm_common_mode() {
+            let commitment: [Bn254Fr; 1] = proof.vk.commit.into();
+            let pc_start_bn254 = Bn254Fr::from_canonical_u32(proof.vk.pc_start.as_canonical_u32());
+            let mut state = [vkey_hash, commitment[0], pc_start_bn254];
+            outer_perm().permute_mut(&mut state);
+            vkey_hash = state[0];
+        }
+
+        let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();
         input.write(&mut witness);

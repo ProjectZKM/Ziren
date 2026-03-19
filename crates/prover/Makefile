@@ -18,8 +18,8 @@ build-circuits-common:
 	rm -rf build-common && \
 	mkdir -p build-common && \
 	mkdir -p build-common/groth16 && \
-	RUST_LOG=debug RUSTFLAGS='-C target-cpu=native' \
-		cargo run -p zkm-prover --release --bin build_groth16_bn254_common --features native-gnark -- \
+	RUST_LOG=info RUSTFLAGS='-C target-cpu=native' ZKM_COMMON=1 \
+		cargo run -p zkm-prover --release --bin build_groth16_bn254 --features native-gnark -- \
 		--build-dir=./build-common/groth16
 
 release-circuits:
@@ -28,7 +28,7 @@ release-circuits:
 
 release-circuits-common:
 	@read -p "Release version (ex. v1.0.0-testnet)? " version; \
-	bash release-common.sh $$version
+	bash release_common.sh $$version
 
 release-shapes:
 	bash shapes.sh

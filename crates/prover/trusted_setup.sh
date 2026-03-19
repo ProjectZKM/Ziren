@@ -59,8 +59,5 @@ echo "--------[TODO] Release--------"
 # make release-circuits
 
 echo "--------[TODO] Clear--------"
-# rm -rf build/
-# rm -rf powersOfTau28_hez_final.ptau
-# rm -rf semaphore-gnark-11
-# rm -rf semaphore-mtb-setup/
-# rm -rf trusted-setup/
+# rm -rf build-common powersOfTau28_hez_final.ptau semaphore-gnark-11 \
+    # semaphore-mtb-setup trusted-setup-common pk vk Groth16Verifier.sol

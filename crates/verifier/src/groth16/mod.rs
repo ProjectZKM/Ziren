@@ -177,13 +177,13 @@ impl Groth16Verifier {
 
 // Combine the base vkey hash with the vk_commitment and pc_start using a Poseidon2 permutation.
 fn add_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
-    let base_vkey = bytes_to_bn254fr(zkm_vkey_hash)?;
     let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> = bincode::deserialize(part_vk)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
     let commitment: [Bn254Fr; 1] = part_vk.commit.into();
     let pc_start_bn254 = Bn254Fr::from_canonical_u32(part_vk.pc_start.as_canonical_u32());
 
-    let mut state = [base_vkey, commitment[0], pc_start_bn254];
+    let zkm_vkey_hash = bytes_to_bn254fr(zkm_vkey_hash)?;
+    let mut state = [zkm_vkey_hash, commitment[0], pc_start_bn254];
     outer_perm().permute_mut(&mut state);
 
     bn254fr_to_fr(state[0])

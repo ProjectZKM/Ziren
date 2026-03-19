@@ -101,11 +101,7 @@ impl CudaProver {
                 try_install_circuit_artifacts("groth16")
             };
 
-            let proof = if zkm_prover::build::zkm_common_mode() {
-                self.cpu_prover.wrap_groth16_bn254_common(outer_proof, &groth16_bn254_artifacts)
-            } else {
-                self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts)
-            };
+            let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
             let proof_with_pv = ZKMProofWithPublicValues {
                 proof: ZKMProof::Groth16(proof),
                 public_values,
@@ -158,11 +154,7 @@ impl CudaProver {
             try_install_circuit_artifacts("groth16")
         };
 
-        let proof = if zkm_prover::build::zkm_common_mode() {
-            self.cpu_prover.wrap_groth16_bn254_common(outer_proof, &groth16_bn254_artifacts)
-        } else {
-            self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts)
-        };
+        let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
         Ok(ZKMProofWithPublicValues {
             proof: ZKMProof::Groth16(proof),
             public_values,
