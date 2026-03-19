@@ -27,7 +27,7 @@ pub fn groth16_circuit_artifacts_dir() -> PathBuf {
 
 /// The directory where the groth16 circuit artifacts will be stored.
 #[must_use]
-pub fn common_groth16_circuit_artifacts_dir() -> PathBuf {
+pub fn groth16_circuit_artifacts_dir_common() -> PathBuf {
     dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16/common")
 }
 
@@ -42,7 +42,7 @@ pub fn plonk_circuit_artifacts_dir() -> PathBuf {
 pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
     let build_dir = if artifacts_type == "groth16" {
         if zkm_prover::build::zkm_common_mode() {
-            common_groth16_circuit_artifacts_dir()
+            groth16_circuit_artifacts_dir_common()
         } else {
             groth16_circuit_artifacts_dir()
         }
@@ -85,8 +85,11 @@ pub fn install_circuit_artifacts(build_dir: PathBuf, artifacts_type: &str) {
     std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
 
     // Download the artifacts.
-    let download_url =
-        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{ZKM_CIRCUIT_VERSION}-{artifacts_type}.tar.gz");
+    let download_url = if zkm_prover::build::zkm_common_mode() {
+        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-common.tar.gz")
+    } else {
+        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{ZKM_CIRCUIT_VERSION}-{artifacts_type}.tar.gz")
+    };
     let mut artifacts_tar_gz_file =
         tempfile::NamedTempFile::new().expect("failed to create tempfile");
     let client = Client::builder().build().expect("failed to create reqwest client");

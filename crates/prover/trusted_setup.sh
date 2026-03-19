@@ -7,9 +7,11 @@ echo "--------Prerequisites--------"
 make build-circuits
 
 echo "--------Powers of Tau--------"
-export NB_CONSTRAINTS_LOG2=23
-wget https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau \
-    -O powersOfTau28_hez_final.ptau
+if [ ! -f "powersOfTau28_hez_final.ptau" ]; then
+    export NB_CONSTRAINTS_LOG2=23
+    wget https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau \
+        -O powersOfTau28_hez_final.ptau
+fi
 
 echo "--------Semaphore Install--------"
 git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2 semaphore-mtb-setup
@@ -48,6 +50,7 @@ cp trusted-setup/Groth16Verifier.sol build/groth16/Groth16Verifier.sol
 echo "--------Override Existing VKs--------"
 cp build/groth16/groth16_vk.bin ../verifier/bn254-vk/
 cp build/plonk/plonk_vk.bin ../verifier/bn254-vk/
+cp build/groth16/part_start_vk.bin ../verifier/bn254-vk/
 
 echo "--------Post Trusted Setup--------"
 cargo run --bin post_trusted_setup --release -- --build-dir build/groth16
@@ -56,14 +59,8 @@ echo "--------[TODO] Release--------"
 # make release-circuits
 
 echo "--------[TODO] Clear--------"
-# rm -rf Groth16Verifier.sol
 # rm -rf build/
-# rm -rf data/
-# rm -rf pk
 # rm -rf powersOfTau28_hez_final.ptau
 # rm -rf semaphore-gnark-11
 # rm -rf semaphore-mtb-setup/
 # rm -rf trusted-setup/
-# rm -rf vk
-# rm -rf wrap_vk.bin
-# rm -rf wrapped_proof.bin
