@@ -68,6 +68,7 @@ network = [
   "dep:twirp",
   "dep:ethers",
 ]
+common = ["zkm-prover/common"] # The groth16 verification key (vk) is not affected by ziren upgrades
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = [

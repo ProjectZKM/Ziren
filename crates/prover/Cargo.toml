@@ -89,3 +89,4 @@ path = "scripts/test_shape_fixing.rs"
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
 debug = ["zkm-core-machine/debug"]
+common = ["zkm-recursion-core/common"] # The groth16 verification key (vk) is not affected by ziren upgrades

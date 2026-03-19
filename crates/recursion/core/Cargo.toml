@@ -76,3 +76,4 @@ default = []
 debug = ["zkm-core-machine/debug"]
 sys = ["zkm-core-machine/sys", "dep:glob", "dep:cc", "dep:cbindgen", "dep:pathdiff"]
 program_validation = ["dep:range-set-blaze", "dep:smallvec"]
+common = [] # The groth16 verification key (vk) is not affected by ziren upgrades
