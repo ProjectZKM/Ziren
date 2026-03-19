@@ -3,13 +3,13 @@ pub mod error;
 mod verify;
 
 use p3_bn254_fr::Bn254Fr;
-use p3_field::{PrimeField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_symmetric::Permutation;
 use substrate_bn::Fr;
 
 use alloc::vec::Vec;
-use p3_koala_bear::KoalaBear;
 use sha2::{Digest, Sha256};
-use zkm_recursion_core::stark::KoalaBearPoseidon2Outer;
+use zkm_recursion_core::stark::{outer_perm, KoalaBearPoseidon2Outer};
 use zkm_stark::PartStarkVerifyingKey;
 
 use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
@@ -175,20 +175,18 @@ impl Groth16Verifier {
     }
 }
 
-// Combine the base vkey hash with the vk_commitment and pc_start.
+// Combine the base vkey hash with the vk_commitment and pc_start using a Poseidon2 permutation.
 fn add_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
-    let mut zkm_vkey_fr = Fr::from_slice(zkm_vkey_hash)
-        .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
-
+    let base_vkey = bytes_to_bn254fr(zkm_vkey_hash)?;
     let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> = bincode::deserialize(part_vk)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
     let commitment: [Bn254Fr; 1] = part_vk.commit.into();
-    let commitment_fr = bn254fr_to_fr(commitment[0])?;
-    let pc_start_fr = koalabear_to_fr(part_vk.pc_start)?;
+    let pc_start_bn254 = Bn254Fr::from_canonical_u32(part_vk.pc_start.as_canonical_u32());
 
-    zkm_vkey_fr = zkm_vkey_fr + commitment_fr + pc_start_fr;
+    let mut state = [base_vkey, commitment[0], pc_start_bn254];
+    outer_perm().permute_mut(&mut state);
 
-    Ok(zkm_vkey_fr)
+    bn254fr_to_fr(state[0])
 }
 
 fn bn254fr_to_fr(value: Bn254Fr) -> Result<Fr, Groth16Error> {
@@ -203,8 +201,11 @@ fn bn254fr_to_fr(value: Bn254Fr) -> Result<Fr, Groth16Error> {
     Fr::from_slice(&bytes).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))
 }
 
-fn koalabear_to_fr(word: KoalaBear) -> Result<Fr, Groth16Error> {
-    let mut word_bytes = [0u8; 32];
-    word_bytes[28..].copy_from_slice(&word.as_canonical_u32().to_be_bytes());
-    Fr::from_slice(&word_bytes).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))
+fn bytes_to_bn254fr(bytes: &[u8; 32]) -> Result<Bn254Fr, Groth16Error> {
+    let mut acc = Bn254Fr::ZERO;
+    let base = Bn254Fr::from_canonical_u32(256);
+    for byte in bytes.iter() {
+        acc = acc * base + Bn254Fr::from_canonical_u32(*byte as u32);
+    }
+    Ok(acc)
 }

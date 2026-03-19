@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use zkm_core_machine::utils::setup_logger;
-use zkm_prover::build::build_common_groth16_bn254_artifacts_with_dummy;
+use zkm_prover::build::build_groth16_bn254_artifacts_with_dummy_common;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -15,5 +15,5 @@ pub fn main() {
     setup_logger();
     let args = Args::parse();
     std::env::set_var("ZKM_COMMON", "1");
-    build_common_groth16_bn254_artifacts_with_dummy(args.build_dir);
+    build_groth16_bn254_artifacts_with_dummy_common(args.build_dir);
 }

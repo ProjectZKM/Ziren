@@ -653,7 +653,9 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
         let vk_commitment_var: Var<_> = vk_commitment[0];
         let pc_start_var: Var<_> = builder.felt2var_circuit(pc_start);
-        let vkey_hash = builder.eval(vkey_hash + vk_commitment_var + pc_start_var);
+        let state: [Var<_>; 3] = [vkey_hash, vk_commitment_var, pc_start_var];
+        builder.push_op(DslIr::CircuitPoseidon2Permute(state));
+        let vkey_hash = state[0];
         builder.commit_vkey_hash_circuit(vkey_hash);
     }
 }

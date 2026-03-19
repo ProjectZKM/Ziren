@@ -37,6 +37,7 @@ use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_symmetric::Permutation;
 use shapes::ZKMProofShape;
 use tracing::instrument;
 use zkm_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
@@ -71,7 +72,7 @@ use zkm_recursion_core::{
     machine::RecursionAir,
     runtime::ExecutionRecord,
     shape::{RecursionShape, RecursionShapeConfig},
-    stark::KoalaBearPoseidon2Outer,
+    stark::{outer_perm, KoalaBearPoseidon2Outer},
     RecursionProgram, Runtime as RecursionRuntime,
 };
 pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
@@ -1144,10 +1145,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
-        // Common mode: fold vk_commitment + pc_start directly into the vkey hash.
+        // Common mode: hash vkey hash + vk_commitment + pc_start into a single value.
         let commitment: [Bn254Fr; 1] = proof.vk.commit.into();
         let pc_start_bn254 = Bn254Fr::from_canonical_u32(proof.vk.pc_start.as_canonical_u32());
-        let vkey_hash = vkey_hash + commitment[0] + pc_start_bn254;
+        let mut state = [vkey_hash, commitment[0], pc_start_bn254];
+        outer_perm().permute_mut(&mut state);
+        let vkey_hash = state[0];
 
         let mut witness = Witness::default();
         input.write(&mut witness);

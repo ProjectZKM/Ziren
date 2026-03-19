@@ -1,6 +1,7 @@
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
+use p3_symmetric::Permutation;
 use std::{
     borrow::Borrow,
     fs::{metadata, File},
@@ -20,7 +21,7 @@ use zkm_recursion_compiler::{
 };
 
 use zkm_recursion_core::air::RecursionPublicValues;
-pub use zkm_recursion_core::stark::{zkm_common_mode, zkm_dev_mode};
+pub use zkm_recursion_core::stark::{outer_perm, zkm_common_mode, zkm_dev_mode};
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
@@ -53,7 +54,7 @@ pub fn try_build_groth16_bn254_artifacts_dev(
     let build_dir = groth16_bn254_artifacts_dev_dir();
     println!("[zkm] building groth16 bn254 artifacts in development mode");
     if crate::build::zkm_common_mode() {
-        build_common_groth16_bn254_artifacts(template_vk, template_proof, &build_dir);
+        build_groth16_bn254_artifacts_common(template_vk, template_proof, &build_dir);
     } else {
         build_groth16_bn254_artifacts(template_vk, template_proof, &build_dir);
     }
@@ -143,14 +144,14 @@ pub fn build_groth16_bn254_artifacts(
     file.write_all(&serialized).unwrap();
 }
 
-pub fn build_common_groth16_bn254_artifacts(
+pub fn build_groth16_bn254_artifacts_common(
     template_vk: &StarkVerifyingKey<OuterSC>,
     template_proof: &ShardProof<OuterSC>,
     build_dir: impl Into<PathBuf>,
 ) {
     let build_dir = build_dir.into();
     std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
-    let (constraints, witness) = build_common_constraints_and_witness(template_vk, template_proof);
+    let (constraints, witness) = build_constraints_and_witness_common(template_vk, template_proof);
     Groth16Bn254Prover::build(constraints, witness, build_dir.clone());
 
     // Serialize the part vk to a file
@@ -194,9 +195,9 @@ pub fn build_groth16_bn254_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
     crate::build::build_groth16_bn254_artifacts(&wrap_vk, &wrapped_proof, build_dir.into());
 }
 
-pub fn build_common_groth16_bn254_artifacts_with_dummy(build_dir: impl Into<PathBuf>) {
+pub fn build_groth16_bn254_artifacts_with_dummy_common(build_dir: impl Into<PathBuf>) {
     let (wrap_vk, wrapped_proof) = dummy_proof();
-    crate::build::build_common_groth16_bn254_artifacts(&wrap_vk, &wrapped_proof, build_dir.into());
+    crate::build::build_groth16_bn254_artifacts_common(&wrap_vk, &wrapped_proof, build_dir.into());
 }
 
 /// Build the verifier constraints and template witness for the circuit.
@@ -229,7 +230,7 @@ pub fn build_constraints_and_witness(
 }
 
 /// Build the verifier constraints and template witness for the circuit.
-pub fn build_common_constraints_and_witness(
+pub fn build_constraints_and_witness_common(
     template_vk: &StarkVerifyingKey<OuterSC>,
     template_proof: &ShardProof<OuterSC>,
 ) -> (Vec<Constraint>, OuterWitness<OuterConfig>) {
@@ -245,7 +246,9 @@ pub fn build_common_constraints_and_witness(
     let vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
     let commitment: [Bn254Fr; 1] = template_vk.commit.into();
     let pc_start_bn254 = Bn254Fr::from_canonical_u32(template_vk.pc_start.as_canonical_u32());
-    let vkey_hash = vkey_hash + commitment[0] + pc_start_bn254;
+    let mut state = [vkey_hash, commitment[0], pc_start_bn254];
+    outer_perm().permute_mut(&mut state);
+    let vkey_hash = state[0];
     let committed_values_digest_bytes: [KoalaBear; 32] =
         words_to_bytes(&pv.committed_value_digest).try_into().unwrap();
     let committed_values_digest = koalabear_bytes_to_bn254(&committed_values_digest_bytes);
