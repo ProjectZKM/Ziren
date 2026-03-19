@@ -30,15 +30,14 @@ use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed, CoreChipError};
 /// The number of main trace columns for `CloClzChip`.
 pub const NUM_CLOCLZ_COLS: usize = size_of::<CloClzCols<u8>>();
 
-/// The size of a byte in bits.
-#[allow(dead_code)]
-const BYTE_SIZE: usize = 8;
-
 /// A chip that implements addition for the opcodes CLO/CLZ.
 #[derive(Default)]
 pub struct CloClzChip;
 
 /// The column layout for the chip.
+///
+/// Optimized: `sr1` removed (hardcoded as 1 in SRL lookup since we always verify sr1 == 1),
+/// `is_clo` removed (derived as `is_real - is_clz`).
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct CloClzCols<T> {
@@ -52,23 +51,16 @@ pub struct CloClzCols<T> {
     /// The input operand.
     pub b: Word<T>,
 
-    /// if clo, bb == b
-    /// if clz, bb == 0xffffffff - b
+    /// if clo, bb == 0xffffffff - b
+    /// if clz, bb == b
     pub bb: Word<T>,
 
     /// whether the `bb` is zero.
     pub is_bb_zero: T,
 
-    /// bb shift right by `32 - (result + 1)`.
-    pub sr1: Word<T>,
-
     /// Flag to indicate whether the opcode is CLZ.
     #[picus(selector)]
     pub is_clz: T,
-
-    /// Flag to indicate whether the opcode is CLO.
-    #[picus(selector)]
-    pub is_clo: T,
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
@@ -107,7 +99,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.pc = F::from_canonical_u32(event.pc);
             cols.next_pc = F::from_canonical_u32(event.next_pc);
             cols.is_real = F::ONE;
-            cols.is_clo = F::from_bool(event.opcode == Opcode::CLO);
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
 
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
@@ -115,11 +106,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
 
             // if bb == 0, then result is 32.
             cols.is_bb_zero = F::from_bool(bb == 0);
-
-            if bb != 0 {
-                let sr1_val = bb >> (31 - event.a);
-                cols.sr1 = Word::from(sr1_val);
-            }
 
             // Range check.
             output.add_u8_range_checks(&bb.to_le_bytes());
@@ -150,7 +136,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_CLOCLZ_COLS];
             let cols: &mut CloClzCols<F> = row.as_mut_slice().borrow_mut();
-            // Padding rows: is_real=0, is_clo=0, is_clz=0, is_bb_zero=1, a=32.
+            // Padding rows: is_real=0, is_clz=0, is_bb_zero=1, a=32.
             // is_bb_zero=1 ensures send_alu for SRL has zero multiplicity.
             cols.a = Word::from(32);
             cols.is_bb_zero = F::ONE;
@@ -191,10 +177,13 @@ where
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
 
+        // Derive is_clo from is_real and is_clz.
+        let is_clo: AB::Expr = local.is_real.into() - local.is_clz.into();
+
         // if clz, bb == b, else bb = !b
         {
             local.b.0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
-                builder.when(local.is_clo).assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
+                builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
                 builder.when(local.is_clz).assert_eq(*a, *b);
             });
 
@@ -216,7 +205,10 @@ where
         builder.when(local.is_real).assert_zero(local.a[3]);
 
         // Get the opcode for the operation.
-        let cpu_opcode = local.is_clo * Opcode::CLO.as_field::<AB::F>()
+        // is_clo = is_real - is_clz, so:
+        //   opcode = (is_real - is_clz) * CLO + is_clz * CLZ
+        //          = is_real * CLO + is_clz * (CLZ - CLO)
+        let cpu_opcode = is_clo.clone() * Opcode::CLO.as_field::<AB::F>()
             + local.is_clz * Opcode::CLZ.as_field::<AB::F>();
 
         builder.receive_instruction(
@@ -250,10 +242,12 @@ where
         }
 
         {
-            // Use the SRL table to compute bb >> (31 - result).
+            // Use the SRL table to verify bb >> (31 - result) == 1.
+            // Since sr1 is always 1 when bb != 0, we hardcode the expected result
+            // as Word([1, 0, 0, 0]) directly, eliminating 4 witness columns.
             builder.send_alu(
                 Opcode::SRL.as_field::<AB::F>(),
-                local.sr1,
+                Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.bb,
                 Word([
                     AB::Expr::from_canonical_u32(31) - local.a[0],
@@ -265,16 +259,11 @@ where
             );
         }
 
-        // if bb!=0, check sr1 == 1
-        {
-            builder.when_not(local.is_bb_zero).assert_one(local.sr1.reduce::<AB>());
-            builder.when_not(local.is_bb_zero).assert_zero(local.sr1[3]);
-        }
-
-        builder.assert_bool(local.is_clo);
+        // is_clz and is_real are boolean; is_clo = is_real - is_clz must also be boolean,
+        // which is equivalent to: is_clz = 1 implies is_real = 1.
         builder.assert_bool(local.is_clz);
         builder.assert_bool(local.is_real);
-        builder.assert_eq(local.is_real, local.is_clo + local.is_clz);
+        builder.when(local.is_clz).assert_one(local.is_real);
     }
 }
 
