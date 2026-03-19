@@ -1,7 +1,4 @@
-use p3_bn254_fr::Bn254Fr;
-use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
-use p3_symmetric::Permutation;
 use std::{
     borrow::Borrow,
     fs::{metadata, File},
@@ -29,6 +26,7 @@ use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254
 use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
+    new_vk_hash,
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
     OuterSC, WrapAir, ZKMProver,
 };
@@ -190,13 +188,8 @@ pub fn build_constraints_and_witness(
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
     let mut vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
 
-    // In common mode, fold the vk_commitment and pc_start directly into the vkey hash.
     if zkm_common_mode() {
-        let commitment: [Bn254Fr; 1] = template_vk.commit.into();
-        let pc_start_bn254 = Bn254Fr::from_canonical_u32(template_vk.pc_start.as_canonical_u32());
-        let mut state = [vkey_hash, commitment[0], pc_start_bn254];
-        outer_perm().permute_mut(&mut state);
-        vkey_hash = state[0];
+        vkey_hash = new_vk_hash(template_vk, vkey_hash);
     }
 
     let committed_values_digest_bytes: [KoalaBear; 32] =

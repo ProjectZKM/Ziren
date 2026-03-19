@@ -1109,13 +1109,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         };
         let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
 
-        // Common mode: hash vkey hash + vk_commitment + pc_start into a single value.
         if crate::build::zkm_common_mode() {
-            let commitment: [Bn254Fr; 1] = proof.vk.commit.into();
-            let pc_start_bn254 = Bn254Fr::from_canonical_u32(proof.vk.pc_start.as_canonical_u32());
-            let mut state = [vkey_hash, commitment[0], pc_start_bn254];
-            outer_perm().permute_mut(&mut state);
-            vkey_hash = state[0];
+            vkey_hash = new_vk_hash(&proof.vk, vkey_hash);
         }
 
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
@@ -1235,6 +1230,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
     }
+}
+/// Hash vk_commitment, pc_start and vkey hash into one value.
+pub fn new_vk_hash(vk: &StarkVerifyingKey<OuterSC>, vkey_hash: Bn254Fr) -> Bn254Fr {
+    let commitment: [Bn254Fr; 1] = vk.commit.into();
+    let pc_start_bn254 = Bn254Fr::from_canonical_u32(vk.pc_start.as_canonical_u32());
+    let mut state = [vkey_hash, commitment[0], pc_start_bn254];
+    outer_perm().permute_mut(&mut state);
+    state[0]
 }
 
 pub fn compress_program_from_input<C: ZKMProverComponents>(
