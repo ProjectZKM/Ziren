@@ -17,8 +17,8 @@ use zkm_recursion_compiler::{
     ir::Builder,
 };
 
-use zkm_recursion_core::air::RecursionPublicValues;
 pub use zkm_recursion_core::stark::{outer_perm, zkm_common_mode, zkm_dev_mode};
+use zkm_recursion_core::{air::RecursionPublicValues, new_vk_hash};
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
@@ -26,7 +26,6 @@ use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254
 use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
-    new_vk_hash,
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
     OuterSC, WrapAir, ZKMProver,
 };
@@ -189,7 +188,7 @@ pub fn build_constraints_and_witness(
     let mut vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
 
     if zkm_common_mode() {
-        vkey_hash = new_vk_hash(template_vk, vkey_hash);
+        vkey_hash = new_vk_hash(&template_vk.part_vk(), vkey_hash);
     }
 
     let committed_values_digest_bytes: [KoalaBear; 32] =

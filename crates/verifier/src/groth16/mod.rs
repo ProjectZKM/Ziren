@@ -3,13 +3,12 @@ pub mod error;
 mod verify;
 
 use p3_bn254_fr::Bn254Fr;
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
-use p3_symmetric::Permutation;
+use p3_field::{FieldAlgebra, PrimeField};
 use substrate_bn::Fr;
 
 use alloc::vec::Vec;
 use sha2::{Digest, Sha256};
-use zkm_recursion_core::stark::{outer_perm, KoalaBearPoseidon2Outer};
+use zkm_recursion_core::stark::KoalaBearPoseidon2Outer;
 use zkm_stark::PartStarkVerifyingKey;
 
 use crate::{decode_zkm_vkey_hash, error::Error, hash_public_inputs};
@@ -135,7 +134,6 @@ impl Groth16Verifier {
         }
 
         let zkm_vkey_hash = decode_zkm_vkey_hash(zkm_vkey_hash)?;
-        // In common mode, combine the base vkey hash with commitment + pc_start from part vk.
         let zkm_vkey_hash = new_vk_hash(&zkm_vkey_hash, part_start_vk)?;
         let zkm_public_inputs_hash = hash_public_inputs(zkm_public_inputs);
         let public_inputs = [zkm_vkey_hash, Fr::from_slice(&zkm_public_inputs_hash).unwrap()];
@@ -208,14 +206,9 @@ impl Groth16Verifier {
 fn new_vk_hash(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
     let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> = bincode::deserialize(part_vk)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
-    let commitment: [Bn254Fr; 1] = part_vk.commit.into();
-    let pc_start_bn254 = Bn254Fr::from_canonical_u32(part_vk.pc_start.as_canonical_u32());
-
     let zkm_vkey_hash = bytes_to_bn254fr(zkm_vkey_hash)?;
-    let mut state = [zkm_vkey_hash, commitment[0], pc_start_bn254];
-    outer_perm().permute_mut(&mut state);
-
-    bn254fr_to_fr(state[0])
+    let vk_hash = zkm_recursion_core::new_vk_hash(&part_vk, zkm_vkey_hash);
+    bn254fr_to_fr(vk_hash)
 }
 
 fn bn254fr_to_fr(value: Bn254Fr) -> Result<Fr, Groth16Error> {

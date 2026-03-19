@@ -33,11 +33,9 @@ use std::{
 };
 
 use lru::LruCache;
-use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_symmetric::Permutation;
 use shapes::ZKMProofShape;
 use tracing::instrument;
 use zkm_core_executor::{ExecutionError, ExecutionReport, Executor, Program, ZKMContext};
@@ -70,9 +68,10 @@ use zkm_recursion_compiler::{
 use zkm_recursion_core::{
     air::RecursionPublicValues,
     machine::RecursionAir,
+    new_vk_hash,
     runtime::ExecutionRecord,
     shape::{RecursionShape, RecursionShapeConfig},
-    stark::{outer_perm, KoalaBearPoseidon2Outer},
+    stark::KoalaBearPoseidon2Outer,
     RecursionProgram, Runtime as RecursionRuntime,
 };
 pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, PlonkBn254Proof};
@@ -1110,7 +1109,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
 
         if crate::build::zkm_common_mode() {
-            vkey_hash = new_vk_hash(&proof.vk, vkey_hash);
+            vkey_hash = new_vk_hash(&proof.vk.part_vk(), vkey_hash);
         }
 
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
@@ -1230,14 +1229,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
     }
-}
-/// Hash vk_commitment, pc_start and vkey hash into one value.
-pub fn new_vk_hash(vk: &StarkVerifyingKey<OuterSC>, vkey_hash: Bn254Fr) -> Bn254Fr {
-    let commitment: [Bn254Fr; 1] = vk.commit.into();
-    let pc_start_bn254 = Bn254Fr::from_canonical_u32(vk.pc_start.as_canonical_u32());
-    let mut state = [vkey_hash, commitment[0], pc_start_bn254];
-    outer_perm().permute_mut(&mut state);
-    state[0]
 }
 
 pub fn compress_program_from_input<C: ZKMProverComponents>(
