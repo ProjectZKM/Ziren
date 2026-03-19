@@ -3,7 +3,9 @@ use std::io::Read;
 use test_artifacts::HELLO_WORLD_ELF;
 use zkm_prover::build::groth16_bn254_artifacts_dev_dir;
 use zkm_sdk::install::try_install_circuit_artifacts;
-use zkm_sdk::{HashableKey, ProverClient, ZKMStdin};
+use zkm_sdk::{HashableKey, ProverClient, ZKMStdin, ZKM_CIRCUIT_VERSION};
+
+use crate::PART_STARK_VK_BYTES;
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
@@ -62,6 +64,13 @@ fn test_verify_groth16_common() {
         &crate::PART_STARK_VK_BYTES,
     )
     .expect("Groth16 proof is invalid");
+}
+
+#[test]
+#[ignore]
+fn test_get_part_stark_vk() {
+    let part_start_vk = zkm_sdk::get_part_start_vk(ZKM_CIRCUIT_VERSION);
+    assert_eq!(part_start_vk, *PART_STARK_VK_BYTES);
 }
 
 #[test]
@@ -152,12 +161,12 @@ fn test_e2e_verify_groth16() {
 #[test]
 #[ignore]
 fn test_vkeys() {
-    let groth16_path = try_install_circuit_artifacts("groth16");
+    let groth16_path = try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION);
     let s3_vkey_path = groth16_path.join("groth16_vk.bin");
     let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
     assert_eq!(s3_vkey_bytes, *crate::GROTH16_VK_BYTES);
 
-    let plonk_path = try_install_circuit_artifacts("plonk");
+    let plonk_path = try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION);
     let s3_vkey_path = plonk_path.join("plonk_vk.bin");
     let s3_vkey_bytes = std::fs::read(s3_vkey_path).unwrap();
     assert_eq!(s3_vkey_bytes, *crate::PLONK_VK_BYTES);

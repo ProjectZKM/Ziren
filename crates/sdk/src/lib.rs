@@ -25,6 +25,7 @@ use zkm_prover::components::DefaultProverComponents;
 //#[cfg(feature = "network")]
 pub use provers::{CpuProver, MockProver, Prover};
 
+pub use crate::install::get_part_start_vk;
 pub use zkm_build::include_elf;
 pub use zkm_core_executor::{ExecutionReport, HookEnv, ZKMContext, ZKMContextBuilder};
 pub use zkm_core_machine::{io::ZKMStdin, ZKM_CIRCUIT_VERSION};

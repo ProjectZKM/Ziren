@@ -21,8 +21,8 @@ pub const CIRCUIT_ARTIFACTS_URL_BASE: &str = "https://zkm-toolchain.s3.us-west-2
 
 /// The directory where the groth16 circuit artifacts will be stored.
 #[must_use]
-pub fn groth16_circuit_artifacts_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16").join(ZKM_CIRCUIT_VERSION)
+pub fn groth16_circuit_artifacts_dir(zkm_circuit_version: &str) -> PathBuf {
+    dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16").join(zkm_circuit_version)
 }
 
 /// The directory where the groth16 circuit artifacts will be stored.
@@ -38,13 +38,14 @@ pub fn plonk_circuit_artifacts_dir() -> PathBuf {
 }
 
 /// Tries to install the groth16 circuit artifacts if they are not already installed.
+/// zkm_circuit_version: The version of the circuit, e.g. "v1.0.0".
 #[must_use]
-pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
+pub fn try_install_circuit_artifacts(artifacts_type: &str, zkm_circuit_version: &str) -> PathBuf {
     let build_dir = if artifacts_type == "groth16" {
         if zkm_prover::build::zkm_common_mode() {
             groth16_circuit_artifacts_dir_common()
         } else {
-            groth16_circuit_artifacts_dir()
+            groth16_circuit_artifacts_dir(zkm_circuit_version)
         }
     } else if artifacts_type == "plonk" {
         plonk_circuit_artifacts_dir()
@@ -64,23 +65,27 @@ pub fn try_install_circuit_artifacts(artifacts_type: &str) -> PathBuf {
                 println!(
                     "[zkm] {} circuit artifacts for version {} do not exist at {}. downloading...",
                     artifacts_type,
-                    ZKM_CIRCUIT_VERSION,
+                    zkm_circuit_version,
                     build_dir.display()
                 );
-                install_circuit_artifacts(build_dir.clone(), artifacts_type);
+                install_circuit_artifacts(build_dir.clone(), artifacts_type, zkm_circuit_version);
             }
         }
     }
     build_dir
 }
 
-/// Install the latest circuit artifacts.
+/// Install the specified version of circuit artifacts.
 ///
 /// This function will download the latest circuit artifacts from the S3 bucket and extract them
 /// to the directory specified by the provided `build_dir`.
 #[cfg(feature = "network")]
 #[allow(clippy::needless_pass_by_value)]
-pub fn install_circuit_artifacts(build_dir: PathBuf, artifacts_type: &str) {
+pub fn install_circuit_artifacts(
+    build_dir: PathBuf,
+    artifacts_type: &str,
+    zkm_circuit_version: &str,
+) {
     // Create the build directory.
     std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
 
@@ -88,7 +93,7 @@ pub fn install_circuit_artifacts(build_dir: PathBuf, artifacts_type: &str) {
     let download_url = if zkm_prover::build::zkm_common_mode() {
         format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-common.tar.gz")
     } else {
-        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{ZKM_CIRCUIT_VERSION}-{artifacts_type}.tar.gz")
+        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{zkm_circuit_version}-{artifacts_type}.tar.gz")
     };
     let mut artifacts_tar_gz_file =
         tempfile::NamedTempFile::new().expect("failed to create tempfile");
@@ -140,4 +145,14 @@ pub async fn download_file(
     pb.finish();
 
     Ok(())
+}
+
+/// Get the part start vkey for a given version.
+/// version: The version of the circuit, e.g. "v1.0.0"
+pub fn get_part_start_vk(zkm_circuit_version: &str) -> &'static [u8] {
+    let groth16_bn254_artifacts = try_install_circuit_artifacts("groth16", zkm_circuit_version);
+    let path = groth16_bn254_artifacts.join("part_stark_vk.bin");
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("failed to read part_stark_vk.bin at {path:?}: {e}"));
+    Box::leak(bytes.into_boxed_slice())
 }
