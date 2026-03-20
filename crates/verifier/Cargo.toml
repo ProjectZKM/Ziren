@@ -56,4 +56,5 @@ std = ["thiserror/std"]
 ark = ["ark-bn254", "ark-serialize", "ark-ff", "ark-groth16", "ark-ec", "dep-sdk"]
 dep-sdk = ["dep:zkm-sdk"]
 dummy-vk-map = []
-common = ["zkm-recursion-core/common"] # The groth16 verification key (vk) is not affected by ziren upgrades
+# The Groth16 verification key (vk) is not affected by the Ziren upgrade.
+imm-wrap-vk = ["zkm-recursion-core/imm-wrap-vk"]

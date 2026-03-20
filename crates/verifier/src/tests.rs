@@ -41,10 +41,10 @@ fn test_verify_groth16() {
 
 #[test]
 #[ignore]
-// ZKM_COMMON=1 cargo test -r -- --ignored test_verify_groth16_common
+// ZKM_IMM_WRAP_VK=1 cargo test -r -- --ignored test_verify_groth16_imm_wrap_vk
 // or
-// cargo test -r --features common -- --ignored test_verify_groth16_common
-fn test_verify_groth16_common() {
+// cargo test -r --features imm-wrap-vk -- --ignored test_verify_groth16_imm_wrap_vk
+fn test_verify_groth16_imm_wrap_vk() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
     let (pk, vk) = client.setup(HELLO_WORLD_ELF);
@@ -58,11 +58,11 @@ fn test_verify_groth16_common() {
 
     // Get the vkey hash.
     let vkey_hash = vk.bytes32();
-    crate::Groth16Verifier::verify_common(
+    crate::Groth16Verifier::verify_by_imm_groth16_vk(
         &proof,
         &public_inputs,
         &vkey_hash,
-        &crate::COMMON_GROTH16_VK_BYTES,
+        &crate::IMM_GROTH16_VK_BYTES,
         &crate::PART_STARK_VK_BYTES,
     )
     .expect("Groth16 proof is invalid");

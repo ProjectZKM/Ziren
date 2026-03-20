@@ -17,8 +17,8 @@ use zkm_recursion_compiler::{
     ir::Builder,
 };
 
-pub use zkm_recursion_core::stark::{outer_perm, zkm_common_mode, zkm_dev_mode};
-use zkm_recursion_core::{air::RecursionPublicValues, new_vk_hash};
+pub use zkm_recursion_core::stark::{outer_perm, zkm_dev_mode, zkm_imm_wrap_vk_mode};
+use zkm_recursion_core::{air::RecursionPublicValues, hash_vkey_with_part_vk};
 
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
@@ -187,8 +187,8 @@ pub fn build_constraints_and_witness(
     let pv: &RecursionPublicValues<KoalaBear> = template_proof.public_values.as_slice().borrow();
     let mut vkey_hash = koalabears_to_bn254(&pv.zkm_vk_digest);
 
-    if zkm_common_mode() {
-        vkey_hash = new_vk_hash(&template_vk.part_vk(), vkey_hash);
+    if zkm_imm_wrap_vk_mode() {
+        vkey_hash = hash_vkey_with_part_vk(&template_vk.part_vk(), vkey_hash);
     }
 
     let committed_values_digest_bytes: [KoalaBear; 32] =
@@ -247,7 +247,7 @@ fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Ve
     // Fix the `wrap_vk` value to be the same as the template `vk`. Since the chip information and
     // the ordering is already a constant, we just need to constrain the commitment and pc_start.
 
-    if !zkm_common_mode() {
+    if !zkm_imm_wrap_vk_mode() {
         // Get the vk variable from the input.
         let vk = input.vks_and_proofs.first().unwrap().0.clone();
         // Get the expected commitment.

@@ -112,7 +112,7 @@ impl Groth16Verifier {
     /// # Returns
     ///
     /// A success [`Result`] if verification succeeds, or a [`Groth16Error`] if verification fails.
-    pub fn verify_common(
+    pub fn verify_by_imm_groth16_vk(
         proof: &[u8],
         zkm_public_inputs: &[u8],
         zkm_vkey_hash: &str,
@@ -134,7 +134,7 @@ impl Groth16Verifier {
         }
 
         let zkm_vkey_hash = decode_zkm_vkey_hash(zkm_vkey_hash)?;
-        let zkm_vkey_hash = new_vk_hash(&zkm_vkey_hash, part_start_vk)?;
+        let zkm_vkey_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_start_vk)?;
         let zkm_public_inputs_hash = hash_public_inputs(zkm_public_inputs);
         let public_inputs = [zkm_vkey_hash, Fr::from_slice(&zkm_public_inputs_hash).unwrap()];
 
@@ -203,11 +203,11 @@ impl Groth16Verifier {
 }
 
 // Combine the base vkey hash with the `vk_commitment` and `pc_start` using a Poseidon2 permutation.
-fn new_vk_hash(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
+fn hash_vkey_with_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
     let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> = bincode::deserialize(part_vk)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
     let zkm_vkey_hash = bytes_to_bn254fr(zkm_vkey_hash)?;
-    let vk_hash = zkm_recursion_core::new_vk_hash(&part_vk, zkm_vkey_hash);
+    let vk_hash = zkm_recursion_core::hash_vkey_with_part_vk(&part_vk, zkm_vkey_hash);
     bn254fr_to_fr(vk_hash)
 }
 

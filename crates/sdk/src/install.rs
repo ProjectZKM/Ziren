@@ -4,6 +4,7 @@
 
 use cfg_if::cfg_if;
 use std::path::PathBuf;
+use zkm_prover::build::zkm_imm_wrap_vk_mode;
 
 #[cfg(any(feature = "network", feature = "network"))]
 use {
@@ -22,13 +23,11 @@ pub const CIRCUIT_ARTIFACTS_URL_BASE: &str = "https://zkm-toolchain.s3.us-west-2
 /// The directory where the groth16 circuit artifacts will be stored.
 #[must_use]
 pub fn groth16_circuit_artifacts_dir(zkm_circuit_version: &str) -> PathBuf {
-    dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16").join(zkm_circuit_version)
-}
-
-/// The directory where the groth16 circuit artifacts will be stored.
-#[must_use]
-pub fn groth16_circuit_artifacts_dir_common() -> PathBuf {
-    dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16/common")
+    if zkm_imm_wrap_vk_mode() {
+        dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16/imm-wrap-vk")
+    } else {
+        dirs::home_dir().unwrap().join(".zkm").join("circuits/groth16").join(zkm_circuit_version)
+    }
 }
 
 /// The directory where the plonk circuit artifacts will be stored.
@@ -42,11 +41,7 @@ pub fn plonk_circuit_artifacts_dir() -> PathBuf {
 #[must_use]
 pub fn try_install_circuit_artifacts(artifacts_type: &str, zkm_circuit_version: &str) -> PathBuf {
     let build_dir = if artifacts_type == "groth16" {
-        if zkm_prover::build::zkm_common_mode() {
-            groth16_circuit_artifacts_dir_common()
-        } else {
-            groth16_circuit_artifacts_dir(zkm_circuit_version)
-        }
+        groth16_circuit_artifacts_dir(zkm_circuit_version)
     } else if artifacts_type == "plonk" {
         plonk_circuit_artifacts_dir()
     } else {
@@ -90,8 +85,8 @@ pub fn install_circuit_artifacts(
     std::fs::create_dir_all(&build_dir).expect("failed to create build directory");
 
     // Download the artifacts.
-    let download_url = if zkm_prover::build::zkm_common_mode() {
-        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-common.tar.gz")
+    let download_url = if zkm_prover::build::zkm_imm_wrap_vk_mode() {
+        format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{artifacts_type}-imm-wrap-vk.tar.gz")
     } else {
         format!("{CIRCUIT_ARTIFACTS_URL_BASE}/{zkm_circuit_version}-{artifacts_type}.tar.gz")
     };

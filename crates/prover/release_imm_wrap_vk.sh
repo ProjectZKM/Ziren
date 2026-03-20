@@ -21,14 +21,14 @@ if [ $? -ne 0 ]; then
 fi
 
 # Put the version in the build directory
-echo "$COMMIT_HASH $VERSION" > ./build-common/ZKM_COMMIT
+echo "$COMMIT_HASH $VERSION" > ./build-imm-wrap-vk/ZKM_COMMIT
 
 # Create archives for Groth16 and Trusted Setup
-GROTH16_ARCHIVE="groth16-common.tar.gz"
-TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup-common.tar.gz"
+GROTH16_ARCHIVE="groth16-imm-wrap-vk.tar.gz"
+TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup-imm-wrap-vk.tar.gz"
 
 # Create Groth16 archive
-cd ./build-common/groth16
+cd ./build-imm-wrap-vk/groth16
 tar -czvf "../../$GROTH16_ARCHIVE" .
 cd ../..
 if [ $? -ne 0 ]; then
@@ -37,7 +37,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Create Trusted Setup archive
-cd ./trusted-setup-common
+cd ./trusted-setup-imm-wrap-vk
 tar -czvf "../$TRUSTED_SETUP_ARCHIVE" .
 cd ..
 if [ $? -ne 0 ]; then

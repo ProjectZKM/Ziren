@@ -6,7 +6,7 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_recursion_core::stark::zkm_common_mode;
+use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
 use zkm_stark::{air::MachineAir, StarkMachine};
 
 use crate::{
@@ -80,8 +80,8 @@ where
         assert_root_public_values_valid::<C, SC>(builder, public_values);
 
         // Reflect the public values to the next level.
-        if zkm_common_mode() {
-            SC::commit_recursion_public_values_common(
+        if zkm_imm_wrap_vk_mode() {
+            SC::commit_recursion_public_values_imm_wrap_vk(
                 builder,
                 public_values.inner,
                 vk.commitment,
