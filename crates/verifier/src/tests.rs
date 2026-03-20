@@ -41,9 +41,9 @@ fn test_verify_groth16() {
 
 #[test]
 #[ignore]
-// ZKM_IMM_WRAP_VK=1 cargo test -r -- --ignored test_verify_groth16_imm_wrap_vk
+// ZKM_IMM_WRAP_VK=1 cargo test -r --features ark -- --ignored test_verify_groth16_imm_wrap_vk
 // or
-// cargo test -r --features imm-wrap-vk -- --ignored test_verify_groth16_imm_wrap_vk
+// cargo test -r --features imm-wrap-vk --features ark -- --ignored test_verify_groth16_imm_wrap_vk
 fn test_verify_groth16_imm_wrap_vk() {
     // Set up the pk and vk.
     let client = ProverClient::cpu();
@@ -66,6 +66,19 @@ fn test_verify_groth16_imm_wrap_vk() {
         &crate::PART_STARK_VK_BYTES,
     )
     .expect("Groth16 proof is invalid");
+
+    #[cfg(feature = "ark")]
+    {
+        let valid = crate::Groth16Verifier::ark_verify_by_imm_groth16_vk(
+            &zkm_proof_with_public_values,
+            &vkey_hash,
+            &crate::IMM_GROTH16_VK_BYTES,
+            &crate::PART_STARK_VK_BYTES,
+        )
+        .expect("Groth16 proof is invalid");
+        assert!(valid);
+        tracing::info!("Groth16 proof is valid");
+    }
 }
 
 #[test]
