@@ -5,7 +5,7 @@ use zkm_prover::build::groth16_bn254_artifacts_dev_dir;
 use zkm_sdk::install::try_install_circuit_artifacts;
 use zkm_sdk::{HashableKey, ProverClient, ZKMStdin, ZKM_CIRCUIT_VERSION};
 
-use crate::PART_STARK_VK_BYTES;
+use crate::{Groth16Verifier, PART_STARK_VK_BYTES};
 
 // RUST_LOG=debug cargo test -r test_verify_groth16 --features ark
 #[test]
@@ -69,9 +69,8 @@ fn test_verify_groth16_imm_wrap_vk() {
 }
 
 #[test]
-#[ignore]
 fn test_get_part_stark_vk() {
-    let part_start_vk = zkm_sdk::get_part_start_vk(ZKM_CIRCUIT_VERSION);
+    let part_start_vk = Groth16Verifier::get_part_stark_vk(ZKM_CIRCUIT_VERSION);
     assert_eq!(part_start_vk, *PART_STARK_VK_BYTES);
 }
 

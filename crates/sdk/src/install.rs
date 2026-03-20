@@ -141,13 +141,3 @@ pub async fn download_file(
 
     Ok(())
 }
-
-/// Get the part start vkey for a given version.
-/// version: The version of the circuit, e.g. "v1.0.0"
-pub fn get_part_start_vk(zkm_circuit_version: &str) -> &'static [u8] {
-    let groth16_bn254_artifacts = try_install_circuit_artifacts("groth16", zkm_circuit_version);
-    let path = groth16_bn254_artifacts.join("part_stark_vk.bin");
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read part_stark_vk.bin at {path:?}: {e}"));
-    Box::leak(bytes.into_boxed_slice())
-}

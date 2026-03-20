@@ -104,9 +104,9 @@ impl Groth16Verifier {
     /// * `part_start_vk` - The partial STARK verifying key bytes.
     ///   Usually this will be the [`static@crate::PART_STARK_VK_BYTES`] constant,
     ///   which is the partial STARK verifying key for the current Ziren version.
-    ///   You can also obtain the given version of the partial STARK vk through SDK:
+    ///   You can also obtain the given version of the partial STARK vk through function:
     /// ```ignore
-    /// let part_start_vk = zkm_sdk::get_part_start_vk(zkm_circuit_version);
+    /// let part_start_vk = Groth16Verifier::get_part_start_vk(zkm_circuit_version);
     /// ```
     ///
     /// # Returns
@@ -142,6 +142,16 @@ impl Groth16Verifier {
         let groth16_vk = load_groth16_verifying_key_from_bytes(common_groth16_vk).unwrap();
 
         verify_groth16_algebraic(&groth16_vk, &proof, &public_inputs)
+    }
+
+    /// Get the partial STARK verifying key for a given version.
+    /// version: The version of the circuit, e.g. "v1.0.0"
+    pub fn get_part_stark_vk(zkm_circuit_version: &str) -> &'static [u8] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("bn254-vk/history/{zkm_circuit_version}_part_stark_vk.bin"));
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("failed to read part_stark_vk.bin at {path:?}: {e}"));
+        Box::leak(bytes.into_boxed_slice())
     }
 
     #[cfg(feature = "ark")]
