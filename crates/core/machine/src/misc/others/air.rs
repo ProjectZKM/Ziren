@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use crate::memory::MemoryCols;
+use crate::{memory::MemoryCols, operations::IsEqualWordOperation};
 use p3_air::{Air, AirBuilder};
 use p3_field::FieldAlgebra;
 use p3_matrix::Matrix;
@@ -71,7 +71,7 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
+            local.is_teq,
             is_rw_a.clone(),
             is_check_memory.clone(),
             AB::Expr::zero(),
@@ -91,7 +91,7 @@ where
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
+            local.is_teq,
             is_rw_a,
             AB::Expr::zero(),
             AB::Expr::zero(),
@@ -104,6 +104,9 @@ where
         self.eval_maddsub(builder, local);
         self.eval_sext(builder, local);
 
+        builder
+            .when(local.is_sext + local.is_ext + local.is_teq)
+            .assert_word_zero(local.prev_a_value);
         builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[2]);
         builder.when(local.is_ins + local.is_ext).assert_zero(local.op_c_value[3]);
     }
@@ -117,11 +120,16 @@ impl MiscInstrsChip {
     ) {
         let sext_cols = local.misc_specific_columns.sext();
 
-        builder
-            .when(local.is_teq * sext_cols.a_eq_b)
-            .assert_word_eq(local.op_a_value, local.op_b_value);
-
-        builder.when(local.is_teq).assert_zero(sext_cols.a_eq_b);
+        // Check that a != b when `is_teq` is enabled
+        IsEqualWordOperation::<AB::F>::eval(
+            builder,
+            local.op_a_value.map(|x| x.into()),
+            local.op_b_value.map(|x| x.into()),
+            sext_cols.a_eq_b,
+            local.is_teq.into(),
+        );
+        let a_eq_b = sext_cols.a_eq_b.is_diff_zero.result;
+        builder.when(local.is_teq).assert_zero(a_eq_b);
 
         // most_sig_bit is bit 7 of sig_byte.
         builder.send_byte(
@@ -134,6 +142,10 @@ impl MiscInstrsChip {
 
         // op_c can be 0 (for seb) and 1(for seh).
         builder.when(local.is_sext).assert_bool(local.op_c_value[0]);
+        builder.when(local.is_sext).assert_bool(sext_cols.is_seb);
+        builder.when(local.is_sext).assert_bool(sext_cols.is_seh);
+        builder.when(local.is_sext).assert_one(sext_cols.is_seh + sext_cols.is_seb);
+
         builder.when(local.is_sext).when(sext_cols.is_seb).assert_zero(local.op_c_value[0]);
         builder.when(local.is_sext).when(sext_cols.is_seh).assert_one(local.op_c_value[0]);
 
@@ -255,12 +267,18 @@ impl MiscInstrsChip {
     ) {
         let ins_cols = local.misc_specific_columns.ins();
 
-        // Ins can be divided into 5 operations:
-        //    ror_val = rotate_right(op_a, lsb)
-        //    srl_val = ror_val >> (msb - lsb + 1)
-        //    sll_val = op_b << (31 - msb + lsb)
-        //    add_val = srl_val + sll_val
-        //    result = rotate_right(op_a, 31 - msb)
+        // Ins is decomposed into 6 ALU sub-operations:
+        //    ror_val  = rotate_right(prev_a, lsb)            [shift: lsb ∈ 0..31]
+        //    srl1_val = ror_val >> 1                          [shift: 1]
+        //    srl_val  = srl1_val >> (msb - lsb)               [shift: msb-lsb ∈ 0..31]
+        //    sll_val  = op_b << (31 - msb + lsb)              [shift: ∈ 0..31]
+        //    add_val  = srl_val + sll_val
+        //    result   = rotate_right(add_val, 31 - msb)       [shift: ∈ 0..31]
+        //
+        // The original single SRL by `width = msb - lsb + 1` is split into two
+        // steps (`>> 1` then `>> (msb - lsb)`) so that each shift amount is
+        // always in [0, 31], avoiding the ShiftRight chip's range limitation
+        // when width = 32. All multiplicities remain degree 1.
         {
             builder.send_alu(
                 Opcode::ROR.as_field::<AB::F>(),
@@ -275,12 +293,22 @@ impl MiscInstrsChip {
                 local.is_ins,
             );
 
+            // SRL step 1: shift right by 1 (always in range).
+            builder.send_alu(
+                Opcode::SRL.as_field::<AB::F>(),
+                ins_cols.srl1_val,
+                ins_cols.ror_val,
+                Word([AB::Expr::one(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
+                local.is_ins,
+            );
+
+            // SRL step 2: shift right by msb - lsb (range [0, 31]).
             builder.send_alu(
                 Opcode::SRL.as_field::<AB::F>(),
                 ins_cols.srl_val,
-                ins_cols.ror_val,
+                ins_cols.srl1_val,
                 Word([
-                    AB::Expr::from_canonical_u32(1) + ins_cols.msb - ins_cols.lsb,
+                    AB::Expr::from_canonical_u32(0) + ins_cols.msb - ins_cols.lsb,
                     AB::Expr::zero(),
                     AB::Expr::zero(),
                     AB::Expr::zero(),

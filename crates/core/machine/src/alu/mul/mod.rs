@@ -44,9 +44,9 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
@@ -74,10 +74,11 @@ const BYTE_MASK: u8 = 0xff;
 pub struct MulChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MulCols<T> {
     /// The current/next pc, used for instruction lookup table.
+    #[picus(input)]
     pub pc: T,
     pub next_pc: T,
 
@@ -112,15 +113,17 @@ pub struct MulCols<T> {
     pub c_sign_extend: T,
 
     /// Flag indicating whether the opcode is `MUL`.
+    #[picus(selector)]
     pub is_mul: T,
 
     /// Flag indicating whether the opcode is `MULT`.
+    #[picus(selector)]
     pub is_mult: T,
 
     /// Flag indicating whether the opcode is `MULTU`.
+    #[picus(selector)]
     pub is_multu: T,
 
-    /// Selector to know whether this row is enabled.
     pub is_real: T,
 
     /// Access to hi register
@@ -144,6 +147,10 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
 
     fn name(&self) -> String {
         "Mul".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        MulCols::<u8>::picus_info()
     }
 
     fn generate_trace(
@@ -395,11 +402,11 @@ where
         let product = {
             for i in 0..PRODUCT_SIZE {
                 if i == 0 {
-                    builder.assert_eq(local.product[i], m[i].clone() - local.carry[i] * base);
+                    builder.assert_eq(m[i].clone(), local.carry[i] * base + local.product[i]);
                 } else {
                     builder.assert_eq(
-                        local.product[i],
-                        m[i].clone() + local.carry[i - 1] - local.carry[i] * base,
+                        local.product[i] - local.carry[i - 1] + local.carry[i] * base,
+                        m[i].clone(),
                     );
                 }
             }
@@ -489,12 +496,14 @@ where
         );
 
         // Check hi_record_is_real.
-        // hi_record_is_real can only be set for MULT and MULTU instruction.
+        // hi_record_is_real can only be set for MULT and MULTU instruction when is_real = 1.
         // if hi_record_is_real = 0, both clk and shard should be zero.
+        builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
+        builder.when(local.is_mul).assert_word_zero(local.hi);
     }
 }
 

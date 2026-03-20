@@ -5,7 +5,7 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     syscalls::SyscallCode,
     ByteOpcode::{self, U16Range},
-    ExecutionRecord, Instruction, Program,
+    ExecutionRecord, Instruction, Opcode, Program,
 };
 use zkm_stark::air::MachineAir;
 
@@ -134,7 +134,8 @@ impl CpuChip {
 
         cols.op_a_immutable = F::from_bool(
             instruction.is_memory_store_instruction_except_sc()
-                || instruction.is_branch_instruction(),
+                || instruction.is_branch_instruction()
+                || instruction.opcode == Opcode::TEQ,
         );
 
         cols.is_rw_a = F::from_bool(instruction.is_rw_a_instruction());

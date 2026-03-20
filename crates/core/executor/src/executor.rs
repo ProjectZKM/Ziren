@@ -1482,7 +1482,7 @@ impl<'a> Executor<'a> {
             } else if instruction.opcode == Opcode::INS {
                 self.local_counts.event_counts[Opcode::ROR] += 2;
                 self.local_counts.event_counts[Opcode::SLL] += 1;
-                self.local_counts.event_counts[Opcode::SRL] += 1;
+                self.local_counts.event_counts[Opcode::SRL] += 2;
                 self.local_counts.event_counts[Opcode::ADD] += 1;
             } else if instruction.opcode == Opcode::DIV {
                 self.local_counts.event_counts[Opcode::MULT] += 2;

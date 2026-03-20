@@ -50,9 +50,12 @@ __ZKM_HOSTDEV__ void event_to_row(
 
     populate_instruction<F>(cols.instruction, instruction);
 
+    // TEQ is a read-only instruction: it compares two registers and traps if equal,
+    // but must not modify register A. Mark it immutable to prevent register writes.
     cols.op_a_immutable = F::from_bool(
         is_memory_store_instruction_except_sc(instruction)
             || is_branch_instruction(instruction)
+            || instruction.opcode == Opcode::TEQ
     );
 
     cols.is_rw_a = F::from_bool(is_rw_a_instruction(instruction));
