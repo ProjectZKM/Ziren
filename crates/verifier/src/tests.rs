@@ -77,7 +77,6 @@ fn test_verify_groth16_imm_wrap_vk() {
         )
         .expect("Groth16 proof is invalid");
         assert!(valid);
-        tracing::info!("Groth16 proof is valid");
     }
 }
 

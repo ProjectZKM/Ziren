@@ -5,14 +5,12 @@ use ark_ec::AffineRepr;
 use ark_ff::{Fp, MontBackend, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, Compress, Validate};
-use p3_bn254_fr::Bn254Fr;
-use p3_field::PrimeField as P3PrimeField;
 use thiserror::Error;
 
 use zkm_sdk::ZKMProofWithPublicValues;
 
 use crate::error::Error;
-use crate::groth16::{bytes_to_bn254fr, check_groth16_vk_prefix, Groth16VkPrefixError};
+use crate::groth16::{check_groth16_vk_prefix, hash_vkey_with_part_vk, Groth16VkPrefixError};
 use crate::{decode_zkm_vkey_hash, hash_public_inputs};
 
 const GNARK_MASK: u8 = 0b11 << 6;
@@ -95,37 +93,20 @@ pub fn convert_ark_imm_wrap_vk(
     })?;
 
     let zkm_vkey_hash = decode_zkm_vkey_hash(vkey_hash)?;
-    let zkm_vkey_hash_bn254 = bytes_to_bn254fr(&zkm_vkey_hash);
-    let part_vk: zkm_stark::PartStarkVerifyingKey<
-        zkm_recursion_core::stark::KoalaBearPoseidon2Outer,
-    > = bincode::deserialize(part_start_vk).map_err(|_| ArkGroth16Error::InvalidData)?;
-    let vk_hash_bn254 = zkm_recursion_core::hash_vkey_with_part_vk(&part_vk, zkm_vkey_hash_bn254);
+    let vk_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_start_vk)
+        .map_err(|_| ArkGroth16Error::InvalidData)?;
 
     // Convert gnark proof to arkworks proof
     let ark_proof = load_ark_proof_from_bytes(&proof[4..])?;
     let ark_groth16_vk = load_ark_groth16_verifying_key_from_bytes(imm_groth16_vk)?;
-    let ark_public_inputs = [
-        bn254fr_to_ark_fr(vk_hash_bn254)?,
-        Fr::from_be_bytes_mod_order(&hash_public_inputs(&public_inputs)),
-    ];
+    let ark_public_inputs =
+        load_ark_public_inputs_from_bytes(&vk_hash, &hash_public_inputs(&public_inputs));
 
     Ok(ArkProof {
         groth16_vk: ark_groth16_vk.into(),
         proof: ark_proof,
         public_inputs: ark_public_inputs,
     })
-}
-
-fn bn254fr_to_ark_fr(value: Bn254Fr) -> Result<Fr, ArkGroth16Error> {
-    let big = value.as_canonical_biguint();
-    let big_bytes = big.to_bytes_be();
-    if big_bytes.len() > 32 {
-        return Err(ArkGroth16Error::InvalidData);
-    }
-
-    let mut bytes = [0u8; 32];
-    bytes[32 - big_bytes.len()..].copy_from_slice(&big_bytes);
-    Ok(Fr::from_be_bytes_mod_order(&bytes))
 }
 
 /// Convert the endianness of a byte array, chunk by chunk.

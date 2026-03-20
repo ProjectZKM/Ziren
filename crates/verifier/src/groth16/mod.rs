@@ -120,8 +120,8 @@ impl Groth16Verifier {
     /// let (pk, vk) = client.setup(ELF);
     /// let zkm_vkey_hash = vk.bytes32();
     /// ```
-    /// * `common_groth16_vk` - The Groth16 verifying key bytes.
-    ///   Usually this will be the [`static@crate::COMMON_GROTH16_VK_BYTES`] constant,
+    /// * `imm_groth16_vk` - The Groth16 verifying key bytes.
+    ///   Usually this will be the [`static@crate::IMM_GROTH16_VK_BYTES`] constant,
     ///   which is the Groth16 verifying key for all Ziren versions.
     /// * `part_start_vk` - The partial STARK verifying key bytes.
     ///   Usually this will be the [`static@crate::PART_STARK_VK_BYTES`] constant,
@@ -138,23 +138,22 @@ impl Groth16Verifier {
         proof: &[u8],
         zkm_public_inputs: &[u8],
         zkm_vkey_hash: &str,
-        common_groth16_vk: &[u8],
+        imm_groth16_vk: &[u8],
         part_start_vk: &[u8],
     ) -> Result<(), Groth16Error> {
-        check_groth16_vk_prefix(proof, common_groth16_vk).map_err(|e| match e {
+        check_groth16_vk_prefix(proof, imm_groth16_vk).map_err(|e| match e {
             Groth16VkPrefixError::InvalidData => Groth16Error::GeneralError(Error::InvalidData),
             Groth16VkPrefixError::Mismatch => Groth16Error::Groth16VkeyHashMismatch,
         })?;
 
         let zkm_vkey_hash = decode_zkm_vkey_hash(zkm_vkey_hash)?;
         let zkm_vkey_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_start_vk)?;
-        let zkm_public_inputs_hash = hash_public_inputs(zkm_public_inputs);
-        let public_inputs = [zkm_vkey_hash, Fr::from_slice(&zkm_public_inputs_hash).unwrap()];
 
-        let proof = load_groth16_proof_from_bytes(&proof[4..]).unwrap();
-        let groth16_vk = load_groth16_verifying_key_from_bytes(common_groth16_vk).unwrap();
-
-        verify_groth16_algebraic(&groth16_vk, &proof, &public_inputs)
+        Self::verify_gnark_proof(
+            &proof[4..],
+            &[zkm_vkey_hash, hash_public_inputs(zkm_public_inputs)],
+            imm_groth16_vk,
+        )
     }
 
     /// Get the partial STARK verifying key for a given version.
@@ -248,7 +247,10 @@ impl Groth16Verifier {
 }
 
 // Combine the base vkey hash with the `vk_commitment` and `pc_start` using a Poseidon2 permutation.
-fn hash_vkey_with_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr, Groth16Error> {
+pub fn hash_vkey_with_part_vk(
+    zkm_vkey_hash: &[u8; 32],
+    part_vk: &[u8],
+) -> Result<[u8; 32], Groth16Error> {
     let part_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> = bincode::deserialize(part_vk)
         .map_err(|_| Groth16Error::GeneralError(Error::InvalidData))?;
     let zkm_vkey_hash = bytes_to_bn254fr(zkm_vkey_hash);
@@ -256,7 +258,7 @@ fn hash_vkey_with_part_vk(zkm_vkey_hash: &[u8; 32], part_vk: &[u8]) -> Result<Fr
     bn254fr_to_fr(vk_hash)
 }
 
-fn bn254fr_to_fr(value: Bn254Fr) -> Result<Fr, Groth16Error> {
+pub fn bn254fr_to_fr(value: Bn254Fr) -> Result<[u8; 32], Groth16Error> {
     let big = value.as_canonical_biguint();
     let big_bytes = big.to_bytes_be();
     if big_bytes.len() > 32 {
@@ -265,7 +267,7 @@ fn bn254fr_to_fr(value: Bn254Fr) -> Result<Fr, Groth16Error> {
 
     let mut bytes = [0u8; 32];
     bytes[32 - big_bytes.len()..].copy_from_slice(&big_bytes);
-    Fr::from_slice(&bytes).map_err(|_| Groth16Error::GeneralError(Error::InvalidData))
+    Ok(bytes)
 }
 
 pub fn bytes_to_bn254fr(bytes: &[u8; 32]) -> Bn254Fr {
