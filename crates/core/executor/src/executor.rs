@@ -153,9 +153,10 @@ pub struct Executor<'a> {
 }
 
 /// The different modes the executor can run in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecutorMode {
     /// Run the execution with no tracing or checkpointing.
+    #[default]
     Simple,
     /// Run the execution with checkpoints for memory.
     Checkpoint,
@@ -2620,12 +2621,6 @@ impl<'a> Executor<'a> {
             .map(|i| self.state.memory.get(i as u32).unwrap().value)
             .collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
-    }
-}
-
-impl Default for ExecutorMode {
-    fn default() -> Self {
-        Self::Simple
     }
 }
 

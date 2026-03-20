@@ -21,20 +21,14 @@ if [ $? -ne 0 ]; then
 fi
 
 # Put the version in the build directory
-echo "$COMMIT_HASH $VERSION" > ./build/ZKM_COMMIT
+echo "$COMMIT_HASH $VERSION" > ./build-imm-wrap-vk/ZKM_COMMIT
 
-# Create archives for Groth16, Plonk, and Trusted Setup
-GROTH16_ARCHIVE="${VERSION}-groth16.tar.gz"
-PLONK_ARCHIVE="${VERSION}-plonk.tar.gz"
-TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup.tar.gz"
-
-# Store historical partial Stark VK
-PART_START_VK_PATH="../verifier/bn254-vk/part_start_vk.bin"
-PART_START_VK_PATH_HISTORY="../verifier/bn254-vk/history/${VERSION}_part_start_vk.bin"
-cp $PART_START_VK_PATH $PART_START_VK_PATH_HISTORY
+# Create archives for Groth16 and Trusted Setup
+GROTH16_ARCHIVE="groth16-imm-wrap-vk.tar.gz"
+TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup-imm-wrap-vk.tar.gz"
 
 # Create Groth16 archive
-cd ./build/groth16
+cd ./build-imm-wrap-vk/groth16
 tar -czvf "../../$GROTH16_ARCHIVE" .
 cd ../..
 if [ $? -ne 0 ]; then
@@ -42,17 +36,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Create Plonk archive
-cd ./build/plonk
-tar --exclude='srs.bin' --exclude='srs_lagrange.bin' -czvf "../../$PLONK_ARCHIVE" .
-cd ../..
-if [ $? -ne 0 ]; then
-    echo "Failed to create Plonk archive."
-    exit 1
-fi
-
 # Create Trusted Setup archive
-cd ./trusted-setup
+cd ./trusted-setup-imm-wrap-vk
 tar -czvf "../$TRUSTED_SETUP_ARCHIVE" .
 cd ..
 if [ $? -ne 0 ]; then
@@ -67,13 +52,6 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Upload Plonk archive to S3
-aws s3 cp "$PLONK_ARCHIVE" "s3://$S3_BUCKET/$PLONK_ARCHIVE"
-if [ $? -ne 0 ]; then
-    echo "Failed to upload Plonk archive to S3."
-    exit 1
-fi
-
 # Upload Trusted Setup archive to S3
 aws s3 cp "$TRUSTED_SETUP_ARCHIVE" "s3://$S3_BUCKET/$TRUSTED_SETUP_ARCHIVE"
 if [ $? -ne 0 ]; then
@@ -83,8 +61,7 @@ fi
 
 echo "Successfully uploaded build artifacts to S3:"
 echo "- s3://$S3_BUCKET/$GROTH16_ARCHIVE"
-echo "- s3://$S3_BUCKET/$PLONK_ARCHIVE"
 echo "- s3://$S3_BUCKET/$TRUSTED_SETUP_ARCHIVE"
 
 # Clean up local archive files
-rm "$GROTH16_ARCHIVE" "$PLONK_ARCHIVE" "$TRUSTED_SETUP_ARCHIVE"
+rm "$GROTH16_ARCHIVE" "$TRUSTED_SETUP_ARCHIVE"

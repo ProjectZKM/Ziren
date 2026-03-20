@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
+use zkm_prover::ZKM_CIRCUIT_VERSION;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
 use crate::install::try_install_circuit_artifacts;
@@ -53,7 +54,7 @@ impl CpuProver {
                 &outer_proof.proof,
             )
         } else {
-            try_install_circuit_artifacts("groth16")
+            try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
         };
 
         let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -140,7 +141,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("plonk")
+                try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
             };
             let proof = self.prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
 
@@ -159,7 +160,7 @@ impl Prover<DefaultProverComponents> for CpuProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("groth16")
+                try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
             };
 
             let proof = self.prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
