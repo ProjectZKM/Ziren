@@ -57,9 +57,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
@@ -83,15 +83,12 @@ const BYTE_SIZE: usize = 8;
 pub struct ShiftRightChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftRightCols<T> {
     /// The current/next pc, used for instruction lookup table.
     pub pc: T,
     pub next_pc: T,
-
-    /// The output operand.
-    pub a: Word<T>,
 
     /// The first input operand.
     pub b: Word<T>,
@@ -124,12 +121,15 @@ pub struct ShiftRightCols<T> {
     pub c_least_sig_byte: [T; BYTE_SIZE],
 
     /// If the opcode is SRL.
+    #[picus(selector)]
     pub is_srl: T,
 
     /// If the opcode is ROR.
+    #[picus(selector)]
     pub is_ror: T,
 
     /// If the opcode is SRA.
+    #[picus(selector)]
     pub is_sra: T,
 
     /// Selector to know whether this row is enabled.
@@ -145,6 +145,10 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
 
     fn name(&self) -> String {
         "ShiftRight".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        ShiftRightCols::<u8>::picus_info()
     }
 
     fn generate_trace(
@@ -227,7 +231,6 @@ impl ShiftRightChip {
         {
             cols.pc = F::from_canonical_u32(event.pc);
             cols.next_pc = F::from_canonical_u32(event.next_pc);
-            cols.a = Word::from(event.a);
             cols.b = Word::from(event.b);
             cols.c = Word::from(event.c);
 
@@ -314,7 +317,10 @@ impl ShiftRightChip {
             cols.shr_carry_output_shifted_byte =
                 shr_carry_output_shifted_byte.map(F::from_canonical_u8);
             for i in 0..WORD_SIZE {
-                debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
+                debug_assert_eq!(
+                    cols.bit_shift_result[i],
+                    F::from_canonical_u8(event.a.to_le_bytes()[i])
+                );
             }
             // Range checks.
             blu.add_u8_range_checks(&byte_shift_result);
@@ -463,14 +469,6 @@ where
             }
         }
 
-        // The 4 least significant bytes must match a. The 4 most significant bytes of result may be
-        // inaccurate.
-        {
-            for i in 0..WORD_SIZE {
-                builder.assert_eq(local.a[i], local.bit_shift_result[i]);
-            }
-        }
-
         // Check that the flags are indeed boolean.
         {
             let flags = [local.is_srl, local.is_sra, local.is_ror, local.is_real, local.b_msb];
@@ -502,16 +500,18 @@ where
             }
         }
 
-        // Check that the operation flags are boolean.
-        builder.assert_bool(local.is_srl);
-        builder.assert_bool(local.is_sra);
-        builder.assert_bool(local.is_ror);
-        builder.assert_bool(local.is_real);
-
-        // Check that is_real is the sum of the two operation flags.
+        // Check that is_real is the sum of the operation flags.
         builder.assert_eq(local.is_srl + local.is_sra + local.is_ror, local.is_real);
 
         // Receive the arguments.
+        // Use bit_shift_result[0..4] directly as the output operand `a`, eliminating the
+        // redundant `a` column since a[i] == bit_shift_result[i] is always true.
+        let a_word = Word([
+            local.bit_shift_result[0],
+            local.bit_shift_result[1],
+            local.bit_shift_result[2],
+            local.bit_shift_result[3],
+        ]);
         builder.receive_instruction(
             AB::Expr::zero(),
             AB::Expr::zero(),
@@ -522,7 +522,7 @@ where
             local.is_srl * AB::F::from_canonical_u32(Opcode::SRL as u32)
                 + local.is_sra * AB::F::from_canonical_u32(Opcode::SRA as u32)
                 + local.is_ror * AB::F::from_canonical_u32(Opcode::ROR as u32),
-            local.a,
+            a_word,
             local.b,
             local.c,
             Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),

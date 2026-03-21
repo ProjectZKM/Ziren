@@ -103,6 +103,13 @@ pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
         builder: &mut Builder<C>,
         public_values: RecursionPublicValues<Felt<C::F>>,
     );
+
+    fn commit_recursion_public_values_imm_wrap_vk(
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<C::F>>,
+        vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+        pc_start: Felt<<C as Config>::F>,
+    );
 }
 
 pub trait CircuitConfig: Config {
@@ -605,6 +612,15 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriConfigV
     ) {
         builder.commit_public_values_v2(public_values);
     }
+
+    fn commit_recursion_public_values_imm_wrap_vk(
+        _builder: &mut Builder<C>,
+        _public_values: RecursionPublicValues<Felt<<C>::F>>,
+        _vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+        _pc_start: Felt<<C as Config>::F>,
+    ) {
+        unreachable!("commit_recursion_public_values_imm_wrap_vk not implemented");
+    }
 }
 
 impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBearFriConfigVariable<C>
@@ -627,6 +643,27 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBear
         builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);
 
         let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
+        builder.commit_vkey_hash_circuit(vkey_hash);
+    }
+
+    fn commit_recursion_public_values_imm_wrap_vk(
+        builder: &mut Builder<C>,
+        public_values: RecursionPublicValues<Felt<<C>::F>>,
+        vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+        pc_start: Felt<<C as Config>::F>,
+    ) {
+        let committed_values_digest_bytes_felts: [Felt<_>; 32] =
+            words_to_bytes(&public_values.committed_value_digest).try_into().unwrap();
+        let committed_values_digest_bytes: Var<_> =
+            felt_bytes_to_bn254_var(builder, &committed_values_digest_bytes_felts);
+        builder.commit_committed_values_digest_circuit(committed_values_digest_bytes);
+
+        let vkey_hash = felts_to_bn254_var(builder, &public_values.zkm_vk_digest);
+        let vk_commitment_var: Var<_> = vk_commitment[0];
+        let pc_start_var: Var<_> = builder.felt2var_circuit(pc_start);
+        let state: [Var<_>; 3] = [vkey_hash, vk_commitment_var, pc_start_var];
+        builder.push_op(DslIr::CircuitPoseidon2Permute(state));
+        let vkey_hash = state[0];
         builder.commit_vkey_hash_circuit(vkey_hash);
     }
 }

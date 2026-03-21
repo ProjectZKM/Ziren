@@ -41,10 +41,6 @@ pub trait WeierstrassParameters: EllipticCurveParameters {
         }
         modulus
     }
-
-    fn nb_scalar_bits() -> usize {
-        Self::BaseField::NB_LIMBS * 16
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,10 +60,6 @@ impl<E: WeierstrassParameters> WeierstrassParameters for SwCurve<E> {
 
     fn generator() -> (BigUint, BigUint) {
         E::generator()
-    }
-
-    fn nb_scalar_bits() -> usize {
-        E::nb_scalar_bits()
     }
 
     fn prime_group_order() -> BigUint {
@@ -128,7 +120,7 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
     pub fn sw_scalar_mul(&self, scalar: &BigUint) -> Self {
         let mut result: Option<AffinePoint<SwCurve<E>>> = None;
         let mut temp = self.clone();
-        let bits = biguint_to_bits_le(scalar, E::nb_scalar_bits());
+        let bits = biguint_to_bits_le(scalar, <SwCurve<E> as EllipticCurve>::nb_scalar_bits());
         for bit in bits {
             if bit {
                 result = result.map(|r| r.sw_add(&temp)).or(Some(temp.clone()));

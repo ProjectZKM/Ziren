@@ -13,9 +13,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
-    air::{MachineAir, ZKMAirBuilder},
+    air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
 };
 
@@ -29,7 +29,7 @@ pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 pub struct BitwiseChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct BitwiseCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -46,15 +46,19 @@ pub struct BitwiseCols<T> {
     pub c: Word<T>,
 
     /// If the opcode is NOR.
+    #[picus(selector)]
     pub is_nor: T,
 
     /// If the opcode is XOR.
+    #[picus(selector)]
     pub is_xor: T,
 
     // If the opcode is OR.
+    #[picus(selector)]
     pub is_or: T,
 
     /// If the opcode is AND.
+    #[picus(selector)]
     pub is_and: T,
 }
 
@@ -67,6 +71,10 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
 
     fn name(&self) -> String {
         "Bitwise".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        BitwiseCols::<u8>::picus_info()
     }
 
     fn generate_trace(
@@ -229,7 +237,7 @@ where
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
-        builder.assert_bool(local.is_xor);
+        builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real);
     }
 }

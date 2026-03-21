@@ -28,6 +28,11 @@ GROTH16_ARCHIVE="${VERSION}-groth16.tar.gz"
 PLONK_ARCHIVE="${VERSION}-plonk.tar.gz"
 TRUSTED_SETUP_ARCHIVE="${VERSION}-trusted-setup.tar.gz"
 
+# Store historical partial Stark VK
+PART_START_VK_PATH="../verifier/bn254-vk/part_stark_vk.bin"
+PART_START_VK_PATH_HISTORY="../verifier/bn254-vk/history/${VERSION}_part_stark_vk.bin"
+cp $PART_START_VK_PATH $PART_START_VK_PATH_HISTORY
+
 # Create Groth16 archive
 cd ./build/groth16
 tar -czvf "../../$GROTH16_ARCHIVE" .

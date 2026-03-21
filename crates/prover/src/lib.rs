@@ -26,7 +26,6 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::sync_channel,
         Arc, Mutex, OnceLock,
     },
     thread,
@@ -67,6 +66,7 @@ use zkm_recursion_compiler::{
 };
 use zkm_recursion_core::{
     air::RecursionPublicValues,
+    hash_vkey_with_part_vk,
     machine::RecursionAir,
     runtime::ExecutionRecord,
     shape::{RecursionShape, RecursionShapeConfig},
@@ -646,9 +646,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             // Spawn a worker that sends the first layer inputs to a bounded channel.
             let input_sync = Arc::new(TurnBasedSync::new());
-            let (input_tx, input_rx) = sync_channel::<(usize, usize, ZKMCircuitWitness)>(
-                opts.recursion_opts.checkpoints_channel_capacity,
-            );
+            let (input_tx, input_rx) =
+                crossbeam_channel::bounded::<(usize, usize, ZKMCircuitWitness)>(
+                    opts.recursion_opts.checkpoints_channel_capacity,
+                );
             let input_tx = Arc::new(Mutex::new(input_tx));
             {
                 let input_tx = Arc::clone(&input_tx);
@@ -665,7 +666,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // Spawn workers who generate the records and traces.
             let record_and_trace_sync = Arc::new(TurnBasedSync::new());
             let (record_and_trace_tx, record_and_trace_rx) =
-                sync_channel::<(
+                crossbeam_channel::bounded::<(
                     usize,
                     usize,
                     Arc<RecursionProgram<KoalaBear>>,
@@ -786,10 +787,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
             // Spawn workers who generate the compress proofs.
             let proofs_sync = Arc::new(TurnBasedSync::new());
-            let (proofs_tx, proofs_rx) =
-                sync_channel::<(usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>)>(
-                    num_first_layer_inputs * 2,
-                );
+            let (proofs_tx, proofs_rx) = crossbeam_channel::bounded::<(
+                usize,
+                usize,
+                StarkVerifyingKey<InnerSC>,
+                ShardProof<InnerSC>,
+            )>(num_first_layer_inputs * 2);
             let proofs_tx = Arc::new(Mutex::new(proofs_tx));
             let proofs_rx = Arc::new(Mutex::new(proofs_rx));
             let mut prover_handles = Vec::new();
@@ -1105,7 +1108,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
+
+        if crate::build::zkm_imm_wrap_vk_mode() {
+            vkey_hash = hash_vkey_with_part_vk(&proof.vk.part_vk(), vkey_hash);
+        }
+
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();

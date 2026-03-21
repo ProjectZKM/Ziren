@@ -19,6 +19,7 @@ pub struct AddOperation<T> {
 }
 
 impl<F: Field> AddOperation<F> {
+    #[allow(unused_assignments)]
     pub fn populate(&mut self, record: &mut impl ByteRecord, a_u32: u32, b_u32: u32) -> u32 {
         let expected = a_u32.wrapping_add(b_u32);
         self.value = Word::from(expected);
@@ -40,9 +41,9 @@ impl<F: Field> AddOperation<F> {
             self.carry[2] = F::ONE;
         }
 
-        let base = 256u32;
-        let overflow = a[3].wrapping_add(b[3]).wrapping_sub(expected.to_le_bytes()[3]) as u32;
-        debug_assert_eq!(overflow.wrapping_mul(overflow.wrapping_sub(base)), 0);
+        let overflow =
+            (a[3] as u32) + (b[3] as u32) + (carry[2] as u32) - (expected.to_le_bytes()[3] as u32);
+        debug_assert!(overflow == 0 || overflow == 256);
 
         // Range check
         {

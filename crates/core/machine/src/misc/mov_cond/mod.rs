@@ -13,10 +13,10 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MovCondEvent},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
-    Word,
+    {PicusInfo, Word},
 };
 
 use crate::{air::WordAirBuilder, CoreChipError};
@@ -33,7 +33,7 @@ pub const NUM_MOV_COND_COLS: usize = size_of::<MovCondCols<u8>>();
 pub struct MovCondChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct MovCondCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -52,12 +52,15 @@ pub struct MovCondCols<T> {
     pub c_eq_0: IsZeroWordOperation<T>,
 
     /// Flag indicating whether the opcode is `MNE`.
+    #[picus(selector)]
     pub is_mne: T,
 
     /// Flag indicating whether the opcode is `MEQ`.
+    #[picus(selector)]
     pub is_meq: T,
 
     /// Flag indicating whether the opcode is `WSBH`.
+    #[picus(selector)]
     pub is_wsbh: T,
 }
 
@@ -70,6 +73,10 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
 
     fn name(&self) -> String {
         "MovCond".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        MovCondCols::<u8>::picus_info()
     }
 
     fn generate_trace(
@@ -218,7 +225,7 @@ where
         }
 
         self.eval_wsbh(builder, local);
-
+        builder.when(local.is_wsbh).assert_word_zero(local.prev_a_value);
         builder.assert_bool(local.is_mne);
         builder.assert_bool(local.is_meq);
         builder.assert_bool(local.is_wsbh);

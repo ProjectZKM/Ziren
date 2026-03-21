@@ -1,9 +1,11 @@
 use anyhow::Result;
+use std::fs;
 use std::path::PathBuf;
 use tonic::async_trait;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_cuda::{ZKMCudaProver, ZKMGpuServer};
+use zkm_prover::ZKM_CIRCUIT_VERSION;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
 
 use crate::install::try_install_circuit_artifacts;
@@ -82,7 +84,7 @@ impl CudaProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("plonk")
+                try_install_circuit_artifacts("plonk", ZKM_CIRCUIT_VERSION)
             };
             let proof = self.cpu_prover.wrap_plonk_bn254(outer_proof, &plonk_bn254_artifacts);
             let proof_with_pv = ZKMProofWithPublicValues {
@@ -98,7 +100,7 @@ impl CudaProver {
                     &outer_proof.proof,
                 )
             } else {
-                try_install_circuit_artifacts("groth16")
+                try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
             };
 
             let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);
@@ -110,8 +112,12 @@ impl CudaProver {
             return Ok((proof_with_pv, cycles));
         } else if kind == ZKMProofKind::DvSnark {
             // Get the store dvsnark assets dir via the environment variable.
-            let store_dir: PathBuf =
-                std::env::var("DVSNARK_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::new());
+            let store_dir: PathBuf = std::env::var("DVSNARK_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::new())
+                .join(format!("dvsnark_artifacts_{}", env!("CARGO_PKG_VERSION")));
+            fs::create_dir_all(&store_dir)
+                .expect("failed to create dvsnark artifacts store directory");
             let dv_snark_artifacts = zkm_prover::build::try_build_dvsnark_bn254_artifacts_dev(
                 &outer_proof.vk,
                 &outer_proof.proof,
@@ -151,7 +157,7 @@ impl CudaProver {
                 &outer_proof.proof,
             )
         } else {
-            try_install_circuit_artifacts("groth16")
+            try_install_circuit_artifacts("groth16", ZKM_CIRCUIT_VERSION)
         };
 
         let proof = self.cpu_prover.wrap_groth16_bn254(outer_proof, &groth16_bn254_artifacts);

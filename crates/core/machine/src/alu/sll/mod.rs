@@ -45,9 +45,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed, CoreChipError};
 
@@ -62,7 +62,7 @@ pub const BYTE_SIZE: usize = 8;
 pub struct ShiftLeft;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftLeftCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -108,6 +108,10 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
 
     fn name(&self) -> String {
         "ShiftLeft".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        ShiftLeftCols::<u8>::picus_info()
     }
 
     fn generate_trace(

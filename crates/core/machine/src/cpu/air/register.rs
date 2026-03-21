@@ -68,7 +68,7 @@ impl CpuChip {
         // an invalid word and write it to memory.
         builder.slice_range_check_u8(&local.op_a_access.access.value.0, local.is_real);
 
-        // If we are performing a branch or a store, then the value of `a` is the previous value.
+        // If we are performing a branch or a store or `teq`, then the value of `a` is the previous value.
         builder
             .when(local.op_a_immutable)
             .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
