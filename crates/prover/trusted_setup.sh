@@ -54,11 +54,11 @@ cp trusted-setup/Groth16Verifier.sol build/groth16/Groth16Verifier.sol
 echo "--------Override Existing VKs--------"
 cp build/groth16/groth16_vk.bin ../verifier/bn254-vk/
 cp build/plonk/plonk_vk.bin ../verifier/bn254-vk/
-cp build/groth16/part_start_vk.bin ../verifier/bn254-vk/
+cp build/groth16/part_stark_vk.bin ../verifier/bn254-vk/
 
 # Store historical partial Stark VK.
 # ```
-# cp "../verifier/bn254-vk/part_start_vk.bin" "../verifier/bn254-vk/history/${VERSION}_part_start_vk.bin"
+# cp "../verifier/bn254-vk/part_stark_vk.bin" "../verifier/bn254-vk/history/${VERSION}_part_stark_vk.bin"
 # ```
 # This was executed in the script `release.sh` when the command `make release-circuits` was run
 
