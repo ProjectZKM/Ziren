@@ -54,7 +54,7 @@ cp trusted-setup-imm-wrap-vk/Groth16Verifier.sol build-imm-wrap-vk/groth16/Groth
 
 echo "--------Override Existing VKs--------"
 cp build-imm-wrap-vk/groth16/groth16_vk.bin ../verifier/bn254-vk/imm_groth16_vk.bin
-cp build-imm-wrap-vk/groth16/part_start_vk.bin ../verifier/bn254-vk/part_start_vk.bin
+cp build-imm-wrap-vk/groth16/part_stark_vk.bin ../verifier/bn254-vk/part_stark_vk.bin
 
 echo "--------Post Trusted Setup--------"
 cargo run --bin post_trusted_setup --release -- --build-dir build-imm-wrap-vk/groth16

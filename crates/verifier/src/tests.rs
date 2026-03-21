@@ -82,8 +82,8 @@ fn test_verify_groth16_imm_wrap_vk() {
 
 #[test]
 fn test_get_part_stark_vk() {
-    let part_start_vk = Groth16Verifier::get_part_stark_vk(ZKM_CIRCUIT_VERSION);
-    assert_eq!(part_start_vk, *PART_STARK_VK_BYTES);
+    let part_stark_vk = Groth16Verifier::get_part_stark_vk(ZKM_CIRCUIT_VERSION);
+    assert_eq!(part_stark_vk, *PART_STARK_VK_BYTES);
 }
 
 #[test]

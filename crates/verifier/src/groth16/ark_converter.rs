@@ -82,7 +82,7 @@ pub fn convert_ark_imm_wrap_vk(
     proof_with_pub_values: &ZKMProofWithPublicValues,
     vkey_hash: &str,
     imm_groth16_vk: &[u8],
-    part_start_vk: &[u8],
+    part_stark_vk: &[u8],
 ) -> Result<ArkProof, ArkGroth16Error> {
     let proof = proof_with_pub_values.bytes();
     let public_inputs = proof_with_pub_values.public_values.to_vec();
@@ -93,7 +93,7 @@ pub fn convert_ark_imm_wrap_vk(
     })?;
 
     let zkm_vkey_hash = decode_zkm_vkey_hash(vkey_hash)?;
-    let vk_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_start_vk)
+    let vk_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_stark_vk)
         .map_err(|_| ArkGroth16Error::InvalidData)?;
 
     // Convert gnark proof to arkworks proof
