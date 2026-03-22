@@ -68,6 +68,7 @@ tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 num = { version = "0.4.3", features = ["rand"] }
 rand = "0.8.5"
 test-artifacts = { workspace = true }
+zkm-instruction-test-defs = { workspace = true }
 
 [build-dependencies]
 zkm-stark = { workspace = true }
