@@ -12,7 +12,7 @@ cargo run --release --bin keeper-host -- \
   --rpc http://localhost:8545 \
   --block latest
 
-# specific block
+# specific block (hex)
 cargo run --release --bin keeper-host -- \
   --rpc http://localhost:8545 \
   --block 0x11982d
@@ -27,10 +27,31 @@ cargo run --release --bin keeper-host -- \
   --block latest
 ```
 
-The payload file will be saved as `{block_number}_payload.rlp` in the current directory.
+The payload file will be saved as `{block_number_hex}_payload.rlp` in the current directory.
+
+### Continuous mode (follow new blocks)
+
+```bash
+# follow and prove each new block
+cargo run --release --bin keeper-host -- \
+  --rpc http://localhost:8545 \
+  --block latest \
+  --follow \
+  --poll-interval 5
+
+# follow and save payloads only
+cargo run --release --bin keeper-host -- \
+  --rpc http://localhost:8545 \
+  --block 0x11982d \
+  --follow \
+  --save \
+  --poll-interval 5
+```
+
+Press `Ctrl+C` to stop follow mode.
 
 ### Prove from a payload file
 
 ```bash
-cargo run --release --bin keeper-host -- 1155117_payload.rlp
+cargo run --release --bin keeper-host -- 11982d_payload.rlp
 ```

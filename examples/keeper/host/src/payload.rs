@@ -229,7 +229,7 @@ fn resolve_block(url: &str, block_arg: &str) -> Result<(u64, String)> {
 /// Fetch a keeper payload from an Ethereum JSON-RPC endpoint.
 ///
 /// Returns the RLP-encoded payload bytes (identical format to the Go payloadgen tool).
-pub fn fetch_payload(url: &str, block_arg: &str, save: bool) -> Result<Vec<u8>> {
+pub fn fetch_payload(url: &str, block_arg: &str, save: bool) -> Result<(u64, Vec<u8>)> {
     let chain_id = fetch_chain_id(url)?;
     let (block_num, block_tag) = resolve_block(url, block_arg)?;
 
@@ -250,11 +250,16 @@ pub fn fetch_payload(url: &str, block_arg: &str, save: bool) -> Result<Vec<u8>> 
     println!("Payload ready: block=0x{block_num:x} size={size_mb:.2}MB chain_id={chain_id}");
 
     if save {
-        let filename = format!("{block_num}_payload.rlp");
+        let filename = format!("{block_num:x}_payload.rlp");
         let mut file = std::fs::File::create(&filename)?;
         file.write_all(&payload)?;
         println!("Payload saved to {filename}");
     }
 
-    Ok(payload)
+    Ok((block_num, payload))
+}
+
+/// Fetch the latest block number.
+pub fn latest_block_number(url: &str) -> Result<u64> {
+    fetch_block_number(url)
 }
