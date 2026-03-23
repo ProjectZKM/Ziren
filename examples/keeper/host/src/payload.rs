@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::error::Error;
+use std::io::Write;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -228,7 +229,7 @@ fn resolve_block(url: &str, block_arg: &str) -> Result<(u64, String)> {
 /// Fetch a keeper payload from an Ethereum JSON-RPC endpoint.
 ///
 /// Returns the RLP-encoded payload bytes (identical format to the Go payloadgen tool).
-pub fn fetch_payload(url: &str, block_arg: &str) -> Result<Vec<u8>> {
+pub fn fetch_payload(url: &str, block_arg: &str, save: bool) -> Result<Vec<u8>> {
     let chain_id = fetch_chain_id(url)?;
     let (block_num, block_tag) = resolve_block(url, block_arg)?;
 
@@ -247,6 +248,13 @@ pub fn fetch_payload(url: &str, block_arg: &str) -> Result<Vec<u8>> {
 
     let size_mb = payload.len() as f64 / (1024.0 * 1024.0);
     println!("Payload ready: block=0x{block_num:x} size={size_mb:.2}MB chain_id={chain_id}");
+
+    if save {
+        let filename = format!("{block_num}_payload.rlp");
+        let mut file = std::fs::File::create(&filename)?;
+        file.write_all(&payload)?;
+        println!("Payload saved to {filename}");
+    }
 
     Ok(payload)
 }

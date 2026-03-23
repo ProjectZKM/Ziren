@@ -18,8 +18,19 @@ cargo run --release --bin keeper-host -- \
   --block 0x11982d
 ```
 
+### Save payload only (no proving)
+
+```bash
+cargo run --release --bin keeper-host -- \
+  --save \
+  --rpc http://localhost:8545 \
+  --block latest
+```
+
+The payload file will be saved as `{block_number}_payload.rlp` in the current directory.
+
 ### Prove from a payload file
 
 ```bash
-cargo run --release --bin keeper-host -- /tmp/1155117_payload.rlp
+cargo run --release --bin keeper-host -- 1155117_payload.rlp
 ```

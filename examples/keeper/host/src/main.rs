@@ -9,39 +9,59 @@ use zkm_sdk::{utils, ProverClient, ZKMProofWithPublicValues, ZKMStdin};
 /// The ELF we want to execute inside the zkVM.
 const ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/keeper.elf"));
 
-fn load_payload(args: &[String]) -> Vec<u8> {
-    let (mut rpc, mut block, mut file_path) = (None, None, None);
+struct Args {
+    rpc: Option<String>,
+    block: Option<String>,
+    file_path: Option<String>,
+    save_only: bool,
+}
+
+fn parse_args(args: &[String]) -> Args {
+    let mut parsed = Args {
+        rpc: None,
+        block: None,
+        file_path: None,
+        save_only: false,
+    };
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--rpc" => {
-                rpc = Some(args.get(i + 1).expect("--rpc requires a value").clone());
+                parsed.rpc = Some(args.get(i + 1).expect("--rpc requires a value").clone());
                 i += 2;
             }
             "--block" => {
-                block = Some(args.get(i + 1).expect("--block requires a value").clone());
+                parsed.block = Some(args.get(i + 1).expect("--block requires a value").clone());
                 i += 2;
             }
+            "--save" => {
+                parsed.save_only = true;
+                i += 1;
+            }
             _ => {
-                file_path = Some(args[i].clone());
+                parsed.file_path = Some(args[i].clone());
                 i += 1;
             }
         }
     }
+    parsed
+}
 
-    if let Some(rpc_url) = rpc {
-        let block_arg = block.as_deref().unwrap_or("latest");
-        payload::fetch_payload(&rpc_url, block_arg).expect("failed to fetch payload from RPC")
-    } else if let Some(path) = file_path {
+fn load_payload(args: &Args) -> Vec<u8> {
+    if let Some(rpc_url) = &args.rpc {
+        let block_arg = args.block.as_deref().unwrap_or("latest");
+        payload::fetch_payload(rpc_url, block_arg, args.save_only)
+            .expect("failed to fetch payload from RPC")
+    } else if let Some(path) = &args.file_path {
         println!("Loading payload from file: {path}");
-        let mut file = File::open(&path).unwrap_or_else(|e| panic!("unable to open {path}: {e}"));
+        let mut file = File::open(path).unwrap_or_else(|e| panic!("unable to open {path}: {e}"));
         let mut data = Vec::new();
         file.read_to_end(&mut data)
             .unwrap_or_else(|e| panic!("unable to read {path}: {e}"));
         data
     } else {
         eprintln!(
-            "Usage: {} [--rpc <url> [--block <block>]] [<payload_file>]",
+            "Usage: {} [--save] --rpc <url> [--block <block>] | <payload_file>",
             env::args().next().unwrap()
         );
         std::process::exit(1);
@@ -90,6 +110,13 @@ fn main() {
     utils::setup_logger();
 
     let args: Vec<String> = env::args().skip(1).collect();
+    let args = parse_args(&args);
     let data = load_payload(&args);
+
+    if args.save_only {
+        println!("Payload saved, skipping prove.");
+        return;
+    }
+
     prove_keeper(data);
 }
