@@ -975,6 +975,7 @@ pub mod tests {
             (123 * 456, 789),
             (0xffff * (0xffff - 1), 0xffff),
             (u32::MAX - 5, u32::MAX - 7),
+            (5, i32::MIN.unsigned_abs()),
         ];
         for div_rem_op in div_rem_ops.iter() {
             for op in operands.iter() {
