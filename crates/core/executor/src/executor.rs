@@ -2488,7 +2488,9 @@ impl<'a> Executor<'a> {
         }
 
         if cpu_exit || !shape_match_found {
-            self.state.records_clk.push(self.state.clk);
+            if self.executor_mode == ExecutorMode::Checkpoint {
+                self.state.records_clk.push(self.state.clk);
+            }
             self.state.current_shard += 1;
             self.state.clk = 0;
             return true;
