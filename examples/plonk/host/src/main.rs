@@ -49,7 +49,7 @@ fn main() {
     let client = ProverClient::new();
 
     // Execute the program using the `ProverClient.execute` method, without generating a proof.
-    let (_, report) = client.execute(PLONK_ELF, stdin).run().unwrap();
+    let (_, report) = client.execute(PLONK_ELF, &stdin).run().unwrap();
     println!("executed plonk program with {} cycles", report.total_instruction_count());
     println!("{}", report);
 }

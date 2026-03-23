@@ -1,5 +1,4 @@
 use crate::mips::MipsAir;
-use crossbeam_channel::bounded;
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
 use serde::{de::DeserializeOwned, Serialize};
@@ -10,7 +9,7 @@ use std::{
     io::{
         Seek, {self},
     },
-    sync::{Arc, Mutex},
+    sync::{mpsc::sync_channel, Arc, Mutex},
 };
 use thiserror::Error;
 use web_time::Instant;
@@ -155,7 +154,7 @@ where
     }
 
     #[cfg(feature = "debug")]
-    let (all_records_tx, all_records_rx) = crossbeam_channel::unbounded::<Vec<ExecutionRecord>>();
+    let (all_records_tx, all_records_rx) = std::sync::mpsc::channel::<Vec<ExecutionRecord>>();
 
     // Record the start of the process.
     let proving_start = Instant::now();
@@ -166,7 +165,7 @@ where
         // Spawn the checkpoint generator thread.
         let checkpoint_generator_span = tracing::Span::current().clone();
         let (checkpoints_tx, checkpoints_rx) =
-            bounded::<(usize, File, bool, u64)>(opts.checkpoints_channel_capacity);
+            sync_channel::<(usize, File, bool, u64)>(opts.checkpoints_channel_capacity);
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
@@ -212,10 +211,12 @@ where
         // Spawn the phase 2 record generator thread.
         let p2_record_gen_sync = Arc::new(TurnBasedSync::new());
         let p2_trace_gen_sync = Arc::new(TurnBasedSync::new());
+        let checkpoints_rx = Arc::new(Mutex::new(checkpoints_rx));
         let (p2_records_and_traces_tx, p2_records_and_traces_rx) =
-            bounded::<(Vec<ExecutionRecord>, Vec<Vec<(String, RowMajorMatrix<Val<SC>>)>>)>(
+            sync_channel::<(Vec<ExecutionRecord>, Vec<Vec<(String, RowMajorMatrix<Val<SC>>)>>)>(
                 opts.records_and_traces_channel_capacity,
             );
+        let p2_records_and_traces_tx = Arc::new(Mutex::new(p2_records_and_traces_tx));
 
         let report_aggregate = Arc::new(Mutex::new(ExecutionReport::default()));
         let state = Arc::new(Mutex::new(PublicValues::<u32, u32>::default().reset()));
@@ -224,8 +225,8 @@ where
         for _ in 0..opts.trace_gen_workers {
             let record_gen_sync = Arc::clone(&p2_record_gen_sync);
             let trace_gen_sync = Arc::clone(&p2_trace_gen_sync);
-            let records_and_traces_tx = p2_records_and_traces_tx.clone();
-            let checkpoints_rx = checkpoints_rx.clone();
+            let records_and_traces_tx = Arc::clone(&p2_records_and_traces_tx);
+            let checkpoints_rx = Arc::clone(&checkpoints_rx);
 
             let report_aggregate = Arc::clone(&report_aggregate);
             let state = Arc::clone(&state);
@@ -242,7 +243,7 @@ where
                 tracing::debug_span!("phase 2 trace generation").in_scope(|| {
                     let _: () = loop {
                         // Receive the latest checkpoint.
-                        let received = checkpoints_rx.recv();
+                        let received = { checkpoints_rx.lock().unwrap().recv() };
                         if let Ok((index, mut checkpoint, done, num_cycles)) = received {
                             // Trace the checkpoint and reconstruct the execution records.
                             let mut reader = io::BufReader::new(&checkpoint);
@@ -453,7 +454,11 @@ where
                                 .into_iter()
                                 .zip(chunked_main_traces.into_iter())
                                 .for_each(|(records, main_traces)| {
-                                    records_and_traces_tx.send((records, main_traces)).unwrap();
+                                    records_and_traces_tx
+                                        .lock()
+                                        .unwrap()
+                                        .send((records, main_traces))
+                                        .unwrap();
                                 });
 
                             trace_gen_sync.advance_turn();

@@ -6,12 +6,10 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Instant,
 };
-
-use crossbeam_channel as channel;
 use eyre::Result;
 use thiserror::Error;
 
@@ -69,8 +67,9 @@ pub fn check_shapes<C: ZKMProverComponents>(
     num_compiler_workers: usize,
     prover: &ZKMProver<C>,
 ) -> bool {
-    let (shape_tx, shape_rx) = channel::bounded::<ZKMCompressProgramShape>(num_compiler_workers);
-    let (panic_tx, panic_rx) = channel::unbounded();
+    let (shape_tx, shape_rx) =
+        std::sync::mpsc::sync_channel::<ZKMCompressProgramShape>(num_compiler_workers);
+    let (panic_tx, panic_rx) = std::sync::mpsc::channel();
     let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
@@ -88,14 +87,15 @@ pub fn check_shapes<C: ZKMProverComponents>(
     // The Merkle tree height.
     let height = num_shapes.next_power_of_two().ilog2() as usize;
 
+    let shape_rx = Mutex::new(shape_rx);
     let compress_ok = std::thread::scope(|s| {
         // Initialize compiler workers.
         for _ in 0..num_compiler_workers {
-            let shape_rx = shape_rx.clone();
+            let shape_rx = &shape_rx;
             let prover = &prover;
             let panic_tx = panic_tx.clone();
             s.spawn(move || {
-                while let Ok(shape) = shape_rx.recv() {
+                while let Ok(shape) = shape_rx.lock().unwrap().recv() {
                     tracing::info!("shape is {:?}", shape);
                     let program = catch_unwind(AssertUnwindSafe(|| {
                         // Try to build the recursion program from the given shape.
@@ -160,11 +160,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         (dummy_set, vec![], height)
     } else {
         let start_time = Instant::now();
-        let (vk_tx, vk_rx) = channel::unbounded();
+        let (vk_tx, vk_rx) = std::sync::mpsc::channel();
         let (shape_tx, shape_rx) =
-            channel::bounded::<(usize, ZKMCompressProgramShape)>(num_compiler_workers);
-        let (program_tx, program_rx) = channel::bounded(num_setup_workers);
-        let (panic_tx, panic_rx) = channel::unbounded();
+            std::sync::mpsc::sync_channel::<(usize, ZKMCompressProgramShape)>(num_compiler_workers);
+        let (program_tx, program_rx) = std::sync::mpsc::sync_channel(num_setup_workers);
+        let (panic_tx, panic_rx) = std::sync::mpsc::channel();
 
         let compile_total_ns = AtomicU64::new(0);
         let compile_count = AtomicUsize::new(0);
@@ -181,17 +181,19 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let height = num_shapes.next_power_of_two().ilog2() as usize;
         let chunk_size = indices_set.as_ref().map(|indices| indices.len()).unwrap_or(num_shapes);
 
+        let shape_rx = Mutex::new(shape_rx);
+        let program_rx = Mutex::new(program_rx);
         std::thread::scope(|s| {
             // Initialize compiler workers.
             for _ in 0..num_compiler_workers {
                 let program_tx = program_tx.clone();
-                let shape_rx = shape_rx.clone();
+                let shape_rx = &shape_rx;
                 let prover = &prover;
                 let panic_tx = panic_tx.clone();
                 let compile_total_ns = &compile_total_ns;
                 let compile_count = &compile_count;
                 s.spawn(move || {
-                    while let Ok((i, shape)) = shape_rx.recv() {
+                    while let Ok((i, shape)) = shape_rx.lock().unwrap().recv() {
                         tracing::info!("shape {i} is {shape:?}");
                         let compile_start = Instant::now();
                         let program = catch_unwind(AssertUnwindSafe(|| {
@@ -220,12 +222,12 @@ pub fn build_vk_map<C: ZKMProverComponents>(
             // Initialize setup workers.
             for _ in 0..num_setup_workers {
                 let vk_tx = vk_tx.clone();
-                let program_rx = program_rx.clone();
+                let program_rx = &program_rx;
                 let prover = &prover;
                 let setup_total_ns = &setup_total_ns;
                 let setup_count = &setup_count;
                 s.spawn(move || {
-                    while let Ok((i, program, is_shrink)) = program_rx.recv() {
+                    while let Ok((i, program, is_shrink)) = program_rx.lock().unwrap().recv() {
                         let setup_start = Instant::now();
                         let vk = tracing::debug_span!("setup for program {}", i).in_scope(|| {
                             if is_shrink {
