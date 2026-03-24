@@ -2,42 +2,56 @@
 
 See more [Keeper - geth as a zkvm guest](https://github.com/ethereum/go-ethereum/tree/master/cmd/keeper#keeper---geth-as-a-zkvm-guest).
 
-## Payload Generation
+## Usage
 
-Generate keeper payload files (`*_payload.rlp`) from Ethereum JSON-RPC:
-
-```bash
-cd examples/keeper/host/payloadgen
-```
-
-Single block:
+### Fetch payload from RPC and prove
 
 ```bash
 # latest block
-go run . \
+cargo run --release --bin keeper-host -- \
   --rpc http://localhost:8545 \
-  --block latest \
-  --out-dir /tmp
+  --block latest
+
+# specific block (hex)
+cargo run --release --bin keeper-host -- \
+  --rpc http://localhost:8545 \
+  --block 0x11982d
 ```
 
-Continuous generation (follow new blocks):
+### Save payload only (no proving)
 
 ```bash
-# start from latest and keep generating
-go run . \
+cargo run --release --bin keeper-host -- \
+  --save \
+  --rpc http://localhost:8545 \
+  --block latest
+```
+
+The payload file will be saved as `{block_number_hex}_payload.rlp` in the current directory.
+
+### Continuous mode (follow new blocks)
+
+```bash
+# follow and prove each new block
+cargo run --release --bin keeper-host -- \
   --rpc http://localhost:8545 \
   --block latest \
   --follow \
-  --poll-interval 5s \
-  --out-dir /tmp
+  --poll-interval 5
 
-# start from specific block and keep generating
-go run . \
+# follow and save payloads only
+cargo run --release --bin keeper-host -- \
   --rpc http://localhost:8545 \
   --block 0x11982d \
   --follow \
-  --poll-interval 5s \
-  --out-dir /tmp
+  --save \
+  --poll-interval 5
 ```
 
-Press `Ctrl+C` to stop follow mode gracefully.
+Press `Ctrl+C` to stop follow mode.
+
+### Prove from a payload file
+
+```bash
+cargo run --release --bin keeper-host -- 11982d_payload.rlp
+```

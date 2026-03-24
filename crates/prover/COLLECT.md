@@ -98,7 +98,7 @@ $ ls ../ziren-shape-bin/geth/payloads
 
 ```
 RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
-    --initial "./crates/core/machine/src/shape/maximal_shapes.json" \
+    --initial "./maximal_shapes.json" \
     --shard-sizes "17 18 19 20 21 22" \
     --geth \
     --elf "../ziren-shape-bin/geth/keeper" \
