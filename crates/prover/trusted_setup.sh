@@ -1,3 +1,4 @@
+set -e
 #---------------Usage---------------
 # cd Ziren/crates/prover
 # sh trusted_setup.sh
