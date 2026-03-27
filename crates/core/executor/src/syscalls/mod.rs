@@ -254,6 +254,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(SyscallCode::SYS_GETTID, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_SCHED_GETAFFINITY, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_CLOCK_GETTIME, Arc::new(SysNopSyscall));
+    syscall_map.insert(SyscallCode::SYS_NANOSLEEP, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_PRLIMIT64, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_SIGALTSTACK, Arc::new(SysNopSyscall));
     syscall_map.insert(SyscallCode::SYS_OPENAT, Arc::new(SysNopSyscall));
