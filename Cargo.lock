@@ -7784,6 +7784,7 @@ dependencies = [
  "typenum",
  "vec_map",
  "zkm-curves",
+ "zkm-instruction-test-defs",
  "zkm-primitives 1.2.5",
  "zkm-stark",
 ]
@@ -7840,6 +7841,7 @@ dependencies = [
  "zkm-core-executor",
  "zkm-curves",
  "zkm-derive",
+ "zkm-instruction-test-defs",
  "zkm-primitives 1.2.5",
  "zkm-stark",
 ]
@@ -7893,6 +7895,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "zkm-instruction-test-defs"
+version = "1.2.5"
+dependencies = [
+ "zkm-core-executor",
 ]
 
 [[package]]

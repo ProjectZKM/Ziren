@@ -271,14 +271,17 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_overflow_b.populate(event.b, i32::MIN as u32);
                 cols.is_overflow_c.populate(event.c, -1i32 as u32);
                 if is_signed_operation(event.opcode) {
+                    let abs_remainder = (remainder as i32).unsigned_abs();
+                    let abs_c = (event.c as i32).unsigned_abs();
+
                     cols.rem_neg = cols.rem_msb;
                     cols.b_neg = cols.b_msb;
                     cols.c_neg = cols.c_msb;
                     cols.is_overflow =
                         F::from_bool(event.b as i32 == i32::MIN && event.c as i32 == -1);
-                    cols.abs_remainder = Word::from((remainder as i32).abs() as u32);
-                    cols.abs_c = Word::from((event.c as i32).abs() as u32);
-                    cols.max_abs_c_or_1 = Word::from(u32::max(1, (event.c as i32).abs() as u32));
+                    cols.abs_remainder = Word::from(abs_remainder);
+                    cols.abs_c = Word::from(abs_c);
+                    cols.max_abs_c_or_1 = Word::from(u32::max(1, abs_c));
                 } else {
                     cols.abs_remainder = cols.remainder;
                     cols.abs_c = cols.c;
