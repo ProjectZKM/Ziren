@@ -65,10 +65,7 @@ pub fn generate_go_overlay(out_dir: &Path) -> Option<PathBuf> {
         .arg("GOROOT")
         .output()
         .expect("failed to run `go env GOROOT`");
-    let go_root = String::from_utf8(go_root.stdout)
-        .unwrap()
-        .trim()
-        .to_string();
+    let go_root = String::from_utf8(go_root.stdout).unwrap().trim().to_string();
     let original_file = PathBuf::from(&go_root).join("src/runtime/sys_linux_mipsx.s");
 
     // Write overlay.json to OUT_DIR.

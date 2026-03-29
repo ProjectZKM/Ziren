@@ -1,3 +1,4 @@
+use eyre::Result;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs::File,
@@ -10,7 +11,6 @@ use std::{
     },
     time::Instant,
 };
-use eyre::Result;
 use thiserror::Error;
 
 use p3_field::FieldAlgebra;
