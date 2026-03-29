@@ -68,6 +68,8 @@ network = [
   "dep:twirp",
   "dep:ethers",
 ]
+# The Groth16 verification key (vk) is not affected by the Ziren upgrade.
+imm-wrap-vk = ["zkm-prover/imm-wrap-vk"]
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = [

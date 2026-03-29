@@ -1,11 +1,11 @@
 {
   "U256XU2048Mul": 5849,
   "Bn254Fp2MulAssign": 2885,
-  "CloClz": 46,
+  "CloClz": 41,
   "Bls12831Fp2AddSubAssign": 2070,
   "SyscallInstrs": 80,
   "DivRem": 162,
-  "ShiftRight": 135,
+  "ShiftRight": 131,
   "Secp256r1Decompress": 2686,
   "Secp256k1Decompress": 2686,
   "KeccakSponge": 102216,
@@ -36,7 +36,7 @@
   "Bls12831Fp2MulAssign": 4341,
   "EdAddAssign": 3637,
   "Bls12381Decompress": 4149,
-  "Lt": 56,
+  "Lt": 52,
   "Secp256r1DoubleAssign": 4492,
   "Branch": 90,
   "SyscallCore": 22,
@@ -47,6 +47,6 @@
   "Cpu": 119,
   "ShaCompress": 40480,
   "MemoryInstrs": 115,
-  "MiscInstrs": 148,
+  "MiscInstrs": 152,
   "Secp256k1DoubleAssign": 4492
 }

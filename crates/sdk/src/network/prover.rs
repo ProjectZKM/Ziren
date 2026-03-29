@@ -64,15 +64,16 @@ impl NetworkProver {
         );
         let ssl_cert_path = env::var("SSL_CERT_PATH").ok();
         let ssl_key_path = env::var("SSL_KEY_PATH").ok();
-        let ssl_config = if ssl_cert_path.is_none() || ssl_key_path.is_none() {
-            None
-        } else {
-            let (ca_cert, identity) = get_cert_and_identity(
-                ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
-                ssl_cert_path.as_ref().expect("SSL_CERT_PATH not set"),
-                ssl_key_path.as_ref().expect("SSL_KEY_PATH not set"),
-            )?;
-            Some(Config { ca_cert, identity })
+        let ssl_config = match (ssl_cert_path.as_ref(), ssl_key_path.as_ref()) {
+            (Some(ssl_cert_path), Some(ssl_key_path)) => {
+                let (ca_cert, identity) = get_cert_and_identity(
+                    ca_cert_path.as_ref().expect("CA_CERT_PATH not set"),
+                    ssl_cert_path.as_ref(),
+                    ssl_key_path.as_ref(),
+                )?;
+                Some(Config { ca_cert, identity })
+            }
+            _ => None,
         };
 
         let endpoint_para = endpoint.to_owned().expect("ENDPOINT must be set");

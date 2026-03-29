@@ -1,3 +1,4 @@
+set -e
 #---------------Usage---------------
 # cd Ziren/crates/prover
 # sh trusted_setup.sh
@@ -8,8 +9,14 @@ make build-circuits
 
 echo "--------Powers of Tau--------"
 export NB_CONSTRAINTS_LOG2=23
-wget https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau \
-    -O powersOfTau28_hez_final.ptau
+URL="https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_${NB_CONSTRAINTS_LOG2}.ptau"
+FILE="powersOfTau28_hez_final.ptau"
+if [ -s "$FILE" ]; then
+    echo "$FILE already exists, skip downloading."
+else
+    echo "Downloading $FILE ..."
+    wget "$URL" -O "$FILE"
+fi
 
 echo "--------Semaphore Install--------"
 git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2 semaphore-mtb-setup
@@ -48,6 +55,13 @@ cp trusted-setup/Groth16Verifier.sol build/groth16/Groth16Verifier.sol
 echo "--------Override Existing VKs--------"
 cp build/groth16/groth16_vk.bin ../verifier/bn254-vk/
 cp build/plonk/plonk_vk.bin ../verifier/bn254-vk/
+cp build/groth16/part_stark_vk.bin ../verifier/bn254-vk/
+
+# Store historical partial Stark VK.
+# ```
+# cp "../verifier/bn254-vk/part_stark_vk.bin" "../verifier/bn254-vk/history/${VERSION}_part_stark_vk.bin"
+# ```
+# This was executed in the script `release.sh` when the command `make release-circuits` was run
 
 echo "--------Post Trusted Setup--------"
 cargo run --bin post_trusted_setup --release -- --build-dir build/groth16
@@ -56,14 +70,5 @@ echo "--------[TODO] Release--------"
 # make release-circuits
 
 echo "--------[TODO] Clear--------"
-# rm -rf Groth16Verifier.sol
-# rm -rf build/
-# rm -rf data/
-# rm -rf pk
-# rm -rf powersOfTau28_hez_final.ptau
-# rm -rf semaphore-gnark-11
-# rm -rf semaphore-mtb-setup/
-# rm -rf trusted-setup/
-# rm -rf vk
-# rm -rf wrap_vk.bin
-# rm -rf wrapped_proof.bin
+# rm -rf build powersOfTau28_hez_final.ptau semaphore-gnark-11 \
+    # semaphore-mtb-setup trusted-setup pk vk Groth16Verifier.sol

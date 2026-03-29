@@ -67,6 +67,7 @@ use zkm_recursion_compiler::{
 };
 use zkm_recursion_core::{
     air::RecursionPublicValues,
+    hash_vkey_with_part_vk,
     machine::RecursionAir,
     runtime::ExecutionRecord,
     shape::{RecursionShape, RecursionShapeConfig},
@@ -1105,7 +1106,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
             is_complete: true,
         };
-        let vkey_hash = zkm_vkey_digest_bn254(&proof);
+        let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
+
+        if crate::build::zkm_imm_wrap_vk_mode() {
+            vkey_hash = hash_vkey_with_part_vk(&proof.vk.part_vk(), vkey_hash);
+        }
+
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
 
         let mut witness = Witness::default();

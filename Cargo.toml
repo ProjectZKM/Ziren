@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.2.4"
+version = "1.2.5"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.80"
@@ -12,10 +12,12 @@ members = [
     "crates/build",
     "crates/cli",
     "crates/core/executor",
+    "crates/core/instruction-test-defs",
     "crates/core/machine",
     "crates/cuda",
     "crates/curves",
     "crates/derive",
+    "crates/picus",
     "crates/primitives",
     "crates/prover",
     "crates/recursion/circuit",
@@ -106,6 +108,7 @@ zkm-recursion-gnark-ffi = { path = "crates/recursion/gnark-ffi", default-feature
 zkm-recursion-compiler = { path = "crates/recursion/compiler" }
 zkm-recursion-core = { path = "crates/recursion/core" }
 zkm-core-executor = { path = "crates/core/executor", default-features = false }
+zkm-instruction-test-defs = { path = "crates/core/instruction-test-defs" }
 zkm-core-machine = { path = "crates/core/machine", default-features = false }
 zkm-derive = { path = "crates/derive" }
 zkm-primitives = { path = "crates/primitives" }
@@ -115,6 +118,7 @@ zkm-build = { path = "crates/build" }
 zkm-sdk = { path = "crates/sdk" }
 zkm-cuda = { path = "crates/cuda" }
 zkm-verifier = { path = "crates/verifier" }
+zkm-picus = {path = "crates/picus"}
 
 zkm-lib = { path = "crates/zkvm/lib", default-features = false }
 zkm-zkvm = { path = "crates/zkvm/entrypoint", default-features = false }

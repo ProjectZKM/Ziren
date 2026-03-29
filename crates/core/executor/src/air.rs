@@ -99,7 +99,7 @@ pub enum MipsAirId {
     SyscallInstrs = 38,
     /// The MemoryInstructionChip.
     MemoryInstrs = 39,
-    /// The MiscInstructionChip.
+    /// The MiscInstrsChip.
     MiscInstrs = 40,
     /// The memory global init chip.
     MemoryGlobalInit = 41,

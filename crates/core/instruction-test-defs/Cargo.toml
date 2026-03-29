@@ -1,0 +1,13 @@
+[package]
+name = "zkm-instruction-test-defs"
+description = "Shared instruction regression definitions for executor and prover tests"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+zkm-core-executor = { workspace = true, default-features = true }
+
+[lib]
+bench = false

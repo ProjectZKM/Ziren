@@ -20,6 +20,7 @@ pub struct AddDoubleOperation<T> {
 }
 
 impl<F: Field> AddDoubleOperation<F> {
+    #[allow(unused_assignments)]
     pub fn populate(&mut self, record: &mut impl ByteRecord, a_u64: u64, b_u64: u64) -> u64 {
         let expected = a_u64.wrapping_add(b_u64);
         self.value = Word::from(expected as u32);
