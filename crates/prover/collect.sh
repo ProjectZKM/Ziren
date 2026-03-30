@@ -59,8 +59,8 @@ RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
     --geth \
     --elf "../ziren-shape-bin/geth/keeper" \
     --stdin "../ziren-shape-bin/geth/payloads" \
-    --start-block 1153024 \
-    --end-block 1153029
+    --start-block 24698734 \
+    --end-block 24698905
 
 RUST_LOG=info cargo run --release -p zkm-prover --bin find_small_shapes -- \
     --maximal-shapes-json "maximal_shapes.json" \
