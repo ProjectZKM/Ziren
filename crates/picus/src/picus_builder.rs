@@ -6,6 +6,7 @@ use crate::{
         fresh_picus_expr, fresh_picus_var, fresh_picus_var_id, partial_evaluate_expr, Felt,
         PicusAtom, PicusCall, PicusConstraint, PicusExpr, PicusModule,
     },
+    syscall_spec::spec_for_sender,
 };
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
@@ -39,6 +40,7 @@ pub struct PicusBuilder<'chips, A: MachineAir<Felt>> {
     pub main: RowMajorMatrix<PicusAtom>,
     pub public_values: Vec<PicusAtom>,
     pub picus_module: PicusModule,
+    pub global_send_outputs: Vec<PicusExpr>,
     pub aux_modules: BTreeMap<String, PicusModule>,
     pub chips: &'chips [Chip<Felt, A>],
     pub extract_modularly: bool,
@@ -118,6 +120,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             main: RowMajorMatrix::new(main, width),
             public_values,
             picus_module,
+            global_send_outputs: Vec::new(),
             aux_modules,
             chips,
             extract_modularly: false,
@@ -507,20 +510,86 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
     }
 
-    fn get_main_vars_for_call(&mut self, message_values: &[PicusExpr]) -> Option<Vec<PicusAtom>> {
-        let opcode_spec = match message_values[6].clone() {
-            PicusExpr::Const(v) => {
-                assert!(v < Opcode::UNIMPL as u64);
-                spec_for(Opcode::try_from(v as u8).unwrap())
-            }
-            _ => panic!("Opcode should be constant"),
+    fn handle_receive_syscall(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+        assert_eq!(values.len(), 5, "Expected syscall lookup to contain 5 values");
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
         };
-        let target_chip = self.get_chip(opcode_spec.chip);
+
+        let syscall_id_var = fresh_picus_expr();
+        self.picus_module.inputs.push(syscall_id_var.clone());
+        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[2], &syscall_id_var));
+
+        for value in values.iter().skip(3) {
+            let input_var = fresh_picus_expr();
+            self.picus_module.inputs.push(input_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+        }
+    }
+
+    fn handle_receive_global(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
+        };
+
+        for value in values {
+            let input_var = fresh_picus_expr();
+            self.picus_module.inputs.push(input_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+        }
+    }
+
+    fn handle_send_global(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
+        };
+
+        for value in values {
+            let output_var = fresh_picus_expr();
+            self.picus_module.outputs.push(output_var.clone());
+            self.global_send_outputs.push(output_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &output_var));
+        }
+    }
+
+    fn add_abstract_syscall_call(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        let module_name = "SyscallLookup".to_string();
+        if !self.aux_modules.contains_key(&module_name) {
+            // Picus requires modules to expose at least one output, even for abstract summaries.
+            let syscall_module = PicusModule::build_empty(module_name.clone(), values.len(), 1);
+            self.aux_modules.insert(module_name.clone(), syscall_module);
+        }
+
+        let inputs =
+            values.iter().map(|value| value.clone() * multiplicity.clone()).collect::<Vec<_>>();
+        let dummy_output = fresh_picus_expr();
+        self.picus_module.calls.push(PicusCall::new(module_name, &[dummy_output], &inputs));
+    }
+
+    fn get_main_vars_for_named_call(
+        &mut self,
+        chip_name: &str,
+        arg_to_colname: &[(IndexSlice, &'static str)],
+        message_values: &[PicusExpr],
+    ) -> Option<Vec<PicusAtom>> {
+        let target_chip = self.get_chip(chip_name);
         let mut target_main_vals: Vec<PicusAtom> =
             (0..target_chip.air.width()).map(|_| fresh_picus_var()).collect();
 
         let target_picus_info = target_chip.picus_info();
-        for (slice, name) in opcode_spec.arg_to_colname {
+        for (slice, name) in arg_to_colname {
             let colrange = target_picus_info.name_to_colrange.get(*name).unwrap();
             match *slice {
                 IndexSlice::Range { start, end } => {
@@ -560,11 +629,26 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
         Some(target_main_vals)
     }
+
+    fn get_main_vars_for_call(&mut self, message_values: &[PicusExpr]) -> Option<Vec<PicusAtom>> {
+        let opcode_spec = match message_values[6].clone() {
+            PicusExpr::Const(v) => {
+                assert!(v < Opcode::UNIMPL as u64);
+                spec_for(Opcode::try_from(v as u8).unwrap())
+            }
+            _ => panic!("Opcode should be constant"),
+        };
+        self.get_main_vars_for_named_call(
+            opcode_spec.chip,
+            opcode_spec.arg_to_colname,
+            message_values,
+        )
+    }
 }
 
 impl<'chips, A: MachineAir<Felt>> PairBuilder for PicusBuilder<'chips, A> {
     fn preprocessed(&self) -> Self::M {
-        todo!()
+        self.preprocessed.clone()
     }
 }
 
@@ -572,7 +656,7 @@ impl<'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'c
     type PublicVar = PicusAtom;
 
     fn public_values(&self) -> &[Self::PublicVar] {
-        todo!()
+        &self.public_values
     }
 }
 
@@ -620,6 +704,43 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
                     })
                 }
             }
+            LookupKind::Syscall => {
+                if matches!(specialized_multiplicity, PicusExpr::Const(0)) {
+                    return;
+                }
+
+                if self.submodule_mode == SubmoduleMode::Ignore {
+                    return;
+                }
+
+                if let Some(syscall_spec) = spec_for_sender(&self.picus_module.name) {
+                    let main_vars = self.get_main_vars_for_named_call(
+                        syscall_spec.chip,
+                        syscall_spec.arg_to_colname,
+                        &specialized_values,
+                    );
+                    if let Some(vars) = main_vars {
+                        self.concrete_pending_tasks.push(ConcretePendingTask {
+                            chip_name: syscall_spec.chip.to_string(),
+                            main_vars: vars,
+                            multiplicity: specialized_multiplicity,
+                            selector: syscall_spec.selector.to_string(),
+                        });
+                        return;
+                    }
+                }
+
+                self.add_abstract_syscall_call(specialized_multiplicity, &specialized_values);
+            }
+            LookupKind::Global => {
+                if matches!(specialized_multiplicity, PicusExpr::Const(0))
+                    || self.submodule_mode == SubmoduleMode::Ignore
+                {
+                    return;
+                }
+
+                self.handle_send_global(specialized_multiplicity, &specialized_values);
+            }
             _ => todo!("handle send: {}", message.kind),
         }
     }
@@ -644,6 +765,12 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
                     &specialized_values,
                     false,
                 );
+            }
+            LookupKind::Syscall => {
+                self.handle_receive_syscall(specialized_multiplicity, &specialized_values);
+            }
+            LookupKind::Global => {
+                self.handle_receive_global(specialized_multiplicity, &specialized_values);
             }
             _ => todo!("handle receive: {}", message.kind),
         }

@@ -5,8 +5,8 @@ use p3_air::{Air, BaseAir};
 use zkm_core_machine::MipsAir;
 use zkm_picus::{
     pcl::{
-        initialize_fresh_var_ctr, set_field_modulus, set_picus_names, Felt, PicusAtom,
-        PicusConstraint, PicusExpr, PicusModule, PicusProgram,
+        initialize_fresh_var_ctr, partial_evaluate_expr, set_field_modulus, set_picus_names, Felt,
+        PicusAtom, PicusConstraint, PicusExpr, PicusModule, PicusProgram,
     },
     picus_builder::{PicusBuilder, ShrCarrySummaryMode, SubmoduleMode},
 };
@@ -142,6 +142,13 @@ where
         let updated_picus_module = sub_module.partial_eval(&env);
         builder.picus_module.constraints.extend_from_slice(&updated_picus_module.constraints);
         builder.picus_module.calls.extend_from_slice(&updated_picus_module.calls);
+        let propagated_global_outputs = sub_builder
+            .global_send_outputs
+            .iter()
+            .map(|expr| partial_evaluate_expr(expr, &env))
+            .collect::<Vec<_>>();
+        builder.picus_module.outputs.extend_from_slice(&propagated_global_outputs);
+        builder.global_send_outputs.extend(propagated_global_outputs);
         builder.picus_module.postconditions.extend_from_slice(&sub_module.postconditions);
     }
     (builder.picus_module.clone(), builder.aux_modules.clone())
@@ -255,24 +262,24 @@ fn main() {
     picus_program.add_modules(&mut all_aux_modules);
     picus_program.add_modules(&mut selector_modules);
 
-    // Build the top module from chip constraints but ignore instruction submodules.
-    // This keeps top focused on selector determinism while still retaining chip-local constraints.
-    let top_env = build_selector_env(&picus_info, None);
-    initialize_fresh_var_ctr(fresh_var_ctr_base);
-    let (top_base_module, mut top_aux_modules) = analyze_chip(
-        chip,
-        &chips,
-        None,
-        Some(top_env.clone()),
-        SubmoduleMode::Ignore,
-        shr_carry_summary_mode,
-    );
-    picus_program.add_modules(&mut top_aux_modules);
-    let mut top_module = top_base_module.partial_eval(&top_env);
-    top_module.name = "top".to_string();
-    // Top exists only to prove selector properties, so expose only selectors as outputs.
-    top_module.outputs.clear();
+    // Build the top module only when the chip has selectors to constrain.
     if !picus_info.selector_indices.is_empty() {
+        // This keeps top focused on selector determinism while still retaining chip-local constraints.
+        let top_env = build_selector_env(&picus_info, None);
+        initialize_fresh_var_ctr(fresh_var_ctr_base);
+        let (top_base_module, mut top_aux_modules) = analyze_chip(
+            chip,
+            &chips,
+            None,
+            Some(top_env.clone()),
+            SubmoduleMode::Ignore,
+            shr_carry_summary_mode,
+        );
+        picus_program.add_modules(&mut top_aux_modules);
+        let mut top_module = top_base_module.partial_eval(&top_env);
+        top_module.name = "top".to_string();
+        // Top exists only to prove selector properties, so expose only selectors as outputs.
+        top_module.outputs.clear();
         let mut one_hot_sum = PicusExpr::Const(0);
         for (selector_col, _) in &picus_info.selector_indices {
             let selector_var = PicusExpr::Var(*selector_col);
@@ -283,9 +290,9 @@ fn main() {
                 top_module.assume_deterministic.push(selector_var);
             }
         }
-        top_module.postconditions.push(PicusConstraint::new_lt(one_hot_sum, 2.into()))
+        top_module.postconditions.push(PicusConstraint::new_lt(one_hot_sum, 2.into()));
+        picus_program.add_module("top", top_module);
     }
-    picus_program.add_module("top", top_module);
     let res =
         picus_program.write_to_path(args.picus_out_dir.join(format!("{}.picus", chip.name())));
     if res.is_err() {
