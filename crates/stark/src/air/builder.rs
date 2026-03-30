@@ -378,6 +378,54 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             scope,
         );
     }
+
+    /// Sends a syscall result with full Word bytes (result, arg1, arg2) to prevent reduce() collisions.
+    #[allow(clippy::too_many_arguments)]
+    fn send_syscall_result(
+        &mut self,
+        shard: impl Into<Self::Expr> + Clone,
+        clk: impl Into<Self::Expr> + Clone,
+        result_word: Word<impl Into<Self::Expr> + Copy>,
+        arg1_word: Word<impl Into<Self::Expr> + Copy>,
+        arg2_word: Word<impl Into<Self::Expr> + Copy>,
+        multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
+    ) {
+        let values: Vec<Self::Expr> = core::iter::once(shard.into())
+            .chain(core::iter::once(clk.into()))
+            .chain(result_word.0.iter().map(|x| (*x).into()))
+            .chain(arg1_word.0.iter().map(|x| (*x).into()))
+            .chain(arg2_word.0.iter().map(|x| (*x).into()))
+            .collect();
+        self.send(
+            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
+            scope,
+        );
+    }
+
+    /// Receives a syscall result with full Word bytes (result, arg1, arg2).
+    #[allow(clippy::too_many_arguments)]
+    fn receive_syscall_result(
+        &mut self,
+        shard: impl Into<Self::Expr> + Clone,
+        clk: impl Into<Self::Expr> + Clone,
+        result_word: Word<impl Into<Self::Expr> + Copy>,
+        arg1_word: Word<impl Into<Self::Expr> + Copy>,
+        arg2_word: Word<impl Into<Self::Expr> + Copy>,
+        multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
+    ) {
+        let values: Vec<Self::Expr> = core::iter::once(shard.into())
+            .chain(core::iter::once(clk.into()))
+            .chain(result_word.0.iter().map(|x| (*x).into()))
+            .chain(arg1_word.0.iter().map(|x| (*x).into()))
+            .chain(arg2_word.0.iter().map(|x| (*x).into()))
+            .collect();
+        self.receive(
+            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
+            scope,
+        );
+    }
 }
 
 /// A builder that can operate on septic extension elements.

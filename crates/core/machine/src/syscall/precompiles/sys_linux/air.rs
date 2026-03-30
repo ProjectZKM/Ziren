@@ -160,6 +160,19 @@ where
             local.is_real,
             LookupScope::Local,
         );
+
+        // Receive full Word bytes for linux syscall result linkage and byte-level matching.
+        // This ensures op_a_value (result), op_b_value (a0), op_c_value (a1) match byte-by-byte
+        // between SyscallInstrsChip and SysLinuxChip, preventing reduce() collisions.
+        builder.receive_syscall_result(
+            local.shard,
+            local.clk,
+            local.result,
+            local.a0,
+            local.a1,
+            local.is_real,
+            LookupScope::Local,
+        );
     }
 }
 
