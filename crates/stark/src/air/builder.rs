@@ -397,10 +397,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(arg1_word.0.iter().map(|x| (*x).into()))
             .chain(arg2_word.0.iter().map(|x| (*x).into()))
             .collect();
-        self.send(
-            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
-            scope,
-        );
+        self.send(AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult), scope);
     }
 
     /// Receives a syscall result with full Word bytes (result, arg1, arg2).
@@ -421,10 +418,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             .chain(arg1_word.0.iter().map(|x| (*x).into()))
             .chain(arg2_word.0.iter().map(|x| (*x).into()))
             .collect();
-        self.receive(
-            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
-            scope,
-        );
+        self.receive(AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult), scope);
     }
 }
 
