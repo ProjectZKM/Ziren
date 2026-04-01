@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cassert>
-#include <iostream>
 #include "prelude.hpp"
 #include "utils.hpp"
 
@@ -33,6 +32,9 @@ __ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, LtCols<F>& cols) {
     }
     cols.sltu = F::from_bool(b_comp < c_comp);
     cols.is_comp_eq = F::from_bool(b_comp == c_comp);
+    cols.not_eq_inv = F::zero();
+    std::fill(std::begin(cols.byte_flags), std::end(cols.byte_flags), F::zero());
+    std::fill(std::begin(cols.comparison_bytes), std::end(cols.comparison_bytes), F::zero());
 
     // Set the byte equality flags.
     for (int idx = 3; idx >= 0; --idx) {
