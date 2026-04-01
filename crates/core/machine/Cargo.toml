@@ -80,7 +80,7 @@ pathdiff = { version = "0.2.1", optional = true }
 glob = { version = "0.3.1", optional = true }
 
 [features]
-default = []
+default = ["sys"]
 debug = []
 bigint-rug = ["zkm-curves/bigint-rug", "zkm-core-executor/bigint-rug"]
 pre-alloc = ["zkm-core-executor/pre-alloc"]

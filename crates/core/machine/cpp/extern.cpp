@@ -36,4 +36,12 @@ extern void syscall_event_to_row_koalabear(const SyscallEvent* event, const bool
     syscall::event_to_row<kb31_t, kb31_septic_extension_t>(event, is_receive, cols_kb31);
 }
 
+extern void lt_event_to_row_koalabear(
+    const AluEvent* event,
+    LtCols<KoalaBearP3>* cols
+) {
+    LtCols<kb31_t>* cols_kb31 = reinterpret_cast<LtCols<kb31_t>*>(cols);
+    lt::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
 } // namespace zkm_core_machine_sys

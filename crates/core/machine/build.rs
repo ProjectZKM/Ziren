@@ -129,6 +129,8 @@ mod sys {
             .include_item("AluEvent")
             .include_item("AddSubCols")
             .include_item("AddOperation")
+            .include_item("AddSubCols")
+            .include_item("LtCols")
             .include_item("MemoryLocalEvent")
             .include_item("GlobalCols")
             .include_item("GlobalLookupEvent")
