@@ -4,19 +4,19 @@ use std::{
     mem::size_of,
 };
 
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelBridge;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
-use zkm_core_executor::events::GlobalLookupEvent;
+use zkm_core_executor::events::{GlobalLookupEvent, PrecompileEvent};
 use zkm_core_executor::{events::SyscallEvent, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
-use zkm_stark::LookupKind;
+use zkm_stark::{LookupKind, Word};
 
 use crate::{utils::next_power_of_two, CoreChipError};
 
@@ -71,6 +71,18 @@ pub struct SyscallCols<T: Copy> {
     /// The arg2.
     pub arg2: T,
 
+    /// Full Word bytes for syscall result (op_a_value), used for linux syscall result linkage.
+    pub result_word: Word<T>,
+
+    /// Full Word bytes for arg1 (op_b_value), used for linux syscall byte-level matching.
+    pub arg1_word: Word<T>,
+
+    /// Full Word bytes for arg2 (op_c_value), used for linux syscall byte-level matching.
+    pub arg2_word: Word<T>,
+
+    /// Whether the syscall is a linux syscall.
+    pub is_linux: T,
+
     pub is_real: T,
 }
 
@@ -90,8 +102,8 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        let events = match self.shard_kind {
-            SyscallShardKind::Core => &input
+        let events: Vec<SyscallEvent> = match self.shard_kind {
+            SyscallShardKind::Core => input
                 .syscall_events
                 .iter()
                 .filter(|e| {
@@ -99,19 +111,20 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                         || (e.a_record.prev_value.to_le_bytes()[1] != 0)
                 })
                 .copied()
-                .collect::<Vec<_>>(),
-            SyscallShardKind::Precompile => &input
+                .collect(),
+            SyscallShardKind::Precompile => input
                 .precompile_events
                 .all_events()
                 .map(|(event, _)| event.to_owned())
-                .collect::<Vec<_>>(),
+                .collect(),
         };
 
-        let events = events
+        let is_receive = self.shard_kind == SyscallShardKind::Precompile;
+        let events: Vec<GlobalLookupEvent> = events
             .iter()
             .map(|event| GlobalLookupEvent {
                 message: [event.shard, event.clk, event.syscall_id, event.arg1, event.arg2, 0, 0],
-                is_receive: self.shard_kind == SyscallShardKind::Precompile,
+                is_receive,
                 kind: LookupKind::Syscall as u8,
             })
             .collect::<Vec<_>>();
@@ -139,19 +152,39 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        let row_fn = |syscall_event: &SyscallEvent, _: bool| {
-            let mut row = [F::ZERO; NUM_SYSCALL_COLS];
-            let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
+        let row_fn =
+            |syscall_event: &SyscallEvent,
+             precompile_event: Option<&PrecompileEvent>| {
+                let mut row = [F::ZERO; NUM_SYSCALL_COLS];
+                let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(syscall_event.shard);
-            cols.clk = F::from_canonical_u32(syscall_event.clk);
-            cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
-            cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
-            cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
-            cols.is_real = F::ONE;
+                cols.shard = F::from_canonical_u32(syscall_event.shard);
+                cols.clk = F::from_canonical_u32(syscall_event.clk);
+                cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
+                cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
+                cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
+                // For Core shard, a_record has real prev_value with linux_sys byte.
+                // For Precompile shard, a_record is default (prev_value=0), so detect
+                // linux from the PrecompileEvent variant instead.
+                let is_linux = match precompile_event {
+                    Some(PrecompileEvent::Linux(_)) => true,
+                    Some(_) => false,
+                    None => syscall_event.a_record.prev_value.to_le_bytes()[1] != 0,
+                };
+                cols.is_linux = F::from_bool(is_linux);
+                if is_linux {
+                    let result = match precompile_event {
+                        Some(PrecompileEvent::Linux(linux_event)) => linux_event.v0,
+                        _ => syscall_event.a_record.value,
+                    };
+                    cols.result_word = result.into();
+                    cols.arg1_word = syscall_event.arg1.into();
+                    cols.arg2_word = syscall_event.arg2.into();
+                }
+                cols.is_real = F::ONE;
 
-            row
-        };
+                row
+            };
 
         let mut rows = match self.shard_kind {
             SyscallShardKind::Core => input
@@ -161,14 +194,13 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     (event.a_record.prev_value.to_le_bytes()[2] == 1)
                         || (event.a_record.prev_value.to_le_bytes()[1] != 0)
                 })
-                .map(|event| row_fn(event, false))
+                .map(|event| row_fn(event, None))
                 .collect::<Vec<_>>(),
             SyscallShardKind::Precompile => input
                 .precompile_events
                 .all_events()
-                .map(|(event, _)| event)
                 .par_bridge()
-                .map(|event| row_fn(event, true))
+                .map(|(event, precompile)| row_fn(event, Some(precompile)))
                 .collect::<Vec<_>>(),
         };
 
@@ -223,6 +255,12 @@ where
         let local: &SyscallCols<AB::Var> = (*local).borrow();
 
         builder.assert_bool(local.is_real);
+        builder.assert_bool(local.is_linux);
+        // is_linux can only be 1 when is_real is 1.
+        builder
+            .when(AB::Expr::one() - local.is_real)
+            .assert_zero(local.is_linux);
+
         match self.shard_kind {
             SyscallShardKind::Core => {
                 builder.receive_syscall(
@@ -235,7 +273,18 @@ where
                     LookupScope::Local,
                 );
 
-                // Send the lookup to the global table.
+                // Receive SyscallResult from SyscallInstrsChip (local).
+                builder.receive_syscall_result(
+                    local.shard,
+                    local.clk,
+                    local.result_word,
+                    local.arg1_word,
+                    local.arg2_word,
+                    local.is_linux,
+                    LookupScope::Local,
+                );
+
+                // Send the Syscall lookup to the global table.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -255,6 +304,7 @@ where
                     ),
                     LookupScope::Local,
                 );
+
             }
             SyscallShardKind::Precompile => {
                 builder.send_syscall(
@@ -267,7 +317,18 @@ where
                     LookupScope::Local,
                 );
 
-                // Send the lookup to the global table.
+                // Send SyscallResult to SysLinuxChip (local).
+                builder.send_syscall_result(
+                    local.shard,
+                    local.clk,
+                    local.result_word,
+                    local.arg1_word,
+                    local.arg2_word,
+                    local.is_linux,
+                    LookupScope::Local,
+                );
+
+                // Send the Syscall lookup to the global table.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -287,6 +348,7 @@ where
                     ),
                     LookupScope::Local,
                 );
+
             }
         }
     }

@@ -137,12 +137,9 @@ impl SysLinuxChip {
                 cols.is_fnctl = F::ONE;
                 cols.is_a1_1 = F::from_bool(event.a1 == 1);
                 cols.is_a1_3 = F::from_bool(event.a1 == 3);
-                cols.is_fnctl_a1_1 = F::from_bool(event.a1 == 1);
-                cols.is_fnctl_a1_3 = F::from_bool(event.a1 == 3);
             }
             4210 | 4090 => {
                 cols.is_mmap = F::ONE;
-                cols.is_mmap2 = F::from_bool(event.syscall_code == 4090);
                 cols.is_mmap_a0_0 = F::from_bool(event.a0 == 0);
                 cols.page_offset = F::from_canonical_u32(event.a1 & 0xFFF);
                 cols.is_offset_0 = F::from_bool(event.a1 & 0xFFF == 0);

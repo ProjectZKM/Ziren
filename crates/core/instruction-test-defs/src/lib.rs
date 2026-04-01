@@ -27,7 +27,6 @@ pub use misc::{N71_SEB, N72_SEH, N73_WSBH, N74_INS, N75_EXT};
 pub use rotate::{N78_ROTR, N79_ROTRV};
 
 /// Shared interface used by the generated executor and prover test runners.
-#[allow(clippy::len_without_is_empty)]
 pub trait InstructionTestSuite {
     fn name(&self) -> &'static str;
     fn len(&self) -> usize;

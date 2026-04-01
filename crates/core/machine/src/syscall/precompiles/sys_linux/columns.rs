@@ -24,9 +24,8 @@ pub struct SysLinuxCols<T> {
     pub is_a0_1: T,
     pub is_a0_2: T,
 
-    /// Columns for sys mmap
+    /// Columns for sys mmap (covers both SYS_MMAP and SYS_MMAP2)
     pub is_mmap: T,
-    pub is_mmap2: T,
     pub is_mmap_a0_0: T,
     pub page_offset: T,
     pub is_offset_0: T,
@@ -46,8 +45,6 @@ pub struct SysLinuxCols<T> {
     pub is_fnctl: T,
     pub is_a1_1: T,
     pub is_a1_3: T,
-    pub is_fnctl_a1_1: T,
-    pub is_fnctl_a1_3: T,
 
     /// Columns for sys read
     pub is_read: T,

@@ -157,6 +157,19 @@ impl SyscallInstrsChip {
             LookupScope::Local,
         );
 
+        // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
+        // with SysLinuxChip via SyscallChip bridge. This fixes both the reduce() collision
+        // (Bug 3) and the missing result linkage (Bug 2).
+        builder.send_syscall_result(
+            local.shard,
+            local.clk,
+            local.op_a_value,
+            local.op_b_value,
+            local.op_c_value,
+            local.is_sys_linux,
+            LookupScope::Local,
+        );
+
         // Compute whether this syscall is ENTER_UNCONSTRAINED.
         let is_enter_unconstrained = {
             IsZeroOperation::<AB::F>::eval(
