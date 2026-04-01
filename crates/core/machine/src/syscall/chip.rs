@@ -16,7 +16,7 @@ use zkm_core_executor::{events::SyscallEvent, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
-use zkm_stark::{LookupKind, Word};
+use zkm_stark::LookupKind;
 
 use crate::{utils::next_power_of_two, CoreChipError};
 
@@ -71,14 +71,17 @@ pub struct SyscallCols<T: Copy> {
     /// The arg2.
     pub arg2: T,
 
-    /// Full Word bytes for syscall result (op_a_value), used for linux syscall result linkage.
-    pub result_word: Word<T>,
+    /// Half-word packed result (lo = byte0 + byte1*256, hi = byte2 + byte3*256).
+    pub result_lo: T,
+    pub result_hi: T,
 
-    /// Full Word bytes for arg1 (op_b_value), used for linux syscall byte-level matching.
-    pub arg1_word: Word<T>,
+    /// Half-word packed arg1 (op_b_value).
+    pub arg1_lo: T,
+    pub arg1_hi: T,
 
-    /// Full Word bytes for arg2 (op_c_value), used for linux syscall byte-level matching.
-    pub arg2_word: Word<T>,
+    /// Half-word packed arg2 (op_c_value).
+    pub arg2_lo: T,
+    pub arg2_hi: T,
 
     /// Whether the syscall is a linux syscall.
     pub is_linux: T,
@@ -177,9 +180,21 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                         Some(PrecompileEvent::Linux(linux_event)) => linux_event.v0,
                         _ => syscall_event.a_record.value,
                     };
-                    cols.result_word = result.into();
-                    cols.arg1_word = syscall_event.arg1.into();
-                    cols.arg2_word = syscall_event.arg2.into();
+                    let rb = result.to_le_bytes();
+                    cols.result_lo =
+                        F::from_canonical_u32(rb[0] as u32 + (rb[1] as u32) * 256);
+                    cols.result_hi =
+                        F::from_canonical_u32(rb[2] as u32 + (rb[3] as u32) * 256);
+                    let a1b = syscall_event.arg1.to_le_bytes();
+                    cols.arg1_lo =
+                        F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
+                    cols.arg1_hi =
+                        F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
+                    let a2b = syscall_event.arg2.to_le_bytes();
+                    cols.arg2_lo =
+                        F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
+                    cols.arg2_hi =
+                        F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
                 }
                 cols.is_real = F::ONE;
 
@@ -273,13 +288,16 @@ where
                     LookupScope::Local,
                 );
 
-                // Receive SyscallResult from SyscallInstrsChip (local).
-                builder.receive_syscall_result(
+                // Receive SyscallResult from SyscallInstrsChip (local), using half-word packed columns.
+                builder.receive_syscall_result_packed(
                     local.shard,
                     local.clk,
-                    local.result_word,
-                    local.arg1_word,
-                    local.arg2_word,
+                    local.result_lo,
+                    local.result_hi,
+                    local.arg1_lo,
+                    local.arg1_hi,
+                    local.arg2_lo,
+                    local.arg2_hi,
                     local.is_linux,
                     LookupScope::Local,
                 );
@@ -317,13 +335,16 @@ where
                     LookupScope::Local,
                 );
 
-                // Send SyscallResult to SysLinuxChip (local).
-                builder.send_syscall_result(
+                // Send SyscallResult to SysLinuxChip (local), using half-word packed columns.
+                builder.send_syscall_result_packed(
                     local.shard,
                     local.clk,
-                    local.result_word,
-                    local.arg1_word,
-                    local.arg2_word,
+                    local.result_lo,
+                    local.result_hi,
+                    local.arg1_lo,
+                    local.arg1_hi,
+                    local.arg2_lo,
+                    local.arg2_hi,
                     local.is_linux,
                     LookupScope::Local,
                 );

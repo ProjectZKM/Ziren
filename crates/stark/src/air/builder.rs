@@ -379,7 +379,19 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         );
     }
 
-    /// Sends a syscall result with full Word bytes (result, arg1, arg2) to prevent reduce() collisions.
+    /// Packs a Word's 4 bytes into 2 half-words: lo = b0 + b1*256, hi = b2 + b3*256.
+    /// Each half-word is in [0, 65535] < P, so the encoding is injective (collision-free).
+    fn word_to_halves(word: Word<impl Into<Self::Expr> + Copy>) -> [Self::Expr; 2] {
+        let c256 = Self::Expr::from_canonical_u32(256);
+        [
+            word.0[0].into() + word.0[1].into() * c256.clone(),
+            word.0[2].into() + word.0[3].into() * c256,
+        ]
+    }
+
+    /// Sends a syscall result using half-word encoding to prevent reduce() collisions.
+    /// Words are packed into half-words (2 field elements per word instead of 4),
+    /// saving 6 columns in the SyscallChip bridge while remaining collision-free.
     #[allow(clippy::too_many_arguments)]
     fn send_syscall_result(
         &mut self,
@@ -391,19 +403,18 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
-        let values: Vec<Self::Expr> = core::iter::once(shard.into())
-            .chain(core::iter::once(clk.into()))
-            .chain(result_word.0.iter().map(|x| (*x).into()))
-            .chain(arg1_word.0.iter().map(|x| (*x).into()))
-            .chain(arg2_word.0.iter().map(|x| (*x).into()))
-            .collect();
+        let [r_lo, r_hi] = Self::word_to_halves(result_word);
+        let [a0_lo, a0_hi] = Self::word_to_halves(arg1_word);
+        let [a1_lo, a1_hi] = Self::word_to_halves(arg2_word);
+        let values: Vec<Self::Expr> =
+            vec![shard.into(), clk.into(), r_lo, r_hi, a0_lo, a0_hi, a1_lo, a1_hi];
         self.send(
             AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
             scope,
         );
     }
 
-    /// Receives a syscall result with full Word bytes (result, arg1, arg2).
+    /// Receives a syscall result using half-word encoding.
     #[allow(clippy::too_many_arguments)]
     fn receive_syscall_result(
         &mut self,
@@ -415,12 +426,73 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
-        let values: Vec<Self::Expr> = core::iter::once(shard.into())
-            .chain(core::iter::once(clk.into()))
-            .chain(result_word.0.iter().map(|x| (*x).into()))
-            .chain(arg1_word.0.iter().map(|x| (*x).into()))
-            .chain(arg2_word.0.iter().map(|x| (*x).into()))
-            .collect();
+        let [r_lo, r_hi] = Self::word_to_halves(result_word);
+        let [a0_lo, a0_hi] = Self::word_to_halves(arg1_word);
+        let [a1_lo, a1_hi] = Self::word_to_halves(arg2_word);
+        let values: Vec<Self::Expr> =
+            vec![shard.into(), clk.into(), r_lo, r_hi, a0_lo, a0_hi, a1_lo, a1_hi];
+        self.receive(
+            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
+            scope,
+        );
+    }
+
+    /// Sends a syscall result using pre-computed half-word values (for chips that store half-words).
+    #[allow(clippy::too_many_arguments)]
+    fn send_syscall_result_packed(
+        &mut self,
+        shard: impl Into<Self::Expr>,
+        clk: impl Into<Self::Expr>,
+        result_lo: impl Into<Self::Expr>,
+        result_hi: impl Into<Self::Expr>,
+        arg1_lo: impl Into<Self::Expr>,
+        arg1_hi: impl Into<Self::Expr>,
+        arg2_lo: impl Into<Self::Expr>,
+        arg2_hi: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
+    ) {
+        let values: Vec<Self::Expr> = vec![
+            shard.into(),
+            clk.into(),
+            result_lo.into(),
+            result_hi.into(),
+            arg1_lo.into(),
+            arg1_hi.into(),
+            arg2_lo.into(),
+            arg2_hi.into(),
+        ];
+        self.send(
+            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
+            scope,
+        );
+    }
+
+    /// Receives a syscall result using pre-computed half-word values (for chips that store half-words).
+    #[allow(clippy::too_many_arguments)]
+    fn receive_syscall_result_packed(
+        &mut self,
+        shard: impl Into<Self::Expr>,
+        clk: impl Into<Self::Expr>,
+        result_lo: impl Into<Self::Expr>,
+        result_hi: impl Into<Self::Expr>,
+        arg1_lo: impl Into<Self::Expr>,
+        arg1_hi: impl Into<Self::Expr>,
+        arg2_lo: impl Into<Self::Expr>,
+        arg2_hi: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
+    ) {
+        let values: Vec<Self::Expr> = vec![
+            shard.into(),
+            clk.into(),
+            result_lo.into(),
+            result_hi.into(),
+            arg1_lo.into(),
+            arg1_hi.into(),
+            arg2_lo.into(),
+            arg2_hi.into(),
+        ];
         self.receive(
             AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
             scope,
