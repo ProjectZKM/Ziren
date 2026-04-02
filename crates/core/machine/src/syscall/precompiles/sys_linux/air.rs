@@ -263,25 +263,14 @@ impl SysLinuxChip {
 
     fn eval_fnctl<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
         builder.when(local.is_fnctl_a1_1).assert_eq(local.a1[0], AB::Expr::one());
-        builder
-            .when(local.is_fnctl_a1_3)
-            .assert_eq(local.a1[0], AB::Expr::from_canonical_u32(3));
+        builder.when(local.is_fnctl_a1_3).assert_eq(local.a1[0], AB::Expr::from_canonical_u32(3));
 
-        builder
-            .when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3)
-            .assert_zero(local.a1[1]);
-        builder
-            .when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3)
-            .assert_zero(local.a1[2]);
-        builder
-            .when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3)
-            .assert_zero(local.a1[3]);
+        builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[1]);
+        builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[2]);
+        builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[3]);
 
         // Result constraints for fnctl with a1==3 (F_GETFL)
-        builder
-            .when(local.is_fnctl_a1_3)
-            .when(local.is_a0_0)
-            .assert_word_zero(local.result);
+        builder.when(local.is_fnctl_a1_3).when(local.is_a0_0).assert_word_zero(local.result);
         builder
             .when(local.is_fnctl_a1_3)
             .when(local.is_a0_1 + local.is_a0_2)

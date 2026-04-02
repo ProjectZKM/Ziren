@@ -115,11 +115,9 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 })
                 .copied()
                 .collect(),
-            SyscallShardKind::Precompile => input
-                .precompile_events
-                .all_events()
-                .map(|(event, _)| event.to_owned())
-                .collect(),
+            SyscallShardKind::Precompile => {
+                input.precompile_events.all_events().map(|(event, _)| event.to_owned()).collect()
+            }
         };
 
         let is_receive = self.shard_kind == SyscallShardKind::Precompile;
@@ -155,51 +153,43 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         input: &ExecutionRecord,
         _output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
-        let row_fn =
-            |syscall_event: &SyscallEvent,
-             precompile_event: Option<&PrecompileEvent>| {
-                let mut row = [F::ZERO; NUM_SYSCALL_COLS];
-                let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
+        let row_fn = |syscall_event: &SyscallEvent, precompile_event: Option<&PrecompileEvent>| {
+            let mut row = [F::ZERO; NUM_SYSCALL_COLS];
+            let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-                cols.shard = F::from_canonical_u32(syscall_event.shard);
-                cols.clk = F::from_canonical_u32(syscall_event.clk);
-                cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
-                cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
-                cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
-                // For Core shard, a_record has real prev_value with linux_sys byte.
-                // For Precompile shard, a_record is default (prev_value=0), so detect
-                // linux from the PrecompileEvent variant instead.
-                let is_linux = match precompile_event {
-                    Some(PrecompileEvent::Linux(_)) => true,
-                    Some(_) => false,
-                    None => syscall_event.a_record.prev_value.to_le_bytes()[1] != 0,
-                };
-                cols.is_linux = F::from_bool(is_linux);
-                if is_linux {
-                    let result = match precompile_event {
-                        Some(PrecompileEvent::Linux(linux_event)) => linux_event.v0,
-                        _ => syscall_event.a_record.value,
-                    };
-                    let rb = result.to_le_bytes();
-                    cols.result_lo =
-                        F::from_canonical_u32(rb[0] as u32 + (rb[1] as u32) * 256);
-                    cols.result_hi =
-                        F::from_canonical_u32(rb[2] as u32 + (rb[3] as u32) * 256);
-                    let a1b = syscall_event.arg1.to_le_bytes();
-                    cols.arg1_lo =
-                        F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
-                    cols.arg1_hi =
-                        F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
-                    let a2b = syscall_event.arg2.to_le_bytes();
-                    cols.arg2_lo =
-                        F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
-                    cols.arg2_hi =
-                        F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
-                }
-                cols.is_real = F::ONE;
-
-                row
+            cols.shard = F::from_canonical_u32(syscall_event.shard);
+            cols.clk = F::from_canonical_u32(syscall_event.clk);
+            cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
+            cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
+            cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
+            // For Core shard, a_record has real prev_value with linux_sys byte.
+            // For Precompile shard, a_record is default (prev_value=0), so detect
+            // linux from the PrecompileEvent variant instead.
+            let is_linux = match precompile_event {
+                Some(PrecompileEvent::Linux(_)) => true,
+                Some(_) => false,
+                None => syscall_event.a_record.prev_value.to_le_bytes()[1] != 0,
             };
+            cols.is_linux = F::from_bool(is_linux);
+            if is_linux {
+                let result = match precompile_event {
+                    Some(PrecompileEvent::Linux(linux_event)) => linux_event.v0,
+                    _ => syscall_event.a_record.value,
+                };
+                let rb = result.to_le_bytes();
+                cols.result_lo = F::from_canonical_u32(rb[0] as u32 + (rb[1] as u32) * 256);
+                cols.result_hi = F::from_canonical_u32(rb[2] as u32 + (rb[3] as u32) * 256);
+                let a1b = syscall_event.arg1.to_le_bytes();
+                cols.arg1_lo = F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
+                cols.arg1_hi = F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
+                let a2b = syscall_event.arg2.to_le_bytes();
+                cols.arg2_lo = F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
+                cols.arg2_hi = F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
+            }
+            cols.is_real = F::ONE;
+
+            row
+        };
 
         let mut rows = match self.shard_kind {
             SyscallShardKind::Core => input
@@ -272,9 +262,7 @@ where
         builder.assert_bool(local.is_real);
         builder.assert_bool(local.is_linux);
         // is_linux can only be 1 when is_real is 1.
-        builder
-            .when(AB::Expr::one() - local.is_real)
-            .assert_zero(local.is_linux);
+        builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
 
         match self.shard_kind {
             SyscallShardKind::Core => {
@@ -322,7 +310,6 @@ where
                     ),
                     LookupScope::Local,
                 );
-
             }
             SyscallShardKind::Precompile => {
                 builder.send_syscall(
@@ -369,7 +356,6 @@ where
                     ),
                     LookupScope::Local,
                 );
-
             }
         }
     }

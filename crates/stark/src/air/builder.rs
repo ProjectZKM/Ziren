@@ -408,10 +408,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         let [a1_lo, a1_hi] = Self::word_to_halves(arg2_word);
         let values: Vec<Self::Expr> =
             vec![shard.into(), clk.into(), r_lo, r_hi, a0_lo, a0_hi, a1_lo, a1_hi];
-        self.send(
-            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
-            scope,
-        );
+        self.send(AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult), scope);
     }
 
     /// Receives a syscall result using half-word encoding.
@@ -431,10 +428,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         let [a1_lo, a1_hi] = Self::word_to_halves(arg2_word);
         let values: Vec<Self::Expr> =
             vec![shard.into(), clk.into(), r_lo, r_hi, a0_lo, a0_hi, a1_lo, a1_hi];
-        self.receive(
-            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
-            scope,
-        );
+        self.receive(AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult), scope);
     }
 
     /// Sends a syscall result using pre-computed half-word values (for chips that store half-words).
@@ -462,10 +456,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             arg2_lo.into(),
             arg2_hi.into(),
         ];
-        self.send(
-            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
-            scope,
-        );
+        self.send(AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult), scope);
     }
 
     /// Receives a syscall result using pre-computed half-word values (for chips that store half-words).
@@ -493,10 +484,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
             arg2_lo.into(),
             arg2_hi.into(),
         ];
-        self.receive(
-            AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult),
-            scope,
-        );
+        self.receive(AirLookup::new(values, multiplicity.into(), LookupKind::SyscallResult), scope);
     }
 }
 
