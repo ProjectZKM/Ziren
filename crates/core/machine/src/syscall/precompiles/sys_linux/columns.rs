@@ -45,6 +45,9 @@ pub struct SysLinuxCols<T> {
     pub is_fnctl: T,
     pub is_a1_1: T,
     pub is_a1_3: T,
+    /// Composite flags to keep constraint degree <= 3
+    pub is_fnctl_a1_1: T,
+    pub is_fnctl_a1_3: T,
 
     /// Columns for sys read
     pub is_read: T,

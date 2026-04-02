@@ -137,6 +137,8 @@ impl SysLinuxChip {
                 cols.is_fnctl = F::ONE;
                 cols.is_a1_1 = F::from_bool(event.a1 == 1);
                 cols.is_a1_3 = F::from_bool(event.a1 == 3);
+                cols.is_fnctl_a1_1 = F::from_bool(event.a1 == 1);
+                cols.is_fnctl_a1_3 = F::from_bool(event.a1 == 3);
             }
             4210 | 4090 => {
                 cols.is_mmap = F::ONE;
