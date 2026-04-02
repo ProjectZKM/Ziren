@@ -93,6 +93,26 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void word_from_le_bytes(
     word._0[3] = F::from_canonical_u8(bytes[3]).val;
 }
 
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChecker<F>& self, const uint32_t value) {
+    for (size_t i = 0; i < 8; ++i) {
+        bool bit = (value & (1u << (i + 24))) != 0;
+        self.most_sig_byte_decomp[i] = F::from_bool(bit);
+    }
+    self.and_most_sig_byte_decomp_0_to_2 =
+        self.most_sig_byte_decomp[0] * self.most_sig_byte_decomp[1];
+    self.and_most_sig_byte_decomp_0_to_3 =
+        self.and_most_sig_byte_decomp_0_to_2 * self.most_sig_byte_decomp[2];
+    self.and_most_sig_byte_decomp_0_to_4 =
+        self.and_most_sig_byte_decomp_0_to_3 * self.most_sig_byte_decomp[3];
+    self.and_most_sig_byte_decomp_0_to_5 =
+        self.and_most_sig_byte_decomp_0_to_4 * self.most_sig_byte_decomp[4];
+    self.and_most_sig_byte_decomp_0_to_6 =
+        self.and_most_sig_byte_decomp_0_to_5 * self.most_sig_byte_decomp[5];
+    self.and_most_sig_byte_decomp_0_to_7 =
+        self.and_most_sig_byte_decomp_0_to_6 * self.most_sig_byte_decomp[6];
+}
+
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t
 get_msb(const array_t<uint8_t, WORD_SIZE> a) {
     return (a[WORD_SIZE - 1] >> (BYTE_SIZE - 1)) & 1;

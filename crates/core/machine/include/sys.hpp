@@ -2,6 +2,7 @@
 
 #include "add_sub.hpp"
 #include "bitwise.hpp"
+#include "branch.hpp"
 #include "clo_clz.hpp"
 #include "lt.hpp"
 #include "memory_local.hpp"
