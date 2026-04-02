@@ -52,4 +52,12 @@ extern void bitwise_event_to_row_koalabear(
     bitwise::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
+extern void clo_clz_event_to_row_koalabear(
+    const AluEvent* event,
+    CloClzCols<KoalaBearP3>* cols
+) {
+    CloClzCols<kb31_t>* cols_kb31 = reinterpret_cast<CloClzCols<kb31_t>*>(cols);
+    clo_clz::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
 } // namespace zkm_core_machine_sys
