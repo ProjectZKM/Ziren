@@ -44,4 +44,12 @@ extern void lt_event_to_row_koalabear(
     lt::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
+extern void bitwise_event_to_row_koalabear(
+    const AluEvent* event,
+    BitwiseCols<KoalaBearP3>* cols
+) {
+    BitwiseCols<kb31_t>* cols_kb31 = reinterpret_cast<BitwiseCols<kb31_t>*>(cols);
+    bitwise::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
 } // namespace zkm_core_machine_sys

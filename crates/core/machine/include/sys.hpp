@@ -1,6 +1,7 @@
 #pragma once
 
 #include "add_sub.hpp"
+#include "bitwise.hpp"
 #include "lt.hpp"
 #include "memory_local.hpp"
 #include "memory_global.hpp"
