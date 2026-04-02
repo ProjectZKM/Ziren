@@ -80,6 +80,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
             next_power_of_two(input.add_sub_events.len(), input.fixed_log2_rows::<F, _>(self));
         Some(nb_rows)
     }
+
     fn picus_info(&self) -> PicusInfo {
         AddSubCols::<u8>::picus_info()
     }

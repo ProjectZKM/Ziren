@@ -114,6 +114,7 @@ mod sys {
             .rename_item("KoalaBear", "KoalaBearP3")
             .include_item("KoalaBear")
             .include_item("MemoryRecord") // Just for convenience. Not exposed, so we need to manually do this.
+            .include_item("MemoryRecordEnum")
             .include_item("SyscallCode") // Required for populating the CPU columns for ECALL.
             .include_item("SepticExtension")
             .include_item("SepticCurve")
@@ -135,7 +136,9 @@ mod sys {
             .include_item("BranchColumns")
             .include_item("JumpColumns")
             .include_item("CloClzCols")
+            .include_item("MemoryInstructionsColumns")
             .include_item("MemoryLocalEvent")
+            .include_item("MemInstrEvent")
             .include_item("GlobalCols")
             .include_item("BranchEvent")
             .include_item("GlobalLookupEvent")

@@ -75,10 +75,10 @@ write_word_from_le_bytes(Word<F>& word, const array_t<uint8_t, 4> bytes) {
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
 word_to_u32(const Word<decltype(F::val)>& word) {
-    return ((uint8_t)F(word._0[0]).as_canonical_u32())
-        + ((uint8_t)F(word._0[1]).as_canonical_u32() << 8)
-        + ((uint8_t)F(word._0[1]).as_canonical_u32() << 16)
-        + ((uint8_t)F(word._0[1]).as_canonical_u32() << 24);
+    return ((uint32_t)F(word._0[0]).as_canonical_u32())
+        | ((uint32_t)F(word._0[1]).as_canonical_u32() << 8)
+        | ((uint32_t)F(word._0[2]).as_canonical_u32() << 16)
+        | ((uint32_t)F(word._0[3]).as_canonical_u32() << 24);
 }
 
 template<class F>
@@ -111,6 +111,20 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChe
         self.and_most_sig_byte_decomp_0_to_5 * self.most_sig_byte_decomp[5];
     self.and_most_sig_byte_decomp_0_to_7 =
         self.and_most_sig_byte_decomp_0_to_6 * self.most_sig_byte_decomp[6];
+}
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t populate_from_field_element(IsZeroOperation<F>& self, const F& a) {
+    if (a == F::zero()) {
+        self.inverse = F::zero();
+        self.result = F::one();
+    } else {
+        self.inverse = a.reciprocal();
+        self.result = F::zero();
+    }
+    F prod = self.inverse * a;
+    assert(prod == F::one() || prod == F::zero());
+    return (uint32_t)(a == F::zero());
 }
 
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t

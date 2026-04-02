@@ -92,4 +92,45 @@ __ZKM_HOSTDEV__ void populate_read_write(
     write_word_from_u32_v2<F>(self.prev_value, prev_record.value);
     populate_access<F>(self.access, current_record, prev_record);
 }
+
+template<class F>
+__ZKM_HOSTDEV__ void populate_read_write_v2(
+    MemoryReadWriteCols<F>& self,
+    const MemoryRecordEnum& record
+) {
+    MemoryRecord current_record;
+    MemoryRecord prev_record;
+    switch (record.tag) {
+        case MemoryRecordEnum::Tag::Read:
+            current_record = {
+                .shard = record.read._0.shard,
+                .timestamp = record.read._0.timestamp,
+                .value = record.read._0.value,
+            };
+            prev_record = {
+                .shard = record.read._0.prev_shard,
+                .timestamp = record.read._0.prev_timestamp,
+                .value = record.read._0.value,
+            };
+            break;
+        case MemoryRecordEnum::Tag::Write:
+            current_record = {
+                .shard = record.write._0.shard,
+                .timestamp = record.write._0.timestamp,
+                .value = record.write._0.value,
+            };
+            prev_record = {
+                .shard = record.write._0.prev_shard,
+                .timestamp = record.write._0.prev_timestamp,
+                .value = record.write._0.prev_value,
+            };
+            break;
+        default:
+            // Unreachable. `None` case guarded above.
+            assert(false);
+            break;
+    }
+    write_word_from_u32_v2<F>(self.prev_value, prev_record.value);
+    populate_access<F>(self.access, current_record, prev_record);
+}
 }  // namespace zkm_core_machine_sys::memory
