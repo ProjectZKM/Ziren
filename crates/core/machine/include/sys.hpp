@@ -5,6 +5,7 @@
 #include "branch.hpp"
 #include "clo_clz.hpp"
 #include "lt.hpp"
+#include "jump.hpp"
 #include "memory_local.hpp"
 #include "memory_global.hpp"
 #include "syscall.hpp"

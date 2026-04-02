@@ -1,6 +1,6 @@
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::events::{
-    AluEvent, BranchEvent, CpuEventFfi, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+    AluEvent, BranchEvent, CpuEventFfi, JumpEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
     SyscallEvent,
 };
 use zkm_core_executor::InstructionFfi;
@@ -8,7 +8,7 @@ use zkm_core_executor::InstructionFfi;
 use crate::alu::{BitwiseCols, CloClzCols};
 use crate::{
     alu::{AddSubCols, LtCols},
-    control_flow::BranchColumns,
+    control_flow::{BranchColumns, JumpColumns},
     cpu::columns::CpuCols,
     memory::{MemoryInitCols, SingleMemoryLocal},
     syscall::chip::SyscallCols,
@@ -41,6 +41,7 @@ extern "C-unwind" {
     pub fn bitwise_event_to_row_koalabear(event: &AluEvent, cols: &mut BitwiseCols<KoalaBear>);
     pub fn clo_clz_event_to_row_koalabear(event: &AluEvent, cols: &mut CloClzCols<KoalaBear>);
     pub fn branch_event_to_row_koalabear(event: &BranchEvent, cols: &mut BranchColumns<KoalaBear>);
+    pub fn jump_event_to_row_koalabear(event: &JumpEvent, cols: &mut JumpColumns<KoalaBear>);
 
     pub fn test_mul();
     pub fn test_inv();
