@@ -166,6 +166,29 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Constrain the `is_a0_*` flags to exactly match the byte word `a0`
   - at minimum, add the missing reverse implications for the `0`, `1`, and `2` cases
 
+### 10. `SysLinux::write`: read value is not tied to previous value
+
+- Locations:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/trace.rs`
+  - `crates/core/machine/src/memory/consistency/trace.rs`
+- Current behavior:
+  - `eval_write` uses `local.inorout` in `eval_memory_access(...)`
+  - then constrains `result = *local.inorout.value()`
+  - but does not constrain `local.inorout.value() = local.inorout.prev_value`
+- Why this matters:
+  - for `SYS_WRITE`, `local.inorout` is populated from a read of register `A2`
+  - honest trace generation sets `prev_value = value` for reads
+  - the AIR does not enforce that equality for this read-shaped `MemoryReadWriteCols`
+- Picus symptom:
+  - For `x_7 = 4004` (`SYS_WRITE`) and `x_148 = 1`, Picus finds two valid models with:
+    - the same `A3` write (`x_115..x_118 = 0`)
+    - different `x_102..x_105 = local.inorout.value()`
+    - and therefore different `result` bytes `x_8..x_11`
+- Likely fix:
+  - On the `is_write` branch, assert `local.inorout.value() = local.inorout.prev_value`
+  - or use a read-only memory witness type for the `A2` access instead of `MemoryReadWriteCols`
+
 
 
 
