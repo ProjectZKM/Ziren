@@ -5,7 +5,7 @@ use zkm_stark::Word;
 
 use crate::{
     memory::MemoryReadWriteCols,
-    operations::{GtColsBytes, IsZeroOperation},
+    operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
 
 pub const NUM_SYS_LINUX_COLS: usize = size_of::<SysLinuxCols<u8>>();
@@ -33,14 +33,18 @@ pub struct SysLinuxCols<T> {
     pub page_offset: T,
     pub is_offset_0: T,
     pub upper_address: T,
-    /// Fix #6: Decompose page_offset into low byte and high nibble for range check.
+    /// PR #488:6: Decompose page_offset into low byte and high nibble for range check.
     pub page_offset_lo: T,
-    /// Fix #6: High nibble of page_offset, decomposed into 4 bits.
+    /// PR #488:6: High nibble of page_offset, decomposed into 4 bits.
     pub page_offset_hi_bits: [T; 4],
-    /// Fix #6: upper_address / 4096, proving upper_address is page-aligned.
+    /// PR #488:6: upper_address / 4096, proving upper_address is page-aligned.
     pub upper_address_pages: T,
-    /// Fix #6: IsZero on page_offset for bidirectional is_offset_0.
+    /// PR #488:6: IsZero on page_offset for bidirectional is_offset_0.
     pub is_page_offset_zero: IsZeroOperation<T>,
+    /// PR #488:11: mmap size as a Word for bytewise heap update constraint.
+    pub mmap_size: Word<T>,
+    /// PR #488:11: AddOperation for new_heap = old_heap + mmap_size (bytewise, not via reduce).
+    pub heap_add: AddOperation<T>,
 
     /// Columns for sys clone
     pub is_clone: T,
@@ -71,7 +75,7 @@ pub struct SysLinuxCols<T> {
 
     pub is_real: T,
 
-    // --- Fix #2: IsZero columns for bidirectional syscall flag constraints ---
+    // --- PR #488:2: IsZero columns for bidirectional syscall flag constraints ---
     pub is_not_mmap: IsZeroOperation<T>,
     pub is_not_mmap2: IsZeroOperation<T>,
     pub is_not_clone: IsZeroOperation<T>,
@@ -81,12 +85,12 @@ pub struct SysLinuxCols<T> {
     pub is_not_read: IsZeroOperation<T>,
     pub is_not_write: IsZeroOperation<T>,
 
-    // --- Fix #9: IsZero columns for bidirectional is_a0_0/1/2 ---
+    // --- PR #488:9: IsZero columns for bidirectional is_a0_0/1/2 ---
     pub is_a0_eq_0: IsZeroOperation<T>,
     pub is_a0_eq_1: IsZeroOperation<T>,
     pub is_a0_eq_2: IsZeroOperation<T>,
 
-    // --- Fix #12: IsZero columns for bidirectional is_a1_1/3 ---
+    // --- PR #488:12: IsZero columns for bidirectional is_a1_1/3 ---
     pub is_a1_eq_1: IsZeroOperation<T>,
     pub is_a1_eq_3: IsZeroOperation<T>,
 }

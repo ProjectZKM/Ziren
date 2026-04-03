@@ -16,7 +16,7 @@ use super::{
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},
     memory::MemoryCols,
-    operations::{GtColsBytes, IsZeroOperation},
+    operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
 use zkm_stark::air::BaseAirBuilder;
 
@@ -107,7 +107,7 @@ where
                 .assert_zero(local.a0[3]);
         }
 
-        // Fix #9: Reverse direction — when a0 == 0/1/2, the corresponding flag must be set.
+        // PR #488:9: Reverse direction — when a0 == 0/1/2, the corresponding flag must be set.
         {
             let a0_reduce = local.a0.reduce::<AB>();
             IsZeroOperation::<AB::F>::eval(
@@ -143,7 +143,7 @@ where
                 .assert_one(local.is_a0_2);
         }
 
-        // Fix #12: Reverse direction — when a1 == 1/3, the corresponding flag must be set.
+        // PR #488:12: Reverse direction — when a1 == 1/3, the corresponding flag must be set.
         {
             let a1_reduce = local.a1.reduce::<AB>();
             IsZeroOperation::<AB::F>::eval(
@@ -212,7 +212,7 @@ where
             );
         }
 
-        // Fix #2: Reverse direction — when syscall_id matches a known code, the flag MUST be set.
+        // PR #488:2: Reverse direction — when syscall_id matches a known code, the flag MUST be set.
         // is_not_X.result = 1 iff syscall_id != X. When result = 0, the flag must be 1.
         {
             IsZeroOperation::<AB::F>::eval(
@@ -386,7 +386,7 @@ impl SysLinuxChip {
     }
 
     fn eval_mmap<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
-        // Fix #6: Range check page_offset < 4096 = 2^12.
+        // PR #488:6: Range check page_offset < 4096 = 2^12.
         // Decompose: page_offset = page_offset_lo + page_offset_hi * 256,
         // where page_offset_lo < 256 (byte) and page_offset_hi < 16 (4 bits).
         // This gives page_offset < 256 + 15*256 = 4096.
@@ -409,7 +409,7 @@ impl SysLinuxChip {
             local.is_mmap,
         );
 
-        // Fix #6: Bidirectional is_offset_0 = (page_offset == 0).
+        // PR #488:6: Bidirectional is_offset_0 = (page_offset == 0).
         IsZeroOperation::<AB::F>::eval(
             builder,
             local.page_offset.into(),
@@ -425,7 +425,7 @@ impl SysLinuxChip {
             .when(local.is_offset_0)
             .assert_eq(local.page_offset, AB::Expr::zero());
 
-        // Fix #6: Prove upper_address is page-aligned: upper_address = upper_address_pages * 4096.
+        // PR #488:6: Prove upper_address is page-aligned: upper_address = upper_address_pages * 4096.
         builder.when(local.is_mmap).assert_eq(
             local.upper_address,
             local.upper_address_pages * AB::Expr::from_canonical_u32(4096),
@@ -436,14 +436,35 @@ impl SysLinuxChip {
         builder
             .when(local.is_mmap)
             .assert_eq(local.page_offset + local.upper_address, local.a1.reduce::<AB>());
-        let size = local.upper_address
-            + AB::Expr::from_canonical_u32(0x1000) * (AB::Expr::one() - local.is_offset_0);
 
-        builder.when(local.is_mmap).when(local.is_a0_0).assert_eq(
-            local.inorout.value().reduce::<AB>(),
-            size + local.inorout.prev_value.reduce::<AB>(),
+        // PR #488:11: Constrain mmap_size as a Word matching the field-level size computation.
+        let size_field = local.upper_address
+            + AB::Expr::from_canonical_u32(0x1000) * (AB::Expr::one() - local.is_offset_0);
+        builder
+            .when(local.is_mmap)
+            .when(local.is_a0_0)
+            .assert_eq(local.mmap_size.reduce::<AB>(), size_field);
+        // Range check mmap_size bytes (the AddOperation below also does this, but be explicit).
+        builder
+            .when(local.is_mmap)
+            .when(local.is_a0_0)
+            .slice_range_check_u8(&local.mmap_size.0, local.is_mmap_a0_0.into());
+
+        // PR #488:11: Bytewise heap update: new_heap = old_heap + mmap_size (32-bit wrapping add).
+        // This replaces the old reduce()-based constraint which was not injective.
+        AddOperation::<AB::F>::eval(
+            builder,
+            local.inorout.prev_value,
+            local.mmap_size,
+            local.heap_add,
+            local.is_mmap_a0_0.into(),
         );
-        // Fix #3: Bidirectional is_mmap_a0_0 = is_mmap * is_a0_0.
+        // The AddOperation proves heap_add.value = prev_value + mmap_size bytewise.
+        // Now assert that the memory write (inorout.value) equals the add result.
+        builder
+            .when(local.is_mmap_a0_0)
+            .assert_word_eq(*local.inorout.value(), local.heap_add.value);
+        // PR #488:3: Bidirectional is_mmap_a0_0 = is_mmap * is_a0_0.
         builder.assert_eq(local.is_mmap_a0_0, local.is_mmap * local.is_a0_0);
         builder
             .when(local.is_mmap_a0_0)
@@ -460,7 +481,7 @@ impl SysLinuxChip {
 
         builder.when(local.is_mmap).when_not(local.is_a0_0).assert_word_eq(local.a0, local.result);
 
-        // Fix #5: mmap always writes A3 = 0 (executor does this unconditionally before branching).
+        // PR #488:5: mmap always writes A3 = 0 (executor does this unconditionally before branching).
         builder
             .when(local.is_mmap)
             .assert_word_zero(*local.output.value());
@@ -468,7 +489,7 @@ impl SysLinuxChip {
 
     fn eval_exit_group<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
         builder.when(local.is_exit_group).assert_word_zero(*local.output.value());
-        // Fix #7: Constrain result to zero (executor returns v0 = 0).
+        // PR #488:7: Constrain result to zero (executor returns v0 = 0).
         builder.when(local.is_exit_group).assert_word_zero(local.result);
     }
 
@@ -480,7 +501,7 @@ impl SysLinuxChip {
         builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[2]);
         builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[3]);
 
-        // Fix #8: Result constraints for fnctl with a1==1 (F_GETFD).
+        // PR #488:8: Result constraints for fnctl with a1==1 (F_GETFD).
         // Executor: a0 in {0,1,2} => result = a0; otherwise result = 0xFFFFFFFF.
         builder
             .when(local.is_fnctl_a1_1)
@@ -552,7 +573,7 @@ impl SysLinuxChip {
             local.is_write,
         );
 
-        // Fix #10: For SYS_WRITE, inorout is a read — value must equal prev_value.
+        // PR #488:10: For SYS_WRITE, inorout is a read — value must equal prev_value.
         builder
             .when(local.is_write)
             .assert_word_eq(*local.inorout.value(), local.inorout.prev_value);

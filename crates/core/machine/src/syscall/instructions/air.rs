@@ -143,7 +143,7 @@ impl SyscallInstrsChip {
         builder.assert_bool(local.is_sys_linux);
         builder.assert_bool(send_to_table.clone());
 
-        // Fix #1: Constrain is_sys_linux bidirectionally.
+        // PR #488:1: Constrain is_sys_linux bidirectionally.
         // is_prev_a1_zero.result = 1 iff prev_a_value[1] == 0.
         // is_sys_linux must be the inverse: 1 iff prev_a_value[1] != 0.
         IsZeroOperation::<AB::F>::eval(

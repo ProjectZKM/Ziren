@@ -10,7 +10,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_stark::{air::MachineAir, Word};
 
 use super::{
     columns::{SysLinuxCols, NUM_SYS_LINUX_COLS},
@@ -148,7 +148,7 @@ impl SysLinuxChip {
                 cols.is_offset_0 = F::from_bool(page_off == 0);
                 let upper = (event.a1 >> 12) << 12;
                 cols.upper_address = F::from_canonical_u32(upper);
-                // Fix #6: Decompose page_offset for range check and prove alignment.
+                // PR #488:6: Decompose page_offset for range check and prove alignment.
                 cols.page_offset_lo = F::from_canonical_u32(page_off & 0xFF);
                 let hi_nibble = (page_off >> 8) & 0xF;
                 for bit in 0..4 {
@@ -160,6 +160,11 @@ impl SysLinuxChip {
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);
                     cols.inorout.populate_write(event.write_records[1], blu);
+                    // PR #488:11: Compute mmap size and populate bytewise heap addition.
+                    let size = if page_off == 0 { upper } else { upper + 0x1000 };
+                    cols.mmap_size = Word::from(size);
+                    let old_heap = event.write_records[1].prev_value;
+                    cols.heap_add.populate(blu, old_heap, size);
                 }
             }
             4003 => {
@@ -175,7 +180,7 @@ impl SysLinuxChip {
             }
         };
 
-        // Fix #9: Populate IsZero for bidirectional is_a0_0/1/2.
+        // PR #488:9: Populate IsZero for bidirectional is_a0_0/1/2.
         // a0.reduce() = a0[0] + a0[1]*256 + a0[2]*65536 + a0[3]*16777216
         let a0_val = F::from_canonical_u32(event.a0);
         cols.is_a0_eq_0.populate_from_field_element(a0_val);
@@ -184,14 +189,14 @@ impl SysLinuxChip {
         cols.is_a0_eq_2
             .populate_from_field_element(a0_val - F::from_canonical_u32(2));
 
-        // Fix #12: Populate IsZero for bidirectional is_a1_1/3.
+        // PR #488:12: Populate IsZero for bidirectional is_a1_1/3.
         let a1_val = F::from_canonical_u32(event.a1);
         cols.is_a1_eq_1
             .populate_from_field_element(a1_val - F::from_canonical_u32(1));
         cols.is_a1_eq_3
             .populate_from_field_element(a1_val - F::from_canonical_u32(3));
 
-        // Fix #2: Populate IsZero columns for bidirectional syscall flag constraints.
+        // PR #488:2: Populate IsZero columns for bidirectional syscall flag constraints.
         let sid = F::from_canonical_u32(event.syscall_code);
         cols.is_not_mmap.populate_from_field_element(
             sid - F::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
