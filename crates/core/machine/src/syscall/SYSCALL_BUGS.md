@@ -81,12 +81,21 @@ This file tracks syscall-related AIR issues found during manual review and Picus
 - Why this matters:
   - Distinct 32-bit words can collide modulo the KoalaBear prime `0x7f000001`.
   - The later `send_syscall_result` fix helps local byte-level linkage to `SysLinux`, but the older reduced `Syscall` interaction still exists.
+- Picus symptom:
+  - Adding KoalaBear-word postconditions for `op_b` / `op_c` fails.
+  - Picus finds a model with:
+    - `is_sys_linux = 1`
+    - unknown linux syscall id, so the `SysLinux -> nop` path is taken
+    - `op_b` / `op_c` bytes that are not valid KoalaBear words
+  - This shows the extracted bridge still admits non-KoalaBear `arg1` / `arg2` values.
 - Example collision:
   - `0x80000000`
   - `0x00ffffff`
   - both reduce to the same field element modulo `0x7f000001`
-- Status:
-  - Still looks like a real structural issue unless the reduced bridge is no longer relied on for soundness.
+- Likely fix:
+  - Add explicit KoalaBear word checks for `op_b_value` and `op_c_value` on the syscall bridge path.
+  - Use `send_to_table` as the multiplicity/enable for the syscall-table interaction, rather than a weaker selector such as `is_sys_linux`.
+  - If the reduced `send_syscall` interaction is still kept, it should only be active on rows where those KoalaBear word checks hold.
 
 ### 5. `SysLinux::mmap`: `A3` / output write is unconstrained
 
@@ -162,6 +171,10 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - For `x_7 = 4090` (`SYS_MMAP2`) with `a0 = 0`, Picus finds two valid models:
     - `is_a0_0 = 1`, which enables the heap path and emits a `HEAP` write
     - `is_a0_0 = 0`, which disables the heap path and falls through to `result = a0 = 0`
+  - The same issue also appears in `fnctl`:
+    - for `x_7 = 4055` with `a1 = 3` and `a0 = 1`, Picus finds:
+      - `is_a0_1 = 0`, which routes to the unsupported-fd branch (`result = 0xffffffff`, `A3 = 9`)
+      - `is_a0_1 = 1`, which routes to the supported `F_GETFL` branch (`result = 1`, `A3 = 0`)
 - Likely fix:
   - Constrain the `is_a0_*` flags to exactly match the byte word `a0`
   - at minimum, add the missing reverse implications for the `0`, `1`, and `2` cases

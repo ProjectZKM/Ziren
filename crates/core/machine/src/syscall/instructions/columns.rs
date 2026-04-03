@@ -26,8 +26,12 @@ pub struct SyscallInstrColumns<T> {
     /// operation.
     pub is_halt: T,
 
-    /// Whether the current syscall is linux syscall
+    /// Whether the current syscall is linux syscall.
+    /// Constrained bidirectionally: is_sys_linux = 1 iff prev_a_value[1] != 0.
     pub is_sys_linux: T,
+
+    /// IsZero check on prev_a_value[1] to enforce is_sys_linux bidirectionality.
+    pub is_prev_a1_zero: IsZeroOperation<T>,
 
     /// The syscall id
     pub syscall_id: T,

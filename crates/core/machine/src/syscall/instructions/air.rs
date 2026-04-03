@@ -143,6 +143,19 @@ impl SyscallInstrsChip {
         builder.assert_bool(local.is_sys_linux);
         builder.assert_bool(send_to_table.clone());
 
+        // ProjectZKM/Ziren#488:1: Constrain is_sys_linux bidirectionally.
+        // is_prev_a1_zero.result = 1 iff prev_a_value[1] == 0.
+        // is_sys_linux must be the inverse: 1 iff prev_a_value[1] != 0.
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            local.prev_a_value[1].into(),
+            local.is_prev_a1_zero,
+            local.is_real.into(),
+        );
+        builder
+            .when(local.is_real)
+            .assert_eq(local.is_sys_linux, AB::Expr::one() - local.is_prev_a1_zero.result);
+
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table.clone());
@@ -158,8 +171,8 @@ impl SyscallInstrsChip {
         );
 
         // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
-        // with SysLinuxChip via SyscallChip bridge. This fixes both the reduce() collision
-        // (Bug 3) and the missing result linkage (Bug 2).
+        // with SysLinuxChip via SyscallChip bridge.
+        // See ProjectZKM/Ziren#488
         builder.send_syscall_result(
             local.shard,
             local.clk,
@@ -220,11 +233,8 @@ impl SyscallInstrsChip {
             .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
             .assert_word_eq(local.op_a_value, local.prev_a_value);
 
-        // When the syscall is not a LINUX SYSCALL, prev op_a[1] must be zero.
-        // The reverse direction (is_sys_linux=1 requires prev_a[1]!=0) is enforced by the
-        // SyscallResult interaction: a fake is_sys_linux=1 would require a matching SysLinuxChip
-        // entry, which validates syscall_id against known linux codes.
-        builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(local.prev_a_value[1]);
+        // is_sys_linux is now bidirectionally constrained via is_prev_a1_zero above.
+        // When is_sys_linux = 0, prev_a[1] = 0 follows from the IsZero constraint.
         // SAFETY: This leaves the case where syscall is `HINT_LEN`.
         // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.
         // This is due to `op_a_val` being connected to the CpuChip.

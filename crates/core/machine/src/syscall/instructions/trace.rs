@@ -111,6 +111,11 @@ impl SyscallInstrsChip {
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
 
+        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
+        let prev_a_bytes = event.a_record.prev_value.to_le_bytes();
+        cols.is_prev_a1_zero
+            .populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
+
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
             syscall_id - F::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),

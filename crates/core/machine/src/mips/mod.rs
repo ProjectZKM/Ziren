@@ -1199,4 +1199,46 @@ pub mod tests {
         }
         assert_eq!(vk.chip_ordering, deserialized_vk.chip_ordering);
     }
+
+    // -----------------------------------------------------------------------
+    // Syscall soundness regression tests (ProjectZKM/Ziren#488)
+    //
+    // These tests exercise Go ELF programs that trigger linux syscalls
+    // (mmap, clone, brk, fcntl, read, write, exit_group, nop) through the
+    // Go runtime initialization. They validate that the bidirectional flag
+    // constraints, bytewise heap updates, and other soundness fixes do not
+    // reject honest traces.
+    //
+    // Covered issues:
+    //   #1  is_sys_linux bidirectional
+    //   #2  SysLinux flag routing bidirectional
+    //   #3  is_mmap_a0_0 bidirectional
+    //   #4  Reduced arg1/arg2 bound to packed half-words
+    //   #5  mmap A3 output zeroed unconditionally
+    //   #6  page_offset decomposition + range check + alignment
+    //   #7  exit_group result zeroed
+    //   #8  fnctl(a1==1) result constrained
+    //   #9  is_a0_0/1/2 bidirectional
+    //   #10 write: read value = prev_value
+    //   #11 mmap: bytewise heap update via AddOperation
+    //   #12 is_a1_1/3 bidirectional
+    // -----------------------------------------------------------------------
+
+    /// Exercises SYS_WRITE, exit_group, mmap, clone, brk, fcntl, and nop
+    /// syscall paths through the Go hello_world runtime.
+    #[test]
+    fn test_syscall_soundness_hello_world() {
+        setup_logger();
+        let program = hello_world_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
+
+    /// Exercises the full Go runtime init: mmap2 with a0=0 (heap allocation),
+    /// fcntl with a1=1 and a1=3, clone, brk, read, and exit_group.
+    #[test]
+    fn test_syscall_soundness_fibonacci() {
+        setup_logger();
+        let program = fibonacci_program();
+        run_test::<CpuProver<_, _>>(program).unwrap();
+    }
 }

@@ -10,7 +10,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_stark::{air::MachineAir, Word};
 
 use super::{
     columns::{SysLinuxCols, NUM_SYS_LINUX_COLS},
@@ -147,12 +147,28 @@ impl SysLinuxChip {
             4210 | 4090 => {
                 cols.is_mmap = F::ONE;
                 cols.is_mmap_a0_0 = F::from_bool(event.a0 == 0);
-                cols.page_offset = F::from_canonical_u32(event.a1 & 0xFFF);
-                cols.is_offset_0 = F::from_bool(event.a1 & 0xFFF == 0);
-                cols.upper_address = F::from_canonical_u32((event.a1 >> 12) << 12);
+                let page_off = event.a1 & 0xFFF;
+                cols.page_offset = F::from_canonical_u32(page_off);
+                cols.is_offset_0 = F::from_bool(page_off == 0);
+                let upper = (event.a1 >> 12) << 12;
+                cols.upper_address = F::from_canonical_u32(upper);
+                // ProjectZKM/Ziren#488:6: Decompose page_offset for range check and prove alignment.
+                cols.page_offset_lo = F::from_canonical_u32(page_off & 0xFF);
+                let hi_nibble = (page_off >> 8) & 0xF;
+                for bit in 0..4 {
+                    cols.page_offset_hi_bits[bit] = F::from_canonical_u32((hi_nibble >> bit) & 1);
+                }
+                cols.upper_address_pages = F::from_canonical_u32(upper >> 12);
+                cols.is_page_offset_zero
+                    .populate_from_field_element(F::from_canonical_u32(page_off));
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);
                     cols.inorout.populate_write(event.write_records[1], blu);
+                    // ProjectZKM/Ziren#488:11: Compute mmap size and populate bytewise heap addition.
+                    let size = if page_off == 0 { upper } else { upper + 0x1000 };
+                    cols.mmap_size = Word::from(size);
+                    let old_heap = event.write_records[1].prev_value;
+                    cols.heap_add.populate(blu, old_heap, size);
                 }
             }
             4003 => {
@@ -167,5 +183,31 @@ impl SysLinuxChip {
                 cols.is_nop = F::ONE;
             }
         };
+
+        // ProjectZKM/Ziren#488: Populate inverse columns for bidirectional flag constraints.
+        // For each (value, code) pair: if value != code, store the inverse; else store 0.
+        let populate_inv = |val: F, code: u32| -> F {
+            let diff = val - F::from_canonical_u32(code);
+            if diff == F::ZERO { F::ZERO } else { diff.inverse() }
+        };
+
+        let a0_val = F::from_canonical_u32(event.a0);
+        cols.inv_a0_diff_0 = populate_inv(a0_val, 0);
+        cols.inv_a0_diff_1 = populate_inv(a0_val, 1);
+        cols.inv_a0_diff_2 = populate_inv(a0_val, 2);
+
+        let a1_val = F::from_canonical_u32(event.a1);
+        cols.inv_a1_diff_1 = populate_inv(a1_val, 1);
+        cols.inv_a1_diff_3 = populate_inv(a1_val, 3);
+
+        let sid = F::from_canonical_u32(event.syscall_code);
+        cols.inv_syscall_diff_mmap = populate_inv(sid, SyscallCode::SYS_MMAP as u32);
+        cols.inv_syscall_diff_mmap2 = populate_inv(sid, SyscallCode::SYS_MMAP2 as u32);
+        cols.inv_syscall_diff_clone = populate_inv(sid, SyscallCode::SYS_CLONE as u32);
+        cols.inv_syscall_diff_exit_group = populate_inv(sid, SyscallCode::SYS_EXT_GROUP as u32);
+        cols.inv_syscall_diff_brk = populate_inv(sid, SyscallCode::SYS_BRK as u32);
+        cols.inv_syscall_diff_fnctl = populate_inv(sid, SyscallCode::SYS_FCNTL as u32);
+        cols.inv_syscall_diff_read = populate_inv(sid, SyscallCode::SYS_READ as u32);
+        cols.inv_syscall_diff_write = populate_inv(sid, SyscallCode::SYS_WRITE as u32);
     }
 }
