@@ -107,8 +107,15 @@ impl SyscallInstrsChip {
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
 
-        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
+        // Populate KoalaBear range check for op_b_value and op_c_value when send_to_table = 1.
         let prev_a_bytes = event.a_record.prev_value.to_le_bytes();
+        let send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
+        if send_to_table {
+            cols.op_b_range_check.populate(event.arg1);
+            cols.op_c_range_check.populate(event.arg2);
+        }
+
+        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
         cols.is_prev_a1_zero
             .populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
 

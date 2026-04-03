@@ -160,6 +160,24 @@ impl SyscallInstrsChip {
         // interaction is not activated.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table.clone());
 
+        // ProjectZKM/Ziren#488:4: KoalaBear range check op_b_value and op_c_value when
+        // send_to_table = 1. This ensures reduce() is injective on the syscall bridge,
+        // preventing distinct 32-bit words from colliding modulo the KoalaBear prime.
+        // Covers both: (a) sys_linux nop path where a0/a1 upper bits are unconstrained,
+        // and (b) non-linux precompile path where only reduced args are sent.
+        KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
+            builder,
+            local.op_b_value,
+            local.op_b_range_check,
+            send_to_table.clone(),
+        );
+        KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
+            builder,
+            local.op_c_value,
+            local.op_c_range_check,
+            send_to_table.clone(),
+        );
+
         builder.send_syscall(
             local.shard,
             local.clk,
