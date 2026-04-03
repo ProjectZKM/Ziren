@@ -112,11 +112,36 @@ This file tracks syscall-related AIR issues found during manual review and Picus
 
 ### 7. `SysLinux::exit_group`: unconstrained result
 
+- Location:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
 - Current behavior:
-  - `SysExitGroupSyscall::execute` returns `Ok(None)` and records `LinuxEvent.v0 = 0`
-  - the executor keeps `V0 = syscall_id` whenever a syscall returns `None`
-  - the `SysLinux` trace sets `cols.result = event.v0`
-  - the syscall-result bridge in `SyscallChip` uses `linux_event.v0` on the precompile side
+  - `eval_exit_group` only constrains `local.output.value()` and does not constrain `local.result`
+- Picus symptom:
+  - With `x_7 = 4246`, `x_133 = 1`, and `x_149 = 0`, Picus finds two valid models with:
+    - the same `A3` write (`x_115..x_118 = 0`)
+    - different result bytes (`x_8..x_11`), and therefore different top-level outputs `x_67..x_70`
+- Likely fix:
+  - Add `assert_word_zero(local.result)` on the `is_exit_group` branch
+
+### 8. `SysLinux::fnctl(a1 == 1)`: missing result constraints
+
+- Locations:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+  - `crates/core/executor/src/syscalls/precompiles/sys_linux/sysfcntl.rs`
+- Current behavior:
+  - `eval_fnctl` constrains `result` for:
+    - `a1 == 3`
+    - unsupported `a1`
+  - but does not constrain `result` for the supported `a1 == 1` (`F_GETFD`) case
+- Executor semantics:
+  - for `a1 == 1`:
+    - `a0 = 0 => result = 0`
+    - `a0 = 1 => result = 1`
+    - `a0 = 2 => result = 2`
+    - otherwise `result = 0xffffffff`
+- Likely fix:
+  - Add `result` constraints for the `is_fnctl_a1_1` branch mirroring the executor logic
+  - Separately tighten the `is_a0_0` / `is_a0_1` / `is_a0_2` classifiers if exact subcase routing is intended
 
 
 
@@ -124,7 +149,7 @@ This file tracks syscall-related AIR issues found during manual review and Picus
 ## Picus Notes
 
 - Current extracted module under investigation:
-  - `crates/picus/picus_out/SyscallInstrs.picus`
+  - `crates/picus/picus_out/SyscallInstrs3.picus`
 - Useful variable names from the current extraction:
   - `x_6` = `is_sys_linux`
   - `x_7` = internal `syscall_id`
@@ -134,8 +159,14 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - `x_133` = `is_exit_group`
   - `x_134` = `is_brk`
   - `x_142` = `is_fnctl`
+  - `x_143` = `is_a1_1`
+  - `x_144` = `is_a1_3`
+  - `x_145` = `is_fnctl_a1_1`
+  - `x_146` = `is_fnctl_a1_3`
   - `x_147` = `is_read`
   - `x_148` = `is_write`
   - `x_149` = `is_nop`
   - `x_124` = `is_a0_0`
+  - `x_125` = `is_a0_1`
+  - `x_126` = `is_a0_2`
   - `x_128` = `is_mmap_a0_0`
