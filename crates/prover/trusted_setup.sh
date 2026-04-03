@@ -1,3 +1,4 @@
+set -e
 #---------------Usage---------------
 # cd Ziren/crates/prover
 # sh trusted_setup.sh
@@ -18,6 +19,7 @@ else
 fi
 
 echo "--------Semaphore Install--------"
+rm -rf semaphore-mtb-setup
 git clone https://github.com/ProjectZKM/semaphore-gnark-11.git -b zkm2 semaphore-mtb-setup
 cd semaphore-mtb-setup
 go build
@@ -26,6 +28,7 @@ cp semaphore-mtb-setup/semaphore-mtb-setup semaphore-gnark-11
 
 echo "--------Phase 1 Setup--------"
 mkdir -p trusted-setup
+rm -rf trusted-setup/*
 ./semaphore-gnark-11 p1i powersOfTau28_hez_final.ptau trusted-setup/phase1
 
 echo "--------Phase 2 Setup--------"

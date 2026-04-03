@@ -157,6 +157,19 @@ impl SyscallInstrsChip {
             LookupScope::Local,
         );
 
+        // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
+        // with SysLinuxChip via SyscallChip bridge. This fixes both the reduce() collision
+        // (Bug 3) and the missing result linkage (Bug 2).
+        builder.send_syscall_result(
+            local.shard,
+            local.clk,
+            local.op_a_value,
+            local.op_b_value,
+            local.op_c_value,
+            local.is_sys_linux,
+            LookupScope::Local,
+        );
+
         // Compute whether this syscall is ENTER_UNCONSTRAINED.
         let is_enter_unconstrained = {
             IsZeroOperation::<AB::F>::eval(
@@ -207,7 +220,10 @@ impl SyscallInstrsChip {
             .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
             .assert_word_eq(local.op_a_value, local.prev_a_value);
 
-        // when the syscall is not LINUX SYSCALL， prev op_a[1] is zero
+        // When the syscall is not a LINUX SYSCALL, prev op_a[1] must be zero.
+        // The reverse direction (is_sys_linux=1 requires prev_a[1]!=0) is enforced by the
+        // SyscallResult interaction: a fake is_sys_linux=1 would require a matching SysLinuxChip
+        // entry, which validates syscall_id against known linux codes.
         builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(local.prev_a_value[1]);
         // SAFETY: This leaves the case where syscall is `HINT_LEN`.
         // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.

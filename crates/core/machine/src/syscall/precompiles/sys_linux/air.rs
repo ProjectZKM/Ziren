@@ -60,7 +60,6 @@ where
                 local.is_a0_1,
                 local.is_a0_2,
                 local.is_mmap,
-                local.is_mmap2,
                 local.is_mmap_a0_0,
                 local.is_offset_0,
                 local.is_clone,
@@ -81,6 +80,10 @@ where
                 builder.assert_bool(flag);
             }
         }
+
+        // Constrain composite flags: is_fnctl_a1_X = is_fnctl * is_a1_X.
+        builder.assert_eq(local.is_fnctl_a1_1, local.is_fnctl * local.is_a1_1);
+        builder.assert_eq(local.is_fnctl_a1_3, local.is_fnctl * local.is_a1_3);
 
         // Check that the a0 flags are correct.
         {
@@ -106,15 +109,12 @@ where
 
         // Check that the syscall flags are correct.
         {
-            builder.when(local.is_mmap).when_not(local.is_mmap2).assert_eq(
-                local.syscall_id,
-                AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
+            // When is_mmap, syscall_id must be either SYS_MMAP or SYS_MMAP2.
+            builder.when(local.is_mmap).assert_zero(
+                (local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32))
+                    * (local.syscall_id
+                        - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32)),
             );
-            builder.when(local.is_mmap2).assert_eq(
-                local.syscall_id,
-                AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
-            );
-            builder.when(local.is_mmap2).assert_one(local.is_mmap);
             builder.when(local.is_clone).assert_eq(
                 local.syscall_id,
                 AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
@@ -157,6 +157,19 @@ where
             local.syscall_id,
             local.a0.reduce::<AB>(),
             local.a1.reduce::<AB>(),
+            local.is_real,
+            LookupScope::Local,
+        );
+
+        // Receive full Word bytes for linux syscall result linkage and byte-level matching.
+        // This ensures op_a_value (result), op_b_value (a0), op_c_value (a1) match byte-by-byte
+        // between SyscallInstrsChip and SysLinuxChip, preventing reduce() collisions.
+        builder.receive_syscall_result(
+            local.shard,
+            local.clk,
+            local.result,
+            local.a0,
+            local.a1,
             local.is_real,
             LookupScope::Local,
         );
@@ -249,18 +262,14 @@ impl SysLinuxChip {
     }
 
     fn eval_fnctl<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>) {
-        builder.when(local.is_fnctl).when(local.is_a1_1).assert_eq(local.a1[0], AB::Expr::one());
-        builder
-            .when(local.is_fnctl)
-            .when(local.is_a1_3)
-            .assert_eq(local.a1[0], AB::Expr::from_canonical_u32(3));
+        builder.when(local.is_fnctl_a1_1).assert_eq(local.a1[0], AB::Expr::one());
+        builder.when(local.is_fnctl_a1_3).assert_eq(local.a1[0], AB::Expr::from_canonical_u32(3));
 
-        builder.when(local.is_fnctl).when(local.is_a1_1 + local.is_a1_3).assert_zero(local.a1[1]);
-        builder.when(local.is_fnctl).when(local.is_a1_1 + local.is_a1_3).assert_zero(local.a1[2]);
-        builder.when(local.is_fnctl).when(local.is_a1_1 + local.is_a1_3).assert_zero(local.a1[3]);
+        builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[1]);
+        builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[2]);
+        builder.when(local.is_fnctl_a1_1 + local.is_fnctl_a1_3).assert_zero(local.a1[3]);
 
-        builder.when(local.is_fnctl_a1_3).assert_one(local.is_a1_3 * local.is_fnctl);
-        builder.when(local.is_fnctl_a1_1).assert_one(local.is_a1_1 * local.is_fnctl);
+        // Result constraints for fnctl with a1==3 (F_GETFL)
         builder.when(local.is_fnctl_a1_3).when(local.is_a0_0).assert_word_zero(local.result);
         builder
             .when(local.is_fnctl_a1_3)
@@ -275,6 +284,7 @@ impl SysLinuxChip {
             .when_not(local.is_a1_3 + local.is_a1_1)
             .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
 
+        // Output constraints for fnctl with a1==1 or a1==3
         builder
             .when(local.is_fnctl_a1_3 + local.is_fnctl_a1_1)
             .when(local.is_a0_0 + local.is_a0_1 + local.is_a0_2)

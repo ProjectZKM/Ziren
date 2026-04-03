@@ -53,14 +53,14 @@ RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
     --end-block 23968125
 
 # Generate Shapes for the ETH Chain using GETH
-# RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
-#     --initial "maximal_shapes.json" \
-#     --shard-sizes "17 18 19 20 21 22" \
-#     --geth \
-#     --elf "../ziren-shape-bin/geth/keeper" \
-#     --stdin "../ziren-shape-bin/geth/payloads" \
-#     --start-block 1153024 \
-#     --end-block 1153279
+RUST_LOG=info cargo run --release -p zkm-prover --bin find_maximal_shapes -- \
+    --initial "maximal_shapes.json" \
+    --shard-sizes "17 18 19 20 21 22" \
+    --geth \
+    --elf "../ziren-shape-bin/geth/keeper" \
+    --stdin "../ziren-shape-bin/geth/payloads" \
+    --start-block 1153024 \
+    --end-block 1153029
 
 RUST_LOG=info cargo run --release -p zkm-prover --bin find_small_shapes -- \
     --maximal-shapes-json "maximal_shapes.json" \

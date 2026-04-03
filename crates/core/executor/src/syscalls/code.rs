@@ -174,6 +174,7 @@ pub enum SyscallCode {
     SYS_GETTID = 4222,
     SYS_SCHED_GETAFFINITY = 4240,
     SYS_CLOCK_GETTIME = 4263,
+    SYS_NANOSLEEP = 4166,
     SYS_OPENAT = 4288,
     SYS_PRLIMIT64 = 4338,
 
@@ -255,6 +256,7 @@ impl SyscallCode {
             4222 => SyscallCode::SYS_GETTID,
             4240 => SyscallCode::SYS_SCHED_GETAFFINITY,
             4246 => SyscallCode::SYS_EXT_GROUP,
+            4166 => SyscallCode::SYS_NANOSLEEP,
             4263 => SyscallCode::SYS_CLOCK_GETTIME,
             4288 => SyscallCode::SYS_OPENAT,
             4338 => SyscallCode::SYS_PRLIMIT64,
