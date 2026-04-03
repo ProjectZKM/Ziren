@@ -1189,7 +1189,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .iter()
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
-                    let index = self.recursion_vk_map.get(&vk_digest).expect("vk not allowed");
+                    let index = self.recursion_vk_map.get(&vk_digest).unwrap_or_else(|| {
+                        panic!(
+                            "vk not allowed: digest {:?} not in map ({} entries). \
+                             vk_map.bin may be stale. Set VERIFY_VK=false or rebuild vk_map.bin.",
+                            vk_digest,
+                            self.recursion_vk_map.len()
+                        )
+                    });
                     (index, vk_digest)
                 })
                 .unzip()

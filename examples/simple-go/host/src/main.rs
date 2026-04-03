@@ -20,7 +20,7 @@ fn prove_simple_go() {
 
     // Generate the proof for the given guest and input.
     let (pk, vk) = client.setup(ELF);
-    let mut proof = client.prove(&pk, stdin).run().unwrap();
+    let mut proof = client.prove(&pk, stdin).groth16().run().unwrap();
 
     let a = proof.public_values.read::<u32>();
     println!("a: {a}");

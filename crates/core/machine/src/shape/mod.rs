@@ -125,13 +125,14 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 return Ok(());
             }
 
-            // No shape found, so return an error.
-            return Err(CoreShapeError::ShapeError(
-                heights
-                    .into_iter()
-                    .map(|(air, height)| (air.to_string(), log2_ceil_usize(height)))
-                    .collect(),
-            ));
+            // Fallback: generate a dynamic shape from the actual heights.
+            let dynamic_shape = Self::dynamic_shape_from_heights(&heights);
+            tracing::warn!(
+                "No small shape fits shard {}. Using dynamic shape (VK may not be in vk_map.bin).",
+                record.public_values.shard
+            );
+            record.shape.as_mut().unwrap().extend(dynamic_shape);
+            return Ok(());
         }
 
         // If this is a normal "core" record, try to fix the shape as such.
@@ -175,16 +176,14 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 return Ok(());
             }
 
-            // No shape found, so return an error.
-            tracing::info!(
-                "No shape found for core record with heights: {:?}",
-                heights
-                    .into_iter()
-                    .map(|(air, height)| (air.to_string(), log2_ceil_usize(height)))
-                    .collect::<HashMap<_, _>>()
+            // Fallback: generate a dynamic shape from the actual heights.
+            tracing::warn!(
+                "No core shape found for shard {}. Using dynamic shape (VK may not be in vk_map.bin).",
+                record.public_values.shard
             );
-
-            return Err(CoreShapeError::ShapeError(record.stats()));
+            let dynamic_shape = Self::dynamic_shape_from_heights(&heights);
+            record.shape.as_mut().unwrap().extend(dynamic_shape);
+            return Ok(());
         }
 
         // If the record is a does not have the CPU chip and is a global memory init/finalize
@@ -193,11 +192,18 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             || !record.global_memory_finalize_events.is_empty()
         {
             let heights = MipsAir::<F>::memory_heights(record);
-            let shape = self
-                .partial_memory_shapes
-                .find_shape(&heights)
-                .ok_or(CoreShapeError::ShapeError(record.stats()))?;
-            record.shape.as_mut().unwrap().extend(shape);
+            if let Some(shape) = self.partial_memory_shapes.find_shape(&heights) {
+                record.shape.as_mut().unwrap().extend(shape);
+                return Ok(());
+            }
+
+            // Fallback: generate a dynamic shape from the actual heights.
+            tracing::warn!(
+                "No memory shape found for shard {}. Using dynamic shape (VK may not be in vk_map.bin).",
+                record.public_values.shard
+            );
+            let dynamic_shape = Self::dynamic_shape_from_heights(&heights);
+            record.shape.as_mut().unwrap().extend(dynamic_shape);
             return Ok(());
         }
 
@@ -230,17 +236,48 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                         }
                     }
                 }
-                tracing::error!(
-                    "Cannot find shape for precompile {:?}, height {:?}, and mem events {:?}",
-                    air.name(),
-                    height,
-                    num_memory_local_events
+
+                // Fallback: generate a dynamic precompile shape.
+                tracing::warn!(
+                    "No precompile shape found for {:?}. Using dynamic shape (VK may not be in vk_map.bin).",
+                    air.name()
                 );
+                let log2_height = log2_ceil_usize(height);
+                let log2_mem = log2_ceil_usize(
+                    num_memory_local_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW),
+                );
+                let log2_global = log2_ceil_usize(num_global_events);
+                let precompile_shape = self.get_precompile_shapes(
+                    air,
+                    *memory_events_per_row,
+                    log2_height,
+                );
+                if let Some(shape) = precompile_shape.into_iter().find(|shape| {
+                    let mem_h = shape[2].1;
+                    let global_h = shape[3].1;
+                    log2_mem <= mem_h && log2_global <= global_h
+                }) {
+                    record.shape.as_mut().unwrap().extend(
+                        shape.iter().map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
+                    );
+                    return Ok(());
+                }
+
                 return Err(CoreShapeError::ShapeError(record.stats()));
             }
         }
 
         Err(CoreShapeError::PrecompileNotIncluded(record.stats()))
+    }
+
+    /// Generate a dynamic shape by rounding each chip height up to the next power of 2.
+    /// This is used as a fallback when no pre-defined shape fits the execution record.
+    fn dynamic_shape_from_heights(heights: &[(MipsAirId, usize)]) -> Shape<MipsAirId> {
+        heights
+            .iter()
+            .filter(|(_, height)| *height > 0)
+            .map(|(air, height)| (*air, log2_ceil_usize(*height)))
+            .collect()
     }
 
     fn get_precompile_shapes(
@@ -472,38 +509,60 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
             (MipsAirId::Byte, vec![Some(16)]),
         ]);
 
-        // Generate the clusters from the maximal shapes and register them indexed by log2 shard
-        //  size.
+        // OpenVM-style: merge all maximal shapes per shard size into a single envelope shape.
+        // This produces 1 fixed shape per shard size instead of thousands of clusters.
         let mut core_allowed_log2_heights = BTreeMap::new();
-        for (log2_shard_size, maximal_shapes) in maximal_shapes {
-            let mut clusters = vec![];
-
-            for maximal_shape in maximal_shapes.iter() {
-                let cluster = derive_cluster_from_maximal_shape(maximal_shape);
-                clusters.push(cluster);
+        for (log2_shard_size, shard_shapes) in maximal_shapes {
+            // Take the max log2_height per chip across all maximal shapes for this shard size.
+            let mut envelope: HashMap<MipsAirId, usize> = HashMap::new();
+            for shape in shard_shapes.iter() {
+                for (air, log_height) in shape.iter() {
+                    let entry = envelope.entry(*air).or_insert(0);
+                    *entry = (*entry).max(*log_height);
+                }
             }
-
-            core_allowed_log2_heights.insert(log2_shard_size, clusters);
+            // Convert to a single-shape cluster (1 height option per chip).
+            let cluster = ShapeCluster::new(
+                envelope
+                    .into_iter()
+                    .map(|(air, h)| (air, vec![Some(h)]))
+                    .collect(),
+            );
+            core_allowed_log2_heights.insert(log2_shard_size, vec![cluster]);
         }
 
-        // Set the memory init and finalize heights.
+        // Merge small shapes into a single envelope small shape.
+        let merged_small_shapes = if small_shapes.is_empty() {
+            vec![]
+        } else {
+            let mut envelope: HashMap<MipsAirId, usize> = HashMap::new();
+            for shape in small_shapes.iter() {
+                for (air, log_height) in shape.iter() {
+                    let entry = envelope.entry(*air).or_insert(0);
+                    *entry = (*entry).max(*log_height);
+                }
+            }
+            vec![ShapeCluster::new(
+                envelope
+                    .into_iter()
+                    .map(|(air, h)| (air, vec![Some(h)]))
+                    .collect(),
+            )]
+        };
+
+        // Set the memory init and finalize heights — single maximal combination.
         let memory_allowed_log2_heights = HashMap::from(
             [
-                (
-                    MipsAirId::MemoryGlobalInit,
-                    vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)],
-                ),
-                (
-                    MipsAirId::MemoryGlobalFinalize,
-                    vec![None, Some(10), Some(16), Some(18), Some(19), Some(20), Some(21)],
-                ),
-                (MipsAirId::Global, vec![None, Some(11), Some(17), Some(19), Some(21), Some(22)]),
+                (MipsAirId::MemoryGlobalInit, vec![None, Some(21)]),
+                (MipsAirId::MemoryGlobalFinalize, vec![None, Some(21)]),
+                (MipsAirId::Global, vec![None, Some(22)]),
             ]
             .map(|(air, log_heights)| (air, log_heights)),
         );
 
+        // Set the precompile heights — single maximal height.
         let mut precompile_allowed_log2_heights = HashMap::new();
-        let precompile_heights = (3..21).collect::<Vec<_>>();
+        let precompile_heights = vec![20];
         for (air, memory_events_per_row) in
             MipsAir::<F>::precompile_airs_with_memory_events_per_row()
         {
@@ -516,95 +575,13 @@ impl<F: PrimeField32> Default for CoreShapeConfig<F> {
             partial_core_shapes: core_allowed_log2_heights,
             partial_memory_shapes: ShapeCluster::new(memory_allowed_log2_heights),
             partial_precompile_shapes: precompile_allowed_log2_heights,
-            partial_small_shapes: small_shapes
-                .into_iter()
-                .map(|x| {
-                    ShapeCluster::new(x.into_iter().map(|(k, v)| (k, vec![Some(v)])).collect())
-                })
-                .collect(),
+            partial_small_shapes: merged_small_shapes,
             costs: serde_json::from_str(include_str!(
                 "../../../executor/src/artifacts/mips_costs.json"
             ))
             .unwrap(),
         }
     }
-}
-
-fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<MipsAirId> {
-    // We first define a heuristic to derive the log heights from the maximal shape.
-    let log2_gap_from_22 = 22 - shape.log2_height(&MipsAirId::Cpu).unwrap();
-    let min_log2_height_threshold = 18 - log2_gap_from_22;
-    let log2_height_buffer = 10;
-    let heuristic = |maximal_log2_height: Option<usize>, min_offset: usize| {
-        if let Some(maximal_log2_height) = maximal_log2_height {
-            let tallest_log2_height = std::cmp::max(maximal_log2_height, min_log2_height_threshold);
-            let shortest_log2_height = tallest_log2_height.saturating_sub(min_offset);
-
-            (shortest_log2_height..=tallest_log2_height).map(Some).collect::<Vec<_>>()
-        } else {
-            vec![None, Some(log2_height_buffer)]
-        }
-    };
-
-    let mut maybe_log2_heights = HashMap::new();
-
-    let cpu_log_height = shape.log2_height(&MipsAirId::Cpu);
-    maybe_log2_heights.insert(MipsAirId::Cpu, heuristic(cpu_log_height, 0));
-
-    let addsub_log_height = shape.log2_height(&MipsAirId::AddSub);
-    maybe_log2_heights.insert(MipsAirId::AddSub, heuristic(addsub_log_height, 0));
-
-    let lt_log_height = shape.log2_height(&MipsAirId::Lt);
-    maybe_log2_heights.insert(MipsAirId::Lt, heuristic(lt_log_height, 0));
-
-    let memory_local_log_height = shape.log2_height(&MipsAirId::MemoryLocal);
-    maybe_log2_heights.insert(MipsAirId::MemoryLocal, heuristic(memory_local_log_height, 0));
-
-    let divrem_log_height = shape.log2_height(&MipsAirId::DivRem);
-    maybe_log2_heights.insert(MipsAirId::DivRem, heuristic(divrem_log_height, 1));
-
-    let bitwise_log_height = shape.log2_height(&MipsAirId::Bitwise);
-    maybe_log2_heights.insert(MipsAirId::Bitwise, heuristic(bitwise_log_height, 1));
-
-    let mul_log_height = shape.log2_height(&MipsAirId::Mul);
-    maybe_log2_heights.insert(MipsAirId::Mul, heuristic(mul_log_height, 1));
-
-    let shift_right_log_height = shape.log2_height(&MipsAirId::ShiftRight);
-    maybe_log2_heights.insert(MipsAirId::ShiftRight, heuristic(shift_right_log_height, 1));
-
-    let shift_left_log_height = shape.log2_height(&MipsAirId::ShiftLeft);
-    maybe_log2_heights.insert(MipsAirId::ShiftLeft, heuristic(shift_left_log_height, 1));
-
-    let cloclz_log_height = shape.log2_height(&MipsAirId::CloClz);
-    maybe_log2_heights.insert(MipsAirId::CloClz, heuristic(cloclz_log_height, 0));
-
-    let branch_log_height = shape.log2_height(&MipsAirId::Branch);
-    maybe_log2_heights.insert(MipsAirId::Branch, heuristic(branch_log_height, 0));
-
-    let jump_log_height = shape.log2_height(&MipsAirId::Jump);
-    maybe_log2_heights.insert(MipsAirId::Jump, heuristic(jump_log_height, 0));
-
-    let syscall_log_height = shape.log2_height(&MipsAirId::SyscallInstrs);
-    maybe_log2_heights.insert(MipsAirId::SyscallInstrs, heuristic(syscall_log_height, 0));
-
-    let memory_log_height = shape.log2_height(&MipsAirId::MemoryInstrs);
-    maybe_log2_heights.insert(MipsAirId::MemoryInstrs, heuristic(memory_log_height, 0));
-
-    let movcond_log_height = shape.log2_height(&MipsAirId::MovCond);
-    maybe_log2_heights.insert(MipsAirId::MovCond, heuristic(movcond_log_height, 0));
-
-    let misc_log_height = shape.log2_height(&MipsAirId::MiscInstrs);
-    maybe_log2_heights.insert(MipsAirId::MiscInstrs, heuristic(misc_log_height, 0));
-
-    let syscall_core_log_height = shape.log2_height(&MipsAirId::SyscallCore);
-    maybe_log2_heights.insert(MipsAirId::SyscallCore, heuristic(syscall_core_log_height, 0));
-
-    let global_log_height = shape.log2_height(&MipsAirId::Global);
-    maybe_log2_heights.insert(MipsAirId::Global, heuristic(global_log_height, 1));
-
-    assert!(maybe_log2_heights.len() >= shape.len(), "not all chips were included in the shape");
-
-    ShapeCluster::new(maybe_log2_heights)
 }
 
 #[derive(Debug, Error)]
