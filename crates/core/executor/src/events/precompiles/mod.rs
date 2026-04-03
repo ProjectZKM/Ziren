@@ -212,6 +212,10 @@ impl PrecompileEvents {
         self.events.values().flatten()
     }
 
+    pub fn get_all_events(&self) -> &HashMap<SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>> {
+        &self.events
+    }
+
     #[inline]
     /// Insert a vector of precompile events for a given syscall code.
     pub(crate) fn insert(

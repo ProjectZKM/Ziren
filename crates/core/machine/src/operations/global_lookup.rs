@@ -96,7 +96,7 @@ impl<F: Field> GlobalLookupOperation<F> {
         is_receive: AB::Expr,
         is_send: AB::Expr,
         is_real: AB::Var,
-        _kind: AB::Var,
+        kind: AB::Var,
     ) {
         // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);
@@ -119,6 +119,27 @@ impl<F: Field> GlobalLookupOperation<F> {
 
         let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
         let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
+
+        // Constrain that x_coordinate is derived from (values, kind, offset) via the
+        // map-to-curve function. This is the critical link between the tuple columns
+        // (which participate in the cross-table lookup) and the witness curve point
+        // (which is accumulated into the global digest).
+        //
+        // The map-to-curve computes:
+        //   x[0] = values[0] + kind * 65536
+        //   x[i] = values[i]              for i in 1..6
+        //   x[6] = values[6] * 256 + offset
+        builder.when(is_real).assert_eq(
+            x.0[0].clone(),
+            values[0].clone() + kind.into() * AB::Expr::from_canonical_u32(65536),
+        );
+        for i in 1..6 {
+            builder.when(is_real).assert_eq(x.0[i].clone(), values[i].clone());
+        }
+        builder.when(is_real).assert_eq(
+            x.0[6].clone(),
+            values[6].clone() * AB::Expr::from_canonical_u32(256) + offset.clone(),
+        );
 
         // Constrain that `(x, y)` is a valid point on the curve.
         let y2 = y.square();

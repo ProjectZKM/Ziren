@@ -138,12 +138,11 @@ fn fetch_raw_block(url: &str, block_tag: &str) -> Result<Vec<u8>> {
     decode_hex(result.as_str().ok_or("debug_getRawBlock: expected hex string")?)
 }
 
-/// Fetch execution witness and return its RLP bytes.
+/// Fetch execution witness and return its ExtWitness RLP bytes.
 ///
-/// Handles three response formats from different go-ethereum versions:
-///   1. Hex string  – already RLP-encoded witness bytes.
-///   2. JSON object (ExtWitness with parsed headers) – not supported, rare.
-///   3. JSON object with hex-encoded header RLP – construct RLP from parts.
+/// Handles response formats from different go-ethereum versions:
+///   1. Hex string  – already RLP-encoded ExtWitness bytes.
+///   2. JSON object – ExtWitness with JSON header objects or hex-encoded header RLP.
 fn fetch_witness_rlp(url: &str, block_tag: &str) -> Result<Vec<u8>> {
     let result = rpc_call(url, "debug_executionWitness", &[json!(block_tag)])?;
 
@@ -160,7 +159,156 @@ fn fetch_witness_rlp(url: &str, block_tag: &str) -> Result<Vec<u8>> {
     Err("debug_executionWitness: unexpected response format".into())
 }
 
-/// Construct witness RLP from a JSON object with hex-encoded byte arrays.
+// ---------------------------------------------------------------------------
+// Header JSON → RLP encoder
+// ---------------------------------------------------------------------------
+
+/// Decode a hex string from a JSON value, returning empty vec for null.
+fn json_hex_bytes(v: &Value) -> Result<Vec<u8>> {
+    match v.as_str() {
+        Some(s) => decode_hex(s),
+        None => Ok(vec![]),
+    }
+}
+
+/// Decode a hex string as u64 from a JSON value, returning 0 for null.
+fn json_hex_u64(v: &Value) -> Result<u64> {
+    match v.as_str() {
+        Some(s) => parse_hex_u64(s),
+        None => Ok(0),
+    }
+}
+
+/// Decode a hex string as big-endian big integer bytes (no leading zeros).
+fn json_hex_bigint_bytes(v: &Value) -> Result<Vec<u8>> {
+    match v.as_str() {
+        Some(s) => {
+            let bytes = decode_hex(s)?;
+            // Strip leading zeros
+            let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
+            Ok(bytes[start..].to_vec())
+        }
+        None => Ok(vec![]),
+    }
+}
+
+/// RLP-encode a fixed-size byte array (e.g. Hash=32 bytes, Address=20 bytes, Bloom=256 bytes).
+/// These are encoded as byte strings (never single-byte shortcut for values >= 0x80).
+fn rlp_encode_fixed_bytes(data: &[u8]) -> Vec<u8> {
+    rlp_encode_bytes(data)
+}
+
+/// RLP-encode a big integer from its big-endian byte representation (no leading zeros).
+/// Same encoding as uint64 but from arbitrary-length bytes.
+fn rlp_encode_bigint(bytes: &[u8]) -> Vec<u8> {
+    if bytes.is_empty() {
+        return vec![0x80]; // zero
+    }
+    if bytes.len() == 1 && bytes[0] < 0x80 {
+        return bytes.to_vec();
+    }
+    let mut out = vec![0x80 + bytes.len() as u8];
+    out.extend_from_slice(bytes);
+    out
+}
+
+/// RLP-encode an optional *uint64 field. Returns None if the JSON value is null,
+/// meaning this optional field should be omitted (rlp:"optional" trailing).
+fn rlp_encode_optional_u64(v: &Value) -> Result<Option<Vec<u8>>> {
+    if v.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(rlp_encode_u64(json_hex_u64(v)?)))
+    }
+}
+
+/// RLP-encode an optional *common.Hash field.
+fn rlp_encode_optional_hash(v: &Value) -> Result<Option<Vec<u8>>> {
+    if v.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(rlp_encode_fixed_bytes(&json_hex_bytes(v)?)))
+    }
+}
+
+/// RLP-encode an optional *big.Int field.
+fn rlp_encode_optional_bigint(v: &Value) -> Result<Option<Vec<u8>>> {
+    if v.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(rlp_encode_bigint(&json_hex_bigint_bytes(v)?)))
+    }
+}
+
+/// RLP-encode a go-ethereum Header JSON object.
+///
+/// Field order matches go-ethereum's `core/types.Header` struct definition,
+/// with rlp:"optional" trailing fields omitted when null.
+fn rlp_encode_header_json(h: &Value) -> Result<Vec<u8>> {
+    // Required fields (always present)
+    let mut fields: Vec<Vec<u8>> = vec![
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("parentHash").unwrap_or(&Value::Null))?),     // ParentHash  common.Hash
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("sha3Uncles").unwrap_or(&Value::Null))?),     // UncleHash   common.Hash
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("miner").unwrap_or(&Value::Null))?),          // Coinbase    common.Address
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("stateRoot").unwrap_or(&Value::Null))?),      // Root        common.Hash
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("transactionsRoot").unwrap_or(&Value::Null))?), // TxHash    common.Hash
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("receiptsRoot").unwrap_or(&Value::Null))?),   // ReceiptHash common.Hash
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("logsBloom").unwrap_or(&Value::Null))?),      // Bloom       Bloom
+        rlp_encode_bigint(&json_hex_bigint_bytes(h.get("difficulty").unwrap_or(&Value::Null))?),   // Difficulty  *big.Int
+        rlp_encode_bigint(&json_hex_bigint_bytes(h.get("number").unwrap_or(&Value::Null))?),       // Number      *big.Int
+        rlp_encode_u64(json_hex_u64(h.get("gasLimit").unwrap_or(&Value::Null))?),                  // GasLimit    uint64
+        rlp_encode_u64(json_hex_u64(h.get("gasUsed").unwrap_or(&Value::Null))?),                   // GasUsed     uint64
+        rlp_encode_u64(json_hex_u64(h.get("timestamp").unwrap_or(&Value::Null))?),                 // Time        uint64
+        rlp_encode_bytes(&json_hex_bytes(h.get("extraData").unwrap_or(&Value::Null))?),            // Extra       []byte
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("mixHash").unwrap_or(&Value::Null))?),        // MixDigest   common.Hash
+        rlp_encode_fixed_bytes(&json_hex_bytes(h.get("nonce").unwrap_or(&Value::Null))?),          // Nonce       BlockNonce (8 bytes)
+    ];
+
+    // Optional fields (rlp:"optional") — must be appended in order,
+    // trailing nulls are omitted.
+    let optional: Vec<(&str, Box<dyn Fn(&Value) -> Result<Option<Vec<u8>>>>)> = vec![
+        ("baseFeePerGas",        Box::new(|v| rlp_encode_optional_bigint(v))),    // BaseFee          *big.Int
+        ("withdrawalsRoot",      Box::new(|v| rlp_encode_optional_hash(v))),      // WithdrawalsHash  *common.Hash
+        ("blobGasUsed",          Box::new(|v| rlp_encode_optional_u64(v))),       // BlobGasUsed      *uint64
+        ("excessBlobGas",        Box::new(|v| rlp_encode_optional_u64(v))),       // ExcessBlobGas    *uint64
+        ("parentBeaconBlockRoot", Box::new(|v| rlp_encode_optional_hash(v))),     // ParentBeaconRoot *common.Hash
+        ("requestsHash",         Box::new(|v| rlp_encode_optional_hash(v))),      // RequestsHash     *common.Hash
+    ];
+
+    // Find last non-null optional field to know how many to include.
+    let mut last_present = 0;
+    for (i, (key, _)) in optional.iter().enumerate() {
+        let v = h.get(*key).unwrap_or(&Value::Null);
+        if !v.is_null() {
+            last_present = i + 1;
+        }
+    }
+
+    // Append optional fields up to the last present one.
+    for (i, (key, encoder)) in optional.iter().enumerate() {
+        if i >= last_present {
+            break;
+        }
+        let v = h.get(*key).unwrap_or(&Value::Null);
+        match encoder(v)? {
+            Some(encoded) => fields.push(encoded),
+            None => fields.push(rlp_encode_bytes(&[])), // null in the middle → encode as empty
+        }
+    }
+
+    let refs: Vec<&[u8]> = fields.iter().map(|f| f.as_slice()).collect();
+    Ok(rlp_wrap_list(&refs))
+}
+
+// ---------------------------------------------------------------------------
+// Witness JSON → RLP
+// ---------------------------------------------------------------------------
+
+/// Construct ExtWitness RLP from a JSON object.
+///
+/// Supports two header formats:
+///   - JSON header objects (from debug_executionWitness API)
+///   - Hex-encoded header RLP strings (alternative format)
 fn encode_witness_from_json(obj: &serde_json::Map<String, Value>) -> Result<Vec<u8>> {
     let headers = obj.get("headers")
         .and_then(|v| v.as_array())
@@ -171,33 +319,36 @@ fn encode_witness_from_json(obj: &serde_json::Map<String, Value>) -> Result<Vec<
     let state = obj.get("state")
         .and_then(|v| v.as_array())
         .ok_or("witness: missing state array")?;
+    let empty_vec = vec![];
     let keys = obj.get("keys")
         .and_then(|v| v.as_array())
-        .ok_or("witness: missing keys array")?;
+        .unwrap_or(&empty_vec);
 
-    // Headers: expect hex-encoded RLP of each header.
+    // Encode headers — support both JSON objects and hex RLP strings.
     let mut header_items: Vec<Vec<u8>> = Vec::new();
     for h in headers {
-        match h.as_str() {
-            Some(hex_str) => header_items.push(decode_hex(hex_str)?),
-            None => return Err(
-                "witness: header must be hex-encoded RLP; JSON object headers not supported".into()
-            ),
+        if let Some(hex_str) = h.as_str() {
+            // Hex-encoded RLP string
+            header_items.push(decode_hex(hex_str)?);
+        } else if h.is_object() {
+            // JSON header object → RLP encode
+            header_items.push(rlp_encode_header_json(h)?);
+        } else {
+            return Err("witness: header must be hex string or JSON object".into());
         }
     }
 
     let codes_bytes: Result<Vec<Vec<u8>>> = codes.iter()
-        .map(|v| decode_hex(v.as_str().unwrap_or("0x")))
+        .map(|v| json_hex_bytes(v))
         .collect();
     let state_bytes: Result<Vec<Vec<u8>>> = state.iter()
-        .map(|v| decode_hex(v.as_str().unwrap_or("0x")))
+        .map(|v| json_hex_bytes(v))
         .collect();
     let keys_bytes: Result<Vec<Vec<u8>>> = keys.iter()
-        .map(|v| decode_hex(v.as_str().unwrap_or("0x")))
+        .map(|v| json_hex_bytes(v))
         .collect();
 
     // ExtWitness RLP: list([headers_list, codes_list, state_list, keys_list])
-    // Headers are already valid RLP items (lists), so wrap them directly.
     let header_refs: Vec<&[u8]> = header_items.iter().map(|v| v.as_slice()).collect();
     let headers_list = rlp_wrap_list(&header_refs);
     let codes_list = rlp_encode_bytes_list(&codes_bytes?);
