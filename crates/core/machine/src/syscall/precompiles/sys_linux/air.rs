@@ -107,65 +107,34 @@ where
                 .assert_zero(local.a0[3]);
         }
 
-        // ProjectZKM/Ziren#488:9: Reverse direction — when a0 == 0/1/2, the corresponding flag must be set.
+        // ProjectZKM/Ziren#488: Reverse direction for is_a0_0/1/2 and is_a1_1/3.
+        // Inline IsZero: flag = 1 - inv * diff. flag is already boolean-checked above.
+        // If diff == 0 (value matches), then flag = 1 (forced). If diff != 0, inv = diff^-1, flag = 0.
+        // If prover lies (sets flag=1 when diff != 0), existing forward constraints force a contradiction.
         {
             let a0_reduce = local.a0.reduce::<AB>();
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                a0_reduce.clone(),
-                local.is_a0_eq_0,
-                local.is_real.into(),
+            builder.when(local.is_real).assert_eq(
+                local.is_a0_0,
+                AB::Expr::one() - local.inv_a0_diff_0 * a0_reduce.clone(),
             );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                a0_reduce.clone() - AB::Expr::one(),
-                local.is_a0_eq_1,
-                local.is_real.into(),
+            builder.when(local.is_real).assert_eq(
+                local.is_a0_1,
+                AB::Expr::one() - local.inv_a0_diff_1 * (a0_reduce.clone() - AB::Expr::one()),
             );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                a0_reduce - AB::Expr::two(),
-                local.is_a0_eq_2,
-                local.is_real.into(),
+            builder.when(local.is_real).assert_eq(
+                local.is_a0_2,
+                AB::Expr::one() - local.inv_a0_diff_2 * (a0_reduce - AB::Expr::two()),
             );
-            // is_a0_eq_0.result = 1 iff a0.reduce() == 0. When result=1, is_a0_0 must be 1.
-            builder
-                .when(local.is_real)
-                .when(local.is_a0_eq_0.result)
-                .assert_one(local.is_a0_0);
-            builder
-                .when(local.is_real)
-                .when(local.is_a0_eq_1.result)
-                .assert_one(local.is_a0_1);
-            builder
-                .when(local.is_real)
-                .when(local.is_a0_eq_2.result)
-                .assert_one(local.is_a0_2);
-        }
 
-        // ProjectZKM/Ziren#488:12: Reverse direction — when a1 == 1/3, the corresponding flag must be set.
-        {
             let a1_reduce = local.a1.reduce::<AB>();
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                a1_reduce.clone() - AB::Expr::one(),
-                local.is_a1_eq_1,
-                local.is_real.into(),
+            builder.when(local.is_real).assert_eq(
+                local.is_a1_1,
+                AB::Expr::one() - local.inv_a1_diff_1 * (a1_reduce.clone() - AB::Expr::one()),
             );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                a1_reduce - AB::Expr::from_canonical_u32(3),
-                local.is_a1_eq_3,
-                local.is_real.into(),
+            builder.when(local.is_real).assert_eq(
+                local.is_a1_3,
+                AB::Expr::one() - local.inv_a1_diff_3 * (a1_reduce - AB::Expr::from_canonical_u32(3)),
             );
-            builder
-                .when(local.is_real)
-                .when(local.is_a1_eq_1.result)
-                .assert_one(local.is_a1_1);
-            builder
-                .when(local.is_real)
-                .when(local.is_a1_eq_3.result)
-                .assert_one(local.is_a1_3);
         }
 
         // Check that the syscall flags are correct (forward direction).
@@ -212,104 +181,58 @@ where
             );
         }
 
-        // ProjectZKM/Ziren#488:2: Reverse direction — when syscall_id matches a known code, the flag MUST be set.
-        // is_not_X.result = 1 iff syscall_id != X. When result = 0, the flag must be 1.
+        // ProjectZKM/Ziren#488: Reverse direction for syscall flag routing.
+        // Inline IsZero: is_code = 1 - inv * (syscall_id - CODE).
+        // When is_code = 1 (syscall_id matches), the corresponding flag must be 1.
+        // When is_code = 0 (no match), no constraint on the flag from this code.
+        // Combined with the forward constraints and one-hot sum, this is bidirectional.
         {
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
-                local.is_not_mmap,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
-                local.is_not_mmap2,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
-                local.is_not_clone,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
-                local.is_not_exit_group,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_BRK as u32),
-                local.is_not_brk,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
-                local.is_not_fnctl,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_READ as u32),
-                local.is_not_read,
-                local.is_real.into(),
-            );
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                local.syscall_id - AB::Expr::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
-                local.is_not_write,
-                local.is_real.into(),
-            );
+            let sid = local.syscall_id;
+            // Helper macro: compute is_code inline and assert flag when it's 1.
+            // is_code = 1 - inv * diff. If diff=0 then is_code=1 and flag must be 1.
+            // If diff!=0 and inv is correct, is_code=0 and the when() doesn't fire.
+            // If prover sets inv wrong when diff!=0, is_code is non-boolean.
+            // But flag is already boolean-checked, and (1 - inv*diff) * flag must be consistent
+            // with the one-hot sum. A lying prover can't benefit.
 
-            // When syscall_id == SYS_MMAP or SYS_MMAP2, is_mmap must be 1.
-            // is_not_mmap.result = 0 means syscall_id == SYS_MMAP.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_mmap.result)
-                .assert_one(local.is_mmap);
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_mmap2.result)
-                .assert_one(local.is_mmap);
+            let is_code_mmap = AB::Expr::one()
+                - local.inv_syscall_diff_mmap
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32));
+            let is_code_mmap2 = AB::Expr::one()
+                - local.inv_syscall_diff_mmap2
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32));
+            builder.when(local.is_real).when(is_code_mmap).assert_one(local.is_mmap);
+            builder.when(local.is_real).when(is_code_mmap2).assert_one(local.is_mmap);
 
-            // When syscall_id == SYS_CLONE, is_clone must be 1.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_clone.result)
-                .assert_one(local.is_clone);
+            let is_code_clone = AB::Expr::one()
+                - local.inv_syscall_diff_clone
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32));
+            builder.when(local.is_real).when(is_code_clone).assert_one(local.is_clone);
 
-            // When syscall_id == SYS_EXT_GROUP, is_exit_group must be 1.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_exit_group.result)
-                .assert_one(local.is_exit_group);
+            let is_code_exit = AB::Expr::one()
+                - local.inv_syscall_diff_exit_group
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32));
+            builder.when(local.is_real).when(is_code_exit).assert_one(local.is_exit_group);
 
-            // When syscall_id == SYS_BRK, is_brk must be 1.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_brk.result)
-                .assert_one(local.is_brk);
+            let is_code_brk = AB::Expr::one()
+                - local.inv_syscall_diff_brk
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_BRK as u32));
+            builder.when(local.is_real).when(is_code_brk).assert_one(local.is_brk);
 
-            // When syscall_id == SYS_FCNTL, is_fnctl must be 1.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_fnctl.result)
-                .assert_one(local.is_fnctl);
+            let is_code_fnctl = AB::Expr::one()
+                - local.inv_syscall_diff_fnctl
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_FCNTL as u32));
+            builder.when(local.is_real).when(is_code_fnctl).assert_one(local.is_fnctl);
 
-            // When syscall_id == SYS_READ, is_read must be 1.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_read.result)
-                .assert_one(local.is_read);
+            let is_code_read = AB::Expr::one()
+                - local.inv_syscall_diff_read
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_READ as u32));
+            builder.when(local.is_real).when(is_code_read).assert_one(local.is_read);
 
-            // When syscall_id == SYS_WRITE, is_write must be 1.
-            builder
-                .when(local.is_real)
-                .when_not(local.is_not_write.result)
-                .assert_one(local.is_write);
+            let is_code_write = AB::Expr::one()
+                - local.inv_syscall_diff_write
+                    * (sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_WRITE as u32));
+            builder.when(local.is_real).when(is_code_write).assert_one(local.is_write);
         }
 
         builder.receive_syscall(

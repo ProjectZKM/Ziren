@@ -180,47 +180,30 @@ impl SysLinuxChip {
             }
         };
 
-        // ProjectZKM/Ziren#488:9: Populate IsZero for bidirectional is_a0_0/1/2.
-        // a0.reduce() = a0[0] + a0[1]*256 + a0[2]*65536 + a0[3]*16777216
+        // ProjectZKM/Ziren#488: Populate inverse columns for bidirectional flag constraints.
+        // For each (value, code) pair: if value != code, store the inverse; else store 0.
+        let populate_inv = |val: F, code: u32| -> F {
+            let diff = val - F::from_canonical_u32(code);
+            if diff == F::ZERO { F::ZERO } else { diff.inverse() }
+        };
+
         let a0_val = F::from_canonical_u32(event.a0);
-        cols.is_a0_eq_0.populate_from_field_element(a0_val);
-        cols.is_a0_eq_1
-            .populate_from_field_element(a0_val - F::from_canonical_u32(1));
-        cols.is_a0_eq_2
-            .populate_from_field_element(a0_val - F::from_canonical_u32(2));
+        cols.inv_a0_diff_0 = populate_inv(a0_val, 0);
+        cols.inv_a0_diff_1 = populate_inv(a0_val, 1);
+        cols.inv_a0_diff_2 = populate_inv(a0_val, 2);
 
-        // ProjectZKM/Ziren#488:12: Populate IsZero for bidirectional is_a1_1/3.
         let a1_val = F::from_canonical_u32(event.a1);
-        cols.is_a1_eq_1
-            .populate_from_field_element(a1_val - F::from_canonical_u32(1));
-        cols.is_a1_eq_3
-            .populate_from_field_element(a1_val - F::from_canonical_u32(3));
+        cols.inv_a1_diff_1 = populate_inv(a1_val, 1);
+        cols.inv_a1_diff_3 = populate_inv(a1_val, 3);
 
-        // ProjectZKM/Ziren#488:2: Populate IsZero columns for bidirectional syscall flag constraints.
         let sid = F::from_canonical_u32(event.syscall_code);
-        cols.is_not_mmap.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
-        );
-        cols.is_not_mmap2.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
-        );
-        cols.is_not_clone.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
-        );
-        cols.is_not_exit_group.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
-        );
-        cols.is_not_brk.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_BRK as u32),
-        );
-        cols.is_not_fnctl.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
-        );
-        cols.is_not_read.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_READ as u32),
-        );
-        cols.is_not_write.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
-        );
+        cols.inv_syscall_diff_mmap = populate_inv(sid, SyscallCode::SYS_MMAP as u32);
+        cols.inv_syscall_diff_mmap2 = populate_inv(sid, SyscallCode::SYS_MMAP2 as u32);
+        cols.inv_syscall_diff_clone = populate_inv(sid, SyscallCode::SYS_CLONE as u32);
+        cols.inv_syscall_diff_exit_group = populate_inv(sid, SyscallCode::SYS_EXT_GROUP as u32);
+        cols.inv_syscall_diff_brk = populate_inv(sid, SyscallCode::SYS_BRK as u32);
+        cols.inv_syscall_diff_fnctl = populate_inv(sid, SyscallCode::SYS_FCNTL as u32);
+        cols.inv_syscall_diff_read = populate_inv(sid, SyscallCode::SYS_READ as u32);
+        cols.inv_syscall_diff_write = populate_inv(sid, SyscallCode::SYS_WRITE as u32);
     }
 }

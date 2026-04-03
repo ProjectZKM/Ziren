@@ -75,22 +75,22 @@ pub struct SysLinuxCols<T> {
 
     pub is_real: T,
 
-    // --- ProjectZKM/Ziren#488:2: IsZero columns for bidirectional syscall flag constraints ---
-    pub is_not_mmap: IsZeroOperation<T>,
-    pub is_not_mmap2: IsZeroOperation<T>,
-    pub is_not_clone: IsZeroOperation<T>,
-    pub is_not_exit_group: IsZeroOperation<T>,
-    pub is_not_brk: IsZeroOperation<T>,
-    pub is_not_fnctl: IsZeroOperation<T>,
-    pub is_not_read: IsZeroOperation<T>,
-    pub is_not_write: IsZeroOperation<T>,
-
-    // --- ProjectZKM/Ziren#488:9: IsZero columns for bidirectional is_a0_0/1/2 ---
-    pub is_a0_eq_0: IsZeroOperation<T>,
-    pub is_a0_eq_1: IsZeroOperation<T>,
-    pub is_a0_eq_2: IsZeroOperation<T>,
-
-    // --- ProjectZKM/Ziren#488:12: IsZero columns for bidirectional is_a1_1/3 ---
-    pub is_a1_eq_1: IsZeroOperation<T>,
-    pub is_a1_eq_3: IsZeroOperation<T>,
+    // --- ProjectZKM/Ziren#488: Inverse-only columns for bidirectional flag constraints ---
+    // We only store the inverse, not the result, because the result IS the existing boolean flag.
+    // Constraint: flag = 1 - inverse * (syscall_id - CODE). If syscall_id == CODE, flag must be 1.
+    pub inv_syscall_diff_mmap: T,
+    pub inv_syscall_diff_mmap2: T,
+    pub inv_syscall_diff_clone: T,
+    pub inv_syscall_diff_exit_group: T,
+    pub inv_syscall_diff_brk: T,
+    pub inv_syscall_diff_fnctl: T,
+    pub inv_syscall_diff_read: T,
+    pub inv_syscall_diff_write: T,
+    // Inverses for bidirectional is_a0_0/1/2.
+    pub inv_a0_diff_0: T,
+    pub inv_a0_diff_1: T,
+    pub inv_a0_diff_2: T,
+    // Inverses for bidirectional is_a1_1/3.
+    pub inv_a1_diff_1: T,
+    pub inv_a1_diff_3: T,
 }
