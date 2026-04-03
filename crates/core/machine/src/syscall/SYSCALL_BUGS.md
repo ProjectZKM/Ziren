@@ -268,6 +268,51 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - On the `is_brk` branch, assert `*local.inorout.value() = local.inorout.prev_value`
   - or use a read-only memory witness type for the `BRK` access instead of `MemoryReadWriteCols`
 
+### 14. SysLinux::brk + `GtColsBytes`: selected comparison byte need not be unequal
+
+- Locations:
+  - `crates/core/machine/src/operations/cmp.rs`
+  - surfaced in `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs` through `SysLinux::brk`
+- Classification:
+  - functional correctness bug in a shared comparison gadget
+- Current behavior:
+  - `GtColsBytes` uses one-hot byte flags to choose the comparison byte
+  - it enforces that bytes before the selected flag are equal
+  - and it sends one `LTU` lookup on the selected bytes
+  - but it does not enforce that the selected bytes are actually different
+- Why this matters:
+  - the prover can select an earlier equal byte as the comparison byte
+  - `LTU(a, a) = 0`, so this can force the gadget result to `0` even when a later byte proves `a > b`
+  - callers that rely on the gadget result can therefore branch incorrectly
+- Picus symptom:
+  - On `SysLinux::brk`, Picus finds two valid models with the same `a0` and the same traced `BRK` value, but different comparison witnesses and different syscall results
+  - the visible manifestation is in `SysLinux`, but the root cause is in the shared `GtColsBytes` gadget
+- Likely fix:
+  - keep the existing `LTU(b, a)` lookup for the selected bytes
+  - add the complementary gated `LTU(a, b)` lookup when any comparison-byte flag is set
+  - this makes equality on the selected byte impossible, because the selected byte must satisfy either `a > b` or `a < b`
+  - Concretely, in `GtColsBytes::eval` in `crates/core/machine/src/operations/cmp.rs`, keep the existing:
+    ```rust
+    builder.send_byte(
+        ByteOpcode::LTU.as_field::<AB::F>(),
+        cols.result,
+        cols.b_comparison_byte,
+        cols.a_comparison_byte,
+        is_real,
+    );
+    ```
+    and then add:
+    ```rust
+    builder.send_byte(
+        ByteOpcode::LTU.as_field::<AB::F>(),
+        AB::Expr::one() - cols.result,
+        cols.a_comparison_byte,
+        cols.b_comparison_byte,
+        is_real.into() * sum_flags.clone(),
+    );
+    ```
+    This rules out choosing an equal byte as the selected comparison byte.
+
 
 
 
