@@ -94,6 +94,16 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void word_from_le_bytes(
 }
 
 template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ array_t<F, 4> u32_to_word(uint32_t a) {
+    return array_t<F, 4>{
+        F::from_canonical_u8((uint8_t)(a >> 8 * 0)),
+        F::from_canonical_u8((uint8_t)(a >> 8 * 1)),
+        F::from_canonical_u8((uint8_t)(a >> 8 * 2)),
+        F::from_canonical_u8((uint8_t)(a >> 8 * 3))
+    };
+}
+
+template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChecker<F>& self, const uint32_t value) {
     for (size_t i = 0; i < 8; ++i) {
         bool bit = (value & (1u << (i + 24))) != 0;
@@ -114,7 +124,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChe
 }
 
 template<class F>
-__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t populate_from_field_element(IsZeroOperation<F>& self, const F& a) {
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t populate_is_zero_operation(IsZeroOperation<F>& self, const F& a) {
     if (a == F::zero()) {
         self.inverse = F::zero();
         self.result = F::one();
@@ -125,6 +135,88 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t populate_from_field_element(IsZeroOperat
     F prod = self.inverse * a;
     assert(prod == F::one() || prod == F::zero());
     return (uint32_t)(a == F::zero());
+}
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
+populate_is_zero_word_operaion(IsZeroWordOperation<F>& self, const array_t<F, 4> bytes) {
+    bool is_zero = true;
+    for (size_t i = 0; i < WORD_SIZE; ++i) {
+        is_zero &= populate_is_zero_operation(self.is_zero_byte[i], bytes[i]) == 1;
+    }
+    self.is_lower_half_zero = self.is_zero_byte[0].result * self.is_zero_byte[1].result;
+    self.is_upper_half_zero = self.is_zero_byte[2].result * self.is_zero_byte[3].result;
+    self.result = F::from_bool(is_zero);
+    return (uint32_t)is_zero;
+}
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
+populate_is_equal_word_operaion(IsEqualWordOperation<F>& self, uint32_t a_u32, uint32_t b_u32) {
+    array_t<uint8_t, 4> a = u32_to_le_bytes(a_u32);
+    array_t<uint8_t, 4> b = u32_to_le_bytes(b_u32);
+    array_t<F, 4> diff = {
+        F::from_canonical_u8(a[0]) - F::from_canonical_u8(b[0]),
+        F::from_canonical_u8(a[1]) - F::from_canonical_u8(b[1]),
+        F::from_canonical_u8(a[2]) - F::from_canonical_u8(b[2]),
+        F::from_canonical_u8(a[3]) - F::from_canonical_u8(b[3]),
+    };
+    populate_is_zero_word_operaion(self.is_diff_zero, diff);
+    return (uint32_t)(a == b);
+}
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
+populate_add_double_operaion(AddDoubleOperation<F>& self, uint64_t a_u64, uint64_t b_u64) {
+    uint64_t expected = a_u64 + b_u64;
+    write_word_from_u32_v2<F>(self.value, (uint32_t)expected);
+    write_word_from_u32_v2<F>(self.value_hi, (uint32_t)(expected >> 32));
+
+    auto a = u64_to_le_bytes(a_u64);
+    auto b = u64_to_le_bytes(b_u64);
+
+    uint8_t carry[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < 7; i++) {
+        self.carry[i] = F::zero();
+    }
+
+    if ((uint32_t)a[0] + (uint32_t)b[0] > 255) {
+        carry[0] = 1;
+        self.carry[0] = F::one();
+    }
+    if ((uint32_t)a[1] + (uint32_t)b[1] + (uint32_t)carry[0] > 255) {
+        carry[1] = 1;
+        self.carry[1] = F::one();
+    }
+    if ((uint32_t)a[2] + (uint32_t)b[2] + (uint32_t)carry[1] > 255) {
+        carry[2] = 1;
+        self.carry[2] = F::one();
+    }
+
+    if ((uint32_t)a[3] + (uint32_t)b[3] + (uint32_t)carry[2] > 255) {
+        carry[3] = 1;
+        self.carry[3] = F::one();
+    }
+
+    if ((uint32_t)a[4] + (uint32_t)b[4] + (uint32_t)carry[3] > 255) {
+        carry[4] = 1;
+        self.carry[4] = F::one();
+    }
+
+    if ((uint32_t)a[5] + (uint32_t)b[5] + (uint32_t)carry[4] > 255) {
+        carry[5] = 1;
+        self.carry[5] = F::one();
+    }
+
+    if ((uint32_t)a[6] + (uint32_t)b[6] + (uint32_t)carry[5] > 255) {
+        carry[6] = 1;
+        self.carry[6] = F::one();
+    }
+
+    uint32_t base = 256;
+    uint32_t overflow = (uint32_t)a[0] + (uint32_t)b[0] - (uint32_t)u64_to_le_bytes(expected)[0];
+    assert(overflow * (overflow - base) == 0);
+    return expected;
 }
 
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t

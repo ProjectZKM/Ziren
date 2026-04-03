@@ -154,7 +154,7 @@ namespace zkm_core_machine_sys::memory_instrs {
         cols.is_swr = F::from_bool(event.opcode == Opcode::SWR);
         cols.is_sc = F::from_bool(event.opcode == Opcode::SC);
 
-        populate_from_field_element(
+        populate_is_zero_operation(
             cols.most_sig_bytes_zero,
             cols.addr_word._0[1] + cols.addr_word._0[2] + cols.addr_word._0[3]
         );
