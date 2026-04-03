@@ -4,7 +4,7 @@ use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{PicusInfo, Word};
 
 use crate::{
-    memory::MemoryReadWriteCols,
+    memory::{MemoryReadCols, MemoryReadWriteCols},
     operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
 
@@ -14,83 +14,76 @@ pub const NUM_SYS_LINUX_COLS: usize = size_of::<SysLinuxCols<u8>>();
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SysLinuxCols<T> {
-    /// Common Inputs.
+    // ── Common inputs ──────────────────────────────────────────────────
     pub shard: T,
     pub clk: T,
     pub syscall_id: T,
     pub a0: Word<T>,
     pub a1: Word<T>,
     pub result: Word<T>,
-    pub inorout: MemoryReadWriteCols<T>,
-    pub output: MemoryReadWriteCols<T>,
-    pub is_a0_0: T,
-    pub is_a0_1: T,
-    pub is_a0_2: T,
 
-    /// Columns for sys mmap (covers both SYS_MMAP and SYS_MMAP2)
+    // ── Memory access ──────────────────────────────────────────────────
+    /// Read-only memory access for brk (BRK register) and write (A2 register).
+    /// `MemoryReadCols` structurally enforces value == prev_value,
+    /// eliminating bugs 10 and 13 by construction.
+    pub read_access: MemoryReadCols<T>,
+    /// Read-write memory access for mmap heap update only.
+    pub heap_write: MemoryReadWriteCols<T>,
+    /// A3 output register write (used by all branches).
+    pub output: MemoryReadWriteCols<T>,
+
+    // ── Canonical syscall decoder ──────────────────────────────────────
+    // Each IsZeroOperation computes: result = 1 iff (syscall_id - CODE) == 0.
+    // This gives bidirectional flag derivation in one step.
+    pub decode_mmap: IsZeroOperation<T>,
+    pub decode_mmap2: IsZeroOperation<T>,
+    pub decode_clone: IsZeroOperation<T>,
+    pub decode_exit_group: IsZeroOperation<T>,
+    pub decode_brk: IsZeroOperation<T>,
+    pub decode_fnctl: IsZeroOperation<T>,
+    pub decode_read: IsZeroOperation<T>,
+    pub decode_write: IsZeroOperation<T>,
+
+    /// Stored is_mmap = decode_mmap.result + decode_mmap2.result.
+    /// Kept as a column so downstream constraints stay degree ≤ 3.
     pub is_mmap: T,
+
+    // ── Canonical a0 / a1 decoder ──────────────────────────────────────
+    pub decode_a0_0: IsZeroOperation<T>,
+    pub decode_a0_1: IsZeroOperation<T>,
+    pub decode_a0_2: IsZeroOperation<T>,
+    pub decode_a1_1: IsZeroOperation<T>,
+    pub decode_a1_3: IsZeroOperation<T>,
+
+    // ── Composite flags (stored for degree reasons) ────────────────────
+    /// is_mmap * decode_a0_0.result.  Exact product, not a free witness.
     pub is_mmap_a0_0: T,
+    /// decode_fnctl.result * decode_a1_1.result
+    pub is_fnctl_a1_1: T,
+    /// decode_fnctl.result * decode_a1_3.result
+    pub is_fnctl_a1_3: T,
+
+    // ── mmap-specific columns ──────────────────────────────────────────
     pub page_offset: T,
     pub is_offset_0: T,
     pub upper_address: T,
-    /// ProjectZKM/Ziren#488:6: Decompose page_offset into low byte and high nibble for range check.
-    pub page_offset_lo: T,
-    /// ProjectZKM/Ziren#488:6: High nibble of page_offset, decomposed into 4 bits.
-    pub page_offset_hi_bits: [T; 4],
-    /// ProjectZKM/Ziren#488:6: upper_address / 4096, proving upper_address is page-aligned.
+    /// Byte-level decomposition of a1[1] into low nibble and high nibble.
+    /// page_offset = a1[0] + a1_byte1_lo * 256  (12-bit value, range < 4096).
+    pub a1_byte1_lo: T,
+    /// 4-bit decomposition of the high nibble of a1[1].
+    pub a1_byte1_hi_bits: [T; 4],
+    /// upper_address / 4096, proving upper_address is page-aligned.
     pub upper_address_pages: T,
-    /// ProjectZKM/Ziren#488:6: IsZero on page_offset for bidirectional is_offset_0.
+    /// IsZero on page_offset for bidirectional is_offset_0.
     pub is_page_offset_zero: IsZeroOperation<T>,
-    /// ProjectZKM/Ziren#488:11: mmap size as a Word for bytewise heap update constraint.
+    /// mmap size as a Word for bytewise heap update constraint.
     pub mmap_size: Word<T>,
-    /// ProjectZKM/Ziren#488:11: AddOperation for new_heap = old_heap + mmap_size (bytewise, not via reduce).
+    /// AddOperation for new_heap = old_heap + mmap_size (bytewise).
     pub heap_add: AddOperation<T>,
 
-    /// Columns for sys clone
-    pub is_clone: T,
-
-    /// Columns for sys exit_group
-    pub is_exit_group: T,
-
-    /// Columns for sys brk
-    pub is_brk: T,
+    // ── brk-specific columns ───────────────────────────────────────────
     pub is_a0_gt_brk: GtColsBytes<T>,
 
-    ///Columns for sys fntrl
-    pub is_fnctl: T,
-    pub is_a1_1: T,
-    pub is_a1_3: T,
-    /// Composite flags to keep constraint degree <= 3
-    pub is_fnctl_a1_1: T,
-    pub is_fnctl_a1_3: T,
-
-    /// Columns for sys read
-    pub is_read: T,
-
-    /// Columns for sys write
-    pub is_write: T,
-
-    /// Columns for sys nop
-    pub is_nop: T,
-
+    // ── bookkeeping ────────────────────────────────────────────────────
     pub is_real: T,
-
-    // --- ProjectZKM/Ziren#488: Inverse-only columns for bidirectional flag constraints ---
-    // We only store the inverse, not the result, because the result IS the existing boolean flag.
-    // Constraint: flag = 1 - inverse * (syscall_id - CODE). If syscall_id == CODE, flag must be 1.
-    pub inv_syscall_diff_mmap: T,
-    pub inv_syscall_diff_mmap2: T,
-    pub inv_syscall_diff_clone: T,
-    pub inv_syscall_diff_exit_group: T,
-    pub inv_syscall_diff_brk: T,
-    pub inv_syscall_diff_fnctl: T,
-    pub inv_syscall_diff_read: T,
-    pub inv_syscall_diff_write: T,
-    // Inverses for bidirectional is_a0_0/1/2.
-    pub inv_a0_diff_0: T,
-    pub inv_a0_diff_1: T,
-    pub inv_a0_diff_2: T,
-    // Inverses for bidirectional is_a1_1/3.
-    pub inv_a1_diff_1: T,
-    pub inv_a1_diff_3: T,
 }

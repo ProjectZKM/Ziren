@@ -76,6 +76,14 @@ pub struct SyscallInstrColumns<T> {
     /// The result of is_real * (is_halt || is_commit_deferred_proofs)
     pub syscall_range_check_operand: T,
 
+    /// KoalaBear range check columns for op_b_value (arg1).
+    /// Ensures op_b_value < KoalaBear prime so that reduce() is injective on the syscall bridge.
+    pub op_b_range_check: KoalaBearWordRangeChecker<T>,
+
+    /// KoalaBear range check columns for op_c_value (arg2).
+    /// Ensures op_c_value < KoalaBear prime so that reduce() is injective on the syscall bridge.
+    pub op_c_range_check: KoalaBearWordRangeChecker<T>,
+
     /// Whether the current instruction is a real instruction.
     pub is_real: T,
 }

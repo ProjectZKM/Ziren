@@ -63,7 +63,6 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
             input.fixed_log2_rows::<F, _>(self),
         );
 
-        // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYS_LINUX_COLS))
     }
 
@@ -120,94 +119,106 @@ impl SysLinuxChip {
         cols.syscall_id = F::from_canonical_u32(event.syscall_code);
         cols.is_real = F::ONE;
         cols.result = event.v0.into();
-        cols.is_a0_0 = F::from_bool(event.a0 == 0);
-        cols.is_a0_1 = F::from_bool(event.a0 == 1);
-        cols.is_a0_2 = F::from_bool(event.a0 == 2);
         cols.output.populate_write(event.write_records[0], blu);
+
+        // ── Canonical syscall decoder ──────────────────────────────────
+        let sid = F::from_canonical_u32(event.syscall_code);
+        cols.decode_mmap
+            .populate_from_field_element(sid - F::from_canonical_u32(SyscallCode::SYS_MMAP as u32));
+        cols.decode_mmap2.populate_from_field_element(
+            sid - F::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
+        );
+        cols.decode_clone.populate_from_field_element(
+            sid - F::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
+        );
+        cols.decode_exit_group.populate_from_field_element(
+            sid - F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
+        );
+        cols.decode_brk
+            .populate_from_field_element(sid - F::from_canonical_u32(SyscallCode::SYS_BRK as u32));
+        cols.decode_fnctl.populate_from_field_element(
+            sid - F::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
+        );
+        cols.decode_read.populate_from_field_element(
+            sid - F::from_canonical_u32(SyscallCode::SYS_READ as u32),
+        );
+        cols.decode_write.populate_from_field_element(
+            sid - F::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
+        );
+
+        let is_mmap = event.syscall_code == SyscallCode::SYS_MMAP as u32
+            || event.syscall_code == SyscallCode::SYS_MMAP2 as u32;
+        cols.is_mmap = F::from_bool(is_mmap);
+
+        // ── Canonical a0 / a1 decoder ──────────────────────────────────
+        let a0_val = F::from_canonical_u32(event.a0);
+        cols.decode_a0_0.populate_from_field_element(a0_val);
+        cols.decode_a0_1
+            .populate_from_field_element(a0_val - F::ONE);
+        cols.decode_a0_2
+            .populate_from_field_element(a0_val - F::TWO);
+
+        let a1_val = F::from_canonical_u32(event.a1);
+        cols.decode_a1_1
+            .populate_from_field_element(a1_val - F::ONE);
+        cols.decode_a1_3
+            .populate_from_field_element(a1_val - F::from_canonical_u32(3));
+
+        // ── Composite flags ────────────────────────────────────────────
+        cols.is_mmap_a0_0 = F::from_bool(is_mmap && event.a0 == 0);
+        cols.is_fnctl_a1_1 =
+            F::from_bool(event.syscall_code == SyscallCode::SYS_FCNTL as u32 && event.a1 == 1);
+        cols.is_fnctl_a1_3 =
+            F::from_bool(event.syscall_code == SyscallCode::SYS_FCNTL as u32 && event.a1 == 3);
+
+        // ── Branch-specific trace ──────────────────────────────────────
         match event.syscall_code {
             4045 => {
-                cols.is_brk = F::ONE;
+                // brk: read BRK register via MemoryReadCols.
                 assert!(event.write_records.len() == 1 && event.read_records.len() == 1);
-                cols.is_a0_gt_brk.populate(event.a0, event.read_records[0].value, blu);
-                cols.inorout.populate_read(event.read_records[0], blu);
-            }
-            4120 => {
-                cols.is_clone = F::ONE;
-            }
-            4246 => {
-                cols.is_exit_group = F::ONE;
-            }
-            4055 => {
-                cols.is_fnctl = F::ONE;
-                cols.is_a1_1 = F::from_bool(event.a1 == 1);
-                cols.is_a1_3 = F::from_bool(event.a1 == 3);
-                cols.is_fnctl_a1_1 = F::from_bool(event.a1 == 1);
-                cols.is_fnctl_a1_3 = F::from_bool(event.a1 == 3);
+                cols.is_a0_gt_brk
+                    .populate(event.a0, event.read_records[0].value, blu);
+                cols.read_access.populate(event.read_records[0], blu);
             }
             4210 | 4090 => {
-                cols.is_mmap = F::ONE;
-                cols.is_mmap_a0_0 = F::from_bool(event.a0 == 0);
+                // mmap / mmap2
+                let a1_bytes = event.a1.to_le_bytes();
+                let lo_nibble = a1_bytes[1] & 0x0F;
+                let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
+                cols.a1_byte1_lo = F::from_canonical_u8(lo_nibble);
+                for bit in 0..4 {
+                    cols.a1_byte1_hi_bits[bit] = F::from_canonical_u32((hi_nibble as u32 >> bit) & 1);
+                }
+
                 let page_off = event.a1 & 0xFFF;
                 cols.page_offset = F::from_canonical_u32(page_off);
                 cols.is_offset_0 = F::from_bool(page_off == 0);
                 let upper = (event.a1 >> 12) << 12;
                 cols.upper_address = F::from_canonical_u32(upper);
-                // ProjectZKM/Ziren#488:6: Decompose page_offset for range check and prove alignment.
-                cols.page_offset_lo = F::from_canonical_u32(page_off & 0xFF);
-                let hi_nibble = (page_off >> 8) & 0xF;
-                for bit in 0..4 {
-                    cols.page_offset_hi_bits[bit] = F::from_canonical_u32((hi_nibble >> bit) & 1);
-                }
                 cols.upper_address_pages = F::from_canonical_u32(upper >> 12);
                 cols.is_page_offset_zero
                     .populate_from_field_element(F::from_canonical_u32(page_off));
+
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);
-                    cols.inorout.populate_write(event.write_records[1], blu);
-                    // ProjectZKM/Ziren#488:11: Compute mmap size and populate bytewise heap addition.
+                    cols.heap_write.populate_write(event.write_records[1], blu);
                     let size = if page_off == 0 { upper } else { upper + 0x1000 };
                     cols.mmap_size = Word::from(size);
                     let old_heap = event.write_records[1].prev_value;
                     cols.heap_add.populate(blu, old_heap, size);
                 }
             }
-            4003 => {
-                cols.is_read = F::ONE;
-            }
             4004 => {
+                // write: read A2 register via MemoryReadCols.
                 assert!(event.read_records.len() == 1);
-                cols.inorout.populate_read(event.read_records[0], blu);
-                cols.is_write = F::ONE;
+                cols.read_access.populate(event.read_records[0], blu);
+            }
+            4120 | 4246 | 4055 | 4003 => {
+                // clone, exit_group, fnctl, read: no extra memory access needed.
             }
             _ => {
-                cols.is_nop = F::ONE;
+                // nop: unrecognized linux syscall.
             }
-        };
-
-        // ProjectZKM/Ziren#488: Populate inverse columns for bidirectional flag constraints.
-        // For each (value, code) pair: if value != code, store the inverse; else store 0.
-        let populate_inv = |val: F, code: u32| -> F {
-            let diff = val - F::from_canonical_u32(code);
-            if diff == F::ZERO { F::ZERO } else { diff.inverse() }
-        };
-
-        let a0_val = F::from_canonical_u32(event.a0);
-        cols.inv_a0_diff_0 = populate_inv(a0_val, 0);
-        cols.inv_a0_diff_1 = populate_inv(a0_val, 1);
-        cols.inv_a0_diff_2 = populate_inv(a0_val, 2);
-
-        let a1_val = F::from_canonical_u32(event.a1);
-        cols.inv_a1_diff_1 = populate_inv(a1_val, 1);
-        cols.inv_a1_diff_3 = populate_inv(a1_val, 3);
-
-        let sid = F::from_canonical_u32(event.syscall_code);
-        cols.inv_syscall_diff_mmap = populate_inv(sid, SyscallCode::SYS_MMAP as u32);
-        cols.inv_syscall_diff_mmap2 = populate_inv(sid, SyscallCode::SYS_MMAP2 as u32);
-        cols.inv_syscall_diff_clone = populate_inv(sid, SyscallCode::SYS_CLONE as u32);
-        cols.inv_syscall_diff_exit_group = populate_inv(sid, SyscallCode::SYS_EXT_GROUP as u32);
-        cols.inv_syscall_diff_brk = populate_inv(sid, SyscallCode::SYS_BRK as u32);
-        cols.inv_syscall_diff_fnctl = populate_inv(sid, SyscallCode::SYS_FCNTL as u32);
-        cols.inv_syscall_diff_read = populate_inv(sid, SyscallCode::SYS_READ as u32);
-        cols.inv_syscall_diff_write = populate_inv(sid, SyscallCode::SYS_WRITE as u32);
+        }
     }
 }

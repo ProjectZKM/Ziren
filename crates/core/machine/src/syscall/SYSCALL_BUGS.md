@@ -337,14 +337,16 @@ This file tracks syscall-related AIR issues found during manual review and Picus
     ```
     This rules out choosing an equal byte as the selected comparison byte.
 
-### 15. `SysLinux::mmap`: low-byte range check fix is incorrect (bad fix attempt for item 6)
+### 15. `SysLinux::mmap`: low-limb range check fix is incorrect (bad fix attempt for item 6)
 
 - Location:
   - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
 - Current behavior:
   - the attempted fix for the `mmap` `page_offset` decomposition adds a range check on `page_offset_lo`
   - but it uses `ByteOpcode::U16Range`
-  - `page_offset_lo` is supposed to be the low byte of the 12-bit offset, so it must be 8-bit ranged
+  - `page_offset_lo` is not a full byte: it is the low nibble of `a1[1]`
+  - so the AIR needs to enforce `page_offset_lo < 16` / a 4-bit constraint
+  - even `U8Range` would still be too weak; `U16Range` is much too weak
 - Picus symptom:
   - On the `mmap2(a0 = 0)` heap path, Picus finds two valid models with:
     - the same syscall id and the same `a1`
@@ -353,9 +355,10 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - the concrete witness shows:
     - `x_134 = 65412` in one model
     - `x_134 = 20` in the other
-  - that should be impossible if `x_134` were really an 8-bit limb
+  - that should be impossible if `x_134` were really the low nibble of `a1[1]`
 - Likely fix:
-  - replace the `U16Range` check on `page_offset_lo` with an 8-bit range check (`U8Range` or equivalent `slice_range_check_u8`)
+  - replace the `U16Range` check on `page_offset_lo` with a true `<16` / 4-bit constraint
+  - for example, decompose `page_offset_lo` into 4 boolean bits or use an equivalent nibble-range lookup
   - keep the 4-bit boolean decomposition for the high nibble
   - then recheck that item 6 is fully closed
 
