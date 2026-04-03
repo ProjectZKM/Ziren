@@ -189,6 +189,48 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - On the `is_write` branch, assert `local.inorout.value() = local.inorout.prev_value`
   - or use a read-only memory witness type for the `A2` access instead of `MemoryReadWriteCols`
 
+### 11. `SysLinux::mmap`: new heap value is only constrained through `reduce()`
+
+- Location:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - on the `mmap(a0 = 0)` path, the AIR constrains:
+    - `local.inorout.value().reduce() = size + local.inorout.prev_value.reduce()`
+  - but it does not constrain the new heap word `local.inorout.value()` bytewise
+- Why this matters:
+  - distinct 32-bit words can share the same reduced field element
+  - so the new heap value can vary while preserving the reduced equality
+- Picus symptom:
+  - With `x_7 = 4090`, `x_127 = 1`, `x_124 = 1`, `x_128 = 1`, and the `a1` decomposition fixed,
+    Picus still finds two valid models with:
+    - the same `result` bytes `x_8..x_11`
+    - the same `A3` write
+    - different new heap bytes `x_102..x_105`, and therefore different propagated `HEAP` writes `x_202..x_206`
+- Likely fix:
+  - Constrain the new heap word bytewise rather than only via `reduce()`
+  - or add enough range/injectivity constraints so the reduced equality uniquely determines the word
+
+### 12. `SysLinux`: `is_a1_1` / `is_a1_3` are only constrained in one direction
+
+- Location:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - the AIR only enforces:
+    - `is_a1_1 => a1 == 1`
+    - `is_a1_3 => a1 == 3`
+  - but not the reverse implications
+- Why this matters:
+  - the `fnctl` logic uses `is_a1_1` / `is_a1_3` as exact subcase classifiers
+  - so even when `a1 == 1` or `a1 == 3`, the prover can clear those flags and route the row into the unsupported-op branch
+- Picus symptom:
+  - For `x_7 = 4055` (`SYS_FCNTL`) with `a1 = 1`, Picus finds two valid models:
+    - one with `is_a1_1 = 0`, which takes the unsupported-`a1` branch
+    - one with `is_a1_1 = 1`, which takes the supported `F_GETFD` branch
+  - the same witness also benefits from the already-known `is_a0_*` and `fnctl(a1 == 1)` result issues
+- Likely fix:
+  - Constrain `is_a1_1` and `is_a1_3` exactly from the `a1` word
+  - at minimum, add the reverse implications for the `1` and `3` cases
+
 
 
 
