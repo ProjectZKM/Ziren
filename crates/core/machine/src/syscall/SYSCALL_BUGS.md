@@ -244,6 +244,30 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Constrain `is_a1_1` and `is_a1_3` exactly from the `a1` word
   - at minimum, add the reverse implications for the `1` and `3` cases
 
+### 13. `SysLinux::brk`: read value is not tied to previous value
+
+- Locations:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/trace.rs`
+- Current behavior:
+  - `eval_brk` uses `local.inorout` in `eval_memory_access(...)`
+  - then compares `a0` against `*local.inorout.value()`
+  - but the fallback result branch uses `local.inorout.prev_value`
+  - and the AIR never constrains `*local.inorout.value() = local.inorout.prev_value`
+- Why this matters:
+  - for `SYS_BRK`, `local.inorout` is populated from a read of register `BRK`
+  - for a read access, the `value` and `prev_value` should agree
+  - if they do not, the prover can change the comparison outcome without changing the traced previous `BRK` value
+- Picus symptom:
+  - For `x_7 = 4045` (`SYS_BRK`) and `x_155 = 1`, Picus finds two valid models with:
+    - the same `result` bytes `x_10..x_13`
+    - the same `A3` write (`x_117..x_120 = 0`)
+    - different promoted `local.inorout.value()` bytes (`x_104..x_107` / `x_193..x_196`)
+  - This is the same structural issue previously seen on `SYS_WRITE`, but on the `BRK` register read.
+- Likely fix:
+  - On the `is_brk` branch, assert `*local.inorout.value() = local.inorout.prev_value`
+  - or use a read-only memory witness type for the `BRK` access instead of `MemoryReadWriteCols`
+
 
 
 
