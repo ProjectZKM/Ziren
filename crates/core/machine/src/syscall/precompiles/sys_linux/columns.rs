@@ -33,17 +33,17 @@ pub struct SysLinuxCols<T> {
     pub page_offset: T,
     pub is_offset_0: T,
     pub upper_address: T,
-    /// PR #488:6: Decompose page_offset into low byte and high nibble for range check.
+    /// https://github.com/ProjectZKM/Ziren/pull/488:6: Decompose page_offset into low byte and high nibble for range check.
     pub page_offset_lo: T,
-    /// PR #488:6: High nibble of page_offset, decomposed into 4 bits.
+    /// https://github.com/ProjectZKM/Ziren/pull/488:6: High nibble of page_offset, decomposed into 4 bits.
     pub page_offset_hi_bits: [T; 4],
-    /// PR #488:6: upper_address / 4096, proving upper_address is page-aligned.
+    /// https://github.com/ProjectZKM/Ziren/pull/488:6: upper_address / 4096, proving upper_address is page-aligned.
     pub upper_address_pages: T,
-    /// PR #488:6: IsZero on page_offset for bidirectional is_offset_0.
+    /// https://github.com/ProjectZKM/Ziren/pull/488:6: IsZero on page_offset for bidirectional is_offset_0.
     pub is_page_offset_zero: IsZeroOperation<T>,
-    /// PR #488:11: mmap size as a Word for bytewise heap update constraint.
+    /// https://github.com/ProjectZKM/Ziren/pull/488:11: mmap size as a Word for bytewise heap update constraint.
     pub mmap_size: Word<T>,
-    /// PR #488:11: AddOperation for new_heap = old_heap + mmap_size (bytewise, not via reduce).
+    /// https://github.com/ProjectZKM/Ziren/pull/488:11: AddOperation for new_heap = old_heap + mmap_size (bytewise, not via reduce).
     pub heap_add: AddOperation<T>,
 
     /// Columns for sys clone
@@ -75,7 +75,7 @@ pub struct SysLinuxCols<T> {
 
     pub is_real: T,
 
-    // --- PR #488:2: IsZero columns for bidirectional syscall flag constraints ---
+    // --- https://github.com/ProjectZKM/Ziren/pull/488:2: IsZero columns for bidirectional syscall flag constraints ---
     pub is_not_mmap: IsZeroOperation<T>,
     pub is_not_mmap2: IsZeroOperation<T>,
     pub is_not_clone: IsZeroOperation<T>,
@@ -85,12 +85,12 @@ pub struct SysLinuxCols<T> {
     pub is_not_read: IsZeroOperation<T>,
     pub is_not_write: IsZeroOperation<T>,
 
-    // --- PR #488:9: IsZero columns for bidirectional is_a0_0/1/2 ---
+    // --- https://github.com/ProjectZKM/Ziren/pull/488:9: IsZero columns for bidirectional is_a0_0/1/2 ---
     pub is_a0_eq_0: IsZeroOperation<T>,
     pub is_a0_eq_1: IsZeroOperation<T>,
     pub is_a0_eq_2: IsZeroOperation<T>,
 
-    // --- PR #488:12: IsZero columns for bidirectional is_a1_1/3 ---
+    // --- https://github.com/ProjectZKM/Ziren/pull/488:12: IsZero columns for bidirectional is_a1_1/3 ---
     pub is_a1_eq_1: IsZeroOperation<T>,
     pub is_a1_eq_3: IsZeroOperation<T>,
 }

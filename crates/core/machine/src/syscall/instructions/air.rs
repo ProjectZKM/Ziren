@@ -143,7 +143,7 @@ impl SyscallInstrsChip {
         builder.assert_bool(local.is_sys_linux);
         builder.assert_bool(send_to_table.clone());
 
-        // PR #488:1: Constrain is_sys_linux bidirectionally.
+        // https://github.com/ProjectZKM/Ziren/pull/488:1: Constrain is_sys_linux bidirectionally.
         // is_prev_a1_zero.result = 1 iff prev_a_value[1] == 0.
         // is_sys_linux must be the inverse: 1 iff prev_a_value[1] != 0.
         IsZeroOperation::<AB::F>::eval(
@@ -171,8 +171,8 @@ impl SyscallInstrsChip {
         );
 
         // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
-        // with SysLinuxChip via SyscallChip bridge. This fixes both the reduce() collision
-        // (Bug 3) and the missing result linkage (Bug 2).
+        // with SysLinuxChip via SyscallChip bridge.
+        // See https://github.com/ProjectZKM/Ziren/pull/488
         builder.send_syscall_result(
             local.shard,
             local.clk,
