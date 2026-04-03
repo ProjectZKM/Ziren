@@ -264,7 +264,7 @@ where
         // is_linux can only be 1 when is_real is 1.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
 
-        // https://github.com/ProjectZKM/Ziren/pull/488:4: Bind reduced arg1/arg2 to packed half-word columns.
+        // ProjectZKM/Ziren#488:4: Bind reduced arg1/arg2 to packed half-word columns.
         // reduce(word) = lo + hi * 65536, where lo = b0 + b1*256, hi = b2 + b3*256.
         // This ensures the reduced Syscall lookup and the packed SyscallResult lookup
         // agree on the same byte-level values, closing the reduce() collision hole.
