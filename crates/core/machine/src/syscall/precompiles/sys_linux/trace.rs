@@ -170,11 +170,11 @@ impl SysLinuxChip {
         // ── Branch-specific trace ──────────────────────────────────────
         match event.syscall_code {
             4045 => {
-                // brk: read BRK register via MemoryReadCols.
+                // brk: read BRK register.
                 assert!(event.write_records.len() == 1 && event.read_records.len() == 1);
                 cols.is_a0_gt_brk
                     .populate(event.a0, event.read_records[0].value, blu);
-                cols.read_access.populate(event.read_records[0], blu);
+                cols.inorout.populate_read(event.read_records[0], blu);
             }
             4210 | 4090 => {
                 // mmap / mmap2
@@ -183,21 +183,18 @@ impl SysLinuxChip {
                 let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
                 cols.a1_byte1_lo = F::from_canonical_u8(lo_nibble);
                 for bit in 0..4 {
-                    cols.a1_byte1_hi_bits[bit] = F::from_canonical_u32((hi_nibble as u32 >> bit) & 1);
+                    cols.a1_byte1_hi_bits[bit] =
+                        F::from_canonical_u32((hi_nibble as u32 >> bit) & 1);
                 }
 
                 let page_off = event.a1 & 0xFFF;
-                cols.page_offset = F::from_canonical_u32(page_off);
-                cols.is_offset_0 = F::from_bool(page_off == 0);
                 let upper = (event.a1 >> 12) << 12;
-                cols.upper_address = F::from_canonical_u32(upper);
-                cols.upper_address_pages = F::from_canonical_u32(upper >> 12);
                 cols.is_page_offset_zero
                     .populate_from_field_element(F::from_canonical_u32(page_off));
 
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);
-                    cols.heap_write.populate_write(event.write_records[1], blu);
+                    cols.inorout.populate_write(event.write_records[1], blu);
                     let size = if page_off == 0 { upper } else { upper + 0x1000 };
                     cols.mmap_size = Word::from(size);
                     let old_heap = event.write_records[1].prev_value;
@@ -205,9 +202,9 @@ impl SysLinuxChip {
                 }
             }
             4004 => {
-                // write: read A2 register via MemoryReadCols.
+                // write: read A2 register.
                 assert!(event.read_records.len() == 1);
-                cols.read_access.populate(event.read_records[0], blu);
+                cols.inorout.populate_read(event.read_records[0], blu);
             }
             4120 | 4246 | 4055 | 4003 => {
                 // clone, exit_group, fnctl, read: no extra memory access needed.
