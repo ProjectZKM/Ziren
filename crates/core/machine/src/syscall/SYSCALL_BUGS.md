@@ -143,6 +143,29 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Add `result` constraints for the `is_fnctl_a1_1` branch mirroring the executor logic
   - Separately tighten the `is_a0_0` / `is_a0_1` / `is_a0_2` classifiers if exact subcase routing is intended
 
+### 9. `SysLinux`: `is_a0_0` / `is_a0_1` / `is_a0_2` are only constrained in one direction
+
+- Location:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - the AIR only enforces:
+    - `is_a0_0 => a0 == 0`
+    - `is_a0_1 => a0 == 1`
+    - `is_a0_2 => a0 == 2`
+  - but not the reverse implications
+- Why this matters:
+  - multiple syscall branches use these flags as exact subcase classifiers:
+    - `mmap` / `mmap2` branch on `is_a0_0`
+    - `read` branches on `is_a0_0`
+    - `fnctl` branches on `is_a0_0`, `is_a0_1`, `is_a0_2`
+- Picus symptom:
+  - For `x_7 = 4090` (`SYS_MMAP2`) with `a0 = 0`, Picus finds two valid models:
+    - `is_a0_0 = 1`, which enables the heap path and emits a `HEAP` write
+    - `is_a0_0 = 0`, which disables the heap path and falls through to `result = a0 = 0`
+- Likely fix:
+  - Constrain the `is_a0_*` flags to exactly match the byte word `a0`
+  - at minimum, add the missing reverse implications for the `0`, `1`, and `2` cases
+
 
 
 
