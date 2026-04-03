@@ -130,20 +130,22 @@ impl SysLinuxChip {
 
     fn eval_mmap<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_a0_0: AB::Var) {
         // ── Byte-level a1 decomposition ────────────────────────────────
+        // Both nibbles of a1[1] are decomposed into 4 boolean bits each,
+        // proving a1_byte1_lo ∈ [0,15] and a1_byte1_hi ∈ [0,15] without byte lookups.
+        let mut a1_byte1_lo = AB::Expr::zero();
+        for bit in 0..4 {
+            builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
+            a1_byte1_lo = a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+        }
         let mut a1_byte1_hi = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
             a1_byte1_hi = a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
         }
-        builder.when(local.is_mmap).assert_eq(local.a1[1], local.a1_byte1_lo + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16));
-
-        builder.send_byte(
-            AB::Expr::from_canonical_u8(zkm_core_executor::ByteOpcode::U16Range as u8),
-            local.a1_byte1_lo, AB::Expr::zero(), AB::Expr::zero(), local.is_mmap,
-        );
+        builder.when(local.is_mmap).assert_eq(local.a1[1], a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16));
 
         // Inline page_offset and upper_address (not stored).
-        let page_offset: AB::Expr = local.a1[0].into() + local.a1_byte1_lo * AB::Expr::from_canonical_u32(256);
+        let page_offset: AB::Expr = local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
         let upper_address: AB::Expr = a1_byte1_hi * AB::Expr::from_canonical_u32(4096)
             + local.a1[2] * AB::Expr::from_canonical_u32(65536)
             + local.a1[3] * AB::Expr::from_canonical_u32(16777216);

@@ -181,7 +181,10 @@ impl SysLinuxChip {
                 let a1_bytes = event.a1.to_le_bytes();
                 let lo_nibble = a1_bytes[1] & 0x0F;
                 let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
-                cols.a1_byte1_lo = F::from_canonical_u8(lo_nibble);
+                for bit in 0..4 {
+                    cols.a1_byte1_lo_bits[bit] =
+                        F::from_canonical_u32((lo_nibble as u32 >> bit) & 1);
+                }
                 for bit in 0..4 {
                     cols.a1_byte1_hi_bits[bit] =
                         F::from_canonical_u32((hi_nibble as u32 >> bit) & 1);

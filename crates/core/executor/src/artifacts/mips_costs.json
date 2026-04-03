@@ -40,7 +40,7 @@
   "Secp256r1DoubleAssign": 4492,
   "Branch": 90,
   "SyscallCore": 33,
-  "SysLinux": 178,
+  "SysLinux": 177,
   "Bn254Fp2AddSubAssign": 1382,
   "MovCond": 48,
   "Bls12381FpOpAssign": 1048,

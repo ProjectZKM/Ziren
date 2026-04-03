@@ -59,8 +59,9 @@ pub struct SysLinuxCols<T> {
 
     // ── mmap columns (15 cols) ─────────────────────────────────────────
     // page_offset, upper_address, is_offset_0 are computed inline, not stored.
-    /// Low nibble of a1[1] (4 bits). page_offset = a1[0] + a1_byte1_lo * 256.
-    pub a1_byte1_lo: T,
+    /// 4-bit decomposition of the low nibble of a1[1].
+    /// page_offset = a1[0] + a1_byte1_lo * 256 where a1_byte1_lo = sum(bits * 2^i).
+    pub a1_byte1_lo_bits: [T; 4],
     /// 4-bit decomposition of the high nibble of a1[1].
     pub a1_byte1_hi_bits: [T; 4],
     /// IsZero on page_offset for bidirectional is_offset_0 derivation.
