@@ -121,10 +121,16 @@ namespace zkm_core_machine_sys::memory_instrs {
                 uint8_t most_sig_mem_value_bit = most_sig_mem_value_byte >> 7;
                 if (most_sig_mem_value_bit == 1) {
                     cols.mem_value_is_neg = F::one();
+                } else {
+                    cols.mem_value_is_neg = F::zero();
                 }
 
                 cols.most_sig_byte = F::from_canonical_u8(most_sig_mem_value_byte);
                 cols.most_sig_bit = F::from_canonical_u8(most_sig_mem_value_bit);
+            } else {
+                cols.most_sig_byte = F::zero();
+                cols.most_sig_bit = F::zero();
+                cols.mem_value_is_neg = F::zero();
             }
         } else {
             cols.most_sig_byte = F::zero();
