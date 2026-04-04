@@ -200,6 +200,7 @@ impl SysLinuxChip {
                     cols.inorout.populate_write(event.write_records[1], blu);
                     let size = if page_off == 0 { upper } else { upper + 0x1000 };
                     cols.mmap_size = Word::from(size);
+                    blu.add_u8_range_checks(&size.to_le_bytes());
                     let old_heap = event.write_records[1].prev_value;
                     cols.heap_add.populate(blu, old_heap, size);
                 }
