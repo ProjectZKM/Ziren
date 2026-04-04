@@ -226,7 +226,7 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - On the `is_write` branch, assert `local.inorout.value() = local.inorout.prev_value`
   - or use a read-only memory witness type for the `A2` access instead of `MemoryReadWriteCols`
 
-### 11. `SysLinux::mmap`: new heap value is only constrained through `reduce()`
+### 11. `SysLinux::mmap`: new heap value and is only constrained through `reduce()`
 
 - Location:
   - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
@@ -247,7 +247,38 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Constrain the new heap word bytewise rather than only via `reduce()`
   - or add enough range/injectivity constraints so the reduced equality uniquely determines the word
 
-### 12. `SysLinux`: `is_a1_1` / `is_a1_3` are only constrained in one direction
+### 12. `SysLinux::mmap`: `mmap_size` is only constrained through `reduce()`
+
+- Location:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - on the `mmap(a0 = 0)` path, the AIR constrains:
+    - `local.mmap_size.reduce::<AB>() = size_field`
+  - and separately byte-range-checks `local.mmap_size`
+  - but it does not constrain `local.mmap_size` to be the canonical KoalaBear-word encoding of `size_field`
+- Why this matters:
+  - distinct 32-bit words can share the same reduced field element modulo the KoalaBear prime
+  - so multiple bytewise encodings of `mmap_size` can satisfy the same `reduce()` equality
+  - the later heap update is bytewise, so this directly produces different heap writes
+- Picus symptom:
+  - On the `mmap2(a0 = 0)` heap path, Picus finds two valid models with:
+    - the same syscall id, same `a1`, same old heap value, and same syscall result
+    - the same fixed decomposition values:
+      - `x_131 = 1024`
+      - `x_133 = 805302272`
+    - but different `mmap_size` bytes:
+      - `x_142..x_145 = (1,0,0,175)` in one model
+      - `x_142..x_145 = (0,0,0,48)` in the other
+  - those two words differ by the KoalaBear prime `0x7f000001`
+  - the heap write then diverges accordingly:
+    - `x_217..x_220 = (196,162,0,191)` in one model
+    - `x_217..x_220 = (195,162,0,64)` in the other
+- Likely fix:
+  - Constrain `local.mmap_size` as the canonical KoalaBear-word encoding of `size_field`, not just by `reduce()`
+  - for example, add an explicit KoalaBear-word validity check for `local.mmap_size`
+  - or derive `mmap_size` directly from a canonical byte/word decomposition of `size_field`
+
+### 13. `SysLinux`: `is_a1_1` / `is_a1_3` are only constrained in one direction
 
 - Location:
   - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
@@ -268,7 +299,7 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Constrain `is_a1_1` and `is_a1_3` exactly from the `a1` word
   - at minimum, add the reverse implications for the `1` and `3` cases
 
-### 13. `SysLinux::brk`: read value is not tied to previous value
+### 14. `SysLinux::brk`: read value is not tied to previous value
 
 - Locations:
   - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
@@ -292,7 +323,7 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - On the `is_brk` branch, assert `*local.inorout.value() = local.inorout.prev_value`
   - or use a read-only memory witness type for the `BRK` access instead of `MemoryReadWriteCols`
 
-### 14. SysLinux::brk + `GtColsBytes`: selected comparison byte need not be unequal
+### 15. SysLinux::brk + `GtColsBytes`: selected comparison byte need not be unequal
 
 - Locations:
   - `crates/core/machine/src/operations/cmp.rs`
@@ -337,7 +368,7 @@ This file tracks syscall-related AIR issues found during manual review and Picus
     ```
     This rules out choosing an equal byte as the selected comparison byte.
 
-### 15. `SysLinux::mmap`: low-limb range check fix is incorrect (bad fix attempt for item 6)
+### 16. `SysLinux::mmap`: low-limb range check fix is incorrect (bad fix attempt for item 6)
 
 - Location:
   - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
@@ -362,7 +393,7 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - keep the 4-bit boolean decomposition for the high nibble
   - then recheck that item 6 is fully closed
 
-### 16. `SysLinux::mmap`: `upper_address` page alignment is only enforced modulo the field
+### 17. `SysLinux::mmap`: `upper_address` page alignment is only enforced modulo the field
 
 - Location:
   - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
@@ -397,6 +428,23 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - equivalently, constrain `upper_address_pages` as the canonical integer quotient of `a1 >> 12`, then reconstruct `upper_address` from that quotient
 
 
+
+## Manual
+
+### 1. `Syscall results are not linked through GlobalChip`
+
+- Location:
+  - `crates/core/machine/src/syscall/chip/air.rs`
+- Current behavior:
+  - The SysLinux and SysPrecompile chips are in one shard, the SysCore and SysInstrs chips are in another shard. Local events only propagate in the same shard.
+  - The syscall instruction chip sends a syscall result and syscall event to the core chip.
+  - The core chip receives the syscall event and the result and then sends a global event with the same syscall id and arguments but not the result.
+  - The precompile chip sends a syscall event and receives the result from the SysLinux chip.
+- Why this matters:
+  - The syscall results are not necessarily consistent across the two shards. The result of the syscall is not shared in the global chip. 
+- Likely fix:
+  - add the `result` to the global chip to link the two shards.
+  - The design of this interaction should be reconsidered
 
 
 ## Picus Notes
