@@ -362,6 +362,40 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - keep the 4-bit boolean decomposition for the high nibble
   - then recheck that item 6 is fully closed
 
+### 16. `SysLinux::mmap`: `upper_address` page alignment is only enforced modulo the field
+
+- Location:
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - `upper_address` is a single field element column, not a canonical 32-bit word decomposition
+  - the AIR only enforces:
+    - `upper_address = upper_address_pages * 4096`
+    - `page_offset + upper_address = a1.reduce()`
+  - both constraints are field equations
+- Why this matters:
+  - in KoalaBear, `4096` is invertible
+  - so `upper_address = upper_address_pages * 4096` does **not** prove that `upper_address` is a page-aligned 32-bit integer chunk
+  - it only proves that `upper_address` is some field element with a multiplicative witness
+  - combined with the modular `page_offset + upper_address = a1.reduce()` relation, this allows non-canonical decompositions of the same `a1`
+  - this remains true even if the low-limb range issue from items 6 / 15 is fixed
+- Picus symptom:
+  - On the `mmap2(a0 = 0)` heap path, Picus finds two valid models with:
+    - the same syscall id and the same `a1`
+    - the same old heap value / syscall result
+    - different `upper_address` / heap-update outputs
+  - relevant witness lines:
+    - `x_9 = 4090`, `x_129 = 1`, `x_126 = 1`, `x_130 = 1`
+    - `x_131 = 4093` in one model vs `x_131 = 2` in the other
+    - `x_133 = 2130702596` in one model vs `x_133 = 254` in the other
+    - `x_217..x_220 = (5,1,194,128)` in one model vs `(0,17,194,128)` in the other
+  - those two decompositions should not both be valid for the same `a1 = 256`
+- Likely fix:
+  - derive `page_offset` and `upper_address` canonically from the bytes of `a1`, not from a field-multiple witness
+  - or decompose `upper_address` into a word / byte form and enforce:
+    - low 12 bits are zero
+    - the remaining bytes match the aligned upper chunk of `a1`
+  - equivalently, constrain `upper_address_pages` as the canonical integer quotient of `a1 >> 12`, then reconstruct `upper_address` from that quotient
+
 
 
 
