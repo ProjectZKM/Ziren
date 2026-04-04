@@ -415,13 +415,3 @@ The following syscalls are recognized but perform no operation.
 | `SYS_CLOCK_GETTIME` | 4263 |
 | `SYS_OPENAT` | 4288 |
 | `SYS_PRLIMIT64` | 4338 |
-
-### Soundness Notes
-
-See `docs/syscall-result-linkage-issues.md` for the full list of soundness issues found and fixed in PR #488. Key properties enforced:
-
-- All syscall ID decoders are **bidirectional** (a syscall cannot be misrouted to a different handler).
-- All argument comparisons (`a0 == 0/1/2`, `a1 == 1/3`) are **bidirectional**.
-- MMAP page alignment is verified via nibble decomposition.
-- Heap arithmetic uses bytewise `AddOperation` (not field `reduce()`).
-- Every syscall constrains both `result` and `output (A3)`.
