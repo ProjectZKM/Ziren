@@ -178,6 +178,10 @@ impl SysLinuxChip {
             }
             4210 | 4090 => {
                 // mmap / mmap2
+                // byte-range-check a0 and a1 so decompositions are canonical.
+                blu.add_u8_range_checks(&event.a0.to_le_bytes());
+                blu.add_u8_range_checks(&event.a1.to_le_bytes());
+
                 let a1_bytes = event.a1.to_le_bytes();
                 let lo_nibble = a1_bytes[1] & 0x0F;
                 let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;

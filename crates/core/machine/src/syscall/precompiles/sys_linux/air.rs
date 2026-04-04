@@ -129,6 +129,12 @@ impl SysLinuxChip {
     }
 
     fn eval_mmap<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_a0_0: AB::Var) {
+        // Range-check a0 and a1 bytes so decompositions are canonical.
+        // a1[1] is already constrained to [0,255] by the nibble decomposition below,
+        // but a1[0], a1[2], a1[3] and a0 bytes need explicit byte validity checks.
+        builder.when(local.is_mmap).slice_range_check_u8(&local.a0.0, local.is_mmap.into());
+        builder.when(local.is_mmap).slice_range_check_u8(&local.a1.0, local.is_mmap.into());
+
         // ── Byte-level a1 decomposition ────────────────────────────────
         // Both nibbles of a1[1] are decomposed into 4 boolean bits each,
         // proving a1_byte1_lo ∈ [0,15] and a1_byte1_hi ∈ [0,15] without byte lookups.
