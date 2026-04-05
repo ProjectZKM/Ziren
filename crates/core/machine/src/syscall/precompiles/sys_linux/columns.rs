@@ -68,6 +68,10 @@ pub struct SysLinuxCols<T> {
     pub is_page_offset_zero: IsZeroOperation<T>,
     /// mmap size as a Word for bytewise heap update.
     pub mmap_size: Word<T>,
+    /// Carry bits for upper_address + 0x1000 → mmap_size (unaligned case).
+    /// carry[0]: byte1 overflow ((a1_byte1_hi + 1) * 16 >= 256, i.e. a1_byte1_hi == 15).
+    /// carry[1]: byte2 overflow (a1[2] + carry[0] >= 256, i.e. a1[2] == 255 && carry[0] == 1).
+    pub mmap_size_carry: [T; 2],
     /// AddOperation for new_heap = old_heap + mmap_size.
     pub heap_add: AddOperation<T>,
 

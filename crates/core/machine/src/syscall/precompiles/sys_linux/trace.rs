@@ -205,6 +205,20 @@ impl SysLinuxChip {
                     let size = if page_off == 0 { upper } else { upper + 0x1000 };
                     cols.mmap_size = Word::from(size);
                     blu.add_u8_range_checks(&size.to_le_bytes());
+
+                    // Populate carry bits for byte-level mmap_size constraint.
+                    if page_off != 0 {
+                        let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
+                        // carry[0]: (hi_nibble + 1) * 16 >= 256, i.e. hi_nibble == 15
+                        if hi_nibble == 15 {
+                            cols.mmap_size_carry[0] = F::ONE;
+                            // carry[1]: a1[2] + 1 >= 256, i.e. a1[2] == 255
+                            if a1_bytes[2] == 255 {
+                                cols.mmap_size_carry[1] = F::ONE;
+                            }
+                        }
+                    }
+
                     let old_heap = event.write_records[1].prev_value;
                     cols.heap_add.populate(blu, old_heap, size);
                 }

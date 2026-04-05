@@ -150,19 +150,60 @@ impl SysLinuxChip {
         }
         builder.when(local.is_mmap).assert_eq(local.a1[1], a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16));
 
-        // Inline page_offset and upper_address (not stored).
+        // Inline page_offset (not stored). upper_address is no longer needed as a
+        // single field expression — the mmap_size bytes are constrained directly.
         let page_offset: AB::Expr = local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
-        let upper_address: AB::Expr = a1_byte1_hi * AB::Expr::from_canonical_u32(4096)
-            + local.a1[2] * AB::Expr::from_canonical_u32(65536)
-            + local.a1[3] * AB::Expr::from_canonical_u32(16777216);
 
         // is_offset_0 = (page_offset == 0), derived from IsZero.
         IsZeroOperation::<AB::F>::eval(builder, page_offset.clone(), local.is_page_offset_zero, local.is_mmap.into());
         let is_offset_0 = local.is_page_offset_zero.result;
 
-        // mmap size.
-        let size_field = upper_address + AB::Expr::from_canonical_u32(0x1000) * (AB::Expr::one() - is_offset_0);
-        builder.when(local.is_mmap).when(is_a0_0).assert_eq(local.mmap_size.reduce::<AB>(), size_field);
+        // ── mmap size (byte-level, no reduce()) ──────────────────────────
+        // We avoid `mmap_size.reduce() == size_field` because reduce() can
+        // collide modulo the KoalaBear prime for large byte[3] values.
+        // Instead we constrain each byte of mmap_size directly.
+        //
+        // upper_addr bytes (LE): [0, a1_byte1_hi * 16, a1[2], a1[3]]
+        // round_up (when !page-aligned): + [0, 0x10, 0, 0] = + 0x1000
+        //
+        // Aligned case (is_offset_0 = 1): mmap_size = upper_addr
+        // Unaligned case (is_offset_0 = 0): mmap_size = upper_addr + 0x1000
+        //   with carry propagation through bytes 1→2→3.
+
+        let base = AB::Expr::from_canonical_u32(256);
+        let sixteen = AB::Expr::from_canonical_u32(16);
+        // not_aligned = is_mmap_a0_0 * (1 - is_offset_0)
+        let not_aligned: AB::Expr = local.is_mmap_a0_0.into() * (AB::Expr::one() - is_offset_0);
+
+        // carry bits are boolean.
+        builder.when(local.is_mmap_a0_0).assert_bool(local.mmap_size_carry[0]);
+        builder.when(local.is_mmap_a0_0).assert_bool(local.mmap_size_carry[1]);
+
+        // byte0: always 0.
+        builder.when(local.is_mmap_a0_0).assert_zero(local.mmap_size[0]);
+
+        // byte1: a1_byte1_hi * 16 + 16 * not_aligned - carry[0] * 256
+        //   carry[0] = 1 iff (a1_byte1_hi + not_aligned) * 16 >= 256
+        builder.when(local.is_mmap_a0_0).assert_eq(
+            local.mmap_size[1],
+            a1_byte1_hi.clone() * sixteen.clone()
+                + not_aligned.clone() * sixteen
+                - local.mmap_size_carry[0] * base.clone(),
+        );
+
+        // byte2: a1[2] + carry[0] - carry[1] * 256
+        builder.when(local.is_mmap_a0_0).assert_eq(
+            local.mmap_size[2],
+            local.a1[2] + local.mmap_size_carry[0] - local.mmap_size_carry[1] * base,
+        );
+
+        // byte3: a1[3] + carry[1]
+        builder.when(local.is_mmap_a0_0).assert_eq(
+            local.mmap_size[3],
+            local.a1[3] + local.mmap_size_carry[1],
+        );
+
+        // Range-check mmap_size bytes.
         builder.when(local.is_mmap).when(is_a0_0).slice_range_check_u8(&local.mmap_size.0, local.is_mmap_a0_0.into());
 
         // Bytewise heap update.
