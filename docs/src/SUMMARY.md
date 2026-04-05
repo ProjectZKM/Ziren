@@ -8,6 +8,7 @@
     - [Independent Evaluations](./introduction/independent-evaluations.md)
 - [MIPS VM](./mips-vm/mips-vm.md)
     - [MIPS ISA](./mips-vm/mips-isa.md)
+    - [Linux ABI](./mips-vm/linux-abi.md)
 - [Developer Tutorial](./dev/overview.md)
     - [Program](./dev/program.md)
         - [Host Program](./dev/host-program.md)
