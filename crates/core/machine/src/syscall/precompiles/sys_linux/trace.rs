@@ -135,9 +135,8 @@ impl SysLinuxChip {
         cols.decode_fnctl.populate_from_field_element(
             sid - F::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
         );
-        cols.decode_read.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_READ as u32),
-        );
+        cols.decode_read
+            .populate_from_field_element(sid - F::from_canonical_u32(SyscallCode::SYS_READ as u32));
         cols.decode_write.populate_from_field_element(
             sid - F::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
         );
@@ -149,16 +148,12 @@ impl SysLinuxChip {
         // ── Canonical a0 / a1 decoder ──────────────────────────────────
         let a0_val = F::from_canonical_u32(event.a0);
         cols.decode_a0_0.populate_from_field_element(a0_val);
-        cols.decode_a0_1
-            .populate_from_field_element(a0_val - F::ONE);
-        cols.decode_a0_2
-            .populate_from_field_element(a0_val - F::TWO);
+        cols.decode_a0_1.populate_from_field_element(a0_val - F::ONE);
+        cols.decode_a0_2.populate_from_field_element(a0_val - F::TWO);
 
         let a1_val = F::from_canonical_u32(event.a1);
-        cols.decode_a1_1
-            .populate_from_field_element(a1_val - F::ONE);
-        cols.decode_a1_3
-            .populate_from_field_element(a1_val - F::from_canonical_u32(3));
+        cols.decode_a1_1.populate_from_field_element(a1_val - F::ONE);
+        cols.decode_a1_3.populate_from_field_element(a1_val - F::from_canonical_u32(3));
 
         // ── Composite flags ────────────────────────────────────────────
         cols.is_mmap_a0_0 = F::from_bool(is_mmap && event.a0 == 0);
@@ -172,8 +167,7 @@ impl SysLinuxChip {
             4045 => {
                 // brk: read BRK register.
                 assert!(event.write_records.len() == 1 && event.read_records.len() == 1);
-                cols.is_a0_gt_brk
-                    .populate(event.a0, event.read_records[0].value, blu);
+                cols.is_a0_gt_brk.populate(event.a0, event.read_records[0].value, blu);
                 cols.inorout.populate_read(event.read_records[0], blu);
             }
             4210 | 4090 => {

@@ -50,6 +50,12 @@ impl SyscallChip {
     pub fn shard_kind(&self) -> SyscallShardKind {
         self.shard_kind
     }
+
+    /// Pack a u32 result into two half-word values (lo = bytes 0-1, hi = bytes 2-3).
+    fn pack_result_halves(result: u32) -> (u32, u32) {
+        let rb = result.to_le_bytes();
+        (rb[0] as u32 + (rb[1] as u32) * 256, rb[2] as u32 + (rb[3] as u32) * 256)
+    }
 }
 
 /// The column layout for the chip.
@@ -105,7 +111,26 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        let events: Vec<SyscallEvent> = match self.shard_kind {
+        let is_receive = self.shard_kind == SyscallShardKind::Precompile;
+
+        let make_global =
+            |event: &SyscallEvent, result_lo: u32, result_hi: u32| GlobalLookupEvent {
+                message: [
+                    event.shard,
+                    event.clk,
+                    event.syscall_id,
+                    event.arg1,
+                    event.arg2,
+                    result_lo,
+                    result_hi,
+                ],
+                is_receive,
+                kind: LookupKind::Syscall as u8,
+            };
+
+        // Bug 18 fix: include linux syscall result (as packed half-words) in the
+        // global message so results are verified across Core and Precompile shards.
+        let events: Vec<GlobalLookupEvent> = match self.shard_kind {
             SyscallShardKind::Core => input
                 .syscall_events
                 .iter()
@@ -113,22 +138,29 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     (e.a_record.prev_value.to_le_bytes()[2] == 1)
                         || (e.a_record.prev_value.to_le_bytes()[1] != 0)
                 })
-                .copied()
+                .map(|event| {
+                    let is_linux = event.a_record.prev_value.to_le_bytes()[1] != 0;
+                    let (rlo, rhi) = if is_linux {
+                        Self::pack_result_halves(event.a_record.value)
+                    } else {
+                        (0, 0)
+                    };
+                    make_global(event, rlo, rhi)
+                })
                 .collect(),
-            SyscallShardKind::Precompile => {
-                input.precompile_events.all_events().map(|(event, _)| event.to_owned()).collect()
-            }
+            SyscallShardKind::Precompile => input
+                .precompile_events
+                .all_events()
+                .map(|(event, precompile)| {
+                    let (rlo, rhi) = match precompile {
+                        PrecompileEvent::Linux(le) => Self::pack_result_halves(le.v0),
+                        _ => (0, 0),
+                    };
+                    make_global(event, rlo, rhi)
+                })
+                .collect(),
         };
 
-        let is_receive = self.shard_kind == SyscallShardKind::Precompile;
-        let events: Vec<GlobalLookupEvent> = events
-            .iter()
-            .map(|event| GlobalLookupEvent {
-                message: [event.shard, event.clk, event.syscall_id, event.arg1, event.arg2, 0, 0],
-                is_receive,
-                kind: LookupKind::Syscall as u8,
-            })
-            .collect::<Vec<_>>();
         output.global_lookup_events.extend(events);
         Ok(())
     }
@@ -263,11 +295,12 @@ where
         builder.assert_bool(local.is_linux);
         // is_linux can only be 1 when is_real is 1.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
+        // Bug 18 fix: result_lo/result_hi must be zero when is_linux is 0, so they
+        // can be used directly (degree 1) in the global lookup.
+        builder.when_not(local.is_linux).assert_zero(local.result_lo);
+        builder.when_not(local.is_linux).assert_zero(local.result_hi);
 
         // ProjectZKM/Ziren#488:4: Bind reduced arg1/arg2 to packed half-word columns.
-        // reduce(word) = lo + hi * 65536, where lo = b0 + b1*256, hi = b2 + b3*256.
-        // This ensures the reduced Syscall lookup and the packed SyscallResult lookup
-        // agree on the same byte-level values, closing the reduce() collision hole.
         builder.when(local.is_linux).assert_eq(
             local.arg1,
             local.arg1_lo + local.arg1_hi * AB::Expr::from_canonical_u32(65536),
@@ -289,7 +322,6 @@ where
                     LookupScope::Local,
                 );
 
-                // Receive SyscallResult from SyscallInstrsChip (local), using half-word packed columns.
                 builder.receive_syscall_result_packed(
                     local.shard,
                     local.clk,
@@ -303,7 +335,9 @@ where
                     LookupScope::Local,
                 );
 
-                // Send the Syscall lookup to the global table.
+                // Send Syscall lookup to global table.
+                // Bug 18 fix: include result_lo/result_hi so syscall results are
+                // verified across Core and Precompile shards.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -312,8 +346,8 @@ where
                             local.syscall_id.into(),
                             local.arg1.into(),
                             local.arg2.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
+                            local.result_lo.into(),
+                            local.result_hi.into(),
                             local.is_real.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
@@ -335,7 +369,6 @@ where
                     LookupScope::Local,
                 );
 
-                // Send SyscallResult to SysLinuxChip (local), using half-word packed columns.
                 builder.send_syscall_result_packed(
                     local.shard,
                     local.clk,
@@ -349,7 +382,7 @@ where
                     LookupScope::Local,
                 );
 
-                // Send the Syscall lookup to the global table.
+                // Send Syscall lookup to global table (with result for bug 18).
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -358,8 +391,8 @@ where
                             local.syscall_id.into(),
                             local.arg1.into(),
                             local.arg2.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
+                            local.result_lo.into(),
+                            local.result_hi.into(),
                             local.is_real.into() * AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),

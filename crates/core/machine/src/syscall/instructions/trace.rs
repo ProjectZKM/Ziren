@@ -112,8 +112,7 @@ impl SyscallInstrsChip {
         let is_halt_val = cols.is_halt == F::ONE;
 
         // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
-        cols.is_prev_a1_zero
-            .populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
+        cols.is_prev_a1_zero.populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
 
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(

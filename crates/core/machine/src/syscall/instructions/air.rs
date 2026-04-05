@@ -168,15 +168,9 @@ impl SyscallInstrsChip {
         builder.when(send_to_table.clone()).assert_one(local.op_b_check);
         builder.when(local.is_halt).assert_one(local.op_b_check);
         builder.when(send_to_table.clone()).assert_one(local.op_c_check);
-        builder
-            .when(local.is_commit_deferred_proofs.result)
-            .assert_one(local.op_c_check);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.op_b_check);
-        builder
-            .when_not(local.is_real)
-            .assert_zero(local.op_c_check);
+        builder.when(local.is_commit_deferred_proofs.result).assert_one(local.op_c_check);
+        builder.when_not(local.is_real).assert_zero(local.op_b_check);
+        builder.when_not(local.is_real).assert_zero(local.op_c_check);
 
         KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
             builder,

@@ -38,14 +38,54 @@ where
         // ── Canonical syscall decoder ──────────────────────────────────
         let sid: AB::Expr = local.syscall_id.into();
 
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32), local.decode_mmap, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32), local.decode_mmap2, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32), local.decode_clone, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32), local.decode_exit_group, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_BRK as u32), local.decode_brk, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_FCNTL as u32), local.decode_fnctl, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_READ as u32), local.decode_read, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_WRITE as u32), local.decode_write, local.is_real.into());
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
+            local.decode_mmap,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
+            local.decode_mmap2,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
+            local.decode_clone,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
+            local.decode_exit_group,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_BRK as u32),
+            local.decode_brk,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
+            local.decode_fnctl,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_READ as u32),
+            local.decode_read,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
+            local.decode_write,
+            local.is_real.into(),
+        );
 
         let is_clone = local.decode_clone.result;
         let is_exit_group = local.decode_exit_group.result;
@@ -54,22 +94,55 @@ where
         let is_read = local.decode_read.result;
         let is_write = local.decode_write.result;
 
-        builder.when(local.is_real).assert_eq(local.is_mmap, local.decode_mmap.result + local.decode_mmap2.result);
+        builder
+            .when(local.is_real)
+            .assert_eq(local.is_mmap, local.decode_mmap.result + local.decode_mmap2.result);
         builder.assert_bool(local.is_mmap);
 
-        let recognized_sum: AB::Expr = local.is_mmap.into() + is_clone + is_exit_group + is_brk + is_fnctl + is_read + is_write;
+        let recognized_sum: AB::Expr = local.is_mmap.into()
+            + is_clone
+            + is_exit_group
+            + is_brk
+            + is_fnctl
+            + is_read
+            + is_write;
         let is_nop: AB::Expr = local.is_real.into() - recognized_sum;
         builder.when(local.is_real).assert_bool(is_nop.clone());
 
         // ── Canonical a0 / a1 decoder ──────────────────────────────────
         let a0_reduce = local.a0.reduce::<AB>();
-        IsZeroOperation::<AB::F>::eval(builder, a0_reduce.clone(), local.decode_a0_0, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, a0_reduce.clone() - AB::Expr::one(), local.decode_a0_1, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, a0_reduce - AB::Expr::two(), local.decode_a0_2, local.is_real.into());
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            a0_reduce.clone(),
+            local.decode_a0_0,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            a0_reduce.clone() - AB::Expr::one(),
+            local.decode_a0_1,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            a0_reduce - AB::Expr::two(),
+            local.decode_a0_2,
+            local.is_real.into(),
+        );
 
         let a1_reduce = local.a1.reduce::<AB>();
-        IsZeroOperation::<AB::F>::eval(builder, a1_reduce.clone() - AB::Expr::one(), local.decode_a1_1, local.is_real.into());
-        IsZeroOperation::<AB::F>::eval(builder, a1_reduce - AB::Expr::from_canonical_u32(3), local.decode_a1_3, local.is_real.into());
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            a1_reduce.clone() - AB::Expr::one(),
+            local.decode_a1_1,
+            local.is_real.into(),
+        );
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            a1_reduce - AB::Expr::from_canonical_u32(3),
+            local.decode_a1_3,
+            local.is_real.into(),
+        );
 
         let is_a0_0 = local.decode_a0_0.result;
         let is_a0_1 = local.decode_a0_1.result;
@@ -84,7 +157,9 @@ where
 
         // ── Structural read-only guard for inorout ─────────────────────
         // brk and write use inorout as a read; only mmap(a0==0) writes.
-        builder.when(is_brk + is_write).assert_word_eq(*local.inorout.value(), local.inorout.prev_value);
+        builder
+            .when(is_brk + is_write)
+            .assert_word_eq(*local.inorout.value(), local.inorout.prev_value);
 
         // ── Branch evaluations ─────────────────────────────────────────
         self.eval_brk(builder, local, is_brk);
@@ -98,29 +173,72 @@ where
 
         // ── A3 output ──────────────────────────────────────────────────
         builder.eval_memory_access(
-            local.shard, local.clk,
+            local.shard,
+            local.clk,
             AB::Expr::from_canonical_u32(Register::A3 as u32),
-            &local.output, local.is_real,
+            &local.output,
+            local.is_real,
         );
 
         // ── Cross-chip interactions ────────────────────────────────────
-        builder.receive_syscall(local.shard, local.clk, local.syscall_id, local.a0.reduce::<AB>(), local.a1.reduce::<AB>(), local.is_real, LookupScope::Local);
-        builder.receive_syscall_result(local.shard, local.clk, local.result, local.a0, local.a1, local.is_real, LookupScope::Local);
+        builder.receive_syscall(
+            local.shard,
+            local.clk,
+            local.syscall_id,
+            local.a0.reduce::<AB>(),
+            local.a1.reduce::<AB>(),
+            local.is_real,
+            LookupScope::Local,
+        );
+        builder.receive_syscall_result(
+            local.shard,
+            local.clk,
+            local.result,
+            local.a0,
+            local.a1,
+            local.is_real,
+            LookupScope::Local,
+        );
     }
 }
 
 impl SysLinuxChip {
-    fn eval_brk<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_brk: AB::Var) {
-        builder.eval_memory_access(local.shard, local.clk, AB::Expr::from_canonical_u32(Register::BRK as u32), &local.inorout, is_brk);
+    fn eval_brk<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_brk: AB::Var,
+    ) {
+        builder.eval_memory_access(
+            local.shard,
+            local.clk,
+            AB::Expr::from_canonical_u32(Register::BRK as u32),
+            &local.inorout,
+            is_brk,
+        );
 
-        GtColsBytes::<AB::F>::eval(builder, local.a0, *local.inorout.value(), is_brk, local.is_a0_gt_brk);
+        GtColsBytes::<AB::F>::eval(
+            builder,
+            local.a0,
+            *local.inorout.value(),
+            is_brk,
+            local.is_a0_gt_brk,
+        );
 
         builder.when(is_brk).when(local.is_a0_gt_brk.result).assert_word_eq(local.result, local.a0);
-        builder.when(is_brk).when_not(local.is_a0_gt_brk.result).assert_word_eq(local.result, local.inorout.prev_value);
+        builder
+            .when(is_brk)
+            .when_not(local.is_a0_gt_brk.result)
+            .assert_word_eq(local.result, local.inorout.prev_value);
         builder.when(is_brk).assert_word_zero(*local.output.value());
     }
 
-    fn eval_clone<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_clone: AB::Var) {
+    fn eval_clone<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_clone: AB::Var,
+    ) {
         builder.when(is_clone).assert_word_zero(*local.output.value());
         builder.when(is_clone).assert_one(local.result[0]);
         builder.when(is_clone).assert_zero(local.result[1]);
@@ -128,7 +246,12 @@ impl SysLinuxChip {
         builder.when(is_clone).assert_zero(local.result[3]);
     }
 
-    fn eval_mmap<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_a0_0: AB::Var) {
+    fn eval_mmap<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_a0_0: AB::Var,
+    ) {
         // Range-check a0 and a1 bytes so decompositions are canonical.
         // a1[1] is already constrained to [0,255] by the nibble decomposition below,
         // but a1[0], a1[2], a1[3] and a0 bytes need explicit byte validity checks.
@@ -141,21 +264,32 @@ impl SysLinuxChip {
         let mut a1_byte1_lo = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
-            a1_byte1_lo = a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+            a1_byte1_lo =
+                a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
         }
         let mut a1_byte1_hi = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
-            a1_byte1_hi = a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+            a1_byte1_hi =
+                a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
         }
-        builder.when(local.is_mmap).assert_eq(local.a1[1], a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16));
+        builder.when(local.is_mmap).assert_eq(
+            local.a1[1],
+            a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16),
+        );
 
         // Inline page_offset (not stored). upper_address is no longer needed as a
         // single field expression — the mmap_size bytes are constrained directly.
-        let page_offset: AB::Expr = local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
+        let page_offset: AB::Expr =
+            local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
 
         // is_offset_0 = (page_offset == 0), derived from IsZero.
-        IsZeroOperation::<AB::F>::eval(builder, page_offset.clone(), local.is_page_offset_zero, local.is_mmap.into());
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            page_offset.clone(),
+            local.is_page_offset_zero,
+            local.is_mmap.into(),
+        );
         let is_offset_0 = local.is_page_offset_zero.result;
 
         // ── mmap size (byte-level, no reduce()) ──────────────────────────
@@ -186,8 +320,7 @@ impl SysLinuxChip {
         //   carry[0] = 1 iff (a1_byte1_hi + not_aligned) * 16 >= 256
         builder.when(local.is_mmap_a0_0).assert_eq(
             local.mmap_size[1],
-            a1_byte1_hi.clone() * sixteen.clone()
-                + not_aligned.clone() * sixteen
+            a1_byte1_hi.clone() * sixteen.clone() + not_aligned.clone() * sixteen
                 - local.mmap_size_carry[0] * base.clone(),
         );
 
@@ -198,61 +331,147 @@ impl SysLinuxChip {
         );
 
         // byte3: a1[3] + carry[1]
-        builder.when(local.is_mmap_a0_0).assert_eq(
-            local.mmap_size[3],
-            local.a1[3] + local.mmap_size_carry[1],
-        );
+        builder
+            .when(local.is_mmap_a0_0)
+            .assert_eq(local.mmap_size[3], local.a1[3] + local.mmap_size_carry[1]);
 
         // Range-check mmap_size bytes.
-        builder.when(local.is_mmap).when(is_a0_0).slice_range_check_u8(&local.mmap_size.0, local.is_mmap_a0_0.into());
+        builder
+            .when(local.is_mmap)
+            .when(is_a0_0)
+            .slice_range_check_u8(&local.mmap_size.0, local.is_mmap_a0_0.into());
 
         // Bytewise heap update.
-        AddOperation::<AB::F>::eval(builder, local.inorout.prev_value, local.mmap_size, local.heap_add, local.is_mmap_a0_0.into());
-        builder.when(local.is_mmap_a0_0).assert_word_eq(*local.inorout.value(), local.heap_add.value);
+        AddOperation::<AB::F>::eval(
+            builder,
+            local.inorout.prev_value,
+            local.mmap_size,
+            local.heap_add,
+            local.is_mmap_a0_0.into(),
+        );
+        builder
+            .when(local.is_mmap_a0_0)
+            .assert_word_eq(*local.inorout.value(), local.heap_add.value);
 
-        builder.eval_memory_access(local.shard, local.clk, AB::Expr::from_canonical_u32(Register::HEAP as u32), &local.inorout, local.is_mmap_a0_0);
+        builder.eval_memory_access(
+            local.shard,
+            local.clk,
+            AB::Expr::from_canonical_u32(Register::HEAP as u32),
+            &local.inorout,
+            local.is_mmap_a0_0,
+        );
 
         builder.when(local.is_mmap_a0_0).assert_word_eq(local.inorout.prev_value, local.result);
         builder.when(local.is_mmap).when_not(is_a0_0).assert_word_eq(local.a0, local.result);
         builder.when(local.is_mmap).assert_word_zero(*local.output.value());
     }
 
-    fn eval_exit_group<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_exit_group: AB::Var) {
+    fn eval_exit_group<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_exit_group: AB::Var,
+    ) {
         builder.when(is_exit_group).assert_word_zero(*local.output.value());
         builder.when(is_exit_group).assert_word_zero(local.result);
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn eval_fnctl<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_fnctl: AB::Var, is_a0_0: AB::Var, is_a0_1: AB::Var, is_a0_2: AB::Var, is_a1_1: AB::Var, is_a1_3: AB::Var) {
+    fn eval_fnctl<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_fnctl: AB::Var,
+        is_a0_0: AB::Var,
+        is_a0_1: AB::Var,
+        is_a0_2: AB::Var,
+        is_a1_1: AB::Var,
+        is_a1_3: AB::Var,
+    ) {
         builder.when(local.is_fnctl_a1_1).when(is_a0_0).assert_word_zero(local.result);
-        builder.when(local.is_fnctl_a1_1).when(is_a0_1).assert_word_eq(local.result, Word::<AB::Expr>::from(1u32));
-        builder.when(local.is_fnctl_a1_1).when(is_a0_2).assert_word_eq(local.result, Word::<AB::Expr>::from(2u32));
-        builder.when(local.is_fnctl_a1_1).when_not(is_a0_0 + is_a0_1 + is_a0_2).assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
+        builder
+            .when(local.is_fnctl_a1_1)
+            .when(is_a0_1)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(1u32));
+        builder
+            .when(local.is_fnctl_a1_1)
+            .when(is_a0_2)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(2u32));
+        builder
+            .when(local.is_fnctl_a1_1)
+            .when_not(is_a0_0 + is_a0_1 + is_a0_2)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
 
         builder.when(local.is_fnctl_a1_3).when(is_a0_0).assert_word_zero(local.result);
-        builder.when(local.is_fnctl_a1_3).when(is_a0_1 + is_a0_2).assert_word_eq(local.result, Word::<AB::Expr>::from(1u32));
-        builder.when(local.is_fnctl_a1_3).when_not(is_a0_0 + is_a0_1 + is_a0_2).assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
-        builder.when(is_fnctl).when_not(is_a1_3 + is_a1_1).assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
+        builder
+            .when(local.is_fnctl_a1_3)
+            .when(is_a0_1 + is_a0_2)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(1u32));
+        builder
+            .when(local.is_fnctl_a1_3)
+            .when_not(is_a0_0 + is_a0_1 + is_a0_2)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
+        builder
+            .when(is_fnctl)
+            .when_not(is_a1_3 + is_a1_1)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
 
-        builder.when(local.is_fnctl_a1_3 + local.is_fnctl_a1_1).when(is_a0_0 + is_a0_1 + is_a0_2).assert_word_zero(*local.output.value());
-        builder.when(local.is_fnctl_a1_3 + local.is_fnctl_a1_1).when_not(is_a0_0 + is_a0_1 + is_a0_2).assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(9u32));
-        builder.when(is_fnctl).when_not(is_a1_3 + is_a1_1).assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(0x9u32));
+        builder
+            .when(local.is_fnctl_a1_3 + local.is_fnctl_a1_1)
+            .when(is_a0_0 + is_a0_1 + is_a0_2)
+            .assert_word_zero(*local.output.value());
+        builder
+            .when(local.is_fnctl_a1_3 + local.is_fnctl_a1_1)
+            .when_not(is_a0_0 + is_a0_1 + is_a0_2)
+            .assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(9u32));
+        builder
+            .when(is_fnctl)
+            .when_not(is_a1_3 + is_a1_1)
+            .assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(0x9u32));
     }
 
-    fn eval_read<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_read: AB::Var, is_a0_0: AB::Var) {
+    fn eval_read<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_read: AB::Var,
+        is_a0_0: AB::Var,
+    ) {
         builder.when(is_read).when(is_a0_0).assert_word_zero(local.result);
         builder.when(is_read).when(is_a0_0).assert_word_zero(*local.output.value());
-        builder.when(is_read).when_not(is_a0_0).assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
-        builder.when(is_read).when_not(is_a0_0).assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(9));
+        builder
+            .when(is_read)
+            .when_not(is_a0_0)
+            .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
+        builder
+            .when(is_read)
+            .when_not(is_a0_0)
+            .assert_word_eq(*local.output.value(), Word::<AB::Expr>::from(9));
     }
 
-    fn eval_write<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_write: AB::Var) {
-        builder.eval_memory_access(local.shard, local.clk, AB::Expr::from_canonical_u32(Register::A2 as u32), &local.inorout, is_write);
+    fn eval_write<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_write: AB::Var,
+    ) {
+        builder.eval_memory_access(
+            local.shard,
+            local.clk,
+            AB::Expr::from_canonical_u32(Register::A2 as u32),
+            &local.inorout,
+            is_write,
+        );
         builder.when(is_write).assert_word_eq(local.result, *local.inorout.value());
         builder.when(is_write).assert_word_zero(*local.output.value());
     }
 
-    fn eval_nop<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &SysLinuxCols<AB::Var>, is_nop: AB::Expr) {
+    fn eval_nop<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &SysLinuxCols<AB::Var>,
+        is_nop: AB::Expr,
+    ) {
         builder.when(is_nop.clone()).assert_word_zero(*local.output.value());
         builder.when(is_nop).assert_word_zero(local.result);
     }
