@@ -141,6 +141,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use p3_air::WindowAccess;
     use num::BigUint;
     use p3_air::BaseAir;
     use p3_field::{Field, PrimeField32};
@@ -162,7 +163,7 @@ mod tests {
     };
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
@@ -261,7 +262,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
             local.a_den_b.eval(builder, &local.a, &local.b, self.sign, AB::F::ZERO);
         }
@@ -288,7 +289,7 @@ mod tests {
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         // This it to test that the proof DOESN'T work if messed up.
         // let row = trace.row_mut(0);
-        // row[0] = KoalaBear::from_canonical_u8(0);
+        // row[0] = KoalaBear::from_u8(0);
         let proof = prove::<KoalaBearPoseidon2, _>(&config, &chip, &mut challenger, trace);
 
         let mut challenger = config.challenger();

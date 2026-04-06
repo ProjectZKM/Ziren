@@ -1,6 +1,6 @@
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    Field, FieldExtensionAlgebra,
+    BasedVectorSpace, Field, ExtensionField,
 };
 use zkm_stark::air::BinomialExtension;
 
@@ -26,14 +26,13 @@ impl<T: Clone> BinomialExtensionUtils<T> for BinomialExtension<T> {
 
 impl<AF> BinomialExtensionUtils<AF> for BinomialExtensionField<AF, D>
 where
-    AF: Field,
-    AF::F: BinomiallyExtendable<D>,
+    AF: Field + BinomiallyExtendable<D>,
 {
     fn from_block(block: Block<AF>) -> Self {
-        Self::from_base_slice(&block.0)
+        Self::from_basis_coefficients_slice(&block.0).unwrap()
     }
 
     fn as_block(&self) -> Block<AF> {
-        Block(self.as_base_slice().try_into().unwrap())
+        Block(self.as_basis_coefficients_slice().try_into().unwrap())
     }
 }

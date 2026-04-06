@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 use instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr};
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -143,14 +143,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
 impl<AB> Air<AB> for MemoryChip<AB::F>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryCols<AB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &MemoryPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (value, access) in zip(local.values, prep_local.accesses) {
@@ -162,7 +162,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 

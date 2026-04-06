@@ -2,7 +2,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    Field, FieldAlgebra, FieldExtensionAlgebra,
+    BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField,
 };
 use zkm_derive::AlignedBorrow;
 
@@ -17,9 +17,9 @@ impl<T> BinomialExtension<T> {
     /// Creates a new binomial extension element from a base element.
     pub fn from_base(b: T) -> Self
     where
-        T: FieldAlgebra,
+        T: PrimeCharacteristicRing,
     {
-        let mut arr: [T; D] = core::array::from_fn(|_| T::zero());
+        let mut arr: [T; D] = core::array::from_fn(|_| T::ZERO);
         arr[0] = b;
         Self(arr)
     }
@@ -52,12 +52,12 @@ impl<T: Sub<Output = T> + Clone> Sub for BinomialExtension<T> {
     }
 }
 
-impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra> Mul for BinomialExtension<T> {
+impl<T: Add<Output = T> + Mul<Output = T> + PrimeCharacteristicRing> Mul for BinomialExtension<T> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [T::zero(), T::zero(), T::zero(), T::zero()];
-        let w = T::from_canonical_u32(3);
+        let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
+        let w = T::from_u32(3);
 
         for i in 0..D {
             for j in 0..D {
@@ -81,10 +81,10 @@ where
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        let p3_ef_lhs = BinomialExtensionField::from_base_slice(&self.0);
-        let p3_ef_rhs = BinomialExtensionField::from_base_slice(&rhs.0);
+        let p3_ef_lhs = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| self.0[i]);
+        let p3_ef_rhs = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| rhs.0[i]);
         let p3_ef_result = p3_ef_lhs / p3_ef_rhs;
-        Self(p3_ef_result.as_base_slice().try_into().unwrap())
+        Self(p3_ef_result.as_basis_coefficients_slice().try_into().unwrap())
     }
 }
 
@@ -95,21 +95,21 @@ where
     /// Returns the multiplicative inverse of the element.
     #[must_use]
     pub fn inverse(&self) -> Self {
-        let p3_ef = BinomialExtensionField::from_base_slice(&self.0);
+        let p3_ef = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| self.0[i]);
         let p3_ef_inverse = p3_ef.inverse();
-        Self(p3_ef_inverse.as_base_slice().try_into().unwrap())
+        Self(p3_ef_inverse.as_basis_coefficients_slice().try_into().unwrap())
     }
 
     /// Returns the multiplicative inverse of the element, if it exists.
     #[must_use]
     pub fn try_inverse(&self) -> Option<Self> {
-        let p3_ef = BinomialExtensionField::from_base_slice(&self.0);
+        let p3_ef = BinomialExtensionField::<F, D>::from_basis_coefficients_fn(|i| self.0[i]);
         let p3_ef_inverse = p3_ef.try_inverse()?;
-        Some(Self(p3_ef_inverse.as_base_slice().try_into().unwrap()))
+        Some(Self(p3_ef_inverse.as_basis_coefficients_slice().try_into().unwrap()))
     }
 }
 
-impl<T: FieldAlgebra + Copy> Neg for BinomialExtension<T> {
+impl<T: PrimeCharacteristicRing + Copy> Neg for BinomialExtension<T> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -119,22 +119,20 @@ impl<T: FieldAlgebra + Copy> Neg for BinomialExtension<T> {
 
 impl<AF> From<BinomialExtensionField<AF, D>> for BinomialExtension<AF>
 where
-    AF: FieldAlgebra + Copy,
-    AF::F: BinomiallyExtendable<D>,
+    AF: BinomiallyExtendable<D> + Copy,
 {
     fn from(value: BinomialExtensionField<AF, D>) -> Self {
-        let arr: [AF; D] = value.as_base_slice().try_into().unwrap();
+        let arr: [AF; D] = value.as_basis_coefficients_slice().try_into().unwrap();
         Self(arr)
     }
 }
 
 impl<AF> From<BinomialExtension<AF>> for BinomialExtensionField<AF, D>
 where
-    AF: FieldAlgebra + Copy,
-    AF::F: BinomiallyExtendable<D>,
+    AF: BinomiallyExtendable<D> + Copy,
 {
     fn from(value: BinomialExtension<AF>) -> Self {
-        BinomialExtensionField::from_base_slice(&value.0)
+        BinomialExtensionField::from_basis_coefficients_fn(|i| value.0[i])
     }
 }
 

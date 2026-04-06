@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 
-use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::{Field, FieldAlgebra};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::air::ZKMAirBuilder;
@@ -17,14 +17,14 @@ impl<F: Field> BaseAir<F> for ByteChip<F> {
     }
 }
 
-impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
+impl<AB: ZKMAirBuilder<F: Field>> Air<AB> for ByteChip<AB::F> {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_mult = main.row_slice(0);
+        let local_mult = main.current_slice();
         let local_mult: &ByteMultCols<AB::Var> = (*local_mult).borrow();
 
-        let prep = builder.preprocessed();
-        let prep = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep = prep.current_slice();
         let local: &BytePreprocessedCols<AB::Var> = (*prep).borrow();
 
         // Send all the lookups for each operation.
@@ -46,7 +46,7 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                     builder.receive_byte(field_op, local.sll, local.b, local.c, mult)
                 }
                 ByteOpcode::U8Range => {
-                    builder.receive_byte(field_op, AB::F::zero(), local.b, local.c, mult)
+                    builder.receive_byte(field_op, AB::F::ZERO, local.b, local.c, mult)
                 }
                 ByteOpcode::ShrCarry => builder.receive_byte_pair(
                     field_op,
@@ -60,13 +60,13 @@ impl<AB: ZKMAirBuilder + PairBuilder> Air<AB> for ByteChip<AB::F> {
                     builder.receive_byte(field_op, local.ltu, local.b, local.c, mult)
                 }
                 ByteOpcode::MSB => {
-                    builder.receive_byte(field_op, local.msb, local.b, AB::F::zero(), mult)
+                    builder.receive_byte(field_op, local.msb, local.b, AB::F::ZERO, mult)
                 }
                 ByteOpcode::U16Range => builder.receive_byte(
                     field_op,
                     local.value_u16,
-                    AB::F::zero(),
-                    AB::F::zero(),
+                    AB::F::ZERO,
+                    AB::F::ZERO,
                     mult,
                 ),
             }

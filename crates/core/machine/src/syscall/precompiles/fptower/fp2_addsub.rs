@@ -8,8 +8,8 @@ use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use itertools::Itertools;
 use num::BigUint;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use typenum::Unsigned;
 use zkm_core_executor::{
@@ -128,10 +128,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
 
             cols.is_real = F::ONE;
             cols.is_add = F::from_bool(event.op == FieldOperation::Add);
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.x_ptr = F::from_canonical_u32(event.x_ptr);
-            cols.y_ptr = F::from_canonical_u32(event.y_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.x_ptr = F::from_u32(event.x_ptr);
+            cols.y_ptr = F::from_u32(event.y_ptr);
 
             Self::populate_field_ops(
                 &mut new_byte_lookup_events,
@@ -225,7 +225,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Fp2AddSubAssignCols<AB::Var, P> = (*local).borrow();
 
         // Constrain the `is_add` flag to be boolean.
@@ -240,7 +240,7 @@ where
         let q_y = limbs_from_prev_access(&local.y_access[num_words_field_element..]);
 
         let modulus_coeffs =
-            P::MODULUS.iter().map(|&limbs| AB::Expr::from_canonical_u8(limbs)).collect_vec();
+            P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         {
@@ -250,7 +250,7 @@ where
                 &q_x,
                 &p_modulus,
                 local.is_add,
-                AB::Expr::one() - local.is_add,
+                AB::Expr::ONE - local.is_add,
                 AB::F::ZERO,
                 AB::F::ZERO,
                 local.is_real,
@@ -262,7 +262,7 @@ where
                 &q_y,
                 &p_modulus,
                 local.is_add,
-                AB::Expr::one() - local.is_add,
+                AB::Expr::ONE - local.is_add,
                 AB::F::ZERO,
                 AB::F::ZERO,
                 local.is_real,
@@ -286,7 +286,7 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(1), /* We read p at +1 since p, q could be the
+            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
                                                        * same. */
             local.x_ptr,
             &local.x_access,
@@ -295,17 +295,17 @@ where
 
         let (add_syscall_id, sub_syscall_id) = match P::FIELD_TYPE {
             FieldType::Bn254 => (
-                AB::F::from_canonical_u32(SyscallCode::BN254_FP2_ADD.syscall_id()),
-                AB::F::from_canonical_u32(SyscallCode::BN254_FP2_SUB.syscall_id()),
+                AB::F::from_u32(SyscallCode::BN254_FP2_ADD.syscall_id()),
+                AB::F::from_u32(SyscallCode::BN254_FP2_SUB.syscall_id()),
             ),
             FieldType::Bls12381 => (
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_ADD.syscall_id()),
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_SUB.syscall_id()),
+                AB::F::from_u32(SyscallCode::BLS12381_FP2_ADD.syscall_id()),
+                AB::F::from_u32(SyscallCode::BLS12381_FP2_SUB.syscall_id()),
             ),
         };
 
         let syscall_id_felt =
-            local.is_add * add_syscall_id + (AB::Expr::one() - local.is_add) * sub_syscall_id;
+            local.is_add * add_syscall_id + (AB::Expr::ONE - local.is_add) * sub_syscall_id;
 
         builder.receive_syscall(
             local.shard,

@@ -4,7 +4,7 @@ use std::{borrow::BorrowMut, mem::size_of};
 
 use itertools::Itertools;
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -240,9 +240,9 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
                                 r + NUM_INTERNAL_ROUNDS - 1
                             };
 
-                            F::from_wrapped_u32(RC_16_30_U32[round][j])
+                            F::from_u32(RC_16_30_U32[round][j])
                         } else if i == INTERNAL_ROUND_IDX {
-                            F::from_wrapped_u32(RC_16_30_U32[NUM_EXTERNAL_ROUNDS / 2 + j][0])
+                            F::from_u32(RC_16_30_U32[NUM_EXTERNAL_ROUNDS / 2 + j][0])
                         } else {
                             F::ZERO
                         };
@@ -350,7 +350,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             // sbox.
             let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS - 1 };
             let mut add_rc = *round_state;
-            (0..WIDTH).for_each(|i| add_rc[i] += F::from_wrapped_u32(RC_16_30_U32[round][i]));
+            (0..WIDTH).for_each(|i| add_rc[i] += F::from_u32(RC_16_30_U32[round][i]));
 
             // Apply the sboxes.
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
@@ -380,7 +380,7 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
             // columns for it, just like for external rounds.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
-            let add_rc = new_state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
+            let add_rc = new_state[0] + F::from_u32(RC_16_30_U32[round][0]);
 
             // Apply the sboxes.
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
@@ -408,10 +408,11 @@ impl<const DEGREE: usize> Poseidon2SkinnyChip<DEGREE> {
 
 #[cfg(test)]
 mod tests {
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
+    use rand::Rng;
     use zkhash::ark_ff::UniformRand;
     use zkm_stark::{air::MachineAir, inner_perm};
 
@@ -428,7 +429,7 @@ mod tests {
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();
 
-        let input_1 = [F::rand(&mut rng); WIDTH];
+        let input_1: [F; WIDTH] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
         let output_1 = permuter.permute(input_1);
         let shard = ExecutionRecord {
             poseidon2_events: vec![

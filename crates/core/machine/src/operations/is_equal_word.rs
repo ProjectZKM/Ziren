@@ -19,10 +19,10 @@ impl<F: Field> IsEqualWordOperation<F> {
         let a = a_u32.to_le_bytes();
         let b = b_u32.to_le_bytes();
         let diff = Word([
-            F::from_canonical_u8(a[0]) - F::from_canonical_u8(b[0]),
-            F::from_canonical_u8(a[1]) - F::from_canonical_u8(b[1]),
-            F::from_canonical_u8(a[2]) - F::from_canonical_u8(b[2]),
-            F::from_canonical_u8(a[3]) - F::from_canonical_u8(b[3]),
+            F::from_u8(a[0]) - F::from_u8(b[0]),
+            F::from_u8(a[1]) - F::from_u8(b[1]),
+            F::from_u8(a[2]) - F::from_u8(b[2]),
+            F::from_u8(a[3]) - F::from_u8(b[3]),
         ]);
         self.is_diff_zero.populate_from_field_element(diff);
         (a_u32 == b_u32) as u32

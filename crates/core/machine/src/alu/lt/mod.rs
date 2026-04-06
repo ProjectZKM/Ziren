@@ -5,8 +5,8 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
@@ -186,17 +186,17 @@ impl LtChip {
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
-        cols.a = Word(a.map(F::from_canonical_u8));
-        cols.b = Word(b.map(F::from_canonical_u8));
-        cols.c = Word(c.map(F::from_canonical_u8));
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
+        cols.a = Word(a.map(F::from_u8));
+        cols.b = Word(b.map(F::from_u8));
+        cols.c = Word(c.map(F::from_u8));
 
         // If this is SLT, mask the MSB of b & c before computing cols.bits.
         let masked_b = b[3] & 0x7f;
         let masked_c = c[3] & 0x7f;
-        cols.b_masked = F::from_canonical_u8(masked_b);
-        cols.c_masked = F::from_canonical_u8(masked_c);
+        cols.b_masked = F::from_u8(masked_b);
+        cols.c_masked = F::from_u8(masked_c);
 
         // Send the masked lookup.
         blu.add_byte_lookup_event(ByteLookupEvent {
@@ -230,16 +230,16 @@ impl LtChip {
             if c_byte != b_byte {
                 *flag = F::ONE;
                 cols.sltu = F::from_bool(b_byte < c_byte);
-                let b_byte = F::from_canonical_u8(*b_byte);
-                let c_byte = F::from_canonical_u8(*c_byte);
+                let b_byte = F::from_u8(*b_byte);
+                let c_byte = F::from_u8(*c_byte);
                 cols.not_eq_inv = (b_byte - c_byte).inverse();
                 cols.comparison_bytes = [b_byte, c_byte];
                 break;
             }
         }
 
-        cols.msb_b = F::from_canonical_u8((b[3] >> 7) & 1);
-        cols.msb_c = F::from_canonical_u8((c[3] >> 7) & 1);
+        cols.msb_b = F::from_u8((b[3] >> 7) & 1);
+        cols.msb_c = F::from_u8((c[3] >> 7) & 1);
         cols.is_sign_eq = if event.opcode == Opcode::SLT {
             F::from_bool((b[3] >> 7) == (c[3] >> 7))
         } else {
@@ -276,7 +276,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &LtCols<AB::Var> = (*local).borrow();
 
         let is_real = local.is_slt + local.is_sltu;
@@ -311,14 +311,14 @@ where
             ByteOpcode::AND.as_field::<AB::F>(),
             local.b_masked,
             local.b[3],
-            AB::F::from_canonical_u8(0x7f),
+            AB::F::from_u8(0x7f),
             is_real.clone(),
         );
         builder.send_byte(
             ByteOpcode::AND.as_field::<AB::F>(),
             local.c_masked,
             local.c[3],
-            AB::F::from_canonical_u8(0x7f),
+            AB::F::from_u8(0x7f),
             is_real.clone(),
         );
 
@@ -327,7 +327,7 @@ where
         builder.assert_eq(local.bit_c, local.msb_c * local.is_slt);
 
         // Assert the correctness of `local.msb_b` and `local.msb_c` using the mask.
-        let inv_128 = AB::F::from_canonical_u32(128).inverse();
+        let inv_128 = AB::F::from_u32(128).inverse();
         builder.assert_eq(local.msb_b, (local.b[3] - local.b_masked) * inv_128);
         builder.assert_eq(local.msb_c, (local.c[3] - local.c_masked) * inv_128);
 
@@ -348,7 +348,7 @@ where
         // Check that `a[0]` is set correctly.
         builder.assert_eq(
             local.a[0],
-            local.bit_b * (AB::Expr::one() - local.bit_c) + local.is_sign_eq * local.sltu,
+            local.bit_b * (AB::Expr::ONE - local.bit_c) + local.is_sign_eq * local.sltu,
         );
         // Check the 3 most significant bytes of 'a' are zero.
         builder.assert_zero(local.a[1]);
@@ -364,7 +364,7 @@ where
         builder.assert_bool(local.byte_flags[2]);
         builder.assert_bool(local.byte_flags[3]);
         builder.assert_bool(sum_flags.clone());
-        builder.when(is_real.clone()).assert_eq(AB::Expr::one() - local.is_comp_eq, sum_flags);
+        builder.when(is_real.clone()).assert_eq(AB::Expr::ONE - local.is_comp_eq, sum_flags);
 
         // Constrain `local.sltu == STLU(b_comp, c_comp)`.
         //
@@ -381,11 +381,11 @@ where
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::zero();
+        let mut is_inequality_visited = AB::Expr::ZERO;
 
         // Expressions for computing the comparison bytes.
-        let mut b_comparison_byte = AB::Expr::zero();
-        let mut c_comparison_byte = AB::Expr::zero();
+        let mut b_comparison_byte = AB::Expr::ZERO;
+        let mut c_comparison_byte = AB::Expr::ZERO;
         // Iterate over the bytes in reverse order and select the differing bytes using the byte
         // flag columns values.
         for (b_byte, c_byte, &flag) in
@@ -445,23 +445,23 @@ where
 
         // Receive the arguments.
         builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            local.is_slt * AB::F::from_canonical_u32(Opcode::SLT as u32)
-                + local.is_sltu * AB::F::from_canonical_u32(Opcode::SLTU as u32),
+            local.next_pc + AB::Expr::from_u32(4),
+            AB::Expr::ZERO,
+            local.is_slt * AB::F::from_u32(Opcode::SLT as u32)
+                + local.is_sltu * AB::F::from_u32(Opcode::SLTU as u32),
             local.a,
             local.b,
             local.c,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
+            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ONE,
             is_real,
         );
     }

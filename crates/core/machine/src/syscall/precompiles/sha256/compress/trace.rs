@@ -138,17 +138,17 @@ impl ShaCompressChip {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
 
             cols.octet[j] = F::ONE;
             cols.octet_num[octet_num_idx] = F::ONE;
             cols.is_initialize = F::ONE;
 
             cols.mem.populate_read(event.h_read_records[j], blu);
-            cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
+            cols.mem_addr = F::from_u32(event.h_ptr + (j * 4) as u32);
 
             cols.a = Word::from(event.h_read_records[0].value);
             cols.b = Word::from(event.h_read_records[1].value);
@@ -180,12 +180,12 @@ impl ShaCompressChip {
             cols.octet[j % 8] = F::ONE;
             cols.octet_num[octet_num_idx] = F::ONE;
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
             cols.mem.populate_read(event.w_i_read_records[j], blu);
-            cols.mem_addr = F::from_canonical_u32(event.w_ptr + (j * 4) as u32);
+            cols.mem_addr = F::from_u32(event.w_ptr + (j * 4) as u32);
 
             let a = h_array[0];
             let b = h_array[1];
@@ -259,10 +259,10 @@ impl ShaCompressChip {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.w_ptr = F::from_canonical_u32(event.w_ptr);
-            cols.h_ptr = F::from_canonical_u32(event.h_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.w_ptr = F::from_u32(event.w_ptr);
+            cols.h_ptr = F::from_u32(event.h_ptr);
 
             cols.octet[j] = F::ONE;
             cols.octet_num[octet_num_idx] = F::ONE;
@@ -270,7 +270,7 @@ impl ShaCompressChip {
 
             cols.finalize_add.populate(blu, og_h[j], h_array[j]);
             cols.mem.populate_write(event.h_write_records[j], blu);
-            cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
+            cols.mem_addr = F::from_u32(event.h_ptr + (j * 4) as u32);
 
             v[j] = h_array[j];
             cols.a = Word::from(v[0]);

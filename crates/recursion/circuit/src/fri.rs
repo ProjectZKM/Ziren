@@ -1,7 +1,8 @@
 use itertools::{izip, Itertools};
 use p3_commit::PolynomialSpace;
-use p3_field::{FieldAlgebra, TwoAdicField};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof};
+use p3_field::{PrimeCharacteristicRing, TwoAdicField};
+use p3_commit::BatchOpening;
+use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::Hash;
 use p3_util::log2_strict_usize;
@@ -16,7 +17,7 @@ use zkm_stark::{InnerChallenge, InnerChallengeMmcs, InnerInputProof, InnerPcsPro
 use crate::{
     challenger::{CanSampleBitsVariable, FieldChallengerVariable},
     CanObserveVariable, CircuitConfig, Ext, FriChallenges, FriCommitPhaseProofStepVariable,
-    FriMmcs, FriProofVariable, KoalaBearFriConfigVariable, TwoAdicPcsRoundVariable,
+    FriMmcs, FriProofVariable, KoalaBearFriParametersVariable, TwoAdicPcsRoundVariable,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -33,10 +34,10 @@ pub struct PolynomialBatchShape {
 
 pub fn verify_shape_and_sample_challenges<
     C: CircuitConfig<F = KoalaBear>,
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
 >(
     builder: &mut Builder<C>,
-    config: &FriConfig<FriMmcs<SC>>,
+    config: &FriParameters<FriMmcs<SC>>,
     proof: &FriProofVariable<C, SC>,
     challenger: &mut SC::FriChallengerVariable,
 ) -> FriChallenges<C> {
@@ -56,8 +57,15 @@ pub fn verify_shape_and_sample_challenges<
         challenger.observe(builder, *felt);
     });
 
+    // Observe log arities to match upstream FRI verifier protocol.
+    // With max_log_arity = 1 (binary folding), every round has log_arity = 1.
+    for _ in 0..proof.commit_phase_commits.len() {
+        let log_arity: Felt<C::F> = builder.eval(C::F::ONE);
+        challenger.observe(builder, log_arity);
+    }
+
     assert_eq!(proof.query_proofs.len(), config.num_queries);
-    challenger.check_witness(builder, config.proof_of_work_bits, proof.pow_witness);
+    challenger.check_witness(builder, config.query_proof_of_work_bits, proof.pow_witness);
 
     let log_max_height = proof.commit_phase_commits.len() + config.log_blowup;
     let query_indices: Vec<Vec<C::Bit>> =
@@ -68,13 +76,25 @@ pub fn verify_shape_and_sample_challenges<
     FriChallenges { query_indices, betas, betas_squared }
 }
 
-pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
+pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>(
     builder: &mut Builder<C>,
-    config: &FriConfig<FriMmcs<SC>>,
+    config: &FriParameters<FriMmcs<SC>>,
     fri_proof: &FriProofVariable<C, SC>,
     challenger: &mut SC::FriChallengerVariable,
     rounds: Vec<TwoAdicPcsRoundVariable<C, SC>>,
 ) {
+    // Observe all opening evaluations before sampling alpha (matches pcs.verify protocol).
+    for round in &rounds {
+        for mat in &round.domains_points_and_opens {
+            for point_values in &mat.values {
+                for &val in point_values {
+                    let felts = C::ext2felt(builder, val);
+                    challenger.observe_slice(builder, felts);
+                }
+            }
+        }
+    }
+
     let alpha = challenger.sample_ext(builder);
 
     let fri_challenges =
@@ -91,7 +111,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfig
     }
 
     // The powers of alpha, where the ith element is alpha^i.
-    let mut alpha_pows: Vec<Ext<C::F, C::EF>> = vec![builder.eval(SymbolicExt::from_f(C::EF::ONE))];
+    let mut alpha_pows: Vec<Ext<C::F, C::EF>> = vec![builder.eval(SymbolicExt::Const(C::EF::ONE))];
 
     // input_proof handler: https://github.com/ProjectZKM/Plonky3/blob/main/fri/src/two_adic_pcs.rs#L375
     let reduced_openings = fri_proof
@@ -102,7 +122,7 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfig
             // The powers of alpha, where the ith element is alpha^i.
             let mut log_height_pow = [0usize; 32];
             let mut ro: [Ext<C::F, C::EF>; 32] =
-                [builder.eval(SymbolicExt::from_f(C::EF::ZERO)); 32];
+                [builder.eval(SymbolicExt::Const(C::EF::ZERO)); 32];
 
             for (batch_opening, round) in zip(&query_proof.input_proof, rounds.iter().cloned()) {
                 let batch_commit = round.batch_commit;
@@ -217,9 +237,9 @@ pub fn verify_two_adic_pcs<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfig
     );
 }
 
-pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
+pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>(
     builder: &mut Builder<C>,
-    config: &FriConfig<FriMmcs<SC>>,
+    config: &FriParameters<FriMmcs<SC>>,
     proof: FriProofVariable<C, SC>,
     challenges: &FriChallenges<C>,
     reduced_openings: Vec<[Ext<C::F, C::EF>; 32]>,
@@ -244,7 +264,7 @@ pub fn verify_challenges<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVa
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
+pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>(
     builder: &mut Builder<C>,
     commit_phase_commits: &[SC::DigestVariable],
     index_bits: &[C::Bit],
@@ -360,7 +380,7 @@ pub fn verify_query<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariabl
     folded_eval
 }
 
-pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>>(
+pub fn verify_batch<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>(
     builder: &mut Builder<C>,
     commit: SC::DigestVariable,
     dimensions: &[usize],
@@ -408,6 +428,11 @@ pub fn dummy_hash() -> Hash<KoalaBear, KoalaBear, DIGEST_SIZE> {
     [KoalaBear::ZERO; DIGEST_SIZE].into()
 }
 
+/// Create a dummy commitment (MerkleCap with a single zero hash).
+pub fn dummy_commit() -> p3_symmetric::MerkleCap<KoalaBear, [KoalaBear; DIGEST_SIZE]> {
+    p3_symmetric::MerkleCap::new(vec![[KoalaBear::ZERO; DIGEST_SIZE]])
+}
+
 pub fn dummy_query_proof(
     height: usize,
     log_blowup: usize,
@@ -435,7 +460,8 @@ pub fn dummy_query_proof(
         input_proof: query_openings,
         commit_phase_openings: (0..height)
             .map(|i| CommitPhaseProofStep {
-                sibling_value: InnerChallenge::ZERO,
+                log_arity: 1,
+                sibling_values: vec![InnerChallenge::ZERO],
                 opening_proof: vec![dummy_hash().into(); height - i + log_blowup - 1],
             })
             .collect(),
@@ -457,10 +483,11 @@ pub fn dummy_pcs_proof(
         .max()
         .unwrap();
     FriProof {
-        commit_phase_commits: vec![dummy_hash(); max_height],
+        commit_phase_commits: vec![dummy_commit(); max_height],
+        commit_pow_witnesses: vec![InnerVal::ZERO; max_height],
         query_proofs: vec![dummy_query_proof(max_height, log_blowup, batch_shapes); fri_queries],
-        final_poly: InnerChallenge::ZERO,
-        pow_witness: InnerVal::ZERO,
+        final_poly: vec![InnerChallenge::ZERO],
+        query_pow_witness: InnerVal::ZERO,
     }
 }
 
@@ -478,15 +505,20 @@ mod tests {
         CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger,
     };
     use p3_commit::{Mmcs, Pcs};
-    use p3_field::{Field, FieldAlgebra};
-    use p3_fri::{
-        verifier, FriGenericConfig, TwoAdicFriGenericConfig, TwoAdicFriGenericConfigForMmcs,
-    };
+    use p3_field::{Field, PrimeCharacteristicRing};
+    use p3_fri::verifier;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_matrix::Dimensions;
     use p3_util::reverse_bits_len;
-    use rand::rngs::OsRng;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::collections::BTreeMap;
+
+    /// Create a random RowMajorMatrix using rand 0.8 compatible approach
+    fn rand_matrix(rows: usize, cols: usize, seed: u64) -> RowMajorMatrix<F> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let values: Vec<F> = (0..rows * cols).map(|_| F::from_u64(rng.gen::<u64>())).collect();
+        RowMajorMatrix::new(values, cols)
+    }
     use zkm_recursion_compiler::{
         circuit::AsmBuilder,
         config::InnerConfig,
@@ -514,7 +546,7 @@ mod tests {
             .commit_phase_commits
             .iter()
             .map(|commit| {
-                let commit: [F; DIGEST_SIZE] = (*commit).into();
+                let commit: [F; DIGEST_SIZE] = commit[0];
                 commit.map(|x| builder.eval(x))
             })
             .collect::<Vec<_>>();
@@ -529,7 +561,7 @@ mod tests {
                     .iter()
                     .map(|commit_phase_opening| {
                         let sibling_value =
-                            builder.eval(SymbolicExt::from_f(commit_phase_opening.sibling_value));
+                            builder.eval(SymbolicExt::Const(commit_phase_opening.sibling_values[0]));
                         let opening_proof = commit_phase_opening
                             .opening_proof
                             .iter()
@@ -571,8 +603,8 @@ mod tests {
         FriProofVariable {
             commit_phase_commits,
             query_proofs,
-            final_poly: builder.eval(SymbolicExt::from_f(fri_proof.final_poly)),
-            pow_witness: builder.eval(fri_proof.pow_witness),
+            final_poly: builder.eval(SymbolicExt::Const(fri_proof.final_poly[0])),
+            pow_witness: builder.eval(fri_proof.query_pow_witness),
         }
     }
 
@@ -583,39 +615,40 @@ mod tests {
         let perm = inner_perm();
         let hash = InnerHash::new(perm.clone());
         let compress = InnerCompress::new(perm);
-        let mmcs = InnerValMmcs::new(hash, compress);
+        let mmcs = InnerValMmcs::new(hash, compress, 0);
 
         let mut builder = Builder::<InnerConfig>::default();
 
-        // 4 mats with 1000 rows, 8 columns
-        let large_mats = (0..4).map(|_| RowMajorMatrix::<F>::rand(&mut OsRng, 1000, 8));
-        let large_mat_heights = (0..4).map(|_| 1000);
+        // 4 mats with 1024 rows, 8 columns
+        let large_mats = (0..4).map(|i| rand_matrix(1024, 8, 0x1000 + i));
+        let large_mat_heights = (0..4).map(|_| 1024);
 
-        // 5 mats with 70 rows, 8 columns
-        let medium_mats = (0..5).map(|_| RowMajorMatrix::<F>::rand(&mut OsRng, 70, 8));
-        let medium_mat_heights = (0..5).map(|_| 70);
+        // 5 mats with 128 rows, 8 columns
+        let medium_mats = (0..5).map(|i| rand_matrix(128, 8, 0x2000 + i));
+        let medium_mat_heights = (0..5).map(|_| 128);
 
         // 6 mats with 8 rows, 8 columns
-        let small_mats = (0..6).map(|_| RowMajorMatrix::<F>::rand(&mut OsRng, 8, 8));
+        let small_mats = (0..6).map(|i| rand_matrix(8, 8, 0x3000 + i));
         let small_mat_heights = (0..6).map(|_| 8);
 
         let (commit, prover_data) =
             mmcs.commit(large_mats.chain(medium_mats).chain(small_mats).collect_vec());
 
-        let commit: [_; DIGEST_SIZE] = commit.into();
-        let commit = commit.map(|x| builder.eval(x));
+        let commit_arr: [_; DIGEST_SIZE] = commit[0];
+        let commit_var = commit_arr.map(|x| builder.eval(x));
         // open the 6th row of each matrix and verify
-        let (opened_values, proof) = mmcs.open_batch(6, &prover_data);
-        let opened_values = opened_values
+        let batch_opening = mmcs.open_batch(6, &prover_data);
+        let (opened_values_raw, proof_raw) = batch_opening.unpack();
+        let opened_values = opened_values_raw
             .into_iter()
             .map(|x| x.into_iter().map(|y| builder.eval::<Felt<_>, _>(y)).collect())
             .collect();
-        let index = builder.eval(F::from_canonical_u32(6));
+        let index = builder.eval(F::from_u32(6));
         let index_bits = C::num2bits(&mut builder, index, 31);
-        let proof = proof.into_iter().map(|p| p.map(|x| builder.eval(x))).collect();
+        let proof = proof_raw.into_iter().map(|p| p.map(|x| builder.eval(x))).collect();
         verify_batch::<_, SC>(
             &mut builder,
-            commit,
+            commit_var,
             &large_mat_heights.chain(medium_mat_heights).chain(small_mat_heights).collect_vec(),
             &index_bits,
             opened_values,
@@ -625,13 +658,13 @@ mod tests {
 
     #[test]
     fn test_fri_verify_shape_and_sample_challenges() {
-        let mut rng = &mut OsRng;
+        let mut seed_counter: u64 = 0x4000;
         let log_degrees = &[16, 9, 7, 4, 2];
         let perm = inner_perm();
         let fri_config = inner_fri_config();
         let hash = InnerHash::new(perm.clone());
         let compress = InnerCompress::new(perm.clone());
-        let val_mmcs = InnerValMmcs::new(hash, compress);
+        let val_mmcs = InnerValMmcs::new(hash, compress, 0);
         let dft = InnerDft::default();
 
         let log_blowup = fri_config.log_blowup;
@@ -646,7 +679,10 @@ mod tests {
                         &pcs,
                         1 << d,
                     ),
-                    RowMajorMatrix::<InnerVal>::rand(&mut rng, 1 << d, 10),
+                    {
+                        seed_counter += 1;
+                        rand_matrix(1 << d, 10, seed_counter)
+                    },
                 )
             })
             .collect::<Vec<_>>();
@@ -655,132 +691,92 @@ mod tests {
             domains_and_polys.clone(),
         );
         let mut challenger = InnerChallenger::new(perm.clone());
-        challenger.observe(commit);
-        let zeta = challenger.sample_ext_element::<InnerChallenge>();
+        challenger.observe(&commit);
+        let zeta = challenger.sample_algebra_element::<InnerChallenge>();
         let points = repeat_with(|| vec![zeta]).take(domains_and_polys.len()).collect::<Vec<_>>();
         let (opening_by_round, proof) = pcs.open(vec![(&data, points)], &mut challenger);
 
         // Verify proof.
         let mut challenger = InnerChallenger::new(perm.clone());
-        challenger.observe(commit);
-        let _: InnerChallenge = challenger.sample();
+        challenger.observe(&commit);
 
-        let alpha: InnerChallenge = challenger.sample_ext_element();
-        let g: TwoAdicFriGenericConfigForMmcs<InnerVal, InnerValMmcs> =
-            TwoAdicFriGenericConfig(std::marker::PhantomData);
+        // Observe all opening evaluations (matches pcs.verify protocol).
+        for mat_openings in &opening_by_round[0] {
+            for point_openings in mat_openings {
+                challenger.observe_algebra_slice(point_openings);
+            }
+        }
 
-        let log_global_max_height = proof.commit_phase_commits.len() + log_blowup;
+        // Sample alpha (inside verify_fri).
+        let _: InnerChallenge = challenger.sample_algebra_element();
 
-        let rounds = izip!(vec![commit], vec![domains_and_polys], opening_by_round,)
-            .map(|(commit, domains_and_polys, openings)| {
-                let claims = domains_and_polys
-                    .iter()
-                    .zip(openings)
-                    .map(|((domain, _), mat_openings)| {
-                        (*domain, vec![(zeta, mat_openings[0].clone())])
-                    })
-                    .collect_vec();
-                (commit, claims)
-            })
-            .collect_vec();
-
+        // Compute expected betas and query indices by replaying the challenger.
         let mut dummy_challenger = challenger.clone();
         let betas_gt: Vec<InnerChallenge> = proof
             .commit_phase_commits
             .iter()
             .map(|comm| {
-                dummy_challenger.observe(*comm);
-                dummy_challenger.sample_ext_element()
+                dummy_challenger.observe(comm);
+                dummy_challenger.sample_algebra_element()
             })
             .collect();
         let mut query_indices_gt: Vec<usize> = vec![];
-        dummy_challenger.observe_ext_element(proof.final_poly);
+        for &coeff in &proof.final_poly {
+            dummy_challenger.observe_algebra_element(coeff);
+        }
 
         let config = inner_fri_config();
         if proof.query_proofs.len() != config.num_queries {
             panic!("Invalid query proofs");
         }
 
+        // Observe log arities before query PoW (matches upstream verifier protocol).
+        let log_arities: Vec<usize> = proof
+            .query_proofs
+            .first()
+            .map(|qp| {
+                qp.commit_phase_openings
+                    .iter()
+                    .map(|o| o.log_arity as usize)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for &log_arity in &log_arities {
+            dummy_challenger.observe(InnerVal::from_usize(log_arity));
+        }
+
         // Check PoW.
-        if !dummy_challenger.check_witness(config.proof_of_work_bits, proof.pow_witness) {
+        if !dummy_challenger.check_witness(config.query_proof_of_work_bits, proof.query_pow_witness) {
             panic!("Invalid witness");
         }
 
-        let log_max_height = proof.commit_phase_commits.len() + config.log_blowup;
+        let total_log_reduction: usize = log_arities.iter().sum();
+        let log_max_height = total_log_reduction + config.log_blowup;
 
         for _qp in &proof.query_proofs {
-            let index = dummy_challenger.sample_bits(log_max_height + <TwoAdicFriGenericConfigForMmcs<InnerVal, InnerValMmcs> as FriGenericConfig<InnerVal>>::extra_query_index_bits(&g));
+            let index = dummy_challenger.sample_bits(log_max_height);
             query_indices_gt.push(index);
         }
         drop(dummy_challenger);
 
-        verifier::verify(&g, &config, &proof, &mut challenger, |index, input_proof| {
-            // TODO: separate this out into functions
-
-            // log_height -> (alpha_pow, reduced_opening)
-            let mut reduced_openings = BTreeMap::<usize, (InnerChallenge, InnerChallenge)>::new();
-
-            for (batch_opening, (batch_commit, mats)) in izip!(input_proof, &rounds) {
-                let batch_heights =
-                    mats.iter().map(|(domain, _)| domain.size() << log_blowup).collect_vec();
-                let batch_dims = batch_heights
-                    .iter()
-                    // TODO: MMCS doesn't really need width; we put 0 for now.
-                    .map(|&height| Dimensions { width: 0, height })
-                    .collect_vec();
-
-                let batch_max_height = batch_heights.iter().max().expect("Empty batch?");
-                let log_batch_max_height = log2_strict_usize(*batch_max_height);
-                let bits_reduced = log_global_max_height - log_batch_max_height;
-                let reduced_index = index >> bits_reduced;
-
-                val_mmcs
-                    .verify_batch(
-                        batch_commit,
-                        &batch_dims,
-                        reduced_index,
-                        &batch_opening.opened_values,
-                        &batch_opening.opening_proof,
-                    )
-                    .unwrap();
-                for (mat_opening, (mat_domain, mat_points_and_values)) in
-                    izip!(&batch_opening.opened_values, mats)
-                {
-                    let log_height = log2_strict_usize(mat_domain.size()) + log_blowup;
-
-                    let bits_reduced = log_global_max_height - log_height;
-                    let rev_reduced_index = reverse_bits_len(index >> bits_reduced, log_height);
-
-                    // todo: this can be nicer with domain methods?
-
-                    let x = InnerVal::GENERATOR
-                        * InnerVal::two_adic_generator(log_height)
-                            .exp_u64(rev_reduced_index as u64);
-
-                    let (alpha_pow, ro) = reduced_openings
-                        .entry(log_height)
-                        .or_insert((InnerChallenge::ONE, InnerChallenge::ZERO));
-
-                    for (z, ps_at_z) in mat_points_and_values {
-                        for (&p_at_x, &p_at_z) in izip!(mat_opening, ps_at_z) {
-                            let quotient = (-p_at_z + p_at_x) / (-*z + x);
-                            *ro += *alpha_pow * quotient;
-                            *alpha_pow *= alpha;
-                        }
-                    }
-                }
-            }
-            if let Some((_alpha_pow, ro)) = reduced_openings.remove(&log_blowup) {
-                debug_assert!(ro.is_zero());
-            }
-
-            Ok(reduced_openings
-                .into_iter()
-                .rev()
-                .map(|(log_height, (_alpha_pow, ro))| (log_height, ro))
-                .collect())
-        })
-        .unwrap();
+        // Verify the proof using the PCS verifier.
+        {
+            let rounds = izip!(vec![commit.clone()], vec![domains_and_polys.clone()], opening_by_round.clone())
+                .map(|(commit, domains_and_polys, openings)| {
+                    let claims = domains_and_polys
+                        .iter()
+                        .zip(openings)
+                        .map(|((domain, _), mat_openings)| {
+                            (*domain, vec![(zeta, mat_openings[0].clone())])
+                        })
+                        .collect_vec();
+                    (commit, claims)
+                })
+                .collect_vec();
+            let mut verify_challenger = InnerChallenger::new(perm.clone());
+            verify_challenger.observe(&commit);
+            pcs.verify(rounds, &proof, &mut verify_challenger).unwrap();
+        }
 
         // Define circuit.
         let mut builder = Builder::<InnerConfig>::default();
@@ -788,9 +784,27 @@ mod tests {
         let fri_proof = const_fri_proof(&mut builder, proof);
 
         let mut challenger = DuplexChallengerVariable::new(&mut builder);
-        let commit: [_; DIGEST_SIZE] = commit.into();
-        let commit: [Felt<InnerVal>; DIGEST_SIZE] = commit.map(|x| builder.eval(x));
-        challenger.observe_slice(&mut builder, commit);
+        let commit_arr: [_; DIGEST_SIZE] = commit[0];
+        let commit_felts: [Felt<InnerVal>; DIGEST_SIZE] = commit_arr.map(|x| builder.eval(x));
+        challenger.observe_slice(&mut builder, commit_felts);
+
+        // Observe all opening evaluations (matches pcs.verify protocol).
+        for mat_openings in &opening_by_round[0] {
+            for point_openings in mat_openings {
+                for &val in point_openings {
+                    // Each InnerChallenge has 4 base field coefficients.
+                    let basis: Vec<InnerVal> = (0..4)
+                        .map(|i| <InnerChallenge as p3_field::BasedVectorSpace<InnerVal>>::as_basis_coefficients_slice(&val)[i])
+                        .collect();
+                    for b in basis {
+                        let felt: Felt<InnerVal> = builder.eval(b);
+                        challenger.observe(&mut builder, felt);
+                    }
+                }
+            }
+        }
+
+        // Sample alpha (inside verify_fri).
         let _ = challenger.sample_ext(&mut builder);
         let fri_challenges = verify_shape_and_sample_challenges::<InnerConfig, KoalaBearPoseidon2>(
             &mut builder,
@@ -801,14 +815,14 @@ mod tests {
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..betas_gt.len() {
-            builder.assert_ext_eq(SymbolicExt::from_f(betas_gt[i]), fri_challenges.betas[i]);
+            builder.assert_ext_eq(SymbolicExt::Const(betas_gt[i]), fri_challenges.betas[i]);
         }
 
         #[allow(clippy::needless_range_loop)]
         for i in 0..query_indices_gt.len() {
             let query_indices =
                 C::bits2num(&mut builder, fri_challenges.query_indices[i].iter().cloned());
-            builder.assert_felt_eq(F::from_canonical_usize(query_indices_gt[i]), query_indices);
+            builder.assert_felt_eq(F::from_usize(query_indices_gt[i]), query_indices);
         }
 
         run_test_recursion(builder.into_operations(), None);
@@ -822,7 +836,7 @@ mod tests {
         let fri_config = inner_fri_config();
         let hash = InnerHash::new(perm.clone());
         let compress = InnerCompress::new(perm.clone());
-        let val_mmcs = InnerValMmcs::new(hash, compress);
+        let val_mmcs = InnerValMmcs::new(hash, compress, 0);
         let dft = InnerDft::default();
         let pcs: InnerPcs = InnerPcs::new(dft, val_mmcs, fri_config);
 
@@ -830,7 +844,7 @@ mod tests {
             let mut mat_vec: Vec<_> = vec![];
 
             for i in 0..(1 << d) * 100 {
-                mat_vec.push(InnerVal::from_canonical_u32(i));
+                mat_vec.push(InnerVal::from_u32(i));
             }
             RowMajorMatrix::<InnerVal>::new(mat_vec, 100)
         };
@@ -854,21 +868,21 @@ mod tests {
             domains_and_polys.clone(),
         );
         let mut challenger = InnerChallenger::new(perm.clone());
-        challenger.observe(commit);
-        let zeta = challenger.sample_ext_element::<InnerChallenge>();
+        challenger.observe(&commit);
+        let zeta = challenger.sample_algebra_element::<InnerChallenge>();
         let points = domains_and_polys.iter().map(|_| vec![zeta]).collect::<Vec<_>>();
         let (opening, proof) = pcs.open(vec![(&data, points)], &mut challenger);
 
         // Verify proof.
         let mut challenger = InnerChallenger::new(perm.clone());
-        challenger.observe(commit);
-        let x1 = challenger.sample_ext_element::<InnerChallenge>();
+        challenger.observe(&commit);
+        let x1 = challenger.sample_algebra_element::<InnerChallenge>();
         let os = domains_and_polys
             .iter()
             .zip(&opening[0])
             .map(|((domain, _), mat_openings)| (*domain, vec![(zeta, mat_openings[0].clone())]))
             .collect::<Vec<_>>();
-        pcs.verify(vec![(commit, os.clone())], &proof, &mut challenger).unwrap();
+        pcs.verify(vec![(commit.clone(), os.clone())], &proof, &mut challenger).unwrap();
 
         let batch_shapes = vec![PolynomialBatchShape {
             shapes: log_degrees

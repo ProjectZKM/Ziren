@@ -17,7 +17,7 @@ use zkm_stark::air::ZKMAirBuilder;
 
 use super::{field_op::FieldOpCols, range::FieldLtCols};
 use crate::air::WordAirBuilder;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 /// A set of columns to compute the square root in emulated arithmetic.
 ///
@@ -66,7 +66,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
         self.range.populate(record, &sqrt, &modulus);
 
         let sqrt_bytes = P::to_limbs(&sqrt);
-        self.lsb = F::from_canonical_u8(sqrt_bytes[0] & 1);
+        self.lsb = F::from_u8(sqrt_bytes[0] & 1);
 
         let and_event = ByteLookupEvent {
             opcode: ByteOpcode::AND,
@@ -144,6 +144,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use p3_air::WindowAccess;
     use num::{BigUint, One};
     use p3_air::BaseAir;
     use p3_field::{Field, PrimeField32};
@@ -158,7 +159,7 @@ mod tests {
     };
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
@@ -259,7 +260,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
 
             // eval verifies that local.sqrt.result is indeed the square root of local.a.

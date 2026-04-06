@@ -10,7 +10,7 @@ use crate::{air::LookupScope, AirOpenedValues, ChipOpenedValues, ShardOpenedValu
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, ExtensionField, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
@@ -218,7 +218,7 @@ where
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC::Val: PrimeField32,
     Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
+    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: Clone,
 {
@@ -325,12 +325,12 @@ where
         // Obtain the challenges used for the local permutation argument.
         let mut local_permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
-            local_permutation_challenges.push(challenger.sample_ext_element());
+            local_permutation_challenges.push(challenger.sample_algebra_element());
         }
 
         let packed_perm_challenges = local_permutation_challenges
             .iter()
-            .map(|c| PackedChallenge::<SC>::from_f(*c))
+            .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
         // Generate the permutation traces.
@@ -355,8 +355,8 @@ where
                         let main_trace_size = main_trace.height() * main_trace.width();
                         let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
                         SepticDigest(SepticCurve {
-                            x: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i]),
-                            y: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i + 7]),
+                            x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| last_row[i]),
+                            y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| last_row[i + 7]),
                         })
                     };
                     ((perm_trace, preprocessed_trace), (global_sum, local_sum))
@@ -372,13 +372,13 @@ where
             let permutation_width = permutation_traces[i].width();
             let total_width = trace_width
                 + prep_width
-                + permutation_width * <SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D;
+                + permutation_width * <SC::Challenge as BasedVectorSpace<SC::Val>>::DIMENSION;
             tracing::debug!(
                 "{:<15} | Main Cols = {:<5} | Pre Cols = {:<5}  | Perm Cols = {:<5} | Rows = {:<5} | Cells = {:<10}",
                 chips[i].name(),
                 trace_width,
                 prep_width,
-                permutation_width * <SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D,
+                permutation_width * <SC::Challenge as BasedVectorSpace<SC::Val>>::DIMENSION,
                 trace_height,
                 total_width * trace_height,
             );
@@ -407,7 +407,7 @@ where
         for (local_sum, global_sum) in
             local_cumulative_sums.iter().zip(global_cumulative_sums.iter())
         {
-            challenger.observe_slice(local_sum.as_base_slice());
+            challenger.observe_slice(local_sum.as_basis_coefficients_slice());
             challenger.observe_slice(&global_sum.0.x.0);
             challenger.observe_slice(&global_sum.0.y.0);
         }
@@ -423,7 +423,7 @@ where
             .collect::<Vec<_>>();
 
         // Compute the quotient values.
-        let alpha: SC::Challenge = challenger.sample_ext_element::<SC::Challenge>();
+        let alpha: SC::Challenge = challenger.sample_algebra_element::<SC::Challenge>();
         let parent_span = tracing::debug_span!("compute quotient values");
         let quotient_values = parent_span.in_scope(|| {
             quotient_domains
@@ -451,7 +451,7 @@ where
                             // 1. Generate sequence [α⁰, α¹, ..., α^(n-1)] where n = chip_num_constraints.
                             // 2. Reverse to [α^(n-1), ..., α¹, α⁰] to align with Horner's method in the verifier.
                             let powers_of_alpha =
-                                alpha.powers().take(*chip_num_constraints).collect::<Vec<_>>();
+                                alpha.powers().collect_n(*chip_num_constraints);
                             let mut powers_of_alpha_rev = powers_of_alpha.clone();
                             powers_of_alpha_rev.reverse();
 
@@ -498,7 +498,7 @@ where
         challenger.observe(quotient_commit.clone());
 
         // Compute the quotient argument.
-        let zeta: SC::Challenge = challenger.sample_ext_element();
+        let zeta: SC::Challenge = challenger.sample_algebra_element();
 
         let preprocessed_opening_points =
             tracing::debug_span!("compute preprocessed opening points").in_scope(|| {
@@ -696,7 +696,7 @@ where
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>
 where
     SC: 'static + StarkGenericConfig + Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
+    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     Com<SC>: Send + Sync,
 {
     fn preprocessed_commit(&self) -> Com<SC> {

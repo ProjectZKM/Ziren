@@ -2,9 +2,9 @@ use std::borrow::Borrow;
 
 use p3_challenger::DuplexChallenger;
 use p3_koala_bear::KoalaBear;
-use p3_symmetric::Hash;
+use p3_symmetric::{Hash, MerkleCap};
 
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::Builder;
 use zkm_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
@@ -19,7 +19,7 @@ use crate::{
     merkle_tree::MerkleProof,
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    CircuitConfig, FriProofVariable, KoalaBearFriConfigVariable, VerifyingKeyVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
 use super::{
@@ -78,7 +78,29 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
+impl<C, F, W, const DIGEST_ELEMENTS: usize> Witnessable<C> for MerkleCap<F, [W; DIGEST_ELEMENTS]>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    W: Witnessable<C> + Copy,
+    [W; DIGEST_ELEMENTS]: Borrow<[W; DIGEST_ELEMENTS]>,
+{
+    type WitnessVariable = [W::WitnessVariable; DIGEST_ELEMENTS];
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        // MerkleCap with cap_height=0 has exactly one digest entry.
+        let cap: &[[W; DIGEST_ELEMENTS]] = self.borrow();
+        assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
+        cap[0].read(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        let cap: &[[W; DIGEST_ELEMENTS]] = self.borrow();
+        assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
+        cap[0].write(witness);
+    }
+}
+
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
     Witnessable<C> for StarkVerifyingKey<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
@@ -90,7 +112,9 @@ where
         let commitment = self.commit.read(builder);
         let pc_start = self.pc_start.read(builder);
         let initial_global_cumulative_sum = self.initial_global_cumulative_sum.read(builder);
-        let chip_information = self.chip_information.clone();
+        let chip_information = self.chip_information.iter().map(|(name, ser_domain, dims)| {
+            (name.clone(), ser_domain.to_coset(), p3_matrix::Dimensions { width: dims.0, height: dims.1 })
+        }).collect();
         let chip_ordering = self.chip_ordering.clone();
         VerifyingKeyVariable {
             commitment,
@@ -132,7 +156,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
     Witnessable<C> for ZKMCompressWitnessValues<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
@@ -235,7 +259,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear>, SC: KoalaBearFriConfigVariable<C>> Witnessable<C>
+impl<C: CircuitConfig<F = KoalaBear>, SC: KoalaBearFriParametersVariable<C>> Witnessable<C>
     for ZKMMerkleProofWitnessValues<SC>
 where
     // This trait bound is redundant, but Rust-Analyzer is not able to infer it.

@@ -49,8 +49,8 @@ use core::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
@@ -225,13 +225,13 @@ impl ShiftRightChip {
     ) {
         // Initialize cols with basic operands and flags derived from the current event.
         {
-            cols.pc = F::from_canonical_u32(event.pc);
-            cols.next_pc = F::from_canonical_u32(event.next_pc);
+            cols.pc = F::from_u32(event.pc);
+            cols.next_pc = F::from_u32(event.next_pc);
             cols.a = Word::from(event.a);
             cols.b = Word::from(event.b);
             cols.c = Word::from(event.c);
 
-            cols.b_msb = F::from_canonical_u32((event.b >> 31) & 1);
+            cols.b_msb = F::from_u32((event.b >> 31) & 1);
 
             cols.is_srl = F::from_bool(event.opcode == Opcode::SRL);
             cols.is_sra = F::from_bool(event.opcode == Opcode::SRA);
@@ -240,7 +240,7 @@ impl ShiftRightChip {
             cols.is_real = F::ONE;
 
             for i in 0..BYTE_SIZE {
-                cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
+                cols.c_least_sig_byte[i] = F::from_u32((event.c >> i) & 1);
             }
 
             // Insert the MSB lookup event.
@@ -279,7 +279,7 @@ impl ShiftRightChip {
                     byte_shift_result[i] = sign_extended_b[i + num_bytes_to_shift];
                 }
             }
-            cols.byte_shift_result = byte_shift_result.map(F::from_canonical_u8);
+            cols.byte_shift_result = byte_shift_result.map(F::from_u8);
         }
 
         // Bit shifting.
@@ -309,10 +309,10 @@ impl ShiftRightChip {
                 bit_shift_result[i] = ((shift as u32 + last_carry * carry_multiplier) & 0xff) as u8;
                 last_carry = carry as u32;
             }
-            cols.bit_shift_result = bit_shift_result.map(F::from_canonical_u8);
-            cols.shr_carry_output_carry = shr_carry_output_carry.map(F::from_canonical_u8);
+            cols.bit_shift_result = bit_shift_result.map(F::from_u8);
+            cols.shr_carry_output_carry = shr_carry_output_carry.map(F::from_u8);
             cols.shr_carry_output_shifted_byte =
-                shr_carry_output_shifted_byte.map(F::from_canonical_u8);
+                shr_carry_output_shifted_byte.map(F::from_u8);
             for i in 0..WORD_SIZE {
                 debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
             }
@@ -337,7 +337,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShiftRightCols<AB::Var> = (*local).borrow();
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
@@ -345,7 +345,7 @@ where
         // Check that the MSB of most_significant_byte matches local.b_msb using lookup.
         {
             let byte = local.b[WORD_SIZE - 1];
-            let opcode = AB::F::from_canonical_u32(ByteOpcode::MSB as u32);
+            let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             let msb = local.b_msb;
             builder.send_byte(opcode, msb, byte, zero.clone(), local.is_real);
         }
@@ -353,9 +353,9 @@ where
         // Calculate the number of bits and bytes to shift by from c.
         {
             // The sum of c_least_sig_byte[i] * 2^i must match c[0].
-            let mut c_byte_sum = AB::Expr::zero();
+            let mut c_byte_sum = AB::Expr::ZERO;
             for i in 0..BYTE_SIZE {
-                let val: AB::Expr = AB::F::from_canonical_u32(1 << i).into();
+                let val: AB::Expr = AB::F::from_u32(1 << i).into();
                 c_byte_sum = c_byte_sum.clone() + val * local.c_least_sig_byte[i];
             }
             builder.assert_eq(c_byte_sum, local.c[0]);
@@ -364,15 +364,15 @@ where
 
             // The 3-bit number represented by the 3 least significant bits of c equals the number
             // of bits to shift.
-            let mut num_bits_to_shift = AB::Expr::zero();
+            let mut num_bits_to_shift = AB::Expr::ZERO;
             for i in 0..3 {
                 num_bits_to_shift = num_bits_to_shift.clone()
-                    + local.c_least_sig_byte[i] * AB::F::from_canonical_u32(1 << i);
+                    + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
             }
             for i in 0..BYTE_SIZE {
                 builder
                     .when(local.shift_by_n_bits[i])
-                    .assert_eq(num_bits_to_shift.clone(), AB::F::from_canonical_usize(i));
+                    .assert_eq(num_bits_to_shift.clone(), AB::F::from_usize(i));
             }
 
             // Exactly one of the shift_by_n_bits must be 1.
@@ -384,13 +384,13 @@ where
             // The 2-bit number represented by the 3rd and 4th least significant bits of c is the
             // number of bytes to shift.
             let num_bytes_to_shift = local.c_least_sig_byte[3]
-                + local.c_least_sig_byte[4] * AB::F::from_canonical_u32(2);
+                + local.c_least_sig_byte[4] * AB::F::from_u32(2);
 
             // If shift_by_n_bytes[i] = 1, then i = num_bytes_to_shift.
             for i in 0..WORD_SIZE {
                 builder
                     .when(local.shift_by_n_bytes[i])
-                    .assert_eq(num_bytes_to_shift.clone(), AB::F::from_canonical_usize(i));
+                    .assert_eq(num_bytes_to_shift.clone(), AB::F::from_usize(i));
             }
 
             // Exactly one of the shift_by_n_bytes must be 1.
@@ -408,7 +408,7 @@ where
                 sign_extended_b.push(local.b[i].into());
             }
             for i in 0..WORD_SIZE {
-                let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_canonical_u8(0xff)
+                let leading_byte = local.is_sra * local.b_msb * AB::Expr::from_u8(0xff)
                     + local.is_ror * local.b[i].into();
                 sign_extended_b.push(leading_byte.clone());
             }
@@ -427,24 +427,24 @@ where
         // Bit shift the byte_shift_result using ShrCarry, and compare the result to a.
         {
             // The carry multiplier is 2^(8 - num_bits_to_shift).
-            let mut carry_multiplier = AB::Expr::from_canonical_u8(0);
+            let mut carry_multiplier = AB::Expr::from_u8(0);
             for i in 0..BYTE_SIZE {
                 carry_multiplier = carry_multiplier.clone()
-                    + AB::Expr::from_canonical_u32(1u32 << (8 - i)) * local.shift_by_n_bits[i];
+                    + AB::Expr::from_u32(1u32 << (8 - i)) * local.shift_by_n_bits[i];
             }
 
             // The 3-bit number represented by the 3 least significant bits of c equals the number
             // of bits to shift.
-            let mut num_bits_to_shift = AB::Expr::zero();
+            let mut num_bits_to_shift = AB::Expr::ZERO;
             for i in 0..3 {
                 num_bits_to_shift = num_bits_to_shift.clone()
-                    + local.c_least_sig_byte[i] * AB::F::from_canonical_u32(1 << i);
+                    + local.c_least_sig_byte[i] * AB::F::from_u32(1 << i);
             }
 
             // Calculate ShrCarry.
             for i in (0..LONG_WORD_SIZE).rev() {
                 builder.send_byte_pair(
-                    AB::F::from_canonical_u32(ByteOpcode::ShrCarry as u32),
+                    AB::F::from_u32(ByteOpcode::ShrCarry as u32),
                     local.shr_carry_output_shifted_byte[i],
                     local.shr_carry_output_carry[i],
                     local.byte_shift_result[i],
@@ -513,24 +513,24 @@ where
 
         // Receive the arguments.
         builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
-            local.is_srl * AB::F::from_canonical_u32(Opcode::SRL as u32)
-                + local.is_sra * AB::F::from_canonical_u32(Opcode::SRA as u32)
-                + local.is_ror * AB::F::from_canonical_u32(Opcode::ROR as u32),
+            local.next_pc + AB::Expr::from_u32(4),
+            AB::Expr::ZERO,
+            local.is_srl * AB::F::from_u32(Opcode::SRL as u32)
+                + local.is_sra * AB::F::from_u32(Opcode::SRA as u32)
+                + local.is_ror * AB::F::from_u32(Opcode::ROR as u32),
             local.a,
             local.b,
             local.c,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
+            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ONE,
             local.is_real,
         );
     }

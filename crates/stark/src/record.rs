@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 /// A record that can be proven by a machine.
 pub trait MachineRecord: Default + Sized + Send + Sync + Clone {
@@ -14,5 +14,5 @@ pub trait MachineRecord: Default + Sized + Send + Sync + Clone {
     fn append(&mut self, other: &mut Self);
 
     /// Returns the public values of the record.
-    fn public_values<F: FieldAlgebra>(&self) -> Vec<F>;
+    fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F>;
 }

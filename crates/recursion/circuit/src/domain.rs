@@ -1,5 +1,6 @@
-use p3_commit::{LagrangeSelectors, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
+use p3_commit::{LagrangeSelectors, PolynomialSpace};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, TwoAdicField};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
 use zkm_recursion_compiler::prelude::*;
 
 /// Reference: [p3_commit::PolynomialSpace]
@@ -38,7 +39,7 @@ where
         builder: &mut Builder<C>,
         point: Ext<<C as Config>::F, <C as Config>::EF>,
     ) -> Ext<<C as Config>::F, <C as Config>::EF> {
-        let g = C::F::two_adic_generator(self.log_n);
+        let g = C::F::two_adic_generator(self.log_size());
         // let g: Felt<_> = builder.eval(g);
         builder.eval(point * g)
     }
@@ -48,18 +49,18 @@ where
         builder: &mut Builder<C>,
         point: Ext<<C as Config>::F, <C as Config>::EF>,
     ) -> LagrangeSelectors<Ext<<C as Config>::F, <C as Config>::EF>> {
-        let unshifted_point: Ext<_, _> = builder.eval(point * self.shift.inverse());
+        let unshifted_point: Ext<_, _> = builder.eval(point * self.shift().inverse());
         let z_h_expr = builder
-            .exp_power_of_2_v::<Ext<_, _>>(unshifted_point, Usize::Const(self.log_n))
+            .exp_power_of_2_v::<Ext<_, _>>(unshifted_point, Usize::Const(self.log_size()))
             - C::EF::ONE;
         let z_h: Ext<_, _> = builder.eval(z_h_expr);
-        let g = C::F::two_adic_generator(self.log_n);
+        let g = C::F::two_adic_generator(self.log_size());
         let ginv = g.inverse();
         LagrangeSelectors {
             is_first_row: builder.eval(z_h / (unshifted_point - C::EF::ONE)),
             is_last_row: builder.eval(z_h / (unshifted_point - ginv)),
             is_transition: builder.eval(unshifted_point - ginv),
-            inv_zeroifier: builder.eval(z_h.inverse()),
+            inv_vanishing: builder.eval(z_h.inverse()),
         }
     }
 
@@ -70,10 +71,10 @@ where
     ) -> Ext<<C as Config>::F, <C as Config>::EF> {
         let unshifted_power = builder.exp_power_of_2_v::<Ext<_, _>>(
             point
-                * C::EF::from_base_slice(&[self.shift, C::F::ZERO, C::F::ZERO, C::F::ZERO])
+                * C::EF::from_basis_coefficients_slice(&[self.shift(), C::F::ZERO, C::F::ZERO, C::F::ZERO]).unwrap()
                     .inverse()
                     .cons(),
-            Usize::Const(self.log_n),
+            Usize::Const(self.log_size()),
         );
         builder.eval(unshifted_power - C::EF::ONE)
     }
@@ -83,7 +84,7 @@ where
         point: Felt<<C as Config>::F>,
     ) -> Felt<<C as Config>::F> {
         let unshifted_power = builder
-            .exp_power_of_2_v::<Felt<_>>(point * self.shift.inverse(), Usize::Const(self.log_n));
+            .exp_power_of_2_v::<Felt<_>>(point * self.shift().inverse(), Usize::Const(self.log_size()));
         builder.eval(unshifted_power - C::F::ONE)
     }
 }

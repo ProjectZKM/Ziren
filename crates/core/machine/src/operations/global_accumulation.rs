@@ -1,8 +1,8 @@
 use crate::operations::GlobalLookupOperation;
 use p3_air::AirBuilder;
 use p3_field::Field;
-use p3_field::FieldAlgebra;
-use p3_field::FieldExtensionAlgebra;
+use p3_field::PrimeCharacteristicRing;
+use p3_field::{ExtensionField, BasedVectorSpace};
 use p3_field::PrimeField32;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::BaseAirBuilder;
@@ -192,10 +192,10 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             // Now we can constrain that when `local_is_real[i] == 1`, the two `sum_checker` values are both zero.
             builder
                 .when(local_is_real[i])
-                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::zero());
+                .assert_septic_ext_eq(witnessed_sum_checker_x, SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO));
             builder
                 .when(local_is_real[i])
-                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::zero());
+                .assert_septic_ext_eq(sum_checker_y, SepticExtension::<AB::Expr>::from_base_fn(|_| AB::Expr::ZERO));
 
             // If `is_real == 0`, current_sum == next_sum must hold.
             builder

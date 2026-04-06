@@ -4,8 +4,9 @@ use crate::{Com, StarkGenericConfig, ZeroCommitment};
 use p3_challenger::DuplexChallenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_field::{extension::BinomialExtensionField, Field, PrimeCharacteristicRing};
+use p3_commit::BatchOpening;
+use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
@@ -27,6 +28,7 @@ pub type InnerValMmcs = MerkleTreeMmcs<
     <InnerVal as Field>::Packing,
     InnerHash,
     InnerCompress,
+    2,
     8,
 >;
 pub type InnerChallengeMmcs = ExtensionMmcs<InnerVal, InnerChallenge, InnerValMmcs>;
@@ -51,31 +53,31 @@ pub fn inner_perm() -> InnerPerm {
 
 /// The FRI config for Ziren proofs.
 #[must_use]
-pub fn zkm_fri_config() -> FriConfig<InnerChallengeMmcs> {
+pub fn zkm_fri_config() -> FriParameters<InnerChallengeMmcs> {
     let perm = inner_perm();
     let hash = InnerHash::new(perm.clone());
     let compress = InnerCompress::new(perm.clone());
-    let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress));
+    let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress, 0));
     let num_queries = match std::env::var("FRI_QUERIES") {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 84,
     };
-    FriConfig { log_blowup: 1, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 /// The FRI config for inner recursion.
 /// This targets by default 100 bits of security.
 #[must_use]
-pub fn inner_fri_config() -> FriConfig<InnerChallengeMmcs> {
+pub fn inner_fri_config() -> FriParameters<InnerChallengeMmcs> {
     let perm = inner_perm();
     let hash = InnerHash::new(perm.clone());
     let compress = InnerCompress::new(perm.clone());
-    let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress));
+    let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress, 0));
     let num_queries = match std::env::var("FRI_QUERIES") {
         Ok(value) => value.parse().unwrap(),
         Err(_) => 84,
     };
-    FriConfig { log_blowup: 1, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+    FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
 }
 
 /// The recursion config used for recursive reduce circuit.
@@ -113,7 +115,7 @@ impl KoalaBearPoseidon2Inner {
         let perm = inner_perm();
         let hash = InnerHash::new(perm.clone());
         let compress = InnerCompress::new(perm.clone());
-        let val_mmcs = InnerValMmcs::new(hash, compress);
+        let val_mmcs = InnerValMmcs::new(hash, compress, 0);
         let dft = InnerDft::default();
 
         let fri_config = inner_fri_config();
@@ -146,7 +148,7 @@ impl StarkGenericConfig for KoalaBearPoseidon2Inner {
 
 impl ZeroCommitment<KoalaBearPoseidon2Inner> for InnerPcs {
     fn zero_commitment(&self) -> Com<KoalaBearPoseidon2Inner> {
-        InnerDigestHash::from([InnerVal::ZERO; DIGEST_SIZE])
+        InnerDigestHash::from([InnerVal::ZERO; DIGEST_SIZE]).into()
     }
 }
 
@@ -155,8 +157,8 @@ pub mod koala_bear_poseidon2 {
     use p3_challenger::DuplexChallenger;
     use p3_commit::ExtensionMmcs;
     use p3_dft::Radix2DitParallel;
-    use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
-    use p3_fri::{FriConfig, TwoAdicFriPcs};
+    use p3_field::{extension::BinomialExtensionField, Field, PrimeCharacteristicRing};
+    use p3_fri::{FriParameters, TwoAdicFriPcs};
     use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
     use p3_merkle_tree::MerkleTreeMmcs;
     use p3_poseidon2::ExternalLayerConstants;
@@ -174,7 +176,7 @@ pub mod koala_bear_poseidon2 {
     pub type DigestHash = Hash<Val, Val, DIGEST_SIZE>;
     pub type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
     pub type ValMmcs =
-        MerkleTreeMmcs<<Val as Field>::Packing, <Val as Field>::Packing, MyHash, MyCompress, 8>;
+        MerkleTreeMmcs<<Val as Field>::Packing, <Val as Field>::Packing, MyHash, MyCompress, 2, 8>;
     pub type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
     pub type Dft = Radix2DitParallel<Val>;
     pub type Challenger = DuplexChallenger<Val, Perm, 16, 8>;
@@ -200,44 +202,44 @@ pub mod koala_bear_poseidon2 {
 
     #[must_use]
     /// This targets by default 100 bits of security.
-    pub fn default_fri_config() -> FriConfig<ChallengeMmcs> {
+    pub fn default_fri_config() -> FriParameters<ChallengeMmcs> {
         let perm = my_perm();
         let hash = MyHash::new(perm.clone());
         let compress = MyCompress::new(perm.clone());
-        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress));
+        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress, 0));
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 84,
         };
-        FriConfig { log_blowup: 1, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+        FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
     }
 
     #[must_use]
     /// This targets by default 100 bits of security.
-    pub fn compressed_fri_config() -> FriConfig<ChallengeMmcs> {
+    pub fn compressed_fri_config() -> FriParameters<ChallengeMmcs> {
         let perm = my_perm();
         let hash = MyHash::new(perm.clone());
         let compress = MyCompress::new(perm.clone());
-        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress));
+        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress, 0));
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 42,
         };
-        FriConfig { log_blowup: 2, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+        FriParameters { log_blowup: 2, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
     }
 
     #[must_use]
     /// This targets by default 100 bits of security.
-    pub fn ultra_compressed_fri_config() -> FriConfig<ChallengeMmcs> {
+    pub fn ultra_compressed_fri_config() -> FriParameters<ChallengeMmcs> {
         let perm = my_perm();
         let hash = MyHash::new(perm.clone());
         let compress = MyCompress::new(perm.clone());
-        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress));
+        let challenge_mmcs = ChallengeMmcs::new(ValMmcs::new(hash, compress, 0));
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(value) => value.parse().unwrap(),
             Err(_) => 28,
         };
-        FriConfig { log_blowup: 3, num_queries, proof_of_work_bits: 16, mmcs: challenge_mmcs }
+        FriParameters { log_blowup: 3, log_final_poly_len: 0, max_log_arity: 1, num_queries, commit_proof_of_work_bits: 0, query_proof_of_work_bits: 16, mmcs: challenge_mmcs }
     }
 
     enum KoalaBearPoseidon2Type {
@@ -250,6 +252,7 @@ pub mod koala_bear_poseidon2 {
     pub struct KoalaBearPoseidon2 {
         pub perm: Perm,
         pcs: Pcs,
+        fri_config: FriParameters<ChallengeMmcs>,
         config_type: KoalaBearPoseidon2Type,
     }
 
@@ -259,11 +262,11 @@ pub mod koala_bear_poseidon2 {
             let perm = my_perm();
             let hash = MyHash::new(perm.clone());
             let compress = MyCompress::new(perm.clone());
-            let val_mmcs = ValMmcs::new(hash, compress);
+            let val_mmcs = ValMmcs::new(hash, compress, 0);
             let dft = Dft::default();
             let fri_config = default_fri_config();
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            Self { pcs, perm, config_type: KoalaBearPoseidon2Type::Default }
+            let pcs = Pcs::new(dft, val_mmcs, fri_config.clone());
+            Self { pcs, perm, fri_config, config_type: KoalaBearPoseidon2Type::Default }
         }
 
         #[must_use]
@@ -271,11 +274,11 @@ pub mod koala_bear_poseidon2 {
             let perm = my_perm();
             let hash = MyHash::new(perm.clone());
             let compress = MyCompress::new(perm.clone());
-            let val_mmcs = ValMmcs::new(hash, compress);
+            let val_mmcs = ValMmcs::new(hash, compress, 0);
             let dft = Dft::default();
             let fri_config = compressed_fri_config();
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            Self { pcs, perm, config_type: KoalaBearPoseidon2Type::Compressed }
+            let pcs = Pcs::new(dft, val_mmcs, fri_config.clone());
+            Self { pcs, perm, fri_config, config_type: KoalaBearPoseidon2Type::Compressed }
         }
 
         #[must_use]
@@ -283,11 +286,16 @@ pub mod koala_bear_poseidon2 {
             let perm = my_perm();
             let hash = MyHash::new(perm.clone());
             let compress = MyCompress::new(perm.clone());
-            let val_mmcs = ValMmcs::new(hash, compress);
+            let val_mmcs = ValMmcs::new(hash, compress, 0);
             let dft = Dft::default();
             let fri_config = ultra_compressed_fri_config();
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            Self { pcs, perm, config_type: KoalaBearPoseidon2Type::Compressed }
+            let pcs = Pcs::new(dft, val_mmcs, fri_config.clone());
+            Self { pcs, perm, fri_config, config_type: KoalaBearPoseidon2Type::Compressed }
+        }
+
+        /// Get a reference to the FRI configuration.
+        pub fn get_fri_config(&self) -> &FriParameters<ChallengeMmcs> {
+            &self.fri_config
         }
     }
 
@@ -340,7 +348,7 @@ pub mod koala_bear_poseidon2 {
 
     impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {
         fn zero_commitment(&self) -> Com<KoalaBearPoseidon2> {
-            DigestHash::from([Val::ZERO; DIGEST_SIZE])
+            DigestHash::from([Val::ZERO; DIGEST_SIZE]).into()
         }
     }
 }

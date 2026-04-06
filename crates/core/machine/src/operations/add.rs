@@ -2,7 +2,7 @@ use zkm_core_executor::events::ByteRecord;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
 
 use crate::air::WordAirBuilder;
@@ -60,8 +60,8 @@ impl<F: Field> AddOperation<F> {
         cols: AddOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::one();
-        let base = AB::F::from_canonical_u32(256);
+        let one = AB::Expr::ONE;
+        let base = AB::F::from_u32(256);
 
         let mut builder_is_real = builder.when(is_real.clone());
 

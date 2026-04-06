@@ -145,7 +145,7 @@ impl Opcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u32(self as u32)
+        F::from_u32(self as u32)
     }
 
     pub fn is_use_lo_hi_alu(&self) -> bool {

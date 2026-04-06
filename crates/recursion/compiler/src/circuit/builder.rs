@@ -3,7 +3,7 @@
 use std::iter::repeat;
 
 use itertools::Itertools;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
@@ -64,7 +64,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         let mut num: Felt<_> = self.eval(C::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
             // Add `bit * 2^i` to the sum.
-            num = self.eval(num + bit * C::F::from_wrapped_u32(1 << i));
+            num = self.eval(num + bit * C::F::from_u32(1 << i));
         }
         num
     }
@@ -79,7 +79,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
             .enumerate()
             .map(|(i, &bit)| {
                 self.assert_felt_eq(bit * (bit - C::F::ONE), C::F::ZERO);
-                bit * C::F::from_wrapped_u32(1 << i)
+                bit * C::F::from_u32(1 << i)
             })
             .sum();
 
@@ -195,7 +195,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
         for i in 0..4 {
             let felt = felts[i];
-            let monomial: Ext<C::F, C::EF> = self.constant(C::EF::monomial(i));
+            let monomial: Ext<C::F, C::EF> = self.constant(C::EF::ith_basis_element(i).unwrap());
             reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
         }
 

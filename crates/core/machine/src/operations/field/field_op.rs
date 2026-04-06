@@ -64,7 +64,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         debug_assert_eq!(&carry * modulus, a * b + c - &result);
 
         let p_modulus_limbs =
-            modulus.to_bytes_le().iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<F>>();
+            modulus.to_bytes_le().iter().map(|x| F::from_u8(*x)).collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
@@ -123,7 +123,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         // the field, but modulus can == the field modulus so it can have 1 extra limb (ex.
         // uint256).
         let p_modulus_limbs =
-            modulus.to_bytes_le().iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<F>>();
+            modulus.to_bytes_le().iter().map(|x| F::from_u8(*x)).collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
         let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
@@ -375,6 +375,7 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
 
 #[cfg(test)]
 mod tests {
+    use p3_air::WindowAccess;
     use num::BigUint;
     use p3_air::BaseAir;
     use p3_field::{Field, PrimeField32};
@@ -392,7 +393,7 @@ mod tests {
     use core::borrow::{Borrow, BorrowMut};
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
@@ -501,7 +502,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
             local.a_op_b.eval(builder, &local.a, &local.b, self.operation, AB::F::ONE);
         }

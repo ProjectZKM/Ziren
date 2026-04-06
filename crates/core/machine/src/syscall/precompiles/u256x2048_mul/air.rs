@@ -7,8 +7,8 @@ use crate::{
 };
 
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{
@@ -122,12 +122,12 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
 
                         // Assign basic values to the columns.
                         cols.is_real = F::ONE;
-                        cols.shard = F::from_canonical_u32(event.shard);
-                        cols.clk = F::from_canonical_u32(event.clk);
-                        cols.a_ptr = F::from_canonical_u32(event.a_ptr);
-                        cols.b_ptr = F::from_canonical_u32(event.b_ptr);
-                        cols.lo_ptr = F::from_canonical_u32(event.lo_ptr);
-                        cols.hi_ptr = F::from_canonical_u32(event.hi_ptr);
+                        cols.shard = F::from_u32(event.shard);
+                        cols.clk = F::from_u32(event.clk);
+                        cols.a_ptr = F::from_u32(event.a_ptr);
+                        cols.b_ptr = F::from_u32(event.b_ptr);
+                        cols.lo_ptr = F::from_u32(event.lo_ptr);
+                        cols.hi_ptr = F::from_u32(event.hi_ptr);
 
                         // Populate memory accesses for lo_ptr and hi_ptr.
                         cols.lo_ptr_memory
@@ -255,7 +255,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &U256x2048MulCols<AB::Var> = (*local).borrow();
 
         // Assert that is_real is a boolean.
@@ -265,7 +265,7 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::U256XU2048_MUL.syscall_id()),
+            AB::F::from_u32(SyscallCode::U256XU2048_MUL.syscall_id()),
             local.a_ptr,
             local.b_ptr,
             local.is_real,
@@ -276,7 +276,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk.into(),
-            AB::Expr::from_canonical_u32(LO_REGISTER),
+            AB::Expr::from_u32(LO_REGISTER),
             &local.lo_ptr_memory,
             local.is_real,
         );
@@ -284,7 +284,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk.into(),
-            AB::Expr::from_canonical_u32(HI_REGISTER),
+            AB::Expr::from_u32(HI_REGISTER),
             &local.hi_ptr_memory,
             local.is_real,
         );
@@ -309,7 +309,7 @@ where
         // Evaluate the memory accesses for lo_memory and hi_memory.
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk.into() + AB::Expr::one(),
+            local.clk.into() + AB::Expr::ONE,
             local.lo_ptr,
             &local.lo_memory,
             local.is_real,
@@ -317,7 +317,7 @@ where
 
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk.into() + AB::Expr::one(),
+            local.clk.into() + AB::Expr::ONE,
             local.hi_ptr,
             &local.hi_memory,
             local.is_real,
@@ -334,8 +334,8 @@ where
             .collect::<Vec<_>>();
 
         let mut coeff_2_256 = Vec::new();
-        coeff_2_256.resize(32, AB::Expr::zero());
-        coeff_2_256.push(AB::Expr::one());
+        coeff_2_256.resize(32, AB::Expr::ZERO);
+        coeff_2_256.push(AB::Expr::ONE);
         let modulus_polynomial: Polynomial<AB::Expr> = Polynomial::from_coefficients(&coeff_2_256);
 
         // Evaluate that each of the mul and carry columns are valid.
@@ -354,7 +354,7 @@ where
             builder,
             &a_limbs,
             &b_limb_array[0],
-            &Polynomial::from_coefficients(&[AB::Expr::zero()]), // Zero polynomial for no previous carry
+            &Polynomial::from_coefficients(&[AB::Expr::ZERO]), // Zero polynomial for no previous carry
             &modulus_polynomial,
             local.is_real,
         );

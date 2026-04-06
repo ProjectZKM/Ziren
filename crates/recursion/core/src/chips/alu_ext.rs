@@ -1,9 +1,9 @@
 use core::borrow::Borrow;
 use std::{borrow::BorrowMut, iter::zip};
 
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -263,14 +263,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>> MachineAir<F> for ExtAluChip {
 
 impl<AB> Air<AB> for ExtAluChip
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ExtAluCols<AB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &ExtAluPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (
@@ -305,7 +305,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::{extension::BinomialExtensionField, FieldAlgebra, FieldExtensionAlgebra};
+    use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -342,8 +342,8 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut random_extfelt = move || {
-            let inner: [F; 4] = core::array::from_fn(|_| rng.sample(rand::distributions::Standard));
-            BinomialExtensionField::<F, D>::from_base_slice(&inner)
+            let inner: [F; 4] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
+            BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap()
         };
         let mut addr = 0;
 

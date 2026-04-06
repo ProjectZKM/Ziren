@@ -5,7 +5,7 @@ use instruction::{
 };
 use itertools::Itertools;
 use p3_field::{
-    Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField, PrimeField64, TwoAdicField,
+    Field, PrimeCharacteristicRing, ExtensionField, PrimeField, PrimeField64, TwoAdicField,
 };
 use std::{borrow::Borrow, collections::HashMap, mem::transmute};
 use vec_map::VecMap;
@@ -783,14 +783,14 @@ pub enum Imm<F, EF> {
 
 impl<F, EF> Imm<F, EF>
 where
-    F: FieldAlgebra + Copy,
-    EF: FieldExtensionAlgebra<F>,
+    F: Field + Copy,
+    EF: ExtensionField<F>,
 {
     // Get a `Block` of memory representing this immediate.
     pub fn as_block(&self) -> Block<F> {
         match self {
             Imm::F(f) => Block::from(*f),
-            Imm::EF(ef) => ef.as_base_slice().into(),
+            Imm::EF(ef) => ef.as_basis_coefficients_slice().into(),
         }
     }
 }
@@ -890,10 +890,32 @@ impl<C: Config<F: PrimeField64>> Reg<C> for Address<C::F> {
 mod tests {
     use std::{collections::VecDeque, io::BufRead, iter::zip, sync::Arc};
 
-    use p3_field::{Field, PrimeField32};
+    use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use p3_symmetric::{CryptographicHasher, Permutation};
     use rand::{rngs::StdRng, Rng, SeedableRng};
+
+    /// Generate random field elements using rand 0.8 compatible approach.
+    fn rand_felt_iter(seed: u64) -> impl Iterator<Item = F> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        std::iter::from_fn(move || Some(F::from_u64(rng.gen::<u64>())))
+    }
+
+    /// Generate random [F; 4] arrays using rand 0.8 compatible approach.
+    fn rand_felt4_iter(seed: u64) -> impl Iterator<Item = [F; 4]> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        std::iter::from_fn(move || {
+            Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
+        })
+    }
+
+    /// Generate random [F; 16] arrays using rand 0.8 compatible approach.
+    fn rand_felt16_iter(seed: u64) -> impl Iterator<Item = [F; 16]> {
+        let mut rng = StdRng::seed_from_u64(seed);
+        std::iter::from_fn(move || {
+            Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>())))
+        })
+    }
 
     use zkm_core_machine::utils::{run_test_machine, setup_logger};
     use zkm_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
@@ -953,8 +975,7 @@ mod tests {
         setup_logger();
 
         let mut builder = AsmBuilder::<F, EF>::default();
-        let mut rng = StdRng::seed_from_u64(0xCAFEDA7E)
-            .sample_iter::<[F; WIDTH], _>(rand::distributions::Standard);
+        let mut rng = rand_felt16_iter(0xCAFEDA7E);
         for _ in 0..1 {
             let input_1: [F; WIDTH] = rng.next().unwrap();
             let output_1 = inner_perm().permute(input_1);
@@ -976,32 +997,32 @@ mod tests {
         let hasher = InnerHash::new(perm.clone());
 
         let input: [F; 26] = [
-            F::from_canonical_u32(0),
-            F::from_canonical_u32(1),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(2),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
-            F::from_canonical_u32(3),
+            F::from_u32(0),
+            F::from_u32(1),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(2),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
+            F::from_u32(3),
         ];
         let expected = hasher.hash_iter(input);
         println!("{expected:?}");
@@ -1020,8 +1041,7 @@ mod tests {
         setup_logger();
 
         let mut builder = AsmBuilder::<F, EF>::default();
-        let mut rng =
-            StdRng::seed_from_u64(0xEC0BEEF).sample_iter::<F, _>(rand::distributions::Standard);
+        let mut rng = rand_felt_iter(0xEC0BEEF);
         for _ in 0..100 {
             let power_f = rng.next().unwrap();
             let power = power_f.as_canonical_u32();
@@ -1056,11 +1076,10 @@ mod tests {
 
         let mut builder = AsmBuilder::<F, EF>::default();
 
-        let mut rng = StdRng::seed_from_u64(0xFEB29).sample_iter(rand::distributions::Standard);
-        let mut random_felt = move || -> F { rng.next().unwrap() };
-        let mut rng =
-            StdRng::seed_from_u64(0x0451).sample_iter::<[F; 4], _>(rand::distributions::Standard);
-        let mut random_ext = move || EF::from_base_slice(&rng.next().unwrap());
+        let mut felt_iter = rand_felt_iter(0xFEB29);
+        let mut random_felt = move || -> F { felt_iter.next().unwrap() };
+        let mut ext_iter = rand_felt4_iter(0x0451);
+        let mut random_ext = move || EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap();
 
         for i in 2..17 {
             // Generate random values for the inputs.
@@ -1110,8 +1129,7 @@ mod tests {
         setup_logger();
 
         let mut builder = AsmBuilder::<F, EF>::default();
-        let mut rng =
-            StdRng::seed_from_u64(0xC0FFEE7AB1E).sample_iter::<F, _>(rand::distributions::Standard);
+        let mut rng = rand_felt_iter(0xC0FFEE7AB1E);
         for _ in 0..100 {
             let input_f = rng.next().unwrap();
             let input = input_f.as_canonical_u32();
@@ -1120,7 +1138,7 @@ mod tests {
             let input_felt = builder.eval(input_f);
             let output_felts = builder.num2bits_v2_f(input_felt, NUM_BITS);
             let expected: Vec<Felt<_>> =
-                output.into_iter().map(|x| builder.eval(F::from_canonical_u32(x))).collect();
+                output.into_iter().map(|x| builder.eval(F::from_u32(x))).collect();
             for (lhs, rhs) in output_felts.into_iter().zip(expected) {
                 builder.assert_felt_eq(lhs, rhs);
             }
@@ -1136,13 +1154,11 @@ mod tests {
 
         let mut builder = AsmBuilder::<F, EF>::default();
 
-        let input_fs = StdRng::seed_from_u64(0xC0FFEE7AB1E)
-            .sample_iter::<F, _>(rand::distributions::Standard)
+        let input_fs = rand_felt_iter(0xC0FFEE7AB1E)
             .take(ITERS)
             .collect::<Vec<_>>();
 
-        let input_efs = StdRng::seed_from_u64(0x7EA7AB1E)
-            .sample_iter::<[F; 4], _>(rand::distributions::Standard)
+        let input_efs = rand_felt4_iter(0x7EA7AB1E)
             .take(ITERS)
             .collect::<Vec<_>>();
 
@@ -1160,7 +1176,7 @@ mod tests {
         builder.cycle_tracker_v2_enter("printing exts".to_string());
         for (i, input_block) in input_efs.iter().enumerate() {
             builder.cycle_tracker_v2_enter(format!("printing ext {i}"));
-            let input_ext = builder.eval(EF::from_base_slice(input_block).cons());
+            let input_ext = builder.eval(EF::from_basis_coefficients_slice(input_block).unwrap().cons());
             builder.print_e(input_ext);
             builder.cycle_tracker_v2_exit();
         }
@@ -1191,12 +1207,11 @@ mod tests {
         setup_logger();
 
         let mut builder = AsmBuilder::<F, EF>::default();
-        let mut rng =
-            StdRng::seed_from_u64(0x3264).sample_iter::<[F; 4], _>(rand::distributions::Standard);
-        let mut random_ext = move || EF::from_base_slice(&rng.next().unwrap());
+        let mut ext_iter = rand_felt4_iter(0x3264);
+        let mut random_ext = move || EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap();
         for _ in 0..100 {
             let input = random_ext();
-            let output: &[F] = input.as_base_slice();
+            let output: &[F] = input.as_basis_coefficients_slice();
 
             let input_ext = builder.eval(input.cons());
             let output_felts = builder.ext2felt_v2(input_ext);
@@ -1213,29 +1228,46 @@ mod tests {
             {
                 use std::convert::identity;
                 let mut builder = AsmBuilder::<F, EF>::default();
-                test_assert_fixture!(builder, identity, F, Felt<_>, 0xDEADBEEF, $assert_felt, $should_offset);
-                test_assert_fixture!(builder, EF::cons, EF, Ext<_, _>, 0xABADCAFE, $assert_ext, $should_offset);
-                test_operations(builder.into_operations());
-            }
-        };
-        ($builder:ident, $wrap:path, $t:ty, $u:ty, $seed:expr, $assert:ident, $should_offset:expr) => {
-            {
-                let mut elts = StdRng::seed_from_u64($seed)
-                    .sample_iter::<$t, _>(rand::distributions::Standard);
-                for _ in 0..100 {
-                    let a = elts.next().unwrap();
-                    let b = elts.next().unwrap();
-                    let c = a + b;
-                    let ar: $u = $builder.eval($wrap(a));
-                    let br: $u = $builder.eval($wrap(b));
-                    let cr: $u = $builder.eval(ar + br);
-                    let cm = if $should_offset {
-                        c + elts.find(|x| !x.is_zero()).unwrap()
-                    } else {
-                        c
-                    };
-                    $builder.$assert(cr, $wrap(cm));
+                // Test with F (felt)
+                {
+                    let mut elts = rand_felt_iter(0xDEADBEEF);
+                    for _ in 0..100 {
+                        let a: F = elts.next().unwrap();
+                        let b: F = elts.next().unwrap();
+                        let c = a + b;
+                        let ar: Felt<_> = builder.eval(identity(a));
+                        let br: Felt<_> = builder.eval(identity(b));
+                        let cr: Felt<_> = builder.eval(ar + br);
+                        let cm = if $should_offset {
+                            c + elts.find(|x| !x.is_zero()).unwrap()
+                        } else {
+                            c
+                        };
+                        builder.$assert_felt(cr, identity(cm));
+                    }
                 }
+                // Test with EF (ext)
+                {
+                    let mut ext_iter = rand_felt4_iter(0xABADCAFE);
+                    let mut elts = std::iter::from_fn(move || {
+                        Some(EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap())
+                    });
+                    for _ in 0..100 {
+                        let a: EF = elts.next().unwrap();
+                        let b: EF = elts.next().unwrap();
+                        let c = a + b;
+                        let ar: Ext<_, _> = builder.eval(EF::cons(a));
+                        let br: Ext<_, _> = builder.eval(EF::cons(b));
+                        let cr: Ext<_, _> = builder.eval(ar + br);
+                        let cm = if $should_offset {
+                            c + elts.find(|x| !x.is_zero()).unwrap()
+                        } else {
+                            c
+                        };
+                        builder.$assert_ext(cr, EF::cons(cm));
+                    }
+                }
+                test_operations(builder.into_operations());
             }
         };
     }

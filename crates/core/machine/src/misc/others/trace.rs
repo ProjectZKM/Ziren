@@ -84,15 +84,15 @@ impl MiscInstrsChip {
         cols: &mut MiscInstrColumns<F>,
         blu: &mut impl ByteRecord,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
 
         cols.op_a_value = event.a.into();
         cols.op_b_value = event.b.into();
         cols.op_c_value = event.c.into();
         cols.prev_a_value = event.prev_a.into();
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
 
         cols.is_sext = F::from_bool(matches!(event.opcode, Opcode::SEXT));
         cols.is_ext = F::from_bool(matches!(event.opcode, Opcode::EXT));
@@ -127,8 +127,8 @@ impl MiscInstrsChip {
             sext_cols.is_seb = F::ONE;
             (((event.b as u8) >> 7) as u16, event.b as u8)
         };
-        sext_cols.most_sig_bit = F::from_canonical_u16(sig_bit);
-        sext_cols.sig_byte = F::from_canonical_u8(sig_byte);
+        sext_cols.most_sig_bit = F::from_u16(sig_bit);
+        sext_cols.sig_byte = F::from_u8(sig_byte);
 
         sext_cols.a_eq_b = F::from_bool(event.b == event.a);
 
@@ -195,8 +195,8 @@ impl MiscInstrsChip {
         let lsb = event.c & 0x1f;
         let msbd = event.c >> 5;
         let shift_left = event.b << (31 - lsb - msbd);
-        ext_cols.lsb = F::from_canonical_u32(lsb);
-        ext_cols.msbd = F::from_canonical_u32(msbd);
+        ext_cols.lsb = F::from_u32(lsb);
+        ext_cols.msbd = F::from_u32(msbd);
         ext_cols.sll_val = Word::from(shift_left);
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::U8Range,
@@ -230,8 +230,8 @@ impl MiscInstrsChip {
         let srl_val = ror_val >> (msb - lsb + 1);
         let sll_val = event.b << (31 - msb + lsb);
         let add_val = srl_val + sll_val;
-        ins_cols.lsb = F::from_canonical_u32(lsb);
-        ins_cols.msb = F::from_canonical_u32(msb);
+        ins_cols.lsb = F::from_u32(lsb);
+        ins_cols.msb = F::from_u32(msb);
         ins_cols.ror_val = Word::from(ror_val);
         ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);

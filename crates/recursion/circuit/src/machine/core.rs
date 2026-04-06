@@ -7,7 +7,7 @@ use std::{
 
 use itertools::Itertools;
 use p3_commit::Mmcs;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -43,12 +43,12 @@ use crate::{
     challenger::{CanObserveVariable, DuplexChallengerVariable},
     machine::{assert_complete, recursion_public_values_digest},
     stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
-    CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriParameters, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
 pub struct ZKMRecursionWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
 > {
     pub vk: VerifyingKeyVariable<C, SC>,
     pub shard_proofs: Vec<ShardProofVariable<C, SC>>,
@@ -76,19 +76,18 @@ pub struct ZKMRecursionShape {
 
 /// A program for recursively verifying a batch of Ziren proofs.
 #[derive(Debug, Clone, Copy)]
-pub struct ZKMRecursiveVerifier<C: Config, SC: KoalaBearFriConfig> {
+pub struct ZKMRecursiveVerifier<C: Config, SC: KoalaBearFriParameters> {
     _phantom: PhantomData<(C, SC)>,
 }
 
 impl<C, SC> ZKMRecursiveVerifier<C, SC>
 where
-    SC: KoalaBearFriConfigVariable<
+    SC: KoalaBearFriParametersVariable<
         C,
         FriChallengerVariable = DuplexChallengerVariable<C>,
         DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
     >,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
 {
     /// Verify a batch of Ziren shard proofs and aggregate their public values.
     ///
@@ -569,7 +568,7 @@ where
     }
 }
 
-impl<SC: KoalaBearFriConfig> ZKMRecursionWitnessValues<SC> {
+impl<SC: KoalaBearFriParameters> ZKMRecursionWitnessValues<SC> {
     pub fn shape(&self) -> ZKMRecursionShape {
         let proof_shapes = self.shard_proofs.iter().map(|proof| proof.shape()).collect();
 

@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, mem::transmute};
 
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::iter::{
@@ -135,8 +135,8 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut GlobalCols<F> = row.borrow_mut();
                     let event: &GlobalLookupEvent = &events[idx];
-                    cols.message = event.message.map(F::from_canonical_u32);
-                    cols.kind = F::from_canonical_u8(event.kind);
+                    cols.message = event.message.map(F::from_u32);
+                    cols.kind = F::from_u8(event.kind);
                     cols.lookup.populate(
                         SepticBlock(event.message),
                         event.is_receive,
@@ -212,13 +212,13 @@ impl<F> BaseAir<F> for GlobalChip {
 
 impl<AB> Air<AB> for GlobalChip
 where
-    AB: ZKMAirBuilder + PairBuilder,
+    AB: ZKMAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &GlobalCols<AB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
+        let next = main.next_slice();
         let next: &GlobalCols<AB::Var> = (*next).borrow();
 
         // Receive the arguments, which consists of 7 message columns, `is_send`, `is_receive`, and `kind`.

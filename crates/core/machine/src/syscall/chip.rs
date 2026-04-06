@@ -5,8 +5,8 @@ use std::{
 };
 
 use itertools::Itertools;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelBridge;
@@ -144,11 +144,11 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(syscall_event.shard);
-            cols.clk = F::from_canonical_u32(syscall_event.clk);
-            cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
-            cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
-            cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
+            cols.shard = F::from_u32(syscall_event.shard);
+            cols.clk = F::from_u32(syscall_event.clk);
+            cols.syscall_id = F::from_u32(syscall_event.syscall_id);
+            cols.arg1 = F::from_u32(syscall_event.arg1);
+            cols.arg2 = F::from_u32(syscall_event.arg2);
             cols.is_real = F::ONE;
 
             row
@@ -176,7 +176,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         // Pad the trace to a power of two depending on the proof shape in `input`.
         rows.resize(
             <SyscallChip as MachineAir<F>>::num_rows(self, input).unwrap(),
-            [F::zero(); NUM_SYSCALL_COLS],
+            [F::ZERO; NUM_SYSCALL_COLS],
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYSCALL_COLS))
@@ -220,7 +220,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SyscallCols<AB::Var> = (*local).borrow();
 
         builder.assert_bool(local.is_real);
@@ -246,11 +246,11 @@ where
                             local.syscall_id.into(),
                             local.arg1.into(),
                             local.arg2.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                            AB::Expr::ZERO,
+                            AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
+                            local.is_real.into() * AB::Expr::ZERO,
+                            AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -278,11 +278,11 @@ where
                             local.syscall_id.into(),
                             local.arg1.into(),
                             local.arg2.into(),
-                            AB::Expr::zero(),
-                            AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                            AB::Expr::ZERO,
+                            AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ZERO,
+                            local.is_real.into() * AB::Expr::ONE,
+                            AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,

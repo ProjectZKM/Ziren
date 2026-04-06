@@ -1,8 +1,8 @@
 pub mod register;
 
 use core::borrow::Borrow;
-use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::{
@@ -20,13 +20,13 @@ use crate::{
 
 impl<AB> Air<AB> for CpuChip
 where
-    AB: ZKMCoreAirBuilder + AirBuilderWithPublicValues,
+    AB: ZKMCoreAirBuilder,
     AB::Var: Sized,
 {
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &CpuCols<AB::Var> = (*local).borrow();
         let next: &CpuCols<AB::Var> = (*next).borrow();
 
@@ -36,7 +36,7 @@ where
             public_values_slice.as_slice().borrow();
 
         let clk =
-            AB::Expr::from_canonical_u32(1u32 << 16) * local.clk_8bit_limb + local.clk_16bit_limb;
+            AB::Expr::from_u32(1u32 << 16) * local.clk_8bit_limb + local.clk_16bit_limb;
 
         // Program constraints.
         builder.send_program(local.pc, local.instruction, local.is_real);
@@ -50,9 +50,9 @@ where
         // The correctness of `is_memory` and `is_syscall` will be checked in the opcode specific chips.
         // In these correct cases, `is_memory + is_syscall` will be always boolean.
         let expected_shard_to_send =
-            builder.if_else(local.is_check_memory, local.shard, AB::Expr::zero());
+            builder.if_else(local.is_check_memory, local.shard, AB::Expr::ZERO);
         let expected_clk_to_send =
-            builder.if_else(local.is_check_memory, clk.clone(), AB::Expr::zero());
+            builder.if_else(local.is_check_memory, clk.clone(), AB::Expr::ZERO);
         builder.when(local.is_real).assert_eq(local.shard_to_send, expected_shard_to_send);
         builder.when(local.is_real).assert_eq(local.clk_to_send, expected_clk_to_send);
 
@@ -85,10 +85,10 @@ where
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
 
-        let not_real = AB::Expr::one() - local.is_real;
-        builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_b);
-        builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_c);
-        builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.is_rw_a);
+        let not_real = AB::Expr::ONE - local.is_real;
+        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_b);
+        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_c);
+        builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.is_rw_a);
     }
 }
 
@@ -112,10 +112,10 @@ impl CpuChip {
 
         // Verify that the shard value is within 16 bits.
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.shard,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.is_real,
         );
 
@@ -125,10 +125,10 @@ impl CpuChip {
         // We already assert that `local.clk < 2^24`. `num_extra_cycles` is an entry of a word and
         // therefore less than `2^8`, this means that the sum cannot overflow in a 31 bit field.
         let expected_next_clk =
-            clk.clone() + AB::Expr::from_canonical_u32(5) + local.num_extra_cycles;
+            clk.clone() + AB::Expr::from_u32(5) + local.num_extra_cycles;
 
         let next_clk =
-            AB::Expr::from_canonical_u32(1u32 << 16) * next.clk_8bit_limb + next.clk_16bit_limb;
+            AB::Expr::from_u32(1u32 << 16) * next.clk_8bit_limb + next.clk_16bit_limb;
         builder.when_transition().when(next.is_real).assert_eq(expected_next_clk, next_clk);
 
         // Range check that the clk is within 24 bits using it's limb values.
@@ -158,7 +158,7 @@ impl CpuChip {
         builder
             .when_first_row()
             .when_not(local.is_halt)
-            .assert_eq(local.pc + AB::Expr::from_canonical_u32(4), local.next_pc);
+            .assert_eq(local.pc + AB::Expr::from_u32(4), local.next_pc);
 
         // Verify the pc, next_pc, and next_next_pc
         builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
@@ -172,7 +172,7 @@ impl CpuChip {
             .when_transition()
             .when(local.is_real)
             .when(local.is_sequential)
-            .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_canonical_u32(4));
+            .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_u32(4));
 
         // Verify the public value's next pc.  We need to handle two cases:
         // 1. The last real row is a transition row.

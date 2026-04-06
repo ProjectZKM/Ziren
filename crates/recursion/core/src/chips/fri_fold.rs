@@ -9,9 +9,9 @@ use tracing::instrument;
 use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
 use zkm_stark::air::{BinomialExtension, MachineAir};
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
@@ -468,15 +468,15 @@ impl<const DEGREE: usize> FriFoldChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for FriFoldChip<DEGREE>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &FriFoldCols<AB::Var> = (*local).borrow();
         let next: &FriFoldCols<AB::Var> = (*next).borrow();
-        let prepr = builder.preprocessed();
-        let (prepr_local, prepr_next) = (prepr.row_slice(0), prepr.row_slice(1));
+        let prepr = builder.preprocessed().clone();
+        let (prepr_local, prepr_next) = (prepr.current_slice(), prepr.next_slice());
         let prepr_local: &FriFoldPreprocessedCols<AB::Var> = (*prepr_local).borrow();
         let prepr_next: &FriFoldPreprocessedCols<AB::Var> = (*prepr_next).borrow();
 
@@ -491,13 +491,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use p3_field::FieldExtensionAlgebra;
+    use p3_field::{ExtensionField, BasedVectorSpace};
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::mem::size_of;
     use zkm_core_machine::utils::setup_logger;
     use zkm_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -519,10 +519,10 @@ mod tests {
         type EF = <SC as StarkGenericConfig>::Challenge;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
-        let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 16)) };
+        let mut random_felt = move || -> F { F::from_u32(rng.gen_range(0..1 << 16)) };
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut random_block =
-            move || Block::from([F::from_canonical_u32(rng.gen_range(0..1 << 16)); 4]);
+            move || Block::from([F::from_u32(rng.gen_range(0..1 << 16)); 4]);
         let mut addr = 0;
 
         let num_ext_vecs: u32 = size_of::<FriFoldExtVecIo<u8>>() as u32;
@@ -633,13 +633,13 @@ mod tests {
                         MemAccessKind::Read,
                         1,
                         alpha_pow_output_a[j],
-                        Block::from(alpha_pow_output[j].as_base_slice()),
+                        Block::from(alpha_pow_output[j].as_basis_coefficients_slice()),
                     ));
                     instructions.push(instr::mem_block(
                         MemAccessKind::Read,
                         1,
                         ro_output_a[j],
-                        Block::from(ro_output[j].as_base_slice()),
+                        Block::from(ro_output[j].as_basis_coefficients_slice()),
                     ));
                 });
 
@@ -658,14 +658,14 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut rng2 = StdRng::seed_from_u64(0xDEADBEEF);
-        let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 16)) };
+        let mut random_felt = move || -> F { F::from_u32(rng.gen_range(0..1 << 16)) };
         let mut random_block = move || Block::from([random_felt(); 4]);
 
         let shard = ExecutionRecord {
             fri_fold_events: (0..17)
                 .map(|_| FriFoldEvent {
                     base_single: FriFoldBaseIo {
-                        x: F::from_canonical_u32(rng2.gen_range(0..1 << 16)),
+                        x: F::from_u32(rng2.gen_range(0..1 << 16)),
                     },
                     ext_single: FriFoldExtSingleIo { z: random_block(), alpha: random_block() },
                     ext_vec: crate::FriFoldExtVecIo {

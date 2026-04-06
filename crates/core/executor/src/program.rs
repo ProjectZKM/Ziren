@@ -8,7 +8,7 @@ use elf::{endian::LittleEndian, file::Class, ElfBytes};
 use std::str::FromStr;
 
 use p3_field::Field;
-use p3_field::FieldExtensionAlgebra;
+use p3_field::{ExtensionField, BasedVectorSpace};
 use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::IntoParallelIterator;
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
@@ -327,7 +327,7 @@ pub fn patch_stack(image: &mut BTreeMap<u32, u32>) {
 
 impl<F: PrimeField32> MachineProgram<F> for Program {
     fn pc_start(&self) -> F {
-        F::from_canonical_u32(self.pc_start)
+        F::from_u32(self.pc_start)
     }
 
     fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
@@ -346,7 +346,7 @@ impl<F: PrimeField32> MachineProgram<F> for Program {
                     (word >> 24) & 255,
                 ];
                 let x_start =
-                    SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values[i]));
+                    SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(values[i]));
                 let (point, _) = SepticCurve::<F>::lift_x(x_start);
                 SepticCurveComplete::Affine(point.neg())
             })

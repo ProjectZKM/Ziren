@@ -127,9 +127,9 @@ impl CpuChip {
         self.populate_shard_clk(cols, event, blu_events, shard);
 
         // Populate basic fields.
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
-        cols.next_next_pc = F::from_canonical_u32(event.next_next_pc);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
+        cols.next_next_pc = F::from_u32(event.next_next_pc);
         cols.instruction.populate(instruction);
 
         cols.op_a_immutable = F::from_bool(
@@ -159,7 +159,7 @@ impl CpuChip {
             };
         cols.clk_to_send =
             if instruction.is_check_memory_instruction() || instruction.is_mult_div_instruction() {
-                F::from_canonical_u32(event.clk)
+                F::from_u32(event.clk)
             } else {
                 F::ZERO
             };
@@ -182,10 +182,10 @@ impl CpuChip {
             let syscall_id1 = cols.op_a_access.prev_value[1];
             let num_extra_cycles = cols.op_a_access.prev_value[3];
             let sys_exit_group = SyscallCode::SYS_EXT_GROUP.syscall_id();
-            is_halt = (syscall_id0 == F::from_canonical_u32(SyscallCode::HALT.syscall_id())
+            is_halt = (syscall_id0 == F::from_u32(SyscallCode::HALT.syscall_id())
                 && syscall_id1 == F::ZERO)
-                || (syscall_id0 == F::from_canonical_u8(sys_exit_group as u8)
-                    && syscall_id1 == F::from_canonical_u8((sys_exit_group >> 8) as u8));
+                || (syscall_id0 == F::from_u8(sys_exit_group as u8)
+                    && syscall_id1 == F::from_u8((sys_exit_group >> 8) as u8));
             cols.is_halt = F::from_bool(is_halt);
             cols.num_extra_cycles = num_extra_cycles;
         }
@@ -230,12 +230,12 @@ impl CpuChip {
         blu_events: &mut impl ByteRecord,
         shard: u32,
     ) {
-        cols.shard = F::from_canonical_u32(shard);
+        cols.shard = F::from_u32(shard);
 
         let clk_16bit_limb = (event.clk & 0xffff) as u16;
         let clk_8bit_limb = ((event.clk >> 16) & 0xff) as u8;
-        cols.clk_16bit_limb = F::from_canonical_u16(clk_16bit_limb);
-        cols.clk_8bit_limb = F::from_canonical_u8(clk_8bit_limb);
+        cols.clk_16bit_limb = F::from_u16(clk_16bit_limb);
+        cols.clk_8bit_limb = F::from_u8(clk_8bit_limb);
 
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(U16Range, shard as u16, 0, 0, 0));
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(U16Range, clk_16bit_limb, 0, 0, 0));
@@ -255,7 +255,7 @@ mod tests {
     use std::borrow::BorrowMut;
     use std::sync::Arc;
 
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_maybe_rayon::prelude::ParallelBridge;

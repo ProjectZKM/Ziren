@@ -1,5 +1,5 @@
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{events::ByteRecord, ByteOpcode};
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
@@ -18,7 +18,7 @@ impl<F: Field> NotOperation<F> {
         let expected = !x;
         let x_bytes = x.to_le_bytes();
         for i in 0..WORD_SIZE {
-            self.value[i] = F::from_canonical_u8(!x_bytes[i]);
+            self.value[i] = F::from_u8(!x_bytes[i]);
         }
         record.add_u8_range_checks(&x_bytes);
         expected
@@ -33,7 +33,7 @@ impl<F: Field> NotOperation<F> {
     ) {
         for i in (0..WORD_SIZE).step_by(2) {
             builder.send_byte_pair(
-                AB::F::from_canonical_u32(ByteOpcode::U8Range as u32),
+                AB::F::from_u32(ByteOpcode::U8Range as u32),
                 AB::F::ZERO,
                 AB::F::ZERO,
                 a[i],
@@ -46,7 +46,7 @@ impl<F: Field> NotOperation<F> {
         for i in 0..WORD_SIZE {
             builder
                 .when(is_real)
-                .assert_eq(cols.value[i] + a[i], AB::F::from_canonical_u8(u8::MAX));
+                .assert_eq(cols.value[i] + a[i], AB::F::from_u8(u8::MAX));
         }
     }
 }

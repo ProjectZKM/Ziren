@@ -1,7 +1,7 @@
 use std::{array, sync::Arc};
 
 use hashbrown::HashMap;
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use zkm_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use super::{
@@ -75,12 +75,12 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
     }
 
-    fn public_values<T: FieldAlgebra>(&self) -> Vec<T> {
+    fn public_values<T: PrimeCharacteristicRing>(&self) -> Vec<T> {
         let pv_elms = self.public_values.as_array();
 
         let ret: [T; PROOF_MAX_NUM_PVS] = array::from_fn(|i| {
             if i < pv_elms.len() {
-                T::from_canonical_u32(pv_elms[i].as_canonical_u32())
+                T::from_u32(pv_elms[i].as_canonical_u32())
             } else {
                 T::ZERO
             }

@@ -1,7 +1,7 @@
 use p3_air::AirBuilder;
 use p3_field::Field;
-use p3_field::FieldAlgebra;
-use p3_field::FieldExtensionAlgebra;
+use p3_field::PrimeCharacteristicRing;
+use p3_field::{ExtensionField, BasedVectorSpace};
 use p3_field::PrimeField32;
 use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;
@@ -28,8 +28,8 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         is_receive: bool,
         kind: u8,
     ) -> (SepticCurve<F>, u8) {
-        let x_start = SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values.0[i]))
-            + SepticExtension::from_base(F::from_canonical_u32((kind as u32) << 16));
+        let x_start = SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(values.0[i]))
+            + SepticExtension::from(F::from_u32((kind as u32) << 16));
         let (point, offset) = SepticCurve::<F>::lift_x(x_start);
         if !is_receive {
             return (point.neg(), offset);
@@ -47,7 +47,7 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
         if is_real {
             let (point, offset) = Self::get_digest(values, is_receive, kind);
             for i in 0..8 {
-                self.offset_bits[i] = F::from_canonical_u8((offset >> i) & 1);
+                self.offset_bits[i] = F::from_u8((offset >> i) & 1);
             }
             self.x_coordinate = SepticBlock::<F>::from(point.x.0);
             self.y_coordinate = SepticBlock::<F>::from(point.y.0);
@@ -58,12 +58,12 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             };
             let mut top_7_bits = F::ZERO;
             for i in 0..30 {
-                self.y6_bit_decomp[i] = F::from_canonical_u32((range_check_value >> i) & 1);
+                self.y6_bit_decomp[i] = F::from_u32((range_check_value >> i) & 1);
                 if i >= 23 {
                     top_7_bits += self.y6_bit_decomp[i];
                 }
             }
-            top_7_bits -= F::from_canonical_u32(7);
+            top_7_bits -= F::from_u32(7);
             self.range_check_witness = top_7_bits.inverse();
         } else {
             self.populate_dummy();
@@ -75,10 +75,10 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
             self.offset_bits[i] = F::ZERO;
         }
         self.x_coordinate = SepticBlock::<F>::from_base_fn(|i| {
-            F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
+            F::from_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
         });
         self.y_coordinate = SepticBlock::<F>::from_base_fn(|i| {
-            F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
+            F::from_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
         });
         for i in 0..30 {
             self.y6_bit_decomp[i] = F::ZERO;
@@ -89,7 +89,7 @@ impl<F: PrimeField32> GlobalLookupOperation<F> {
 
 impl<F: Field> GlobalLookupOperation<F> {
     /// Constrain that the elliptic curve point for the global interaction is correctly derived.
-    pub fn eval_single_digest<AB: ZKMAirBuilder + p3_air::PairBuilder>(
+    pub fn eval_single_digest<AB: ZKMAirBuilder>(
         builder: &mut AB,
         values: [AB::Expr; 7],
         cols: GlobalLookupOperation<AB::Var>,
@@ -102,18 +102,18 @@ impl<F: Field> GlobalLookupOperation<F> {
         builder.assert_bool(is_real);
 
         // Compute the offset and range check each bits, ensuring that the offset is a byte.
-        let mut offset = AB::Expr::zero();
+        let mut offset = AB::Expr::ZERO;
         for i in 0..8 {
             builder.assert_bool(cols.offset_bits[i]);
-            offset = offset.clone() + cols.offset_bits[i] * AB::F::from_canonical_u32(1 << i);
+            offset = offset.clone() + cols.offset_bits[i] * AB::F::from_u32(1 << i);
         }
 
         // Range check the first element in the message to be a u16 so that we can encode the interaction kind in the upper 8 bits.
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             values[0].clone(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             is_real,
         );
 
@@ -128,28 +128,28 @@ impl<F: Field> GlobalLookupOperation<F> {
         // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^23`.
         // Decompose `y6_value` into 30 bits, and then constrain that the top 7 bits cannot be all 1.
         // To do this, check that the sum of the top 7 bits is not equal to 7, which can be done by providing an inverse.
-        let mut y6_value = AB::Expr::zero();
-        let mut top_7_bits = AB::Expr::zero();
+        let mut y6_value = AB::Expr::ZERO;
+        let mut top_7_bits = AB::Expr::ZERO;
         for i in 0..30 {
             builder.assert_bool(cols.y6_bit_decomp[i]);
-            y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * AB::F::from_canonical_u32(1 << i);
+            y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * AB::F::from_u32(1 << i);
             if i >= 23 {
                 top_7_bits = top_7_bits.clone() + cols.y6_bit_decomp[i];
             }
         }
         // If `is_real` is true, check that `top_7_bits - 7` is non-zero, by checking `range_check_witness` is an inverse of it.
         builder.when(is_real).assert_eq(
-            cols.range_check_witness * (top_7_bits - AB::Expr::from_canonical_u8(7)),
-            AB::Expr::one(),
+            cols.range_check_witness * (top_7_bits - AB::Expr::from_u8(7)),
+            AB::Expr::ONE,
         );
 
         // Constrain that y has correct sign.
         // If it's a receive: `1 <= y_6 <= (p - 1) / 2`, so `0 <= y_6 - 1 = y6_value < (p - 1) / 2`.
         // If it's a send: `(p + 1) / 2 <= y_6 <= p - 1`, so `0 <= y_6 - (p + 1) / 2 = y6_value < (p - 1) / 2`.
-        builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::one() + y6_value.clone());
+        builder.when(is_receive).assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value.clone());
         builder.when(is_send).assert_eq(
             y.0[6].clone(),
-            AB::Expr::from_canonical_u32((1 << 30) - (1 << 23) + 1) + y6_value.clone(),
+            AB::Expr::from_u32((1 << 30) - (1 << 23) + 1) + y6_value.clone(),
         );
     }
 }

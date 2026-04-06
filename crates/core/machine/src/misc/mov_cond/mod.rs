@@ -5,8 +5,8 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
@@ -129,8 +129,8 @@ impl MovCondChip {
         cols: &mut MovCondCols<F>,
         _blu: &mut impl ByteRecord,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
 
         cols.op_a_value = event.a.into();
         cols.op_b_value = event.b.into();
@@ -157,7 +157,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MovCondCols<AB::Var> = (*local).borrow();
         let is_real = local.is_mne + local.is_meq + local.is_wsbh;
 
@@ -166,22 +166,22 @@ where
             + local.is_mne * Opcode::MNE.as_field::<AB::F>();
 
         builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
+            local.next_pc + AB::Expr::from_u32(4),
+            AB::Expr::ZERO,
             cpu_opcode.clone(),
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
             local.prev_a_value,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.is_mne + local.is_meq,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ONE,
             is_real.clone(),
         );
 

@@ -1,4 +1,4 @@
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
@@ -22,7 +22,7 @@ impl<F: Field> XorOperation<F> {
         let y_bytes = y.to_le_bytes();
         for i in 0..WORD_SIZE {
             let xor = x_bytes[i] ^ y_bytes[i];
-            self.value[i] = F::from_canonical_u8(xor);
+            self.value[i] = F::from_u8(xor);
 
             let byte_event = ByteLookupEvent {
                 opcode: ByteOpcode::XOR,
@@ -46,7 +46,7 @@ impl<F: Field> XorOperation<F> {
     ) {
         for i in 0..WORD_SIZE {
             builder.send_byte(
-                AB::F::from_canonical_u32(ByteOpcode::XOR as u32),
+                AB::F::from_u32(ByteOpcode::XOR as u32),
                 cols.value[i],
                 a[i],
                 b[i],

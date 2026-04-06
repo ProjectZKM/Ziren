@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 
 use crate::operations::poseidon2::air::{eval_external_round, eval_internal_rounds};
@@ -24,11 +24,11 @@ impl<F> BaseAir<F> for Poseidon2PermuteChip {
 
 impl<AB> Air<AB> for Poseidon2PermuteChip
 where
-    AB: ZKMAirBuilder + PairBuilder,
+    AB: ZKMAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Poseidon2MemCols<AB::Var> = (*local).borrow();
 
         // Assert that is_real is a boolean.
@@ -47,7 +47,7 @@ where
             let pre_state = pre_state_word
                 .iter()
                 .enumerate()
-                .map(|(j, limb)| (*limb).into() * AB::Expr::from_canonical_u32(1 << (j * 8)))
+                .map(|(j, limb)| (*limb).into() * AB::Expr::from_u32(1 << (j * 8)))
                 .sum::<AB::Expr>();
             // If this is a real operation, assert that the reconstructed pre-state from memory
             // matches the input to the Poseidon2 permutation AIR.
@@ -76,7 +76,7 @@ where
             let post_state = post_state_word
                 .iter()
                 .enumerate()
-                .map(|(j, limb)| (*limb).into() * AB::Expr::from_canonical_u32(1 << (j * 8)))
+                .map(|(j, limb)| (*limb).into() * AB::Expr::from_u32(1 << (j * 8)))
                 .sum::<AB::Expr>();
             // If this is a real operation, assert that the reconstructed post-state from memory
             // matches the output from the Poseidon2 permutation AIR.
@@ -98,9 +98,9 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
+            AB::F::from_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
             local.state_addr,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.is_real,
             LookupScope::Local,
         );

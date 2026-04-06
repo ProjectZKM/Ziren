@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use num::BigUint;
 use p3_air::AirBuilder;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::ByteRecord;
 use zkm_curves::params::{FieldParameters, Limbs};
 use zkm_derive::AlignedBorrow;
@@ -104,7 +104,7 @@ where
         let p_result: Polynomial<<AB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<AB as AirBuilder>::Expr> = self.carry.into();
 
-        let p_zero = Polynomial::<AB::Expr>::new(vec![AB::Expr::zero()]);
+        let p_zero = Polynomial::<AB::Expr>::new(vec![AB::Expr::ZERO]);
 
         let p_inner_product = p_a_vec
             .iter()
@@ -133,6 +133,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use p3_air::WindowAccess;
     use num::BigUint;
     use p3_air::BaseAir;
     use p3_field::{Field, PrimeField32};
@@ -150,7 +151,7 @@ mod tests {
     };
     use num::bigint::RandBigInt;
     use p3_air::Air;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::{dense::RowMajorMatrix, Matrix};
     use rand::thread_rng;
@@ -248,7 +249,7 @@ mod tests {
     {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
+            let local = main.current_slice();
             let local: &TestCols<AB::Var, P> = (*local).borrow();
             local.a_ip_b.eval(builder, &local.a, &local.b, AB::F::ONE);
         }

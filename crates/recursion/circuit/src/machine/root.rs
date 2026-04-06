@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use p3_air::Air;
 use p3_commit::Mmcs;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -12,9 +12,9 @@ use super::{
 };
 use crate::{
     challenger::DuplexChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
-    CircuitConfig, KoalaBearFriConfigVariable,
+    CircuitConfig, KoalaBearFriParametersVariable,
 };
-use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
 use zkm_stark::{air::MachineAir, StarkMachine};
 
@@ -38,10 +38,11 @@ pub struct ZKMCompressRootVerifierWithVKey<C, SC, A> {
 
 impl<C, SC, A> ZKMCompressRootVerifier<C, SC, A>
 where
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
+
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
 {
     pub fn verify(
         builder: &mut Builder<C>,
@@ -64,14 +65,15 @@ where
 
 impl<C, SC, A> ZKMCompressRootVerifierWithVKey<C, SC, A>
 where
-    SC: KoalaBearFriConfigVariable<
+    SC: KoalaBearFriParametersVariable<
         C,
         FriChallengerVariable = DuplexChallengerVariable<C>,
         DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
     >,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
+
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
 {
     pub fn verify(
         builder: &mut Builder<C>,

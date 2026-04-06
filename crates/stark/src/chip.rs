@@ -1,9 +1,9 @@
 use std::hash::Hash;
 
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{Air, BaseAir};
 use p3_field::{ExtensionField, Field, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::{get_max_constraint_degree, SymbolicAirBuilder};
+use p3_uni_stark::{get_max_constraint_degree, AirLayout, SymbolicAirBuilder};
 use p3_util::log2_ceil_usize;
 
 use crate::{
@@ -79,7 +79,12 @@ where
         );
 
         let mut max_constraint_degree =
-            get_max_constraint_degree(&air, air.preprocessed_width(), PROOF_MAX_NUM_PVS);
+            get_max_constraint_degree(&air, AirLayout {
+                preprocessed_width: air.preprocessed_width(),
+                main_width: air.width(),
+                num_public_values: PROOF_MAX_NUM_PVS,
+                ..Default::default()
+            });
 
         if !sends.is_empty() || !receives.is_empty() {
             max_constraint_degree = max_constraint_degree.max(3);
@@ -254,7 +259,7 @@ impl<'a, F, A, AB> Air<AB> for Chip<F, A>
 where
     F: Field,
     A: Air<AB> + MachineAir<F>,
-    AB: ZKMAirBuilder<F = F> + MultiTableAirBuilder<'a> + PairBuilder + 'a,
+    AB: ZKMAirBuilder<F = F> + MultiTableAirBuilder<'a> + 'a,
 {
     fn eval(&self, builder: &mut AB) {
         // Evaluate the execution trace constraints.

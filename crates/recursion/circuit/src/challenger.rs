@@ -1,4 +1,4 @@
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -118,8 +118,8 @@ impl<C: Config<F = KoalaBear>> DuplexChallengerVariable<C> {
         assert!(self.output_buffer.len() <= PERMUTATION_WIDTH);
 
         let sponge_state = self.sponge_state;
-        let num_inputs = builder.eval(C::F::from_canonical_usize(self.input_buffer.len()));
-        let num_outputs = builder.eval(C::F::from_canonical_usize(self.output_buffer.len()));
+        let num_inputs = builder.eval(C::F::from_usize(self.input_buffer.len()));
+        let num_outputs = builder.eval(C::F::from_usize(self.output_buffer.len()));
 
         let input_buffer: [_; PERMUTATION_WIDTH] = self
             .input_buffer
@@ -266,7 +266,7 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
         builder.push_op(DslIr::CircuitPoseidon2Permute(self.sponge_state));
 
         self.output_buffer.clear();
-        for &pf_val in self.sponge_state.iter() {
+        for &pf_val in self.sponge_state[..OUTER_MULTI_FIELD_CHALLENGER_RATE].iter() {
             let f_vals = split_32(builder, pf_val, self.num_f_elms);
             for f_val in f_vals {
                 self.output_buffer.push(f_val);
@@ -321,7 +321,7 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
         self.observe(builder, witness);
         let element = self.sample_bits(builder, bits);
         for bit in element {
-            builder.assert_var_eq(bit, C::N::from_canonical_usize(0));
+            builder.assert_var_eq(bit, C::N::from_usize(0));
         }
     }
 }
@@ -402,7 +402,7 @@ pub fn reduce_32<C: Config>(builder: &mut Builder<C>, vals: &[Felt<C::F>]) -> Va
     for val in vals.iter() {
         let val = builder.felt2var_circuit(*val);
         builder.assign(result, result + val * power);
-        power *= C::N::from_canonical_u64(1u64 << 32);
+        power *= C::N::from_u64(1u64 << 32);
     }
     result
 }
@@ -414,7 +414,7 @@ pub fn split_32<C: Config>(builder: &mut Builder<C>, val: Var<C::N>, n: usize) -
         let result: Felt<C::F> = builder.eval(C::F::ZERO);
         for j in 0..64 {
             let bit = bits[i * 64 + j];
-            let t = builder.eval(result + C::F::from_wrapped_u64(1 << j));
+            let t = builder.eval(result + C::F::from_u64(1 << j));
             let z = builder.select_f(bit, t, result);
             builder.assign(result, z);
         }
@@ -432,9 +432,9 @@ pub(crate) mod tests {
         hash::{FieldHasherVariable, BN254_DIGEST_SIZE},
         utils::tests::run_test_recursion,
     };
-    use p3_bn254_fr::Bn254Fr;
+    use p3_bn254_fr::Bn254;
     use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger};
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::{CryptographicHasher, Hash, PseudoCompressionFunction};
     use zkm_recursion_compiler::{
@@ -469,7 +469,7 @@ pub(crate) mod tests {
         challenger.observe(F::TWO);
         let result: F = challenger.sample();
         println!("expected result: {result}");
-        let result_ef: EF = challenger.sample_ext_element();
+        let result_ef: EF = challenger.sample_algebra_element();
         println!("expected result_ef: {result_ef}");
 
         let mut builder = AsmBuilder::<F, EF>::default();
@@ -516,7 +516,7 @@ pub(crate) mod tests {
         challenger.observe(commit);
         let result: F = challenger.sample();
         println!("expected result: {result}");
-        let result_ef: EF = challenger.sample_ext_element();
+        let result_ef: EF = challenger.sample_algebra_element();
         println!("expected result_ef: {result_ef}");
         let mut bits = challenger.sample_bits(30);
         let mut bits_vec = vec![];
@@ -528,7 +528,7 @@ pub(crate) mod tests {
 
         let mut builder = Builder::<C>::default();
 
-        // let width: Var<_> = builder.eval(F::from_canonical_usize(PERMUTATION_WIDTH));
+        // let width: Var<_> = builder.eval(F::from_usize(PERMUTATION_WIDTH));
         let mut challenger = MultiField32ChallengerVariable::<C>::new(&mut builder);
         let one: Felt<_> = builder.eval(F::ONE);
         let two: Felt<_> = builder.eval(F::TWO);
@@ -553,7 +553,7 @@ pub(crate) mod tests {
         builder.print_e(element_ef);
         builder.assert_ext_eq(expected_result_ef, element_ef);
         for (expected_bit, bit) in zip(bits_vec.iter(), bits.iter()) {
-            let expected_bit: Var<_> = builder.eval(N::from_canonical_usize(*expected_bit));
+            let expected_bit: Var<_> = builder.eval(N::from_usize(*expected_bit));
             builder.print_v(*bit);
             builder.assert_var_eq(expected_bit, *bit);
         }
@@ -591,13 +591,13 @@ pub(crate) mod tests {
         let hasher = OuterHash::new(perm.clone()).unwrap();
 
         let input: [KoalaBear; 7] = [
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(1),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
-            KoalaBear::from_canonical_u32(2),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(1),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
+            KoalaBear::from_u32(2),
         ];
         let output = hasher.hash_iter(input);
 
@@ -624,8 +624,8 @@ pub(crate) mod tests {
         let perm = outer_perm();
         let compressor = OuterCompress::new(perm.clone());
 
-        let a: [Bn254Fr; 1] = [Bn254Fr::TWO];
-        let b: [Bn254Fr; 1] = [Bn254Fr::TWO];
+        let a: [Bn254; 1] = [Bn254::TWO];
+        let b: [Bn254; 1] = [Bn254::TWO];
         let gt = compressor.compress([a, b]);
 
         let mut builder = Builder::<C>::default();

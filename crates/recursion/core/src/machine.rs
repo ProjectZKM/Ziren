@@ -270,7 +270,7 @@ pub mod tests {
     use crate::machine::RecursionAir;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
-        Field, FieldAlgebra, FieldExtensionAlgebra,
+        BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
@@ -370,12 +370,12 @@ pub mod tests {
         let mut addr = 0;
         for _ in 0..100 {
             let inner: [F; 4] = std::iter::repeat_with(|| {
-                core::array::from_fn(|_| rng.sample(rand::distributions::Standard))
+                core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))
             })
             .find(|xs| !xs.iter().all(F::is_zero))
             .unwrap();
-            let x = BinomialExtensionField::<F, D>::from_base_slice(&inner);
-            let gal = x.galois_group();
+            let x = BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap();
+            let gal = x.galois_orbit();
 
             let mut acc = BinomialExtensionField::ONE;
 
@@ -387,7 +387,7 @@ pub mod tests {
                 addr += 2;
                 acc *= conj;
             }
-            let base_cmp: F = acc.as_base_slice()[0];
+            let base_cmp: F = acc.as_basis_coefficients_slice()[0];
             instructions.push(instr::mem_single(MemAccessKind::Read, 1, addr, base_cmp));
             addr += 1;
         }

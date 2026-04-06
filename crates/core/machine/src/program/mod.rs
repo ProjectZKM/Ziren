@@ -9,7 +9,7 @@ use crate::{
     utils::{next_power_of_two, pad_rows_fixed, zeroed_f_vec},
     CoreChipError,
 };
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -89,7 +89,7 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
                         let cols: &mut ProgramPreprocessedCols<F> = row.borrow_mut();
                         let instruction = &program.instructions[idx];
                         let pc = program.pc_base + (idx as u32 * 4);
-                        cols.pc = F::from_canonical_u32(pc);
+                        cols.pc = F::from_u32(pc);
                         cols.instruction.populate(instruction);
                     }
                 });
@@ -134,7 +134,7 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
                 let mut row = [F::ZERO; NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
                 cols.multiplicity =
-                    F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
+                    F::from_usize(*instruction_counts.get(&pc).unwrap_or(&0));
                 row
             })
             .collect::<Vec<_>>();
@@ -165,15 +165,15 @@ impl<F> BaseAir<F> for ProgramChip {
 
 impl<AB> Air<AB> for ProgramChip
 where
-    AB: ZKMAirBuilder + PairBuilder,
+    AB: ZKMAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let preprocessed = builder.preprocessed();
 
-        let prep_local = preprocessed.row_slice(0);
+        let prep_local = preprocessed.current_slice();
         let prep_local: &ProgramPreprocessedCols<AB::Var> = (*prep_local).borrow();
-        let mult_local = main.row_slice(0);
+        let mult_local = main.current_slice();
         let mult_local: &ProgramMultiplicityCols<AB::Var> = (*mult_local).borrow();
 
         // Constrain the lookup with CPU table

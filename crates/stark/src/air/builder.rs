@@ -1,17 +1,16 @@
 use std::{array, iter::once};
 
 use itertools::Itertools;
-use p3_air::{AirBuilder, AirBuilderWithPublicValues, FilteredAirBuilder, PermutationAirBuilder};
-use p3_field::{Field, FieldAlgebra};
-use p3_uni_stark::{
-    ProverConstraintFolder, StarkGenericConfig, SymbolicAirBuilder, VerifierConstraintFolder,
-};
+use p3_air::{AirBuilder, FilteredAirBuilder, PermutationAirBuilder};
+use p3_field::{Field, PrimeCharacteristicRing};
+use p3_uni_stark::SymbolicAirBuilder;
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
 use super::{lookup::AirLookup, BinomialExtension};
 use crate::{
     lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension, Word,
+    ProverConstraintFolder, VerifierConstraintFolder, StarkGenericConfig,
 };
 
 /// The default increment for the program counter.  Is used for all instructions except
@@ -62,7 +61,7 @@ impl<AB: EmptyMessageBuilder, M> MessageBuilder<M> for AB {
 }
 
 /// A trait which contains basic methods for building an AIR.
-pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
+pub trait BaseAirBuilder: AirBuilder<F: Field> + MessageBuilder<AirLookup<Self::Expr>> {
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<'_, Self> {
         self.when_ne(condition, Self::F::ONE)
@@ -93,7 +92,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
         a: impl Into<Self::Expr> + Clone,
         b: impl Into<Self::Expr> + Clone,
     ) -> Self::Expr {
-        condition.clone().into() * a.into() + (Self::Expr::one() - condition.into()) * b.into()
+        condition.clone().into() * a.into() + (Self::Expr::ONE - condition.into()) * b.into()
     }
 
     /// Index an array of expressions using an index bitmap.  This function assumes that the
@@ -103,7 +102,7 @@ pub trait BaseAirBuilder: AirBuilder + MessageBuilder<AirLookup<Self::Expr>> {
         array: &[impl Into<Self::Expr> + Clone],
         index_bitmap: &[impl Into<Self::Expr> + Clone],
     ) -> Self::Expr {
-        let mut result = Self::Expr::zero();
+        let mut result = Self::Expr::ZERO;
 
         for (value, i) in array.iter().zip_eq(index_bitmap) {
             result = result.clone() + value.clone().into() * i.clone().into();
@@ -125,7 +124,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.send_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
+        self.send_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
     }
 
     /// Sends a byte operation with two outputs to be processed.
@@ -159,7 +158,7 @@ pub trait ByteAirBuilder: BaseAirBuilder {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.receive_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
+        self.receive_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
     }
 
     /// Receives a byte operation with two outputs to be processed.
@@ -303,22 +302,22 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.send_instruction(
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            Self::Expr::from_canonical_u32(UNUSED_PC),
-            Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC),
-            Self::Expr::from_canonical_u32(UNUSED_PC + DEFAULT_PC_INC + DEFAULT_PC_INC),
-            Self::Expr::zero(),
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            Self::Expr::from_u32(UNUSED_PC),
+            Self::Expr::from_u32(UNUSED_PC + DEFAULT_PC_INC),
+            Self::Expr::from_u32(UNUSED_PC + DEFAULT_PC_INC + DEFAULT_PC_INC),
+            Self::Expr::ZERO,
             opcode,
             a,
             b,
             c,
             hi,
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            Self::Expr::one(),
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            Self::Expr::ONE,
             multiplicity,
         )
     }
@@ -450,7 +449,7 @@ pub trait MultiTableAirBuilder<'a>: PermutationAirBuilder {
 /// A trait that contains the common helper methods for building `Ziren recursion` and Ziren machine
 /// AIRs.
 pub trait MachineAirBuilder:
-    BaseAirBuilder + ExtensionAirBuilder + SepticExtensionAirBuilder + AirBuilderWithPublicValues
+    BaseAirBuilder + ExtensionAirBuilder + SepticExtensionAirBuilder
 {
 }
 
@@ -467,19 +466,22 @@ impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBui
     }
 }
 
-impl<AB: AirBuilder + MessageBuilder<AirLookup<AB::Expr>>> BaseAirBuilder for AB {}
+impl<AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<AB::Expr>>> BaseAirBuilder for AB {}
 impl<AB: BaseAirBuilder> ByteAirBuilder for AB {}
 impl<AB: BaseAirBuilder> InstructionAirBuilder for AB {}
 
 impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> SepticExtensionAirBuilder for AB {}
-impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> MachineAirBuilder for AB {}
-impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> ZKMAirBuilder for AB {}
+impl<AB: BaseAirBuilder> MachineAirBuilder for AB {}
+impl<AB: BaseAirBuilder> ZKMAirBuilder for AB {}
 
 impl<SC: StarkGenericConfig> EmptyMessageBuilder for ProverConstraintFolder<'_, SC> {}
-impl<SC: StarkGenericConfig> EmptyMessageBuilder for VerifierConstraintFolder<'_, SC> {}
+// EmptyMessageBuilder for VerifierConstraintFolder is covered by the GenericVerifierConstraintFolder impl in folder.rs
 impl<F: Field> EmptyMessageBuilder for SymbolicAirBuilder<F> {}
 
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
-impl<F: Field> EmptyMessageBuilder for p3_uni_stark::DebugConstraintBuilder<'_, F> {}
+impl<F: Field, EF: p3_field::ExtensionField<F>> EmptyMessageBuilder for crate::DebugConstraintBuilder<'_, F, EF> {}
+
+// Blanket impls for upstream p3_uni_stark folders, so our Air impls (which require ZKMAirBuilder)
+// can be used with the upstream prove/verify functions.
+impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder for p3_uni_stark::ProverConstraintFolder<'_, SC> {}
+impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder for p3_uni_stark::VerifierConstraintFolder<'_, SC> {}

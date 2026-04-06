@@ -3,8 +3,8 @@ use std::{
     mem::size_of,
 };
 
-use p3_air::{Air, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{
@@ -166,12 +166,12 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
                     let cols = &mut cols.memory_local_entries[k];
                     if idx + k < events.len() {
                         let event: &&MemoryLocalEvent = &events[idx + k];
-                        cols.addr = F::from_canonical_u32(event.addr);
-                        cols.initial_shard = F::from_canonical_u32(event.initial_mem_access.shard);
-                        cols.final_shard = F::from_canonical_u32(event.final_mem_access.shard);
+                        cols.addr = F::from_u32(event.addr);
+                        cols.initial_shard = F::from_u32(event.initial_mem_access.shard);
+                        cols.final_shard = F::from_u32(event.final_mem_access.shard);
                         cols.initial_clk =
-                            F::from_canonical_u32(event.initial_mem_access.timestamp);
-                        cols.final_clk = F::from_canonical_u32(event.final_mem_access.timestamp);
+                            F::from_u32(event.initial_mem_access.timestamp);
+                        cols.final_clk = F::from_u32(event.final_mem_access.timestamp);
                         cols.initial_value = event.initial_mem_access.value.into();
                         cols.final_value = event.final_mem_access.value.into();
                         cols.is_real = F::ONE;
@@ -203,7 +203,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryLocalCols<AB::Var> = (*local).borrow();
 
         for local in local.memory_local_entries.iter() {
@@ -228,9 +228,9 @@ where
                         local.initial_value[1].into(),
                         local.initial_value[2].into(),
                         local.initial_value[3].into(),
-                        local.is_real.into() * AB::Expr::zero(),
-                        local.is_real.into() * AB::Expr::one(),
-                        AB::Expr::from_canonical_u8(LookupKind::Memory as u8),
+                        local.is_real.into() * AB::Expr::ZERO,
+                        local.is_real.into() * AB::Expr::ONE,
+                        AB::Expr::from_u8(LookupKind::Memory as u8),
                     ],
                     local.is_real.into(),
                     LookupKind::Global,
@@ -249,9 +249,9 @@ where
                         local.final_value[1].into(),
                         local.final_value[2].into(),
                         local.final_value[3].into(),
-                        local.is_real.into() * AB::Expr::one(),
-                        local.is_real.into() * AB::Expr::zero(),
-                        AB::Expr::from_canonical_u8(LookupKind::Memory as u8),
+                        local.is_real.into() * AB::Expr::ONE,
+                        local.is_real.into() * AB::Expr::ZERO,
+                        AB::Expr::from_u8(LookupKind::Memory as u8),
                     ],
                     local.is_real.into(),
                     LookupKind::Global,

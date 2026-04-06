@@ -1,38 +1,178 @@
-use p3_air::{Air, BaseAir};
-use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
+use std::marker::PhantomData;
+use std::ops::MulAssign;
+
+use p3_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, WindowAccess, Air, BaseAir};
+use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace};
+use p3_field::{Algebra, BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, TwoAdicField};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
+use p3_matrix::stack::VerticalPair;
 
 use zkm_recursion_compiler::ir::{
     Builder, Config, Ext, ExtConst, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
 };
 use zkm_stark::{
-    air::MachineAir, AirOpenedValues, ChipOpenedValues, GenericVerifierConstraintFolder,
-    MachineChip, OpeningShapeError,
+    air::{MachineAir, MultiTableAirBuilder, EmptyMessageBuilder},
+    AirOpenedValues, ChipOpenedValues, MachineChip, OpeningShapeError,
+    folder::PairWindow,
+    septic_digest::SepticDigest,
 };
 
 use crate::{
     domain::PolynomialSpaceVariable, stark::StarkVerifier, CircuitConfig,
-    KoalaBearFriConfigVariable,
+    KoalaBearFriParametersVariable,
 };
 
-pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFolder<
-    'a,
-    <C as Config>::F,
-    <C as Config>::EF,
-    Felt<<C as Config>::F>,
-    Ext<<C as Config>::F, <C as Config>::EF>,
-    SymbolicExt<<C as Config>::F, <C as Config>::EF>,
->;
+/// Constraint folder for recursive verification.
+///
+/// This is a dedicated struct (rather than a type alias of `GenericVerifierConstraintFolder`)
+/// because the recursive case needs `AirBuilder::F = EF` (the extension field), which allows
+/// `SymbolicExt<F, EF>: Algebra<EF>` without conflicting `From` impls.
+pub struct RecursiveVerifierConstraintFolder<'a, C: Config> {
+    pub preprocessed: VerticalPair<RowMajorMatrixView<'a, Ext<C::F, C::EF>>, RowMajorMatrixView<'a, Ext<C::F, C::EF>>>,
+    pub preprocessed_window: PairWindow<'a, Ext<C::F, C::EF>>,
+    pub main: VerticalPair<RowMajorMatrixView<'a, Ext<C::F, C::EF>>, RowMajorMatrixView<'a, Ext<C::F, C::EF>>>,
+    pub perm: VerticalPair<RowMajorMatrixView<'a, Ext<C::F, C::EF>>, RowMajorMatrixView<'a, Ext<C::F, C::EF>>>,
+    pub perm_challenges: &'a [Ext<C::F, C::EF>],
+    pub local_cumulative_sum: &'a Ext<C::F, C::EF>,
+    pub global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
+    pub is_first_row: Ext<C::F, C::EF>,
+    pub is_last_row: Ext<C::F, C::EF>,
+    pub is_transition: Ext<C::F, C::EF>,
+    pub alpha: Ext<C::F, C::EF>,
+    pub accumulator: SymbolicExt<C::F, C::EF>,
+    pub public_values: &'a [Felt<C::F>],
+}
+
+impl<'a, C: Config> AirBuilder for RecursiveVerifierConstraintFolder<'a, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+{
+    type F = C::F;
+    type Expr = SymbolicExt<C::F, C::EF>;
+    type Var = Ext<C::F, C::EF>;
+    type PreprocessedWindow = PairWindow<'a, Ext<C::F, C::EF>>;
+    type MainWindow = PairWindow<'a, Ext<C::F, C::EF>>;
+    type PublicVar = Felt<C::F>;
+
+    fn main(&self) -> Self::MainWindow {
+        let width = self.main.top.width;
+        PairWindow {
+            local: &self.main.top.values[..width],
+            next: &self.main.bottom.values[..width],
+        }
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed_window
+    }
+
+    fn is_first_row(&self) -> Self::Expr {
+        self.is_first_row.into()
+    }
+
+    fn is_last_row(&self) -> Self::Expr {
+        self.is_last_row.into()
+    }
+
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        if size == 2 {
+            self.is_transition.into()
+        } else {
+            panic!("uni-stark only supports a window size of 2")
+        }
+    }
+
+    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
+        let x: SymbolicExt<C::F, C::EF> = x.into();
+        self.accumulator *= self.alpha;
+        self.accumulator += x;
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.public_values
+    }
+}
+
+impl<C: Config> ExtensionBuilder for RecursiveVerifierConstraintFolder<'_, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    type EF = C::EF;
+    type ExprEF = SymbolicExt<C::F, C::EF>;
+    type VarEF = Ext<C::F, C::EF>;
+
+    fn assert_zero_ext<I>(&mut self, x: I)
+    where
+        I: Into<Self::ExprEF>,
+    {
+        self.assert_zero(x);
+    }
+}
+
+impl<'a, C: Config> PermutationAirBuilder for RecursiveVerifierConstraintFolder<'a, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    type MP = PairWindow<'a, Ext<C::F, C::EF>>;
+    type RandomVar = Ext<C::F, C::EF>;
+    type PermutationVar = Ext<C::F, C::EF>;
+
+    fn permutation(&self) -> Self::MP {
+        let width = self.perm.top.width;
+        PairWindow {
+            local: &self.perm.top.values[..width],
+            next: &self.perm.bottom.values[..width],
+        }
+    }
+
+    fn permutation_randomness(&self) -> &[Self::Var] {
+        self.perm_challenges
+    }
+
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        &[]
+    }
+}
+
+impl<'a, C: Config> MultiTableAirBuilder<'a> for RecursiveVerifierConstraintFolder<'a, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    type LocalSum = Ext<C::F, C::EF>;
+    type GlobalSum = Felt<C::F>;
+
+    fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
+        self.local_cumulative_sum
+    }
+
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+        self.global_cumulative_sum
+    }
+}
+
+impl<C: Config> EmptyMessageBuilder for RecursiveVerifierConstraintFolder<'_, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{}
 
 impl<C, SC, A> StarkVerifier<C, SC, A>
 where
     C::F: TwoAdicField,
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
     C: CircuitConfig<F = SC::Val>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<C::F> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
@@ -64,7 +204,7 @@ where
         );
 
         // Assert that the quotient times the zerofier is equal to the folded constraints.
-        builder.assert_ext_eq(folded_constraints * sels.inv_zeroifier, quotient);
+        builder.assert_ext_eq(folded_constraints * sels.inv_vanishing, quotient);
     }
 
     #[allow(clippy::type_complexity)]
@@ -78,7 +218,7 @@ where
         public_values: &[Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
         let mut unflatten = |v: &[Ext<C::F, C::EF>]| {
-            v.chunks_exact(<SC::Challenge as FieldExtensionAlgebra<C::F>>::D)
+            v.chunks_exact(<SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION)
                 .map(|chunk| {
                     builder.eval(
                         chunk
@@ -86,7 +226,8 @@ where
                             .enumerate()
                             .map(
                                 |(e_i, x): (usize, &Ext<C::F, C::EF>)| -> SymbolicExt<C::F, C::EF> {
-                                    SymbolicExt::from(*x) * C::EF::monomial(e_i)
+                                    let basis: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(C::EF::ith_basis_element(e_i).unwrap());
+                                    SymbolicExt::Val(*x) * basis
                                 },
                             )
                             .sum::<SymbolicExt<_, _>>(),
@@ -99,8 +240,14 @@ where
             next: unflatten(&opening.permutation.next),
         };
 
+        let preprocessed_vp = opening.preprocessed.view();
+        let preprocessed_window = PairWindow {
+            local: &preprocessed_vp.top.values[..preprocessed_vp.top.width],
+            next: &preprocessed_vp.bottom.values[..preprocessed_vp.bottom.width],
+        };
         let mut folder = RecursiveVerifierConstraintFolder::<C> {
-            preprocessed: opening.preprocessed.view(),
+            preprocessed: preprocessed_vp,
+            preprocessed_window,
             main: opening.main.view(),
             perm: perm_opening.view(),
             perm_challenges: permutation_challenges,
@@ -112,7 +259,6 @@ where
             is_transition: selectors.is_transition,
             alpha,
             accumulator: SymbolicExt::ZERO,
-            _marker: std::marker::PhantomData,
         };
 
         chip.eval(&mut folder);
@@ -127,7 +273,7 @@ where
         zeta: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {
         // Compute the maximum power of zeta we will need.
-        let max_domain_log_n = qc_domains.iter().map(|d| d.log_n).max().unwrap();
+        let max_domain_log_n = qc_domains.iter().map(|d| d.log_size()).max().unwrap();
 
         // Compute all powers of zeta of the form zeta^(2^i) up to `zeta^(2^max_domain_log_n)`.
         let mut zetas: Vec<Ext<_, _>> = vec![zeta];
@@ -148,10 +294,10 @@ where
                     .map(|(_, other_domain)| {
                         // `shift_power` is used in the computation of
                         let shift_power =
-                            other_domain.shift.exp_power_of_2(other_domain.log_n).inverse();
+                            other_domain.shift().exp_power_of_2(other_domain.log_size()).inverse();
                         // This is `other_domain.zp_at_point_f(builder, domain.first_point())`.
                         // We compute it as a constant here.
-                        let z_f = domain.first_point().exp_power_of_2(other_domain.log_n)
+                        let z_f = domain.first_point().exp_power_of_2(other_domain.log_size())
                             * shift_power
                             - C::F::ONE;
                         (
@@ -159,8 +305,8 @@ where
                                 // We use the precomputed powers of zeta to compute (inline) the value of
                                 // `other_domain.zp_at_point_variable(builder, zeta)`.
                                 let z: Ext<_, _> = builder.eval(
-                                    zetas[other_domain.log_n] * SymbolicFelt::from_f(shift_power)
-                                        - SymbolicExt::from_f(C::EF::ONE),
+                                    zetas[other_domain.log_size()] * SymbolicFelt::from(shift_power)
+                                        - SymbolicExt::Const(C::EF::ONE),
                                 );
                                 z.to_operand().symbolic()
                             },
@@ -183,11 +329,14 @@ where
                 .iter()
                 .enumerate()
                 .map(|(ch_i, ch)| {
-                    assert_eq!(ch.len(), C::EF::D);
+                    assert_eq!(ch.len(), <C::EF as BasedVectorSpace<C::F>>::DIMENSION);
                     zps[ch_i].to_operand().symbolic()
                         * ch.iter()
                             .enumerate()
-                            .map(|(e_i, &c)| C::EF::monomial(e_i).cons() * SymbolicExt::from(c))
+                            .map(|(e_i, &c)| {
+                                let basis: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(C::EF::ith_basis_element(e_i).unwrap());
+                                basis * SymbolicExt::Val(c)
+                            })
                             .sum::<SymbolicExt<_, _>>()
                 })
                 .sum::<SymbolicExt<_, _>>(),
@@ -229,7 +378,7 @@ where
 
         // Verify that the permutation width matches the expected value for the chip.
         if opening.permutation.local.len()
-            != chip.permutation_width() * <SC::Challenge as FieldExtensionAlgebra<C::F>>::D
+            != chip.permutation_width() * <SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION
         {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
@@ -237,7 +386,7 @@ where
             ));
         }
         if opening.permutation.next.len()
-            != chip.permutation_width() * <SC::Challenge as FieldExtensionAlgebra<C::F>>::D
+            != chip.permutation_width() * <SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION
         {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
@@ -255,9 +404,9 @@ where
         // For each quotient chunk, verify that the number of elements is equal to the degree of the
         // challenge extension field over the value field.
         for slice in &opening.quotient {
-            if slice.len() != <SC::Challenge as FieldExtensionAlgebra<C::F>>::D {
+            if slice.len() != <SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION {
                 return Err(OpeningShapeError::QuotientChunkSizeMismatch(
-                    <SC::Challenge as FieldExtensionAlgebra<C::F>>::D,
+                    <SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION,
                     slice.len(),
                 ));
             }

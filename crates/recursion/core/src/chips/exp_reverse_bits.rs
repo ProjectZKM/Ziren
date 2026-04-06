@@ -1,8 +1,8 @@
 #![allow(clippy::needless_range_loop)]
 
 use core::borrow::Borrow;
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -116,7 +116,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExpReverseBitsLenPreprocessedCols<F> =
                         row.as_mut_slice().borrow_mut();
-                    row.iteration_num = F::from_canonical_u32(i as u32);
+                    row.iteration_num = F::from_u32(i as u32);
                     row.is_first = F::from_bool(i == 0);
                     row.is_last = F::from_bool(i == addrs.exp.len() - 1);
                     row.is_real = F::ONE;
@@ -175,7 +175,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExpReverseBitsLenPreprocessedCols<KoalaBear> =
                         row.as_mut_slice().borrow_mut();
-                    row.iteration_num = KoalaBear::from_canonical_u32(i as u32);
+                    row.iteration_num = KoalaBear::from_u32(i as u32);
                     row.is_first = KoalaBear::from_bool(i == 0);
                     row.is_last = KoalaBear::from_bool(i == addrs.exp.len() - 1);
                     row.is_real = KoalaBear::ONE;
@@ -398,7 +398,7 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
         builder
             .when(local_prepr.is_real)
             .when_not(local.current_bit)
-            .assert_eq(local.multiplier, AB::Expr::one());
+            .assert_eq(local.multiplier, AB::Expr::ONE);
 
         // To get `next.accum`, we multiply `local.prev_accum_squared` by `local.multiplier` when
         // not `is_last`.
@@ -434,15 +434,15 @@ impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for ExpReverseBitsLenChip<DEGREE>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &ExpReverseBitsLenCols<AB::Var> = (*local).borrow();
         let next: &ExpReverseBitsLenCols<AB::Var> = (*next).borrow();
-        let prep = builder.preprocessed();
-        let (prep_local, prep_next) = (prep.row_slice(0), prep.row_slice(1));
+        let prep = builder.preprocessed().clone();
+        let (prep_local, prep_next) = (prep.current_slice(), prep.next_slice());
         let prep_local: &ExpReverseBitsLenPreprocessedCols<_> = (*prep_local).borrow();
         let prep_next: &ExpReverseBitsLenPreprocessedCols<_> = (*prep_next).borrow();
         self.eval_exp_reverse_bits_len::<AB>(builder, local, prep_local, next, prep_next);
@@ -458,7 +458,7 @@ mod tests {
     use zkm_core_machine::utils::setup_logger;
     use zkm_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_field::{FieldAlgebra, PrimeField32};
+    use p3_field::{PrimeCharacteristicRing, PrimeField32};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -477,7 +477,7 @@ mod tests {
         type F = <SC as StarkGenericConfig>::Val;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
-        let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 16)) };
+        let mut random_felt = move || -> F { F::from_u32(rng.gen_range(0..1 << 16)) };
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut random_bit = move || rng.gen_range(0..2);
         let mut addr = 0;
@@ -486,7 +486,7 @@ mod tests {
             .flat_map(|i| {
                 let base = random_felt();
                 let exponent_bits = vec![random_bit(); i];
-                let exponent = F::from_canonical_u32(
+                let exponent = F::from_u32(
                     exponent_bits.iter().enumerate().fold(0, |acc, (i, x)| acc + x * (1 << i)),
                 );
                 let result =
@@ -503,19 +503,19 @@ mod tests {
                         MemAccessKind::Write,
                         1,
                         exp_a_clone[j] as u32,
-                        F::from_canonical_u32(exponent_bits[j]),
+                        F::from_u32(exponent_bits[j]),
                     )
                 });
                 once(instr::mem_single(MemAccessKind::Write, 1, x_a as u32, base))
                     .chain(exp_bit_instructions)
                     .chain(once(instr::exp_reverse_bits_len(
                         1,
-                        F::from_canonical_u32(x_a as u32),
+                        F::from_u32(x_a as u32),
                         exp_a
                             .into_iter()
-                            .map(|bit| F::from_canonical_u32(bit as u32))
+                            .map(|bit| F::from_u32(bit as u32))
                             .collect_vec(),
-                        F::from_canonical_u32(result_a as u32),
+                        F::from_u32(result_a as u32),
                     )))
                     .chain(once(instr::mem_single(MemAccessKind::Read, 1, result_a as u32, result)))
             })

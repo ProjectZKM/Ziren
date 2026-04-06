@@ -66,8 +66,8 @@ use core::{
     mem::size_of,
 };
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemoryAccessPosition, MemoryRecordEnum},
@@ -229,8 +229,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             {
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
-                cols.pc = F::from_canonical_u32(event.pc);
-                cols.next_pc = F::from_canonical_u32(event.next_pc);
+                cols.pc = F::from_u32(event.pc);
+                cols.next_pc = F::from_u32(event.next_pc);
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_div = F::from_bool(event.opcode == Opcode::DIV);
                 cols.is_modu = F::from_bool(event.opcode == Opcode::MODU);
@@ -243,8 +243,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     cols.op_hi_access
                         .populate(MemoryRecordEnum::Write(event.hi_record), &mut blu_events);
                     output.add_byte_lookup_events(blu_events);
-                    cols.shard = F::from_canonical_u32(event.shard);
-                    cols.clk = F::from_canonical_u32(event.clk);
+                    cols.shard = F::from_u32(event.shard);
+                    cols.clk = F::from_u32(event.clk);
                 }
             }
 
@@ -254,9 +254,9 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
             // Calculate flags for sign detection.
             {
-                cols.rem_msb = F::from_canonical_u8(get_msb(remainder));
-                cols.b_msb = F::from_canonical_u8(get_msb(event.b));
-                cols.c_msb = F::from_canonical_u8(get_msb(event.c));
+                cols.rem_msb = F::from_u8(get_msb(remainder));
+                cols.b_msb = F::from_u8(get_msb(event.b));
+                cols.c_msb = F::from_u8(get_msb(event.c));
                 cols.is_overflow_b.populate(event.b, i32::MIN as u32);
                 cols.is_overflow_c.populate(event.c, -1i32 as u32);
                 if is_signed_operation(event.opcode) {
@@ -306,7 +306,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                         ((quotient as u64) * (event.c as u64)).to_le_bytes()
                     }
                 };
-                cols.c_times_quotient = c_times_quotient.map(F::from_canonical_u8);
+                cols.c_times_quotient = c_times_quotient.map(F::from_u8);
 
                 let remainder_bytes = {
                     if is_signed_operation(event.opcode) {
@@ -325,7 +325,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                         x += carry[i - 1];
                     }
                     carry[i] = x / base;
-                    cols.carry[i] = F::from_canonical_u32(carry[i]);
+                    cols.carry[i] = F::from_u32(carry[i]);
                 }
 
                 // Range check.
@@ -374,9 +374,9 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &DivRemCols<AB::Var> = (*local).borrow();
-        let base = AB::F::from_canonical_u32(1 << 8);
+        let base = AB::F::from_u32(1 << 8);
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
 
@@ -414,8 +414,8 @@ where
             ];
 
             let opcode = {
-                let mult = AB::Expr::from_canonical_u32(Opcode::MULT as u32);
-                let multu = AB::Expr::from_canonical_u32(Opcode::MULTU as u32);
+                let mult = AB::Expr::from_u32(Opcode::MULT as u32);
+                let multu = AB::Expr::from_u32(Opcode::MULTU as u32);
                 (local.is_div + local.is_mod) * mult + (local.is_divu + local.is_modu) * multu
             };
 
@@ -459,7 +459,7 @@ where
 
         // Add remainder to product c * quotient, and compare it to b.
         {
-            let sign_extension = local.rem_neg * AB::F::from_canonical_u8(u8::MAX);
+            let sign_extension = local.rem_neg * AB::F::from_u8(u8::MAX);
             let mut c_times_quotient_plus_remainder: Vec<AB::Expr> =
                 vec![AB::F::ZERO.into(); LONG_WORD_SIZE];
 
@@ -498,7 +498,7 @@ where
                     let not_overflow = one.clone() - local.is_overflow;
                     builder.when(not_overflow.clone()).when(local.b_neg).assert_eq(
                         c_times_quotient_plus_remainder[i].clone(),
-                        AB::F::from_canonical_u8(u8::MAX),
+                        AB::F::from_u8(u8::MAX),
                     );
                     builder
                         .when(not_overflow.clone())
@@ -553,7 +553,7 @@ where
             for i in 0..WORD_SIZE {
                 builder
                     .when(local.is_c_0.result)
-                    .assert_eq(local.quotient[i], AB::F::from_canonical_u8(u8::MAX));
+                    .assert_eq(local.quotient[i], AB::F::from_u8(u8::MAX));
             }
         }
 
@@ -570,14 +570,14 @@ where
             // In the case that `c` or `rem` is negative, instead check that their sum is zero by
             // sending an AddEvent.
             builder.send_alu(
-                AB::Expr::from_canonical_u32(Opcode::ADD as u32),
+                AB::Expr::from_u32(Opcode::ADD as u32),
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.c,
                 local.abs_c,
                 local.c_neg,
             );
             builder.send_alu(
-                AB::Expr::from_canonical_u32(Opcode::ADD as u32),
+                AB::Expr::from_u32(Opcode::ADD as u32),
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.remainder,
                 local.abs_remainder,
@@ -609,14 +609,14 @@ where
             // - If is_real == 1 then is_c_0_result must be the expected one, so
             //   remainder_check_multiplicity = (1 - is_c_0_result) * is_real.
             builder.assert_eq(
-                (AB::Expr::one() - local.is_c_0.result) * is_real.clone(),
+                (AB::Expr::ONE - local.is_c_0.result) * is_real.clone(),
                 local.remainder_check_multiplicity,
             );
 
             // Dispatch abs(remainder) < max(abs(c), 1), this is equivalent to abs(remainder) <
             // abs(c) if not division by 0.
             builder.send_alu(
-                AB::Expr::from_canonical_u32(Opcode::SLTU as u32),
+                AB::Expr::from_u32(Opcode::SLTU as u32),
                 Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.abs_remainder,
                 local.max_abs_c_or_1,
@@ -631,7 +631,7 @@ where
                 (local.c_msb, local.c[WORD_SIZE - 1]),
                 (local.rem_msb, local.remainder[WORD_SIZE - 1]),
             ];
-            let opcode = AB::F::from_canonical_u32(ByteOpcode::MSB as u32);
+            let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
@@ -681,10 +681,10 @@ where
             );
 
             let opcode = {
-                let divu: AB::Expr = AB::F::from_canonical_u32(Opcode::DIVU as u32).into();
-                let div: AB::Expr = AB::F::from_canonical_u32(Opcode::DIV as u32).into();
-                let modi: AB::Expr = AB::F::from_canonical_u32(Opcode::MOD as u32).into();
-                let modu: AB::Expr = AB::F::from_canonical_u32(Opcode::MODU as u32).into();
+                let divu: AB::Expr = AB::F::from_u32(Opcode::DIVU as u32).into();
+                let div: AB::Expr = AB::F::from_u32(Opcode::DIV as u32).into();
+                let modi: AB::Expr = AB::F::from_u32(Opcode::MOD as u32).into();
+                let modu: AB::Expr = AB::F::from_u32(Opcode::MODU as u32).into();
 
                 local.is_divu * divu
                     + local.is_div * div
@@ -698,46 +698,46 @@ where
                 local.clk,
                 local.pc,
                 local.next_pc,
-                local.next_pc + AB::Expr::from_canonical_u32(4),
-                AB::Expr::zero(),
+                local.next_pc + AB::Expr::from_u32(4),
+                AB::Expr::ZERO,
                 opcode.clone(),
                 local.quotient,
                 local.b,
                 local.c,
                 local.remainder,
-                AB::Expr::zero(),
-                AB::Expr::zero(),
-                AB::Expr::one(),
-                AB::Expr::zero(),
-                AB::Expr::one(),
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ONE,
+                AB::Expr::ZERO,
+                AB::Expr::ONE,
                 local.is_div + local.is_divu,
             );
 
             builder.receive_instruction(
-                AB::Expr::zero(),
-                AB::Expr::zero(),
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
                 local.pc,
                 local.next_pc,
-                local.next_pc + AB::Expr::from_canonical_u32(4),
-                AB::Expr::zero(),
+                local.next_pc + AB::Expr::from_u32(4),
+                AB::Expr::ZERO,
                 opcode,
                 local.remainder,
                 local.b,
                 local.c,
-                Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-                AB::Expr::zero(),
-                AB::Expr::zero(),
-                AB::Expr::zero(),
-                AB::Expr::zero(),
-                AB::Expr::one(),
+                Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ONE,
                 local.is_mod + local.is_modu,
             );
 
             // Write the HI register, the register can only be Register::HI（33）.
             builder.eval_memory_access(
                 local.shard,
-                local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
-                AB::F::from_canonical_u32(33),
+                local.clk + AB::F::from_u32(MemoryAccessPosition::HI as u32),
+                AB::F::from_u32(33),
                 &local.op_hi_access,
                 local.is_div + local.is_divu,
             );

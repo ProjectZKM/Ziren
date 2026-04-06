@@ -8,8 +8,8 @@ use crate::syscall::precompiles::keccak_sponge::{
     KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
 };
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
@@ -28,15 +28,15 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &KeccakSpongeCols<AB::Var> = (*local).borrow();
         let next: &KeccakSpongeCols<AB::Var> = (*next).borrow();
 
         let first_block = local.is_first_input_block;
         let final_block = local.is_final_input_block;
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
-        let not_final_step = AB::Expr::one() - final_step;
-        let not_final_sponge = AB::Expr::one() - local.write_output;
+        let not_final_step = AB::Expr::ONE - final_step;
+        let not_final_sponge = AB::Expr::ONE - local.write_output;
 
         // Constrain flags
         self.eval_flags(builder, local);
@@ -49,7 +49,7 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::KECCAK_SPONGE.syscall_id()),
+            AB::F::from_u32(SyscallCode::KECCAK_SPONGE.syscall_id()),
             local.input_address,
             local.output_address,
             local.receive_syscall,
@@ -85,23 +85,23 @@ where
             .when(not_final_step)
             .assert_eq(local.already_absorbed_u32s, next.already_absorbed_u32s);
         // If this is the first block, absorbed bytes should be 0
-        builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::zero());
+        builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::ZERO);
         // If this is the final block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
         builder.when(final_block).assert_eq(
             local.already_absorbed_u32s,
-            local.input_len - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32),
+            local.input_len - AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32),
         );
         // If local is real and not the final block, absorbed bytes in next block should be
         // equal to the previous absorbed bytes + KECCAK_GENERAL_RATE_U32S
         builder.when(local.is_absorbed).assert_eq(
             local.already_absorbed_u32s,
             next.already_absorbed_u32s
-                - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32),
+                - AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32),
         );
         // check the input address
         builder.when(local.is_absorbed).assert_eq(
             local.input_address,
-            next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
+            next.input_address - AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
         // Eval the plonky3 keccak air
@@ -115,7 +115,7 @@ impl KeccakSpongeChip {
     fn eval_flags<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &KeccakSpongeCols<AB::Var>) {
         let first_block = local.is_first_input_block;
         let final_block = local.is_final_input_block;
-        let not_final_block = AB::Expr::one() - final_block;
+        let not_final_block = AB::Expr::ONE - final_block;
 
         let first_step = local.keccak.step_flags[0];
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
@@ -139,7 +139,7 @@ impl KeccakSpongeChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            local.output_address + AB::Expr::from_canonical_u32(64),
+            local.output_address + AB::Expr::from_u32(64),
             &local.input_length_mem,
             local.receive_syscall,
         );
@@ -153,7 +153,7 @@ impl KeccakSpongeChip {
             builder.eval_memory_access(
                 local.shard,
                 local.clk,
-                local.input_address + AB::Expr::from_canonical_u32(i * 4),
+                local.input_address + AB::Expr::from_u32(i * 4),
                 &local.block_mem[i as usize],
                 local.read_block,
             );
@@ -169,8 +169,8 @@ impl KeccakSpongeChip {
         for i in 0..KECCAK_GENERAL_OUTPUT_U32S as u32 {
             builder.eval_memory_access(
                 local.shard,
-                local.clk + AB::Expr::one(),
-                local.output_address + AB::Expr::from_canonical_u32(i * 4),
+                local.clk + AB::Expr::ONE,
+                local.output_address + AB::Expr::from_u32(i * 4),
                 &local.output_mem[i as usize],
                 local.write_output,
             );
@@ -184,7 +184,7 @@ impl KeccakSpongeChip {
     ) {
         let first_step = local.keccak.step_flags[0];
         // constrain the state
-        let expr_2_pow_8 = AB::Expr::from_canonical_u32(2u32.pow(8));
+        let expr_2_pow_8 = AB::Expr::from_u32(2u32.pow(8));
 
         for i in 0..(KECCAK_GENERAL_RATE_U32S / 2) as u32 {
             let y_idx = i / 5;

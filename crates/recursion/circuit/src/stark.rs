@@ -3,41 +3,42 @@ use itertools::{izip, Itertools};
 
 use num_traits::cast::ToPrimitive;
 
-use p3_air::{Air, BaseAir};
-use p3_commit::{Mmcs, Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_commit::{Mmcs, Pcs, PolynomialSpace};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
-    ir::{Builder, Config, DslIr, Ext, ExtConst},
+    ir::{Builder, Config, DslIr, Ext, ExtConst, SymbolicExt},
     prelude::Felt,
 };
 use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
-    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, ShardCommitment,
-    ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
+    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, SerializableDomain,
+    ShardCommitment, ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
 use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
 use crate::{
     challenger::CanObserveVariable,
-    fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+    fri::{dummy_commit, dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
-    CircuitConfig, FriProofVariable, KoalaBearFriConfig, TwoAdicPcsMatsVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriParameters, TwoAdicPcsMatsVariable,
 };
 
 use crate::{
     challenger::FieldChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
-    domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs, KoalaBearFriConfigVariable,
+    domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs, KoalaBearFriParametersVariable,
     TwoAdicPcsRoundVariable, VerifyingKeyVariable,
 };
 
 /// Reference: [zkm_core::stark::ShardProof]
 #[derive(Clone)]
-pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
+pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> {
     pub commitment: ShardCommitment<SC::DigestVariable>,
     #[allow(clippy::type_complexity)]
     pub opened_values: ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -61,9 +62,9 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
     // Make a dummy commitment.
     let commitment = ShardCommitment {
-        main_commit: dummy_hash(),
-        permutation_commit: dummy_hash(),
-        quotient_commit: dummy_hash(),
+        main_commit: dummy_commit(),
+        permutation_commit: dummy_commit(),
+        quotient_commit: dummy_commit(),
     };
 
     // Get dummy opened values by reading the chip ordering from the shape.
@@ -144,7 +145,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
                 <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge,
                 <KoalaBearPoseidon2 as StarkGenericConfig>::Challenger,
             >>::natural_domain_for_degree(pcs, 1 << log_height);
-            (name.to_owned(), domain, Dimensions { width: *width, height: 1 << log_height })
+            (name.to_owned(), SerializableDomain::from_coset(&domain), (*width, 1 << log_height))
         })
         .collect();
 
@@ -156,7 +157,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         .collect::<HashMap<_, _>>();
 
     let vk = StarkVerifyingKey {
-        commit: dummy_hash(),
+        commit: dummy_commit(),
         pc_start: KoalaBear::ZERO,
         initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
         chip_information: preprocessed_chip_information,
@@ -184,11 +185,11 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
 
     let permutation_width = chip.permutation_width();
     let permutation = AirOpenedValues {
-        local: vec![EF::ZERO; permutation_width * EF::D],
-        next: vec![EF::ZERO; permutation_width * EF::D],
+        local: vec![EF::ZERO; permutation_width * <EF as p3_field::BasedVectorSpace<F>>::DIMENSION],
+        next: vec![EF::ZERO; permutation_width * <EF as p3_field::BasedVectorSpace<F>>::DIMENSION],
     };
     let quotient_width = chip.quotient_width();
-    let quotient = (0..quotient_width).map(|_| vec![EF::ZERO; EF::D]).collect::<Vec<_>>();
+    let quotient = (0..quotient_width).map(|_| vec![EF::ZERO; <EF as p3_field::BasedVectorSpace<F>>::DIMENSION]).collect::<Vec<_>>();
 
     ChipOpenedValues {
         preprocessed,
@@ -229,8 +230,7 @@ impl<C, SC, A> StarkVerifier<C, SC, A>
 where
     C::F: TwoAdicField,
     C: CircuitConfig<F = SC::Val>,
-    SC: KoalaBearFriConfigVariable<C>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
+    SC: KoalaBearFriParametersVariable<C>,
     A: MachineAir<Val<SC>>,
 {
     pub fn natural_domain_for_degree(
@@ -251,6 +251,7 @@ where
         proof: &ShardProofVariable<C, SC>,
     ) where
         A: for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
     {
         let chips = machine.shard_chips_ordered(&proof.chip_ordering).collect::<Vec<_>>();
 
@@ -468,7 +469,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> ShardProofVariable<C, SC> {
+impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> ShardProofVariable<C, SC> {
     pub fn contains_cpu(&self) -> bool {
         self.chip_ordering.contains_key("Cpu")
     }
@@ -496,7 +497,7 @@ pub mod tests {
     use crate::{
         challenger::{CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable},
         utils::tests::run_test_recursion_with_prover,
-        KoalaBearFriConfig,
+        KoalaBearFriParameters,
     };
 
     use zkm_core_executor::Program;

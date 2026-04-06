@@ -111,9 +111,9 @@ impl SysLinuxChip {
     ) {
         cols.a0 = event.a0.into();
         cols.a1 = event.a1.into();
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.syscall_id = F::from_canonical_u32(event.syscall_code);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.syscall_id = F::from_u32(event.syscall_code);
         cols.is_real = F::ONE;
         cols.result = event.v0.into();
         cols.is_a0_0 = F::from_bool(event.a0 == 0);
@@ -144,9 +144,9 @@ impl SysLinuxChip {
                 cols.is_mmap = F::ONE;
                 cols.is_mmap2 = F::from_bool(event.syscall_code == 4090);
                 cols.is_mmap_a0_0 = F::from_bool(event.a0 == 0);
-                cols.page_offset = F::from_canonical_u32(event.a1 & 0xFFF);
+                cols.page_offset = F::from_u32(event.a1 & 0xFFF);
                 cols.is_offset_0 = F::from_bool(event.a1 & 0xFFF == 0);
-                cols.upper_address = F::from_canonical_u32((event.a1 >> 12) << 12);
+                cols.upper_address = F::from_u32((event.a1 >> 12) << 12);
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);
                     cols.inorout.populate_write(event.write_records[1], blu);

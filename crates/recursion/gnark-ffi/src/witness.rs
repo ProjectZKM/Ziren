@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write};
 
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, ExtensionField, PrimeField};
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Config, Witness};
 
@@ -17,9 +17,9 @@ pub struct GnarkWitness {
 impl GnarkWitness {
     /// Creates a new witness from a given [Witness].
     pub fn new<C: Config>(mut witness: Witness<C>) -> Self {
-        witness.vars.push(C::N::from_canonical_usize(999));
-        witness.felts.push(C::F::from_canonical_usize(999));
-        witness.exts.push(C::EF::from_canonical_usize(999));
+        witness.vars.push(C::N::from_usize(999));
+        witness.felts.push(C::F::from_usize(999));
+        witness.exts.push(C::EF::from_usize(999));
         GnarkWitness {
             vars: witness.vars.into_iter().map(|w| w.as_canonical_biguint().to_string()).collect(),
             felts: witness
@@ -31,7 +31,7 @@ impl GnarkWitness {
                 .exts
                 .into_iter()
                 .map(|w| {
-                    w.as_base_slice().iter().map(|x| x.as_canonical_biguint().to_string()).collect()
+                    w.as_basis_coefficients_slice().iter().map(|x| x.as_canonical_biguint().to_string()).collect()
                 })
                 .collect(),
             vkey_hash: witness.vkey_hash.as_canonical_biguint().to_string(),

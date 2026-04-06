@@ -8,7 +8,7 @@ pub mod air;
 mod chip;
 mod config;
 mod debug;
-mod folder;
+pub mod folder;
 mod kb31_poseidon2;
 mod lookup;
 mod machine;

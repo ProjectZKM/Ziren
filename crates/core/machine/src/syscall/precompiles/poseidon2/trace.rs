@@ -106,13 +106,13 @@ impl Poseidon2PermuteChip {
         blu: &mut impl ByteRecord,
     ) {
         let cols: &mut Poseidon2MemCols<F> = input_row.borrow_mut();
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.state_addr = F::from_canonical_u32(event.state_addr);
+        cols.clk = F::from_u32(event.clk);
+        cols.shard = F::from_u32(event.shard);
+        cols.state_addr = F::from_u32(event.state_addr);
         cols.is_real = F::ONE;
 
-        let input = event.pre_state.map(F::from_canonical_u32);
-        let output = event.post_state.map(F::from_canonical_u32);
+        let input = event.pre_state.map(F::from_u32);
+        let output = event.post_state.map(F::from_u32);
         cols.poseidon2 = populate_perm_deg3(input, Some(output));
 
         // Populate memory columns.

@@ -36,8 +36,8 @@ use core::{
 };
 
 use hashbrown::HashMap;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
@@ -224,8 +224,8 @@ impl MulChip {
         cols: &mut MulCols<F>,
         blu: &mut impl ByteRecord,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
 
         cols.hi_record_is_real = F::from_bool(event.hi_record_is_real);
         if event.hi_record_is_real {
@@ -233,8 +233,8 @@ impl MulChip {
             // instruction chip also has a op_hi_access field that will be populated and that will contribute
             // to the byte lookup dependencies.
             cols.op_hi_access.populate(MemoryRecordEnum::Write(event.hi_record), blu);
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
         }
 
         let hi_word = event.hi.to_le_bytes();
@@ -248,9 +248,9 @@ impl MulChip {
         // Handle b and c's signs.
         {
             let b_msb = get_msb(b_word);
-            cols.b_msb = F::from_canonical_u8(b_msb);
+            cols.b_msb = F::from_u8(b_msb);
             let c_msb = get_msb(c_word);
-            cols.c_msb = F::from_canonical_u8(c_msb);
+            cols.c_msb = F::from_u8(c_msb);
 
             // If b is signed and it is negative, sign extend b.
             if event.opcode == Opcode::MULT && b_msb == 1 {
@@ -301,14 +301,14 @@ impl MulChip {
             if i + 1 < PRODUCT_SIZE {
                 product[i + 1] += carry[i];
             }
-            cols.carry[i] = F::from_canonical_u32(carry[i]);
+            cols.carry[i] = F::from_u32(carry[i]);
         }
 
-        cols.product = product.map(F::from_canonical_u32);
-        cols.hi = Word(hi_word.map(F::from_canonical_u8));
-        cols.a = Word(a_word.map(F::from_canonical_u8));
-        cols.b = Word(b_word.map(F::from_canonical_u8));
-        cols.c = Word(c_word.map(F::from_canonical_u8));
+        cols.product = product.map(F::from_u32);
+        cols.hi = Word(hi_word.map(F::from_u8));
+        cols.a = Word(a_word.map(F::from_u8));
+        cols.b = Word(b_word.map(F::from_u8));
+        cols.c = Word(c_word.map(F::from_u8));
         cols.is_real = F::ONE;
         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
         cols.is_mult = F::from_bool(event.opcode == Opcode::MULT);
@@ -334,19 +334,19 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MulCols<AB::Var> = (*local).borrow();
-        let base = AB::F::from_canonical_u32(1 << 8);
+        let base = AB::F::from_u32(1 << 8);
 
         let zero: AB::Expr = AB::F::ZERO.into();
         let one: AB::Expr = AB::F::ONE.into();
-        let byte_mask = AB::F::from_canonical_u8(BYTE_MASK);
+        let byte_mask = AB::F::from_u8(BYTE_MASK);
 
         // Calculate the MSBs.
         let (b_msb, c_msb) = {
             let msb_pairs =
                 [(local.b_msb, local.b[WORD_SIZE - 1]), (local.c_msb, local.c[WORD_SIZE - 1])];
-            let opcode = AB::F::from_canonical_u32(ByteOpcode::MSB as u32);
+            let opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
@@ -442,9 +442,9 @@ where
             // Exactly one of the op codes must be on.
             builder.when(local.is_real).assert_one(local.is_mul + local.is_mult + local.is_multu);
 
-            let mul: AB::Expr = AB::F::from_canonical_u32(Opcode::MUL as u32).into();
-            let mult: AB::Expr = AB::F::from_canonical_u32(Opcode::MULT as u32).into();
-            let multu: AB::Expr = AB::F::from_canonical_u32(Opcode::MULTU as u32).into();
+            let mul: AB::Expr = AB::F::from_u32(Opcode::MUL as u32).into();
+            let mult: AB::Expr = AB::F::from_u32(Opcode::MULT as u32).into();
+            let multu: AB::Expr = AB::F::from_u32(Opcode::MULTU as u32).into();
             local.is_mul * mul + local.is_mult * mult + local.is_multu * multu
         };
 
@@ -464,26 +464,26 @@ where
             local.clk,
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
+            local.next_pc + AB::Expr::from_u32(4),
+            AB::Expr::ZERO,
             opcode,
             local.a,
             local.b,
             local.c,
             local.hi,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.hi_record_is_real,
-            AB::Expr::zero(),
-            AB::Expr::one(),
+            AB::Expr::ZERO,
+            AB::Expr::ONE,
             local.is_real,
         );
 
         // Write the HI register, the register can only be Register::HI（33）.
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::HI as u32),
-            AB::F::from_canonical_u32(33),
+            local.clk + AB::F::from_u32(MemoryAccessPosition::HI as u32),
+            AB::F::from_u32(33),
             &local.op_hi_access,
             local.hi_record_is_real,
         );

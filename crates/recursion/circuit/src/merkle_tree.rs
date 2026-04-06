@@ -153,10 +153,10 @@ pub fn verify<C: CircuitConfig, HV: FieldHasherVariable<C>>(
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_util::log2_ceil_usize;
-    use rand::rngs::OsRng;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     use zkhash::ark_ff::UniformRand;
     use zkm_recursion_compiler::{
         config::InnerConfig,
@@ -177,14 +177,14 @@ mod tests {
 
     #[test]
     fn test_merkle_tree_inner() {
-        let mut rng = OsRng;
+        let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
         let mut builder = Builder::<InnerConfig>::default();
         // Run five times with different randomness.
         for _ in 0..5 {
             // Test with different number of leaves.
             for j in 2..20 {
                 let leaves: Vec<[F; DIGEST_SIZE]> =
-                    (0..j).map(|_| std::array::from_fn(|_| F::rand(&mut rng))).collect();
+                    (0..j).map(|_| std::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))).collect();
                 let (root, tree) = MerkleTree::<KoalaBear, HV>::commit(leaves.to_vec());
                 for (i, leaf) in leaves.iter().enumerate() {
                     let (_, proof) = MerkleTree::<KoalaBear, HV>::open(&tree, i);
@@ -198,7 +198,7 @@ mod tests {
                             .collect_vec(),
                     );
 
-                    let index_var = builder.constant(KoalaBear::from_canonical_usize(i));
+                    let index_var = builder.constant(KoalaBear::from_usize(i));
                     let index_bits = C::num2bits(&mut builder, index_var, log2_ceil_usize(j));
                     let root_variable: [Felt<_>; 8] =
                         root.iter().map(|x| builder.constant(*x)).collect_vec().try_into().unwrap();

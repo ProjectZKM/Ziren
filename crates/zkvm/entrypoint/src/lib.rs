@@ -154,7 +154,7 @@ mod zkvm {
     cfg_if! {
         if #[cfg(feature = "verify")] {
             use p3_koala_bear::KoalaBear;
-            use p3_field::FieldAlgebra;
+            use p3_field::PrimeCharacteristicRing;
 
             pub static mut DEFERRED_PROOFS_DIGEST: Option<[KoalaBear; 8]> = None;
         }

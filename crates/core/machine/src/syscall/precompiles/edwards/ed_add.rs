@@ -9,8 +9,8 @@ use itertools::Itertools;
 use num::BigUint;
 
 use crate::{air::MemoryAirBuilder, CoreChipError};
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
@@ -220,10 +220,10 @@ impl<E: EllipticCurve + EdwardsParameters> EdAddAssignChip<E> {
 
         // Populate basic columns.
         cols.is_real = F::ONE;
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
-        cols.q_ptr = F::from_canonical_u32(event.q_ptr);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.p_ptr = F::from_u32(event.p_ptr);
+        cols.q_ptr = F::from_u32(event.q_ptr);
 
         Self::populate_field_ops(blu, cols, p_x, p_y, q_x, q_y);
 
@@ -249,7 +249,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &EdAddAssignCols<AB::Var> = (*local).borrow();
 
         let x1: Limbs<AB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
@@ -278,7 +278,7 @@ where
         // d * f.
         let f = local.f.result;
         let d_biguint = E::d_biguint();
-        let d_const = E::BaseField::to_limbs_field::<AB::Expr, _>(&d_biguint);
+        let d_const = E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&d_biguint);
         local.d_mul_f.eval(builder, &f, &d_const, FieldOperation::Mul, local.is_real);
 
         let d_mul_f = local.d_mul_f.result;
@@ -309,7 +309,7 @@ where
 
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(1),
+            local.clk + AB::F::from_u32(1),
             local.p_ptr,
             &local.p_access,
             local.is_real,
@@ -318,7 +318,7 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::ED_ADD.syscall_id()),
+            AB::F::from_u32(SyscallCode::ED_ADD.syscall_id()),
             local.p_ptr,
             local.q_ptr,
             local.is_real,

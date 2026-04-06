@@ -9,7 +9,7 @@ use std::{
     ops::{AddAssign, DivAssign, MulAssign, SubAssign},
 };
 
-use p3_field::{ExtensionField, Field, FieldAlgebra};
+use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 
 use crate::ir::ExtHandle;
 
@@ -77,128 +77,65 @@ pub trait ExtensionOperand<F: Field, EF: ExtensionField<F>> {
     fn to_operand(self) -> ExtOperand<F, EF>;
 }
 
-impl<N: Field> FieldAlgebra for SymbolicVar<N> {
-    type F = N;
+impl<N: Field> PrimeCharacteristicRing for SymbolicVar<N> {
+    type PrimeSubfield = N::PrimeSubfield;
 
     const ZERO: SymbolicVar<N> = SymbolicVar::Const(N::ZERO);
     const ONE: SymbolicVar<N> = SymbolicVar::Const(N::ONE);
     const TWO: SymbolicVar<N> = SymbolicVar::Const(N::TWO);
     const NEG_ONE: SymbolicVar<N> = SymbolicVar::Const(N::NEG_ONE);
 
-    fn from_f(f: Self::F) -> Self {
-        SymbolicVar::from(f)
+    fn from_prime_subfield(f: Self::PrimeSubfield) -> Self {
+        SymbolicVar::from(N::from_prime_subfield(f))
     }
-    fn from_bool(b: bool) -> Self {
-        SymbolicVar::from(N::from_bool(b))
-    }
-    fn from_canonical_u8(n: u8) -> Self {
-        SymbolicVar::from(N::from_canonical_u8(n))
-    }
-    fn from_canonical_u16(n: u16) -> Self {
-        SymbolicVar::from(N::from_canonical_u16(n))
-    }
-    fn from_canonical_u32(n: u32) -> Self {
-        SymbolicVar::from(N::from_canonical_u32(n))
-    }
-    fn from_canonical_u64(n: u64) -> Self {
-        SymbolicVar::from(N::from_canonical_u64(n))
-    }
-    fn from_canonical_usize(n: usize) -> Self {
-        SymbolicVar::from(N::from_canonical_usize(n))
-    }
-
-    fn from_wrapped_u32(n: u32) -> Self {
-        SymbolicVar::from(N::from_wrapped_u32(n))
-    }
-    fn from_wrapped_u64(n: u64) -> Self {
-        SymbolicVar::from(N::from_wrapped_u64(n))
-    }
-
-    ///// A generator of this field's entire multiplicative group.
-    //const GENERATOR: SymbolicVar<N> = SymbolicVar::Const(N::GENERATOR);
 }
 
-impl<F: Field> FieldAlgebra for SymbolicFelt<F> {
-    type F = F;
+impl<F: Field> PrimeCharacteristicRing for SymbolicFelt<F> {
+    type PrimeSubfield = F::PrimeSubfield;
 
     const ZERO: SymbolicFelt<F> = SymbolicFelt::Const(F::ZERO);
     const ONE: SymbolicFelt<F> = SymbolicFelt::Const(F::ONE);
     const TWO: SymbolicFelt<F> = SymbolicFelt::Const(F::TWO);
     const NEG_ONE: SymbolicFelt<F> = SymbolicFelt::Const(F::NEG_ONE);
 
-    fn from_f(f: Self::F) -> Self {
-        SymbolicFelt::from(f)
+    fn from_prime_subfield(f: Self::PrimeSubfield) -> Self {
+        SymbolicFelt::from(F::from_prime_subfield(f))
     }
-    fn from_bool(b: bool) -> Self {
-        SymbolicFelt::from(F::from_bool(b))
-    }
-    fn from_canonical_u8(n: u8) -> Self {
-        SymbolicFelt::from(F::from_canonical_u8(n))
-    }
-    fn from_canonical_u16(n: u16) -> Self {
-        SymbolicFelt::from(F::from_canonical_u16(n))
-    }
-    fn from_canonical_u32(n: u32) -> Self {
-        SymbolicFelt::from(F::from_canonical_u32(n))
-    }
-    fn from_canonical_u64(n: u64) -> Self {
-        SymbolicFelt::from(F::from_canonical_u64(n))
-    }
-    fn from_canonical_usize(n: usize) -> Self {
-        SymbolicFelt::from(F::from_canonical_usize(n))
-    }
-
-    fn from_wrapped_u32(n: u32) -> Self {
-        SymbolicFelt::from(F::from_wrapped_u32(n))
-    }
-    fn from_wrapped_u64(n: u64) -> Self {
-        SymbolicFelt::from(F::from_wrapped_u64(n))
-    }
-
-    ///// A generator of this field's entire multiplicative group.
-    //const GENERATOR: SymbolicFelt<F> = SymbolicFelt::Const(F::GENERATOR);
 }
 
-impl<F: Field, EF: ExtensionField<F>> FieldAlgebra for SymbolicExt<F, EF> {
-    type F = EF;
+impl<F: Field, EF: ExtensionField<F>> PrimeCharacteristicRing for SymbolicExt<F, EF> {
+    type PrimeSubfield = EF::PrimeSubfield;
 
     const ZERO: SymbolicExt<F, EF> = SymbolicExt::Const(EF::ZERO);
     const ONE: SymbolicExt<F, EF> = SymbolicExt::Const(EF::ONE);
     const TWO: SymbolicExt<F, EF> = SymbolicExt::Const(EF::TWO);
     const NEG_ONE: SymbolicExt<F, EF> = SymbolicExt::Const(EF::NEG_ONE);
 
-    fn from_f(f: Self::F) -> Self {
-        SymbolicExt::Const(f)
+    fn from_prime_subfield(f: Self::PrimeSubfield) -> Self {
+        SymbolicExt::Const(EF::from_prime_subfield(f))
     }
-    fn from_bool(b: bool) -> Self {
-        SymbolicExt::from_f(EF::from_bool(b))
-    }
-    fn from_canonical_u8(n: u8) -> Self {
-        SymbolicExt::from_f(EF::from_canonical_u8(n))
-    }
-    fn from_canonical_u16(n: u16) -> Self {
-        SymbolicExt::from_f(EF::from_canonical_u16(n))
-    }
-    fn from_canonical_u32(n: u32) -> Self {
-        SymbolicExt::from_f(EF::from_canonical_u32(n))
-    }
-    fn from_canonical_u64(n: u64) -> Self {
-        SymbolicExt::from_f(EF::from_canonical_u64(n))
-    }
-    fn from_canonical_usize(n: usize) -> Self {
-        SymbolicExt::from_f(EF::from_canonical_usize(n))
-    }
-
-    fn from_wrapped_u32(n: u32) -> Self {
-        SymbolicExt::from_f(EF::from_wrapped_u32(n))
-    }
-    fn from_wrapped_u64(n: u64) -> Self {
-        SymbolicExt::from_f(EF::from_wrapped_u64(n))
-    }
-
-    // /// A generator of this field's entire multiplicative group.
-    // const GENERATOR: ExtensionField<F> = ExtensionField::Const(F::GENERATOR);
 }
+
+// Implement Algebra trait for SymbolicExt to satisfy AirBuilder bounds.
+// Algebra<F> is needed by AirBuilder (where Self::F = F).
+impl<F: Field, EF: ExtensionField<F>> Algebra<F> for SymbolicExt<F, EF> {}
+// Algebra<Ext<F, EF>> is needed by AirBuilder::Expr: Algebra<Self::Var> bound.
+impl<F: Field, EF: ExtensionField<F>> Algebra<Ext<F, EF>> for SymbolicExt<F, EF> {}
+
+// Concrete From<EF> and Algebra<EF> impls for specific (F, EF) pairs.
+// We cannot add a generic `From<EF>` because it conflicts with `From<F>` when F = EF.
+// Since the codebase uses KoalaBear with BinomialExtensionField<KoalaBear, 4>,
+// we add these concrete impls.
+use p3_field::extension::BinomialExtensionField;
+use p3_koala_bear::KoalaBear;
+
+type KB4 = BinomialExtensionField<KoalaBear, 4>;
+impl From<KB4> for SymbolicExt<KoalaBear, KB4> {
+    fn from(ef: KB4) -> Self {
+        SymbolicExt::Const(ef)
+    }
+}
+impl Algebra<KB4> for SymbolicExt<KoalaBear, KB4> {}
 
 // Implement all conversions from constants N, F, EF, to the corresponding symbolic types
 
@@ -332,7 +269,7 @@ impl<F: Field, EF: ExtensionField<F>, E: ExtensionOperand<F, EF>> Add<E> for Sym
             (Self::Base(lhs), Self::Base(rhs)) => Self::Base(lhs + rhs),
             (Self::Base(lhs), Self::Val(rhs)) => match lhs {
                 SymbolicFelt::Const(lhs) => {
-                    let res = unsafe { (*rhs.handle).add_e_const(EF::from_base(lhs), rhs) };
+                    let res = unsafe { (*rhs.handle).add_e_const(EF::from(lhs), rhs) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(lhs) => {
@@ -342,7 +279,7 @@ impl<F: Field, EF: ExtensionField<F>, E: ExtensionOperand<F, EF>> Add<E> for Sym
             },
             (Self::Val(lhs), Self::Base(rhs)) => match rhs {
                 SymbolicFelt::Const(rhs) => {
-                    let res = unsafe { (*lhs.handle).add_const_e(lhs, EF::from_base(rhs)) };
+                    let res = unsafe { (*lhs.handle).add_const_e(lhs, EF::from(rhs)) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(rhs) => {
@@ -426,7 +363,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Mul<E> for SymbolicExt<F, EF> {
                 }
             },
             (Self::Base(lhs), Self::Const(rhs)) => match lhs {
-                SymbolicFelt::Const(lhs) => Self::Const(EF::from_base(lhs) * rhs),
+                SymbolicFelt::Const(lhs) => Self::Const(EF::from(lhs) * rhs),
                 SymbolicFelt::Val(lhs) => {
                     let ext_handle_ptr =
                         unsafe { (*lhs.handle).ext_handle_ptr as *mut ExtHandle<F, EF> };
@@ -444,7 +381,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Mul<E> for SymbolicExt<F, EF> {
             (Self::Base(lhs), Self::Base(rhs)) => Self::Base(lhs * rhs),
             (Self::Base(lhs), Self::Val(rhs)) => match lhs {
                 SymbolicFelt::Const(lhs) => {
-                    let res = unsafe { (*rhs.handle).mul_e_const(EF::from_base(lhs), rhs) };
+                    let res = unsafe { (*rhs.handle).mul_e_const(EF::from(lhs), rhs) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(lhs) => {
@@ -454,7 +391,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Mul<E> for SymbolicExt<F, EF> {
             },
             (Self::Val(lhs), Self::Base(rhs)) => match rhs {
                 SymbolicFelt::Const(rhs) => {
-                    let res = unsafe { (*lhs.handle).mul_const_e(lhs, EF::from_base(rhs)) };
+                    let res = unsafe { (*lhs.handle).mul_const_e(lhs, EF::from(rhs)) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(rhs) => {
@@ -538,7 +475,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Sub<E> for SymbolicExt<F, EF> {
                 }
             },
             (Self::Base(lhs), Self::Const(rhs)) => match lhs {
-                SymbolicFelt::Const(lhs) => Self::Const(EF::from_base(lhs) - rhs),
+                SymbolicFelt::Const(lhs) => Self::Const(EF::from(lhs) - rhs),
                 SymbolicFelt::Val(lhs) => {
                     let ext_handle_ptr =
                         unsafe { (*lhs.handle).ext_handle_ptr as *mut ExtHandle<F, EF> };
@@ -556,7 +493,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Sub<E> for SymbolicExt<F, EF> {
             (Self::Base(lhs), Self::Base(rhs)) => Self::Base(lhs - rhs),
             (Self::Base(lhs), Self::Val(rhs)) => match lhs {
                 SymbolicFelt::Const(lhs) => {
-                    let res = unsafe { (*rhs.handle).sub_e_const(EF::from_base(lhs), rhs) };
+                    let res = unsafe { (*rhs.handle).sub_e_const(EF::from(lhs), rhs) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(lhs) => {
@@ -566,7 +503,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Sub<E> for SymbolicExt<F, EF> {
             },
             (Self::Val(lhs), Self::Base(rhs)) => match rhs {
                 SymbolicFelt::Const(rhs) => {
-                    let res = unsafe { (*lhs.handle).sub_const_e(lhs, EF::from_base(rhs)) };
+                    let res = unsafe { (*lhs.handle).sub_const_e(lhs, EF::from(rhs)) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(rhs) => {
@@ -617,7 +554,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Div<E> for SymbolicExt<F, EF> {
                 Self::Val(res)
             }
             (Self::Const(lhs), Self::Base(rhs)) => match rhs {
-                SymbolicFelt::Const(rhs) => Self::Const(lhs / EF::from_base(rhs)),
+                SymbolicFelt::Const(rhs) => Self::Const(lhs / EF::from(rhs)),
                 SymbolicFelt::Val(rhs) => {
                     let ext_handle_ptr =
                         unsafe { (*rhs.handle).ext_handle_ptr as *mut ExtHandle<F, EF> };
@@ -633,7 +570,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Div<E> for SymbolicExt<F, EF> {
                 }
             },
             (Self::Base(lhs), Self::Const(rhs)) => match lhs {
-                SymbolicFelt::Const(lhs) => Self::Const(EF::from_base(lhs) / rhs),
+                SymbolicFelt::Const(lhs) => Self::Const(EF::from(lhs) / rhs),
                 SymbolicFelt::Val(lhs) => {
                     let ext_handle_ptr =
                         unsafe { (*lhs.handle).ext_handle_ptr as *mut ExtHandle<F, EF> };
@@ -651,7 +588,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Div<E> for SymbolicExt<F, EF> {
             (Self::Base(lhs), Self::Base(rhs)) => Self::Base(lhs / rhs),
             (Self::Base(lhs), Self::Val(rhs)) => match lhs {
                 SymbolicFelt::Const(lhs) => {
-                    let res = unsafe { (*rhs.handle).div_e_const(EF::from_base(lhs), rhs) };
+                    let res = unsafe { (*rhs.handle).div_e_const(EF::from(lhs), rhs) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(lhs) => {
@@ -661,7 +598,7 @@ impl<F: Field, EF: ExtensionField<F>, E: Any> Div<E> for SymbolicExt<F, EF> {
             },
             (Self::Val(lhs), Self::Base(rhs)) => match rhs {
                 SymbolicFelt::Const(rhs) => {
-                    let res = unsafe { (*lhs.handle).div_const_e(lhs, EF::from_base(rhs)) };
+                    let res = unsafe { (*lhs.handle).div_const_e(lhs, EF::from(rhs)) };
                     Self::Val(res)
                 }
                 SymbolicFelt::Val(rhs) => {
@@ -1050,8 +987,8 @@ impl<N: Field> Mul<usize> for Usize<N> {
 
     fn mul(self, rhs: usize) -> Self::Output {
         match self {
-            Usize::Const(n) => SymbolicVar::from(N::from_canonical_usize(n * rhs)),
-            Usize::Var(n) => SymbolicVar::from(n) * N::from_canonical_usize(rhs),
+            Usize::Const(n) => SymbolicVar::from(N::from_usize(n * rhs)),
+            Usize::Var(n) => SymbolicVar::from(n) * N::from_usize(rhs),
         }
     }
 }
@@ -1290,10 +1227,10 @@ impl<N: Field> Add for SymbolicUsize<N> {
         match (self, rhs) {
             (SymbolicUsize::Const(a), SymbolicUsize::Const(b)) => SymbolicUsize::Const(a + b),
             (SymbolicUsize::Var(a), SymbolicUsize::Const(b)) => {
-                SymbolicUsize::Var(a + N::from_canonical_usize(b))
+                SymbolicUsize::Var(a + N::from_usize(b))
             }
             (SymbolicUsize::Const(a), SymbolicUsize::Var(b)) => {
-                SymbolicUsize::Var(b + N::from_canonical_usize(a))
+                SymbolicUsize::Var(b + N::from_usize(a))
             }
             (SymbolicUsize::Var(a), SymbolicUsize::Var(b)) => SymbolicUsize::Var(a + b),
         }
@@ -1307,10 +1244,10 @@ impl<N: Field> Sub for SymbolicUsize<N> {
         match (self, rhs) {
             (SymbolicUsize::Const(a), SymbolicUsize::Const(b)) => SymbolicUsize::Const(a - b),
             (SymbolicUsize::Var(a), SymbolicUsize::Const(b)) => {
-                SymbolicUsize::Var(a - N::from_canonical_usize(b))
+                SymbolicUsize::Var(a - N::from_usize(b))
             }
             (SymbolicUsize::Const(a), SymbolicUsize::Var(b)) => {
-                SymbolicUsize::Var(SymbolicVar::from(N::from_canonical_usize(a)) - b)
+                SymbolicUsize::Var(SymbolicVar::from(N::from_usize(a)) - b)
             }
             (SymbolicUsize::Var(a), SymbolicUsize::Var(b)) => SymbolicUsize::Var(a - b),
         }
@@ -1323,7 +1260,7 @@ impl<N: Field> Add<usize> for SymbolicUsize<N> {
     fn add(self, rhs: usize) -> Self::Output {
         match self {
             SymbolicUsize::Const(a) => SymbolicUsize::Const(a + rhs),
-            SymbolicUsize::Var(a) => SymbolicUsize::Var(a + N::from_canonical_usize(rhs)),
+            SymbolicUsize::Var(a) => SymbolicUsize::Var(a + N::from_usize(rhs)),
         }
     }
 }
@@ -1334,7 +1271,7 @@ impl<N: Field> Sub<usize> for SymbolicUsize<N> {
     fn sub(self, rhs: usize) -> Self::Output {
         match self {
             SymbolicUsize::Const(a) => SymbolicUsize::Const(a - rhs),
-            SymbolicUsize::Var(a) => SymbolicUsize::Var(a - N::from_canonical_usize(rhs)),
+            SymbolicUsize::Var(a) => SymbolicUsize::Var(a - N::from_usize(rhs)),
         }
     }
 }
@@ -1423,7 +1360,7 @@ impl<N: Field> Sub<Usize<N>> for SymbolicVar<N> {
 
     fn sub(self, rhs: Usize<N>) -> Self::Output {
         match rhs {
-            Usize::Const(n) => self - N::from_canonical_usize(n),
+            Usize::Const(n) => self - N::from_usize(n),
             Usize::Var(n) => self - n,
         }
     }
@@ -1434,7 +1371,7 @@ impl<N: Field> Add<Usize<N>> for SymbolicVar<N> {
 
     fn add(self, rhs: Usize<N>) -> Self::Output {
         match rhs {
-            Usize::Const(n) => self + N::from_canonical_usize(n),
+            Usize::Const(n) => self + N::from_usize(n),
             Usize::Var(n) => self + n,
         }
     }
@@ -1461,7 +1398,7 @@ impl<N: Field> Sub<SymbolicVar<N>> for Usize<N> {
 
     fn sub(self, rhs: SymbolicVar<N>) -> Self::Output {
         match self {
-            Usize::Const(n) => SymbolicVar::from(N::from_canonical_usize(n)) - rhs,
+            Usize::Const(n) => SymbolicVar::from(N::from_usize(n)) - rhs,
             Usize::Var(n) => SymbolicVar::<N>::from(n) - rhs,
         }
     }
@@ -1472,7 +1409,7 @@ impl<N: Field> Add<SymbolicVar<N>> for Usize<N> {
 
     fn add(self, rhs: SymbolicVar<N>) -> Self::Output {
         match self {
-            Usize::Const(n) => SymbolicVar::from(N::from_canonical_usize(n)) + rhs,
+            Usize::Const(n) => SymbolicVar::from(N::from_usize(n)) + rhs,
             Usize::Var(n) => SymbolicVar::<N>::from(n) + rhs,
         }
     }
@@ -1497,7 +1434,7 @@ impl<N: Field> Sub<Var<N>> for Usize<N> {
 impl<N: Field> From<Usize<N>> for SymbolicVar<N> {
     fn from(value: Usize<N>) -> Self {
         match value {
-            Usize::Const(n) => SymbolicVar::from(N::from_canonical_usize(n)),
+            Usize::Const(n) => SymbolicVar::from(N::from_usize(n)),
             Usize::Var(n) => SymbolicVar::from(n),
         }
     }

@@ -13,7 +13,7 @@ use zkm_stark::{
 
 use crate::{
     hash::FieldHasherVariable, stark::ShardProofVariable, CircuitConfig, FriProofVariable,
-    KoalaBearFriConfigVariable,
+    KoalaBearFriParametersVariable,
 };
 
 pub trait WitnessWriter<C: CircuitConfig>: Sized {
@@ -92,7 +92,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C> for Inn
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        // vec![Block::from(self.as_base_slice())]
+        // vec![Block::from(self.as_basis_coefficients_slice())]
         witness.write_ext(*self);
     }
 }
@@ -130,7 +130,7 @@ impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for Vec<T> {
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
     Witnessable<C> for ShardProof<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,

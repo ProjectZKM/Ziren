@@ -2,8 +2,8 @@
 
 use std::{array, borrow::Borrow};
 
-use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_primitives::RC_16_30_U32;
 
@@ -32,14 +32,14 @@ impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2WideChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for Poseidon2WideChip<DEGREE>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
     AB::Var: 'static,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let prepr = builder.preprocessed();
-        let local_row = Self::convert::<AB::Var>(main.row_slice(0));
-        let prep_local = prepr.row_slice(0);
+        let prepr = builder.preprocessed().clone();
+        let local_row = Self::convert::<AB::Var>(main.current_slice());
+        let prep_local = prepr.current_slice();
         let prep_local: &Poseidon2PreprocessedColsWide<_> = (*prep_local).borrow();
 
         // Dummy constraints to normalize to DEGREE.
@@ -86,7 +86,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         local_row: &dyn Poseidon2<AB::Var>,
         r: usize,
     ) where
-        AB: ZKMRecursionAirBuilder + PairBuilder,
+        AB: ZKMRecursionAirBuilder,
     {
         let mut local_state: [AB::Expr; WIDTH] =
             array::from_fn(|i| local_row.external_rounds_state()[r][i].into());
@@ -99,13 +99,13 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
         // Add the round constants.
         let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
         let add_rc: [AB::Expr; WIDTH] = array::from_fn(|i| {
-            local_state[i].clone() + AB::F::from_wrapped_u32(RC_16_30_U32[round][i])
+            local_state[i].clone() + AB::F::from_u32(RC_16_30_U32[round][i])
         });
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
         // let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
-        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
+        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         for i in 0..WIDTH {
             let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 
@@ -139,7 +139,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     /// Eval the constraints for the internal rounds.
     fn eval_internal_rounds<AB>(&self, builder: &mut AB, local_row: &dyn Poseidon2<AB::Var>)
     where
-        AB: ZKMRecursionAirBuilder + PairBuilder,
+        AB: ZKMRecursionAirBuilder,
     {
         let state = &local_row.internal_rounds_state();
         let s0 = local_row.internal_rounds_s0();
@@ -148,7 +148,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             // Add the round constant.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
             let add_rc = if r == 0 { state[0].clone() } else { s0[r - 1].into() }
-                + AB::Expr::from_wrapped_u32(RC_16_30_U32[round][0]);
+                + AB::Expr::from_u32(RC_16_30_U32[round][0]);
 
             let mut sbox_deg_3 = add_rc.clone() * add_rc.clone() * add_rc.clone();
             if let Some(internal_sbox) = local_row.internal_rounds_sbox() {

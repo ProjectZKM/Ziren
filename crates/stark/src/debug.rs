@@ -5,10 +5,10 @@ use std::{
 };
 
 use p3_air::{
-    Air, AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PairBuilder,
-    PermutationAirBuilder,
+    Air, AirBuilder, ExtensionBuilder,
+    PermutationAirBuilder, WindowAccess,
 };
-use p3_field::{ExtensionField, Field, FieldAlgebra, PrimeField32};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
@@ -20,6 +20,7 @@ use p3_maybe_rayon::prelude::ParallelIterator;
 use super::{MachineChip, StarkGenericConfig, Val};
 use crate::{
     air::{EmptyMessageBuilder, MachineAir, MultiTableAirBuilder},
+    folder::PairWindow,
     septic_digest::SepticDigest,
 };
 
@@ -51,42 +52,54 @@ pub fn debug_constraints<SC, A>(
     (0..height).par_bridge().for_each(|i| {
         let i_next = (i + 1) % height;
 
-        let main_local = main.row_slice(i);
+        let main_local = main.row_slice(i).unwrap();
         let main_local = &(*main_local);
-        let main_next = main.row_slice(i_next);
+        let main_next = main.row_slice(i_next).unwrap();
         let main_next = &(*main_next);
         let preprocessed_local = if let Some(preprocessed) = preprocessed {
-            let row = preprocessed.row_slice(i);
+            let row = preprocessed.row_slice(i).unwrap();
             let row: &[_] = (*row).borrow();
             row.to_vec()
         } else {
             Vec::new()
         };
         let preprocessed_next = if let Some(preprocessed) = preprocessed {
-            let row = preprocessed.row_slice(i_next);
+            let row = preprocessed.row_slice(i_next).unwrap();
             let row: &[_] = (*row).borrow();
             row.to_vec()
         } else {
             Vec::new()
         };
-        let perm_local = perm.row_slice(i);
+        let perm_local = perm.row_slice(i).unwrap();
         let perm_local = &(*perm_local);
-        let perm_next = perm.row_slice(i_next);
+        let perm_next = perm.row_slice(i_next).unwrap();
         let perm_next = &(*perm_next);
 
+        let preprocessed_pair = VerticalPair::new(
+            RowMajorMatrixView::new_row(&preprocessed_local),
+            RowMajorMatrixView::new_row(&preprocessed_next),
+        );
+        let main_pair = VerticalPair::new(
+            RowMajorMatrixView::new_row(main_local),
+            RowMajorMatrixView::new_row(main_next),
+        );
+        let perm_pair = VerticalPair::new(
+            RowMajorMatrixView::new_row(perm_local),
+            RowMajorMatrixView::new_row(perm_next),
+        );
+
+        let prep_width = preprocessed_local.len();
+        let main_width = main_local.len();
+        let perm_width = perm_local.len();
+
         let mut builder = DebugConstraintBuilder {
-            preprocessed: VerticalPair::new(
-                RowMajorMatrixView::new_row(&preprocessed_local),
-                RowMajorMatrixView::new_row(&preprocessed_next),
-            ),
-            main: VerticalPair::new(
-                RowMajorMatrixView::new_row(main_local),
-                RowMajorMatrixView::new_row(main_next),
-            ),
-            perm: VerticalPair::new(
-                RowMajorMatrixView::new_row(perm_local),
-                RowMajorMatrixView::new_row(perm_next),
-            ),
+            preprocessed: preprocessed_pair,
+            preprocessed_window: PairWindow {
+                local: &preprocessed_pair.top.values[..prep_width],
+                next: &preprocessed_pair.bottom.values[..prep_width],
+            },
+            main: main_pair,
+            perm: perm_pair,
             perm_challenges,
             local_cumulative_sum,
             global_cumulative_sum,
@@ -126,13 +139,14 @@ fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::th
 ///
 /// Note that this does not actually verify the proof.
 pub fn debug_cumulative_sums<F: Field, EF: ExtensionField<F>>(perms: &[RowMajorMatrix<EF>]) {
-    let sum: EF = perms.iter().map(|perm| *perm.row_slice(perm.height() - 1).last().unwrap()).sum();
+    let sum: EF = perms.iter().map(|perm| *perm.row_slice(perm.height() - 1).unwrap().last().unwrap()).sum();
     assert_eq!(sum, EF::ZERO);
 }
 
 /// A builder for debugging constraints.
 pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) preprocessed: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
+    pub(crate) preprocessed_window: PairWindow<'a, F>,
     pub(crate) main: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
     pub(crate) perm: VerticalPair<RowMajorMatrixView<'a, EF>, RowMajorMatrixView<'a, EF>>,
     pub(crate) local_cumulative_sum: &'a EF,
@@ -166,26 +180,26 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    type MP = VerticalPair<RowMajorMatrixView<'a, EF>, RowMajorMatrixView<'a, EF>>;
+    type MP = PairWindow<'a, EF>;
 
     type RandomVar = EF;
 
+    type PermutationVar = EF;
+
     fn permutation(&self) -> Self::MP {
-        self.perm
+        let width = self.perm.top.width;
+        PairWindow {
+            local: &self.perm.top.values[..width],
+            next: &self.perm.bottom.values[..width],
+        }
     }
 
     fn permutation_randomness(&self) -> &[Self::EF] {
         self.perm_challenges
     }
-}
 
-impl<F, EF> PairBuilder for DebugConstraintBuilder<'_, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        &[]
     }
 }
 
@@ -213,7 +227,9 @@ where
     type F = F;
     type Expr = F;
     type Var = F;
-    type M = VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>;
+    type PreprocessedWindow = PairWindow<'a, F>;
+    type MainWindow = PairWindow<'a, F>;
+    type PublicVar = F;
 
     fn is_first_row(&self) -> Self::Expr {
         self.is_first_row
@@ -231,8 +247,16 @@ where
         }
     }
 
-    fn main(&self) -> Self::M {
-        self.main
+    fn main(&self) -> Self::MainWindow {
+        let width = self.main.top.width;
+        PairWindow {
+            local: &self.main.top.values[..width],
+            next: &self.main.bottom.values[..width],
+        }
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed_window
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -256,6 +280,10 @@ where
             panic!();
         }
     }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.public_values
+    }
 }
 
 impl<'a, F, EF> MultiTableAirBuilder<'a> for DebugConstraintBuilder<'a, F, EF>
@@ -275,14 +303,3 @@ where
     }
 }
 
-impl<F: Field, EF: ExtensionField<F>> EmptyMessageBuilder for DebugConstraintBuilder<'_, F, EF> {}
-
-impl<F: Field, EF: ExtensionField<F>> AirBuilderWithPublicValues
-    for DebugConstraintBuilder<'_, F, EF>
-{
-    type PublicVar = F;
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.public_values
-    }
-}

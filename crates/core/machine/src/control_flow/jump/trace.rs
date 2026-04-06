@@ -86,7 +86,7 @@ impl JumpChip {
         cols: &mut JumpColumns<F>,
         _blu: &mut HashMap<ByteLookupEvent, usize>,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
+        cols.pc = F::from_u32(event.pc);
         cols.is_jump = F::from_bool(matches!(event.opcode, Opcode::Jump));
         cols.is_jumpi = F::from_bool(matches!(event.opcode, Opcode::Jumpi));
         cols.is_jumpdirect = F::from_bool(matches!(event.opcode, Opcode::JumpDirect));

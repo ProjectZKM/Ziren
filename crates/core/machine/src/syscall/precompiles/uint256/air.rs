@@ -15,8 +15,8 @@ use crate::{
 
 use generic_array::GenericArray;
 use num::{BigUint, One, Zero};
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -131,10 +131,10 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
 
                         // Assign basic values to the columns.
                         cols.is_real = F::ONE;
-                        cols.shard = F::from_canonical_u32(event.shard);
-                        cols.clk = F::from_canonical_u32(event.clk);
-                        cols.x_ptr = F::from_canonical_u32(event.x_ptr);
-                        cols.y_ptr = F::from_canonical_u32(event.y_ptr);
+                        cols.shard = F::from_u32(event.shard);
+                        cols.clk = F::from_u32(event.clk);
+                        cols.x_ptr = F::from_u32(event.x_ptr);
+                        cols.y_ptr = F::from_u32(event.y_ptr);
 
                         // Populate memory columns.
                         for i in 0..WORDS_FIELD_ELEMENT {
@@ -233,7 +233,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Uint256MulCols<AB::Var> = (*local).borrow();
 
         // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
@@ -246,7 +246,7 @@ where
         // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
         // not overflow because we are summing 32 bytes.
         let modulus_byte_sum =
-            modulus_limbs.0.iter().fold(AB::Expr::zero(), |acc, &limb| acc + limb);
+            modulus_limbs.0.iter().fold(AB::Expr::ZERO, |acc, &limb| acc + limb);
         IsZeroOperation::<AB::F>::eval(
             builder,
             modulus_byte_sum,
@@ -258,11 +258,11 @@ where
         // Otherwise, we use the modulus passed in.
         let modulus_is_zero = local.modulus_is_zero.result;
         let mut coeff_2_256 = Vec::new();
-        coeff_2_256.resize(32, AB::Expr::zero());
-        coeff_2_256.push(AB::Expr::one());
+        coeff_2_256.resize(32, AB::Expr::ZERO);
+        coeff_2_256.push(AB::Expr::ONE);
         let modulus_polynomial: Polynomial<AB::Expr> = modulus_limbs.into();
         let p_modulus: Polynomial<AB::Expr> = modulus_polynomial
-            * (AB::Expr::one() - modulus_is_zero.into())
+            * (AB::Expr::ONE - modulus_is_zero.into())
             + Polynomial::from_coefficients(&coeff_2_256) * modulus_is_zero.into();
 
         // Evaluate the uint256 multiplication
@@ -285,7 +285,7 @@ where
         );
         builder.assert_eq(
             local.modulus_is_not_zero,
-            local.is_real * (AB::Expr::one() - modulus_is_zero.into()),
+            local.is_real * (AB::Expr::ONE - modulus_is_zero.into()),
         );
 
         // Assert that the correct result is being written to x_memory.
@@ -296,7 +296,7 @@ where
         // Read and write x.
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk.into() + AB::Expr::one(),
+            local.clk.into() + AB::Expr::ONE,
             local.x_ptr,
             &local.x_memory,
             local.is_real,
@@ -316,7 +316,7 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::UINT256_MUL.syscall_id()),
+            AB::F::from_u32(SyscallCode::UINT256_MUL.syscall_id()),
             local.x_ptr,
             local.y_ptr,
             local.is_real,

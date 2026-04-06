@@ -9,7 +9,7 @@ use crate::{
     ZKMVerifyingKey,
 };
 use anyhow::Result;
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_fri::FriProof;
 use p3_koala_bear::KoalaBear;
 use zkm_prover::{
@@ -74,23 +74,24 @@ impl Prover<DefaultProverComponents> for MockProver {
 
                 let shard_proof = ShardProof {
                     commitment: ShardCommitment {
-                        main_commit: [KoalaBear::ZERO; 8].into(),
-                        permutation_commit: [KoalaBear::ZERO; 8].into(),
-                        quotient_commit: [KoalaBear::ZERO; 8].into(),
+                        main_commit: vec![[KoalaBear::ZERO; 8]].into(),
+                        permutation_commit: vec![[KoalaBear::ZERO; 8]].into(),
+                        quotient_commit: vec![[KoalaBear::ZERO; 8]].into(),
                     },
                     opened_values: ShardOpenedValues { chips: vec![] },
                     opening_proof: FriProof {
                         commit_phase_commits: vec![],
+                        commit_pow_witnesses: vec![],
                         query_proofs: vec![],
-                        final_poly: Default::default(),
-                        pow_witness: KoalaBear::ZERO,
+                        final_poly: vec![Default::default()],
+                        query_pow_witness: KoalaBear::ZERO,
                     },
                     chip_ordering: HashMap::new(),
                     public_values: vec![],
                 };
 
                 let reduce_vk = StarkVerifyingKey {
-                    commit: [KoalaBear::ZERO; 8].into(),
+                    commit: vec![[KoalaBear::ZERO; 8]].into(),
                     pc_start: KoalaBear::ZERO,
                     chip_information: vec![],
                     chip_ordering: HashMap::new(),

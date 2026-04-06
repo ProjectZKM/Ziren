@@ -86,7 +86,7 @@ impl BranchChip {
         cols: &mut BranchColumns<F>,
         blu: &mut HashMap<ByteLookupEvent, usize>,
     ) {
-        cols.pc = F::from_canonical_u32(event.pc);
+        cols.pc = F::from_u32(event.pc);
         cols.is_beq = F::from_bool(matches!(event.opcode, Opcode::BEQ));
         cols.is_bne = F::from_bool(matches!(event.opcode, Opcode::BNE));
         cols.is_bltz = F::from_bool(matches!(event.opcode, Opcode::BLTZ));

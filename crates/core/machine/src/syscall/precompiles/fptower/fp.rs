@@ -8,8 +8,8 @@ use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use itertools::Itertools;
 use num::BigUint;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, FieldOperation, PrecompileEvent},
@@ -118,14 +118,14 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
             let p = BigUint::from_bytes_le(&words_to_bytes_le_vec(&event.x)) % modulus;
             let q = BigUint::from_bytes_le(&words_to_bytes_le_vec(&event.y)) % modulus;
 
-            cols.is_add = F::from_canonical_u8((event.op == FieldOperation::Add) as u8);
-            cols.is_sub = F::from_canonical_u8((event.op == FieldOperation::Sub) as u8);
-            cols.is_mul = F::from_canonical_u8((event.op == FieldOperation::Mul) as u8);
+            cols.is_add = F::from_u8((event.op == FieldOperation::Add) as u8);
+            cols.is_sub = F::from_u8((event.op == FieldOperation::Sub) as u8);
+            cols.is_mul = F::from_u8((event.op == FieldOperation::Mul) as u8);
             cols.is_real = F::ONE;
-            cols.shard = F::from_canonical_u32(event.shard);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.x_ptr = F::from_canonical_u32(event.x_ptr);
-            cols.y_ptr = F::from_canonical_u32(event.y_ptr);
+            cols.shard = F::from_u32(event.shard);
+            cols.clk = F::from_u32(event.clk);
+            cols.x_ptr = F::from_u32(event.x_ptr);
+            cols.y_ptr = F::from_u32(event.y_ptr);
 
             Self::populate_field_ops(&mut new_byte_lookup_events, cols, p, q, event.op);
 
@@ -147,7 +147,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
                 let mut row = zeroed_f_vec(num_fp_cols::<P>());
                 let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
                 let zero = BigUint::ZERO;
-                cols.is_add = F::from_canonical_u8(1);
+                cols.is_add = F::from_u8(1);
                 Self::populate_field_ops(
                     &mut vec![],
                     cols,
@@ -207,7 +207,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &FpOpCols<AB::Var, P> = (*local).borrow();
 
         // Check that operations flags are boolean.
@@ -216,13 +216,13 @@ where
         builder.assert_bool(local.is_mul);
 
         // Check that only one of them is set.
-        builder.assert_eq(local.is_add + local.is_sub + local.is_mul, AB::Expr::one());
+        builder.assert_eq(local.is_add + local.is_sub + local.is_mul, AB::Expr::ONE);
 
         let p = limbs_from_prev_access(&local.x_access);
         let q = limbs_from_prev_access(&local.y_access);
 
         let modulus_coeffs =
-            P::MODULUS.iter().map(|&limbs| AB::Expr::from_canonical_u8(limbs)).collect_vec();
+            P::MODULUS.iter().map(|&limbs| AB::Expr::from_u8(limbs)).collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         local.output.eval_variable(
@@ -250,7 +250,7 @@ where
         );
         builder.eval_memory_access_slice(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(1), /* We read p at +1 since p, q could be the
+            local.clk + AB::F::from_u32(1), /* We read p at +1 since p, q could be the
                                                        * same. */
             local.x_ptr,
             &local.x_access,
@@ -262,14 +262,14 @@ where
         // *Remark*: If support for division is added, we will need to add the division syscall id.
         let (add_syscall_id, sub_syscall_id, mul_syscall_id) = match P::FIELD_TYPE {
             FieldType::Bn254 => (
-                AB::F::from_canonical_u32(SyscallCode::BN254_FP_ADD.syscall_id()),
-                AB::F::from_canonical_u32(SyscallCode::BN254_FP_SUB.syscall_id()),
-                AB::F::from_canonical_u32(SyscallCode::BN254_FP_MUL.syscall_id()),
+                AB::F::from_u32(SyscallCode::BN254_FP_ADD.syscall_id()),
+                AB::F::from_u32(SyscallCode::BN254_FP_SUB.syscall_id()),
+                AB::F::from_u32(SyscallCode::BN254_FP_MUL.syscall_id()),
             ),
             FieldType::Bls12381 => (
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_FP_ADD.syscall_id()),
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_FP_SUB.syscall_id()),
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_FP_MUL.syscall_id()),
+                AB::F::from_u32(SyscallCode::BLS12381_FP_ADD.syscall_id()),
+                AB::F::from_u32(SyscallCode::BLS12381_FP_SUB.syscall_id()),
+                AB::F::from_u32(SyscallCode::BLS12381_FP_MUL.syscall_id()),
             ),
         };
         let syscall_id_felt = local.is_add * add_syscall_id

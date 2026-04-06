@@ -1,7 +1,7 @@
 use std::array;
 
 use itertools::Itertools;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::ByteOpcode;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::ByteAirBuilder, Word};
@@ -60,8 +60,8 @@ pub trait WordAirBuilder: ByteAirBuilder {
         let mut index = 0;
         while index + 1 < input.len() {
             self.send_byte(
-                Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                Self::Expr::zero(),
+                Self::Expr::from_u8(ByteOpcode::U8Range as u8),
+                Self::Expr::ZERO,
                 input[index].clone(),
                 input[index + 1].clone(),
                 mult.clone(),
@@ -70,10 +70,10 @@ pub trait WordAirBuilder: ByteAirBuilder {
         }
         if index < input.len() {
             self.send_byte(
-                Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                Self::Expr::zero(),
+                Self::Expr::from_u8(ByteOpcode::U8Range as u8),
+                Self::Expr::ZERO,
                 input[index].clone(),
-                Self::Expr::zero(),
+                Self::Expr::ZERO,
                 mult.clone(),
             );
         }
@@ -87,10 +87,10 @@ pub trait WordAirBuilder: ByteAirBuilder {
     ) {
         input.iter().for_each(|limb| {
             self.send_byte(
-                Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+                Self::Expr::from_u8(ByteOpcode::U16Range as u8),
                 *limb,
-                Self::Expr::zero(),
-                Self::Expr::zero(),
+                Self::Expr::ZERO,
+                Self::Expr::ZERO,
                 mult.clone(),
             );
         });

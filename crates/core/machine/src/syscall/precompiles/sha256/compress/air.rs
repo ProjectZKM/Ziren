@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_stark::{
@@ -35,7 +35,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &ShaCompressCols<AB::Var> = (*local).borrow();
         let next: &ShaCompressCols<AB::Var> = (*next).borrow();
 
@@ -51,7 +51,7 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
+            AB::F::from_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
             local.w_ptr,
             local.h_ptr,
             local.start,
@@ -73,7 +73,7 @@ impl ShaCompressChip {
         }
 
         // Verify that exactly one of the octet columns is true.
-        let mut octet_sum = AB::Expr::zero();
+        let mut octet_sum = AB::Expr::ZERO;
         for i in 0..8 {
             octet_sum = octet_sum.clone() + local.octet[i].into();
         }
@@ -93,7 +93,7 @@ impl ShaCompressChip {
         }
 
         // Verify that exactly one of the octet_num columns is true.
-        let mut octet_num_sum = AB::Expr::zero();
+        let mut octet_num_sum = AB::Expr::ZERO;
         for i in 0..10 {
             octet_num_sum = octet_num_sum.clone() + local.octet_num[i].into();
         }
@@ -127,7 +127,7 @@ impl ShaCompressChip {
             // last cycle is an exception since the next row must be a new 80-cycle loop or nonreal.
             builder
                 .when_transition()
-                .when(local.octet_num[0] + local.octet_num[9] * (AB::Expr::one() - local.octet[7]))
+                .when(local.octet_num[0] + local.octet_num[9] * (AB::Expr::ONE - local.octet[7]))
                 .assert_word_eq(*var, next_vars[i]);
 
             // When column is read from memory during init, is should be equal to the memory value.
@@ -210,36 +210,36 @@ impl ShaCompressChip {
         );
 
         // Calculate the current cycle_num.
-        let mut cycle_num = AB::Expr::zero();
+        let mut cycle_num = AB::Expr::ZERO;
         for i in 0..10 {
-            cycle_num = cycle_num.clone() + local.octet_num[i] * AB::Expr::from_canonical_usize(i);
+            cycle_num = cycle_num.clone() + local.octet_num[i] * AB::Expr::from_usize(i);
         }
 
         // Calculate the current step of the cycle 8.
-        let mut cycle_step = AB::Expr::zero();
+        let mut cycle_step = AB::Expr::ZERO;
         for i in 0..8 {
-            cycle_step = cycle_step.clone() + local.octet[i] * AB::Expr::from_canonical_usize(i);
+            cycle_step = cycle_step.clone() + local.octet[i] * AB::Expr::from_usize(i);
         }
 
         // Verify correct mem address for initialize phase
         builder.when(local.is_initialize).assert_eq(
             local.mem_addr,
-            local.h_ptr + cycle_step.clone() * AB::Expr::from_canonical_u32(4),
+            local.h_ptr + cycle_step.clone() * AB::Expr::from_u32(4),
         );
 
         // Verify correct mem address for compression phase
         builder.when(local.is_compression).assert_eq(
             local.mem_addr,
             local.w_ptr
-                + (((cycle_num - AB::Expr::one()) * AB::Expr::from_canonical_u32(8))
+                + (((cycle_num - AB::Expr::ONE) * AB::Expr::from_u32(8))
                     + cycle_step.clone())
-                    * AB::Expr::from_canonical_u32(4),
+                    * AB::Expr::from_u32(4),
         );
 
         // Verify correct mem address for finalize phase
         builder.when(local.is_finalize).assert_eq(
             local.mem_addr,
-            local.h_ptr + cycle_step.clone() * AB::Expr::from_canonical_u32(4),
+            local.h_ptr + cycle_step.clone() * AB::Expr::from_u32(4),
         );
 
         // In the initialize phase, verify that local.a, local.b, ... is correctly read from memory
@@ -481,7 +481,7 @@ impl ShaCompressChip {
         // We can get the needed operand (a,b,c,...,h) by doing an inner product between octet and
         // [a,b,c,...,h] which will act as a selector.
         let add_operands = [local.a, local.b, local.c, local.d, local.e, local.f, local.g, local.h];
-        let zero = AB::Expr::zero();
+        let zero = AB::Expr::ZERO;
         let mut filtered_operand = Word([zero.clone(), zero.clone(), zero.clone(), zero]);
         for (i, operand) in local.octet.iter().zip(add_operands.iter()) {
             for j in 0..4 {

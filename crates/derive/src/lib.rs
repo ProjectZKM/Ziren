@@ -285,7 +285,14 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
             // Attach an extra generic AB : crate::air::ZKMAirBuilder to the generics of the enum
             let generics = &ast.generics;
             let mut new_generics = generics.clone();
-            new_generics.params.push(syn::parse_quote! { AB: p3_air::PairBuilder + #builder_path });
+            // If builder_path starts with `crate::`, don't prefix with `p3_air::`.
+            // Otherwise, prefix with `p3_air::` (e.g. for `AirBuilder<F = F>`).
+            let first_segment = builder_path.segments.first().map(|s| s.ident.to_string());
+            if first_segment.as_deref() == Some("crate") {
+                new_generics.params.push(syn::parse_quote! { AB: #builder_path });
+            } else {
+                new_generics.params.push(syn::parse_quote! { AB: p3_air::#builder_path });
+            }
 
             let (air_impl_generics, _, _) = new_generics.split_for_impl();
 

@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 use itertools::Itertools;
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
@@ -141,11 +141,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
 impl<AB> Air<AB> for MemoryChip<AB::F>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &MemoryPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (value, access) in prep_local.values_and_accesses {
@@ -159,7 +159,7 @@ mod tests {
     use std::sync::Arc;
 
     use machine::{tests::run_recursion_test_machines, RecursionAir};
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_matrix::dense::RowMajorMatrix;
 

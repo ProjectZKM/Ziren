@@ -10,7 +10,7 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(all(target_os = "zkvm", feature = "verify"))] {
         use p3_field::PrimeField32;
-        use p3_field::FieldAlgebra;
+        use p3_field::PrimeCharacteristicRing;
     }
 }
 

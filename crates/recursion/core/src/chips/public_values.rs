@@ -1,8 +1,8 @@
 use std::borrow::{Borrow, BorrowMut};
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -284,14 +284,14 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
 impl<AB> Air<AB> for PublicValuesChip
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &PublicValuesCols<AB::Var> = (*local).borrow();
-        let prepr = builder.preprocessed();
-        let local_prepr = prepr.row_slice(0);
+        let prepr = builder.preprocessed().clone();
+        let local_prepr = prepr.current_slice();
         let local_prepr: &PublicValuesPreprocessedCols<AB::Var> = (*local_prepr).borrow();
         let pv = builder.public_values();
         let pv_elms: [AB::Expr; RECURSIVE_PROOF_NUM_PV_ELTS] =
@@ -317,7 +317,7 @@ mod tests {
     use std::{array, borrow::Borrow};
     use zkm_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -337,7 +337,7 @@ mod tests {
         type F = <SC as StarkGenericConfig>::Val;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
-        let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 16)) };
+        let mut random_felt = move || -> F { F::from_u32(rng.gen_range(0..1 << 16)) };
         let random_pv_elms: [F; RECURSIVE_PROOF_NUM_PV_ELTS] = array::from_fn(|_| random_felt());
         let addr = 0u32;
         let public_values_a: [u32; RECURSIVE_PROOF_NUM_PV_ELTS] =
@@ -369,7 +369,7 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let random_felts: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =
-            array::from_fn(|_| F::from_canonical_u32(rng.gen_range(0..1 << 16)));
+            array::from_fn(|_| F::from_u32(rng.gen_range(0..1 << 16)));
         let random_public_values: &RecursionPublicValues<F> = random_felts.as_slice().borrow();
 
         let shard = ExecutionRecord {

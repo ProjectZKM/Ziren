@@ -304,7 +304,7 @@ impl Groth16Bn254Proof {
 
 #[cfg(test)]
 mod tests {
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::Permutation;
     use zkm_stark::inner_perm;

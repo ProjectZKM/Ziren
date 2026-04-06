@@ -2,11 +2,11 @@ use std::marker::PhantomData;
 
 use p3_air::Air;
 use p3_commit::Mmcs;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
 use zkm_stark::{
     air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, OpeningProof,
@@ -20,7 +20,7 @@ use crate::{
     merkle_tree::{verify, MerkleProof},
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    CircuitConfig, FriProofVariable, KoalaBearFriConfig, KoalaBearFriConfigVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriParameters, KoalaBearFriParametersVariable,
 };
 
 use super::{
@@ -44,7 +44,7 @@ pub struct ZKMCompressWithVkeyShape {
 /// Witness layout for the compress stage verifier.
 pub struct ZKMMerkleProofWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
-    SC: FieldHasherVariable<C> + KoalaBearFriConfigVariable<C>,
+    SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
     /// The shard proofs to verify.
     pub vk_merkle_proofs: Vec<MerkleProofVariable<C, SC>>,
@@ -66,7 +66,7 @@ pub struct ZKMMerkleProofWitnessValues<SC: FieldHasher<KoalaBear>> {
 
 impl<C, SC> ZKMMerkleProofVerifier<C, SC>
 where
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
 {
     /// Verify (via Merkle tree) that the vkey digests of a proof belong to a specified set (encoded
@@ -99,7 +99,7 @@ pub struct ZKMCompressWithVKeyVerifier<C, SC, A> {
 /// Witness layout for the verifier of the proof shape phase of the compress stage.
 pub struct ZKMCompressWithVKeyWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
 > {
     pub compress_var: ZKMCompressWitnessVariable<C, SC>,
     pub merkle_var: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -113,14 +113,14 @@ pub struct ZKMCompressWithVKeyWitnessValues<SC: StarkGenericConfig + FieldHasher
 
 impl<C, SC, A> ZKMCompressWithVKeyVerifier<C, SC, A>
 where
-    SC: KoalaBearFriConfigVariable<
+    SC: KoalaBearFriParametersVariable<
         C,
         FriChallengerVariable = DuplexChallengerVariable<C>,
         DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
     >,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
 {
     /// Verify the proof shape phase of the compress stage.
     pub fn verify(
@@ -142,7 +142,7 @@ where
     }
 }
 
-impl<SC: KoalaBearFriConfig + FieldHasher<KoalaBear>> ZKMCompressWithVKeyWitnessValues<SC> {
+impl<SC: KoalaBearFriParameters + FieldHasher<KoalaBear>> ZKMCompressWithVKeyWitnessValues<SC> {
     pub fn shape(&self) -> ZKMCompressWithVkeyShape {
         let merkle_tree_height = self.merkle_val.vk_merkle_proofs.first().unwrap().path.len();
         ZKMCompressWithVkeyShape { compress_shape: self.compress_val.shape(), merkle_tree_height }
@@ -176,7 +176,7 @@ impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
+impl<C: CircuitConfig<F = KoalaBear, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
     Witnessable<C> for ZKMCompressWithVKeyWitnessValues<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,

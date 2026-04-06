@@ -1,4 +1,4 @@
-use p3_bn254_fr::Bn254Fr;
+use p3_bn254_fr::Bn254;
 use p3_field::extension::BinomialExtensionField;
 use p3_koala_bear::KoalaBear;
 use zkm_stark::{InnerChallenge, InnerVal};
@@ -11,7 +11,7 @@ pub type InnerConfig = AsmConfig<InnerVal, InnerChallenge>;
 pub struct OuterConfig;
 
 impl Config for OuterConfig {
-    type N = Bn254Fr;
+    type N = Bn254;
     type F = KoalaBear;
     type EF = BinomialExtensionField<KoalaBear, 4>;
 }

@@ -1,7 +1,7 @@
 use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use backtrace::Backtrace;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_machine::utils::zkm_debug_mode;
 use zkm_primitives::types::RecursionProgramType;
 
@@ -356,7 +356,7 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn print_debug(&mut self, val: usize) {
-        let constant = self.eval(C::N::from_canonical_usize(val));
+        let constant = self.eval(C::N::from_usize(val));
         self.print_v(constant);
     }
 
@@ -462,7 +462,7 @@ impl<C: Config> Builder<C> {
     /// Materializes a usize into a variable.
     pub fn materialize(&mut self, num: Usize<C::N>) -> Var<C::N> {
         match num {
-            Usize::Const(num) => self.eval(C::N::from_canonical_usize(num)),
+            Usize::Const(num) => self.eval(C::N::from_usize(num)),
             Usize::Var(num) => num,
         }
     }
@@ -746,7 +746,7 @@ impl<C: Config> RangeBuilder<'_, C> {
     }
 
     pub fn for_each(self, mut f: impl FnMut(Var<C::N>, &mut Builder<C>)) {
-        let step_size = C::N::from_canonical_usize(self.step_size);
+        let step_size = C::N::from_usize(self.step_size);
         let loop_variable: Var<C::N> = self.builder.uninit();
         let mut loop_body_builder = Builder::<C>::new_sub_builder(
             self.builder.variable_count(),

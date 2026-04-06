@@ -1,5 +1,5 @@
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
 
 use zkm_core_executor::events::ByteRecord;
@@ -61,9 +61,9 @@ impl<F: Field> Add4Operation<F> {
             self.is_carry_1[i] = F::from_bool(carry[i] == 1);
             self.is_carry_2[i] = F::from_bool(carry[i] == 2);
             self.is_carry_3[i] = F::from_bool(carry[i] == 3);
-            self.carry[i] = F::from_canonical_u8(carry[i]);
+            self.carry[i] = F::from_u8(carry[i]);
             debug_assert!(carry[i] <= 3);
-            debug_assert_eq!(self.value[i], F::from_canonical_u32(res % base));
+            debug_assert_eq!(self.value[i], F::from_u32(res % base));
         }
 
         // Range check.
@@ -111,16 +111,16 @@ impl<F: Field> Add4Operation<F> {
                         + cols.is_carry_1[i]
                         + cols.is_carry_2[i]
                         + cols.is_carry_3[i],
-                    AB::Expr::one(),
+                    AB::Expr::ONE,
                 );
             }
         }
 
         // Calculates carry from is_carry_{0,1,2,3}.
         {
-            let one = AB::Expr::one();
-            let two = AB::F::from_canonical_u32(2);
-            let three = AB::F::from_canonical_u32(3);
+            let one = AB::Expr::ONE;
+            let two = AB::F::from_u32(2);
+            let three = AB::F::from_u32(3);
 
             for i in 0..WORD_SIZE {
                 builder_is_real.assert_eq(
@@ -134,7 +134,7 @@ impl<F: Field> Add4Operation<F> {
 
         // Compare the sum and summands by looking at carry.
         {
-            let base = AB::F::from_canonical_u32(256);
+            let base = AB::F::from_u32(256);
             // For each limb, assert that difference between the carried result and the non-carried
             // result is the product of carry and base.
             for i in 0..WORD_SIZE {

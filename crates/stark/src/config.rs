@@ -49,7 +49,7 @@ pub type PackedChallenge<SC> =
     <<SC as StarkGenericConfig>::Challenge as ExtensionField<Val<SC>>>::ExtensionPacking;
 
 pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwned + Clone {
-    type Val: PrimeField;
+    type Val: PrimeField + p3_field::TwoAdicField;
     type Domain: PolynomialSpace<Val = Self::Val> + Sync;
 
     /// The PCS used to commit to trace polynomials.
@@ -63,9 +63,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// The challenger (Fiat-Shamir) implementation used.
     type Challenger: FieldChallenger<Val<Self>>
         + CanObserve<<Self::Pcs as Pcs<Self::Challenge, Self::Challenger>>::Commitment>
-        + CanSample<Self::Challenge>
-        + Serialize
-        + DeserializeOwned;
+        + CanSample<Self::Challenge>;
 
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;
@@ -78,6 +76,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
     fn zero_commitment(&self) -> Com<SC>;
 }
 
+#[derive(Clone)]
 pub struct UniConfig<SC>(pub SC);
 
 impl<SC: StarkGenericConfig> p3_uni_stark::StarkGenericConfig for UniConfig<SC> {
@@ -89,5 +88,9 @@ impl<SC: StarkGenericConfig> p3_uni_stark::StarkGenericConfig for UniConfig<SC> 
 
     fn pcs(&self) -> &Self::Pcs {
         self.0.pcs()
+    }
+
+    fn initialise_challenger(&self) -> Self::Challenger {
+        self.0.challenger()
     }
 }

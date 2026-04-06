@@ -7,7 +7,7 @@ use core::iter::repeat;
 use itertools::Itertools;
 
 use once_cell::sync::Lazy;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{CryptographicHasher, Permutation};
 use p3_util::reverse_slice_index_bits;
@@ -20,7 +20,7 @@ use zkm_core_machine::utils::log2_strict_usize;
 use zkm_recursion_core::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH};
 use zkm_recursion_core::machine::RecursionAir;
 use zkm_stark::{
-    inner_perm, koala_bear_poseidon2::MyHash as InnerHash, CpuProver, MachineProof, MachineProver,
+    inner_perm, koala_bear_poseidon2::MyHash as InnerHash, MachineProof,
     MachineVerificationError, StarkGenericConfig, DIGEST_SIZE,
 };
 
@@ -28,7 +28,6 @@ use super::{HashableKey, InnerSC, ZKMVerifyingKey};
 
 const COMPRESS_DEGREE: usize = 3;
 pub type CompressAir<F> = RecursionAir<F, COMPRESS_DEGREE>;
-type CompressProver = CpuProver<InnerSC, CompressAir<<InnerSC as StarkGenericConfig>::Val>>;
 
 pub static VK_MAP: Lazy<&'static [u8]> = Lazy::new(|| {
     #[cfg(feature = "dummy-vk-map")]
@@ -52,7 +51,6 @@ pub(crate) fn verify_stark_compressed_proof(
         MerkleTree::<KoalaBear, InnerSC>::commit(allowed_vk_map.keys().copied().collect());
 
     let compress_machine = CompressAir::compress_machine(InnerSC::default());
-    let compress_prover = CompressProver::new(compress_machine);
 
     let ZKMReduceProof { vk: compress_vk, proof } = proof;
 
@@ -63,7 +61,7 @@ pub(crate) fn verify_stark_compressed_proof(
 
     // Validate public values
     let public_values: &RecursionPublicValues<_> = proof.public_values.as_slice().borrow();
-    if !is_recursion_public_values_valid(compress_prover.machine().config(), public_values) {
+    if !is_recursion_public_values_valid(compress_machine.config(), public_values) {
         return Err(MachineVerificationError::InvalidPublicValues(
             "recursion public values are invalid",
         ));
@@ -85,9 +83,9 @@ pub(crate) fn verify_stark_compressed_proof(
         return Err(MachineVerificationError::InvalidPublicValues("Ziren vk hash mismatch"));
     }
 
-    let mut challenger = compress_prover.config().challenger();
+    let mut challenger = compress_machine.config().challenger();
     let machine_proof = MachineProof { shard_proofs: vec![proof.clone()] };
-    compress_prover.machine().verify(compress_vk, &machine_proof, &mut challenger)?;
+    compress_machine.verify(compress_vk, &machine_proof, &mut challenger)?;
 
     Ok(())
 }

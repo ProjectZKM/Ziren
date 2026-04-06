@@ -28,7 +28,7 @@ use std::{
     sync::Arc,
 };
 
-use p3_field::{ExtensionField, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{ExtensionField, PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::Poseidon2ExternalLayerKoalaBear;
 use p3_poseidon2::Poseidon2;
 use p3_symmetric::{CryptographicPermutation, Permutation};
@@ -261,11 +261,11 @@ where
         let early_exit_ts = std::env::var("RECURSION_EARLY_EXIT_TS")
             .map_or(usize::MAX, |ts: String| ts.parse().unwrap());
         self.preallocate_record();
-        while self.pc < F::from_canonical_u32(self.program.instructions.len() as u32) {
+        while self.pc < F::from_u32(self.program.instructions.len() as u32) {
             let idx = self.pc.as_canonical_u32() as usize;
             let instruction = self.program.instructions[idx].clone();
 
-            let next_clk = self.clk + F::from_canonical_u32(4);
+            let next_clk = self.clk + F::from_u32(4);
             let next_pc = self.pc + F::ONE;
             match instruction {
                 Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
@@ -283,7 +283,7 @@ where
                                 // Check for division exceptions and error. Note that 0/0 is defined
                                 // to be 1.
                                 if in1.is_zero() {
-                                    FieldAlgebra::ONE
+                                    PrimeCharacteristicRing::ONE
                                 } else {
                                     return Err(RuntimeError::DivFOutOfDomain {
                                         in1,
@@ -304,8 +304,8 @@ where
                     let in1 = self.memory.mr(addrs.in1).val;
                     let in2 = self.memory.mr(addrs.in2).val;
                     // Do the computation.
-                    let in1_ef = EF::from_base_slice(&in1.0);
-                    let in2_ef = EF::from_base_slice(&in2.0);
+                    let in1_ef = EF::from_basis_coefficients_slice(&in1.0).unwrap();
+                    let in2_ef = EF::from_basis_coefficients_slice(&in2.0).unwrap();
                     let out_ef = match opcode {
                         ExtAluOpcode::AddE => in1_ef + in2_ef,
                         ExtAluOpcode::SubE => in1_ef - in2_ef,
@@ -316,7 +316,7 @@ where
                                 // Check for division exceptions and error. Note that 0/0 is defined
                                 // to be 1.
                                 if in1_ef.is_zero() {
-                                    FieldAlgebra::ONE
+                                    PrimeCharacteristicRing::ONE
                                 } else {
                                     return Err(RuntimeError::DivEOutOfDomain {
                                         in1: in1_ef,
@@ -329,7 +329,7 @@ where
                             }
                         },
                     };
-                    let out = Block::from(out_ef.as_base_slice());
+                    let out = Block::from(out_ef.as_basis_coefficients_slice());
                     self.memory.mw(addrs.out, out, mult);
                     self.record.ext_alu_events.push(ExtAluEvent { out, in1, in2 });
                 }
@@ -412,7 +412,7 @@ where
                     let num = self.memory.mr_mult(input_addr, F::ZERO).val[0].as_canonical_u32();
                     // Decompose the num into LE bits.
                     let bits = (0..output_addrs_mults.len())
-                        .map(|i| Block::from(F::from_canonical_u32((num >> i) & 1)))
+                        .map(|i| Block::from(F::from_u32((num >> i) & 1)))
                         .collect::<Vec<_>>();
                     // Write the bits to the array at dst.
                     for (bit, (addr, mult)) in bits.into_iter().zip(output_addrs_mults) {
@@ -484,7 +484,7 @@ where
                         .collect_vec();
 
                     for m in 0..ps_at_z.len() {
-                        // let m = F::from_canonical_u32(m);
+                        // let m = F::from_u32(m);
                         // Get the opening values.
                         let p_at_x = mat_opening[m];
                         let p_at_x: EF = p_at_x.ext();
@@ -505,29 +505,29 @@ where
 
                         let _ = self.memory.mw(
                             ext_vec_addrs.ro_output[m],
-                            Block::from(new_ro.as_base_slice()),
+                            Block::from(new_ro.as_basis_coefficients_slice()),
                             ro_mults[m],
                         );
 
                         let _ = self.memory.mw(
                             ext_vec_addrs.alpha_pow_output[m],
-                            Block::from(new_alpha_pow.as_base_slice()),
+                            Block::from(new_alpha_pow.as_basis_coefficients_slice()),
                             alpha_pow_mults[m],
                         );
 
                         self.record.fri_fold_events.push(FriFoldEvent {
                             base_single: FriFoldBaseIo { x },
                             ext_single: FriFoldExtSingleIo {
-                                z: Block::from(z.as_base_slice()),
-                                alpha: Block::from(alpha.as_base_slice()),
+                                z: Block::from(z.as_basis_coefficients_slice()),
+                                alpha: Block::from(alpha.as_basis_coefficients_slice()),
                             },
                             ext_vec: FriFoldExtVecIo {
-                                mat_opening: Block::from(p_at_x.as_base_slice()),
-                                ps_at_z: Block::from(p_at_z.as_base_slice()),
-                                alpha_pow_input: Block::from(alpha_pow.as_base_slice()),
-                                ro_input: Block::from(ro.as_base_slice()),
-                                alpha_pow_output: Block::from(new_alpha_pow.as_base_slice()),
-                                ro_output: Block::from(new_ro.as_base_slice()),
+                                mat_opening: Block::from(p_at_x.as_basis_coefficients_slice()),
+                                ps_at_z: Block::from(p_at_z.as_basis_coefficients_slice()),
+                                alpha_pow_input: Block::from(alpha_pow.as_basis_coefficients_slice()),
+                                ro_input: Block::from(ro.as_basis_coefficients_slice()),
+                                alpha_pow_output: Block::from(new_alpha_pow.as_basis_coefficients_slice()),
+                                ro_output: Block::from(new_ro.as_basis_coefficients_slice()),
                             },
                         });
                     }
@@ -555,22 +555,22 @@ where
 
                     self.nb_batch_fri += p_at_zs.len();
                     for m in 0..p_at_zs.len() {
-                        acc += alpha_pows[m] * (p_at_zs[m] - EF::from_base(p_at_xs[m]));
+                        acc += alpha_pows[m] * (p_at_zs[m] - EF::from(p_at_xs[m]));
                         self.record.batch_fri_events.push(BatchFRIEvent {
                             base_vec: BatchFRIBaseVecIo { p_at_x: p_at_xs[m] },
                             ext_single: BatchFRIExtSingleIo {
-                                acc: Block::from(acc.as_base_slice()),
+                                acc: Block::from(acc.as_basis_coefficients_slice()),
                             },
                             ext_vec: BatchFRIExtVecIo {
-                                p_at_z: Block::from(p_at_zs[m].as_base_slice()),
-                                alpha_pow: Block::from(alpha_pows[m].as_base_slice()),
+                                p_at_z: Block::from(p_at_zs[m].as_basis_coefficients_slice()),
+                                alpha_pow: Block::from(alpha_pows[m].as_basis_coefficients_slice()),
                             },
                         });
                     }
 
                     let _ = self.memory.mw(
                         ext_single_addrs.acc,
-                        Block::from(acc.as_base_slice()),
+                        Block::from(acc.as_basis_coefficients_slice()),
                         acc_mult,
                     );
                 }

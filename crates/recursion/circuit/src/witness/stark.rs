@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
 use p3_koala_bear::KoalaBear;
 
@@ -36,7 +36,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> WitnessWriter<C>
     }
 
     fn write_ext(&mut self, value: <C>::EF) {
-        self.push(Block::from(value.as_base_slice()))
+        self.push(Block::from(value.as_basis_coefficients_slice()))
     }
 }
 
@@ -86,24 +86,29 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
             .commit_phase_commits
             .iter()
             .map(|commit| {
-                let commit: &InnerDigest = commit.borrow();
-                commit.read(builder)
+                let cap: &[InnerDigest] = commit.borrow();
+                assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
+                cap[0].read(builder)
             })
             .collect();
         let query_proofs = self.query_proofs.read(builder);
-        let final_poly = self.final_poly.read(builder);
-        let pow_witness = self.pow_witness.read(builder);
+        // final_poly is now Vec<Challenge>; circuit expects a single Ext (poly of degree 0).
+        assert!(!self.final_poly.is_empty(), "final_poly must have at least one element");
+        let final_poly = self.final_poly[0].read(builder);
+        let pow_witness = self.query_pow_witness.read(builder);
         Self::WitnessVariable { commit_phase_commits, query_proofs, final_poly, pow_witness }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.commit_phase_commits.iter().for_each(|commit| {
-            let commit = Borrow::<InnerDigest>::borrow(commit);
-            commit.write(witness);
+            let cap: &[InnerDigest] = commit.borrow();
+            assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
+            cap[0].write(witness);
         });
         self.query_proofs.write(witness);
-        self.final_poly.write(witness);
-        self.pow_witness.write(witness);
+        assert!(!self.final_poly.is_empty(), "final_poly must have at least one element");
+        self.final_poly[0].write(witness);
+        self.query_pow_witness.write(witness);
     }
 }
 
@@ -130,13 +135,14 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
     type WitnessVariable = FriCommitPhaseProofStepVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let sibling_value = self.sibling_value.read(builder);
+        // In binary folding (log_arity=1), there's exactly one sibling value.
+        let sibling_value = self.sibling_values[0].read(builder);
         let opening_proof = self.opening_proof.read(builder);
         Self::WitnessVariable { sibling_value, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.sibling_value.write(witness);
+        self.sibling_values[0].write(witness);
         self.opening_proof.write(witness);
     }
 }

@@ -5,8 +5,8 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
@@ -147,8 +147,8 @@ impl BitwiseChip {
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
         cols.a = Word::from(event.a);
         cols.b = Word::from(event.b);
         cols.c = Word::from(event.c);
@@ -183,7 +183,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &BitwiseCols<AB::Var> = (*local).borrow();
 
         // Get the opcode for the operation.
@@ -206,22 +206,22 @@ where
 
         // Receive the instruction.
         builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
+            local.next_pc + AB::Expr::from_u32(4),
+            AB::Expr::ZERO,
             cpu_opcode,
             local.a,
             local.b,
             local.c,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
+            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ONE,
             local.is_xor + local.is_or + local.is_and + local.is_nor,
         );
 

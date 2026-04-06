@@ -2,9 +2,9 @@ use core::borrow::Borrow;
 use std::borrow::BorrowMut;
 use std::iter::zip;
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::{Field, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -267,14 +267,14 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
 
 impl<AB> Air<AB> for BaseAluChip
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &BaseAluCols<AB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &BaseAluPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (
@@ -303,7 +303,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -334,7 +334,7 @@ mod tests {
         type F = <SC as StarkGenericConfig>::Val;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
-        let mut random_felt = move || -> F { rng.sample(rand::distributions::Standard) };
+        let mut random_felt = move || -> F { F::from_u64(rng.gen::<u64>()) };
         let mut addr = 0;
 
         let instructions = (0..1000)

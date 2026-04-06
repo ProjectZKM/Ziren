@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_core_executor::Opcode;
 use zkm_stark::{
@@ -30,7 +30,7 @@ where
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &BranchColumns<AB::Var> = (*local).borrow();
 
         // SAFETY: All selectors `is_beq`, `is_bne`, `is_bltz`, `is_bgez`, `is_blez`, `is_bgtz` are checked to be boolean.
@@ -66,22 +66,22 @@ where
         // - `is_halt = 0`
         // `next_pc` still has to be constrained, and this is done below.
         builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             opcode,
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::one(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+            AB::Expr::ONE,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             is_real.clone(),
         );
 
@@ -117,7 +117,7 @@ where
 
             // When we are not branching, assert that local.next_pc + 4 <==> next.next_next_pc.
             builder.when(is_real.clone()).when_not(local.is_branching).assert_eq(
-                local.next_pc.reduce::<AB>() + AB::Expr::from_canonical_u32(4),
+                local.next_pc.reduce::<AB>() + AB::Expr::from_u32(4),
                 local.next_next_pc.reduce::<AB>(),
             );
 

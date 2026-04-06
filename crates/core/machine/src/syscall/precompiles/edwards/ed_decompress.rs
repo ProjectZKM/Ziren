@@ -7,8 +7,8 @@ use std::marker::PhantomData;
 use crate::{air::MemoryAirBuilder, utils::pad_rows_fixed_with_err, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use typenum::U32;
 use zkm_core_executor::{
@@ -68,9 +68,9 @@ impl<F: PrimeField32> EdDecompressCols<F> {
     ) -> Result<(), CurveError> {
         let mut new_byte_lookup_events = Vec::new();
         self.is_real = F::from_bool(true);
-        self.shard = F::from_canonical_u32(event.shard);
-        self.clk = F::from_canonical_u32(event.clk);
-        self.ptr = F::from_canonical_u32(event.ptr);
+        self.shard = F::from_u32(event.shard);
+        self.clk = F::from_u32(event.clk);
+        self.ptr = F::from_u32(event.ptr);
         self.sign = F::from_bool(event.sign);
         for i in 0..8 {
             self.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
@@ -123,7 +123,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.u.eval(
             builder,
             &self.yy.result,
-            &[AB::Expr::one()].iter(),
+            &[AB::Expr::ONE].iter(),
             FieldOperation::Sub,
             self.is_real,
         );
@@ -132,7 +132,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.dyy.eval(builder, &d_const, &self.yy.result, FieldOperation::Mul, self.is_real);
         self.v.eval(
             builder,
-            &[AB::Expr::one()].iter(),
+            &[AB::Expr::ONE].iter(),
             &self.dyy.result,
             FieldOperation::Add,
             self.is_real,
@@ -147,7 +147,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.x.eval(builder, &self.u_div_v.result, AB::F::ZERO, self.is_real);
         self.neg_x.eval(
             builder,
-            &[AB::Expr::zero()].iter(),
+            &[AB::Expr::ZERO].iter(),
             &self.x.multiplication.result,
             FieldOperation::Sub,
             self.is_real,
@@ -163,7 +163,7 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.eval_memory_access_slice(
             self.shard,
             self.clk,
-            self.ptr.into() + AB::F::from_canonical_u32(32),
+            self.ptr.into() + AB::F::from_u32(32),
             &self.y_access,
             self.is_real,
         );
@@ -179,7 +179,7 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.receive_syscall(
             self.shard,
             self.clk,
-            AB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
+            AB::F::from_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
             self.ptr,
             self.sign,
             self.is_real,
@@ -276,7 +276,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &EdDecompressCols<AB::Var> = (*local).borrow();
 
         local.eval::<AB, E::BaseField, E>(builder);

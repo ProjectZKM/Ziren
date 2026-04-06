@@ -1,4 +1,4 @@
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::{events::ByteRecord, ByteOpcode, ExecutionRecord};
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
@@ -18,7 +18,7 @@ impl<F: Field> OrOperation<F> {
         let x_bytes = x.to_le_bytes();
         let y_bytes = y.to_le_bytes();
         for i in 0..WORD_SIZE {
-            self.value[i] = F::from_canonical_u8(x_bytes[i] | y_bytes[i]);
+            self.value[i] = F::from_u8(x_bytes[i] | y_bytes[i]);
             record.lookup_or(x_bytes[i], y_bytes[i]);
         }
         expected
@@ -33,7 +33,7 @@ impl<F: Field> OrOperation<F> {
     ) {
         for i in 0..WORD_SIZE {
             builder.send_byte(
-                AB::F::from_canonical_u32(ByteOpcode::OR as u32),
+                AB::F::from_u32(ByteOpcode::OR as u32),
                 cols.value[i],
                 a[i],
                 b[i],

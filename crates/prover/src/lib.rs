@@ -33,7 +33,7 @@ use std::{
 };
 
 use lru::LruCache;
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use shapes::ZKMProofShape;
@@ -1194,7 +1194,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
                     let index = (vk_digest[0].as_canonical_u32() as usize) % num_vks;
-                    (index, [KoalaBear::from_canonical_usize(index); 8])
+                    (index, [KoalaBear::from_usize(index); 8])
                 })
                 .unzip()
         };

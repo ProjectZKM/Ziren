@@ -1,12 +1,12 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::Air;
+use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
-use p3_commit::Pcs;
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
+use p3_commit::{Pcs, PolynomialSpace};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, PrimeField32, TwoAdicField};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use p3_uni_stark::{get_symbolic_constraints, SymbolicAirBuilder};
+use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
 }
 
 /// A proving key for a STARK.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(bound(serialize = "PcsProverData<SC>: Serialize"))]
 #[serde(bound(deserialize = "PcsProverData<SC>: DeserializeOwned"))]
 pub struct StarkProvingKey<SC: StarkGenericConfig> {
@@ -74,6 +74,24 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub constraints_map: HashMap<String, usize>,
 }
 
+impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC>
+where
+    PcsProverData<SC>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            commit: self.commit.clone(),
+            pc_start: self.pc_start,
+            initial_global_cumulative_sum: self.initial_global_cumulative_sum,
+            traces: self.traces.clone(),
+            data: self.data.clone(),
+            chip_ordering: self.chip_ordering.clone(),
+            local_only: self.local_only.clone(),
+            constraints_map: self.constraints_map.clone(),
+        }
+    }
+}
+
 impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// Observes the values of the proving key into the challenger.
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
@@ -86,10 +104,41 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     }
 }
 
+/// Serializable representation of a domain (shift + log_size).
+/// Used in `StarkVerifyingKey` since upstream `TwoAdicMultiplicativeCoset` no longer
+/// implements serde.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "F: Serialize"))]
+#[serde(bound(deserialize = "F: DeserializeOwned"))]
+pub struct SerializableDomain<F: Field> {
+    pub shift: F,
+    pub log_size: usize,
+}
+
+impl<F: p3_field::TwoAdicField> SerializableDomain<F> {
+    /// Create from a concrete `TwoAdicMultiplicativeCoset`.
+    pub fn from_coset(d: &p3_field::coset::TwoAdicMultiplicativeCoset<F>) -> Self {
+        Self { shift: d.shift(), log_size: d.log_size() }
+    }
+
+    /// Reconstruct the concrete domain.
+    pub fn to_coset(&self) -> p3_field::coset::TwoAdicMultiplicativeCoset<F> {
+        p3_field::coset::TwoAdicMultiplicativeCoset::new(self.shift, self.log_size)
+            .expect("invalid domain parameters")
+    }
+}
+
+impl<F: Field> SerializableDomain<F> {
+    /// Create from a PolynomialSpace-like domain (uses size to derive log_size).
+    pub fn new(shift: F, log_size: usize) -> Self {
+        Self { shift, log_size }
+    }
+}
+
 /// A verifying key for a STARK.
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(bound(serialize = "Dom<SC>: Serialize"))]
-#[serde(bound(deserialize = "Dom<SC>: DeserializeOwned"))]
+#[serde(bound(serialize = ""))]
+#[serde(bound(deserialize = ""))]
 pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
@@ -98,7 +147,7 @@ pub struct StarkVerifyingKey<SC: StarkGenericConfig> {
     /// The starting global digest of the program, after incorporating the initial memory.
     pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
     /// The chip information.
-    pub chip_information: Vec<(String, Dom<SC>, Dimensions)>,
+    pub chip_information: Vec<(String, SerializableDomain<Val<SC>>, (usize, usize))>,
     /// The chip ordering.
     pub chip_ordering: HashMap<String, usize>,
 }
@@ -178,12 +227,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
         // Obtain the challenges used for the global permutation argument.
         let mut permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
-            permutation_challenges.push(challenger.sample_ext_element());
+            permutation_challenges.push(challenger.sample_algebra_element());
         }
 
         // Obtain the challenges used for the local permutation argument.
         for _ in 0..2 {
-            permutation_challenges.push(challenger.sample_ext_element());
+            permutation_challenges.push(challenger.sample_algebra_element());
         }
 
         let mut global_cumulative_sums = Vec::new();
@@ -224,8 +273,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                             let last_row =
                                 &main_trace.values[main_trace_size - 14..main_trace_size];
                             SepticDigest(SepticCurve {
-                                x: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i]),
-                                y: SepticExtension::<Val<SC>>::from_base_fn(|i| last_row[i + 7]),
+                                x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| last_row[i]),
+                                y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|i| last_row[i + 7]),
                             })
                         };
                         (trace, (global_sum, local_sum))
@@ -259,7 +308,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 let trace_width = traces[i].0.width();
                 let pre_width = traces[i].1.map_or(0, p3_matrix::Matrix::width);
                 let permutation_width = permutation_traces[i].width()
-                    * <SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D;
+                    * <SC::Challenge as BasedVectorSpace<SC::Val>>::DIMENSION;
                 let total_width = trace_width + pre_width + permutation_width;
                 tracing::debug!(
                     "{:<11} | Main Cols = {:<5} | Pre Cols = {:<5} | Perm Cols = {:<5} | Rows = {:<10} | Cells = {:<10}",
@@ -356,8 +405,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         // Count the number of constraints.
                         let num_main_constraints = get_symbolic_constraints(
                             &chip.air,
-                            chip.preprocessed_width(),
-                            PROOF_MAX_NUM_PVS,
+                            AirLayout {
+                                preprocessed_width: chip.preprocessed_width(),
+                                main_width: chip.width(),
+                                num_public_values: PROOF_MAX_NUM_PVS,
+                                ..Default::default()
+                            },
                         )
                         .len();
 
@@ -388,7 +441,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, _, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                ((name.to_owned(), domain, trace.dimensions()), (domain, trace.to_owned()))
+                let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
+                ((name.to_owned(), ser_domain, (trace.width(), trace.height())), (domain, trace.to_owned()))
             })
             .unzip();
 
@@ -472,8 +526,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         // Count the number of constraints.
                         let num_main_constraints = get_symbolic_constraints(
                             &chip.air,
-                            chip.preprocessed_width(),
-                            PROOF_MAX_NUM_PVS,
+                            AirLayout {
+                                preprocessed_width: chip.preprocessed_width(),
+                                main_width: chip.width(),
+                                num_public_values: PROOF_MAX_NUM_PVS,
+                                ..Default::default()
+                            },
                         )
                         .len();
 
@@ -504,7 +562,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, _, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                ((name.to_owned(), domain, trace.dimensions()), (domain, trace.to_owned()))
+                let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
+                ((name.to_owned(), ser_domain, (trace.width(), trace.height())), (domain, trace.to_owned()))
             })
             .unzip();
 

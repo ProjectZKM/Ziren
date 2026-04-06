@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use p3_air::BaseAir;
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -342,7 +342,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
             let mut add_rc = *round_state;
             for i in 0..WIDTH {
-                add_rc[i] += F::from_wrapped_u32(RC_16_30_U32[round][i]);
+                add_rc[i] += F::from_u32(RC_16_30_U32[round][i]);
             }
 
             // Apply the sboxes.
@@ -381,7 +381,7 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
             // columns for it, just like for external rounds.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
-            let add_rc = state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
+            let add_rc = state[0] + F::from_u32(RC_16_30_U32[round][0]);
 
             // Apply the sboxes.
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
@@ -417,13 +417,14 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
 #[cfg(test)]
 mod tests {
     use p3_air::BaseAir;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_maybe_rayon::prelude::{
         join, IndexedParallelIterator, ParallelIterator, ParallelSliceMut,
     };
     use p3_symmetric::Permutation;
+    use rand::Rng;
     use zkhash::ark_ff::UniformRand;
     use zkm_core_machine::operations::poseidon2::trace::populate_perm;
     use zkm_stark::{air::MachineAir, inner_perm};
@@ -441,7 +442,7 @@ mod tests {
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();
 
-        let input_1 = [F::rand(&mut rng); WIDTH];
+        let input_1: [F; WIDTH] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
         let output_1 = permuter.permute(input_1);
 
         let shard = ExecutionRecord {
@@ -466,7 +467,7 @@ mod tests {
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();
 
-        let input_1 = [F::rand(&mut rng); WIDTH];
+        let input_1: [F; WIDTH] = core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()));
         let output_1 = permuter.permute(input_1);
 
         let shard = ExecutionRecord {
@@ -493,7 +494,7 @@ mod tests {
         let chip = Poseidon2WideChip::<DEGREE>;
         let padded_nb_rows = chip.num_rows(input).unwrap();
         let num_columns = <Poseidon2WideChip<DEGREE> as BaseAir<F>>::width(&chip);
-        let mut values = vec![F::zero(); padded_nb_rows * num_columns];
+        let mut values = vec![F::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
@@ -506,8 +507,8 @@ mod tests {
                 )
             },
             || {
-                let mut dummy_row = vec![F::zero(); num_columns];
-                populate_perm::<F, DEGREE>([F::zero(); WIDTH], None, &mut dummy_row);
+                let mut dummy_row = vec![F::ZERO; num_columns];
+                populate_perm::<F, DEGREE>([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
                     .for_each(|row| row.copy_from_slice(&dummy_row))

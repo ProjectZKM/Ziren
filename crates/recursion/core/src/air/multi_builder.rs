@@ -1,5 +1,5 @@
-use p3_air::{
-    AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, FilteredAirBuilder,
+use p3_air::{WindowAccess, 
+    AirBuilder, ExtensionBuilder, FilteredAirBuilder,
     PermutationAirBuilder,
 };
 use zkm_stark::air::{LookupScope, MessageBuilder};
@@ -34,10 +34,16 @@ impl<AB: AirBuilder> AirBuilder for MultiBuilder<'_, AB> {
     type F = AB::F;
     type Expr = AB::Expr;
     type Var = AB::Var;
-    type M = AB::M;
+    type PreprocessedWindow = AB::PreprocessedWindow;
+    type MainWindow = AB::MainWindow;
+    type PublicVar = AB::PublicVar;
 
-    fn main(&self) -> Self::M {
+    fn main(&self) -> Self::MainWindow {
         self.inner.main()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.inner.preprocessed()
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -54,6 +60,10 @@ impl<AB: AirBuilder> AirBuilder for MultiBuilder<'_, AB> {
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
         self.inner.assert_zero(x.into());
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.inner.inner.public_values()
     }
 }
 
@@ -75,12 +85,18 @@ impl<AB: PermutationAirBuilder> PermutationAirBuilder for MultiBuilder<'_, AB> {
 
     type RandomVar = AB::RandomVar;
 
+    type PermutationVar = AB::PermutationVar;
+
     fn permutation(&self) -> Self::MP {
         self.inner.permutation()
     }
 
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
         self.inner.permutation_randomness()
+    }
+
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        self.inner.permutation_values()
     }
 }
 
@@ -91,15 +107,5 @@ impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for MultiBuilder<'
 
     fn receive(&mut self, message: M, scope: LookupScope) {
         self.inner.receive(message, scope);
-    }
-}
-
-impl<AB: AirBuilder + AirBuilderWithPublicValues> AirBuilderWithPublicValues
-    for MultiBuilder<'_, AB>
-{
-    type PublicVar = AB::PublicVar;
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        self.inner.inner.public_values()
     }
 }

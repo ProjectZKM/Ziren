@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
-use p3_air::{Air, BaseAir, PairBuilder};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -224,14 +224,14 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
 impl<AB> Air<AB> for SelectChip
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SelectCols<AB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &SelectPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         builder.receive_single(prep_local.addrs.bit, local.vals.bit, prep_local.is_real);
@@ -241,11 +241,11 @@ where
         builder.send_single(prep_local.addrs.out2, local.vals.out2, prep_local.mult2);
         builder.assert_eq(
             local.vals.out1,
-            local.vals.bit * local.vals.in2 + (AB::Expr::one() - local.vals.bit) * local.vals.in1,
+            local.vals.bit * local.vals.in2 + (AB::Expr::ONE - local.vals.bit) * local.vals.in1,
         );
         builder.assert_eq(
             local.vals.out2,
-            local.vals.bit * local.vals.in1 + (AB::Expr::one() - local.vals.bit) * local.vals.in2,
+            local.vals.bit * local.vals.in1 + (AB::Expr::ONE - local.vals.bit) * local.vals.in2,
         );
     }
 }
@@ -253,7 +253,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -272,17 +272,17 @@ mod tests {
             select_events: vec![
                 SelectIo {
                     bit: F::ONE,
-                    out1: F::from_canonical_u32(5),
-                    out2: F::from_canonical_u32(3),
-                    in1: F::from_canonical_u32(3),
-                    in2: F::from_canonical_u32(5),
+                    out1: F::from_u32(5),
+                    out2: F::from_u32(3),
+                    in1: F::from_u32(3),
+                    in2: F::from_u32(5),
                 },
                 SelectIo {
                     bit: F::ZERO,
-                    out1: F::from_canonical_u32(5),
-                    out2: F::from_canonical_u32(3),
-                    in1: F::from_canonical_u32(5),
-                    in2: F::from_canonical_u32(3),
+                    out1: F::from_u32(5),
+                    out2: F::from_u32(3),
+                    in1: F::from_u32(5),
+                    in2: F::from_u32(3),
                 },
             ],
             ..Default::default()
@@ -303,8 +303,8 @@ mod tests {
 
         let instructions = (0..1000)
             .flat_map(|_| {
-                let in1: F = rng.sample(rand::distributions::Standard);
-                let in2: F = rng.sample(rand::distributions::Standard);
+                let in1: F = F::from_u64(rng.gen::<u64>());
+                let in2: F = F::from_u64(rng.gen::<u64>());
                 let bit = F::from_bool(rng.gen_bool(0.5));
                 assert_eq!(bit * (bit - F::ONE), F::ZERO);
 
