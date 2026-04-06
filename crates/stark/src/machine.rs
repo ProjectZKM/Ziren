@@ -10,7 +10,7 @@ use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use std::{cmp::Reverse, env, fmt::Debug, iter::once, time::Instant};
+use std::{cmp::Reverse, env, fmt::Debug, iter::once, sync::Arc, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
@@ -54,7 +54,7 @@ impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
 /// A proving key for a STARK.
 #[derive(Serialize, Deserialize)]
 #[serde(bound(serialize = "PcsProverData<SC>: Serialize"))]
-#[serde(bound(deserialize = "PcsProverData<SC>: DeserializeOwned"))]
+#[serde(bound(deserialize = "PcsProverData<SC>: for<'a> Deserialize<'a>"))]
 pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
@@ -64,8 +64,8 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
     /// The preprocessed traces.
     pub traces: Vec<RowMajorMatrix<Val<SC>>>,
-    /// The pcs data for the preprocessed traces.
-    pub data: PcsProverData<SC>,
+    /// The pcs data for the preprocessed traces (Arc-wrapped since MerkleTree is not Clone).
+    pub data: Arc<PcsProverData<SC>>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -74,17 +74,14 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub constraints_map: HashMap<String, usize>,
 }
 
-impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC>
-where
-    PcsProverData<SC>: Clone,
-{
+impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
     fn clone(&self) -> Self {
         Self {
             commit: self.commit.clone(),
             pc_start: self.pc_start,
             initial_global_cumulative_sum: self.initial_global_cumulative_sum,
             traces: self.traces.clone(),
-            data: self.data.clone(),
+            data: Arc::clone(&self.data),
             chip_ordering: self.chip_ordering.clone(),
             local_only: self.local_only.clone(),
             constraints_map: self.constraints_map.clone(),
@@ -477,7 +474,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 pc_start,
                 initial_global_cumulative_sum,
                 traces,
-                data,
+                data: Arc::new(data),
                 chip_ordering: chip_ordering.clone(),
                 local_only,
                 constraints_map,
@@ -597,7 +594,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 pc_start,
                 initial_global_cumulative_sum,
                 traces,
-                data,
+                data: Arc::new(data),
                 chip_ordering: chip_ordering.clone(),
                 local_only,
                 constraints_map,

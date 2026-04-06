@@ -218,7 +218,7 @@ where
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC::Val: PrimeField32,
     Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
+    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: Clone,
 {
@@ -696,7 +696,7 @@ where
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>
 where
     SC: 'static + StarkGenericConfig + Send + Sync,
-    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
+    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     Com<SC>: Send + Sync,
 {
     fn preprocessed_commit(&self) -> Com<SC> {

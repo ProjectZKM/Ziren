@@ -33,6 +33,7 @@ p3-mersenne-31 = { workspace = true  }
 p3-poseidon2 = { workspace = true  }
 p3-symmetric = { workspace = true  }
 rand = { workspace = true }
+p3-whir = { workspace = true, optional = true }
 
 zkm-derive = { workspace = true }
 zkm-primitives = { workspace = true }
@@ -47,5 +48,9 @@ rayon-scan = "0.1.1"
 
 num-traits = "0.2.19"
 sysinfo = "0.30.13"
+
+[features]
+default = []
+whir = ["p3-whir"]
 
 [dev-dependencies]

@@ -10,6 +10,8 @@ mod config;
 mod debug;
 pub mod folder;
 mod kb31_poseidon2;
+#[cfg(feature = "whir")]
+pub mod whir_config;
 mod lookup;
 mod machine;
 mod opts;

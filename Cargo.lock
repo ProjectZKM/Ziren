@@ -2652,6 +2652,8 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.2.0",
 ]
 
@@ -4229,6 +4231,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-multilinear-util"
+version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3?rev=6a62ee07#6a62ee0712243b966ade30e4761b533b1dc17bc5"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field 0.5.1",
+ "p3-matrix 0.5.1",
+ "p3-maybe-rayon 0.5.1",
+ "p3-util 0.5.1",
+ "rand 0.10.0",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "p3-poseidon1"
 version = "0.5.1"
 source = "git+https://github.com/Plonky3/Plonky3?rev=6a62ee07#6a62ee0712243b966ade30e4761b533b1dc17bc5"
@@ -4318,6 +4335,28 @@ source = "git+https://github.com/Plonky3/Plonky3?rev=6a62ee07#6a62ee0712243b966a
 dependencies = [
  "serde",
  "transpose",
+]
+
+[[package]]
+name = "p3-whir"
+version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3?rev=6a62ee07#6a62ee0712243b966ade30e4761b533b1dc17bc5"
+dependencies = [
+ "hashbrown 0.16.1",
+ "itertools 0.14.0",
+ "libm",
+ "p3-challenger",
+ "p3-commit",
+ "p3-field 0.5.1",
+ "p3-matrix 0.5.1",
+ "p3-maybe-rayon 0.5.1",
+ "p3-merkle-tree",
+ "p3-multilinear-util",
+ "p3-symmetric 0.5.1",
+ "p3-util 0.5.1",
+ "serde",
+ "thiserror 2.0.17",
+ "tracing",
 ]
 
 [[package]]
@@ -4770,7 +4809,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -4803,7 +4842,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -8076,6 +8115,7 @@ dependencies = [
  "p3-symmetric 0.5.1",
  "p3-uni-stark",
  "p3-util 0.5.1",
+ "p3-whir",
  "rand 0.8.5",
  "rayon-scan",
  "serde",
