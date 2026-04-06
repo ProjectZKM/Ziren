@@ -11,8 +11,8 @@ use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelBridge;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
-use zkm_core_executor::events::{GlobalLookupEvent, PrecompileEvent};
-use zkm_core_executor::{events::SyscallEvent, ExecutionRecord, Program};
+use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, PrecompileEvent};
+use zkm_core_executor::{events::SyscallEvent, ByteOpcode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
@@ -59,6 +59,10 @@ impl SyscallChip {
 }
 
 /// The column layout for the chip.
+///
+/// `arg1` and `arg2` are NOT stored as columns. They are derived inline as
+/// `arg1_lo + arg1_hi * 65536` to avoid redundant columns while keeping the
+/// reduced field element available for local `send_syscall`/`receive_syscall`.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallCols<T: Copy> {
@@ -71,23 +75,19 @@ pub struct SyscallCols<T: Copy> {
     /// The syscall_id of the syscall.
     pub syscall_id: T,
 
-    /// The arg1.
-    pub arg1: T,
+    /// Half-word packed arg1: low 16 bits (byte0 + byte1 * 256).
+    pub arg1_lo: T,
+    /// Half-word packed arg1: high 16 bits (byte2 + byte3 * 256).
+    pub arg1_hi: T,
 
-    /// The arg2.
-    pub arg2: T,
+    /// Half-word packed arg2: low 16 bits.
+    pub arg2_lo: T,
+    /// Half-word packed arg2: high 16 bits.
+    pub arg2_hi: T,
 
     /// Half-word packed result (lo = byte0 + byte1*256, hi = byte2 + byte3*256).
     pub result_lo: T,
     pub result_hi: T,
-
-    /// Half-word packed arg1 (op_b_value).
-    pub arg1_lo: T,
-    pub arg1_hi: T,
-
-    /// Half-word packed arg2 (op_c_value).
-    pub arg2_lo: T,
-    pub arg2_hi: T,
 
     /// Whether the syscall is a linux syscall.
     pub is_linux: T,
@@ -113,24 +113,8 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
     ) -> Result<(), Self::Error> {
         let is_receive = self.shard_kind == SyscallShardKind::Precompile;
 
-        let make_global =
-            |event: &SyscallEvent, result_lo: u32, result_hi: u32| GlobalLookupEvent {
-                message: [
-                    event.shard,
-                    event.clk,
-                    event.syscall_id,
-                    event.arg1,
-                    event.arg2,
-                    result_lo,
-                    result_hi,
-                ],
-                is_receive,
-                kind: LookupKind::Syscall as u8,
-            };
-
-        // Bug 18 fix: include linux syscall result (as packed half-words) in the
-        // global message so results are verified across Core and Precompile shards.
-        let events: Vec<GlobalLookupEvent> = match self.shard_kind {
+        // Collect (event, result_lo, result_hi) triples in one pass.
+        let event_triples: Vec<(&SyscallEvent, u32, u32)> = match self.shard_kind {
             SyscallShardKind::Core => input
                 .syscall_events
                 .iter()
@@ -145,7 +129,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     } else {
                         (0, 0)
                     };
-                    make_global(event, rlo, rhi)
+                    (event, rlo, rhi)
                 })
                 .collect(),
             SyscallShardKind::Precompile => input
@@ -156,12 +140,37 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                         PrecompileEvent::Linux(le) => Self::pack_result_halves(le.v0),
                         _ => (0, 0),
                     };
-                    make_global(event, rlo, rhi)
+                    (event, rlo, rhi)
                 })
                 .collect(),
         };
 
-        output.global_lookup_events.extend(events);
+        // Emit all global events and byte lookups in a single pass.
+        for &(event, rlo, rhi) in &event_triples {
+            let (a1_lo, a1_hi) = Self::pack_result_halves(event.arg1);
+            let (a2_lo, a2_hi) = Self::pack_result_halves(event.arg2);
+
+            // Global #1: argument linkage (M2 fix).
+            output.global_lookup_events.push(GlobalLookupEvent {
+                message: [event.shard, event.clk, event.syscall_id, a1_lo, a1_hi, a2_lo, a2_hi],
+                is_receive,
+                kind: LookupKind::Syscall as u8,
+            });
+
+            // Global #2: result linkage (M1 fix).
+            output.global_lookup_events.push(GlobalLookupEvent {
+                message: [event.shard, event.clk, event.syscall_id, rlo, rhi, 0, 0],
+                is_receive,
+                kind: LookupKind::SyscallResult as u8,
+            });
+
+            // U16Range checks for half-word columns.
+            output.add_u16_range_check(a1_lo as u16);
+            output.add_u16_range_check(a1_hi as u16);
+            output.add_u16_range_check(a2_lo as u16);
+            output.add_u16_range_check(a2_hi as u16);
+        }
+
         Ok(())
     }
 
@@ -192,8 +201,13 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             cols.shard = F::from_canonical_u32(syscall_event.shard);
             cols.clk = F::from_canonical_u32(syscall_event.clk);
             cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
-            cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
-            cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
+            let a1b = syscall_event.arg1.to_le_bytes();
+            cols.arg1_lo = F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
+            cols.arg1_hi = F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
+            let a2b = syscall_event.arg2.to_le_bytes();
+            cols.arg2_lo = F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
+            cols.arg2_hi = F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
+
             // For Core shard, a_record has real prev_value with linux_sys byte.
             // For Precompile shard, a_record is default (prev_value=0), so detect
             // linux from the PrecompileEvent variant instead.
@@ -211,12 +225,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 let rb = result.to_le_bytes();
                 cols.result_lo = F::from_canonical_u32(rb[0] as u32 + (rb[1] as u32) * 256);
                 cols.result_hi = F::from_canonical_u32(rb[2] as u32 + (rb[3] as u32) * 256);
-                let a1b = syscall_event.arg1.to_le_bytes();
-                cols.arg1_lo = F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
-                cols.arg1_hi = F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
-                let a2b = syscall_event.arg2.to_le_bytes();
-                cols.arg2_lo = F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
-                cols.arg2_hi = F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
             }
             cols.is_real = F::ONE;
 
@@ -295,19 +303,46 @@ where
         builder.assert_bool(local.is_linux);
         // is_linux can only be 1 when is_real is 1.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
-        // Bug 18 fix: result_lo/result_hi must be zero when is_linux is 0, so they
+        // result_lo/result_hi must be zero when is_linux is 0, so they
         // can be used directly (degree 1) in the global lookup.
         builder.when_not(local.is_linux).assert_zero(local.result_lo);
         builder.when_not(local.is_linux).assert_zero(local.result_hi);
 
-        // ProjectZKM/Ziren#488:4: Bind reduced arg1/arg2 to packed half-word columns.
-        builder.when(local.is_linux).assert_eq(
-            local.arg1,
-            local.arg1_lo + local.arg1_hi * AB::Expr::from_canonical_u32(65536),
+        // Derive reduced arg1/arg2 inline from half-word columns.
+        // These are NOT stored as columns — saves 2 columns per row.
+        let arg1: AB::Expr = local.arg1_lo.into()
+            + Into::<AB::Expr>::into(local.arg1_hi) * AB::Expr::from_canonical_u32(65536);
+        let arg2: AB::Expr = local.arg2_lo.into()
+            + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_canonical_u32(65536);
+
+        // Range-check half-words to [0, 65535].
+        builder.send_byte(
+            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            local.arg1_lo,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            local.is_real,
         );
-        builder.when(local.is_linux).assert_eq(
-            local.arg2,
-            local.arg2_lo + local.arg2_hi * AB::Expr::from_canonical_u32(65536),
+        builder.send_byte(
+            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            local.arg1_hi,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            local.is_real,
+        );
+        builder.send_byte(
+            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            local.arg2_lo,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            local.is_real,
+        );
+        builder.send_byte(
+            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            local.arg2_hi,
+            AB::Expr::zero(),
+            AB::Expr::zero(),
+            local.is_real,
         );
 
         match self.shard_kind {
@@ -316,8 +351,8 @@ where
                     local.shard,
                     local.clk,
                     local.syscall_id,
-                    local.arg1,
-                    local.arg2,
+                    arg1.clone(),
+                    arg2.clone(),
                     local.is_real,
                     LookupScope::Local,
                 );
@@ -335,22 +370,42 @@ where
                     LookupScope::Local,
                 );
 
-                // Send Syscall lookup to global table.
-                // Bug 18 fix: include result_lo/result_hi so syscall results are
-                // verified across Core and Precompile shards.
+                // Global lookup #1: collision-resistant argument linkage (M2 fix).
                 builder.send(
                     AirLookup::new(
                         vec![
                             local.shard.into(),
                             local.clk.into(),
                             local.syscall_id.into(),
-                            local.arg1.into(),
-                            local.arg2.into(),
-                            local.result_lo.into(),
-                            local.result_hi.into(),
+                            local.arg1_lo.into(),
+                            local.arg1_hi.into(),
+                            local.arg2_lo.into(),
+                            local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                        ],
+                        local.is_real.into(),
+                        LookupKind::Global,
+                    ),
+                    LookupScope::Local,
+                );
+
+                // Global lookup #2: cross-shard result linkage (M1 fix).
+                // Ensures Core and Precompile shards agree on the syscall result.
+                builder.send(
+                    AirLookup::new(
+                        vec![
+                            local.shard.into(),
+                            local.clk.into(),
+                            local.syscall_id.into(),
+                            local.result_lo.into(),
+                            local.result_hi.into(),
+                            AB::Expr::zero(),
+                            AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::one(),
+                            local.is_real.into() * AB::Expr::zero(),
+                            AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -363,8 +418,8 @@ where
                     local.shard,
                     local.clk,
                     local.syscall_id,
-                    local.arg1,
-                    local.arg2,
+                    arg1.clone(),
+                    arg2.clone(),
                     local.is_real,
                     LookupScope::Local,
                 );
@@ -382,20 +437,41 @@ where
                     LookupScope::Local,
                 );
 
-                // Send Syscall lookup to global table (with result for bug 18).
+                // Global lookup #1: collision-resistant argument linkage (M2 fix).
                 builder.send(
                     AirLookup::new(
                         vec![
                             local.shard.into(),
                             local.clk.into(),
                             local.syscall_id.into(),
-                            local.arg1.into(),
-                            local.arg2.into(),
-                            local.result_lo.into(),
-                            local.result_hi.into(),
+                            local.arg1_lo.into(),
+                            local.arg1_hi.into(),
+                            local.arg2_lo.into(),
+                            local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                        ],
+                        local.is_real.into(),
+                        LookupKind::Global,
+                    ),
+                    LookupScope::Local,
+                );
+
+                // Global lookup #2: cross-shard result linkage (M1 fix).
+                builder.send(
+                    AirLookup::new(
+                        vec![
+                            local.shard.into(),
+                            local.clk.into(),
+                            local.syscall_id.into(),
+                            local.result_lo.into(),
+                            local.result_hi.into(),
+                            AB::Expr::zero(),
+                            AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::zero(),
+                            local.is_real.into() * AB::Expr::one(),
+                            AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
