@@ -457,6 +457,34 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Constrain the half-word pairs to be the canonical decomposition of KoalaBear words.
   - Better: carry `arg1_lo`, `arg1_hi`, `arg2_lo`, and `arg2_hi` (or all bytes) through the global syscall bridge so the exact 32-bit arguments are verified cross-shard.
 
+### 19. `SyscallChip`: linux argument half-words are only witness-generated, not AIR-canonicalized
+
+- Locations:
+  - `crates/core/machine/src/syscall/chip.rs`
+  - `crates/picus/picus_out/SyscallPrecompile.picus`
+- Current behavior:
+  - When `is_linux = 1`, the AIR only enforces:
+    - `arg1 = arg1_lo + 65536 * arg1_hi`
+    - `arg2 = arg2_lo + 65536 * arg2_hi`
+  - There are no AIR constraints that:
+    - `arg1_lo`, `arg1_hi`, `arg2_lo`, `arg2_hi` are `< 65536`
+    - the `(lo, hi)` pair is the canonical KoalaBear-word decomposition
+  - The current trace generator fills these columns canonically from bytes, but that is only witness construction, not proof logic.
+- Why this matters:
+  - The local syscall-result bridge relies on these stored half-words.
+  - Distinct half-word pairs can satisfy the same field equation `arg = lo + 65536 * hi` modulo the KoalaBear prime.
+  - So the AIR admits non-canonical linux argument half-words unless some other interaction carries the exact bytes/limbs.
+- Picus symptom:
+  - In the standalone `SyscallPrecompile` extraction, Picus finds models where:
+    - the reduced syscall request is fixed
+    - but the packed syscall-result argument halves can vary
+  - This is the same witness freedom seen in item 18, but stated at the `SyscallChip` AIR level:
+    - the half-word columns themselves are not range/canonicality constrained
+    - they are only tied back to the reduced field elements by the recombination equations
+- Likely fix:
+  - Add AIR constraints that make the stored half-words canonical, or
+  - preferably carry exact argument limbs/bytes through the syscall request bridge so the chip does not need to reconstruct them from reduced field elements.
+
 
 
 ## Manual
@@ -521,6 +549,37 @@ This file tracks syscall-related AIR issues found during manual review and Picus
   - Extend the global syscall bridge to carry `arg1_lo`, `arg1_hi`, `arg2_lo`, and `arg2_hi` (or all argument bytes), not just the reduced field elements.
   - Enforce that the packed halves/bytes encode canonical KoalaBear words.
   - Preferably use the same packed representation throughout the `SyscallCore` / `SyscallPrecompile` / `SysLinux` bridge so the exact 32-bit arguments are verified cross-shard.
+
+### 3. `send_syscall` / `receive_syscall` use a lossy request encoding
+
+- Locations:
+  - `crates/stark/src/air/builder.rs`
+  - `crates/core/machine/src/syscall/instructions/air.rs`
+  - `crates/core/machine/src/syscall/chip.rs`
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - The syscall request bridge currently carries:
+    - `shard`
+    - `clk`
+    - `syscall_id`
+    - reduced `arg1`
+    - reduced `arg2`
+  - It does not carry the exact 32-bit byte/half-word representation of the syscall arguments.
+- Why this matters:
+  - This makes the request bridge fundamentally lossy for any precompile that later needs exact 32-bit syscall arguments.
+  - As a result, each precompile has to reconstruct byte/half-word structure locally and independently prove canonicality.
+  - If any precompile fails to do that perfectly, the same overflow/collision issue can reappear there.
+  - So this is not just a `SysLinux` bug; it is a bridge-design issue that can affect other precompiles too.
+- Recommended fix:
+  - Change `send_syscall` / `receive_syscall` to carry canonical argument limbs, preferably:
+    - `arg1_lo`, `arg1_hi`
+    - `arg2_lo`, `arg2_hi`
+    - or all argument bytes
+  - Use that same exact representation:
+    - in `SyscallInstrs -> SyscallCore`
+    - across the global `SyscallCore -> SyscallPrecompile` bridge
+    - and in `SyscallPrecompile -> SysLinux` / other precompile chips
+  - In other words, the syscall request bridge should verify exact 32-bit words end-to-end, not only their field reductions.
 
 
 ## Picus Notes
