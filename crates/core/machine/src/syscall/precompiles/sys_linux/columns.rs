@@ -4,7 +4,7 @@ use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{PicusInfo, Word};
 
 use crate::{
-    memory::{MemoryReadCols, MemoryReadWriteCols},
+    memory::MemoryReadWriteCols,
     operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
 
@@ -14,7 +14,7 @@ pub const NUM_SYS_LINUX_COLS: usize = size_of::<SysLinuxCols<u8>>();
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SysLinuxCols<T> {
-    // ── Common inputs ──────────────────────────────────────────────────
+    // ── Common inputs (15 cols) ────────────────────────────────────────
     pub shard: T,
     pub clk: T,
     pub syscall_id: T,
@@ -22,19 +22,14 @@ pub struct SysLinuxCols<T> {
     pub a1: Word<T>,
     pub result: Word<T>,
 
-    // ── Memory access ──────────────────────────────────────────────────
-    /// Read-only memory access for brk (BRK register) and write (A2 register).
-    /// `MemoryReadCols` structurally enforces value == prev_value,
-    /// eliminating bugs 10 and 13 by construction.
-    pub read_access: MemoryReadCols<T>,
-    /// Read-write memory access for mmap heap update only.
-    pub heap_write: MemoryReadWriteCols<T>,
-    /// A3 output register write (used by all branches).
+    // ── Memory access (26 cols) ────────────────────────────────────────
+    /// Shared memory access for brk (read BRK), write (read A2), and mmap (write HEAP).
+    /// Read-only guard: `when(is_brk + is_write).assert_word_eq(value, prev_value)`.
+    pub inorout: MemoryReadWriteCols<T>,
+    /// A3 output register write.
     pub output: MemoryReadWriteCols<T>,
 
-    // ── Canonical syscall decoder ──────────────────────────────────────
-    // Each IsZeroOperation computes: result = 1 iff (syscall_id - CODE) == 0.
-    // This gives bidirectional flag derivation in one step.
+    // ── Canonical syscall decoder (17 cols) ────────────────────────────
     pub decode_mmap: IsZeroOperation<T>,
     pub decode_mmap2: IsZeroOperation<T>,
     pub decode_clone: IsZeroOperation<T>,
@@ -43,47 +38,42 @@ pub struct SysLinuxCols<T> {
     pub decode_fnctl: IsZeroOperation<T>,
     pub decode_read: IsZeroOperation<T>,
     pub decode_write: IsZeroOperation<T>,
-
-    /// Stored is_mmap = decode_mmap.result + decode_mmap2.result.
-    /// Kept as a column so downstream constraints stay degree ≤ 3.
+    /// Stored: decode_mmap.result + decode_mmap2.result (for degree).
     pub is_mmap: T,
 
-    // ── Canonical a0 / a1 decoder ──────────────────────────────────────
+    // ── Canonical a0 / a1 decoder (10 cols) ────────────────────────────
     pub decode_a0_0: IsZeroOperation<T>,
     pub decode_a0_1: IsZeroOperation<T>,
     pub decode_a0_2: IsZeroOperation<T>,
     pub decode_a1_1: IsZeroOperation<T>,
     pub decode_a1_3: IsZeroOperation<T>,
 
-    // ── Composite flags (stored for degree reasons) ────────────────────
-    /// is_mmap * decode_a0_0.result.  Exact product, not a free witness.
+    // ── Composite flags (3 cols) ───────────────────────────────────────
     pub is_mmap_a0_0: T,
-    /// decode_fnctl.result * decode_a1_1.result
     pub is_fnctl_a1_1: T,
-    /// decode_fnctl.result * decode_a1_3.result
     pub is_fnctl_a1_3: T,
 
-    // ── mmap-specific columns ──────────────────────────────────────────
-    pub page_offset: T,
-    pub is_offset_0: T,
-    pub upper_address: T,
-    /// Byte-level decomposition of a1[1] into low nibble and high nibble.
-    /// page_offset = a1[0] + a1_byte1_lo * 256  (12-bit value, range < 4096).
-    pub a1_byte1_lo: T,
+    // ── mmap columns (15 cols) ─────────────────────────────────────────
+    // page_offset, upper_address, is_offset_0 are computed inline, not stored.
+    /// 4-bit decomposition of the low nibble of a1[1].
+    /// page_offset = a1[0] + a1_byte1_lo * 256 where a1_byte1_lo = sum(bits * 2^i).
+    pub a1_byte1_lo_bits: [T; 4],
     /// 4-bit decomposition of the high nibble of a1[1].
     pub a1_byte1_hi_bits: [T; 4],
-    /// upper_address / 4096, proving upper_address is page-aligned.
-    pub upper_address_pages: T,
-    /// IsZero on page_offset for bidirectional is_offset_0.
+    /// IsZero on page_offset for bidirectional is_offset_0 derivation.
     pub is_page_offset_zero: IsZeroOperation<T>,
-    /// mmap size as a Word for bytewise heap update constraint.
+    /// mmap size as a Word for bytewise heap update.
     pub mmap_size: Word<T>,
-    /// AddOperation for new_heap = old_heap + mmap_size (bytewise).
+    /// Carry bits for upper_address + 0x1000 → mmap_size (unaligned case).
+    /// carry[0]: byte1 overflow ((a1_byte1_hi + 1) * 16 >= 256, i.e. a1_byte1_hi == 15).
+    /// carry[1]: byte2 overflow (a1[2] + carry[0] >= 256, i.e. a1[2] == 255 && carry[0] == 1).
+    pub mmap_size_carry: [T; 2],
+    /// AddOperation for new_heap = old_heap + mmap_size.
     pub heap_add: AddOperation<T>,
 
-    // ── brk-specific columns ───────────────────────────────────────────
+    // ── brk columns (8 cols) ───────────────────────────────────────────
     pub is_a0_gt_brk: GtColsBytes<T>,
 
-    // ── bookkeeping ────────────────────────────────────────────────────
+    // ── bookkeeping (1 col) ────────────────────────────────────────────
     pub is_real: T,
 }

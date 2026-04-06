@@ -35,9 +35,7 @@ where
         let local = main.row_slice(0);
         let local: &SysLinuxCols<AB::Var> = (*local).borrow();
 
-        // ── Phase 1: Canonical syscall decoder ─────────────────────────
-        // Derive all branch selectors from syscall_id via IsZeroOperation.
-        // Each decode_X.result = 1 iff syscall_id == CODE_X.
+        // ── Canonical syscall decoder ──────────────────────────────────
         let sid: AB::Expr = local.syscall_id.into();
 
         IsZeroOperation::<AB::F>::eval(
@@ -89,7 +87,6 @@ where
             local.is_real.into(),
         );
 
-        // Convenience aliases (all AB::Var except is_mmap which is stored).
         let is_clone = local.decode_clone.result;
         let is_exit_group = local.decode_exit_group.result;
         let is_brk = local.decode_brk.result;
@@ -97,14 +94,11 @@ where
         let is_read = local.decode_read.result;
         let is_write = local.decode_write.result;
 
-        // is_mmap is stored as a column for degree reasons.
-        builder.when(local.is_real).assert_eq(
-            local.is_mmap,
-            local.decode_mmap.result + local.decode_mmap2.result,
-        );
+        builder
+            .when(local.is_real)
+            .assert_eq(local.is_mmap, local.decode_mmap.result + local.decode_mmap2.result);
         builder.assert_bool(local.is_mmap);
 
-        // is_nop = is_real - sum_of_recognized (derived, not stored).
         let recognized_sum: AB::Expr = local.is_mmap.into()
             + is_clone
             + is_exit_group
@@ -112,11 +106,10 @@ where
             + is_fnctl
             + is_read
             + is_write;
-        let is_nop: AB::Expr = local.is_real.into() - recognized_sum.clone();
-        // One-hot: recognized_sum + is_nop = is_real, and is_nop is boolean.
+        let is_nop: AB::Expr = local.is_real.into() - recognized_sum;
         builder.when(local.is_real).assert_bool(is_nop.clone());
 
-        // ── Phase 1b: Canonical a0 / a1 decoder ───────────────────────
+        // ── Canonical a0 / a1 decoder ──────────────────────────────────
         let a0_reduce = local.a0.reduce::<AB>();
         IsZeroOperation::<AB::F>::eval(
             builder,
@@ -162,6 +155,12 @@ where
         builder.assert_eq(local.is_fnctl_a1_1, is_fnctl * is_a1_1);
         builder.assert_eq(local.is_fnctl_a1_3, is_fnctl * is_a1_3);
 
+        // ── Structural read-only guard for inorout ─────────────────────
+        // brk and write use inorout as a read; only mmap(a0==0) writes.
+        builder
+            .when(is_brk + is_write)
+            .assert_word_eq(*local.inorout.value(), local.inorout.prev_value);
+
         // ── Branch evaluations ─────────────────────────────────────────
         self.eval_brk(builder, local, is_brk);
         self.eval_clone(builder, local, is_clone);
@@ -172,7 +171,7 @@ where
         self.eval_mmap(builder, local, is_a0_0);
         self.eval_nop(builder, local, is_nop);
 
-        // ── A3 output memory access (shared) ───────────────────────────
+        // ── A3 output ──────────────────────────────────────────────────
         builder.eval_memory_access(
             local.shard,
             local.clk,
@@ -191,7 +190,6 @@ where
             local.is_real,
             LookupScope::Local,
         );
-
         builder.receive_syscall_result(
             local.shard,
             local.clk,
@@ -211,32 +209,27 @@ impl SysLinuxChip {
         local: &SysLinuxCols<AB::Var>,
         is_brk: AB::Var,
     ) {
-        // MemoryReadCols structurally enforces value == prev_value.
         builder.eval_memory_access(
             local.shard,
             local.clk,
             AB::Expr::from_canonical_u32(Register::BRK as u32),
-            &local.read_access,
+            &local.inorout,
             is_brk,
         );
 
         GtColsBytes::<AB::F>::eval(
             builder,
             local.a0,
-            *local.read_access.value(),
+            *local.inorout.value(),
             is_brk,
             local.is_a0_gt_brk,
         );
-        // v0 = max(a0, brk)
-        builder
-            .when(is_brk)
-            .when(local.is_a0_gt_brk.result)
-            .assert_word_eq(local.result, local.a0);
+
+        builder.when(is_brk).when(local.is_a0_gt_brk.result).assert_word_eq(local.result, local.a0);
         builder
             .when(is_brk)
             .when_not(local.is_a0_gt_brk.result)
-            .assert_word_eq(local.result, *local.read_access.prev_value());
-
+            .assert_word_eq(local.result, local.inorout.prev_value);
         builder.when(is_brk).assert_word_zero(*local.output.value());
     }
 
@@ -259,104 +252,118 @@ impl SysLinuxChip {
         local: &SysLinuxCols<AB::Var>,
         is_a0_0: AB::Var,
     ) {
-        // ── Byte-level a1 decomposition (Phase 3) ──────────────────────
-        // Decompose a1[1] = a1_byte1_lo + a1_byte1_hi * 16.
+        // Range-check a0 and a1 bytes so decompositions are canonical.
+        // a1[1] is already constrained to [0,255] by the nibble decomposition below,
+        // but a1[0], a1[2], a1[3] and a0 bytes need explicit byte validity checks.
+        builder.when(local.is_mmap).slice_range_check_u8(&local.a0.0, local.is_mmap.into());
+        builder.when(local.is_mmap).slice_range_check_u8(&local.a1.0, local.is_mmap.into());
+
+        // ── Byte-level a1 decomposition ────────────────────────────────
+        // Both nibbles of a1[1] are decomposed into 4 boolean bits each,
+        // proving a1_byte1_lo ∈ [0,15] and a1_byte1_hi ∈ [0,15] without byte lookups.
+        let mut a1_byte1_lo = AB::Expr::zero();
+        for bit in 0..4 {
+            builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
+            a1_byte1_lo =
+                a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+        }
         let mut a1_byte1_hi = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
-            a1_byte1_hi = a1_byte1_hi
-                + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+            a1_byte1_hi =
+                a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
         }
         builder.when(local.is_mmap).assert_eq(
             local.a1[1],
-            local.a1_byte1_lo + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16),
-        );
-        // Range check a1_byte1_lo < 16 via byte lookup.
-        builder.send_byte(
-            AB::Expr::from_canonical_u8(zkm_core_executor::ByteOpcode::U16Range as u8),
-            local.a1_byte1_lo,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.is_mmap,
+            a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16),
         );
 
-        // page_offset = a1[0] + a1_byte1_lo * 256 (directly from bytes, no reduce()).
-        builder.when(local.is_mmap).assert_eq(
-            local.page_offset,
-            local.a1[0] + local.a1_byte1_lo * AB::Expr::from_canonical_u32(256),
-        );
+        // Inline page_offset (not stored). upper_address is no longer needed as a
+        // single field expression — the mmap_size bytes are constrained directly.
+        let page_offset: AB::Expr =
+            local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
 
-        // upper_address from bytes: a1_byte1_hi * 4096 + a1[2] * 65536 + a1[3] * 16777216.
-        builder.when(local.is_mmap).assert_eq(
-            local.upper_address,
-            a1_byte1_hi * AB::Expr::from_canonical_u32(4096)
-                + local.a1[2] * AB::Expr::from_canonical_u32(65536)
-                + local.a1[3] * AB::Expr::from_canonical_u32(16777216),
-        );
-
-        // Prove upper_address is page-aligned.
-        builder.when(local.is_mmap).assert_eq(
-            local.upper_address,
-            local.upper_address_pages * AB::Expr::from_canonical_u32(4096),
-        );
-
-        // Bidirectional is_offset_0 = (page_offset == 0).
+        // is_offset_0 = (page_offset == 0), derived from IsZero.
         IsZeroOperation::<AB::F>::eval(
             builder,
-            local.page_offset.into(),
+            page_offset.clone(),
             local.is_page_offset_zero,
             local.is_mmap.into(),
         );
-        builder
-            .when(local.is_mmap)
-            .assert_eq(local.is_offset_0, local.is_page_offset_zero.result);
+        let is_offset_0 = local.is_page_offset_zero.result;
 
-        // mmap_size Word matching the field-level size computation.
-        let size_field = local.upper_address
-            + AB::Expr::from_canonical_u32(0x1000) * (AB::Expr::one() - local.is_offset_0);
+        // ── mmap size (byte-level, no reduce()) ──────────────────────────
+        // We avoid `mmap_size.reduce() == size_field` because reduce() can
+        // collide modulo the KoalaBear prime for large byte[3] values.
+        // Instead we constrain each byte of mmap_size directly.
+        //
+        // upper_addr bytes (LE): [0, a1_byte1_hi * 16, a1[2], a1[3]]
+        // round_up (when !page-aligned): + [0, 0x10, 0, 0] = + 0x1000
+        //
+        // Aligned case (is_offset_0 = 1): mmap_size = upper_addr
+        // Unaligned case (is_offset_0 = 0): mmap_size = upper_addr + 0x1000
+        //   with carry propagation through bytes 1→2→3.
+
+        let base = AB::Expr::from_canonical_u32(256);
+        let sixteen = AB::Expr::from_canonical_u32(16);
+        // not_aligned = is_mmap_a0_0 * (1 - is_offset_0)
+        let not_aligned: AB::Expr = local.is_mmap_a0_0.into() * (AB::Expr::one() - is_offset_0);
+
+        // carry bits are boolean.
+        builder.when(local.is_mmap_a0_0).assert_bool(local.mmap_size_carry[0]);
+        builder.when(local.is_mmap_a0_0).assert_bool(local.mmap_size_carry[1]);
+
+        // byte0: always 0.
+        builder.when(local.is_mmap_a0_0).assert_zero(local.mmap_size[0]);
+
+        // byte1: a1_byte1_hi * 16 + 16 * not_aligned - carry[0] * 256
+        //   carry[0] = 1 iff (a1_byte1_hi + not_aligned) * 16 >= 256
+        builder.when(local.is_mmap_a0_0).assert_eq(
+            local.mmap_size[1],
+            a1_byte1_hi.clone() * sixteen.clone() + not_aligned.clone() * sixteen
+                - local.mmap_size_carry[0] * base.clone(),
+        );
+
+        // byte2: a1[2] + carry[0] - carry[1] * 256
+        builder.when(local.is_mmap_a0_0).assert_eq(
+            local.mmap_size[2],
+            local.a1[2] + local.mmap_size_carry[0] - local.mmap_size_carry[1] * base,
+        );
+
+        // byte3: a1[3] + carry[1]
         builder
-            .when(local.is_mmap)
-            .when(is_a0_0)
-            .assert_eq(local.mmap_size.reduce::<AB>(), size_field);
+            .when(local.is_mmap_a0_0)
+            .assert_eq(local.mmap_size[3], local.a1[3] + local.mmap_size_carry[1]);
+
+        // Range-check mmap_size bytes.
         builder
             .when(local.is_mmap)
             .when(is_a0_0)
             .slice_range_check_u8(&local.mmap_size.0, local.is_mmap_a0_0.into());
 
-        // Bytewise heap update: new_heap = old_heap + mmap_size.
+        // Bytewise heap update.
         AddOperation::<AB::F>::eval(
             builder,
-            local.heap_write.prev_value,
+            local.inorout.prev_value,
             local.mmap_size,
             local.heap_add,
             local.is_mmap_a0_0.into(),
         );
         builder
             .when(local.is_mmap_a0_0)
-            .assert_word_eq(*local.heap_write.value(), local.heap_add.value);
+            .assert_word_eq(*local.inorout.value(), local.heap_add.value);
 
-        // Heap memory access (only active for mmap with a0==0).
         builder.eval_memory_access(
             local.shard,
             local.clk,
             AB::Expr::from_canonical_u32(Register::HEAP as u32),
-            &local.heap_write,
+            &local.inorout,
             local.is_mmap_a0_0,
         );
 
-        // result = prev_heap when a0==0, result = a0 otherwise.
-        builder
-            .when(local.is_mmap_a0_0)
-            .assert_word_eq(local.heap_write.prev_value, local.result);
-        builder
-            .when(local.is_mmap)
-            .when_not(is_a0_0)
-            .assert_word_eq(local.a0, local.result);
-
-        // mmap always writes A3 = 0.
-        builder
-            .when(local.is_mmap)
-            .assert_word_zero(*local.output.value());
+        builder.when(local.is_mmap_a0_0).assert_word_eq(local.inorout.prev_value, local.result);
+        builder.when(local.is_mmap).when_not(is_a0_0).assert_word_eq(local.a0, local.result);
+        builder.when(local.is_mmap).assert_word_zero(*local.output.value());
     }
 
     fn eval_exit_group<AB: ZKMAirBuilder>(
@@ -381,11 +388,7 @@ impl SysLinuxChip {
         is_a1_1: AB::Var,
         is_a1_3: AB::Var,
     ) {
-        // fnctl(a1==1, F_GETFD) result constraints.
-        builder
-            .when(local.is_fnctl_a1_1)
-            .when(is_a0_0)
-            .assert_word_zero(local.result);
+        builder.when(local.is_fnctl_a1_1).when(is_a0_0).assert_word_zero(local.result);
         builder
             .when(local.is_fnctl_a1_1)
             .when(is_a0_1)
@@ -399,11 +402,7 @@ impl SysLinuxChip {
             .when_not(is_a0_0 + is_a0_1 + is_a0_2)
             .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
 
-        // fnctl(a1==3, F_GETFL) result constraints.
-        builder
-            .when(local.is_fnctl_a1_3)
-            .when(is_a0_0)
-            .assert_word_zero(local.result);
+        builder.when(local.is_fnctl_a1_3).when(is_a0_0).assert_word_zero(local.result);
         builder
             .when(local.is_fnctl_a1_3)
             .when(is_a0_1 + is_a0_2)
@@ -417,7 +416,6 @@ impl SysLinuxChip {
             .when_not(is_a1_3 + is_a1_1)
             .assert_word_eq(local.result, Word::<AB::Expr>::from(0xFFFFFFFFu32));
 
-        // Output constraints for fnctl.
         builder
             .when(local.is_fnctl_a1_3 + local.is_fnctl_a1_1)
             .when(is_a0_0 + is_a0_1 + is_a0_2)
@@ -457,16 +455,14 @@ impl SysLinuxChip {
         local: &SysLinuxCols<AB::Var>,
         is_write: AB::Var,
     ) {
-        // MemoryReadCols structurally enforces value == prev_value.
         builder.eval_memory_access(
             local.shard,
             local.clk,
             AB::Expr::from_canonical_u32(Register::A2 as u32),
-            &local.read_access,
+            &local.inorout,
             is_write,
         );
-
-        builder.when(is_write).assert_word_eq(local.result, *local.read_access.value());
+        builder.when(is_write).assert_word_eq(local.result, *local.inorout.value());
         builder.when(is_write).assert_word_zero(*local.output.value());
     }
 

@@ -427,6 +427,36 @@ This file tracks syscall-related AIR issues found during manual review and Picus
     - the remaining bytes match the aligned upper chunk of `a1`
   - equivalently, constrain `upper_address_pages` as the canonical integer quotient of `a1 >> 12`, then reconstruct `upper_address` from that quotient
 
+### 18. `SyscallPrecompile`: packed syscall-result halves for `arg1` / `arg2` are not canonical
+
+- Locations:
+  - `crates/core/machine/src/syscall/chip.rs`
+  - `crates/picus/picus_out/SyscallPrecompile.picus`
+- Current behavior:
+  - `SyscallPrecompile` stores:
+    - `arg1`, `arg2`
+    - `arg1_lo`, `arg1_hi`
+    - `arg2_lo`, `arg2_hi`
+  - and only enforces:
+    - `arg1 = arg1_lo + 65536 * arg1_hi` in the field
+    - `arg2 = arg2_lo + 65536 * arg2_hi` in the field
+  - it does not enforce that `(arg1_lo, arg1_hi)` and `(arg2_lo, arg2_hi)` are the canonical half-word decomposition of KoalaBear words
+- Why this matters:
+  - distinct half-word pairs can encode different 32-bit words with the same field reduction modulo the KoalaBear prime
+  - so the precompile shard can emit a different packed `SyscallResult` witness than the canonical CPU-side arguments, while preserving the same reduced `arg1` / `arg2`
+- Picus symptom:
+  - In the standalone `SyscallPrecompile` extraction, Picus finds models with:
+    - the same global syscall payload `x_27..x_36`
+    - the same local `send_syscall` payload `x_14..x_18`
+    - but different local `send_syscall_result_packed` halves `x_23..x_26`
+  - example witness family:
+    - one model uses `x_23..x_26 = (2, 65024, 65535, 24319)`
+    - another uses `x_23..x_26 = (0, 0, 0, 56832)`
+    - while `x_14..x_18` and `x_27..x_36` remain fixed
+- Likely fix:
+  - Constrain the half-word pairs to be the canonical decomposition of KoalaBear words.
+  - Better: carry `arg1_lo`, `arg1_hi`, `arg2_lo`, and `arg2_hi` (or all bytes) through the global syscall bridge so the exact 32-bit arguments are verified cross-shard.
+
 
 
 ## Manual
@@ -445,6 +475,52 @@ This file tracks syscall-related AIR issues found during manual review and Picus
 - Likely fix:
   - add the `result` to the global chip to link the two shards.
   - The design of this interaction should be reconsidered
+
+### 2. `SyscallPrecompile` can reinterpret `arg1` / `arg2` as different 32-bit words than the CPU shard
+
+- Locations:
+  - `crates/core/machine/src/syscall/chip.rs`
+  - `crates/core/machine/src/syscall/precompiles/sys_linux/air.rs`
+- Current behavior:
+  - The global syscall bridge only carries `arg1` and `arg2` as single field elements.
+  - On the precompile shard, `SyscallChip` stores:
+    - `arg1`, `arg2`
+    - `arg1_lo`, `arg1_hi`
+    - `arg2_lo`, `arg2_hi`
+  - and only enforces:
+    - `arg1 = arg1_lo + 65536 * arg1_hi` in the field
+    - `arg2 = arg2_lo + 65536 * arg2_hi` in the field
+  - There is no constraint that these `(lo, hi)` pairs encode canonical KoalaBear words, and the global bridge does not carry the halves/bytes.
+  - `SysLinux` then consumes:
+    - reduced `a0` / `a1` on the local `Syscall` interaction
+    - packed half-words for `result`, `a0`, `a1` on the local `SyscallResult` interaction
+- Why this matters:
+  - Distinct 32-bit words can have the same field reduction modulo the KoalaBear prime.
+  - So the precompile shard can choose non-canonical half-word decompositions whose packed 32-bit word is different from the CPU shard's canonical word, while still matching the same reduced `arg1` / `arg2` globally.
+  - This means the CPU shard and the precompile/SysLinux shard can agree on the global syscall bridge but disagree on the exact 32-bit syscall arguments being executed.
+- Concrete attack scenario:
+  1. In the CPU/core shard, the prover emits a linux syscall with canonical 32-bit arguments `(syscall_id, arg1, arg2)`.
+  2. The global syscall bridge only checks the reduced field values of `arg1` and `arg2`, so the precompile shard reuses those same field elements.
+  3. In `SyscallPrecompile`, the prover chooses a non-canonical half-word decomposition for one argument. For example, they can witness:
+     - `arg2 = 0`
+     - `arg2_lo = 2`
+     - `arg2_hi = 65024`
+     because `2 + 65536 * 65024 = 2 * 0x7f000001`, so this still equals `0` in KoalaBear.
+  4. The local `send_syscall` interaction to `SysLinux` still uses the reduced field element `arg2 = 0`, so the core/precompile bridge balances.
+  5. But the local `send_syscall_result_packed` interaction uses `(arg2_lo, arg2_hi) = (2, 65024)`, so `SysLinux` can witness `a1` as the byte word `0xfe000002`, which is a different 32-bit value that also reduces to `0`.
+  6. `SysLinux` then executes the syscall semantics on those altered bytes and returns a result consistent with that altered witness.
+  7. The prover uses the same packed result on the core side, so all local/global interactions balance even though the precompile shard executed the syscall on different 32-bit arguments than the CPU shard.
+- Picus symptom:
+  - The standalone `SyscallPrecompile` extraction admits multiple half-word witnesses for the same full reduced arguments.
+  - In particular, Picus finds models with:
+    - the same global inputs `x_27..x_36`
+    - the same local `send_syscall` payload `x_14..x_18`
+    - but different packed `send_syscall_result` argument halves `x_23..x_26`
+  - This is exactly the witness freedom needed for the attack above.
+- Likely fix:
+  - Extend the global syscall bridge to carry `arg1_lo`, `arg1_hi`, `arg2_lo`, and `arg2_hi` (or all argument bytes), not just the reduced field elements.
+  - Enforce that the packed halves/bytes encode canonical KoalaBear words.
+  - Preferably use the same packed representation throughout the `SyscallCore` / `SyscallPrecompile` / `SysLinux` bridge so the exact 32-bit arguments are verified cross-shard.
 
 
 ## Picus Notes

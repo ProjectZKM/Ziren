@@ -222,10 +222,196 @@ The support instructions are as follows:
 | SYS_MMAP = 4210,                       | Executes the `Linux MMAP API` precompile.          |
 | SYS_MMAP2 = 4090,                      | Executes the `Linux MMAP2 API` precompile.         |
 | SYS_BRK = 4045,                        | Executes the `Linux BRK API` precompile.           |
-| SYS_MMAP2 = 4246,                      | Executes the `Linux EXIT GROUP API` precompile.    |
+| SYS_CLONE = 4120,                      | Executes the `Linux CLONE API` precompile.         |
+| SYS_EXIT_GROUP = 4246,                 | Executes the `Linux EXIT GROUP API` precompile.    |
 | SYS_READ = 4003,                       | Executes the `Linux READ API` precompile.          |
 | SYS_WRITE = 4004,                      | Executes the `Linux WRITE API` precompile.         |
 | SYS_FCNTL = 4055,                      | Executes the `Linux FCNTL API` precompile.         |
 | SYS_NOP = 4000,                        | Executes the `NOP API` precompile.                 |
 
 All the unimplemented Linux syscalls API are treated as SYS_NOP.
+
+## Linux Syscalls Reference (MIPS ABI)
+
+Ziren emulates a subset of the MIPS Linux ABI for guest programs. Syscalls are invoked via the `SYSCALL` instruction with the syscall number in register `V0` and arguments in `A0`/`A1`. Results are returned in `V0`; error codes are written to `A3`.
+
+All Linux syscalls are constrained in the `SysLinuxChip` AIR (79 columns), ensuring that a malicious prover cannot forge syscall results.
+
+### Register Convention
+
+| Register | Width | Role |
+|----------|-------|------|
+| `V0` | 32-bit `u32` | Syscall number (input) / return value (output) |
+| `A0` | 32-bit `u32` | First argument |
+| `A1` | 32-bit `u32` | Second argument |
+| `A2` | 32-bit `u32` | Third argument (read via memory when needed) |
+| `A3` | 32-bit `u32` | Error code output (0 = success, 9 = EBADF) |
+
+All registers are 32-bit. In the AIR layer, each register value is represented as `Word<T>` = 4 × `u8` (little-endian byte decomposition, each byte range-checked to `[0, 255]`).
+
+### SYS_MMAP (4210) / SYS_MMAP2 (4090)
+
+Memory mapping. Used by the guest allocator to request memory pages.
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | Requested virtual address (pointer). `0` = allocate from heap. |
+  | `a1` | 32-bit `u32` | Requested size in bytes. Must be page-aligned (multiple of 4096). |
+  | **return** `v0` | 32-bit `u32` | Allocated address (heap pointer when `a0 == 0`, or `a0` itself). |
+  | **output** `A3` | 32-bit `u32` | Error code. Always `0x00000000` (success). |
+
+- **Bit-level decomposition of `a1` (size):**
+  ```
+  a1 = [byte0 : 8-bit] [byte1 : 8-bit] [byte2 : 8-bit] [byte3 : 8-bit]
+                         ├── lo nibble: 4-bit (a1_byte1_lo_bits[0..3])
+                         └── hi nibble: 4-bit (a1_byte1_hi_bits[0..3])
+
+  page_offset   = byte0 + a1_byte1_lo * 256    (12-bit, range [0, 4095])
+  upper_address = a1_byte1_hi * 4096 + byte2 * 65536 + byte3 * 16777216  (20-bit, page-aligned)
+  ```
+  When `page_offset != 0`, `mmap_size = upper_address + 4096` (round up to next page).
+
+- **Behavior:**
+  - If `a0 == 0`: allocates from heap. Returns current heap pointer, then increments heap by `mmap_size`.
+  - If `a0 != 0`: returns `a0` as-is (reuses existing mapping).
+  - Always writes `A3 = 0` (success).
+- **AIR constraints:**
+  - Page alignment of `a1` verified via nibble decomposition (`page_offset < 4096`, 12-bit range).
+  - `new_heap = old_heap + mmap_size` verified via bytewise `AddOperation` (4 × u8 + 3 carry bits).
+  - `result = old_heap` when `a0 == 0` (bidirectional).
+  - `output (A3) == 0` asserted unconditionally.
+
+### SYS_BRK (4045)
+
+Adjust the program break (heap boundary).
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | New break address (pointer). |
+  | `a1` | 32-bit `u32` | Unused (ignored). |
+  | **return** `v0` | 32-bit `u32` | `max(a0, current_brk)` — the effective break value. |
+  | **output** `A3` | 32-bit `u32` | Error code. Always `0x00000000`. |
+
+- **Behavior:** Returns `max(a0, current_brk)`.
+- **AIR constraints:** Bytewise greater-than comparison (`GtColsBytes`: 4 × u8 byte flags + comparison bytes, 8 columns total) between `a0` and the BRK register `Word<T>`.
+
+### SYS_CLONE (4120)
+
+Simulated process clone (threading not actually supported).
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | Clone flags (ignored in mock implementation). |
+  | `a1` | 32-bit `u32` | New stack pointer (ignored in mock implementation). |
+  | **return** `v0` | 32-bit `u32` | Always `0x00000001` (simulated parent PID). |
+  | **output** `A3` | 32-bit `u32` | Error code. Always `0x00000000`. |
+
+- **Behavior:** Always returns `1` (pretends to be the parent process).
+- **AIR constraints:** `result == Word([0x01, 0x00, 0x00, 0x00])` forced via bidirectional flag.
+
+### SYS_EXIT_GROUP (4246)
+
+Terminate execution (equivalent to `HALT`).
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | Exit code (passed to host). |
+  | `a1` | 32-bit `u32` | Unused (ignored). |
+  | **return** `v0` | 32-bit `u32` | Always `0x00000000` (constrained). |
+  | **output** `A3` | 32-bit `u32` | Error code. Always `0x00000000`. |
+
+- **Behavior:** Sets `next_pc = 0`, records exit code from `a0`.
+- **AIR constraints:** `result == Word([0x00, 0x00, 0x00, 0x00])` asserted explicitly.
+
+### SYS_READ (4003)
+
+Read from a file descriptor.
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | File descriptor. Only `0` (stdin) is valid. |
+  | `a1` | 32-bit `u32` | Buffer address (pointer to write destination). |
+  | **return** `v0` | 32-bit `u32` | Bytes read (`u32`), or `0xFFFFFFFF` (-1 as unsigned) on error. |
+  | **output** `A3` | 32-bit `u32` | `0x00000000` on success, `0x00000009` (EBADF) on invalid fd. |
+
+- **Behavior:**
+  - `a0 == 0` (stdin): reads bytes from the input stream, returns byte count.
+  - `a0 != 0`: returns `0xFFFFFFFF` (32-bit all-ones), sets `A3 = 9` (MIPS_EBADF).
+- **AIR constraints:** Non-stdin reads forced to return `Word([0xFF, 0xFF, 0xFF, 0xFF])` with `A3 = Word([0x09, 0x00, 0x00, 0x00])`.
+
+### SYS_WRITE (4004)
+
+Write to a file descriptor.
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | File descriptor (1 = stdout, 2 = stderr, etc.). |
+  | `a1` | 32-bit `u32` | Buffer address (pointer to read source). |
+  | `A2` (implicit) | 32-bit `u32` | Number of bytes to write (read from A2 register via memory). |
+  | **return** `v0` | 32-bit `u32` | Number of bytes written (= A2 value). |
+  | **output** `A3` | 32-bit `u32` | Error code. Always `0x00000000`. |
+
+- **Behavior:** Reads `A2` bytes from buffer at `a1`, delegates to `write_fd()`, returns bytes written.
+- **AIR constraints:** `inorout.value == inorout.prev_value` (read-only guard ensures A2 is not modified, both are `Word<T>` = 4 × u8).
+
+### SYS_FCNTL (4055)
+
+File control operations.
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | File descriptor. Valid values: `0` (stdin), `1` (stdout), `2` (stderr). |
+  | `a1` | 32-bit `u32` | Command code. `1` = F_GETFD, `3` = F_GETFL. |
+  | **return** `v0` | 32-bit `u32` | Flags/fd value, or `0xFFFFFFFF` (-1) on error. |
+  | **output** `A3` | 32-bit `u32` | `0x00000000` on success, `0x00000009` (EBADF) on error. |
+
+- **Behavior (full case matrix):**
+  | `a1` (cmd) | `a0` (fd) | `v0` (result) | `A3` (error) |
+  |------------|-----------|---------------|--------------|
+  | `1` (F_GETFD) | `0` | `0x00000000` | `0x00000000` |
+  | `1` (F_GETFD) | `1` | `0x00000001` | `0x00000000` |
+  | `1` (F_GETFD) | `2` | `0x00000002` | `0x00000000` |
+  | `1` (F_GETFD) | other | `0xFFFFFFFF` | `0x00000009` |
+  | `3` (F_GETFL) | `0` | `0x00000000` (O_RDONLY) | `0x00000000` |
+  | `3` (F_GETFL) | `1` | `0x00000001` (O_WRONLY) | `0x00000000` |
+  | `3` (F_GETFL) | `2` | `0x00000001` (O_WRONLY) | `0x00000000` |
+  | `3` (F_GETFL) | other | `0xFFFFFFFF` | `0x00000009` |
+  | other | any | `0xFFFFFFFF` | `0x00000009` |
+
+- **AIR constraints:** Exhaustive case analysis using bidirectional `IsZeroOperation` decoders on `a0` (3 decoders: `== 0`, `== 1`, `== 2`) and `a1` (2 decoders: `== 1`, `== 3`). Each branch constrains `result` and `output` per the table above.
+
+### NOP Syscalls
+
+The following syscalls are recognized but perform no operation.
+
+- **Arguments:**
+  | Arg | Width | Semantics |
+  |-----|-------|-----------|
+  | `a0` | 32-bit `u32` | Ignored. |
+  | `a1` | 32-bit `u32` | Ignored. |
+  | **return** `v0` | 32-bit `u32` | Always `0x00000000`. |
+  | **output** `A3` | 32-bit `u32` | Always `0x00000000`. |
+
+| Syscall | Number |
+|---------|--------|
+| `SYS_OPEN` | 4005 |
+| `SYS_CLOSE` | 4006 |
+| `SYS_MUNMAP` | 4091 |
+| `SYS_NANOSLEEP` | 4166 |
+| `SYS_RT_SIGACTION` | 4194 |
+| `SYS_RT_SIGPROCMASK` | 4195 |
+| `SYS_SIGALTSTACK` | 4206 |
+| `SYS_FSTAT64` | 4215 |
+| `SYS_MADVISE` | 4218 |
+| `SYS_GETTID` | 4222 |
+| `SYS_SCHED_GETAFFINITY` | 4240 |
+| `SYS_CLOCK_GETTIME` | 4263 |
+| `SYS_OPENAT` | 4288 |
+| `SYS_PRLIMIT64` | 4338 |
