@@ -3,6 +3,7 @@ pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
 
 /// The size of a word in bytes.
 pub const WORD_SIZE: usize = 4;
+pub const LONG_WORD_SIZE: usize = 8;
 
 pub mod fd {
     /// The file descriptor for stdin.

@@ -8,7 +8,7 @@ use zkm_core_executor::InstructionFfi;
 use crate::alu::{BitwiseCols, CloClzCols};
 use crate::memory::columns::MemoryInstructionsColumns;
 use crate::{
-    alu::{AddSubCols, LtCols, ShiftLeftCols},
+    alu::{AddSubCols, LtCols, ShiftLeftCols, ShiftRightCols},
     control_flow::{BranchColumns, JumpColumns},
     cpu::columns::CpuCols,
     memory::{MemoryInitCols, SingleMemoryLocal},
@@ -56,6 +56,10 @@ extern "C-unwind" {
     );
     pub fn mov_cond_event_to_row_koalabear(event: &MovCondEvent, cols: &mut MovCondCols<KoalaBear>);
     pub fn shift_left_event_to_row_koalabear(event: &AluEvent, cols: &mut ShiftLeftCols<KoalaBear>);
+    pub fn shift_right_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut ShiftRightCols<KoalaBear>,
+    );
 
     pub fn test_mul();
     pub fn test_inv();

@@ -112,6 +112,7 @@ mod sys {
                 "p3-monty-31",
             ])
             .rename_item("KoalaBear", "KoalaBearP3")
+            .include_item("LONG_WORD_SIZE")
             .include_item("AddOperation")
             .include_item("AddSubCols")
             .include_item("AluEvent")
@@ -153,6 +154,7 @@ mod sys {
             .include_item("SepticCurve")
             .include_item("SepticExtension")
             .include_item("ShiftLeftCols")
+            .include_item("ShiftRightCols")
             .include_item("SyscallCode") // Required for populating the CPU columns for ECALL.
             .with_namespace("zkm_core_machine_sys")
             .with_crate(crate_dir)

@@ -82,6 +82,19 @@ write_word_from_le_bytes_v2(F word[WORD_SIZE], const uint8_t bytes[WORD_SIZE]) {
 }
 
 template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void
+write_long_word_from_le_bytes_v2(F word[LONG_WORD_SIZE], const uint8_t bytes[LONG_WORD_SIZE]) {
+    word[0] = F::from_canonical_u8(bytes[0]);
+    word[1] = F::from_canonical_u8(bytes[1]);
+    word[2] = F::from_canonical_u8(bytes[2]);
+    word[3] = F::from_canonical_u8(bytes[3]);
+    word[4] = F::from_canonical_u8(bytes[4]);
+    word[5] = F::from_canonical_u8(bytes[5]);
+    word[6] = F::from_canonical_u8(bytes[6]);
+    word[7] = F::from_canonical_u8(bytes[7]);
+}
+
+template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
 word_to_u32(const Word<decltype(F::val)>& word) {
     return ((uint32_t)F(word._0[0]).as_canonical_u32())
@@ -110,6 +123,22 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ array_t<F, 4> u32_to_word(uint32_t a) {
         F::from_canonical_u8((uint8_t)(a >> 8 * 2)),
         F::from_canonical_u8((uint8_t)(a >> 8 * 3))
     };
+}
+
+/// Calculate the number of bytes to shift by.
+///
+/// Note that we take the least significant 5 bits per the MIPS spec.
+__ZKM_HOSTDEV__ __ZKM_INLINE__ size_t nb_bytes_to_shift(uint32_t shift_amount) {
+    size_t n = (size_t)(shift_amount % 32);
+    return n / BYTE_SIZE;
+}
+
+/// Calculate the number of bits shift by.
+///
+/// Note that we take the least significant 5 bits per the MIPS spec.
+__ZKM_HOSTDEV__ __ZKM_INLINE__ size_t nb_bits_to_shift(uint32_t shift_amount) {
+    size_t n = (size_t)(shift_amount % 32);
+    return n % BYTE_SIZE;
 }
 
 template<class F>

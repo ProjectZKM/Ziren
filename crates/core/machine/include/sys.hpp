@@ -12,6 +12,7 @@
 #include "misc_instrs.hpp"
 #include "mov_cond.hpp"
 #include "shift_left.hpp"
+#include "shift_right.hpp"
 #include "syscall.hpp"
 #include "cpu.hpp"
 #include "zkm-core-machine-sys-cbindgen.hpp"
