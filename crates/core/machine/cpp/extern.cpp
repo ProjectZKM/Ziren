@@ -92,4 +92,12 @@ extern void misc_instrs_event_to_row_koalabear(
     misc_instrs::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
+extern void mov_cond_event_to_row_koalabear(
+    const MovCondEvent* event,
+    MovCondCols<KoalaBearP3>* cols
+) {
+    MovCondCols<kb31_t>* cols_kb31 = reinterpret_cast<MovCondCols<kb31_t>*>(cols);
+    mov_cond::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
 } // namespace zkm_core_machine_sys

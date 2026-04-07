@@ -166,7 +166,7 @@ populate_is_equal_word_operaion(IsEqualWordOperation<F>& self, uint32_t a_u32, u
 }
 
 template<class F>
-__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint64_t
 populate_add_double_operaion(AddDoubleOperation<F>& self, uint64_t a_u64, uint64_t b_u64) {
     uint64_t expected = a_u64 + b_u64;
     write_word_from_u32_v2<F>(self.value, (uint32_t)expected);

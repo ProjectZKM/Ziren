@@ -142,6 +142,8 @@ mod sys {
             .include_item("MemoryRecordEnum")
             .include_item("MiscEvent")
             .include_item("MiscInstrColumns")
+            .include_item("MovCondEvent")
+            .include_item("MovCondCols")
             .include_item("Opcode")
             .include_item("OptionMemoryRecordEnum")
             .include_item("OptionMemoryRecordEnumTag")

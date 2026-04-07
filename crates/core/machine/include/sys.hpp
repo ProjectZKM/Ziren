@@ -10,6 +10,7 @@
 #include "memory_global.hpp"
 #include "memory_instrs.hpp"
 #include "misc_instrs.hpp"
+#include "mov_cond.hpp"
 #include "syscall.hpp"
 #include "cpu.hpp"
 #include "zkm-core-machine-sys-cbindgen.hpp"
