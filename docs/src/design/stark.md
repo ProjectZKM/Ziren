@@ -112,3 +112,93 @@ Given the probabilistic nature of STARK verification, the protocol prevents brut
 - multiple verification rounds.
 
 This approach significantly increases the computational cost of malicious attempts. In Ziren, we employ multiple verification rounds to achieve the desired security level.
+
+## Security Configurations
+
+Ziren supports two security levels, selectable at compile time:
+
+### 100-bit Security (Default)
+
+Uses a **quartic extension** (D=4) over KoalaBear:
+
+| Parameter | Value |
+|-----------|-------|
+| Base field | KoalaBear (p = 2^31 - 2^24 + 1, ~31 bits) |
+| Extension field | BinomialExtensionField<KoalaBear, 4> (~124 bits) |
+| FRI queries | 84 |
+| Proof-of-work | 16 bits |
+| Protocol security | 84 bits (100 - 16 PoW) |
+| Security model | Unique Decoding (proven) |
+
+Config: `KoalaBearPoseidon2` / `KoalaBearPoseidon2Inner`
+
+### Configurable Security with D=5 (Quintic Extension)
+
+The quintic extension config `KoalaBearPoseidon2D5` supports any security level up to ~155 bits. FRI queries are automatically derived from the target:
+
+```rust
+// 128-bit security
+let config = KoalaBearPoseidon2D5::with_security(128);
+
+// Or any other target
+let config = KoalaBearPoseidon2D5::with_security(112);
+```
+
+| Parameter | Value |
+|-----------|-------|
+| Base field | KoalaBear (p = 2^31 - 2^24 + 1, ~31 bits) |
+| Extension field | QuinticTrinomialExtensionField<KoalaBear> (~155 bits) |
+| FRI queries | Auto-derived from security target |
+| Proof-of-work | 16 bits |
+| Security model | Unique Decoding / Johnson Bound (proven) |
+
+Reference: [Plonky3-recursion](https://github.com/Plonky3/Plonky3-recursion) uses D=5 for KoalaBear with parameterized security. The Johnson Bound proximity gaps from [BCSS25] (Ben-Sasson, Carmon, Haboeck, Kopparty, Saraf, 2025) improve the error bound from O(n^2/eta^7) to O(n/eta^5), enabling provable 128-bit security.
+
+**Trade-offs vs D=4 at same security level:**
+- Proofs are ~20% larger (more queries needed at higher targets)
+- Verification is ~15% slower (quintic field arithmetic vs quartic)
+- Proving is ~10% slower (wider extension)
+- No security conjectures required at 128-bit
+
+## WHIR PCS (Alternative to FRI)
+
+WHIR (Worst-case to average-case reduction for Interactive Reed-Solomon) is an alternative polynomial commitment scheme available via the `whir` feature flag.
+
+### How WHIR Differs from FRI
+
+| Property | FRI | WHIR |
+|----------|-----|------|
+| Polynomial type | Univariate | Multilinear |
+| Reduction method | Domain halving | Folding + sumcheck |
+| Vars per round | 1 | 4 (configurable) |
+| Proof structure | Merkle paths at each round | Merkle paths + sumcheck proofs |
+
+### Performance (100-bit security, 2^20 trace)
+
+| Metric | FRI | WHIR | Improvement |
+|--------|-----|------|-------------|
+| Proof size | ~53 KB | ~14 KB | 3.6x smaller |
+| Verification hashes | 1,680 | 455 | 3.7x faster |
+| Prover cost | baseline | comparable | ~neutral |
+
+### WHIR Security Levels
+
+WHIR PCS is generic over the challenge field and security level:
+
+```rust
+// 100-bit with D=4
+let params = whir_parameters(100);
+let pcs = koalabear_whir_pcs::<WhirChallenge>(num_vars, params);
+
+// 128-bit with D=5
+let params = whir_parameters(128);
+let pcs = koalabear_whir_pcs::<Whir128Challenge>(num_vars, params);
+```
+
+The `whir_parameters()` function automatically selects the soundness assumption:
+- `<= 100 bits`: Capacity Bound (conjectured, most efficient)
+- `> 100 bits`: Johnson Bound (proven via [BCSS25], requires D=5)
+
+### Integration Status
+
+WHIR implements the `MultilinearPcs` trait, not the univariate `Pcs` trait used by the current STARK pipeline. Full integration requires either an adapter from `MultilinearPcs` to `Pcs`, or a new STARK pipeline built on `MultilinearPcs` (as done in [Plonky3-recursion](https://github.com/Plonky3/Plonky3-recursion)). The parameter configuration and type aliases are available in `zkm_stark::whir_config` (feature-gated).

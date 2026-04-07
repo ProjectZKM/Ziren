@@ -4,7 +4,7 @@ use crate::{Com, StarkGenericConfig, ZeroCommitment};
 use p3_challenger::DuplexChallenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{extension::{BinomialExtensionField, QuinticTrinomialExtensionField}, Field, PrimeCharacteristicRing};
 use p3_commit::BatchOpening;
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
@@ -44,6 +44,61 @@ pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, 
 pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
 
 pub type InnerPcsProof = <InnerPcs as p3_commit::Pcs<InnerChallenge, InnerChallenger>>::Proof;
+
+// ── Quintic extension types (D=5, ~155 bits) ─────────────────────────────
+//
+// Reference: Plonky3-recursion uses D=5 for KoalaBear to achieve provable
+// 128-bit security under Johnson Bound [BCSS25].
+
+/// Quintic extension challenge field (~155 bits).
+pub type Inner128Challenge = QuinticTrinomialExtensionField<InnerVal>;
+pub type Inner128ChallengeMmcs = ExtensionMmcs<InnerVal, Inner128Challenge, InnerValMmcs>;
+pub type Inner128Pcs = TwoAdicFriPcs<InnerVal, InnerDft, InnerValMmcs, Inner128ChallengeMmcs>;
+
+/// FRI config targeting a given security level with quintic extension (D=5).
+///
+/// With D=5 extension (~155-bit field), the Johnson Bound [BCSS25] analysis
+/// provides provable security up to ~128 bits without conjectures.
+///
+/// Reference: Plonky3-recursion uses log_blowup=3, max_log_arity=4,
+/// log_final_poly_len=5, query_pow_bits=16 as defaults for recursive layers.
+///
+/// `security_bits`: target security level (e.g. 100, 128).
+/// Queries are derived as: ceil((security_bits - pow_bits) / log2(1/(1-delta)))
+#[must_use]
+pub fn fri_config_d5(security_bits: usize) -> FriParameters<Inner128ChallengeMmcs> {
+    let perm = inner_perm();
+    let hash = InnerHash::new(perm.clone());
+    let compress = InnerCompress::new(perm.clone());
+    let challenge_mmcs = Inner128ChallengeMmcs::new(InnerValMmcs::new(hash, compress, 0));
+
+    let pow_bits: usize = 16;
+    let log_blowup: usize = 1;
+
+    // delta for UniqueDecoding at rate 1/2: delta = 0.25, log2(1-delta) = -0.415
+    // queries = ceil(protocol_bits / 0.415)
+    let protocol_bits = security_bits.saturating_sub(pow_bits);
+    let num_queries = match std::env::var("FRI_QUERIES") {
+        Ok(value) => value.parse().unwrap(),
+        Err(_) => {
+            // UniqueDecoding: delta = 0.5 * (1 - rate), rate = 1/2^log_blowup
+            let rate = 1.0 / (1u64 << log_blowup) as f64;
+            let delta = 0.5 * (1.0 - rate);
+            let log_1_delta = (1.0 - delta).log2();
+            (-(protocol_bits as f64) / log_1_delta).ceil() as usize
+        }
+    };
+
+    FriParameters {
+        log_blowup,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries,
+        commit_proof_of_work_bits: 0,
+        query_proof_of_work_bits: pow_bits,
+        mmcs: challenge_mmcs,
+    }
+}
 
 /// The permutation for inner recursion.
 #[must_use]
@@ -151,6 +206,100 @@ impl ZeroCommitment<KoalaBearPoseidon2Inner> for InnerPcs {
         InnerDigestHash::from([InnerVal::ZERO; DIGEST_SIZE]).into()
     }
 }
+
+// ── 128-bit StarkGenericConfig ────────────────────────────────────────────
+
+/// STARK configuration with quintic extension (D=5) for higher security levels.
+///
+/// Uses quintic extension (~155 bits) over KoalaBear with Poseidon2.
+/// The Johnson Bound analysis from [BCSS25] provides provable security
+/// up to ~128 bits without relying on the Capacity Bound conjecture.
+///
+/// Reference: Plonky3-recursion uses D=5 for KoalaBear with configurable
+/// security levels via FRI parameter tuning.
+///
+/// The security level is configurable — use `KoalaBearPoseidon2D5::with_security(128)`
+/// for 128-bit, or any other target up to ~155 bits.
+#[derive(Deserialize)]
+#[serde(from = "std::marker::PhantomData<KoalaBearPoseidon2D5>")]
+pub struct KoalaBearPoseidon2D5 {
+    pub perm: InnerPerm,
+    pub pcs: Inner128Pcs,
+    security_bits: usize,
+}
+
+impl Clone for KoalaBearPoseidon2D5 {
+    fn clone(&self) -> Self {
+        Self::with_security(self.security_bits)
+    }
+}
+
+impl Serialize for KoalaBearPoseidon2D5 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        std::marker::PhantomData::<KoalaBearPoseidon2D5>.serialize(serializer)
+    }
+}
+
+impl From<std::marker::PhantomData<KoalaBearPoseidon2D5>> for KoalaBearPoseidon2D5 {
+    fn from(_: std::marker::PhantomData<KoalaBearPoseidon2D5>) -> Self {
+        Self::with_security(128)
+    }
+}
+
+impl KoalaBearPoseidon2D5 {
+    /// Create a D=5 config with a specific security level.
+    #[must_use]
+    pub fn with_security(security_bits: usize) -> Self {
+        let perm = inner_perm();
+        let hash = InnerHash::new(perm.clone());
+        let compress = InnerCompress::new(perm.clone());
+        let val_mmcs = InnerValMmcs::new(hash, compress, 0);
+        let dft = InnerDft::default();
+        let fri_config = fri_config_d5(security_bits);
+        let pcs = Inner128Pcs::new(dft, val_mmcs, fri_config);
+        Self { perm, pcs, security_bits }
+    }
+
+    /// Create a D=5 config with default 128-bit security.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_security(128)
+    }
+}
+
+impl Default for KoalaBearPoseidon2D5 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StarkGenericConfig for KoalaBearPoseidon2D5 {
+    type Val = InnerVal;
+    type Domain = <Inner128Pcs as p3_commit::Pcs<Inner128Challenge, InnerChallenger>>::Domain;
+    type Pcs = Inner128Pcs;
+    type Challenge = Inner128Challenge;
+    type Challenger = InnerChallenger;
+
+    fn pcs(&self) -> &Self::Pcs {
+        &self.pcs
+    }
+
+    fn challenger(&self) -> Self::Challenger {
+        InnerChallenger::new(self.perm.clone())
+    }
+}
+
+impl ZeroCommitment<KoalaBearPoseidon2D5> for Inner128Pcs {
+    fn zero_commitment(&self) -> Com<KoalaBearPoseidon2D5> {
+        InnerDigestHash::from([InnerVal::ZERO; DIGEST_SIZE]).into()
+    }
+}
+
+/// Alias for backward compatibility.
+pub type KoalaBearPoseidon2_128 = KoalaBearPoseidon2D5;
 
 pub mod koala_bear_poseidon2 {
 
