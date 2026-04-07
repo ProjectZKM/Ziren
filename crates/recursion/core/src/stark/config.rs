@@ -2,7 +2,7 @@ use p3_bn254_fr::{Bn254, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, PrimeCharacteristicRing};
+use p3_field::{extension::{BinomialExtensionField, QuinticTrinomialExtensionField}, PrimeCharacteristicRing};
 use p3_commit::BatchOpening;
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;
@@ -48,6 +48,18 @@ pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChalle
 pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, OuterInputProof>;
 pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
 pub type OuterPcsProof = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Proof;
+
+// ── Quintic extension outer types (D=5, 128-bit security) ─────────────────
+pub type Outer128Challenge = QuinticTrinomialExtensionField<OuterVal>;
+pub type Outer128ChallengeMmcs = ExtensionMmcs<OuterVal, Outer128Challenge, OuterValMmcs>;
+pub type Outer128Pcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, Outer128ChallengeMmcs>;
+
+pub type Outer128InputProof = Vec<BatchOpening<OuterVal, OuterValMmcs>>;
+pub type Outer128QueryProof = QueryProof<Outer128Challenge, Outer128ChallengeMmcs, Outer128InputProof>;
+pub type Outer128CommitPhaseStep = CommitPhaseProofStep<Outer128Challenge, Outer128ChallengeMmcs>;
+pub type Outer128FriProof = FriProof<Outer128Challenge, Outer128ChallengeMmcs, OuterVal, Outer128InputProof>;
+pub type Outer128BatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
+pub type Outer128PcsProof = <Outer128Pcs as p3_commit::Pcs<Outer128Challenge, OuterChallenger>>::Proof;
 
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {
@@ -194,4 +206,118 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
     let compress = OuterCompress::new(perm.clone());
     let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress, 0));
     FriParameters { log_blowup: 1, log_final_poly_len: 0, max_log_arity: 1, num_queries: 1, commit_proof_of_work_bits: 1, query_proof_of_work_bits: 1, mmcs: challenge_mmcs }
+}
+
+// ── D=5 outer config (128-bit security) ───────────────────────────────────
+
+/// FRI config for outer recursion with D=5 quintic extension.
+///
+/// `security_bits`: target security level (e.g. 100, 128).
+pub fn outer_fri_config_d5(security_bits: usize) -> FriParameters<Outer128ChallengeMmcs> {
+    let perm = outer_perm();
+    let hash = OuterHash::new(perm.clone()).unwrap();
+    let compress = OuterCompress::new(perm.clone());
+    let challenge_mmcs = Outer128ChallengeMmcs::new(OuterValMmcs::new(hash, compress, 0));
+
+    let pow_bits: usize = 16;
+    let log_blowup: usize = 1;
+
+    let protocol_bits = security_bits.saturating_sub(pow_bits);
+    let num_queries = if zkm_dev_mode() {
+        1
+    } else {
+        match std::env::var("FRI_QUERIES") {
+            Ok(value) => value.parse().unwrap(),
+            Err(_) => {
+                let rate = 1.0 / (1u64 << log_blowup) as f64;
+                let delta = 0.5 * (1.0 - rate);
+                let log_1_delta = (1.0 - delta).log2();
+                (-(protocol_bits as f64) / log_1_delta).ceil() as usize
+            }
+        }
+    };
+
+    FriParameters {
+        log_blowup,
+        log_final_poly_len: 0,
+        max_log_arity: 1,
+        num_queries,
+        commit_proof_of_work_bits: 0,
+        query_proof_of_work_bits: pow_bits,
+        mmcs: challenge_mmcs,
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(from = "std::marker::PhantomData<KoalaBearPoseidon2OuterD5>")]
+pub struct KoalaBearPoseidon2OuterD5 {
+    pub perm: OuterPerm,
+    pub pcs: Outer128Pcs,
+    fri_config: FriParameters<Outer128ChallengeMmcs>,
+}
+
+impl Clone for KoalaBearPoseidon2OuterD5 {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
+}
+
+impl Serialize for KoalaBearPoseidon2OuterD5 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        std::marker::PhantomData::<KoalaBearPoseidon2OuterD5>.serialize(serializer)
+    }
+}
+
+impl From<std::marker::PhantomData<KoalaBearPoseidon2OuterD5>> for KoalaBearPoseidon2OuterD5 {
+    fn from(_: std::marker::PhantomData<KoalaBearPoseidon2OuterD5>) -> Self {
+        Self::new()
+    }
+}
+
+impl KoalaBearPoseidon2OuterD5 {
+    pub fn new() -> Self {
+        let perm = outer_perm();
+        let hash = OuterHash::new(perm.clone()).unwrap();
+        let compress = OuterCompress::new(perm.clone());
+        let val_mmcs = OuterValMmcs::new(hash, compress, 0);
+        let dft = OuterDft::default();
+        let fri_config = outer_fri_config_d5(128);
+        let pcs = Outer128Pcs::new(dft, val_mmcs, fri_config.clone());
+        Self { pcs, perm, fri_config }
+    }
+
+    pub fn get_fri_config(&self) -> &FriParameters<Outer128ChallengeMmcs> {
+        &self.fri_config
+    }
+}
+
+impl Default for KoalaBearPoseidon2OuterD5 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StarkGenericConfig for KoalaBearPoseidon2OuterD5 {
+    type Val = OuterVal;
+    type Domain = <Outer128Pcs as p3_commit::Pcs<Outer128Challenge, OuterChallenger>>::Domain;
+    type Pcs = Outer128Pcs;
+    type Challenge = Outer128Challenge;
+    type Challenger = OuterChallenger;
+
+    fn pcs(&self) -> &Self::Pcs {
+        &self.pcs
+    }
+
+    fn challenger(&self) -> Self::Challenger {
+        OuterChallenger::new(self.perm.clone()).unwrap()
+    }
+}
+
+impl ZeroCommitment<KoalaBearPoseidon2OuterD5> for Outer128Pcs {
+    fn zero_commitment(&self) -> Com<KoalaBearPoseidon2OuterD5> {
+        Com::<KoalaBearPoseidon2OuterD5>::default()
+    }
 }
