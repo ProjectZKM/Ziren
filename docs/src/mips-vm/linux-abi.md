@@ -228,24 +228,68 @@ Linux syscalls execute across two shards:
 - **Core shard**: CPU decodes `SYSCALL`, writes `(shard, clk, syscall_id, arg1, arg2)` to `SyscallChip(Core)`.
 - **Precompile shard**: `SysLinuxChip` computes the result, receives the same tuple from `SyscallChip(Precompile)`.
 
-Both `SyscallChip` instances send a **global lookup message** that includes the result:
+Both `SyscallChip` instances send **two global lookup messages**:
 
 ```
-[shard, clk, syscall_id, arg1, arg2, result_lo, result_hi]
+Global #1 (Syscall kind):
+  [shard, clk, syscall_id, arg1_lo, arg1_hi, arg2_lo, arg2_hi]
+
+Global #2 (SyscallResult kind):
+  [shard, clk, syscall_id, result_lo, result_hi, 0, 0]
 ```
 
-The `GlobalChip` verifies that send/receive multiplicities match. This ensures the Core shard and Precompile shard agree on the syscall result — a malicious prover cannot compute one result in the Precompile shard but write a different value into the CPU register in the Core shard.
+The `GlobalChip` verifies that send/receive multiplicities match for both messages. This ensures:
+- **Argument integrity**: The Core and Precompile shards process the same 32-bit arguments (half-word packed to prevent `reduce()` collisions modulo the KoalaBear prime).
+- **Result consistency**: Both shards agree on the syscall return value.
 
-The result is packed as two half-words (`result_lo = byte0 + byte1 * 256`, `result_hi = byte2 + byte3 * 256`) to keep the global message at degree 1.
+Arguments and results are packed as half-words (`lo = byte0 + byte1 * 256`, `hi = byte2 + byte3 * 256`), each U16Range-checked to `[0, 65535]`. This decomposition is injective for 32-bit values, unlike `reduce()` which can collide.
 
-## Syscall ID Detection
+## Linux vs Non-Linux Syscalls
 
-The `SYSCALL` instruction stores the syscall code in register `V0`. The system distinguishes Linux syscalls from precompile syscalls by examining `prev_a_value[1]` (byte 1 of the syscall code):
+Ziren supports two categories of syscalls, distinguished by the encoding of the syscall code in register `V0`:
 
-- `byte[1] != 0` → **Linux syscall** (MIPS syscall numbers like 4003, 4045, etc. all have non-zero byte 1)
-- `byte[1] == 0` → **Precompile syscall** (Ziren precompile codes have byte 1 = 0)
+| Property | Linux Syscalls | Non-Linux (Precompile) Syscalls |
+|----------|----------------|--------------------------------|
+| **Syscall ID** | MIPS ABI numbers (4003, 4045, 4210, ...) | Ziren-defined codes (0x00000005, 0x01010006, ...) |
+| **ID encoding** | Byte 1 of V0 is non-zero | Byte 1 of V0 is zero |
+| **Proving chip** | `SysLinuxChip` | Dedicated chip per precompile (SHA256, Poseidon2, etc.) |
+| **Argument handling** | Full byte-level: `a0`/`a1` as `Word<T>` (4 x u8) | Reduced field element: `arg1 = reduce(op_b)` |
+| **Result handling** | `result` as `Word<T>`, `A3` error code | Return value in `V0` (precompile-specific) |
+| **Global linkage** | Half-word packed args + result via two global lookups | Half-word packed args via one global lookup |
+| **Local linkage** | `send_syscall_result_packed` with `is_linux` multiplicity | `send_syscall` / `receive_syscall` (reduced args only) |
 
-This is enforced bidirectionally via an `IsZeroOperation` in `SyscallInstrsChip`, preventing a malicious prover from misrouting a precompile call into the Linux path or vice versa.
+### How detection works
+
+The `SyscallInstrsChip` examines byte 1 of the syscall code (`prev_a_value[1]`):
+
+- `byte[1] != 0` → **Linux syscall** — routes to `SysLinuxChip` via lookup
+- `byte[1] == 0` → **Precompile syscall** — routes to the precompile's dedicated chip
+
+This is enforced bidirectionally via an `IsZeroOperation`, preventing a malicious prover from misrouting a precompile call into the Linux path or vice versa.
+
+### Argument representation across the pipeline
+
+```
+SyscallInstrsChip (Core shard):
+  send_syscall(reduce(op_b), reduce(op_c))          -- reduced, for both types
+  send_syscall_result(op_a_word, op_b_word, op_c_word) -- byte-level, linux only
+
+SyscallChip (bridge):
+  arg1 = arg1_lo + arg1_hi * 65536                   -- derived inline (not stored)
+  arg1_lo, arg1_hi: U16Range-checked                 -- for ALL syscalls
+  Global #1: [shard, clk, id, a1_lo, a1_hi, a2_lo, a2_hi]  -- collision-resistant
+  Global #2: [shard, clk, id, result_lo, result_hi, 0, 0]   -- result linkage
+
+SysLinuxChip (Precompile shard, linux only):
+  receive_syscall_result(result_word, a0_word, a1_word)  -- byte-level constraints
+  Constrains result based on a0/a1 byte values
+
+Other precompile chips (Precompile shard, non-linux):
+  receive_syscall(reduce(arg1), reduce(arg2))            -- reduced args only
+  Constrains output based on memory at arg addresses
+```
+
+The key distinction: linux syscalls need **byte-level** argument constraints (e.g., MMAP checks page alignment of `a1` bytes, FCNTL checks `a0 == 0/1/2` as integers). Non-linux precompiles typically use arguments as memory pointers and operate on the data at those addresses, so reduced field elements suffice.
 
 ## AIR Soundness Properties
 
@@ -261,4 +305,4 @@ The `SysLinuxChip` enforces these key properties (all proven bidirectionally):
 
 5. **Page alignment**: MMAP size is constrained byte-by-byte. Low 12 bits of `mmap_size` are structurally zero (byte0 = 0, byte1 is always a multiple of 16). No field `reduce()` is used.
 
-6. **Cross-shard linkage**: Syscall results are included in the global lookup message, preventing result forgery across shards.
+6. **Cross-shard linkage**: Two global lookups per syscall — one for collision-resistant argument matching (half-word packed), one for result consistency. U16Range checks on all half-words ensure canonical decomposition for both linux and non-linux syscalls.

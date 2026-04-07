@@ -63,6 +63,10 @@ impl SyscallChip {
 /// `arg1` and `arg2` are NOT stored as columns. They are derived inline as
 /// `arg1_lo + arg1_hi * 65536` to avoid redundant columns while keeping the
 /// reduced field element available for local `send_syscall`/`receive_syscall`.
+///
+/// **Soundness**: `arg1_lo/hi` and `arg2_lo/hi` are U16Range-checked inside
+/// `send_syscall_result_packed` (see `crates/stark/src/air/builder.rs`).
+/// Any chip using this interaction gets range-checked half-words automatically.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallCols<T: Copy> {
@@ -76,6 +80,11 @@ pub struct SyscallCols<T: Copy> {
     pub syscall_id: T,
 
     /// Half-word packed arg1: low 16 bits (byte0 + byte1 * 256).
+    /// Currently only SysLinuxChip uses these in its AIR constraints (via
+    /// receive_syscall_result). Non-linux precompiles receive the reduced
+    /// arg1/arg2 through receive_syscall and don't use the half-words.
+    /// If a new precompile needs byte-level argument access, it should use
+    /// receive_syscall_result_packed to get these half-words.
     pub arg1_lo: T,
     /// Half-word packed arg1: high 16 bits (byte2 + byte3 * 256).
     pub arg1_hi: T,
@@ -113,7 +122,6 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
     ) -> Result<(), Self::Error> {
         let is_receive = self.shard_kind == SyscallShardKind::Precompile;
 
-        // Collect (event, result_lo, result_hi) triples in one pass.
         let event_triples: Vec<(&SyscallEvent, u32, u32)> = match self.shard_kind {
             SyscallShardKind::Core => input
                 .syscall_events
@@ -164,7 +172,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 kind: LookupKind::SyscallResult as u8,
             });
 
-            // U16Range checks for half-word columns.
+            // U16Range checks for half-word columns (gated by is_real in the AIR).
             output.add_u16_range_check(a1_lo as u16);
             output.add_u16_range_check(a1_hi as u16);
             output.add_u16_range_check(a2_lo as u16);
@@ -315,7 +323,8 @@ where
         let arg2: AB::Expr = local.arg2_lo.into()
             + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_canonical_u32(65536);
 
-        // Range-check half-words to [0, 65535].
+        // U16Range checks for ALL syscalls (not just linux), gated by is_real.
+        // This ensures the global lookup's half-word args are always canonical.
         builder.send_byte(
             AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
             local.arg1_lo,
