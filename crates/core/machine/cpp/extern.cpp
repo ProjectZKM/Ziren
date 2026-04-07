@@ -100,4 +100,12 @@ extern void mov_cond_event_to_row_koalabear(
     mov_cond::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
+extern void shift_left_event_to_row_koalabear(
+    const AluEvent* event,
+    ShiftLeftCols<KoalaBearP3>* cols
+) {
+    ShiftLeftCols<kb31_t>* cols_kb31 = reinterpret_cast<ShiftLeftCols<kb31_t>*>(cols);
+    shift_left::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
 } // namespace zkm_core_machine_sys

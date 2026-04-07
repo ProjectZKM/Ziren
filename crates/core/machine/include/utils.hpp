@@ -73,6 +73,15 @@ write_word_from_le_bytes(Word<F>& word, const array_t<uint8_t, 4> bytes) {
 }
 
 template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void
+write_word_from_le_bytes_v2(F word[WORD_SIZE], const uint8_t bytes[WORD_SIZE]) {
+    word[0] = F::from_canonical_u8(bytes[0]);
+    word[1] = F::from_canonical_u8(bytes[1]);
+    word[2] = F::from_canonical_u8(bytes[2]);
+    word[3] = F::from_canonical_u8(bytes[3]);
+}
+
+template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t
 word_to_u32(const Word<decltype(F::val)>& word) {
     return ((uint32_t)F(word._0[0]).as_canonical_u32())

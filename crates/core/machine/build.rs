@@ -152,6 +152,7 @@ mod sys {
             .include_item("Poseidon2StateCols")
             .include_item("SepticCurve")
             .include_item("SepticExtension")
+            .include_item("ShiftLeftCols")
             .include_item("SyscallCode") // Required for populating the CPU columns for ECALL.
             .with_namespace("zkm_core_machine_sys")
             .with_crate(crate_dir)
