@@ -792,8 +792,9 @@ mod tests {
         for mat_openings in &opening_by_round[0] {
             for point_openings in mat_openings {
                 for &val in point_openings {
-                    // Each InnerChallenge has 4 base field coefficients.
-                    let basis: Vec<InnerVal> = (0..4)
+                    // Each InnerChallenge has DIMENSION base field coefficients.
+                    let dim = <InnerChallenge as p3_field::BasedVectorSpace<InnerVal>>::DIMENSION;
+                    let basis: Vec<InnerVal> = (0..dim)
                         .map(|i| <InnerChallenge as p3_field::BasedVectorSpace<InnerVal>>::as_basis_coefficients_slice(&val)[i])
                         .collect();
                     for b in basis {

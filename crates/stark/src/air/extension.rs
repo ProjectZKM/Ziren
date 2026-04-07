@@ -56,7 +56,7 @@ impl<T: Add<Output = T> + Mul<Output = T> + PrimeCharacteristicRing> Mul for Bin
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
+        let mut result = [T::ZERO; D];
         let w = T::from_u32(3);
 
         for i in 0..D {
@@ -113,7 +113,7 @@ impl<T: PrimeCharacteristicRing + Copy> Neg for BinomialExtension<T> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Self([-self.0[0], -self.0[1], -self.0[2], -self.0[3]])
+        Self(core::array::from_fn(|i| -self.0[i]))
     }
 }
 

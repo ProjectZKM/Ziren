@@ -126,7 +126,7 @@ impl<F: Field, EF: ExtensionField<F>> Algebra<Ext<F, EF>> for SymbolicExt<F, EF>
 // We cannot add a generic `From<EF>` because it conflicts with `From<F>` when F = EF.
 // Since the codebase uses KoalaBear with BinomialExtensionField<KoalaBear, 4>,
 // we add these concrete impls.
-use p3_field::extension::BinomialExtensionField;
+use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_koala_bear::KoalaBear;
 
 type KB4 = BinomialExtensionField<KoalaBear, 4>;
@@ -136,6 +136,14 @@ impl From<KB4> for SymbolicExt<KoalaBear, KB4> {
     }
 }
 impl Algebra<KB4> for SymbolicExt<KoalaBear, KB4> {}
+
+type KB5 = QuinticTrinomialExtensionField<KoalaBear>;
+impl From<KB5> for SymbolicExt<KoalaBear, KB5> {
+    fn from(ef: KB5) -> Self {
+        SymbolicExt::Const(ef)
+    }
+}
+impl Algebra<KB5> for SymbolicExt<KoalaBear, KB5> {}
 
 // Implement all conversions from constants N, F, EF, to the corresponding symbolic types
 

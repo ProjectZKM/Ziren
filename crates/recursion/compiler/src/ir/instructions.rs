@@ -305,10 +305,14 @@ pub enum DslIr<C: Config> {
     /// Select's an extension field element based on a condition. (select(cond, true_val,
     /// false_val) => output). Should only be used when target is a gnark circuit.
     CircuitSelectE(Var<C::N>, Ext<C::F, C::EF>, Ext<C::F, C::EF>, Ext<C::F, C::EF>),
-    /// Converts an ext to a slice of felts. Should only be used when target is a gnark circuit.
+    /// Converts an ext to a slice of felts (D=4). Should only be used when target is a gnark circuit.
     CircuitExt2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
-    /// Converts a slice of felts to an ext. Should only be used when target is a gnark circuit.
+    /// Converts a slice of felts to an ext (D=4). Should only be used when target is a gnark circuit.
     CircuitFelts2Ext([Felt<C::F>; 4], Ext<C::F, C::EF>),
+    /// Converts an ext to a slice of felts (D=5). Should only be used when target is a gnark circuit.
+    CircuitExt2Felt5([Felt<C::F>; 5], Ext<C::F, C::EF>),
+    /// Converts a slice of felts to an ext (D=5). Should only be used when target is a gnark circuit.
+    CircuitFelts2Ext5([Felt<C::F>; 5], Ext<C::F, C::EF>),
 
     // Debugging instructions.
     /// Executes less than (var = var < var).  This operation is NOT constrained.

@@ -193,7 +193,7 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         self.push_op(DslIr::CircuitExt2Felt(felts, ext));
         // Verify that the decomposed extension element is correct.
         let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
-        for i in 0..4 {
+        for i in 0..D {
             let felt = felts[i];
             let monomial: Ext<C::F, C::EF> = self.constant(C::EF::ith_basis_element(i).unwrap());
             reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);

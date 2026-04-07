@@ -221,20 +221,32 @@ impl<C: Config> Builder<C> {
     }
 
     pub fn felts2ext(&mut self, felts: &[Felt<C::F>]) -> Ext<C::F, C::EF> {
-        assert_eq!(felts.len(), 4);
+        let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+        assert_eq!(felts.len(), dim);
         let out: Ext<C::F, C::EF> = self.uninit();
-        self.push_op(DslIr::CircuitFelts2Ext(felts.try_into().unwrap(), out));
+        match dim {
+            4 => {
+                let arr: [Felt<C::F>; 4] = felts.try_into().unwrap();
+                self.push_op(DslIr::CircuitFelts2Ext(arr, out));
+            }
+            5 => {
+                let arr: [Felt<C::F>; 5] = felts.try_into().unwrap();
+                self.push_op(DslIr::CircuitFelts2Ext5(arr, out));
+            }
+            _ => panic!("unsupported extension dimension: {dim}"),
+        }
         out
     }
 
     /// Converts an ext to a slice of felts.
     pub fn ext2felt(&mut self, value: Ext<C::F, C::EF>) -> Array<C, Felt<C::F>> {
-        let result = self.dyn_array(4);
+        let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+        let result = self.dyn_array(dim);
         self.push_op(DslIr::HintExt2Felt(result.clone(), value));
 
         // Verify that the decomposed extension element is correct.
         let mut reconstructed_ext: Ext<C::F, C::EF> = self.constant(C::EF::ZERO);
-        for i in 0..4 {
+        for i in 0..dim {
             let felt = self.get(&result, i);
             let monomial: Ext<C::F, C::EF> = self.constant(C::EF::ith_basis_element(i).unwrap());
             reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);
@@ -246,12 +258,28 @@ impl<C: Config> Builder<C> {
     }
 
     /// Converts an ext to a slice of felts inside a circuit.
-    pub fn ext2felt_circuit(&mut self, value: Ext<C::F, C::EF>) -> [Felt<C::F>; 4] {
-        let a = self.uninit();
-        let b = self.uninit();
-        let c = self.uninit();
-        let d = self.uninit();
-        self.push_op(DslIr::CircuitExt2Felt([a, b, c, d], value));
-        [a, b, c, d]
+    /// Returns a Vec since the size depends on the extension dimension.
+    pub fn ext2felt_circuit(&mut self, value: Ext<C::F, C::EF>) -> Vec<Felt<C::F>> {
+        let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+        match dim {
+            4 => {
+                let a = self.uninit();
+                let b = self.uninit();
+                let c = self.uninit();
+                let d = self.uninit();
+                self.push_op(DslIr::CircuitExt2Felt([a, b, c, d], value));
+                vec![a, b, c, d]
+            }
+            5 => {
+                let a = self.uninit();
+                let b = self.uninit();
+                let c = self.uninit();
+                let d = self.uninit();
+                let e = self.uninit();
+                self.push_op(DslIr::CircuitExt2Felt5([a, b, c, d, e], value));
+                vec![a, b, c, d, e]
+            }
+            _ => panic!("unsupported extension dimension: {dim}"),
+        }
     }
 }

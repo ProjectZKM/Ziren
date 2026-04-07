@@ -391,6 +391,30 @@ impl<C: Config + Debug> ConstraintCompiler<C> {
                         vec![a[3].id()],
                     ],
                 }),
+                DslIr::CircuitExt2Felt5(a, b) => {
+                    constraints.push(Constraint {
+                        opcode: ConstraintOpcode::Ext2Felt5,
+                        args: vec![
+                            vec![a[0].id()],
+                            vec![a[1].id()],
+                            vec![a[2].id()],
+                            vec![a[3].id()],
+                            vec![a[4].id()],
+                            vec![b.id()],
+                        ],
+                    });
+                }
+                DslIr::CircuitFelts2Ext5(a, b) => constraints.push(Constraint {
+                    opcode: ConstraintOpcode::CircuitFelts2Ext5,
+                    args: vec![
+                        vec![b.id()],
+                        vec![a[0].id()],
+                        vec![a[1].id()],
+                        vec![a[2].id()],
+                        vec![a[3].id()],
+                        vec![a[4].id()],
+                    ],
+                }),
                 // Ignore cycle tracker instruction.
                 // It currently serves as a marker for calculation at compile time.
                 DslIr::CycleTracker(_) => (),

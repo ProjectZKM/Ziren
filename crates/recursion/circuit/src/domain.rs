@@ -71,7 +71,7 @@ where
     ) -> Ext<<C as Config>::F, <C as Config>::EF> {
         let unshifted_power = builder.exp_power_of_2_v::<Ext<_, _>>(
             point
-                * C::EF::from_basis_coefficients_slice(&[self.shift(), C::F::ZERO, C::F::ZERO, C::F::ZERO]).unwrap()
+                * C::EF::from_basis_coefficients_fn(|i| if i == 0 { self.shift() } else { C::F::ZERO })
                     .inverse()
                     .cons(),
             Usize::Const(self.log_size()),

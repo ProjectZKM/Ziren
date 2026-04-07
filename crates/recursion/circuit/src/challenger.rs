@@ -1,4 +1,4 @@
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -305,11 +305,9 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
     }
 
     pub fn sample_ext(&mut self, builder: &mut Builder<C>) -> Ext<C::F, C::EF> {
-        let a = self.sample(builder);
-        let b = self.sample(builder);
-        let c = self.sample(builder);
-        let d = self.sample(builder);
-        builder.felts2ext(&[a, b, c, d])
+        let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+        let samples: Vec<Felt<C::F>> = (0..dim).map(|_| self.sample(builder)).collect();
+        builder.felts2ext(&samples)
     }
 
     pub fn sample_bits(&mut self, builder: &mut Builder<C>, bits: usize) -> Vec<Var<C::N>> {

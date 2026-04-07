@@ -1,4 +1,4 @@
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use zkm_recursion_core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, Usize, Var};
@@ -151,7 +151,8 @@ impl<C: Config> Builder<C> {
             builder.range(0, subarray.len()).for_each(|j, builder| {
                 let element = builder.get(&subarray, j);
                 let felts = builder.ext2felt(element);
-                for i in 0..4 {
+                let dim = <C::EF as BasedVectorSpace<C::F>>::DIMENSION;
+                for i in 0..dim {
                     let felt = builder.get(&felts, i);
                     builder.set_value(&mut state, idx, felt);
                     builder.assign(idx, idx + C::N::ONE);
