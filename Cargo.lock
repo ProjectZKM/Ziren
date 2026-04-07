@@ -7536,6 +7536,7 @@ dependencies = [
 name = "zkm-core-executor"
 version = "1.2.4"
 dependencies = [
+ "aes",
  "anyhow",
  "bincode",
  "bytemuck",

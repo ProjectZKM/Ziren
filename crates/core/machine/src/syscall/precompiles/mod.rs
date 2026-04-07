@@ -1,3 +1,4 @@
+pub mod aes128_encrypt;
 pub mod boolean_circuit_garble;
 pub mod edwards;
 pub mod fptower;
