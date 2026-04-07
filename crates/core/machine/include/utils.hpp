@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <tuple>
+#include <cstdint>
+#include <climits>
 
 #include "prelude.hpp"
 
@@ -27,6 +29,19 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ array_t<uint8_t, 8> u64_to_le_bytes(uint64_t n) {
         (uint8_t)(n >> 8 * 5),
         (uint8_t)(n >> 8 * 6),
         (uint8_t)(n >> 8 * 7),
+    };
+}
+
+__ZKM_HOSTDEV__ __ZKM_INLINE__ array_t<uint8_t, 8> i64_to_le_bytes(int64_t n) {
+    return {
+        static_cast<uint8_t>(n & 0xFF),
+        static_cast<uint8_t>((n >> 8) & 0xFF),
+        static_cast<uint8_t>((n >> 16) & 0xFF),
+        static_cast<uint8_t>((n >> 24) & 0xFF),
+        static_cast<uint8_t>((n >> 32) & 0xFF),
+        static_cast<uint8_t>((n >> 40) & 0xFF),
+        static_cast<uint8_t>((n >> 48) & 0xFF),
+        static_cast<uint8_t>((n >> 56) & 0xFF),
     };
 }
 
@@ -139,6 +154,49 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ size_t nb_bytes_to_shift(uint32_t shift_amount) {
 __ZKM_HOSTDEV__ __ZKM_INLINE__ size_t nb_bits_to_shift(uint32_t shift_amount) {
     size_t n = (size_t)(shift_amount % 32);
     return n % BYTE_SIZE;
+}
+
+/// Returns `true` if the given opcode is a signed operation.
+__ZKM_HOSTDEV__ __ZKM_INLINE__ bool is_signed_operation(Opcode opcode) {
+    // todo: add more signed operations
+    return (opcode == Opcode::DIV || opcode == Opcode::MOD);
+}
+
+/// Calculate the correct `quotient` and `remainder` for the given `b` and `c` per MIPS spec.
+__ZKM_HOSTDEV__ __ZKM_INLINE__ std::tuple<uint32_t, uint32_t>
+get_quotient_and_remainder(uint32_t b, uint32_t c, Opcode opcode) {
+    if (c == 0) {
+        // When c is 0, the quotient is 2^32 - 1 and the remainder is b regardless of whether we
+        // perform signed or unsigned division.
+        return {INT32_MAX, b};
+    } else if (is_signed_operation(opcode)) {
+        return {(uint32_t)((int32_t)b / (int32_t)c), (uint32_t)((int32_t)b % (int32_t)c)};
+    } else {
+        return {b / c, b % c};
+    }
+}
+
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t
+get_msb(const array_t<uint8_t, WORD_SIZE> a) {
+    return (a[WORD_SIZE - 1] >> (BYTE_SIZE - 1)) & 1;
+}
+
+/// Calculate the most significant bit of the given 32-bit integer `a`, and returns it as a u8.
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t
+get_msb_v2(uint32_t a) {
+    return (uint8_t)((a >> 31) & 1);
+}
+
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t unsigned_abs(int32_t value) {
+    if (value == INT32_MIN) {
+        return 0x80000000;
+    }
+
+    if (value < 0) {
+        return static_cast<uint32_t>(-value);
+    }
+
+    return static_cast<uint32_t>(value);
 }
 
 template<class F>
@@ -255,11 +313,6 @@ populate_add_double_operaion(AddDoubleOperation<F>& self, uint64_t a_u64, uint64
     uint32_t overflow = (uint32_t)a[0] + (uint32_t)b[0] - (uint32_t)u64_to_le_bytes(expected)[0];
     assert(overflow * (overflow - base) == 0);
     return expected;
-}
-
-__ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t
-get_msb(const array_t<uint8_t, WORD_SIZE> a) {
-    return (a[WORD_SIZE - 1] >> (BYTE_SIZE - 1)) & 1;
 }
 
 namespace opcode_utils {

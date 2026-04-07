@@ -4,6 +4,7 @@
 #include "bitwise.hpp"
 #include "branch.hpp"
 #include "clo_clz.hpp"
+#include "div_rem.hpp"
 #include "lt.hpp"
 #include "jump.hpp"
 #include "memory_local.hpp"

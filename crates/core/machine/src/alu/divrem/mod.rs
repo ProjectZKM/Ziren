@@ -87,7 +87,7 @@ use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     memory::MemoryCols,
     operations::{IsEqualWordOperation, IsZeroWordOperation},
-    utils::pad_rows_fixed,
+    utils::{next_power_of_two, pad_rows_fixed},
 };
 
 /// The number of main trace columns for `DivRemChip`.
@@ -216,6 +216,12 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
     fn picus_info(&self) -> PicusInfo {
         DivRemCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows =
+            next_power_of_two(input.divrem_events.len(), input.fixed_log2_rows::<F, _>(self));
+        Some(nb_rows)
     }
 
     fn generate_trace(

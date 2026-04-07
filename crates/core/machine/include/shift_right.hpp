@@ -25,9 +25,6 @@ namespace zkm_core_machine_sys::shift_right {
             for (uint32_t i = 0; i < BYTE_SIZE; i++) {
                 cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
             }
-
-            // Insert the MSB lookup event.
-            uint32_t most_significant_byte = u32_to_le_bytes(event.b)[WORD_SIZE - 1];
         }
 
         size_t num_bytes_to_shift = nb_bytes_to_shift(event.c);
