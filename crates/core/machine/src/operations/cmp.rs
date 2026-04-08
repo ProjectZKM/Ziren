@@ -69,7 +69,7 @@ impl<F: Field> GtColsBytes<F> {
 
         // Complementary lookup: when a comparison byte is selected, also prove the
         // reverse direction so that equal bytes are ruled out.
-        let has_flag = byte_flags.iter().any(|&f| f == 1);
+        let has_flag = byte_flags.contains(&1);
         if has_flag {
             record.add_byte_lookup_event(ByteLookupEvent {
                 opcode: ByteOpcode::LTU,
