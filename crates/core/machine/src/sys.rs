@@ -15,6 +15,7 @@ use crate::{
     misc::columns::MiscInstrColumns,
     misc::mov_cond::MovCondCols,
     syscall::chip::SyscallCols,
+    syscall::instructions::columns::SyscallInstrColumns,
 };
 
 #[link(name = "zkm-core-machine-sys", kind = "static")]
@@ -62,6 +63,10 @@ extern "C-unwind" {
     );
     pub fn div_rem_event_to_row_koalabear(event: &CompAluEvent, cols: &mut DivRemCols<KoalaBear>);
     pub fn mul_event_to_row_koalabear(event: &CompAluEvent, cols: &mut MulCols<KoalaBear>);
+    pub fn syscall_instrs_event_to_row_koalabear(
+        event: &SyscallEvent,
+        cols: &mut SyscallInstrColumns<KoalaBear>,
+    );
 
     pub fn test_mul();
     pub fn test_inv();

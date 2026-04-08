@@ -19,4 +19,4 @@ namespace zkm_core_machine_sys::syscall {
         cols->arg2_hi = F::from_canonical_u32(((a2 >> 16) & 0xFF) | ((a2 >> 24 & 0xFF) << 8));
         cols->is_real = F::one();
     }
-}  // namespace zkm::memory_local
+}  // namespace zkm::syscall

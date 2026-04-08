@@ -162,6 +162,7 @@ mod sys {
             .include_item("ShiftLeftCols")
             .include_item("ShiftRightCols")
             .include_item("SyscallCode") // Required for populating the CPU columns for ECALL.
+            .include_item("SyscallInstrColumns")
             .with_namespace("zkm_core_machine_sys")
             .with_crate(crate_dir)
             .generate()

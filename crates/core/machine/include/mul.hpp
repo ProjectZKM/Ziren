@@ -9,8 +9,6 @@
 namespace zkm_core_machine_sys::mul {
     template<class F>
     __ZKM_HOSTDEV__ void event_to_row(const CompAluEvent& event, MulCols<F>& cols) {
-        constexpr uint8_t BYTE_MASK = 0xFF;
-
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 

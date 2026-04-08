@@ -124,12 +124,12 @@ extern void div_rem_event_to_row_koalabear(
     div_rem::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
-extern void mul_event_to_row_koalabear(
-    const CompAluEvent* event,
-    MulCols<KoalaBearP3>* cols
+extern void syscall_instrs_event_to_row_koalabear(
+    const SyscallEvent* event,
+    SyscallInstrColumns<KoalaBearP3>* cols
 ) {
-    MulCols<kb31_t>* cols_kb31 = reinterpret_cast<MulCols<kb31_t>*>(cols);
-    mul::event_to_row<kb31_t>(*event, *cols_kb31);
+    SyscallInstrColumns<kb31_t>* cols_kb31 = reinterpret_cast<SyscallInstrColumns<kb31_t>*>(cols);
+    syscall_instrs::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
 } // namespace zkm_core_machine_sys

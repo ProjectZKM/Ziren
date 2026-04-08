@@ -210,6 +210,11 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ std::array<uint8_t, 8> signed_extended(const arra
     return b_extended;
 }
 
+/// Get the system call identifier.
+__ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t to_syscall_id(SyscallCode self) {
+    return ((uint32_t)self) & 0x0FFFF;
+}
+
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_range_checker(KoalaBearWordRangeChecker<F>& self, const uint32_t value) {
     for (size_t i = 0; i < 8; ++i) {
