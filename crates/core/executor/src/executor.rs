@@ -1919,6 +1919,8 @@ impl<'a> Executor<'a> {
         let mem = self.mr_cpu(aligned_addr);
         let rs = addr;
 
+        // TODO: add null pointer trap region check (aligned_addr < 0x1000) per
+        // eth-act/zkvm-standards#17 "Memory Safety Guard Regions" proposal.
         if aligned_addr + 3 > MAX_MEMORY as u32 {
             return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
         }
@@ -2051,6 +2053,8 @@ impl<'a> Executor<'a> {
             _ => todo!(),
         };
 
+        // TODO: add null pointer trap region check (aligned_addr < 0x1000) per
+        // eth-act/zkvm-standards#17 "Memory Safety Guard Regions" proposal.
         if aligned_addr + 3 > MAX_MEMORY as u32 {
             return Err(ExecutionError::MemoryOutOfBoundsAccess(addr as u64));
         }
