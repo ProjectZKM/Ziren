@@ -112,7 +112,10 @@ mod sys {
                 "p3-monty-31",
             ])
             .rename_item("KoalaBear", "KoalaBearP3")
+            .include_item("BYTE_MASK")
+            .include_item("WORD_SIZE")
             .include_item("LONG_WORD_SIZE")
+            .include_item("PRODUCT_SIZE")
             .include_item("AddOperation")
             .include_item("AddSubCols")
             .include_item("AluEvent")
@@ -147,6 +150,7 @@ mod sys {
             .include_item("MiscInstrColumns")
             .include_item("MovCondEvent")
             .include_item("MovCondCols")
+            .include_item("MulCols")
             .include_item("Opcode")
             .include_item("OptionMemoryRecordEnum")
             .include_item("OptionMemoryRecordEnumTag")

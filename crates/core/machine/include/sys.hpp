@@ -12,6 +12,7 @@
 #include "memory_instrs.hpp"
 #include "misc_instrs.hpp"
 #include "mov_cond.hpp"
+#include "mul.hpp"
 #include "shift_left.hpp"
 #include "shift_right.hpp"
 #include "syscall.hpp"
