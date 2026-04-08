@@ -23,6 +23,10 @@ pub struct GtColsBytes<T> {
     pub(crate) b_comparison_byte: T,
 
     pub(crate) result: T,
+
+    /// Whether any byte flag is set (i.e., a != b). Used as multiplicity for the
+    /// complementary LTU lookup to keep interaction degree low.
+    pub(crate) has_comparison: T,
 }
 
 impl<F: Field> GtColsBytes<F> {
@@ -63,9 +67,23 @@ impl<F: Field> GtColsBytes<F> {
             c: a_comparision_byte,
         });
 
+        // Complementary lookup: when a comparison byte is selected, also prove the
+        // reverse direction so that equal bytes are ruled out.
+        let has_flag = byte_flags.iter().any(|&f| f == 1);
+        if has_flag {
+            record.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::LTU,
+                a1: (1 - result) as u16,
+                a2: 0,
+                b: a_comparision_byte,
+                c: b_comparision_byte,
+            });
+        }
+
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.iter_mut()) {
             *flag = F::from_canonical_u8(*byte);
         }
+        self.has_comparison = F::from_bool(has_flag);
 
         record.add_u8_range_checks(&a.to_le_bytes());
         record.add_u8_range_checks(&b.to_le_bytes());
@@ -99,7 +117,10 @@ impl<F: Field> GtColsBytes<F> {
             // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.into();
         }
-        builder.when(is_real).assert_bool(sum_flags);
+        builder.when(is_real).assert_bool(sum_flags.clone());
+        // Constrain has_comparison = sum_flags (when is_real).
+        builder.when(is_real).assert_eq(cols.has_comparison, sum_flags);
+        builder.when(is_real).assert_bool(cols.has_comparison);
 
         // Check the less-than condition.
 
@@ -133,7 +154,20 @@ impl<F: Field> GtColsBytes<F> {
             cols.b_comparison_byte,
             cols.a_comparison_byte,
             is_real,
-        )
+        );
+
+        // Complementary lookup to rule out equal comparison bytes.
+        // When a flag is set, the selected bytes must satisfy either a > b or a < b (not a == b).
+        // LTU(1 - result, a, b) proves the reverse direction.
+        // Use has_comparison (degree-1 column) instead of sum_flags * is_real to keep
+        // the interaction degree low.
+        builder.send_byte(
+            ByteOpcode::LTU.as_field::<AB::F>(),
+            AB::Expr::one() - cols.result,
+            cols.a_comparison_byte,
+            cols.b_comparison_byte,
+            cols.has_comparison,
+        );
     }
 }
 

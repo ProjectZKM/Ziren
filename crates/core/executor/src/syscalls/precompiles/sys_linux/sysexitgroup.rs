@@ -38,6 +38,6 @@ impl Syscall for SysExitGroupSyscall {
         let syscall_event =
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
-        Ok(None)
+        Ok(Some(v0))
     }
 }

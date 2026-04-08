@@ -107,6 +107,13 @@ impl SyscallInstrsChip {
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
 
+        let prev_a_bytes = event.a_record.prev_value.to_le_bytes();
+        let send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
+        let is_halt_val = cols.is_halt == F::ONE;
+
+        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
+        cols.is_prev_a1_zero.populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
+
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
             syscall_id - F::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
@@ -146,18 +153,19 @@ impl SyscallInstrsChip {
             cols.index_bitmap[digest_idx] = F::ONE;
         }
 
-        // For halt and commit deferred proofs syscalls, we need to koala bear range check one of
-        // it's operands.
-        if cols.is_halt == F::ONE {
-            cols.operand_to_check = event.arg1.into();
-            cols.operand_range_check_cols.populate(event.arg1);
-            cols.syscall_range_check_operand = F::ONE;
-        }
+        // Populate unified KoalaBear range check flags and columns.
+        let is_commit_deferred =
+            syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id());
+        let op_b_needs_check = send_to_table || is_halt_val;
+        let op_c_needs_check = send_to_table || is_commit_deferred;
 
-        if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()) {
-            cols.operand_to_check = event.arg2.into();
-            cols.operand_range_check_cols.populate(event.arg2);
-            cols.syscall_range_check_operand = F::ONE;
+        if op_b_needs_check {
+            cols.op_b_check = F::ONE;
+            cols.op_b_range_check.populate(event.arg1);
+        }
+        if op_c_needs_check {
+            cols.op_c_check = F::ONE;
+            cols.op_c_range_check.populate(event.arg2);
         }
     }
 }

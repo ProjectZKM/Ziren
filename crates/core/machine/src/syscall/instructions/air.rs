@@ -143,9 +143,48 @@ impl SyscallInstrsChip {
         builder.assert_bool(local.is_sys_linux);
         builder.assert_bool(send_to_table.clone());
 
+        // Constrain is_sys_linux bidirectionally to prevent misrouting between
+        // linux and precompile syscall paths.
+        // is_prev_a1_zero.result = 1 iff prev_a_value[1] == 0.
+        // is_sys_linux must be the inverse: 1 iff prev_a_value[1] != 0.
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            local.prev_a_value[1].into(),
+            local.is_prev_a1_zero,
+            local.is_real.into(),
+        );
+        builder
+            .when(local.is_real)
+            .assert_eq(local.is_sys_linux, AB::Expr::one() - local.is_prev_a1_zero.result);
+
         // SAFETY: Assert that for non real row, the send_to_table value is 0 so that the `send_syscall`
         // interaction is not activated.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table.clone());
+
+        // KoalaBear range checks on op_b and op_c, activated by stored flags.
+        // op_b_check = 1 when send_to_table || is_halt (covers both syscall bridge and exit code).
+        // op_c_check = 1 when send_to_table || is_commit_deferred_proofs (covers bridge and digest).
+        builder.assert_bool(local.op_b_check);
+        builder.assert_bool(local.op_c_check);
+        builder.when(send_to_table.clone()).assert_one(local.op_b_check);
+        builder.when(local.is_halt).assert_one(local.op_b_check);
+        builder.when(send_to_table.clone()).assert_one(local.op_c_check);
+        builder.when(local.is_commit_deferred_proofs.result).assert_one(local.op_c_check);
+        builder.when_not(local.is_real).assert_zero(local.op_b_check);
+        builder.when_not(local.is_real).assert_zero(local.op_c_check);
+
+        KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
+            builder,
+            local.op_b_value,
+            local.op_b_range_check,
+            local.op_b_check.into(),
+        );
+        KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
+            builder,
+            local.op_c_value,
+            local.op_c_range_check,
+            local.op_c_check.into(),
+        );
 
         builder.send_syscall(
             local.shard,
@@ -154,6 +193,18 @@ impl SyscallInstrsChip {
             local.op_b_value.reduce::<AB>(),
             local.op_c_value.reduce::<AB>(),
             send_to_table,
+            LookupScope::Local,
+        );
+
+        // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
+        // with SysLinuxChip via SyscallChip bridge.
+        builder.send_syscall_result(
+            local.shard,
+            local.clk,
+            local.op_a_value,
+            local.op_b_value,
+            local.op_c_value,
+            local.is_sys_linux,
             LookupScope::Local,
         );
 
@@ -207,39 +258,16 @@ impl SyscallInstrsChip {
             .when_not(is_enter_unconstrained + is_hint_len + local.is_sys_linux)
             .assert_word_eq(local.op_a_value, local.prev_a_value);
 
-        // when the syscall is not LINUX SYSCALL， prev op_a[1] is zero
-        builder.when(local.is_real).when_not(local.is_sys_linux).assert_zero(local.prev_a_value[1]);
+        // is_sys_linux is now bidirectionally constrained via is_prev_a1_zero above.
+        // When is_sys_linux = 0, prev_a[1] = 0 follows from the IsZero constraint.
         // SAFETY: This leaves the case where syscall is `HINT_LEN`.
         // In this case, `op_a`'s value can be arbitrary, but it still must be a valid word if `is_real = 1`.
         // This is due to `op_a_val` being connected to the CpuChip.
         // In the CpuChip, `op_a_val` is constrained to be a valid word via `eval_registers`.
         // As this is a syscall for HINT, the value itself being arbitrary is fine, as long as it is a valid word.
 
-        // Verify value of syscall_range_check_operand column.
-        // SAFETY: If `is_real = 0`, then `syscall_range_check_operand = 0`.
-        // If `is_real = 1`, then `is_halt_check` and `is_commit_deferred_proofs` are constrained.
-        // The two results will both be boolean due to `IsZeroOperation`, and both cannot be `1` at the same time.
-        // Both of them being `1` will require `syscall_id` being `HALT` and `COMMIT_DEFERRED_PROOFS` at the same time.
-        // This implies that if `is_real = 1`, `syscall_range_check_operand` will be correct, and boolean.
-        builder.assert_eq(
-            local.syscall_range_check_operand,
-            local.is_real
-                * (local.is_halt_check.result
-                    + local.is_exit_group_check.result
-                    + local.is_commit_deferred_proofs.result),
-        );
-
-        // Koalabear range check the operand_to_check word.
-        // SAFETY: `syscall_range_check_operand` is boolean, and no interactions can be made in padding rows.
-        // `operand_to_check` is already known to be a valid word, as it is either
-        // - `op_b_val` in the case of `HALT`
-        // - `op_c_val` in the case of `COMMIT_DEFERRED_PROOFS`
-        KoalaBearWordRangeChecker::<AB::F>::range_check::<AB>(
-            builder,
-            local.operand_to_check,
-            local.operand_range_check_cols,
-            local.syscall_range_check_operand.into(),
-        );
+        // The old operand_range_check is now subsumed by op_b_range_check (for halt)
+        // and op_c_range_check (for commit_deferred_proofs).
     }
 
     /// Constraints related to the COMMIT and COMMIT_DEFERRED_PROOFS instructions.
@@ -304,12 +332,7 @@ impl SyscallInstrsChip {
         let expected_deferred_proofs_digest_element =
             builder.index_array(&deferred_proofs_digest, &local.index_bitmap);
 
-        // Verify that the operand that was range checked is digest_word.
-        builder
-            .when(local.is_real)
-            .when(is_commit_deferred_proofs.clone())
-            .assert_word_eq(digest_word, local.operand_to_check);
-
+        // op_c_value is KoalaBear range-checked via op_c_check (activated by is_commit_deferred_proofs).
         builder
             .when(local.is_real)
             .when(is_commit_deferred_proofs.clone())
@@ -326,9 +349,7 @@ impl SyscallInstrsChip {
         // `next_pc` is constrained for the case where `is_halt` is true to be `0`
         builder.when(local.is_halt).assert_zero(local.next_pc);
 
-        // Verify that the operand that was range checked is op_b.
-        builder.when(local.is_halt).assert_word_eq(local.op_b_value, local.operand_to_check);
-
+        // op_b_value is KoalaBear range-checked via op_b_check (activated by is_halt).
         // Check that the `op_b_value` reduced is the `public_values.exit_code`.
         builder
             .when(local.is_halt)

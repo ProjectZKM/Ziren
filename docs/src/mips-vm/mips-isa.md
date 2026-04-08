@@ -222,7 +222,8 @@ The support instructions are as follows:
 | SYS_MMAP = 4210,                       | Executes the `Linux MMAP API` precompile.          |
 | SYS_MMAP2 = 4090,                      | Executes the `Linux MMAP2 API` precompile.         |
 | SYS_BRK = 4045,                        | Executes the `Linux BRK API` precompile.           |
-| SYS_MMAP2 = 4246,                      | Executes the `Linux EXIT GROUP API` precompile.    |
+| SYS_CLONE = 4120,                      | Executes the `Linux CLONE API` precompile.         |
+| SYS_EXIT_GROUP = 4246,                 | Executes the `Linux EXIT GROUP API` precompile.    |
 | SYS_READ = 4003,                       | Executes the `Linux READ API` precompile.          |
 | SYS_WRITE = 4004,                      | Executes the `Linux WRITE API` precompile.         |
 | SYS_FCNTL = 4055,                      | Executes the `Linux FCNTL API` precompile.         |

@@ -41,6 +41,10 @@ pub enum LookupKind {
 
     /// Lookup with the global table.
     Global = 7,
+
+    /// Lookup connecting syscall result and argument bytes between SyscallInstrsChip,
+    /// SyscallChip, and SysLinuxChip.
+    SyscallResult = 8,
 }
 
 impl LookupKind {
@@ -55,6 +59,7 @@ impl LookupKind {
             LookupKind::Range,
             LookupKind::Syscall,
             LookupKind::Global,
+            LookupKind::SyscallResult,
         ]
     }
 }
@@ -95,6 +100,7 @@ impl Display for LookupKind {
             LookupKind::Range => write!(f, "Range"),
             LookupKind::Syscall => write!(f, "Syscall"),
             LookupKind::Global => write!(f, "Global"),
+            LookupKind::SyscallResult => write!(f, "SyscallResult"),
         }
     }
 }
