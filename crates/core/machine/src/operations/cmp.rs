@@ -156,7 +156,7 @@ impl<F: Field> GtColsBytes<F> {
             is_real,
         );
 
-        // ProjectZKM/Ziren#488:14: Complementary lookup to rule out equal comparison bytes.
+        // Complementary lookup to rule out equal comparison bytes.
         // When a flag is set, the selected bytes must satisfy either a > b or a < b (not a == b).
         // LTU(1 - result, a, b) proves the reverse direction.
         // Use has_comparison (degree-1 column) instead of sum_flags * is_real to keep

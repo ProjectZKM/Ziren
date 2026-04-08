@@ -158,14 +158,14 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             let (a1_lo, a1_hi) = Self::pack_result_halves(event.arg1);
             let (a2_lo, a2_hi) = Self::pack_result_halves(event.arg2);
 
-            // Global #1: argument linkage (M2 fix).
+            // Cross-shard argument linkage using collision-resistant half-word packing.
             output.global_lookup_events.push(GlobalLookupEvent {
                 message: [event.shard, event.clk, event.syscall_id, a1_lo, a1_hi, a2_lo, a2_hi],
                 is_receive,
                 kind: LookupKind::Syscall as u8,
             });
 
-            // Global #2: result linkage (M1 fix).
+            // Cross-shard result linkage to ensure both shards agree on the return value.
             output.global_lookup_events.push(GlobalLookupEvent {
                 message: [event.shard, event.clk, event.syscall_id, rlo, rhi, 0, 0],
                 is_receive,
@@ -379,7 +379,8 @@ where
                     LookupScope::Local,
                 );
 
-                // Global lookup #1: collision-resistant argument linkage (M2 fix).
+                // Cross-shard argument linkage using half-word packed args to prevent
+                // reduce() collisions across shards.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -400,8 +401,8 @@ where
                     LookupScope::Local,
                 );
 
-                // Global lookup #2: cross-shard result linkage (M1 fix).
-                // Ensures Core and Precompile shards agree on the syscall result.
+                // Cross-shard result linkage ensuring both Core and Precompile shards
+                // agree on the syscall return value.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -446,7 +447,8 @@ where
                     LookupScope::Local,
                 );
 
-                // Global lookup #1: collision-resistant argument linkage (M2 fix).
+                // Cross-shard argument linkage using half-word packed args to prevent
+                // reduce() collisions across shards.
                 builder.send(
                     AirLookup::new(
                         vec![
@@ -467,7 +469,7 @@ where
                     LookupScope::Local,
                 );
 
-                // Global lookup #2: cross-shard result linkage (M1 fix).
+                // Cross-shard result linkage ensuring both shards agree on the return value.
                 builder.send(
                     AirLookup::new(
                         vec![
