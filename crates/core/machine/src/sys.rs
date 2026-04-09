@@ -36,9 +36,12 @@ extern "C-unwind" {
         is_receive: bool,
         cols: &mut MemoryInitCols<KoalaBear>,
     );
-    pub fn syscall_event_to_row_koalabear(
+    pub fn syscall_core_event_to_row_koalabear(
         event: &SyscallEvent,
-        is_receive: bool,
+        cols: &mut SyscallCols<KoalaBear>,
+    );
+    pub fn syscall_precompile_event_to_row_koalabear(
+        event: &SyscallEvent,
         cols: &mut SyscallCols<KoalaBear>,
     );
     pub fn mem_instrs_event_to_row_koalabear(
