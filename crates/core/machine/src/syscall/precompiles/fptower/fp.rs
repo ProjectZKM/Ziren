@@ -158,6 +158,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
+            <FpOpChip<P> as MachineAir<F>>::name(&self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

@@ -190,6 +190,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
                 &mut rows,
                 || [F::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS],
                 self.fixed_log2_rows,
+                <FriFoldChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
             );
         }
 
@@ -246,6 +247,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
                 &mut rows,
                 || [KoalaBear::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS],
                 self.fixed_log2_rows,
+                <FriFoldChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
             );
         }
 
@@ -262,7 +264,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.fri_fold_events;
-        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+        Some(next_power_of_two(
+            events.len(),
+            input.fixed_log2_rows(self),
+            <FriFoldChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]

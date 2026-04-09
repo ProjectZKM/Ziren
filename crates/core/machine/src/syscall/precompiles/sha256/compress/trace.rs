@@ -53,6 +53,7 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             &mut rows,
             || [F::ZERO; NUM_SHA_COMPRESS_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <ShaCompressChip as MachineAir<F>>::name(&self).as_str(),
         );
 
         // Set the octet_num and octet columns for the padded rows.

@@ -104,6 +104,15 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         "Lt".to_string()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.lt_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <LtChip as MachineAir<F>>::name(&self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn picus_info(&self) -> PicusInfo {
         LtCols::<u8>::picus_info()
     }
@@ -114,11 +123,9 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
-        let nb_rows = input.lt_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <LtChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_LT_COLS);
-        let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max((input.lt_events.len() + 1) / num_cpus::get(), 1);
 
         values.chunks_mut(chunk_size * NUM_LT_COLS).enumerate().par_bridge().for_each(
             |(i, rows)| {
@@ -126,7 +133,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut LtCols<F> = row.borrow_mut();
 
-                    if idx < nb_rows {
+                    if idx < input.lt_events.len() {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.lt_events[idx];
                         self.event_to_row(event, cols, &mut byte_lookup_events);

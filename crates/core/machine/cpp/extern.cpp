@@ -31,9 +31,110 @@ extern void memory_global_event_to_row_koalabear(const MemoryInitializeFinalizeE
     memory_global::event_to_row<kb31_t, kb31_septic_extension_t>(event, is_receive, cols_kb31);
 }
 
-extern void syscall_event_to_row_koalabear(const SyscallEvent* event, const bool is_receive, SyscallCols<KoalaBearP3>* cols) {
+extern void syscall_core_event_to_row_koalabear(const SyscallEvent* event, SyscallCols<KoalaBearP3>* cols) {
     SyscallCols<kb31_t>* cols_kb31 = reinterpret_cast<SyscallCols<kb31_t>*>(cols);
-    syscall::event_to_row<kb31_t, kb31_septic_extension_t>(event, is_receive, cols_kb31);
+    syscall::core_event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void syscall_precompile_event_to_row_koalabear(const SyscallEvent* event, SyscallCols<KoalaBearP3>* cols) {
+    SyscallCols<kb31_t>* cols_kb31 = reinterpret_cast<SyscallCols<kb31_t>*>(cols);
+    syscall::precompile_event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void lt_event_to_row_koalabear(
+    const AluEvent* event,
+    LtCols<KoalaBearP3>* cols
+) {
+    LtCols<kb31_t>* cols_kb31 = reinterpret_cast<LtCols<kb31_t>*>(cols);
+    lt::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void bitwise_event_to_row_koalabear(
+    const AluEvent* event,
+    BitwiseCols<KoalaBearP3>* cols
+) {
+    BitwiseCols<kb31_t>* cols_kb31 = reinterpret_cast<BitwiseCols<kb31_t>*>(cols);
+    bitwise::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void clo_clz_event_to_row_koalabear(
+    const AluEvent* event,
+    CloClzCols<KoalaBearP3>* cols
+) {
+    CloClzCols<kb31_t>* cols_kb31 = reinterpret_cast<CloClzCols<kb31_t>*>(cols);
+    clo_clz::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void branch_event_to_row_koalabear(
+    const BranchEvent* event,
+    BranchColumns<KoalaBearP3>* cols
+) {
+    BranchColumns<kb31_t>* cols_kb31 = reinterpret_cast<BranchColumns<kb31_t>*>(cols);
+    branch::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void jump_event_to_row_koalabear(
+    const JumpEvent* event,
+    JumpColumns<KoalaBearP3>* cols
+) {
+    JumpColumns<kb31_t>* cols_kb31 = reinterpret_cast<JumpColumns<kb31_t>*>(cols);
+    jump::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void mem_instrs_event_to_row_koalabear(
+    const MemInstrEvent* event,
+    MemoryInstructionsColumns<KoalaBearP3>* cols
+) {
+    MemoryInstructionsColumns<kb31_t>* cols_kb31 = reinterpret_cast<MemoryInstructionsColumns<kb31_t>*>(cols);
+    memory_instrs::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void misc_instrs_event_to_row_koalabear(
+    const MiscEvent* event,
+    MiscInstrColumns<KoalaBearP3>* cols
+) {
+    MiscInstrColumns<kb31_t>* cols_kb31 = reinterpret_cast<MiscInstrColumns<kb31_t>*>(cols);
+    misc_instrs::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void mov_cond_event_to_row_koalabear(
+    const MovCondEvent* event,
+    MovCondCols<KoalaBearP3>* cols
+) {
+    MovCondCols<kb31_t>* cols_kb31 = reinterpret_cast<MovCondCols<kb31_t>*>(cols);
+    mov_cond::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void shift_left_event_to_row_koalabear(
+    const AluEvent* event,
+    ShiftLeftCols<KoalaBearP3>* cols
+) {
+    ShiftLeftCols<kb31_t>* cols_kb31 = reinterpret_cast<ShiftLeftCols<kb31_t>*>(cols);
+    shift_left::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void shift_right_event_to_row_koalabear(
+    const AluEvent* event,
+    ShiftRightCols<KoalaBearP3>* cols
+) {
+    ShiftRightCols<kb31_t>* cols_kb31 = reinterpret_cast<ShiftRightCols<kb31_t>*>(cols);
+    shift_right::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void div_rem_event_to_row_koalabear(
+    const CompAluEvent* event,
+    DivRemCols<KoalaBearP3>* cols
+) {
+    DivRemCols<kb31_t>* cols_kb31 = reinterpret_cast<DivRemCols<kb31_t>*>(cols);
+    div_rem::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
+extern void syscall_instrs_event_to_row_koalabear(
+    const SyscallEvent* event,
+    SyscallInstrColumns<KoalaBearP3>* cols
+) {
+    SyscallInstrColumns<kb31_t>* cols_kb31 = reinterpret_cast<SyscallInstrColumns<kb31_t>*>(cols);
+    syscall_instrs::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
 } // namespace zkm_core_machine_sys

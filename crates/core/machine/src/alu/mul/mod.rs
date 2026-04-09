@@ -61,13 +61,13 @@ pub const NUM_MUL_COLS: usize = size_of::<MulCols<u8>>();
 
 /// The number of digits in the product is at most the sum of the number of digits in the
 /// multiplicands.
-const PRODUCT_SIZE: usize = 2 * WORD_SIZE;
+pub const PRODUCT_SIZE: usize = 8;
 
 /// The number of bits in a byte.
 const BYTE_SIZE: usize = 8;
 
 /// The mask for a byte.
-const BYTE_MASK: u8 = 0xff;
+pub const BYTE_MASK: u8 = 0xff;
 
 /// A chip that implements multiplication for the opcode MUL, MULT and MULTU.
 #[derive(Default)]
@@ -153,16 +153,24 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         MulCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.mul_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <MulChip as MachineAir<F>>::name(&self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
-        let nb_rows = input.mul_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <MulChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
+        let nb_rows = input.mul_events.len();
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
         values.chunks_mut(chunk_size * NUM_MUL_COLS).enumerate().par_bridge().for_each(

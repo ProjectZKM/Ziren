@@ -19,7 +19,10 @@ use zkm_stark::{
     Word,
 };
 
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    utils::{next_power_of_two, pad_rows_fixed},
+    CoreChipError,
+};
 
 /// The number of main trace columns for `BitwiseChip`.
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
@@ -77,6 +80,15 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         BitwiseCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.bitwise_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <BitwiseChip as MachineAir<F>>::name(&self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -99,6 +111,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
             &mut rows,
             || [F::ZERO; NUM_BITWISE_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <BitwiseChip as MachineAir<F>>::name(&self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

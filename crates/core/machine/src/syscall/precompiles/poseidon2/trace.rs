@@ -52,7 +52,12 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         let mut dummy_row = [F::ZERO; NUM_COLS];
         let dummy_cols: &mut Poseidon2MemCols<F> = dummy_row.as_mut_slice().borrow_mut();
         dummy_cols.poseidon2 = populate_perm_deg3([F::ZERO; WIDTH], None);
-        pad_rows_fixed(&mut rows, || dummy_row, input.fixed_log2_rows::<F, _>(self));
+        pad_rows_fixed(
+            &mut rows,
+            || dummy_row,
+            input.fixed_log2_rows::<F, _>(self),
+            <Poseidon2PermuteChip as MachineAir<F>>::name(&self).as_str(),
+        );
 
         // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_COLS))

@@ -277,6 +277,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
                 Ok(row)
             },
             input.fixed_log2_rows::<F, _>(self),
+            <WeierstrassDecompressChip<E> as MachineAir<F>>::name(&self).as_str(),
         )?;
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), width))

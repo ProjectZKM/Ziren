@@ -73,7 +73,11 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
         // Generate the trace rows for each event.
         let nb_rows = program.instructions.len();
         let size_log2 = program.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = next_power_of_two(
+            nb_rows,
+            size_log2,
+            <ProgramChip as MachineAir<F>>::name(&self).as_str(),
+        );
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_PROGRAM_PREPROCESSED_COLS);
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
@@ -144,6 +148,7 @@ impl<F: PrimeField32> MachineAir<F> for ProgramChip {
             &mut rows,
             || [F::ZERO; NUM_PROGRAM_MULT_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <ProgramChip as MachineAir<F>>::name(&self).as_str(),
         );
 
         Ok(RowMajorMatrix::new(

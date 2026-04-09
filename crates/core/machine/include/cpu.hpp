@@ -11,7 +11,9 @@
 namespace zkm_core_machine_sys::cpu {
 
 template<class F>
-__ZKM_HOSTDEV__ void populate_shard_clk(const CpuEventFfi& event, const uint32_t shard, CpuCols<F>& cols) {
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_shard_clk(const CpuEventFfi& event,
+                                                       const uint32_t shard,
+                                                       CpuCols<F>& cols) {
     cols.shard = F::from_canonical_u32(shard);
 
     const uint16_t clk_16bit_limb = (uint16_t)(event.clk & 0xffff);
@@ -21,7 +23,7 @@ __ZKM_HOSTDEV__ void populate_shard_clk(const CpuEventFfi& event, const uint32_t
 }
 
 template<class F>
-__ZKM_HOSTDEV__ void
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void
 populate_instruction(InstructionCols<F>& self, const InstructionFfi& instruction) {
     self.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
     self.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);

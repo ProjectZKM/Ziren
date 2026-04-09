@@ -86,6 +86,7 @@ pub struct MemoryWriteRecord {
 /// This enum represents the different types of memory records that can be stored in the memory
 /// event such as reads and writes.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(C)]
 pub enum MemoryRecordEnum {
     /// Read.
     Read(MemoryReadRecord),
