@@ -8,7 +8,7 @@
 namespace zkm_core_machine_sys::memory {
 
 template<class F>
-__ZKM_HOSTDEV__ void populate_access(
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_access(
     MemoryAccessCols<F>& self,
     const MemoryRecord& current_record,
     const MemoryRecord& prev_record
@@ -34,7 +34,7 @@ __ZKM_HOSTDEV__ void populate_access(
 }
 
 template<class F>
-__ZKM_HOSTDEV__ void
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void
 populate_read(MemoryReadCols<F>& self, const MemoryReadRecord& record) {
     const MemoryRecord current_record = {
         .shard = record.shard,
@@ -50,7 +50,7 @@ populate_read(MemoryReadCols<F>& self, const MemoryReadRecord& record) {
 }
 
 template<class F>
-__ZKM_HOSTDEV__ void populate_read_write(
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_read_write(
     MemoryReadWriteCols<F>& self,
     const OptionMemoryRecordEnum& record
 ) {
@@ -94,7 +94,7 @@ __ZKM_HOSTDEV__ void populate_read_write(
 }
 
 template<class F>
-__ZKM_HOSTDEV__ void populate_read_write_v2(
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_read_write_v2(
     MemoryReadWriteCols<F>& self,
     const MemoryRecordEnum& record
 ) {

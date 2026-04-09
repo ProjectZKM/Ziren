@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vector>
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"

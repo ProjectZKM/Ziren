@@ -8,7 +8,7 @@
 
 namespace zkm_core_machine_sys::misc_instrs {
     template<class F>
-    __ZKM_HOSTDEV__ void populate_sext(const MiscEvent& event, MiscInstrColumns<F>& cols) {
+    __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_sext(const MiscEvent& event, MiscInstrColumns<F>& cols) {
         if (!(event.opcode == Opcode::SEXT || event.opcode == Opcode::TEQ)) {
             return;
         }
@@ -34,7 +34,7 @@ namespace zkm_core_machine_sys::misc_instrs {
     }
 
     template<class F>
-    __ZKM_HOSTDEV__ void populate_maddsub(const MiscEvent& event, MiscInstrColumns<F>& cols) {
+    __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_maddsub(const MiscEvent& event, MiscInstrColumns<F>& cols) {
         if (!(event.opcode == Opcode::MADDU || event.opcode == Opcode::MSUBU || event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB)) {
             return;
         }
@@ -77,7 +77,7 @@ namespace zkm_core_machine_sys::misc_instrs {
     }
 
     template<class F>
-    __ZKM_HOSTDEV__ void populate_ext(const MiscEvent& event, MiscInstrColumns<F>& cols) {
+    __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_ext(const MiscEvent& event, MiscInstrColumns<F>& cols) {
         if (!(event.opcode == Opcode::EXT)) {
             return;
         }
@@ -90,7 +90,7 @@ namespace zkm_core_machine_sys::misc_instrs {
     }
 
     template<class F>
-    __ZKM_HOSTDEV__ void populate_ins(const MiscEvent& event, MiscInstrColumns<F>& cols) {
+    __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_ins(const MiscEvent& event, MiscInstrColumns<F>& cols) {
         if (!(event.opcode == Opcode::INS)) {
             return;
         }

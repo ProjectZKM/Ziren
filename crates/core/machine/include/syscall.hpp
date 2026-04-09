@@ -6,7 +6,7 @@
 
 namespace zkm_core_machine_sys::syscall {
     template<class F>
-    __ZKM_HOSTDEV__ void event_to_row(const SyscallEvent& event, SyscallCols<F>& cols) {
+    __ZKM_HOSTDEV__ __ZKM_INLINE__ void event_to_row(const SyscallEvent& event, SyscallCols<F>& cols) {
         cols.shard = F::from_canonical_u32(event.shard);
         cols.clk = F::from_canonical_u32(event.clk);
         cols.syscall_id = F::from_canonical_u32(event.syscall_id);
@@ -23,7 +23,9 @@ namespace zkm_core_machine_sys::syscall {
     }
 
     template<class F>
-    __ZKM_HOSTDEV__ void event_to_row_result(bool is_linux, uint32_t value, SyscallCols<F>& cols) {
+    __ZKM_HOSTDEV__ __ZKM_INLINE__ void event_to_row_result(bool is_linux,
+                                                            uint32_t value,
+                                                            SyscallCols<F>& cols) {
         if (is_linux) {
             auto valueb = u32_to_le_bytes(value);
             cols.result_lo = F::from_canonical_u32(valueb[0] + (valueb[1] << 8));
