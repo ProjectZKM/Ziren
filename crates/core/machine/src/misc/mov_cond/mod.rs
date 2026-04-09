@@ -80,8 +80,11 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows =
-            next_power_of_two(input.movcond_events.len(), input.fixed_log2_rows::<F, _>(self));
+        let nb_rows = next_power_of_two(
+            input.movcond_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <MovCondChip as MachineAir<F>>::name(&self).as_str(),
+        );
         Some(nb_rows)
     }
 

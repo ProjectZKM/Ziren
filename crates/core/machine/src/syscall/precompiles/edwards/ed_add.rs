@@ -152,6 +152,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> MachineAir<F> for Ed
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
+            <EdAddAssignChip<E> as MachineAir<F>>::name(&self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

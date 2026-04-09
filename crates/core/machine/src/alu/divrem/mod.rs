@@ -219,8 +219,11 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows =
-            next_power_of_two(input.divrem_events.len(), input.fixed_log2_rows::<F, _>(self));
+        let nb_rows = next_power_of_two(
+            input.divrem_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <DivRemChip as MachineAir<F>>::name(&self).as_str(),
+        );
         Some(nb_rows)
     }
 
@@ -364,6 +367,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             &mut rows,
             || [F::ZERO; NUM_DIVREM_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <DivRemChip as MachineAir<F>>::name(&self).as_str(),
         );
         // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS))

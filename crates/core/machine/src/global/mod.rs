@@ -103,7 +103,11 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
         let events = &input.global_lookup_events;
         let nb_rows = events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = next_power_of_two(
+            nb_rows,
+            size_log2,
+            <GlobalChip as MachineAir<F>>::name(&self).as_str(),
+        );
         Some(padded_nb_rows)
     }
 
