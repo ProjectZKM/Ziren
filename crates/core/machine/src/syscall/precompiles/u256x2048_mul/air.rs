@@ -228,7 +228,7 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
-            <U256x2048MulChip as MachineAir<F>>::name(&self).as_str(),
+            <U256x2048MulChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

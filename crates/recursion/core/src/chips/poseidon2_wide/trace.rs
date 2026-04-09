@@ -70,7 +70,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             None => Some(next_power_of_two(
                 events.len(),
                 None,
-                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
             )),
         }
     }
@@ -185,7 +185,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
             None => next_power_of_two(
                 instrs_len,
                 None,
-                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
             ),
         })
     }

@@ -137,7 +137,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             &mut rows,
             || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
-            <ExpReverseBitsLenChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+            <ExpReverseBitsLenChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         );
 
         let trace = RowMajorMatrix::new(
@@ -199,7 +199,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             &mut rows,
             || [KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
-            <ExpReverseBitsLenChip<DEGREE> as MachineAir<KoalaBear>>::name(&self).as_str(),
+            <ExpReverseBitsLenChip<DEGREE> as MachineAir<KoalaBear>>::name(self).as_str(),
         );
 
         let trace = RowMajorMatrix::new(
@@ -255,7 +255,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             &mut overall_rows,
             || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
             input.fixed_log2_rows(self),
-            <ExpReverseBitsLenChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+            <ExpReverseBitsLenChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
@@ -327,7 +327,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
             &mut overall_rows,
             || [KoalaBear::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
             input.fixed_log2_rows(self),
-            <ExpReverseBitsLenChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+            <ExpReverseBitsLenChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

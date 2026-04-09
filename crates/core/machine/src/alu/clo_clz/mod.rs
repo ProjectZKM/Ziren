@@ -89,7 +89,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         let nb_rows = next_power_of_two(
             input.cloclz_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <CloClzChip as MachineAir<F>>::name(&self).as_str(),
+            <CloClzChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -138,7 +138,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             &mut rows,
             || [F::ZERO; NUM_CLOCLZ_COLS],
             input.fixed_log2_rows::<F, _>(self),
-            <CloClzChip as MachineAir<F>>::name(&self).as_str(),
+            <CloClzChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

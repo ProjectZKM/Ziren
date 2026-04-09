@@ -37,7 +37,7 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
         let nb_rows = next_power_of_two(
             input.jump_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <JumpChip as MachineAir<F>>::name(&self).as_str(),
+            <JumpChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }

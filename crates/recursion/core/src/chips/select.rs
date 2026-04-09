@@ -62,7 +62,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
             None => next_power_of_two(
                 instrs_len,
                 None,
-                <SelectChip as MachineAir<F>>::name(&self).as_str(),
+                <SelectChip as MachineAir<F>>::name(self).as_str(),
             ),
         })
     }
@@ -156,7 +156,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         Some(next_power_of_two(
             events.len(),
             input.fixed_log2_rows(self),
-            <SelectChip as MachineAir<F>>::name(&self).as_str(),
+            <SelectChip as MachineAir<F>>::name(self).as_str(),
         ))
     }
 

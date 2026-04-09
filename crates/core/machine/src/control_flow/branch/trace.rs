@@ -37,7 +37,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
         let nb_rows = next_power_of_two(
             input.branch_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <BranchChip as MachineAir<F>>::name(&self).as_str(),
+            <BranchChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }

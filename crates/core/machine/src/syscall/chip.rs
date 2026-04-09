@@ -196,7 +196,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         let padded_nb_rows = next_power_of_two(
             nb_rows,
             size_log2,
-            <SyscallChip as MachineAir<F>>::name(&self).as_str(),
+            <SyscallChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(padded_nb_rows)
     }

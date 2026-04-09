@@ -56,7 +56,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
             &mut rows,
             || dummy_row,
             input.fixed_log2_rows::<F, _>(self),
-            <Poseidon2PermuteChip as MachineAir<F>>::name(&self).as_str(),
+            <Poseidon2PermuteChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

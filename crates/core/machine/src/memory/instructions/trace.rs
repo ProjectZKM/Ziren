@@ -41,7 +41,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryInstructionsChip {
         let nb_rows = next_power_of_two(
             input.memory_instr_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <MemoryInstructionsChip as MachineAir<F>>::name(&self).as_str(),
+            <MemoryInstructionsChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }

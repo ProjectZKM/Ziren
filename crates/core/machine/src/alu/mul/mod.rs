@@ -157,7 +157,7 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         let nb_rows = next_power_of_two(
             input.mul_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <MulChip as MachineAir<F>>::name(&self).as_str(),
+            <MulChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }

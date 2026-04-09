@@ -84,7 +84,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         let nb_rows = next_power_of_two(
             input.bitwise_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <BitwiseChip as MachineAir<F>>::name(&self).as_str(),
+            <BitwiseChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }
@@ -111,7 +111,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
             &mut rows,
             || [F::ZERO; NUM_BITWISE_COLS],
             input.fixed_log2_rows::<F, _>(self),
-            <BitwiseChip as MachineAir<F>>::name(&self).as_str(),
+            <BitwiseChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

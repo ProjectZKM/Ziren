@@ -83,7 +83,7 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         let nb_rows = next_power_of_two(
             input.movcond_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <MovCondChip as MachineAir<F>>::name(&self).as_str(),
+            <MovCondChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }

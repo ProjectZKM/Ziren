@@ -71,7 +71,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         Some(next_power_of_two(
             events.len() * (OUTPUT_ROUND_IDX + 1),
             input.fixed_log2_rows(self),
-            <Poseidon2SkinnyChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+            <Poseidon2SkinnyChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         ))
     }
 
@@ -201,7 +201,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         Some(next_power_of_two(
             instrs_len,
             program.fixed_log2_rows(self),
-            <Poseidon2SkinnyChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+            <Poseidon2SkinnyChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         ))
     }
 

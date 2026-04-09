@@ -243,7 +243,7 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
                 Ok(row)
             },
             input.fixed_log2_rows::<F, _>(self),
-            <EdDecompressChip<E> as MachineAir<F>>::name(&self).as_str(),
+            <EdDecompressChip<E> as MachineAir<F>>::name(self).as_str(),
         )?;
 
         Ok(RowMajorMatrix::new(

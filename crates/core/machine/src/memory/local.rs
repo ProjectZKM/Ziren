@@ -141,7 +141,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryLocalChip {
         Some(next_power_of_two(
             nb_rows,
             size_log2,
-            <MemoryLocalChip as MachineAir<F>>::name(&self).as_str(),
+            <MemoryLocalChip as MachineAir<F>>::name(self).as_str(),
         ))
     }
 

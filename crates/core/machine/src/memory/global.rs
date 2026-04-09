@@ -107,7 +107,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         let padded_nb_rows = next_power_of_two(
             nb_rows,
             size_log2,
-            <MemoryGlobalChip as MachineAir<F>>::name(&self).as_str(),
+            <MemoryGlobalChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(padded_nb_rows)
     }

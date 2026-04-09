@@ -37,7 +37,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
         let nb_rows = next_power_of_two(
             input.syscall_events.len(),
             input.fixed_log2_rows::<F, _>(self),
-            <SyscallInstrsChip as MachineAir<F>>::name(&self).as_str(),
+            <SyscallInstrsChip as MachineAir<F>>::name(self).as_str(),
         );
         Some(nb_rows)
     }

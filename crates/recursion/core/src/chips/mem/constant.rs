@@ -89,7 +89,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             &mut rows,
             || [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS],
             program.fixed_log2_rows(self),
-            <MemoryChip<F> as MachineAir<F>>::name(&self).as_str(),
+            <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
@@ -129,7 +129,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             &mut rows,
             || [F::ZERO; NUM_MEM_INIT_COLS],
             input.fixed_log2_rows(self),
-            <MemoryChip<F> as MachineAir<F>>::name(&self).as_str(),
+            <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

@@ -190,7 +190,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
                 &mut rows,
                 || [F::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS],
                 self.fixed_log2_rows,
-                <FriFoldChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+                <FriFoldChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
             );
         }
 
@@ -247,7 +247,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
                 &mut rows,
                 || [KoalaBear::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS],
                 self.fixed_log2_rows,
-                <FriFoldChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+                <FriFoldChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
             );
         }
 
@@ -267,7 +267,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         Some(next_power_of_two(
             events.len(),
             input.fixed_log2_rows(self),
-            <FriFoldChip<DEGREE> as MachineAir<F>>::name(&self).as_str(),
+            <FriFoldChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         ))
     }
 

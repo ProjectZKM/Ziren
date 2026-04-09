@@ -201,7 +201,7 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
-            <Uint256MulChip as MachineAir<F>>::name(&self).as_str(),
+            <Uint256MulChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
