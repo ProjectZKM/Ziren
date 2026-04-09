@@ -29,6 +29,16 @@ namespace zkm_core_machine_sys::syscall_instrs {
 
         cols.is_sys_linux = F::from_bool((event.a_record.prev_value & 0x0ff00u) != 0);
 
+        auto prev_a_bytes = u32_to_le_bytes(event.a_record.prev_value);
+        bool send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
+        bool is_halt_val = cols.is_halt == F::one();
+
+        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
+        populate_is_zero_operation(
+            cols.is_prev_a1_zero,
+            F::from_canonical_u8(prev_a_bytes[1])
+        );
+
         // Populate `is_enter_unconstrained`.
         populate_is_zero_operation(
             cols.is_enter_unconstrained,
@@ -73,18 +83,19 @@ namespace zkm_core_machine_sys::syscall_instrs {
             cols.index_bitmap[event.arg1] = F::one();
         }
 
-        // For halt and commit deferred proofs syscalls, we need to koala bear range check one of
-        // it's operands.
-        if (cols.is_halt == F::one()) {
-            write_word_from_u32_v2<F>(cols.operand_to_check, event.arg1);
-            populate_range_checker(cols.operand_range_check_cols, event.arg1);
-            cols.syscall_range_check_operand = F::one();
-        }
+        // Populate unified KoalaBear range check flags and columns.
+        bool is_commit_deferred =
+            syscall_id == F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT_DEFERRED_PROOFS));
+        bool op_b_needs_check = send_to_table || is_halt_val;
+        bool op_c_needs_check = send_to_table || is_commit_deferred;
 
-        if (syscall_id == F::from_canonical_u32(to_syscall_id(SyscallCode::COMMIT_DEFERRED_PROOFS))) {
-            write_word_from_u32_v2<F>(cols.operand_to_check, event.arg2);
-            populate_range_checker(cols.operand_range_check_cols, event.arg2);
-            cols.syscall_range_check_operand = F::one();
+        if (op_b_needs_check) {
+            cols.op_b_check = F::one();
+            populate_range_checker(cols.op_b_range_check, event.arg1);
+        }
+        if (op_c_needs_check) {
+            cols.op_c_check = F::one();
+            populate_range_checker(cols.op_c_range_check, event.arg2);
         }
     }
 }  // namespace zkm::syscall_instrs
