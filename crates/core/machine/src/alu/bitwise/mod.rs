@@ -13,13 +13,16 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
-    air::{MachineAir, ZKMAirBuilder},
+    air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
 };
 
-use crate::{utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    utils::{next_power_of_two, pad_rows_fixed},
+    CoreChipError,
+};
 
 /// The number of main trace columns for `BitwiseChip`.
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
@@ -29,7 +32,7 @@ pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 pub struct BitwiseChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct BitwiseCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -46,15 +49,19 @@ pub struct BitwiseCols<T> {
     pub c: Word<T>,
 
     /// If the opcode is NOR.
+    #[picus(selector)]
     pub is_nor: T,
 
     /// If the opcode is XOR.
+    #[picus(selector)]
     pub is_xor: T,
 
     // If the opcode is OR.
+    #[picus(selector)]
     pub is_or: T,
 
     /// If the opcode is AND.
+    #[picus(selector)]
     pub is_and: T,
 }
 
@@ -67,6 +74,19 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
 
     fn name(&self) -> String {
         "Bitwise".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        BitwiseCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.bitwise_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <BitwiseChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -91,6 +111,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
             &mut rows,
             || [F::ZERO; NUM_BITWISE_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <BitwiseChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
@@ -229,7 +250,7 @@ where
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
-        builder.assert_bool(local.is_xor);
+        builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real);
     }
 }

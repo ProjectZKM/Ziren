@@ -7,6 +7,7 @@ crates/test-artifacts/guests/Cargo.lock
 bins
 *.s
 *.txt
+*.codex
 
 # Proofs
 **/proof-with-pis.bin

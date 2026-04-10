@@ -87,7 +87,11 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         let fixed_log2_rows = program.fixed_log2_rows(self);
         Some(match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
+            None => next_power_of_two(
+                nb_rows,
+                None,
+                <BaseAluChip as MachineAir<F>>::name(self).as_str(),
+            ),
         })
     }
 
@@ -191,7 +195,11 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         let fixed_log2_rows = input.fixed_log2_rows(self);
         Some(match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
+            None => next_power_of_two(
+                nb_rows,
+                None,
+                <BaseAluChip as MachineAir<F>>::name(self).as_str(),
+            ),
         })
     }
 

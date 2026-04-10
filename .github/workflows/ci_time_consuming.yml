@@ -11,7 +11,7 @@ env:
 jobs:
   test:
     name: Cargo Test
-    runs-on: self-hosted
+    runs-on: self-hosted-cpu
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
@@ -21,3 +21,4 @@ jobs:
           for pkg in zkm-sdk zkm-verifier; do
             RUSTFLAGS="-C target-cpu=native" cargo test -r -p $pkg
           done
+          RUSTFLAGS="-C target-cpu=native" cargo test -r --features imm-wrap-vk --features ark -- --ignored test_verify_groth16_imm_wrap_vk

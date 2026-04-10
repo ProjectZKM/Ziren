@@ -13,10 +13,10 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MovCondEvent},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
-    Word,
+    {PicusInfo, Word},
 };
 
 use crate::{air::WordAirBuilder, CoreChipError};
@@ -33,7 +33,7 @@ pub const NUM_MOV_COND_COLS: usize = size_of::<MovCondCols<u8>>();
 pub struct MovCondChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct MovCondCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -52,12 +52,15 @@ pub struct MovCondCols<T> {
     pub c_eq_0: IsZeroWordOperation<T>,
 
     /// Flag indicating whether the opcode is `MNE`.
+    #[picus(selector)]
     pub is_mne: T,
 
     /// Flag indicating whether the opcode is `MEQ`.
+    #[picus(selector)]
     pub is_meq: T,
 
     /// Flag indicating whether the opcode is `WSBH`.
+    #[picus(selector)]
     pub is_wsbh: T,
 }
 
@@ -72,15 +75,26 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         "MovCond".to_string()
     }
 
+    fn picus_info(&self) -> PicusInfo {
+        MovCondCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.movcond_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <MovCondChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max(input.movcond_events.len() / num_cpus::get(), 1);
-        let nb_rows = input.movcond_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <MovCondChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MOV_COND_COLS);
 
         let blu_events = values
@@ -218,7 +232,7 @@ where
         }
 
         self.eval_wsbh(builder, local);
-
+        builder.when(local.is_wsbh).assert_word_zero(local.prev_a_value);
         builder.assert_bool(local.is_mne);
         builder.assert_bool(local.is_meq);
         builder.assert_bool(local.is_wsbh);

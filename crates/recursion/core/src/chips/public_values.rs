@@ -115,6 +115,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             &mut rows,
             || [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
             Some(PUB_VALUES_LOG_HEIGHT),
+            <PublicValuesChip as MachineAir<F>>::name(self).as_str(),
         );
 
         let trace = RowMajorMatrix::new(
@@ -174,6 +175,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             &mut rows,
             || [KoalaBear::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
             Some(PUB_VALUES_LOG_HEIGHT),
+            <PublicValuesChip as MachineAir<F>>::name(self).as_str(),
         );
 
         let trace = RowMajorMatrix::new(
@@ -216,6 +218,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             &mut rows,
             || [F::ZERO; NUM_PUBLIC_VALUES_COLS],
             Some(PUB_VALUES_LOG_HEIGHT),
+            <PublicValuesChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
@@ -264,6 +267,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
             &mut rows,
             || [KoalaBear::ZERO; NUM_PUBLIC_VALUES_COLS],
             Some(PUB_VALUES_LOG_HEIGHT),
+            <PublicValuesChip as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

@@ -10,10 +10,10 @@ fn main() {
 
     // Execute the normal program.
     let client = ProverClient::new();
-    let (_, _) = client.execute(NORMAL_ELF, ZKMStdin::new()).run().expect("proving failed");
+    let (_, _) = client.execute(NORMAL_ELF, &ZKMStdin::new()).run().expect("proving failed");
 
     // Execute the report program.
-    let (_, report) = client.execute(REPORT_ELF, ZKMStdin::new()).run().expect("proving failed");
+    let (_, report) = client.execute(REPORT_ELF, &ZKMStdin::new()).run().expect("proving failed");
 
     // Get the "setup" cycle count from the report program.
     let setup_cycles = report.cycle_tracker.get("setup").unwrap();

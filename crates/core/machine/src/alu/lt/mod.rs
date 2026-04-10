@@ -13,10 +13,10 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
-    Word,
+    PicusInfo, Word,
 };
 
 use crate::{
@@ -32,7 +32,7 @@ pub const NUM_LT_COLS: usize = size_of::<LtCols<u8>>();
 pub struct LtChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
 #[repr(C)]
 pub struct LtCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -40,9 +40,11 @@ pub struct LtCols<T> {
     pub next_pc: T,
 
     /// If the opcode is SLT.
+    #[picus(selector)]
     pub is_slt: T,
 
     /// If the opcode is SLTU.
+    #[picus(selector)]
     pub is_sltu: T,
 
     /// The output operand.
@@ -81,8 +83,6 @@ pub struct LtCols<T> {
     pub is_sign_eq: T,
     /// The comparison bytes to be looked up.
     pub comparison_bytes: [T; 2],
-    /// Boolean fags to indicate which byte differs between the operands `b_comp`, `c_comp`.
-    pub byte_equality_check: [T; 4],
 }
 
 impl LtCols<u32> {
@@ -104,17 +104,28 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         "Lt".to_string()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.lt_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <LtChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        LtCols::<u8>::picus_info()
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
-        let nb_rows = input.lt_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <LtChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_LT_COLS);
-        let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max((input.lt_events.len() + 1) / num_cpus::get(), 1);
 
         values.chunks_mut(chunk_size * NUM_LT_COLS).enumerate().par_bridge().for_each(
             |(i, rows)| {
@@ -122,7 +133,7 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
                     let idx = i * chunk_size + j;
                     let cols: &mut LtCols<F> = row.borrow_mut();
 
-                    if idx < nb_rows {
+                    if idx < input.lt_events.len() {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.lt_events[idx];
                         self.event_to_row(event, cols, &mut byte_lookup_events);

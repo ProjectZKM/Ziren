@@ -1,14 +1,21 @@
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::events::{
-    AluEvent, CpuEventFfi, MemoryInitializeFinalizeEvent, MemoryLocalEvent, SyscallEvent,
+    AluEvent, BranchEvent, CompAluEvent, CpuEventFfi, JumpEvent, MemInstrEvent,
+    MemoryInitializeFinalizeEvent, MemoryLocalEvent, MiscEvent, MovCondEvent, SyscallEvent,
 };
 use zkm_core_executor::InstructionFfi;
 
+use crate::alu::{BitwiseCols, CloClzCols, DivRemCols};
+use crate::memory::columns::MemoryInstructionsColumns;
 use crate::{
-    alu::AddSubCols,
+    alu::{AddSubCols, LtCols, MulCols, ShiftLeftCols, ShiftRightCols},
+    control_flow::{BranchColumns, JumpColumns},
     cpu::columns::CpuCols,
     memory::{MemoryInitCols, SingleMemoryLocal},
+    misc::columns::MiscInstrColumns,
+    misc::mov_cond::MovCondCols,
     syscall::chip::SyscallCols,
+    syscall::instructions::columns::SyscallInstrColumns,
 };
 
 #[link(name = "zkm-core-machine-sys", kind = "static")]
@@ -29,10 +36,39 @@ extern "C-unwind" {
         is_receive: bool,
         cols: &mut MemoryInitCols<KoalaBear>,
     );
-    pub fn syscall_event_to_row_koalabear(
+    pub fn syscall_core_event_to_row_koalabear(
         event: &SyscallEvent,
-        is_receive: bool,
         cols: &mut SyscallCols<KoalaBear>,
+    );
+    pub fn syscall_precompile_event_to_row_koalabear(
+        event: &SyscallEvent,
+        cols: &mut SyscallCols<KoalaBear>,
+    );
+    pub fn mem_instrs_event_to_row_koalabear(
+        event: &MemInstrEvent,
+        is_receive: bool,
+        cols: &mut MemoryInstructionsColumns<KoalaBear>,
+    );
+    pub fn lt_event_to_row_koalabear(event: &AluEvent, cols: &mut LtCols<KoalaBear>);
+    pub fn bitwise_event_to_row_koalabear(event: &AluEvent, cols: &mut BitwiseCols<KoalaBear>);
+    pub fn clo_clz_event_to_row_koalabear(event: &AluEvent, cols: &mut CloClzCols<KoalaBear>);
+    pub fn branch_event_to_row_koalabear(event: &BranchEvent, cols: &mut BranchColumns<KoalaBear>);
+    pub fn jump_event_to_row_koalabear(event: &JumpEvent, cols: &mut JumpColumns<KoalaBear>);
+    pub fn misc_instrs_event_to_row_koalabear(
+        event: &MiscEvent,
+        cols: &mut MiscInstrColumns<KoalaBear>,
+    );
+    pub fn mov_cond_event_to_row_koalabear(event: &MovCondEvent, cols: &mut MovCondCols<KoalaBear>);
+    pub fn shift_left_event_to_row_koalabear(event: &AluEvent, cols: &mut ShiftLeftCols<KoalaBear>);
+    pub fn shift_right_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut ShiftRightCols<KoalaBear>,
+    );
+    pub fn div_rem_event_to_row_koalabear(event: &CompAluEvent, cols: &mut DivRemCols<KoalaBear>);
+    pub fn mul_event_to_row_koalabear(event: &CompAluEvent, cols: &mut MulCols<KoalaBear>);
+    pub fn syscall_instrs_event_to_row_koalabear(
+        event: &SyscallEvent,
+        cols: &mut SyscallInstrColumns<KoalaBear>,
     );
 
     pub fn test_mul();

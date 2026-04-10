@@ -32,15 +32,26 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
         "MiscInstrs".to_string()
     }
 
+    fn picus_info(&self) -> zkm_stark::PicusInfo {
+        MiscInstrColumns::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.misc_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <MiscInstrsChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.misc_events.len()) / num_cpus::get(), 1);
-        let nb_rows = input.misc_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <MiscInstrsChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MISC_INSTR_COLS);
 
         let blu_events = values
@@ -129,8 +140,7 @@ impl MiscInstrsChip {
         };
         sext_cols.most_sig_bit = F::from_canonical_u16(sig_bit);
         sext_cols.sig_byte = F::from_canonical_u8(sig_byte);
-
-        sext_cols.a_eq_b = F::from_bool(event.b == event.a);
+        sext_cols.a_eq_b.populate(event.a, event.b);
 
         if matches!(event.opcode, Opcode::SEXT) {
             blu.add_byte_lookup_event(ByteLookupEvent {
@@ -227,12 +237,14 @@ impl MiscInstrsChip {
         let lsb = event.c & 0x1f;
         let msb = event.c >> 5;
         let ror_val = event.prev_a.rotate_right(lsb);
-        let srl_val = ror_val >> (msb - lsb + 1);
+        let srl1_val = ror_val >> 1;
+        let srl_val = srl1_val >> (msb - lsb);
         let sll_val = event.b << (31 - msb + lsb);
         let add_val = srl_val + sll_val;
         ins_cols.lsb = F::from_canonical_u32(lsb);
         ins_cols.msb = F::from_canonical_u32(msb);
         ins_cols.ror_val = Word::from(ror_val);
+        ins_cols.srl1_val = Word::from(srl1_val);
         ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);
         ins_cols.add_val = Word::from(add_val);

@@ -10,17 +10,21 @@ use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
 
 use thiserror::Error;
 use zkm_recursion_circuit::machine::RootPublicValues;
-use zkm_recursion_core::{air::RecursionPublicValues, stark::KoalaBearPoseidon2Outer};
+use zkm_recursion_core::{
+    air::RecursionPublicValues, hash_vkey_with_part_vk, stark::KoalaBearPoseidon2Outer,
+};
 use zkm_recursion_gnark_ffi::{
     Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
 };
 use zkm_stark::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
-    MachineProof, MachineProver, MachineVerificationError, StarkGenericConfig, Word,
+    MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
+    StarkGenericConfig, Word,
 };
 
 use crate::{
+    build::zkm_imm_wrap_vk_mode,
     components::ZKMProverComponents,
     utils::{is_recursion_public_values_valid, is_root_public_values_valid},
     CoreSC, HashableKey, OuterSC, ZKMCoreProofData, ZKMProver, ZKMVerifyingKey,
@@ -477,7 +481,7 @@ pub fn verify_groth16_bn254_public_inputs(
     let expected_vk_hash = BigUint::from_str(&groth16_bn254_public_inputs[0])?;
     let expected_public_values_hash = BigUint::from_str(&groth16_bn254_public_inputs[1])?;
 
-    let vk_hash = vk.hash_bn254().as_canonical_biguint();
+    let vk_hash = groth16_vk_hash(vk)?;
     if vk_hash != expected_vk_hash {
         return Err(Groth16VerificationError::InvalidVerificationKey.into());
     }
@@ -488,6 +492,21 @@ pub fn verify_groth16_bn254_public_inputs(
     }
 
     Ok(())
+}
+
+/// Compute the verification key hash committed into Groth16 public inputs.
+fn groth16_vk_hash(vk: &ZKMVerifyingKey) -> Result<BigUint> {
+    const PART_STARK_VK_BYTES: &[u8] = include_bytes!("../../verifier/bn254-vk/part_stark_vk.bin");
+
+    let vk_hash = vk.hash_bn254();
+
+    if zkm_imm_wrap_vk_mode() {
+        let part_stark_vk: PartStarkVerifyingKey<KoalaBearPoseidon2Outer> =
+            bincode::deserialize(PART_STARK_VK_BYTES)?;
+        Ok(hash_vkey_with_part_vk(&part_stark_vk, vk_hash).as_canonical_biguint())
+    } else {
+        Ok(vk_hash.as_canonical_biguint())
+    }
 }
 
 impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {

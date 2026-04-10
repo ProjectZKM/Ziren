@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2025-07-17
+          toolchain: nightly-2025-08-17
           components: rustfmt
       - run: cargo fmt --all -- --check
   clippy:
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2025-07-17
+          toolchain: nightly-2025-08-17
       - run: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ProjectZKM/toolchain/refs/heads/main/setup.sh | sh
       - run: source ~/.zkm-toolchain/env && cd crates/test-artifacts && cargo build && cd ../..
       - name: Install Dependencies
@@ -42,7 +42,7 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
   test:
     name: Cargo Test
-    runs-on: self-hosted
+    runs-on: self-hosted-cpu
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH

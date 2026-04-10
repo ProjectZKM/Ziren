@@ -76,15 +76,18 @@ use zkm_core_executor::{
 };
 
 use crate::{memory::MemoryReadWriteCols, CoreChipError};
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{
+    air::{MachineAir, PicusInfo},
+    Word,
+};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     memory::MemoryCols,
     operations::{IsEqualWordOperation, IsZeroWordOperation},
-    utils::pad_rows_fixed,
+    utils::{next_power_of_two, pad_rows_fixed},
 };
 
 /// The number of main trace columns for `DivRemChip`.
@@ -101,7 +104,7 @@ const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 pub struct DivRemChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DivRemCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -139,15 +142,19 @@ pub struct DivRemCols<T> {
     pub is_c_0: IsZeroWordOperation<T>,
 
     /// Flag to indicate whether the opcode is DIV.
+    #[picus(selector)]
     pub is_div: T,
 
     /// Flag to indicate whether the opcode is DIVU.
+    #[picus(selector)]
     pub is_divu: T,
 
     /// Flag to indicate whether the opcode is MOD.
+    #[picus(selector)]
     pub is_mod: T,
 
     /// Flag to indicate whether the opcode is MODU.
+    #[picus(selector)]
     pub is_modu: T,
 
     /// Flag to indicate whether the division operation overflows.
@@ -207,6 +214,19 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         "DivRem".to_string()
     }
 
+    fn picus_info(&self) -> PicusInfo {
+        DivRemCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.divrem_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <DivRemChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -260,14 +280,17 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_overflow_b.populate(event.b, i32::MIN as u32);
                 cols.is_overflow_c.populate(event.c, -1i32 as u32);
                 if is_signed_operation(event.opcode) {
+                    let abs_remainder = (remainder as i32).unsigned_abs();
+                    let abs_c = (event.c as i32).unsigned_abs();
+
                     cols.rem_neg = cols.rem_msb;
                     cols.b_neg = cols.b_msb;
                     cols.c_neg = cols.c_msb;
                     cols.is_overflow =
                         F::from_bool(event.b as i32 == i32::MIN && event.c as i32 == -1);
-                    cols.abs_remainder = Word::from((remainder as i32).abs() as u32);
-                    cols.abs_c = Word::from((event.c as i32).abs() as u32);
-                    cols.max_abs_c_or_1 = Word::from(u32::max(1, (event.c as i32).abs() as u32));
+                    cols.abs_remainder = Word::from(abs_remainder);
+                    cols.abs_c = Word::from(abs_c);
+                    cols.max_abs_c_or_1 = Word::from(u32::max(1, abs_c));
                 } else {
                     cols.abs_remainder = cols.remainder;
                     cols.abs_c = cols.c;
@@ -344,6 +367,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
             &mut rows,
             || [F::ZERO; NUM_DIVREM_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <DivRemChip as MachineAir<F>>::name(self).as_str(),
         );
         // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_DIVREM_COLS))

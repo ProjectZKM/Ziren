@@ -153,9 +153,10 @@ pub struct Executor<'a> {
 }
 
 /// The different modes the executor can run in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ExecutorMode {
     /// Run the execution with no tracing or checkpointing.
+    #[default]
     Simple,
     /// Run the execution with checkpoints for memory.
     Checkpoint,
@@ -1481,7 +1482,7 @@ impl<'a> Executor<'a> {
             } else if instruction.opcode == Opcode::INS {
                 self.local_counts.event_counts[Opcode::ROR] += 2;
                 self.local_counts.event_counts[Opcode::SLL] += 1;
-                self.local_counts.event_counts[Opcode::SRL] += 1;
+                self.local_counts.event_counts[Opcode::SRL] += 2;
                 self.local_counts.event_counts[Opcode::ADD] += 1;
             } else if instruction.opcode == Opcode::DIV {
                 self.local_counts.event_counts[Opcode::MULT] += 2;
@@ -2384,7 +2385,7 @@ impl<'a> Executor<'a> {
 
     #[inline]
     fn inc_shard_if_need(&mut self) -> bool {
-        if self.executor_mode == ExecutorMode::Trace {
+        if self.executor_mode == ExecutorMode::Trace && !self.state.records_clk.is_empty() {
             let records_clk_index = self.state.records_clk_index as usize;
             if records_clk_index < self.state.records_clk.len()
                 && self.state.clk >= self.state.records_clk[self.state.records_clk_index as usize]
@@ -2487,7 +2488,9 @@ impl<'a> Executor<'a> {
         }
 
         if cpu_exit || !shape_match_found {
-            self.state.records_clk.push(self.state.clk);
+            if self.executor_mode == ExecutorMode::Checkpoint {
+                self.state.records_clk.push(self.state.clk);
+            }
             self.state.current_shard += 1;
             self.state.clk = 0;
             return true;
@@ -2620,12 +2623,6 @@ impl<'a> Executor<'a> {
             .map(|i| self.state.memory.get(i as u32).unwrap().value)
             .collect::<Vec<_>>();
         println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
-    }
-}
-
-impl Default for ExecutorMode {
-    fn default() -> Self {
-        Self::Simple
     }
 }
 

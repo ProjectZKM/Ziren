@@ -44,9 +44,9 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
@@ -61,23 +61,24 @@ pub const NUM_MUL_COLS: usize = size_of::<MulCols<u8>>();
 
 /// The number of digits in the product is at most the sum of the number of digits in the
 /// multiplicands.
-const PRODUCT_SIZE: usize = 2 * WORD_SIZE;
+pub const PRODUCT_SIZE: usize = 8;
 
 /// The number of bits in a byte.
 const BYTE_SIZE: usize = 8;
 
 /// The mask for a byte.
-const BYTE_MASK: u8 = 0xff;
+pub const BYTE_MASK: u8 = 0xff;
 
 /// A chip that implements multiplication for the opcode MUL, MULT and MULTU.
 #[derive(Default)]
 pub struct MulChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MulCols<T> {
     /// The current/next pc, used for instruction lookup table.
+    #[picus(input)]
     pub pc: T,
     pub next_pc: T,
 
@@ -112,15 +113,17 @@ pub struct MulCols<T> {
     pub c_sign_extend: T,
 
     /// Flag indicating whether the opcode is `MUL`.
+    #[picus(selector)]
     pub is_mul: T,
 
     /// Flag indicating whether the opcode is `MULT`.
+    #[picus(selector)]
     pub is_mult: T,
 
     /// Flag indicating whether the opcode is `MULTU`.
+    #[picus(selector)]
     pub is_multu: T,
 
-    /// Selector to know whether this row is enabled.
     pub is_real: T,
 
     /// Access to hi register
@@ -146,16 +149,28 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         "Mul".to_string()
     }
 
+    fn picus_info(&self) -> PicusInfo {
+        MulCols::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.mul_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <MulChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         _: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         // Generate the trace rows for each event.
-        let nb_rows = input.mul_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <MulChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
+        let nb_rows = input.mul_events.len();
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
         values.chunks_mut(chunk_size * NUM_MUL_COLS).enumerate().par_bridge().for_each(
@@ -395,11 +410,11 @@ where
         let product = {
             for i in 0..PRODUCT_SIZE {
                 if i == 0 {
-                    builder.assert_eq(local.product[i], m[i].clone() - local.carry[i] * base);
+                    builder.assert_eq(m[i].clone(), local.carry[i] * base + local.product[i]);
                 } else {
                     builder.assert_eq(
-                        local.product[i],
-                        m[i].clone() + local.carry[i - 1] - local.carry[i] * base,
+                        local.product[i] - local.carry[i - 1] + local.carry[i] * base,
+                        m[i].clone(),
                     );
                 }
             }
@@ -489,12 +504,14 @@ where
         );
 
         // Check hi_record_is_real.
-        // hi_record_is_real can only be set for MULT and MULTU instruction.
+        // hi_record_is_real can only be set for MULT and MULTU instruction when is_real = 1.
         // if hi_record_is_real = 0, both clk and shard should be zero.
+        builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
+        builder.when(local.is_mul).assert_word_zero(local.hi);
     }
 }
 

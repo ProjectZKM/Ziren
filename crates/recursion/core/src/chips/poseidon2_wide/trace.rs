@@ -67,7 +67,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         let events = &input.poseidon2_events;
         match input.fixed_log2_rows(self) {
             Some(log2_rows) => Some(1 << log2_rows),
-            None => Some(next_power_of_two(events.len(), None)),
+            None => Some(next_power_of_two(
+                events.len(),
+                None,
+                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+            )),
         }
     }
 
@@ -178,7 +182,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
         Some(match program.fixed_log2_rows(self) {
             Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(instrs_len, None),
+            None => next_power_of_two(
+                instrs_len,
+                None,
+                <Poseidon2WideChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+            ),
         })
     }
 

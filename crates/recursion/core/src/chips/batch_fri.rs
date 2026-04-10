@@ -122,6 +122,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             &mut rows,
             || [F::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
+            <BatchFRIChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         );
 
         let trace = RowMajorMatrix::new(
@@ -176,6 +177,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             &mut rows,
             || [KoalaBear::ZERO; NUM_BATCH_FRI_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
+            <BatchFRIChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
         );
 
         Some(RowMajorMatrix::new(
@@ -190,7 +192,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.batch_fri_events;
-        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+        Some(next_power_of_two(
+            events.len(),
+            input.fixed_log2_rows(self),
+            <BatchFRIChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]

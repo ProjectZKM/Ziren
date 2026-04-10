@@ -33,15 +33,22 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
         "SyscallInstrs".to_string()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.syscall_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <SyscallInstrsChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.syscall_events.len()) / num_cpus::get(), 1);
-        let nb_rows = input.syscall_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <SyscallInstrsChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_SYSCALL_INSTR_COLS);
 
         let blu_events = values
@@ -107,6 +114,13 @@ impl SyscallInstrsChip {
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
 
+        let prev_a_bytes = event.a_record.prev_value.to_le_bytes();
+        let send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
+        let is_halt_val = cols.is_halt == F::ONE;
+
+        // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
+        cols.is_prev_a1_zero.populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
+
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
             syscall_id - F::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
@@ -146,18 +160,19 @@ impl SyscallInstrsChip {
             cols.index_bitmap[digest_idx] = F::ONE;
         }
 
-        // For halt and commit deferred proofs syscalls, we need to koala bear range check one of
-        // it's operands.
-        if cols.is_halt == F::ONE {
-            cols.operand_to_check = event.arg1.into();
-            cols.operand_range_check_cols.populate(event.arg1);
-            cols.syscall_range_check_operand = F::ONE;
-        }
+        // Populate unified KoalaBear range check flags and columns.
+        let is_commit_deferred =
+            syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id());
+        let op_b_needs_check = send_to_table || is_halt_val;
+        let op_c_needs_check = send_to_table || is_commit_deferred;
 
-        if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()) {
-            cols.operand_to_check = event.arg2.into();
-            cols.operand_range_check_cols.populate(event.arg2);
-            cols.syscall_range_check_operand = F::ONE;
+        if op_b_needs_check {
+            cols.op_b_check = F::ONE;
+            cols.op_b_range_check.populate(event.arg1);
+        }
+        if op_c_needs_check {
+            cols.op_c_check = F::ONE;
+            cols.op_c_range_check.populate(event.arg2);
         }
     }
 }
