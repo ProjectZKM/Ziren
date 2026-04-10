@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: Setup Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Build with mdBook
         run: cd docs && mdbook build
       - name: Upload artifact
