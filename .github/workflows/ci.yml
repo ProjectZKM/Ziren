@@ -42,7 +42,7 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
   test:
     name: Cargo Test
-    runs-on: self-hosted
+    runs-on: self-hosted-cpu
     steps:
       - uses: actions/checkout@v5
       - run: export PATH=~/.cargo/bin:$PATH
