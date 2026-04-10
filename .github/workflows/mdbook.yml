@@ -27,11 +27,16 @@ concurrency:
 jobs:
   # Build job
   build:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       MDBOOK_VERSION: 0.4.52
     steps:
       - uses: actions/checkout@v5
+      - name: Install mdBook                                                                                                                       
+        run: |                                                                                                                                     
+          curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- --default-toolchain none -y                                         
+          rustup toolchain install stable --profile minimal                                                                                        
+          cargo install --version ${MDBOOK_VERSION} mdbook
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v6
