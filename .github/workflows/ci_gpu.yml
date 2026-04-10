@@ -1,0 +1,32 @@
+name: GPU
+
+on:
+  push:
+    branches:
+      - gpu-ci
+  pull_request:
+    branches:
+      - gpu-ci
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gpu-perf:
+    name: Gpu Perf
+    runs-on: self-hosted-gpu
+    steps:
+      - uses: actions/checkout@v5
+      - run: export PATH=~/.cargo/bin:$PATH
+      - run: |
+          BRANCH_NAME=${{ github.ref_name }}
+          echo "branch: $BRANCH_NAME"
+          cd /data/ziren-gpu-ci/ziren-gpu
+          sh ci.sh $BRANCH_NAME
+        env:
+          RUSTFLAGS: "-C target-cpu=native"
