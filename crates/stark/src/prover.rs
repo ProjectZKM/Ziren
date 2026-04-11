@@ -697,8 +697,8 @@ where
         Ok(ShardProof::<SC> {
             commitment: ShardCommitment {
                 main_commit: data.main_commit.clone(),
-                permutation_commit,
-                quotient_commit,
+                permutation_commit: Some(permutation_commit),
+                quotient_commit: Some(quotient_commit),
             },
             opened_values: ShardOpenedValues { chips: opened_values },
             opening_proof,

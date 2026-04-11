@@ -63,8 +63,8 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     // Make a dummy commitment.
     let commitment = ShardCommitment {
         main_commit: dummy_commit(),
-        permutation_commit: dummy_commit(),
-        quotient_commit: dummy_commit(),
+        permutation_commit: Some(dummy_commit()),
+        quotient_commit: Some(dummy_commit()),
     };
 
     // Get dummy opened values by reading the chip ordering from the shape.
@@ -297,7 +297,9 @@ where
         let local_permutation_challenges =
             (0..2).map(|_| challenger.sample_ext(builder)).collect::<Vec<_>>();
 
-        challenger.observe(builder, permutation_commit);
+        if let Some(pc) = permutation_commit {
+            challenger.observe(builder, pc);
+        }
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
             let local_sum = C::ext2felt(builder, opening.local_cumulative_sum);
             let global_sum = opening.global_cumulative_sum;
@@ -321,7 +323,9 @@ where
 
         let alpha = challenger.sample_ext(builder);
 
-        challenger.observe(builder, quotient_commit);
+        if let Some(qc) = quotient_commit {
+            challenger.observe(builder, qc);
+        }
 
         let zeta = challenger.sample_ext(builder);
 
@@ -416,16 +420,20 @@ where
             batch_commit: main_commit,
             domains_points_and_opens: main_domains_points_and_opens,
         };
-        let perm_round = TwoAdicPcsRoundVariable {
-            batch_commit: permutation_commit,
-            domains_points_and_opens: perm_domains_points_and_opens,
-        };
-        let quotient_round = TwoAdicPcsRoundVariable {
-            batch_commit: quotient_commit,
-            domains_points_and_opens: quotient_domains_points_and_opens,
-        };
+        let mut rounds = vec![prep_round, main_round];
 
-        let rounds = vec![prep_round, main_round, perm_round, quotient_round];
+        if let Some(pc) = permutation_commit {
+            rounds.push(TwoAdicPcsRoundVariable {
+                batch_commit: pc,
+                domains_points_and_opens: perm_domains_points_and_opens,
+            });
+        }
+        if let Some(qc) = quotient_commit {
+            rounds.push(TwoAdicPcsRoundVariable {
+                batch_commit: qc,
+                domains_points_and_opens: quotient_domains_points_and_opens,
+            });
+        }
 
         // Verify the pcs proof
         builder.cycle_tracker_v2_enter("stage-d-verify-pcs".to_string());

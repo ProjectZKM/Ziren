@@ -75,8 +75,8 @@ impl Prover<DefaultProverComponents> for MockProver {
                 let shard_proof = ShardProof {
                     commitment: ShardCommitment {
                         main_commit: vec![[KoalaBear::ZERO; 8]].into(),
-                        permutation_commit: vec![[KoalaBear::ZERO; 8]].into(),
-                        quotient_commit: vec![[KoalaBear::ZERO; 8]].into(),
+                        permutation_commit: Some(vec![[KoalaBear::ZERO; 8]].into()),
+                        quotient_commit: Some(vec![[KoalaBear::ZERO; 8]].into()),
                     },
                     opened_values: ShardOpenedValues { chips: vec![] },
                     opening_proof: FriProof {

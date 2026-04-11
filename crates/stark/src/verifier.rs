@@ -88,7 +88,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         let local_permutation_challenges =
             (0..2).map(|_| challenger.sample_algebra_element::<SC::Challenge>()).collect::<Vec<_>>();
 
-        challenger.observe(permutation_commit.clone());
+        if let Some(pc) = permutation_commit.as_ref() {
+            challenger.observe(pc.clone());
+        }
         // Observe the cumulative sums and constrain any sum without a corresponding scope to be
         // zero.
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
@@ -117,7 +119,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         let alpha = challenger.sample_algebra_element::<SC::Challenge>();
 
         // Observe the quotient commitments.
-        challenger.observe(quotient_commit.clone());
+        if let Some(qc) = quotient_commit.as_ref() {
+            challenger.observe(qc.clone());
+        }
 
         let zeta = challenger.sample_algebra_element::<SC::Challenge>();
 
@@ -198,12 +202,16 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             })
             .collect::<Vec<_>>();
 
-        let rounds = vec![
+        let mut rounds = vec![
             (vk.commit.clone(), preprocessed_domains_points_and_opens),
             (main_commit.clone(), main_domains_points_and_opens),
-            (permutation_commit.clone(), perm_domains_points_and_opens),
-            (quotient_commit.clone(), quotient_domains_points_and_opens),
         ];
+        if let Some(pc) = permutation_commit.clone() {
+            rounds.push((pc, perm_domains_points_and_opens));
+        }
+        if let Some(qc) = quotient_commit.clone() {
+            rounds.push((qc, quotient_domains_points_and_opens));
+        }
 
         config
             .pcs()

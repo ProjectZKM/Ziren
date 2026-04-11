@@ -36,8 +36,10 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardCommitment<C> {
     pub main_commit: C,
-    pub permutation_commit: C,
-    pub quotient_commit: C,
+    /// Permutation trace commitment. None when using LogUp-GKR (no permutation trace).
+    pub permutation_commit: Option<C>,
+    /// Quotient polynomial commitment. None when using Zerocheck (no quotient trace).
+    pub quotient_commit: Option<C>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
