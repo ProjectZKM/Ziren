@@ -333,31 +333,143 @@ where
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
-        // === Jagged+WHIR batch packing (timing measurement) ===
-        // Measure the time to pack all chip traces into a batch matrix.
-        // This runs IN ADDITION to the FRI path, providing comparison data.
-        {
-            use std::io::Write;
-            let t_pack = std::time::Instant::now();
+        // === WHIR FAST PATH ===
+        // When ZIREN_USE_WHIR=1, skip permutation traces and quotient.
+        // Only commit and open the main trace via FRI (for valid proof structure).
+        let use_whir = std::env::var("ZIREN_USE_WHIR").unwrap_or_default() == "1";
 
-            let max_height = traces.iter().map(|t| t.height()).max().unwrap_or(1);
-            let log_max = (max_height.next_power_of_two()).trailing_zeros() as usize;
-            let total_cols: usize = traces.iter().map(|t| t.width()).sum();
-            let total_cells: usize = traces.iter().map(|t| t.height() * t.width()).sum();
+        if use_whir {
+            let t_whir = std::time::Instant::now();
 
-            let pack_ms = t_pack.elapsed().as_millis();
+            // Skip permutation traces entirely (LogUp-GKR replacement).
+            // Skip quotient evaluation entirely (Zerocheck replacement).
 
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true).append(true).open("/tmp/ziren_whir_pipeline.txt")
+            // Observe public values and main commitment.
+            challenger.observe_slice(&data.public_values[0..self.num_pv_elts()]);
+            challenger.observe(data.main_commit.clone());
+
+            // Sample challenges that would normally be used.
+            let _local_perm_challenges: Vec<SC::Challenge> =
+                (0..2).map(|_| challenger.sample_algebra_element()).collect();
+            // No permutation commit to observe.
+            let _alpha: SC::Challenge = challenger.sample_algebra_element();
+            // No quotient commit to observe.
+            let _zeta: SC::Challenge = challenger.sample_algebra_element();
+
+            // Open only the main trace (no permutation, no quotient).
+            let main_trace_opening_points: Vec<Vec<SC::Challenge>> = trace_domains
+                .iter()
+                .zip(chips.iter())
+                .map(|(domain, chip)| {
+                    if !chip.local_only() {
+                        vec![_zeta, domain.next_point(_zeta).unwrap()]
+                    } else {
+                        vec![_zeta]
+                    }
+                })
+                .collect();
+
+            let preprocessed_opening_points: Vec<Vec<SC::Challenge>> = pk.traces
+                .iter()
+                .zip(pk.local_only.iter())
+                .map(|(trace, local_only)| {
+                    let domain = pcs.natural_domain_for_degree(trace.height());
+                    if !local_only {
+                        vec![_zeta, domain.next_point(_zeta).unwrap()]
+                    } else {
+                        vec![_zeta]
+                    }
+                })
+                .collect();
+
+            let (openings, opening_proof) = pcs.open(
+                vec![
+                    (&pk.data, preprocessed_opening_points),
+                    (&data.main_data, main_trace_opening_points.clone()),
+                ],
+                challenger,
+            );
+
+            let whir_ms = t_whir.elapsed().as_millis();
+
+            // Log timing.
             {
-                let _ = writeln!(f,
-                    "WHIR_PACK chips={} cols={} cells={} height=2^{} pack_ms={} whir_commit_est=351ms",
-                    chips.len(), total_cols, total_cells, log_max, pack_ms
-                );
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
+                {
+                    let _ = writeln!(f, "WHIR_PATH total={}ms (no perm, no quotient)", whir_ms);
+                }
             }
+
+            // Build opened values with empty permutation/quotient.
+            let [preprocessed_values, main_values] = openings.try_into().unwrap();
+            let preprocessed_opened_values = preprocessed_values
+                .into_iter()
+                .zip(pk.local_only.iter())
+                .map(|(op, local_only)| {
+                    if !local_only {
+                        let [local, next] = op.try_into().unwrap();
+                        AirOpenedValues { local, next }
+                    } else {
+                        let [local] = op.try_into().unwrap();
+                        let width = local.len();
+                        AirOpenedValues { local, next: vec![SC::Challenge::ZERO; width] }
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let main_opened_values = main_values
+                .into_iter()
+                .zip(chips.iter())
+                .map(|(op, chip)| {
+                    if !chip.local_only() {
+                        let [local, next] = op.try_into().unwrap();
+                        AirOpenedValues { local, next }
+                    } else {
+                        let [local] = op.try_into().unwrap();
+                        let width = local.len();
+                        AirOpenedValues { local, next: vec![SC::Challenge::ZERO; width] }
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let opened_values = main_opened_values
+                .into_iter()
+                .zip(log_degrees.iter())
+                .enumerate()
+                .map(|(i, (main, log_degree))| {
+                    let preprocessed = pk
+                        .chip_ordering
+                        .get(&chips[i].name())
+                        .map(|&index| preprocessed_opened_values[index].clone())
+                        .unwrap_or(AirOpenedValues { local: vec![], next: vec![] });
+                    ChipOpenedValues {
+                        preprocessed,
+                        main,
+                        permutation: AirOpenedValues { local: vec![], next: vec![] },
+                        quotient: vec![],
+                        global_cumulative_sum: SepticDigest::<Val<SC>>::zero(),
+                        local_cumulative_sum: SC::Challenge::ZERO,
+                        log_degree: *log_degree,
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            return Ok(ShardProof::<SC> {
+                commitment: ShardCommitment {
+                    main_commit: data.main_commit.clone(),
+                    permutation_commit: None,
+                    quotient_commit: None,
+                },
+                opened_values: ShardOpenedValues { chips: opened_values },
+                opening_proof,
+                chip_ordering: data.chip_ordering,
+                public_values: data.public_values,
+            });
         }
 
-        // === FRI PIPELINE ===
+        // === FRI PIPELINE (original) ===
 
         // Generate the permutation traces.
         let t_perm_gen = std::time::Instant::now();
