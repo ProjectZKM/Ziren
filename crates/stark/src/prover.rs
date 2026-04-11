@@ -679,12 +679,28 @@ where
             records
                 .into_par_iter()
                 .map(|record| {
+                    let t0 = std::time::Instant::now();
                     let named_traces = self.generate_traces(&record).map_err(|e| {
                         tracing::error!("generate traces error: {:?}", e);
                         Self::Error {}
                     })?;
+                    let trace_gen_ms = t0.elapsed().as_millis();
+
+                    let t1 = std::time::Instant::now();
                     let shard_data = self.commit(&record, named_traces);
-                    self.open(pk, shard_data, &mut challenger.clone())
+                    let commit_ms = t1.elapsed().as_millis();
+
+                    let t2 = std::time::Instant::now();
+                    let proof = self.open(pk, shard_data, &mut challenger.clone());
+                    let open_ms = t2.elapsed().as_millis();
+
+                    println!(
+                        ">>> PCS_TIMING trace_gen={}ms commit={}ms open={}ms total={}ms",
+                        trace_gen_ms, commit_ms, open_ms,
+                        trace_gen_ms + commit_ms + open_ms
+                    );
+
+                    proof
                 })
                 .collect::<Result<Vec<_>, _>>()
         })?;

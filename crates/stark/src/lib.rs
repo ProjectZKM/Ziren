@@ -26,6 +26,7 @@ pub mod multilinear_prover;
 pub mod multilinear_verifier;
 #[cfg(feature = "whir")]
 mod bench_pcs;
+pub mod logup_gkr;
 mod lookup;
 mod machine;
 mod opts;
@@ -33,6 +34,7 @@ mod permutation;
 mod proof;
 mod prover;
 mod quotient;
+pub mod zerocheck;
 mod record;
 pub mod septic_curve;
 pub mod septic_digest;

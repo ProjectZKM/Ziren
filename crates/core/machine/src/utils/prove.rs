@@ -489,13 +489,22 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
+                                    let t_commit = std::time::Instant::now();
                                     let main_data = prover.commit(&record, main_traces);
+                                    let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();
+                                    let t_open = std::time::Instant::now();
                                     let proof = prover
                                         .open(pk, main_data, &mut challenger.clone())
                                         .unwrap();
+                                    let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
+
+                                    tracing::info!(
+                                        "PCS timing: commit={}ms open={}ms total={}ms",
+                                        commit_ms, open_ms, commit_ms + open_ms
+                                    );
 
                                     #[cfg(debug_assertions)]
                                     {
