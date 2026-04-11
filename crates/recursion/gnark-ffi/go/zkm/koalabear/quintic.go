@@ -23,6 +23,15 @@ func init() {
 	solver.RegisterHint(InvE5Hint)
 }
 
+// newVariable creates a Variable from a decimal string.
+func newVariable(s string) Variable {
+	v, _ := new(big.Int).SetString(s, 10)
+	return Variable{
+		Value:      frontend.Variable(s),
+		UpperBound: v,
+	}
+}
+
 // Ext5Variable represents an element of the quintic extension field.
 type Ext5Variable struct {
 	Value [5]Variable
@@ -33,14 +42,19 @@ func NewE5(a, b, c, d, e Variable) Ext5Variable {
 	return Ext5Variable{Value: [5]Variable{a, b, c, d, e}}
 }
 
+// Felts2Ext5 converts 5 base field variables to a quintic extension element.
+func Felts2Ext5(a, b, c, d, e Variable) Ext5Variable {
+	return NewE5(a, b, c, d, e)
+}
+
 // NewE5Const creates a quintic extension constant from string values.
 func NewE5Const(v []string) Ext5Variable {
 	return Ext5Variable{Value: [5]Variable{
-		NewVariable(v[0]),
-		NewVariable(v[1]),
-		NewVariable(v[2]),
-		NewVariable(v[3]),
-		NewVariable(v[4]),
+		newVariable(v[0]),
+		newVariable(v[1]),
+		newVariable(v[2]),
+		newVariable(v[3]),
+		newVariable(v[4]),
 	}}
 }
 
@@ -71,7 +85,7 @@ func (chip *Chip) SubE5(a, b Ext5Variable) Ext5Variable {
 func (chip *Chip) NegE5(a Ext5Variable) Ext5Variable {
 	v := [5]Variable{}
 	for i := 0; i < 5; i++ {
-		v[i] = chip.NegF(a.Value[i])
+		v[i] = chip.negF(a.Value[i])
 	}
 	return Ext5Variable{Value: v}
 }

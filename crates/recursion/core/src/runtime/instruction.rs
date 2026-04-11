@@ -17,6 +17,8 @@ pub enum Instruction<F> {
     HintAddCurve(HintAddCurveInstr<F>),
     FriFold(Box<FriFoldInstr<F>>),
     BatchFRI(Box<BatchFRIInstr<F>>),
+    /// WHIR sumcheck round verification instruction.
+    SumcheckVerify(Box<SumcheckVerifyInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
@@ -59,6 +61,28 @@ pub struct HintExt2FeltsInstr<F> {
     pub output_addrs_mults: [(Address<F>, F); D],
     /// Input value to decompose.
     pub input_addr: Address<F>,
+}
+
+/// Instruction for verifying one sumcheck round in a WHIR proof.
+///
+/// Each instruction verifies:
+///   p(0) + p(1) = claimed_sum
+///   new_claim = p(challenge)
+/// where p(X) = c_0 + c_1·X + c_2·X²
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SumcheckVerifyInstr<F> {
+    /// Address of the Fiat-Shamir challenge r_i (extension field).
+    pub challenge_addr: Address<F>,
+    /// Address of the previous claimed sum s_i (extension field).
+    pub claimed_sum_addr: Address<F>,
+    /// Addresses of polynomial coefficients c_0, c_1, c_2 (extension field).
+    pub c0_addr: Address<F>,
+    pub c1_addr: Address<F>,
+    pub c2_addr: Address<F>,
+    /// Address to write the new claimed sum s_{i+1} (extension field).
+    pub new_claim_addr: Address<F>,
+    /// Write multiplicity for the output.
+    pub new_claim_mult: F,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

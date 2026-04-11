@@ -12,6 +12,20 @@ pub mod folder;
 mod kb31_poseidon2;
 #[cfg(feature = "whir")]
 pub mod whir_config;
+#[cfg(feature = "whir")]
+pub mod jagged;
+#[cfg(feature = "whir")]
+pub mod jagged_whir;
+#[cfg(feature = "whir")]
+pub mod jagged_whir_prover;
+#[cfg(feature = "whir")]
+pub mod multilinear_config;
+#[cfg(feature = "whir")]
+pub mod multilinear_prover;
+#[cfg(feature = "whir")]
+pub mod multilinear_verifier;
+#[cfg(feature = "whir")]
+mod bench_pcs;
 mod lookup;
 mod machine;
 mod opts;

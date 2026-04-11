@@ -27,6 +27,7 @@ pub mod machine;
 pub mod merkle_tree;
 pub mod stark;
 pub(crate) mod utils;
+pub mod whir_verifier;
 pub mod witness;
 
 pub use types::*;

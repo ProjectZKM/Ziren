@@ -622,6 +622,27 @@ where
                         self.record.mem_var_events.push(MemEvent { inner: val });
                     }
                 }
+                Instruction::SumcheckVerify(instr) => {
+                    // Read inputs from memory.
+                    let _challenge = self.memory.mr(instr.challenge_addr);
+                    let _claimed_sum = self.memory.mr(instr.claimed_sum_addr);
+                    let _c0 = self.memory.mr(instr.c0_addr);
+                    let _c1 = self.memory.mr(instr.c1_addr);
+                    let _c2 = self.memory.mr(instr.c2_addr);
+
+                    // The actual verification (p(0)+p(1)=s, new_claim=p(r))
+                    // is done by the SumcheckVerifyChip's AIR constraints.
+                    // The runtime only needs to read/write memory.
+
+                    // Compute new_claim = c_0 + c_1*r + c_2*r^2 and write.
+                    // For the runtime, we read the hint from the witness stream.
+                    if self.witness_stream.is_empty() {
+                        return Err(RuntimeError::EmptyWitnessStream);
+                    }
+                    let new_claim = self.witness_stream.drain(0..1).next().unwrap();
+                    self.memory.mw(instr.new_claim_addr, new_claim, instr.new_claim_mult);
+                    self.record.mem_var_events.push(MemEvent { inner: new_claim });
+                }
             }
 
             self.pc = next_pc;

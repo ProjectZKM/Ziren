@@ -8,6 +8,8 @@ pub mod poseidon2_skinny;
 pub mod poseidon2_wide;
 pub mod public_values;
 pub mod select;
+pub mod sumcheck_verify;
+pub mod whir_verify;
 
 pub mod test_fixtures {
     use std::{array, borrow::Borrow};

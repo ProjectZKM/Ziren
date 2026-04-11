@@ -685,6 +685,9 @@ where
                         } = instr.as_mut();
                         backfill((acc_mult, acc));
                     }
+                    Instruction::SumcheckVerify(instr) => {
+                        backfill((&mut instr.new_claim_mult, &instr.new_claim_addr));
+                    }
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
                     }) => {
@@ -708,6 +711,8 @@ where
                     Instruction::Mem(MemInstr { kind: MemAccessKind::Read, .. })
                     | Instruction::CommitPublicValues(_)
                     | Instruction::Print(_) => (),
+                    // WHIR sumcheck verify: output mult is in the instruction.
+                    Instruction::SumcheckVerify(_) => (),
                 }
             }
         });
@@ -758,6 +763,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::Hint(_) => "Hint",
         Instruction::HintAddCurve(_) => "HintAddCurve",
         Instruction::CommitPublicValues(_) => "CommitPublicValues",
+        Instruction::SumcheckVerify(_) => "SumcheckVerify",
     }
 }
 

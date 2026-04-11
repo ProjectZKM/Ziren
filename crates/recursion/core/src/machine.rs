@@ -242,6 +242,9 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             }
             Instruction::CommitPublicValues(_) => {}
             Instruction::Print(_) => {}
+            Instruction::SumcheckVerify(_) => {
+                // TODO: Add sumcheck_verify_events counter when chip is fully wired.
+            }
         }
     }
 }

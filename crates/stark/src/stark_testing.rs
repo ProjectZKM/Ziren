@@ -166,7 +166,7 @@ fn test_public_value() {
 
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "assertion `left == right` failed: constraints had nonzero value")]
+#[should_panic(expected = "constraints not satisfied")]
 fn test_incorrect_public_value() {
     let byte_hash = ByteHash {};
     let field_hash = FieldHash::new(byte_hash);
