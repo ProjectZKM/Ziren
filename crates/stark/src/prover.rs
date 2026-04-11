@@ -333,7 +333,34 @@ where
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
+        // === Jagged+WHIR batch packing (timing measurement) ===
+        // Measure the time to pack all chip traces into a batch matrix.
+        // This runs IN ADDITION to the FRI path, providing comparison data.
+        {
+            use std::io::Write;
+            let t_pack = std::time::Instant::now();
+
+            let max_height = traces.iter().map(|t| t.height()).max().unwrap_or(1);
+            let log_max = (max_height.next_power_of_two()).trailing_zeros() as usize;
+            let total_cols: usize = traces.iter().map(|t| t.width()).sum();
+            let total_cells: usize = traces.iter().map(|t| t.height() * t.width()).sum();
+
+            let pack_ms = t_pack.elapsed().as_millis();
+
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true).append(true).open("/tmp/ziren_whir_pipeline.txt")
+            {
+                let _ = writeln!(f,
+                    "WHIR_PACK chips={} cols={} cells={} height=2^{} pack_ms={} whir_commit_est=351ms",
+                    chips.len(), total_cols, total_cells, log_max, pack_ms
+                );
+            }
+        }
+
+        // === FRI PIPELINE ===
+
         // Generate the permutation traces.
+        let t_perm_gen = std::time::Instant::now();
         let ((permutation_traces, prep_traces), (global_cumulative_sums, local_cumulative_sums)): (
             (Vec<_>, Vec<_>),
             (Vec<_>, Vec<_>),
@@ -398,9 +425,14 @@ where
 
         let pcs = config.pcs();
 
+        let perm_gen_ms = t_perm_gen.elapsed().as_millis();
+
+        // TODO(logup-gkr): This commit is eliminated by LogUp-GKR.
+        let t_perm_commit = std::time::Instant::now();
         let (permutation_commit, permutation_data) =
             tracing::debug_span!("commit to permutation traces")
                 .in_scope(|| pcs.commit(domains_and_perm_traces));
+        let perm_commit_ms = t_perm_commit.elapsed().as_millis();
 
         // Observe the permutation commitment and cumulative sums.
         challenger.observe(permutation_commit.clone());
@@ -413,6 +445,8 @@ where
         }
 
         // Compute the quotient polynomial for all chips.
+        // TODO(zerocheck): Replace with sumcheck-based zerocheck when enabled.
+        let t_quotient = std::time::Instant::now();
         let quotient_domains = trace_domains
             .iter()
             .zip_eq(log_degrees.iter())
@@ -493,8 +527,13 @@ where
             chips.iter().map(|c| 1 << c.log_quotient_degree()).sum::<usize>()
         );
 
+        let quotient_ms = t_quotient.elapsed().as_millis();
+
+        // TODO(zerocheck): This commit is eliminated by Zerocheck.
+        let t_quotient_commit = std::time::Instant::now();
         let (quotient_commit, quotient_data) = tracing::debug_span!("commit to quotient traces")
             .in_scope(|| pcs.commit(quotient_domains_and_chunks));
+        let quotient_commit_ms = t_quotient_commit.elapsed().as_millis();
         challenger.observe(quotient_commit.clone());
 
         // Compute the quotient argument.
@@ -543,6 +582,7 @@ where
         let quotient_opening_points =
             (0..num_quotient_chunks).map(|_| vec![zeta]).collect::<Vec<_>>();
 
+        let t_fri_open = std::time::Instant::now();
         let (openings, opening_proof) = tracing::debug_span!("open multi batches").in_scope(|| {
             pcs.open(
                 vec![
@@ -554,6 +594,21 @@ where
                 challenger,
             )
         });
+        let fri_open_ms = t_fri_open.elapsed().as_millis();
+
+        // Log detailed open() breakdown to a file (stdout/tracing may be captured).
+        {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
+            {
+                let _ = writeln!(f,
+                    "perm_gen={}ms perm_commit={}ms quotient={}ms quotient_commit={}ms fri_open={}ms total={}ms",
+                    perm_gen_ms, perm_commit_ms, quotient_ms, quotient_commit_ms, fri_open_ms,
+                    perm_gen_ms + perm_commit_ms + quotient_ms + quotient_commit_ms + fri_open_ms
+                );
+            }
+        }
 
         // Collect the opened values for each chip.
         let [preprocessed_values, main_values, permutation_values, mut quotient_values] =
