@@ -49,7 +49,11 @@ use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
-use crate::{air::ZKMCoreAirBuilder, utils::pad_rows_fixed, CoreChipError};
+use crate::{
+    air::ZKMCoreAirBuilder,
+    utils::{next_power_of_two, pad_rows_fixed},
+    CoreChipError,
+};
 
 /// The number of main trace columns for `ShiftLeft`.
 pub const NUM_SHIFT_LEFT_COLS: usize = size_of::<ShiftLeftCols<u8>>();
@@ -114,6 +118,15 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
         ShiftLeftCols::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.shift_left_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <ShiftLeft as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
@@ -135,6 +148,7 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
             &mut rows,
             || [F::ZERO; NUM_SHIFT_LEFT_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <ShiftLeft as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

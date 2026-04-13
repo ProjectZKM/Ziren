@@ -89,6 +89,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             &mut rows,
             || [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS],
             program.fixed_log2_rows(self),
+            <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.
@@ -124,7 +125,12 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             std::iter::repeat_n([F::ZERO; NUM_MEM_INIT_COLS], num_rows).collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_MEM_INIT_COLS],
+            input.fixed_log2_rows(self),
+            <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
+        );
 
         // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS))

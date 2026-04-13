@@ -59,7 +59,11 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         let fixed_log2_rows = program.fixed_log2_rows(self);
         Some(match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(instrs_len, None),
+            None => next_power_of_two(
+                instrs_len,
+                None,
+                <SelectChip as MachineAir<F>>::name(self).as_str(),
+            ),
         })
     }
 
@@ -149,7 +153,11 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.select_events;
-        Some(next_power_of_two(events.len(), input.fixed_log2_rows(self)))
+        Some(next_power_of_two(
+            events.len(),
+            input.fixed_log2_rows(self),
+            <SelectChip as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]

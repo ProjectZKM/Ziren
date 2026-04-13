@@ -61,6 +61,7 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
             &mut rows,
             || [F::ZERO; NUM_SYS_LINUX_COLS],
             input.fixed_log2_rows::<F, _>(self),
+            <SysLinuxChip as MachineAir<F>>::name(self).as_str(),
         );
 
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_SYS_LINUX_COLS))

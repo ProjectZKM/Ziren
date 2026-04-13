@@ -1201,7 +1201,7 @@ pub mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Syscall soundness regression tests (ProjectZKM/Ziren#488)
+    // Syscall soundness regression tests
     //
     // These tests exercise Go ELF programs that trigger linux syscalls
     // (mmap, clone, brk, fcntl, read, write, exit_group, nop) through the

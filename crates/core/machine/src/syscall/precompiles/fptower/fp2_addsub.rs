@@ -174,6 +174,7 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
                 row
             },
             input.fixed_log2_rows::<F, _>(self),
+            <Fp2AddSubAssignChip<P> as MachineAir<F>>::name(self).as_str(),
         );
 
         // Convert the trace to a row major matrix.

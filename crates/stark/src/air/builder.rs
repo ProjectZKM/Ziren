@@ -472,6 +472,8 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
+        // Note: U16Range checks for arg half-words are in SyscallChip::eval(),
+        // gated by is_real (covers all syscalls, not just linux).
         let values: Vec<Self::Expr> = vec![
             shard.into(),
             clk.into(),
@@ -500,6 +502,8 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         multiplicity: impl Into<Self::Expr>,
         scope: LookupScope,
     ) {
+        // No U16Range checks here — the send side handles them, and the lookup
+        // argument guarantees both sides have identical values.
         let values: Vec<Self::Expr> = vec![
             shard.into(),
             clk.into(),

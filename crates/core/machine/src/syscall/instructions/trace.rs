@@ -33,8 +33,13 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
         "SyscallInstrs".to_string()
     }
 
-    fn picus_info(&self) -> zkm_stark::PicusInfo {
-        SyscallInstrColumns::<u8>::picus_info()
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.syscall_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <SyscallInstrsChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
     }
 
     fn generate_trace(
@@ -43,9 +48,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.syscall_events.len()) / num_cpus::get(), 1);
-        let nb_rows = input.syscall_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <SyscallInstrsChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_SYSCALL_INSTR_COLS);
 
         let blu_events = values

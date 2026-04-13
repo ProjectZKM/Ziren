@@ -83,7 +83,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
         let nb_rows = accesses.len().div_ceil(NUM_VAR_MEM_ENTRIES_PER_ROW);
         let padded_nb_rows = match program.fixed_log2_rows(self) {
             Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
+            None => next_power_of_two(
+                nb_rows,
+                None,
+                <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
+            ),
         };
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
 
@@ -126,7 +130,12 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
             .collect::<Vec<_>>();
 
         // Pad the rows to the next power of two.
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_MEM_INIT_COLS], input.fixed_log2_rows(self));
+        pad_rows_fixed(
+            &mut rows,
+            || [F::ZERO; NUM_MEM_INIT_COLS],
+            input.fixed_log2_rows(self),
+            <MemoryChip<F> as MachineAir<F>>::name(self).as_str(),
+        );
 
         // Convert the trace to a row major matrix.
         Ok(RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MEM_INIT_COLS))

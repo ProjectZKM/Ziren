@@ -65,6 +65,7 @@ pub fn pad_rows_fixed_with_err<R: Clone>(
     rows: &mut Vec<R>,
     row_fn: impl Fn() -> Result<R, CoreChipError>,
     size_log2: Option<usize>,
+    chip: &str,
 ) -> Result<(), CoreChipError> {
     let nb_rows = rows.len();
     let dummy_row = match row_fn() {
@@ -74,7 +75,7 @@ pub fn pad_rows_fixed_with_err<R: Clone>(
             return Err(e);
         }
     };
-    rows.resize(next_power_of_two(nb_rows, size_log2), dummy_row);
+    rows.resize(next_power_of_two(nb_rows, size_log2, chip), dummy_row);
     Ok(())
 }
 
@@ -88,15 +89,16 @@ pub fn pad_rows_fixed<R: Clone>(
     rows: &mut Vec<R>,
     row_fn: impl Fn() -> R,
     size_log2: Option<usize>,
+    chip: &str,
 ) {
     let nb_rows = rows.len();
     let dummy_row = row_fn();
-    rows.resize(next_power_of_two(nb_rows, size_log2), dummy_row);
+    rows.resize(next_power_of_two(nb_rows, size_log2, chip), dummy_row);
 }
 
 /// Returns the next power of two that is >= `n` and >= 16. If `fixed_power` is set, it will return
 /// `2^fixed_power` after checking that `n <= 2^fixed_power`.
-pub fn next_power_of_two(n: usize, fixed_power: Option<usize>) -> usize {
+pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> usize {
     match fixed_power {
         Some(power) => {
             let padded_nb_rows = 1 << power;
@@ -108,7 +110,7 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>) -> usize {
                 );
             }
             if n > padded_nb_rows {
-                panic!("fixed log2 rows is too small: got {n}, expected {padded_nb_rows}");
+                panic!("{chip}: fixed log2 rows is too small: got {n}, expected {padded_nb_rows}");
             }
             padded_nb_rows
         }

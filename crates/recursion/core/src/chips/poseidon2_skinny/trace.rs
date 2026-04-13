@@ -68,7 +68,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let events = &input.poseidon2_events;
-        Some(next_power_of_two(events.len() * (OUTPUT_ROUND_IDX + 1), input.fixed_log2_rows(self)))
+        Some(next_power_of_two(
+            events.len() * (OUTPUT_ROUND_IDX + 1),
+            input.fixed_log2_rows(self),
+            <Poseidon2SkinnyChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]
@@ -194,7 +198,11 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
     }
 
     fn preprocessed_num_rows(&self, program: &Self::Program, instrs_len: usize) -> Option<usize> {
-        Some(next_power_of_two(instrs_len, program.fixed_log2_rows(self)))
+        Some(next_power_of_two(
+            instrs_len,
+            program.fixed_log2_rows(self),
+            <Poseidon2SkinnyChip<DEGREE> as MachineAir<F>>::name(self).as_str(),
+        ))
     }
 
     #[cfg(not(feature = "sys"))]

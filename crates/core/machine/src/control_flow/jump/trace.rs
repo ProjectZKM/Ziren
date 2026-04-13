@@ -33,15 +33,22 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
         JumpColumns::<u8>::picus_info()
     }
 
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        let nb_rows = next_power_of_two(
+            input.jump_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <JumpChip as MachineAir<F>>::name(self).as_str(),
+        );
+        Some(nb_rows)
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let chunk_size = std::cmp::max((input.jump_events.len()) / num_cpus::get(), 1);
-        let nb_rows = input.jump_events.len();
-        let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(nb_rows, size_log2);
+        let padded_nb_rows = <JumpChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_JUMP_COLS);
 
         let blu_events = values

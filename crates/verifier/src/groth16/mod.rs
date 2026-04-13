@@ -2,6 +2,8 @@ mod converter;
 pub mod error;
 mod verify;
 
+include!(concat!(env!("OUT_DIR"), "/part_stark_vk_registry.rs"));
+
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField};
 use substrate_bn::Fr;
@@ -123,12 +125,12 @@ impl Groth16Verifier {
     /// * `imm_groth16_vk` - The Groth16 verifying key bytes.
     ///   Usually this will be the [`static@crate::IMM_GROTH16_VK_BYTES`] constant,
     ///   which is the Groth16 verifying key for all Ziren versions.
-    /// * `part_start_vk` - The partial STARK verifying key bytes.
+    /// * `part_stark_vk` - The partial STARK verifying key bytes.
     ///   Usually this will be the [`static@crate::PART_STARK_VK_BYTES`] constant,
     ///   which is the partial STARK verifying key for the current Ziren version.
     ///   You can also obtain the given version of the partial STARK vk through function:
     /// ```ignore
-    /// let part_start_vk = Groth16Verifier::get_part_start_vk(zkm_circuit_version);
+    /// let part_stark_vk = Groth16Verifier::get_part_stark_vk(zkm_circuit_version);
     /// ```
     ///
     /// # Returns
@@ -139,7 +141,7 @@ impl Groth16Verifier {
         zkm_public_inputs: &[u8],
         zkm_vkey_hash: &str,
         imm_groth16_vk: &[u8],
-        part_start_vk: &[u8],
+        part_stark_vk: &[u8],
     ) -> Result<(), Groth16Error> {
         check_groth16_vk_prefix(proof, imm_groth16_vk).map_err(|e| match e {
             Groth16VkPrefixError::InvalidData => Groth16Error::GeneralError(Error::InvalidData),
@@ -147,7 +149,7 @@ impl Groth16Verifier {
         })?;
 
         let zkm_vkey_hash = decode_zkm_vkey_hash(zkm_vkey_hash)?;
-        let zkm_vkey_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_start_vk)?;
+        let zkm_vkey_hash = hash_vkey_with_part_vk(&zkm_vkey_hash, part_stark_vk)?;
 
         Self::verify_gnark_proof(
             &proof[4..],
@@ -159,11 +161,12 @@ impl Groth16Verifier {
     /// Get the partial STARK verifying key for a given version.
     /// version: The version of the circuit, e.g. "v1.0.0"
     pub fn get_part_stark_vk(zkm_circuit_version: &str) -> &'static [u8] {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(format!("bn254-vk/history/{zkm_circuit_version}_part_stark_vk.bin"));
-        let bytes = std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("failed to read part_stark_vk.bin at {path:?}: {e}"));
-        Box::leak(bytes.into_boxed_slice())
+        BUNDLED_PART_STARK_VKS
+            .iter()
+            .find_map(|(version, bytes)| (*version == zkm_circuit_version).then_some(*bytes))
+            .unwrap_or_else(|| {
+                panic!("unsupported bundled part_stark_vk version: {zkm_circuit_version}")
+            })
     }
 
     #[cfg(feature = "ark")]
@@ -187,13 +190,13 @@ impl Groth16Verifier {
         proof_with_pub_values: &ZKMProofWithPublicValues,
         vkey_hash: &str,
         imm_groth16_vk: &[u8],
-        part_start_vk: &[u8],
+        part_stark_vk: &[u8],
     ) -> Result<bool, ArkGroth16Error> {
         let ark_proof = crate::convert_ark_imm_wrap_vk(
             proof_with_pub_values,
             vkey_hash,
             imm_groth16_vk,
-            part_start_vk,
+            part_stark_vk,
         )?;
 
         Groth16::<Bn254, LibsnarkReduction>::verify_proof(
