@@ -184,6 +184,32 @@ pub trait ByteAirBuilder: BaseAirBuilder {
     }
 }
 
+/// Optional hooks for builders that want to replace exact operation AIR with a summary.
+///
+/// Builders should return `true` only when they have emitted a semantically sound replacement for
+/// the exact constraints. Returning `false` tells the caller to proceed with exact lowering.
+pub trait OperationSummaryAirBuilder: AirBuilder {
+    fn try_emit_is_zero_summary(
+        &mut self,
+        _input: Self::Expr,
+        _result: Self::Expr,
+        _is_real: Self::Expr,
+    ) -> bool {
+        false
+    }
+
+    fn try_emit_is_zero_word_summary(
+        &mut self,
+        _input: Word<Self::Expr>,
+        _is_lower_half_zero: Self::Expr,
+        _is_upper_half_zero: Self::Expr,
+        _result: Self::Expr,
+        _is_real: Self::Expr,
+    ) -> bool {
+        false
+    }
+}
+
 /// A trait which contains methods related to ALU lookups in an AIR.
 pub trait InstructionAirBuilder: BaseAirBuilder {
     /// Sends a MIPS instruction to be processed.
@@ -563,7 +589,10 @@ pub trait MachineAirBuilder:
 }
 
 /// A trait which contains all helper methods for building Ziren machine AIRs.
-pub trait ZKMAirBuilder: MachineAirBuilder + ByteAirBuilder + InstructionAirBuilder {}
+pub trait ZKMAirBuilder:
+    MachineAirBuilder + ByteAirBuilder + InstructionAirBuilder + OperationSummaryAirBuilder
+{
+}
 
 impl<AB: AirBuilder + MessageBuilder<M>, M> MessageBuilder<M> for FilteredAirBuilder<'_, AB> {
     fn send(&mut self, message: M, scope: LookupScope) {
@@ -582,7 +611,11 @@ impl<AB: BaseAirBuilder> InstructionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> SepticExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> MachineAirBuilder for AB {}
-impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> ZKMAirBuilder for AB {}
+impl<AB: EmptyMessageBuilder + AirBuilderWithPublicValues> OperationSummaryAirBuilder for AB {}
+impl<AB: BaseAirBuilder + AirBuilderWithPublicValues + OperationSummaryAirBuilder> ZKMAirBuilder
+    for AB
+{
+}
 
 impl<SC: StarkGenericConfig> EmptyMessageBuilder for ProverConstraintFolder<'_, SC> {}
 impl<SC: StarkGenericConfig> EmptyMessageBuilder for VerifierConstraintFolder<'_, SC> {}

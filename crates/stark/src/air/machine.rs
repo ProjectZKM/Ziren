@@ -82,6 +82,9 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     ///
     /// This includes:
     /// - Input ranges: columns marked with `#[picus(input)]`
+    /// - Output ranges: columns marked with `#[picus(output)]`
+    /// - Transition-input ranges: columns marked with `#[picus(transition_input)]`
+    /// - Transition-output ranges: columns marked with `#[picus(transition_output)]`
     /// - Selector indices: columns marked with `#[picus(selector)]`
     fn picus_info(&self) -> PicusInfo {
         PicusInfo::default()

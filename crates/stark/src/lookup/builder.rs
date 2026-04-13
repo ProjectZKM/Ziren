@@ -4,7 +4,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 
 use crate::{
-    air::{AirLookup, LookupScope, MessageBuilder},
+    air::{AirLookup, LookupScope, MessageBuilder, OperationSummaryAirBuilder},
     PROOF_MAX_NUM_PVS,
 };
 
@@ -119,6 +119,8 @@ impl<F: Field> AirBuilderWithPublicValues for LookupBuilder<F> {
         &self.public_values
     }
 }
+
+impl<F: Field> OperationSummaryAirBuilder for LookupBuilder<F> {}
 
 fn symbolic_to_virtual_pair<F: Field>(expression: &SymbolicExpression<F>) -> VirtualPairCol<F> {
     if expression.degree_multiple() > 1 {

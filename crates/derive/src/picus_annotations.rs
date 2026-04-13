@@ -16,12 +16,16 @@ use syn::{
 struct PicusArgs {
     input: bool,
     output: bool,
+    transition_input: bool,
+    transition_output: bool,
     selector: bool,
 }
 
 enum Arg {
     Input,
     Output,
+    TransitionInput,
+    TransitionOutput,
     Selector,
 }
 
@@ -37,6 +41,12 @@ impl Parse for Arg {
         }
         if is("output") {
             return Ok(Arg::Output);
+        }
+        if is("transition_input") {
+            return Ok(Arg::TransitionInput);
+        }
+        if is("transition_output") {
+            return Ok(Arg::TransitionOutput);
         }
         if is("selector") {
             return Ok(Arg::Selector);
@@ -58,6 +68,8 @@ fn parse_picus_attr(attr: &syn::Attribute) -> syn::Result<Option<PicusArgs>> {
         match it {
             Arg::Input => out.input = true,
             Arg::Output => out.output = true,
+            Arg::TransitionInput => out.transition_input = true,
+            Arg::TransitionOutput => out.transition_output = true,
             Arg::Selector => out.selector = true,
         }
     }
@@ -188,6 +200,8 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
                     Ok(Some(a)) => {
                         flags.input |= a.input;
                         flags.output |= a.output;
+                        flags.transition_input |= a.transition_input;
+                        flags.transition_output |= a.transition_output;
                         flags.selector |= a.selector;
                     }
                     Ok(None) => {}
@@ -222,6 +236,26 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
             quote!()
         };
 
+        let push_transition_in = if flags.transition_input {
+            quote! {
+                if width > 0 {
+                    info.transition_input_ranges.push((cur, cur + width, #f_name.to_string()));
+                }
+            }
+        } else {
+            quote!()
+        };
+
+        let push_transition_out = if flags.transition_output {
+            quote! {
+                if width > 0 {
+                    info.transition_output_ranges.push((cur, cur + width, #f_name.to_string()));
+                }
+            }
+        } else {
+            quote!()
+        };
+
         let push_sel = if flags.selector {
             quote! {
                 if width > 0 {
@@ -250,6 +284,8 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
             #push_name
             #push_in
             #push_out
+            #push_transition_in
+            #push_transition_out
             #push_sel
             #push_is_real
             cur += width;
