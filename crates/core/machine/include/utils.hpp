@@ -201,12 +201,14 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ uint32_t unsigned_abs(int32_t value) {
 
 __ZKM_HOSTDEV__ __ZKM_INLINE__ std::array<uint8_t, 8> signed_extended(const array_t<uint8_t, 4>& value) {
     constexpr uint8_t BYTE_MASK = 0xFF;
-
-    std::array<uint8_t, 8> b_extended;
-    std::copy(value.begin(), value.end(), b_extended.begin());
-
-    std::fill(b_extended.begin() + value.size(), b_extended.end(), BYTE_MASK);
-    return b_extended;
+    std::array<uint8_t, 8> out{};
+    for (size_t i = 0; i < value.size(); ++i) {
+        out[i] = value[i];
+    }
+    for (size_t i = value.size(); i < out.size(); ++i) {
+        out[i] = BYTE_MASK;
+    }
+    return out;
 }
 
 /// Get the system call identifier.
