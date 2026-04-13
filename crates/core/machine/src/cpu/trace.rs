@@ -309,7 +309,7 @@ mod tests {
 
         let chip = CpuChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&shard, &mut ExecutionRecord::default());
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let trace_ffi = generate_trace_ffi(&shard);
 
         assert_eq!(trace_ffi, trace);

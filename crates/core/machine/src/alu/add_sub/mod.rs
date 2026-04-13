@@ -360,7 +360,7 @@ mod tests {
 
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(shard, &mut ExecutionRecord::default());
+            chip.generate_trace(shard, &mut ExecutionRecord::default()).unwrap();
         let trace_ffi = generate_trace_ffi(shard);
 
         assert_eq!(trace_ffi, trace);
@@ -400,7 +400,7 @@ mod tests {
             rows.extend(row_batch);
         }
 
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None);
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None, "AddSub");
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)
