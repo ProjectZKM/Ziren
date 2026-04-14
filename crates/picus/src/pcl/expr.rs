@@ -18,6 +18,10 @@ pub fn set_picus_names(map: HashMap<usize, String>) {
     let _ = PICUS_NAMES_GLOBAL.set(RwLock::new(map));
 }
 
+pub(crate) fn picus_name_for(id: usize) -> Option<String> {
+    PICUS_NAMES_GLOBAL.get()?.read().unwrap().get(&id).cloned()
+}
+
 // Get or initialize the fresh var counter
 fn ctr() -> &'static AtomicUsize {
     FRESH_VAR_CTR.get_or_init(|| AtomicUsize::new(0))
@@ -118,12 +122,10 @@ impl Display for PicusAtom {
         match self {
             Self::Const(c) => write!(f, "{c}"),
             Self::Var(id) => {
-                if let Some(lock) = PICUS_NAMES_GLOBAL.get() {
-                    if let Some(name) = lock.read().unwrap().get(id) {
-                        return f.write_str(name);
-                    }
+                if let Some(name) = picus_name_for(*id) {
+                    return f.write_str(&name);
                 }
-                write!(f, "v{id}")
+                write!(f, "fresh_{id}")
             }
         }
     }
