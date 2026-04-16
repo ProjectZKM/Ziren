@@ -504,7 +504,7 @@ fn main() {
     println!("Generating Picus program for {} chip.....", chip.name());
     let mut selector_modules = BTreeMap::new();
     let mut all_aux_modules = BTreeMap::new();
-    let phases = ExtractionPhase::all(chip.local_only());
+    let phases = ExtractionPhase::all(chip.local_only(), chip.local_only_row_sensitive());
 
     if picus_info.selector_indices.is_empty() && picus_info.is_real_index.is_none() {
         panic!("PicusBuilder needs at least one selector to be enabled!")

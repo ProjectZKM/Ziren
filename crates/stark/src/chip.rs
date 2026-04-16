@@ -248,6 +248,10 @@ where
         self.air.local_only()
     }
 
+    fn local_only_row_sensitive(&self) -> bool {
+        self.air.local_only_row_sensitive()
+    }
+
     fn picus_info(&self) -> PicusInfo {
         self.air.picus_info()
     }

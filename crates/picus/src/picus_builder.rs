@@ -66,9 +66,14 @@ pub enum ExtractionPhase {
 impl ExtractionPhase {
     /// Returns every extraction phase relevant for the chip's row model.
     ///
-    /// `local_only` chips never materialize successor rows, so they skip
-    /// transition-specific phases such as `Boundary`.
-    pub fn all(local_only: bool) -> Vec<Self> {
+    /// `local_only` chips that also ignore absolute row position only need
+    /// `SingleRow`. Row-sensitive local-only chips still need the first/interior/last
+    /// split, but never the true cross-row `Boundary` phase.
+    pub fn all(local_only: bool, local_only_row_sensitive: bool) -> Vec<Self> {
+        if local_only && !local_only_row_sensitive {
+            return vec![Self::SingleRow];
+        }
+
         let mut phases = vec![Self::SingleRow, Self::FirstRow, Self::Transition, Self::LastRow];
         if !local_only {
             phases.insert(3, Self::Boundary);
