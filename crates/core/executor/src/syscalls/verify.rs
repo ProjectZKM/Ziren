@@ -17,6 +17,16 @@ impl Syscall for VerifySyscall {
     ) -> Result<Option<u32>, ExecutionError> {
         let rt = &mut ctx.rt;
 
+        // When recovering from a checkpoint, proof_stream is intentionally excluded
+        // from serialization (to reduce checkpoint size). In that case, skip proof
+        // verification since it was already performed during checkpoint generation.
+        if rt.state.proof_stream.is_empty() {
+            tracing::info!(
+                "Skipping deferred proof verification: proof_stream is empty (ExecutorMode::Trace)"
+            );
+            return Ok(None);
+        }
+
         // vkey_ptr is a pointer to [u32; 8] which contains the verification key.
         // pv_digest_ptr is a pointer to [u32; 8] which contains the public values digest.
 
