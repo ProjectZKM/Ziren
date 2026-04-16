@@ -1,6 +1,6 @@
 use crate::program::MAX_MEMORY;
 
-use crate::ExecutionError;
+use crate::{DeferredProofVerification, ExecutionError};
 
 use super::{Syscall, SyscallCode, SyscallContext};
 
@@ -17,13 +17,7 @@ impl Syscall for VerifySyscall {
     ) -> Result<Option<u32>, ExecutionError> {
         let rt = &mut ctx.rt;
 
-        // When recovering from a checkpoint, proof_stream is intentionally excluded
-        // from serialization (to reduce checkpoint size). In that case, skip proof
-        // verification since it was already performed during checkpoint generation.
-        if rt.state.proof_stream.is_empty() {
-            tracing::info!(
-                "Skipping deferred proof verification: proof_stream is empty (ExecutorMode::Trace)"
-            );
+        if rt.deferred_proof_verification == DeferredProofVerification::Disabled {
             return Ok(None);
         }
 
@@ -46,13 +40,13 @@ impl Syscall for VerifySyscall {
         if proof_index >= rt.state.proof_stream.len() {
             panic!("Not enough proofs were written to the runtime.");
         }
+        let (proof, proof_vk) = &rt.state.proof_stream[proof_index];
         rt.state.proof_stream_ptr += 1;
 
         let vkey_bytes: [u32; 8] = vkey.try_into().unwrap();
         let pv_digest_bytes: [u32; 8] = pv_digest.try_into().unwrap();
 
         if let Some(verifier) = rt.subproof_verifier {
-            let (proof, proof_vk) = &rt.state.proof_stream[proof_index];
             if let Err(e) =
                 verifier.verify_deferred_proof(proof, proof_vk, vkey_bytes, pv_digest_bytes)
             {
