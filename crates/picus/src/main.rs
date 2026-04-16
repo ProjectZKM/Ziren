@@ -436,15 +436,15 @@ fn build_selector_env(
     env
 }
 
-fn build_top_module(
+fn add_selector_shape_postconditions(
+    top_module: &mut PicusModule,
     picus_info: &PicusInfo,
     assume_selectors_deterministic: bool,
-) -> Option<PicusModule> {
+) -> bool {
     if picus_info.selector_indices.is_empty() {
-        return None;
+        return false;
     }
 
-    let mut top_module = PicusModule::new("top".to_string());
     let mut one_hot_sum = PicusExpr::Const(0);
     for (selector_col, _) in &picus_info.selector_indices {
         let selector_var = PicusExpr::Var(*selector_col);
@@ -456,7 +456,7 @@ fn build_top_module(
         }
     }
     top_module.postconditions.push(PicusConstraint::new_lt(one_hot_sum, 2.into()));
-    Some(top_module)
+    true
 }
 
 fn main() {
@@ -557,10 +557,44 @@ fn main() {
     picus_program.add_modules(&mut all_aux_modules);
     picus_program.add_modules(&mut selector_modules);
 
-    // The top module is independent of selector-specialized extraction. It only
-    // encodes selector-shape assumptions such as one-hotness/determinism.
-    if let Some(top_module) = build_top_module(&picus_info, args.assume_selectors_deterministic) {
-        picus_program.add_module("top", top_module);
+    // For chips with a single extraction phase, keep the older AIR-backed top
+    // module so selector constraints remain visible without selector specialization.
+    // Multi-phase chips currently fall back to a selector-shape-only top module,
+    // since there is no single unspecialized phase that represents the whole AIR.
+    if !picus_info.selector_indices.is_empty() {
+        if phases.len() == 1 {
+            let top_env = build_selector_env(&picus_info, None);
+            initialize_fresh_var_ctr(fresh_var_ctr_base);
+            let (top_base_module, mut top_aux_modules) = analyze_chip(
+                chip,
+                &chips,
+                None,
+                Some(top_env.clone()),
+                phases[0],
+                SubmoduleMode::Ignore,
+                shr_carry_summary_mode,
+                column_output_mode,
+            );
+            picus_program.add_modules(&mut top_aux_modules);
+            let mut top_module = top_base_module.partial_eval(&top_env);
+            top_module.name = "top".to_string();
+            top_module.outputs.clear();
+            top_module.assume_deterministic.clear();
+            add_selector_shape_postconditions(
+                &mut top_module,
+                &picus_info,
+                args.assume_selectors_deterministic,
+            );
+            picus_program.add_module("top", top_module);
+        } else {
+            let mut top_module = PicusModule::new("top".to_string());
+            add_selector_shape_postconditions(
+                &mut top_module,
+                &picus_info,
+                args.assume_selectors_deterministic,
+            );
+            picus_program.add_module("top", top_module);
+        }
     }
     let res =
         picus_program.write_to_path(args.picus_out_dir.join(format!("{}.picus", chip.name())));
