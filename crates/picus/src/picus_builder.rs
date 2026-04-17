@@ -977,6 +977,12 @@ impl<'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'c
 
 impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder<'chips, A> {
     fn send(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
+        // The "top" extraction path is meant to preserve only polynomial constraints
+        // emitted directly by the chip AIR. Interaction lowering adds derived ports,
+        // helper calls, and sub-chip routing, all of which should be absent there.
+        if self.submodule_mode == SubmoduleMode::Ignore {
+            return;
+        }
         // Apply specialization first so opcode routing can see concrete values whenever
         // selector assignments make them decidable.
         let specialized_values: Vec<PicusExpr> =
@@ -1064,17 +1070,19 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
     }
 
     fn receive(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
-        // initialize another chip
-        // call eval with builder?
         let specialized_values: Vec<PicusExpr> =
             message.values.iter().map(|expr| self.specialize_expr(expr)).collect();
         let specialized_multiplicity = self.specialize_expr(&message.multiplicity);
+
+        if self.submodule_mode == SubmoduleMode::Ignore {
+            if message.kind == LookupKind::Instruction {
+                self.picus_module.assume_deterministic.push(specialized_values[6].clone());
+            }
+            return;
+        }
+
         match message.kind {
             LookupKind::Instruction => {
-                if self.submodule_mode == SubmoduleMode::Ignore {
-                    self.picus_module.assume_deterministic.push(specialized_values[6].clone());
-                    return;
-                }
                 self.handle_receive_instruction(specialized_multiplicity, &specialized_values);
             }
             LookupKind::Memory => {

@@ -579,7 +579,11 @@ fn main() {
             let mut top_module = top_base_module.partial_eval(&top_env);
             top_module.name = "top".to_string();
             top_module.outputs.clear();
-            top_module.assume_deterministic.clear();
+            // Partial evaluation can collapse some top-level determinism assumptions
+            // into constants (for example selector-specialized `0/1` values). Drop
+            // only those tautological assumptions so AIR-derived symbolic ones, such
+            // as receive-instruction opcode determinism, remain visible in `top`.
+            top_module.assume_deterministic.retain(|expr| !matches!(expr, PicusExpr::Const(_)));
             add_selector_shape_postconditions(
                 &mut top_module,
                 &picus_info,
