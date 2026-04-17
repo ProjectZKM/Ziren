@@ -118,6 +118,14 @@ pub fn subst_constraint(
     let keep = |cc: PicusConstraint| Some(cc);
 
     match c {
+        Det(e) => {
+            let ee = subst_expr(e, env);
+            match ee {
+                PicusExpr::Const(_) => None,
+                _ => keep(Det(Box::new(ee))),
+            }
+        }
+
         Eq(e) => {
             let ee = subst_expr(e, env);
             // Drop tautologies Eq(0); keep contradictions as Eq(1)

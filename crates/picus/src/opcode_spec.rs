@@ -55,7 +55,7 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
             arg_to_colname: &[
                 (Single(2), "pc"),
                 (Single(3), "next_pc"),
-                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 7, end: 11 }, "bit_shift_result"),
                 (Range { start: 11, end: 15 }, "b"),
                 (Range { start: 15, end: 19 }, "c"),
             ],
@@ -78,7 +78,18 @@ pub fn spec_for(kind: Opcode) -> OpcodeSpec {
             arg_to_colname: &[
                 (Single(2), "pc"),
                 (Single(3), "next_pc"),
-                (Range { start: 7, end: 11 }, "a"),
+                (Range { start: 7, end: 11 }, "bit_shift_result"),
+                (Range { start: 11, end: 15 }, "b"),
+                (Range { start: 15, end: 19 }, "c"),
+            ],
+        },
+        Opcode::SRA => OpcodeSpec {
+            selector: "is_sra",
+            chip: "ShiftRight",
+            arg_to_colname: &[
+                (Single(2), "pc"),
+                (Single(3), "next_pc"),
+                (Range { start: 7, end: 11 }, "bit_shift_result"),
                 (Range { start: 11, end: 15 }, "b"),
                 (Range { start: 15, end: 19 }, "c"),
             ],
