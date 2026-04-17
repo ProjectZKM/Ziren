@@ -12,7 +12,10 @@ pub fn is_valid_merkle_big_branch<'a>(
     index: U256,
     root: &Node,
 ) -> bool {
-    let mut value: [u8; 32] = leaf.as_ref().try_into().unwrap();
+    let mut value: [u8; 32] = leaf
+    .as_ref()
+    .try_into()
+    .expect("Node must be 32 bytes");
 
     let mut hasher = Sha256::new();
     for i in 0..depth {
@@ -29,7 +32,10 @@ pub fn is_valid_merkle_big_branch<'a>(
         }
         value = hasher.finalize_reset().into();
     }
-    let root: [u8; 32] = root.as_ref().try_into().unwrap();
+    let root: [u8; 32] = root
+    .as_ref()
+    .try_into()
+    .expect("Node must be 32 bytes");
     root == value
 }
 
@@ -38,5 +44,5 @@ pub fn branch_from_bytes(s: &[[u8; 32]]) -> Vec<Node> {
 }
 
 pub fn node_from_bytes(s: [u8; 32]) -> Node {
-    Node::try_from(&s[..]).unwrap()
+    Node::try_from(&s[..]).expect("invalid node length")
 }

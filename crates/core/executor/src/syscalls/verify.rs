@@ -1,6 +1,6 @@
 use crate::program::MAX_MEMORY;
 
-use crate::ExecutionError;
+use crate::{DeferredProofVerification, ExecutionError};
 
 use super::{Syscall, SyscallCode, SyscallContext};
 
@@ -16,6 +16,10 @@ impl Syscall for VerifySyscall {
         pv_digest_ptr: u32,
     ) -> Result<Option<u32>, ExecutionError> {
         let rt = &mut ctx.rt;
+
+        if rt.deferred_proof_verification == DeferredProofVerification::Disabled {
+            return Ok(None);
+        }
 
         // vkey_ptr is a pointer to [u32; 8] which contains the verification key.
         // pv_digest_ptr is a pointer to [u32; 8] which contains the public values digest.
@@ -36,13 +40,13 @@ impl Syscall for VerifySyscall {
         if proof_index >= rt.state.proof_stream.len() {
             panic!("Not enough proofs were written to the runtime.");
         }
+        let (proof, proof_vk) = &rt.state.proof_stream[proof_index];
         rt.state.proof_stream_ptr += 1;
 
         let vkey_bytes: [u32; 8] = vkey.try_into().unwrap();
         let pv_digest_bytes: [u32; 8] = pv_digest.try_into().unwrap();
 
         if let Some(verifier) = rt.subproof_verifier {
-            let (proof, proof_vk) = &rt.state.proof_stream[proof_index];
             if let Err(e) =
                 verifier.verify_deferred_proof(proof, proof_vk, vkey_bytes, pv_digest_bytes)
             {

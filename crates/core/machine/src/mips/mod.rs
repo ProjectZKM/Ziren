@@ -480,7 +480,7 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::CloClz, record.cloclz_events.len()),
             (
                 MipsAirId::Global,
-                2 * record.get_local_mem_events().count() + record.syscall_events.len(),
+                2 * record.get_local_mem_events().count() + 2 * record.syscall_events.len(),
             ),
             (MipsAirId::SyscallCore, record.syscall_events.len()),
         ]

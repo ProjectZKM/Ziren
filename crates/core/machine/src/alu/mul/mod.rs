@@ -189,7 +189,6 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         );
 
         // Convert the trace to a row major matrix.
-
         Ok(RowMajorMatrix::new(values, NUM_MUL_COLS))
     }
 
@@ -517,7 +516,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
@@ -541,6 +539,77 @@ mod tests {
         let chip = MulChip::default();
         let _trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
+    }
+
+    #[cfg(feature = "sys")]
+    #[test]
+    fn test_mul_generate_trace_ffi_eq_rust() {
+        use zkm_core_executor::events::MemoryWriteRecord;
+
+        let mut shard = ExecutionRecord::default();
+        shard.mul_events = vec![CompAluEvent {
+            shard: 5,
+            clk: 790405,
+            pc: 1017624,
+            next_pc: 1017628,
+            opcode: Opcode::MULT,
+            hi: 241306,
+            a: 1298966409,
+            b: 274417,
+            c: 3776743705,
+            hi_record: MemoryWriteRecord {
+                value: 241306,
+                shard: 5,
+                timestamp: 790409,
+                prev_value: 3431,
+                prev_shard: 5,
+                prev_timestamp: 790387,
+            },
+            hi_record_is_real: true,
+        }];
+
+        let chip = MulChip::default();
+        let trace: RowMajorMatrix<KoalaBear> =
+            chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
+        let trace_ffi = generate_trace_ffi(&shard);
+
+        assert_eq!(trace_ffi, trace);
+    }
+
+    #[cfg(feature = "sys")]
+    fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
+        use super::{MulCols, NUM_MUL_COLS};
+        use crate::utils::next_power_of_two;
+        use crate::utils::zeroed_f_vec;
+        use p3_koala_bear::KoalaBear;
+        use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+        use std::borrow::BorrowMut;
+
+        type F = KoalaBear;
+
+        let padded_nb_rows = next_power_of_two(input.mul_events.len(), None, "Mul");
+        let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
+        let nb_rows = input.mul_events.len();
+        let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
+
+        values.chunks_mut(chunk_size * NUM_MUL_COLS).enumerate().par_bridge().for_each(
+            |(i, rows)| {
+                rows.chunks_mut(NUM_MUL_COLS).enumerate().for_each(|(j, row)| {
+                    let idx = i * chunk_size + j;
+                    let cols: &mut MulCols<F> = row.borrow_mut();
+
+                    if idx < nb_rows {
+                        let event = &input.mul_events[idx];
+                        unsafe {
+                            crate::sys::mul_event_to_row_koalabear(event, cols);
+                        }
+                    }
+                });
+            },
+        );
+
+        // Convert the trace to a row major matrix.
+        RowMajorMatrix::new(values, NUM_MUL_COLS)
     }
 
     #[test]

@@ -416,7 +416,7 @@ mod tests {
         let record = get_test_execution_record();
         let chip = MemoryLocalChip::new();
         let trace: RowMajorMatrix<KoalaBear> =
-            chip.generate_trace(&record, &mut ExecutionRecord::default());
+            chip.generate_trace(&record, &mut ExecutionRecord::default()).unwrap();
         let trace_ffi = generate_trace_ffi(&record, trace.height());
 
         assert_eq!(trace_ffi, trace);
