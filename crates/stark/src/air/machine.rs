@@ -78,10 +78,23 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
         false
     }
 
+    /// Specifies whether a local-only AIR still depends on absolute row position.
+    ///
+    /// This is for chips that never read the next row, but do use predicates like
+    /// `when_first_row()` or `when_last_row()` to distinguish the beginning or end
+    /// of the trace. Such chips still need `FirstRow` / `Transition` / `LastRow`
+    /// extraction phases even though they are `local_only()`.
+    fn local_only_row_sensitive(&self) -> bool {
+        false
+    }
+
     /// Returns information about Picus annotations on AIR columns.
     ///
     /// This includes:
     /// - Input ranges: columns marked with `#[picus(input)]`
+    /// - Output ranges: columns marked with `#[picus(output)]`
+    /// - Transition-input ranges: columns marked with `#[picus(transition_input)]`
+    /// - Transition-output ranges: columns marked with `#[picus(transition_output)]`
     /// - Selector indices: columns marked with `#[picus(selector)]`
     fn picus_info(&self) -> PicusInfo {
         PicusInfo::default()

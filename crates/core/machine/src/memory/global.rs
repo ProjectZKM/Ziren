@@ -10,13 +10,13 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{
         AirLookup, BaseAirBuilder, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
         ZKM_PROOF_NUM_PV_ELTS,
     },
-    LookupKind, Word,
+    LookupKind, PicusInfo, Word,
 };
 
 use crate::{
@@ -57,6 +57,10 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             MemoryChipType::Initialize => "MemoryGlobalInit".to_string(),
             MemoryChipType::Finalize => "MemoryGlobalFinalize".to_string(),
         }
+    }
+
+    fn picus_info(&self) -> zkm_stark::PicusInfo {
+        MemoryInitCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(
@@ -207,7 +211,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
     }
 }
 
-#[derive(AlignedBorrow, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryInitCols<T: Copy> {
     /// The shard number of the memory access.
@@ -279,8 +283,8 @@ where
             builder.send(
                 AirLookup::new(
                     vec![
-                        AB::Expr::zero(),
-                        AB::Expr::zero(),
+                        AB::Expr::zero(), // shard
+                        AB::Expr::zero(), // timestamp
                         local.addr.into(),
                         value[0].clone(),
                         value[1].clone(),
@@ -404,6 +408,7 @@ where
 
         if self.kind == MemoryChipType::Initialize {
             builder.when(local.is_real).assert_eq(local.timestamp, AB::F::ONE);
+            builder.when(local.is_real).assert_eq(local.shard, AB::F::ONE);
         }
 
         // Constraints related to register %x0.
@@ -431,6 +436,8 @@ where
         // - The flag `is_real` is set to one and the next `is_real` is set to zero.
 
         // Constrain the `is_last_addr` flag.
+        builder.assert_bool(local.is_last_addr);
+        builder.when_last_row().assert_eq(local.is_last_addr, local.is_real);
         builder
             .when_transition()
             .assert_eq(local.is_last_addr, local.is_real * (AB::Expr::one() - next.is_real));

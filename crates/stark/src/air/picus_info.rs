@@ -21,6 +21,22 @@ pub struct PicusInfo {
     /// - `field_name` is the name of the field
     pub output_ranges: Vec<(usize, usize, String)>,
 
+    /// Ranges of columns whose current-row values should be exposed as inputs in transition-capable
+    /// extraction phases.
+    /// Each tuple contains (`start_index`, `end_index`, `field_name`) where:
+    /// - `start_index` is the first column index (inclusive)
+    /// - `end_index` is the last column index (exclusive)
+    /// - `field_name` is the name of the field
+    pub transition_input_ranges: Vec<(usize, usize, String)>,
+
+    /// Ranges of columns whose next-row values should be exposed as outputs in transition-capable
+    /// extraction phases.
+    /// Each tuple contains (`start_index`, `end_index`, `field_name`) where:
+    /// - `start_index` is the first column index (inclusive)
+    /// - `end_index` is the last column index (exclusive)
+    /// - `field_name` is the name of the field
+    pub transition_output_ranges: Vec<(usize, usize, String)>,
+
     /// Indices of columns marked as selectors.
     /// Each tuple contains (`column_index`, `field_name`) where:
     /// - `column_index` is the index of the selector column

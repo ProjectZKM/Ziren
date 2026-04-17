@@ -39,7 +39,7 @@ impl<F: Field> IsZeroOperation<F> {
         (a == F::ZERO) as u32
     }
 
-    pub fn eval<AB: ZKMAirBuilder>(
+    fn eval_exact<AB: ZKMAirBuilder>(
         builder: &mut AB,
         a: AB::Expr,
         cols: IsZeroOperation<AB::Var>,
@@ -63,5 +63,18 @@ impl<F: Field> IsZeroOperation<F> {
 
         // If the result is 1, then the input is 0.
         builder.when(is_real).when(cols.result).assert_zero(a);
+    }
+
+    pub fn eval<AB: ZKMAirBuilder>(
+        builder: &mut AB,
+        a: AB::Expr,
+        cols: IsZeroOperation<AB::Var>,
+        is_real: AB::Expr,
+    ) {
+        if builder.try_emit_is_zero_summary(a.clone(), cols.result.into(), is_real.clone()) {
+            return;
+        }
+
+        Self::eval_exact(builder, a, cols, is_real);
     }
 }

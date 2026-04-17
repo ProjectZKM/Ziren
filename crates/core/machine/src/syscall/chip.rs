@@ -13,9 +13,9 @@ use p3_maybe_rayon::prelude::ParallelIterator;
 
 use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, PrecompileEvent};
 use zkm_core_executor::{events::SyscallEvent, ByteOpcode, ExecutionRecord, Program};
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::air::AirLookup;
-use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_stark::air::{LookupScope, MachineAir, PicusInfo, ZKMAirBuilder};
 use zkm_stark::LookupKind;
 
 use crate::{utils::next_power_of_two, CoreChipError};
@@ -59,15 +59,7 @@ impl SyscallChip {
 }
 
 /// The column layout for the chip.
-///
-/// `arg1` and `arg2` are NOT stored as columns. They are derived inline as
-/// `arg1_lo + arg1_hi * 65536` to avoid redundant columns while keeping the
-/// reduced field element available for local `send_syscall`/`receive_syscall`.
-///
-/// **Soundness**: `arg1_lo/hi` and `arg2_lo/hi` are U16Range-checked inside
-/// `send_syscall_result_packed` (see `crates/stark/src/air/builder.rs`).
-/// Any chip using this interaction gets range-checked half-words automatically.
-#[derive(AlignedBorrow, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallCols<T: Copy> {
     /// The shard number of the syscall.
@@ -113,6 +105,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
 
     fn name(&self) -> String {
         format!("Syscall{}", self.shard_kind).to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        SyscallCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(
