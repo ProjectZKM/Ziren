@@ -7,7 +7,7 @@ use zkm_core_executor::{
     ByteOpcode::{self, U16Range},
     ExecutionRecord, Instruction, Opcode, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_stark::air::{MachineAir, PicusInfo};
 
 use p3_field::{PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -26,6 +26,10 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
 
     fn name(&self) -> String {
         self.id().to_string()
+    }
+
+    fn picus_info(&self) -> zkm_stark::PicusInfo {
+        CpuCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

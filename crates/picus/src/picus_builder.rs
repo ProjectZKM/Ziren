@@ -826,6 +826,102 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
     }
 
+    // Program lookups are encoded as:
+    //   [pc, instruction fields...]
+    // For Picus determinism extraction, we treat the fetched program row as fixed
+    // external context to the sending chip. That means `pc` and all instruction
+    // fields become inputs to the current module rather than a separate submodule call.
+    fn handle_program_send(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+        assert!(
+            values.len() >= 2,
+            "Expected program lookup to include at least pc and instruction fields"
+        );
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
+        };
+
+        for value in values {
+            let input_var = fresh_picus_expr();
+            self.push_input_port(input_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+        }
+    }
+
+    // When `send_instruction` comes from CPU with a symbolic opcode, we cannot dispatch into one
+    // concrete instruction chip yet. Instead we summarize the CPU/instruction-chip contract:
+    //
+    // - the instruction payload consumed by opcode chips is treated as input context to CPU
+    // - `next_pc` and `next_next_pc` stay outputs because they are the control-flow values the
+    //   instruction chips are responsible for fixing
+    // - `opcode` is assumed deterministic so the symbolic dispatch itself is stable
+    // - non-sequential instructions must determine `next_next_pc`, which we encode directly as
+    //   `is_sequential = 0 => det(next_next_pc)`
+    //
+    // We intentionally ignore `shard` and `clk` here. They are routing metadata for memory and
+    // syscall timing, not part of the opcode-level contract Picus is trying to prove.
+    fn handle_send_instruction_symbolic(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+        assert_eq!(values.len(), 28, "Expected instruction lookup to contain 28 values");
+
+        const PC_IDX: usize = 2;
+        const NEXT_PC_IDX: usize = 3;
+        const NEXT_NEXT_PC_IDX: usize = 4;
+        const NUM_EXTRA_CYCLES_IDX: usize = 5;
+        const OPCODE_IDX: usize = 6;
+        const A_START: usize = 7;
+        const HI_END: usize = 23;
+        const OP_A_IMMUTABLE_IDX: usize = 23;
+        const IS_RW_A_IDX: usize = 24;
+        const IS_CHECK_MEMORY_IDX: usize = 25;
+        const IS_HALT_IDX: usize = 26;
+        const IS_SEQUENTIAL_IDX: usize = 27;
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, var: &PicusExpr| {
+            PicusConstraint::new_equality(var.clone(), val.clone() * multiplicity.clone())
+        };
+
+        let bind_input = |builder: &mut Self, value: &PicusExpr| -> PicusExpr {
+            let input_var = fresh_picus_expr();
+            builder.push_input_port(input_var.clone());
+            builder.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+            input_var
+        };
+        let bind_output = |builder: &mut Self, value: &PicusExpr| -> PicusExpr {
+            let output_var = fresh_picus_expr();
+            builder.push_output_port(output_var.clone());
+            builder.picus_module.constraints.push(eq_mul(&multiplicity, value, &output_var));
+            output_var
+        };
+
+        bind_input(self, &values[PC_IDX]);
+        bind_input(self, &values[NUM_EXTRA_CYCLES_IDX]);
+        let opcode_in = bind_input(self, &values[OPCODE_IDX]);
+        bind_output(self, &values[NEXT_PC_IDX]);
+        let next_next_pc_out = bind_output(self, &values[NEXT_NEXT_PC_IDX]);
+
+        for value in values.iter().take(HI_END).skip(A_START) {
+            bind_input(self, value);
+        }
+
+        bind_input(self, &values[OP_A_IMMUTABLE_IDX]);
+        bind_input(self, &values[IS_RW_A_IDX]);
+        bind_input(self, &values[IS_CHECK_MEMORY_IDX]);
+        bind_input(self, &values[IS_HALT_IDX]);
+        let is_sequential_in = bind_input(self, &values[IS_SEQUENTIAL_IDX]);
+
+        self.picus_module.assume_deterministic.push(opcode_in);
+        self.picus_module.constraints.push(PicusConstraint::Implies(
+            Box::new(PicusConstraint::Eq(Box::new(is_sequential_in))),
+            Box::new(PicusConstraint::Det(Box::new(next_next_pc_out))),
+        ));
+    }
+
     fn handle_receive_syscall(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
@@ -977,6 +1073,12 @@ impl<'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'c
 
 impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder<'chips, A> {
     fn send(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
+        // The "top" extraction path is meant to preserve only polynomial constraints
+        // emitted directly by the chip AIR. Interaction lowering adds derived ports,
+        // helper calls, and sub-chip routing, all of which should be absent there.
+        if self.submodule_mode == SubmoduleMode::Ignore {
+            return;
+        }
         // Apply specialization first so opcode routing can see concrete values whenever
         // selector assignments make them decidable.
         let specialized_values: Vec<PicusExpr> =
@@ -989,6 +1091,9 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
             LookupKind::Memory => {
                 self.handle_memory_interaction(specialized_multiplicity, &specialized_values, true);
             }
+            LookupKind::Program => {
+                self.handle_program_send(specialized_multiplicity, &specialized_values);
+            }
             LookupKind::Instruction => {
                 if self.submodule_mode == SubmoduleMode::Ignore {
                     return;
@@ -998,10 +1103,13 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
                         assert!(v < Opcode::UNIMPL as u64);
                         spec_for(Opcode::try_from(v as u8).unwrap())
                     }
-                    _ => panic!(
-                        "Expected opcode val to be a constant after specialization: Got: {}",
-                        specialized_values[6]
-                    ),
+                    _ => {
+                        self.handle_send_instruction_symbolic(
+                            specialized_multiplicity,
+                            &specialized_values,
+                        );
+                        return;
+                    }
                 };
                 let target_chip = self.get_chip(opcode_spec.chip);
                 let main_vars = self.get_main_vars_for_call(&specialized_values);
@@ -1064,17 +1172,19 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
     }
 
     fn receive(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
-        // initialize another chip
-        // call eval with builder?
         let specialized_values: Vec<PicusExpr> =
             message.values.iter().map(|expr| self.specialize_expr(expr)).collect();
         let specialized_multiplicity = self.specialize_expr(&message.multiplicity);
+
+        if self.submodule_mode == SubmoduleMode::Ignore {
+            if message.kind == LookupKind::Instruction {
+                self.picus_module.assume_deterministic.push(specialized_values[6].clone());
+            }
+            return;
+        }
+
         match message.kind {
             LookupKind::Instruction => {
-                if self.submodule_mode == SubmoduleMode::Ignore {
-                    self.picus_module.assume_deterministic.push(specialized_values[6].clone());
-                    return;
-                }
                 self.handle_receive_instruction(specialized_multiplicity, &specialized_values);
             }
             LookupKind::Memory => {

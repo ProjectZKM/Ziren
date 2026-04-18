@@ -551,6 +551,8 @@ pub enum PicusConstraint {
     Or(Box<PicusConstraint>, Box<PicusConstraint>),
     /// Canonical equality-to-zero form: `Eq(e)` represents `e = 0`.
     Eq(Box<PicusExpr>),
+    /// Assert expression is deterministic
+    Det(Box<PicusExpr>),
 }
 
 impl PicusConstraint {
@@ -653,6 +655,10 @@ impl PicusConstraint {
             Eq(e) => {
                 let new_e = multiplier.clone() * (*e.clone());
                 PicusConstraint::Eq(Box::new(new_e))
+            }
+            Det(e) => {
+                let new_expr = multiplier.clone() * (*e.clone());
+                PicusConstraint::Det(Box::new(new_expr))
             }
         }
     }
