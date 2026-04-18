@@ -198,16 +198,24 @@ where
     }
 
     /// Emit `lhs == rhs` as `(lhs - rhs) / 0 = out` (DivF by 0).
-    /// The AIR catches lhs != rhs because the constraint
+    /// The AIR catches `lhs != rhs` because the constraint
     /// `divisor * out = numerator` becomes `0 * out = (lhs - rhs)`,
     /// which has no solution unless `lhs == rhs`.
     ///
-    /// Uses `BaseAluOpcode::DivFAssert` instead of `DivF` so the
-    /// preprocessed `is_div_soundness` flag is set on the AIR row,
-    /// forcing the constraint to fire even though `out`'s mult is 0
-    /// (assertion `out` is never read by downstream instructions).
-    /// Without this, the `is_div_active = is_div AND mult>0` gate
-    /// would silently skip the constraint.
+    /// **Uses plain `DivF`** (SP1-parity — see SP1
+    /// `crates/recursion/compiler/src/circuit/compiler.rs`'s
+    /// `base_assert_eq`).  The runtime's `DivF` mult=0 guard makes
+    /// dead-branch execution graceful (returns 0; constraint gated
+    /// off via `is_div_active = is_div AND mult>0` so no AIR
+    /// obligation on the dead row).  Live-branch failures still
+    /// panic via `DivFOutOfDomain` since mult>0 bypasses the guard.
+    ///
+    /// The previous `DivFAssert` opcode used here was designed to
+    /// "always fire" the constraint even when mult=0 — but that
+    /// blocks the standard dead-branch idiom (assertions inside
+    /// Select branches where only one side's mult is nonzero), which
+    /// the recursion DSL relies on heavily.  Matches SP1's
+    /// behaviour on the same DSL patterns.
     fn base_assert_eq(
         &mut self,
         lhs: impl Reg<C>,
@@ -217,7 +225,7 @@ where
         use BaseAluOpcode::*;
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivFAssert, out, diff, Imm::F(C::F::ZERO)));
+        f(self.base_alu(DivF, out, diff, Imm::F(C::F::ZERO)));
     }
 
     fn base_assert_ne(
@@ -230,7 +238,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivFAssert, out, Imm::F(C::F::ONE), diff));
+        f(self.base_alu(DivF, out, Imm::F(C::F::ONE), diff));
     }
 
     fn ext_assert_eq(
@@ -243,7 +251,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivEAssert, out, diff, Imm::EF(C::EF::ZERO)));
+        f(self.ext_alu(DivE, out, diff, Imm::EF(C::EF::ZERO)));
     }
 
     fn ext_assert_ne(
@@ -256,7 +264,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivEAssert, out, Imm::EF(C::EF::ONE), diff));
+        f(self.ext_alu(DivE, out, Imm::EF(C::EF::ONE), diff));
     }
 
     #[inline(always)]
