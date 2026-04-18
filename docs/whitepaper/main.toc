@@ -1,0 +1,208 @@
+\contentsline {paragraph}{Keywords:}{1}{section*.1}%
+\contentsline {section}{\numberline {1}Introduction}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Contributions}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Implementation and Open-Source Release}{5}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Paper Outline}{5}{subsection.1.3}%
+\contentsline {section}{\numberline {2}Preliminaries}{5}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Notation}{5}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}STARKs and the Ziren Pipeline}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Sumcheck Protocol}{6}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}WHIR}{6}{subsection.2.4}%
+\contentsline {subsection}{\numberline {2.5}LogUp-GKR}{6}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}Plonky3 Architecture}{6}{subsection.2.6}%
+\contentsline {section}{\numberline {3}Background and Motivation}{7}{section.3}%
+\contentsline {subsection}{\numberline {3.1}The starting point}{7}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}The Plonky3 / WHIR upgrade}{7}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}The architecture of this work}{7}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Status of the work}{9}{subsection.3.4}%
+\contentsline {section}{\numberline {4}Plonky3 Upgrade}{10}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Per-round PoW witnesses}{10}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Log-arity observations and opened-values restoration}{10}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}\texttt {check\_witness} early-return for zero PoW bits}{10}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}\texttt {is\_div\_active} preprocessed column}{10}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Result}{10}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Soundness Fix Design: Making WHIR Mode Production-Sound}{10}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Current State}{10}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}What This Leaves Unchecked}{11}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Target Soundness Design}{11}{subsection.5.3}%
+\contentsline {paragraph}{Option A --- Keep the quotient polynomial, batch it into WHIR.}{11}{section*.3}%
+\contentsline {paragraph}{Option B --- Logup-GKR plus sumcheck-based constraint verification (SP1 hypercube model).}{11}{section*.4}%
+\contentsline {paragraph}{Option C --- Multilinear constraint check via WHIR opening at $\zeta $.}{12}{section*.5}%
+\contentsline {subsection}{\numberline {5.4}Chosen Design: Option B}{12}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Projected Performance Impact}{13}{subsection.5.5}%
+\contentsline {subsection}{\numberline {5.6}Immediate Action Items}{14}{subsection.5.6}%
+\contentsline {section}{\numberline {6}System Design: Proof-System Architecture}{14}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Proof-System Overview}{14}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Data Layout: Jagged Polynomial Commitment}{14}{subsection.6.2}%
+\contentsline {paragraph}{Implementation.}{15}{section*.10}%
+\contentsline {subsection}{\numberline {6.3}Polynomial Commitment: WHIR}{15}{subsection.6.3}%
+\contentsline {paragraph}{Folding-factor scaling.}{15}{section*.11}%
+\contentsline {paragraph}{Implementation.}{15}{section*.12}%
+\contentsline {subsection}{\numberline {6.4}Late-Binding WHIR}{15}{subsection.6.4}%
+\contentsline {paragraph}{Motivation.}{15}{section*.13}%
+\contentsline {paragraph}{Soundness.}{16}{section*.14}%
+\contentsline {paragraph}{Multi-column variant.}{16}{section*.15}%
+\contentsline {paragraph}{Implementation.}{16}{section*.16}%
+\contentsline {subsection}{\numberline {6.5}Jagged + Late-Binding Reduction}{16}{subsection.6.5}%
+\contentsline {paragraph}{Cost analysis.}{17}{section*.17}%
+\contentsline {paragraph}{Implementation.}{17}{section*.18}%
+\contentsline {subsection}{\numberline {6.6}Cross-Binding}{17}{subsection.6.6}%
+\contentsline {paragraph}{Threat model.}{17}{section*.19}%
+\contentsline {paragraph}{Soundness.}{17}{section*.20}%
+\contentsline {paragraph}{Status.}{17}{section*.21}%
+\contentsline {paragraph}{Implementation.}{18}{section*.22}%
+\contentsline {subsection}{\numberline {6.7}Soundness Layers Summary}{18}{subsection.6.7}%
+\contentsline {subsection}{\numberline {6.8}Implementation Activation Matrix}{18}{subsection.6.8}%
+\contentsline {section}{\numberline {7}Phase 2a: Zerocheck Integration}{18}{section.7}%
+\contentsline {subsection}{\numberline {7.1}What Ships}{18}{subsection.7.1}%
+\contentsline {paragraph}{Sumcheck core (\texttt {crates/stark/src/zerocheck\_prover.rs}, 5 unit tests, all passing).}{18}{section*.23}%
+\contentsline {paragraph}{Hypercube constraint evaluator.}{19}{section*.24}%
+\contentsline {paragraph}{\texttt {ShardProof::zerocheck\_proofs} field.}{19}{section*.25}%
+\contentsline {paragraph}{Prover wiring (WHIR fast path).}{19}{section*.26}%
+\contentsline {paragraph}{Verifier wiring.}{19}{section*.27}%
+\contentsline {paragraph}{Downstream fixes.}{19}{section*.28}%
+\contentsline {subsection}{\numberline {7.2}End-to-End Test Results}{19}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Phase 2a Scope Limitation (By Design)}{20}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}Files Changed (Phase 2a)}{20}{subsection.7.4}%
+\contentsline {section}{\numberline {8}Phase 2b: LogUp-GKR Protocol Core}{20}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Fraction-Sum Combine}{20}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}GKR Reduction}{21}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Soundness Tests}{21}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}Public API}{21}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}Integration Path (Phase 2b Steps 2 -- 4)}{22}{subsection.8.5}%
+\contentsline {subsection}{\numberline {8.6}Combined Soundness Picture}{22}{subsection.8.6}%
+\contentsline {section}{\numberline {9}LogUp-GKR: Bug, Fix, and End-to-End Integration}{23}{section.9}%
+\contentsline {subsection}{\numberline {9.1}The Soundness Bug (And Why It Was Hard to Spot)}{23}{subsection.9.1}%
+\contentsline {paragraph}{Why the original test suite didn't catch it.}{23}{section*.29}%
+\contentsline {subsection}{\numberline {9.2}The Correct Reduction}{23}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}Implementation}{24}{subsection.9.3}%
+\contentsline {paragraph}{Proof shape.}{24}{section*.31}%
+\contentsline {paragraph}{Variable ordering.}{24}{section*.32}%
+\contentsline {paragraph}{Unit tests.}{24}{section*.33}%
+\contentsline {paragraph}{End-to-end.}{24}{section*.34}%
+\contentsline {subsection}{\numberline {9.4}Closing the Soundness Loop}{25}{subsection.9.4}%
+\contentsline {paragraph}{Outstanding infrastructure.}{25}{section*.35}%
+\contentsline {subsection}{\numberline {9.5}Files Touched}{25}{subsection.9.5}%
+\contentsline {section}{\numberline {10}Phase 2c: WHIR Late-Binding and Per-Chip Row-MLE}{25}{section.10}%
+\contentsline {subsection}{\numberline {10.1}The Problem with the Standard WHIR Adapter}{26}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Late-Binding Adapter}{26}{subsection.10.2}%
+\contentsline {paragraph}{Insight.}{26}{section*.36}%
+\contentsline {paragraph}{Implementation.}{26}{section*.37}%
+\contentsline {paragraph}{Soundness validation.}{26}{section*.38}%
+\contentsline {paragraph}{Constraint ordering subtlety.}{26}{section*.39}%
+\contentsline {subsection}{\numberline {10.3}Architectural Choice for Multi-Column Binding}{27}{subsection.10.3}%
+\contentsline {paragraph}{(A) Per-column WHIR commits.}{27}{section*.40}%
+\contentsline {paragraph}{(B) Single $\alpha $-combined commit + restructured GKR.}{27}{section*.41}%
+\contentsline {paragraph}{Why (B) is sound.}{27}{section*.42}%
+\contentsline {paragraph}{Why we choose (B).}{27}{section*.43}%
+\contentsline {subsection}{\numberline {10.4}Restructured Leaf-Claim Reconstruction}{27}{subsection.10.4}%
+\contentsline {subsubsection}{\numberline {10.4.1}The Fix: Fingerprint Re-Batching at GKR Time}{28}{subsubsection.10.4.1}%
+\contentsline {paragraph}{Concrete construction.}{28}{section*.44}%
+\contentsline {paragraph}{Soundness sketch.}{28}{section*.45}%
+\contentsline {subsection}{\numberline {10.5}The VEIL Multilinear PCS Construction (the actual answer)}{28}{subsection.10.5}%
+\contentsline {paragraph}{Construction overview.}{29}{section*.46}%
+\contentsline {paragraph}{Commit phase.}{29}{section*.47}%
+\contentsline {paragraph}{Open at a post-commit point $x = (x^{(1)}, x^{(2)})$.}{29}{section*.48}%
+\contentsline {paragraph}{Why this works (and the previous design didn't).}{29}{section*.49}%
+\contentsline {paragraph}{Cost analysis (Lemma 4.7, $k=0$).}{30}{section*.50}%
+\contentsline {paragraph}{Mapping to our STARK pipeline.}{30}{section*.51}%
+\contentsline {subsection}{\numberline {10.6}Cross-Binding Plan (Closing the First-Iteration Gap)}{30}{subsection.10.6}%
+\contentsline {paragraph}{Two viable closures (in increasing scope).}{31}{section*.52}%
+\contentsline {paragraph}{C.1 implementation reality check.}{31}{section*.53}%
+\contentsline {paragraph}{C.1 WHIR-side: shipped.}{31}{section*.54}%
+\contentsline {paragraph}{C.1 FRI-side: not yet started.}{31}{section*.55}%
+\contentsline {paragraph}{Recommendation.}{32}{section*.56}%
+\contentsline {subsection}{\numberline {10.7}Implementation Plan}{32}{subsection.10.7}%
+\contentsline {section}{\numberline {11}Performance Evaluation: Plonky3 Upgrade and WHIR PCS}{33}{section.11}%
+\contentsline {subsection}{\numberline {11.1}Test Environment}{33}{subsection.11.1}%
+\contentsline {subsection}{\numberline {11.2}Core Proof Performance}{34}{subsection.11.2}%
+\contentsline {subsection}{\numberline {11.3}Compressed Proof Performance}{34}{subsection.11.3}%
+\contentsline {subsection}{\numberline {11.4}Proof Size Comparison}{34}{subsection.11.4}%
+\contentsline {subsection}{\numberline {11.5}Key Findings}{34}{subsection.11.5}%
+\contentsline {paragraph}{Performance gains scale with workload size.}{34}{table.10}%
+\contentsline {paragraph}{Throughput at scale.}{34}{section*.58}%
+\contentsline {paragraph}{Proof size reduction.}{34}{section*.59}%
+\contentsline {paragraph}{Recursion / compression status.}{35}{section*.60}%
+\contentsline {subsection}{\numberline {11.6}Soundness Caveat for the Current WHIR Fast Path}{35}{subsection.11.6}%
+\contentsline {subsection}{\numberline {11.7}Wrap / Groth16 Status}{35}{subsection.11.7}%
+\contentsline {subsection}{\numberline {11.8}Known Failures (Pre-existing, Not WHIR-related)}{35}{subsection.11.8}%
+\contentsline {subsection}{\numberline {11.9}Notes}{35}{subsection.11.9}%
+\contentsline {section}{\numberline {12}Related Work}{36}{section.12}%
+\contentsline {subsection}{\numberline {12.1}WHIR PCS Constructions}{36}{subsection.12.1}%
+\contentsline {subsection}{\numberline {12.2}Sumcheck-Based STARK Verification}{36}{subsection.12.2}%
+\contentsline {subsection}{\numberline {12.3}SP1 Hypercube and Recursion Architectures}{36}{subsection.12.3}%
+\contentsline {subsection}{\numberline {12.4}Brakedown and Spot-Check Protocols}{36}{subsection.12.4}%
+\contentsline {subsection}{\numberline {12.5}Jagged Polynomial Commitments}{37}{subsection.12.5}%
+\contentsline {section}{\numberline {13}Conclusion and Future Work}{37}{section.13}%
+\contentsline {subsection}{\numberline {13.1}Future Work}{37}{subsection.13.1}%
+\contentsline {paragraph}{Recursion-circuit constraint emission --- orchestrator shipped.}{37}{section*.61}%
+\contentsline {paragraph}{Performance optimisation.}{38}{section*.62}%
+\contentsline {paragraph}{Soundness analysis formalisation.}{38}{section*.63}%
+\contentsline {paragraph}{Recursion-circuit \texttt {is\_div\_active} fix.}{38}{section*.64}%
+\contentsline {paragraph}{Production deployment.}{38}{section*.65}%
+\contentsline {subsection}{\numberline {13.2}Acknowledgements}{38}{subsection.13.2}%
+\contentsline {section}{\numberline {A}Implementation Status and Next Steps}{38}{appendix.A}%
+\contentsline {subsection}{\numberline {A.1}What ships today}{38}{subsection.A.1}%
+\contentsline {subsection}{\numberline {A.2}What's next}{39}{subsection.A.2}%
+\contentsline {subsection}{\numberline {A.3}Soundness summary}{39}{subsection.A.3}%
+\contentsline {section}{\numberline {B}Changelog: Phase 2c Late-Binding Implementation}{39}{appendix.B}%
+\contentsline {subsection}{\numberline {B.1}Shipped (2026-04-16 / 17)}{39}{subsection.B.1}%
+\contentsline {paragraph}{Late-binding adapter (foundation).}{39}{section*.66}%
+\contentsline {paragraph}{Trait dispatch + prover/verifier wiring.}{40}{section*.67}%
+\contentsline {paragraph}{Serialisation.}{40}{section*.68}%
+\contentsline {paragraph}{End-to-end validation.}{40}{section*.69}%
+\contentsline {subsection}{\numberline {B.2}Cross-Binding (FRI $\leftrightarrow $ WHIR consistency)}{41}{subsection.B.2}%
+\contentsline {paragraph}{Closed via C.1 Brakedown-style spot check.}{41}{section*.70}%
+\contentsline {paragraph}{Implementation.}{41}{section*.71}%
+\contentsline {subsection}{\numberline {B.3}Plonky3 \texttt {MerkleTree::Clone} Fix (Pre-Existing Bug Found)}{41}{subsection.B.3}%
+\contentsline {paragraph}{Fix.}{41}{section*.72}%
+\contentsline {paragraph}{Result: 34/34 zkm-recursion-core tests pass.}{41}{section*.73}%
+\contentsline {subsection}{\numberline {B.4}Recursion Circuit Host-Shape Verifier Benchmark}{42}{subsection.B.4}%
+\contentsline {paragraph}{Benchmark on a fibonacci jagged shard ($\text {num\_variables}=27$).}{42}{section*.74}%
+\contentsline {paragraph}{Constraint count (estimated).}{42}{section*.75}%
+\contentsline {paragraph}{Scaling sweep across proof shapes.}{42}{section*.76}%
+\contentsline {paragraph}{Implication for in-circuit work.}{42}{section*.77}%
+\contentsline {subsection}{\numberline {B.5}Recursion Circuit: Full DSL→AIR Pipeline for SumcheckVerify}{43}{subsection.B.5}%
+\contentsline {paragraph}{Test counts.}{43}{section*.78}%
+\contentsline {paragraph}{Remaining work for a fully-running in-circuit WHIR verification.}{43}{section*.79}%
+\contentsline {subsection}{\numberline {B.6}Recursion-Circuit WHIR Verifier Scaffolding (2026-04-17)}{44}{subsection.B.6}%
+\contentsline {paragraph}{Test counts.}{44}{section*.80}%
+\contentsline {paragraph}{Helper inventory (in \texttt {whir\_verifier.rs}).}{44}{section*.81}%
+\contentsline {paragraph}{What's left to make \texttt {verify\_whir\_pcs\_in\_circuit} non-stub.}{44}{section*.82}%
+\contentsline {subsection}{\numberline {B.7}Final Soundness Chain Status (2026-04-17, end of session)}{45}{subsection.B.7}%
+\contentsline {paragraph}{Activation matrix.}{45}{section*.83}%
+\contentsline {paragraph}{Test count (lib).}{45}{section*.84}%
+\contentsline {paragraph}{Build matrix.}{45}{section*.85}%
+\contentsline {paragraph}{End-to-end smoke tests passing.}{45}{section*.86}%
+\contentsline {subsection}{\numberline {B.8}Phase 2c+ Session Summary (2026-04-17)}{45}{subsection.B.8}%
+\contentsline {subsection}{\numberline {B.9}Phase 2c+ Jagged + Late-Binding (Shipped 2026-04-17)}{46}{subsection.B.9}%
+\contentsline {paragraph}{Shipped components.}{46}{section*.87}%
+\contentsline {paragraph}{End-to-end fibonacci validation.}{46}{section*.88}%
+\contentsline {paragraph}{Per-phase profile (rayon, fibonacci shard, n=27).}{46}{section*.89}%
+\contentsline {paragraph}{Reference WHIR benchmark (\texttt {bench\_whir\_pcs}).}{47}{section*.90}%
+\contentsline {paragraph}{WHIR scaling benchmark (\texttt {bench\_whir\_scaling}).}{47}{section*.91}%
+\contentsline {paragraph}{Verifier microbenchmark (\texttt {bench\_jagged\_late\_binding\_verify}).}{47}{section*.92}%
+\contentsline {paragraph}{Per-chip vs jagged verify side-by-side (\texttt {bench\_per\_chip\_vs\_jagged\_verify}).}{48}{section*.93}%
+\contentsline {paragraph}{Bundle byte breakdown (\texttt {bench\_jagged\_bundle\_byte\_breakdown}).}{48}{section*.94}%
+\contentsline {paragraph}{Implication for fibonacci-scale shard.}{48}{section*.95}%
+\contentsline {paragraph}{Serde cost (\texttt {bench\_jagged\_bundle\_serde\_cost}).}{49}{section*.96}%
+\contentsline {paragraph}{Inner-loop parallel scalability (\texttt {bench\_jagged\_sumcheck\_inner\_loops}).}{49}{section*.97}%
+\contentsline {paragraph}{Amdahl's law explains the modest end-to-end speedup.}{49}{section*.98}%
+\contentsline {paragraph}{Verify scaling vs chip count (\texttt {bench\_jagged\_verify\_scaling\_with\_chip\_count}).}{49}{section*.99}%
+\contentsline {paragraph}{Per-chip verify scaling (symmetric measurement, \texttt {bench\_per\_chip\_verify\_scaling\_with\_chip\_count}).}{50}{section*.100}%
+\contentsline {paragraph}{Jagged speedup grows with chip count (combined view).}{50}{section*.101}%
+\contentsline {subsection}{\numberline {B.10}Phase 2c+ Performance Scoreboard}{50}{subsection.B.10}%
+\contentsline {paragraph}{Summary verdict.}{50}{section*.102}%
+\contentsline {paragraph}{Cross-workload validation: JSON example.}{50}{section*.103}%
+\contentsline {paragraph}{Apples-to-apples comparison at 80-bit security.}{51}{section*.104}%
+\contentsline {paragraph}{Cross-binding (C.1) WHIR-side cryptographic.}{51}{section*.105}%
+\contentsline {paragraph}{Cross-binding C.1 END-TO-END FUNCTIONAL.}{52}{section*.106}%
+\contentsline {paragraph}{C.1 FRI-side helpers: shipped.}{52}{section*.107}%
+\contentsline {paragraph}{C.1 FRI-side legacy scoping note (now obsolete):}{52}{section*.108}%
+\contentsline {paragraph}{Three-workload jagged comparison (80-bit, single shard).}{53}{section*.109}%
+\contentsline {paragraph}{Three-workload jagged comparison (80-bit, single shard).}{53}{section*.110}%
+\contentsline {paragraph}{Multi-shard scaling observation.}{53}{section*.111}%
+\contentsline {paragraph}{Bottleneck and next steps.}{53}{section*.112}%
+\contentsline {paragraph}{Two subtle bugs found and fixed during integration.}{53}{section*.113}%
+\contentsline {subsection}{\numberline {B.11}Cost Optimisation: VEIL Lemma 4.7}{54}{subsection.B.11}%
+\contentsline {subsection}{\numberline {B.12}Crisp Next Steps (Code Pointers)}{54}{subsection.B.12}%

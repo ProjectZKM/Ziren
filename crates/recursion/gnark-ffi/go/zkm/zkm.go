@@ -79,6 +79,7 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	vars := make(map[string]frontend.Variable)
 	felts := make(map[string]koalabear.Variable)
 	exts := make(map[string]koalabear.ExtensionVariable)
+	ext5s := make(map[string]koalabear.Ext5Variable)
 
 	// Iterate through the witnesses and range check them, if necessary.
 	for i := 0; i < len(circuit.Felts); i++ {
@@ -181,6 +182,11 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			for i := 0; i < 4; i++ {
 				felts[cs.Args[i][0]] = out[i]
 			}
+		case "Ext2Felt5":
+			out := fieldAPI.Ext5ToFelt(ext5s[cs.Args[5][0]])
+			for i := 0; i < 5; i++ {
+				felts[cs.Args[i][0]] = out[i]
+			}
 		case "AssertEqV":
 			api.AssertIsEqual(vars[cs.Args[0][0]], vars[cs.Args[1][0]])
 		case "AssertEqF":
@@ -226,6 +232,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			api.AssertIsEqual(circuit.CommittedValuesDigest, element)
 		case "CircuitFelts2Ext":
 			exts[cs.Args[0][0]] = koalabear.Felts2Ext(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]])
+		case "CircuitFelts2Ext5":
+			ext5s[cs.Args[0][0]] = koalabear.Felts2Ext5(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]], felts[cs.Args[5][0]])
 		case "CircuitFelt2Var":
 			vars[cs.Args[0][0]] = fieldAPI.ReduceSlow(felts[cs.Args[1][0]]).Value
 		case "ReduceE":

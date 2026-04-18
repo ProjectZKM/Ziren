@@ -5,7 +5,7 @@ use core::{
 use std::slice::Iter;
 
 use itertools::Itertools;
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing, ExtensionField};
 
 /// A polynomial represented as a vector of coefficients.
 #[derive(Debug, Clone)]
@@ -48,9 +48,9 @@ impl<T> Polynomial<T> {
 
     /// Evaluates the polynomial at a given point.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn eval<S: FieldExtensionAlgebra<T>>(&self, x: S) -> S
+    pub fn eval<S: ExtensionField<T>>(&self, x: S) -> S
     where
-        T: FieldAlgebra,
+        T: Field,
     {
         let powers = x.powers();
         self.coefficients.iter().zip(powers).map(|(c, x)| x * c.clone()).sum()
@@ -193,11 +193,11 @@ impl<T: Sub<Output = T> + Neg<Output = T> + Clone> Sub for &Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul for Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul for Polynomial<T> {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        let mut result = vec![T::zero(); self.coefficients.len() + other.coefficients.len() - 1];
+        let mut result = vec![T::ZERO; self.coefficients.len() + other.coefficients.len() - 1];
         for (i, a) in self.coefficients.into_iter().enumerate() {
             for (j, b) in other.coefficients.iter().enumerate() {
                 result[i + j] = result[i + j].clone() + a.clone() * b.clone();
@@ -207,11 +207,11 @@ impl<T: FieldAlgebra> Mul for Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul for &Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul for &Polynomial<T> {
     type Output = Polynomial<T>;
 
     fn mul(self, other: Self) -> Polynomial<T> {
-        let mut result = vec![T::zero(); self.coefficients.len() + other.coefficients.len() - 1];
+        let mut result = vec![T::ZERO; self.coefficients.len() + other.coefficients.len() - 1];
         for (i, a) in self.coefficients.iter().enumerate() {
             for (j, b) in other.coefficients.iter().enumerate() {
                 result[i + j] = result[i + j].clone() + a.clone() * b.clone();
@@ -221,7 +221,7 @@ impl<T: FieldAlgebra> Mul for &Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul<T> for Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul<T> for Polynomial<T> {
     type Output = Self;
 
     fn mul(self, other: T) -> Self {
@@ -229,7 +229,7 @@ impl<T: FieldAlgebra> Mul<T> for Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul<T> for &Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul<T> for &Polynomial<T> {
     type Output = Polynomial<T>;
 
     fn mul(self, other: T) -> Polynomial<T> {
@@ -237,7 +237,7 @@ impl<T: FieldAlgebra> Mul<T> for &Polynomial<T> {
     }
 }
 
-impl<T: Eq + FieldAlgebra> PartialEq<Polynomial<T>> for Polynomial<T> {
+impl<T: Eq + PrimeCharacteristicRing> PartialEq<Polynomial<T>> for Polynomial<T> {
     fn eq(&self, other: &Polynomial<T>) -> bool {
         if self.coefficients.len() != other.coefficients.len() {
             let (shorter, longer) = if self.coefficients.len() < other.coefficients.len() {
@@ -264,7 +264,7 @@ impl Polynomial<u8> {
     #[must_use]
     pub fn as_field<F: Field>(self) -> Polynomial<F> {
         Polynomial {
-            coefficients: self.coefficients.iter().map(|x| F::from_canonical_u8(*x)).collect(),
+            coefficients: self.coefficients.iter().map(|x| F::from_u8(*x)).collect(),
         }
     }
 }

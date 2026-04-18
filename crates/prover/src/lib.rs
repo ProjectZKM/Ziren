@@ -33,7 +33,7 @@ use std::{
 };
 
 use lru::LruCache;
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use shapes::ZKMProofShape;
@@ -92,14 +92,28 @@ use components::{DefaultProverComponents, ZKMProverComponents};
 
 pub use zkm_core_machine::ZKM_CIRCUIT_VERSION;
 
-/// The configuration for the core prover.
+/// The configuration for the core prover (D=4, 100-bit security).
 pub type CoreSC = KoalaBearPoseidon2;
 
-/// The configuration for the inner prover.
+/// The configuration for the inner prover (D=4, 100-bit security).
 pub type InnerSC = KoalaBearPoseidon2;
 
-/// The configuration for the outer prover.
+/// The configuration for the outer prover (D=4, 100-bit security).
 pub type OuterSC = KoalaBearPoseidon2Outer;
+
+// ── 128-bit security pipeline aliases (D=5) ──────────────────────────────
+//
+// These use quintic extension for provable 128-bit security.
+// Reference: Plonky3-recursion FriRecursionBackendD5
+
+/// Core prover config with D=5 (128-bit security).
+pub type CoreSC128 = zkm_stark::KoalaBearPoseidon2D5;
+
+/// Inner prover config with D=5 (128-bit security).
+pub type InnerSC128 = zkm_stark::KoalaBearPoseidon2D5;
+
+/// Outer prover config with D=5 (128-bit security).
+pub type OuterSC128 = zkm_recursion_core::stark::KoalaBearPoseidon2OuterD5;
 
 pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<
     KoalaBearPoseidon2,
@@ -1200,7 +1214,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
                     let index = (vk_digest[0].as_canonical_u32() as usize) % num_vks;
-                    (index, [KoalaBear::from_canonical_usize(index); 8])
+                    (index, [KoalaBear::from_usize(index); 8])
                 })
                 .unzip()
         };

@@ -4,8 +4,8 @@ use std::{
     mem::size_of,
 };
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::ParallelBridge;
@@ -210,15 +210,15 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.shard = F::from_canonical_u32(syscall_event.shard);
-            cols.clk = F::from_canonical_u32(syscall_event.clk);
-            cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
+            cols.shard = F::from_u32(syscall_event.shard);
+            cols.clk = F::from_u32(syscall_event.clk);
+            cols.syscall_id = F::from_u32(syscall_event.syscall_id);
             let a1b = syscall_event.arg1.to_le_bytes();
-            cols.arg1_lo = F::from_canonical_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
-            cols.arg1_hi = F::from_canonical_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
+            cols.arg1_lo = F::from_u32(a1b[0] as u32 + (a1b[1] as u32) * 256);
+            cols.arg1_hi = F::from_u32(a1b[2] as u32 + (a1b[3] as u32) * 256);
             let a2b = syscall_event.arg2.to_le_bytes();
-            cols.arg2_lo = F::from_canonical_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
-            cols.arg2_hi = F::from_canonical_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
+            cols.arg2_lo = F::from_u32(a2b[0] as u32 + (a2b[1] as u32) * 256);
+            cols.arg2_hi = F::from_u32(a2b[2] as u32 + (a2b[3] as u32) * 256);
 
             // For Core shard, a_record has real prev_value with linux_sys byte.
             // For Precompile shard, a_record is default (prev_value=0), so detect
@@ -235,8 +235,8 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                     _ => syscall_event.a_record.value,
                 };
                 let rb = result.to_le_bytes();
-                cols.result_lo = F::from_canonical_u32(rb[0] as u32 + (rb[1] as u32) * 256);
-                cols.result_hi = F::from_canonical_u32(rb[2] as u32 + (rb[3] as u32) * 256);
+                cols.result_lo = F::from_u32(rb[0] as u32 + (rb[1] as u32) * 256);
+                cols.result_hi = F::from_u32(rb[2] as u32 + (rb[3] as u32) * 256);
             }
             cols.is_real = F::ONE;
 
@@ -308,7 +308,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SyscallCols<AB::Var> = (*local).borrow();
 
         builder.assert_bool(local.is_real);
@@ -323,35 +323,35 @@ where
         // Derive reduced arg1/arg2 inline from half-word columns.
         // These are NOT stored as columns — saves 2 columns per row.
         let arg1: AB::Expr = local.arg1_lo.into()
-            + Into::<AB::Expr>::into(local.arg1_hi) * AB::Expr::from_canonical_u32(65536);
+            + Into::<AB::Expr>::into(local.arg1_hi) * AB::Expr::from_u32(65536);
         let arg2: AB::Expr = local.arg2_lo.into()
-            + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_canonical_u32(65536);
+            + Into::<AB::Expr>::into(local.arg2_hi) * AB::Expr::from_u32(65536);
 
         // U16Range checks for ALL syscalls (not just linux), gated by is_real.
         // This ensures the global lookup's half-word args are always canonical.
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_lo,
             AB::Expr::zero(),
             AB::Expr::zero(),
             local.is_real,
         );
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg1_hi,
             AB::Expr::zero(),
             AB::Expr::zero(),
             local.is_real,
         );
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg2_lo,
             AB::Expr::zero(),
             AB::Expr::zero(),
             local.is_real,
         );
         builder.send_byte(
-            AB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            AB::Expr::from_u8(ByteOpcode::U16Range as u8),
             local.arg2_hi,
             AB::Expr::zero(),
             AB::Expr::zero(),
@@ -397,7 +397,7 @@ where
                             local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                            AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -419,7 +419,7 @@ where
                             AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
-                            AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
+                            AB::Expr::from_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -465,7 +465,7 @@ where
                             local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
+                            AB::Expr::from_u8(LookupKind::Syscall as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,
@@ -486,7 +486,7 @@ where
                             AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::one(),
-                            AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
+                            AB::Expr::from_u8(LookupKind::SyscallResult as u8),
                         ],
                         local.is_real.into(),
                         LookupKind::Global,

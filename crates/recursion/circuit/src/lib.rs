@@ -6,8 +6,8 @@ use challenger::{
 };
 use hash::{FieldHasherVariable, Poseidon2KoalaBearHasherVariable};
 use itertools::izip;
-use p3_bn254_fr::Bn254Fr;
-use p3_field::FieldAlgebra;
+use p3_bn254_fr::Bn254;
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use std::iter::{repeat, zip};
 use zkm_recursion_compiler::{
@@ -27,6 +27,8 @@ pub mod machine;
 pub mod merkle_tree;
 pub mod stark;
 pub(crate) mod utils;
+/// BaseFold proof verifier — see [`basefold_verifier`] module doc.
+pub mod basefold_verifier;
 pub mod witness;
 
 pub use types::*;
@@ -38,7 +40,7 @@ use zkm_stark::{
 use p3_challenger::{CanObserve, CanSample, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DitParallel;
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::{FriParameters, TwoAdicFriPcs};
 use zkm_recursion_core::{
     air::RecursionPublicValues,
     stark::{KoalaBearPoseidon2Outer, OuterValMmcs},
@@ -50,19 +52,19 @@ use utils::{felt_bytes_to_bn254_var, felts_to_bn254_var, words_to_bytes};
 
 type EF = <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge;
 
-pub type PcsConfig<C> = FriConfig<
+pub type PcsConfig<C> = FriParameters<
     ExtensionMmcs<
         <C as StarkGenericConfig>::Val,
         <C as StarkGenericConfig>::Challenge,
-        <C as KoalaBearFriConfig>::ValMmcs,
+        <C as KoalaBearFriParameters>::ValMmcs,
     >,
 >;
 
 pub type Digest<C, SC> = <SC as FieldHasherVariable<C>>::DigestVariable;
 
-pub type FriMmcs<C> = ExtensionMmcs<KoalaBear, EF, <C as KoalaBearFriConfig>::ValMmcs>;
+pub type FriMmcs<C> = ExtensionMmcs<KoalaBear, EF, <C as KoalaBearFriParameters>::ValMmcs>;
 
-pub trait KoalaBearFriConfig:
+pub trait KoalaBearFriParameters:
     StarkGenericConfig<
     Val = KoalaBear,
     Challenge = EF,
@@ -75,22 +77,22 @@ pub trait KoalaBearFriConfig:
     >,
 >
 {
-    type ValMmcs: Mmcs<KoalaBear, ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData>
+    type ValMmcs: Mmcs<KoalaBear, ProverData<RowMajorMatrix<KoalaBear>> = Self::RowMajorProverData, Proof: Send + Sync, Error: Send + Sync>
         + Send
         + Sync;
-    type RowMajorProverData: Clone + Send + Sync;
+    type RowMajorProverData: Send + Sync;
     type FriChallenger: CanObserve<<Self::ValMmcs as Mmcs<KoalaBear>>::Commitment>
         + CanSample<EF>
         + GrindingChallenger<Witness = KoalaBear>
         + FieldChallenger<KoalaBear>;
 
-    fn fri_config(&self) -> &FriConfig<FriMmcs<Self>>;
+    fn fri_config(&self) -> &FriParameters<FriMmcs<Self>>;
 
     fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape;
 }
 
-pub trait KoalaBearFriConfigVariable<C: CircuitConfig<F = KoalaBear>>:
-    KoalaBearFriConfig + FieldHasherVariable<C> + Poseidon2KoalaBearHasherVariable<C>
+pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
+    KoalaBearFriParameters + FieldHasherVariable<C> + Poseidon2KoalaBearHasherVariable<C>
 {
     type FriChallengerVariable: FieldChallengerVariable<C, <C as CircuitConfig>::Bit>
         + CanObserveVariable<C, <Self as FieldHasherVariable<C>>::DigestVariable>
@@ -507,7 +509,7 @@ impl CircuitConfig for OuterConfig {
         let result = builder.eval(Self::F::ZERO);
         for (i, bit) in bits.into_iter().enumerate() {
             let to_add: Felt<_> = builder.uninit();
-            let pow2 = builder.constant(Self::F::from_canonical_u32(1 << i));
+            let pow2 = builder.constant(Self::F::from_u32(1 << i));
             let zero = builder.constant(Self::F::ZERO);
             builder.push_op(DslIr::CircuitSelectF(bit, pow2, zero, to_add));
             builder.assign(result, result + to_add);
@@ -564,13 +566,13 @@ impl CircuitConfig for OuterConfig {
     }
 }
 
-impl KoalaBearFriConfig for KoalaBearPoseidon2 {
+impl KoalaBearFriParameters for KoalaBearPoseidon2 {
     type ValMmcs = ValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
 
-    fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        self.pcs().fri_config()
+    fn fri_config(&self) -> &FriParameters<FriMmcs<Self>> {
+        self.get_fri_config()
     }
 
     fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape {
@@ -581,15 +583,15 @@ impl KoalaBearFriConfig for KoalaBearPoseidon2 {
     }
 }
 
-impl KoalaBearFriConfig for KoalaBearPoseidon2Outer {
+impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
     type ValMmcs = OuterValMmcs;
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
 
     type RowMajorProverData =
         <OuterValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
 
-    fn fri_config(&self) -> &FriConfig<FriMmcs<Self>> {
-        self.pcs().fri_config()
+    fn fri_config(&self) -> &FriParameters<FriMmcs<Self>> {
+        self.get_fri_config()
     }
 
     fn challenger_shape(_challenger: &Self::FriChallenger) -> SpongeChallengerShape {
@@ -597,7 +599,7 @@ impl KoalaBearFriConfig for KoalaBearPoseidon2Outer {
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriConfigVariable<C>
+impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParametersVariable<C>
     for KoalaBearPoseidon2
 {
     type FriChallengerVariable = DuplexChallengerVariable<C>;
@@ -623,7 +625,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriConfigV
     }
 }
 
-impl<C: CircuitConfig<F = KoalaBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> KoalaBearFriConfigVariable<C>
+impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriParametersVariable<C>
     for KoalaBearPoseidon2Outer
 {
     type FriChallengerVariable = MultiField32ChallengerVariable<C>;

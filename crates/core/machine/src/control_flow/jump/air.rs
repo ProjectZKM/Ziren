@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_core_executor::Opcode;
 use zkm_stark::{air::ZKMAirBuilder, Word};
@@ -20,7 +20,7 @@ where
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &JumpColumns<AB::Var> = (*local).borrow();
 
         // SAFETY: All selectors `is_jump`, `is_jumpi`, `is_jumpdirect`  are checked to be boolean.
@@ -44,29 +44,29 @@ where
         // - `is_halt = 0`
         // `next_pc` and `op_a_value` still has to be constrained, and this is done below.
         builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             local.pc,
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             opcode,
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             is_real.clone(),
         );
 
         // Verify that the local.next_pc + 4 is op_a_value for all jump instructions.
         builder.when(is_real.clone()).assert_eq(
             local.op_a_value.reduce::<AB>(),
-            local.next_pc.reduce::<AB>() + AB::F::from_canonical_u32(4),
+            local.next_pc.reduce::<AB>() + AB::F::from_u32(4),
         );
 
         // Range check op_a, next_pc, and next_next_pc.
@@ -105,7 +105,7 @@ where
         // Verify that the next_next_pc is calculated correctly for BAL instructions.
         // SAFETY: `is_jumpdirect` is boolean, and zero for padding rows.
         builder.send_alu(
-            AB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            AB::Expr::from_u32(Opcode::ADD as u32),
             local.next_next_pc,
             local.next_pc,
             local.op_b_value,

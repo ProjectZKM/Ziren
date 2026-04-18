@@ -7,8 +7,8 @@ use std::{fmt::Debug, marker::PhantomData};
 use crate::{air::MemoryAirBuilder, utils::zeroed_f_vec, CoreChipError};
 use generic_array::GenericArray;
 use num::{BigUint, One};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
@@ -303,9 +303,9 @@ impl<E: EllipticCurve + WeierstrassParameters> WeierstrassDoubleAssignChip<E> {
 
         // Populate basic columns.
         cols.is_real = F::ONE;
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.p_ptr = F::from_u32(event.p_ptr);
 
         Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y);
 
@@ -329,7 +329,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &WeierstrassDoubleAssignCols<AB::Var, E::BaseField> = (*local).borrow();
 
         let num_words_field_element = E::BaseField::NB_LIMBS / 4;
@@ -337,7 +337,7 @@ where
         let p_y = limbs_from_prev_access(&local.p_access[num_words_field_element..]);
 
         // `a` in the Weierstrass form: y^2 = x^3 + a * x + b.
-        let a = E::BaseField::to_limbs_field::<AB::Expr, _>(&E::a_int());
+        let a = E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&E::a_int());
 
         // slope = slope_numerator / slope_denominator.
         let slope = {
@@ -348,7 +348,7 @@ where
                 local.p_x_squared_times_3.eval(
                     builder,
                     &local.p_x_squared.result,
-                    &E::BaseField::to_limbs_field::<AB::Expr, _>(&BigUint::from(3u32)),
+                    &E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&BigUint::from(3u32)),
                     FieldOperation::Mul,
                     local.is_real,
                 );
@@ -365,7 +365,7 @@ where
             // slope_denominator = 2 * y.
             local.slope_denominator.eval(
                 builder,
-                &E::BaseField::to_limbs_field::<AB::Expr, _>(&BigUint::from(2u32)),
+                &E::BaseField::to_limbs_field::<AB::Expr, AB::F>(&BigUint::from(2u32)),
                 &p_y,
                 FieldOperation::Mul,
                 local.is_real,
@@ -438,14 +438,14 @@ where
         // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
             CurveType::Secp256k1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id())
+                AB::F::from_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id())
             }
             CurveType::Secp256r1 => {
-                AB::F::from_canonical_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id())
+                AB::F::from_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id())
             }
-            CurveType::Bn254 => AB::F::from_canonical_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
+            CurveType::Bn254 => AB::F::from_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
             CurveType::Bls12381 => {
-                AB::F::from_canonical_u32(SyscallCode::BLS12381_DOUBLE.syscall_id())
+                AB::F::from_u32(SyscallCode::BLS12381_DOUBLE.syscall_id())
             }
             _ => panic!("Unsupported curve"),
         };
@@ -455,7 +455,7 @@ where
             local.clk,
             syscall_id_felt,
             local.p_ptr,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.is_real,
             LookupScope::Local,
         );

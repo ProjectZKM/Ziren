@@ -6,7 +6,7 @@ cfg_if::cfg_if! {
         use crate::syscalls::VERIFY_ZKM_PROOF;
         use crate::zkvm::DEFERRED_PROOFS_DIGEST;
         use p3_koala_bear::KoalaBear;
-        use p3_field::FieldAlgebra;
+        use p3_field::PrimeCharacteristicRing;
         use zkm_primitives::hash_deferred_proof;
     }
 }
@@ -36,10 +36,10 @@ pub extern "C" fn syscall_verify_zkm_proof(vk_digest: &[u32; 8], pv_digest: &[u8
 
         // Next 8 elements are vkey_digest
         let vk_digest_koalabear =
-            vk_digest.iter().map(|x| KoalaBear::from_canonical_u32(*x)).collect::<Vec<_>>();
+            vk_digest.iter().map(|x| KoalaBear::from_u32(*x)).collect::<Vec<_>>();
         // Remaining 32 elements are pv_digest converted from u8 to KoalaBear
         let pv_digest_koalabear =
-            pv_digest.iter().map(|b| KoalaBear::from_canonical_u8(*b)).collect::<Vec<_>>();
+            pv_digest.iter().map(|b| KoalaBear::from_u8(*b)).collect::<Vec<_>>();
 
         *deferred_proofs_digest = hash_deferred_proof(
             deferred_proofs_digest,

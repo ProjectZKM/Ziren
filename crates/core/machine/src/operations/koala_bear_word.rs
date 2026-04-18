@@ -1,7 +1,7 @@
 use std::array;
 
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
@@ -54,11 +54,11 @@ impl<F: Field> KoalaBearWordRangeChecker<F> {
         cols: KoalaBearWordRangeChecker<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut recomposed_byte = AB::Expr::zero();
+        let mut recomposed_byte = AB::Expr::ZERO;
         cols.most_sig_byte_decomp.iter().enumerate().for_each(|(i, value)| {
             builder.when(is_real.clone()).assert_bool(*value);
             recomposed_byte =
-                recomposed_byte.clone() + AB::Expr::from_canonical_usize(1 << i) * *value;
+                recomposed_byte.clone() + AB::Expr::from_usize(1 << i) * *value;
         });
 
         builder.when(is_real.clone()).assert_eq(recomposed_byte, value[3]);

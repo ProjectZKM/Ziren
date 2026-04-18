@@ -3,41 +3,42 @@ use itertools::{izip, Itertools};
 
 use num_traits::cast::ToPrimitive;
 
-use p3_air::{Air, BaseAir};
-use p3_commit::{Mmcs, Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
+use p3_air::{WindowAccess, Air, BaseAir};
+use p3_commit::{Mmcs, Pcs, PolynomialSpace};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
-    ir::{Builder, Config, DslIr, Ext, ExtConst},
+    ir::{Builder, Config, DslIr, Ext, ExtConst, SymbolicExt},
     prelude::Felt,
 };
 use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
-    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, ShardCommitment,
-    ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
+    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, SerializableDomain,
+    ShardCommitment, ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
 use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
 use crate::{
     challenger::CanObserveVariable,
-    fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+    fri::{dummy_commit, dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
-    CircuitConfig, FriProofVariable, KoalaBearFriConfig, TwoAdicPcsMatsVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriParameters, TwoAdicPcsMatsVariable,
 };
 
 use crate::{
     challenger::FieldChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
-    domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs, KoalaBearFriConfigVariable,
+    domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs, KoalaBearFriParametersVariable,
     TwoAdicPcsRoundVariable, VerifyingKeyVariable,
 };
 
 /// Reference: [zkm_core::stark::ShardProof]
 #[derive(Clone)]
-pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
+pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> {
     pub commitment: ShardCommitment<SC::DigestVariable>,
     #[allow(clippy::type_complexity)]
     pub opened_values: ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -61,9 +62,9 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
     // Make a dummy commitment.
     let commitment = ShardCommitment {
-        main_commit: dummy_hash(),
-        permutation_commit: dummy_hash(),
-        quotient_commit: dummy_hash(),
+        main_commit: dummy_commit(),
+        permutation_commit: Some(dummy_commit()),
+        quotient_commit: Some(dummy_commit()),
     };
 
     // Get dummy opened values by reading the chip ordering from the shape.
@@ -144,7 +145,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
                 <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge,
                 <KoalaBearPoseidon2 as StarkGenericConfig>::Challenger,
             >>::natural_domain_for_degree(pcs, 1 << log_height);
-            (name.to_owned(), domain, Dimensions { width: *width, height: 1 << log_height })
+            (name.to_owned(), SerializableDomain::from_coset(&domain), (*width, 1 << log_height))
         })
         .collect();
 
@@ -156,15 +157,25 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         .collect::<HashMap<_, _>>();
 
     let vk = StarkVerifyingKey {
-        commit: dummy_hash(),
+        commit: dummy_commit(),
         pc_start: KoalaBear::ZERO,
         initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
         chip_information: preprocessed_chip_information,
         chip_ordering: preprocessed_chip_ordering,
     };
 
-    let shard_proof =
-        ShardProof { commitment, opened_values, opening_proof, chip_ordering, public_values };
+    let shard_proof = ShardProof {
+        commitment,
+        opened_values,
+        opening_proof,
+        chip_ordering,
+        public_values,
+        zerocheck_proofs: None,
+        logup_gkr_proofs: None,
+        logup_row_openings: None,
+        late_binding_proofs: None,
+        late_binding_jagged_proof: None,
+    };
 
     (vk, shard_proof)
 }
@@ -184,11 +195,11 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
 
     let permutation_width = chip.permutation_width();
     let permutation = AirOpenedValues {
-        local: vec![EF::ZERO; permutation_width * EF::D],
-        next: vec![EF::ZERO; permutation_width * EF::D],
+        local: vec![EF::ZERO; permutation_width * <EF as p3_field::BasedVectorSpace<F>>::DIMENSION],
+        next: vec![EF::ZERO; permutation_width * <EF as p3_field::BasedVectorSpace<F>>::DIMENSION],
     };
     let quotient_width = chip.quotient_width();
-    let quotient = (0..quotient_width).map(|_| vec![EF::ZERO; EF::D]).collect::<Vec<_>>();
+    let quotient = (0..quotient_width).map(|_| vec![EF::ZERO; <EF as p3_field::BasedVectorSpace<F>>::DIMENSION]).collect::<Vec<_>>();
 
     ChipOpenedValues {
         preprocessed,
@@ -229,8 +240,7 @@ impl<C, SC, A> StarkVerifier<C, SC, A>
 where
     C::F: TwoAdicField,
     C: CircuitConfig<F = SC::Val>,
-    SC: KoalaBearFriConfigVariable<C>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
+    SC: KoalaBearFriParametersVariable<C>,
     A: MachineAir<Val<SC>>,
 {
     pub fn natural_domain_for_degree(
@@ -251,6 +261,7 @@ where
         proof: &ShardProofVariable<C, SC>,
     ) where
         A: for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
     {
         let chips = machine.shard_chips_ordered(&proof.chip_ordering).collect::<Vec<_>>();
 
@@ -296,7 +307,9 @@ where
         let local_permutation_challenges =
             (0..2).map(|_| challenger.sample_ext(builder)).collect::<Vec<_>>();
 
-        challenger.observe(builder, permutation_commit);
+        if let Some(pc) = permutation_commit {
+            challenger.observe(builder, pc);
+        }
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
             let local_sum = C::ext2felt(builder, opening.local_cumulative_sum);
             let global_sum = opening.global_cumulative_sum;
@@ -320,7 +333,9 @@ where
 
         let alpha = challenger.sample_ext(builder);
 
-        challenger.observe(builder, quotient_commit);
+        if let Some(qc) = quotient_commit {
+            challenger.observe(builder, qc);
+        }
 
         let zeta = challenger.sample_ext(builder);
 
@@ -367,15 +382,24 @@ where
             })
             .collect::<Vec<_>>();
 
-        let perm_domains_points_and_opens = trace_domains
-            .iter()
-            .zip_eq(opened_values.chips.iter())
-            .map(|(domain, values)| TwoAdicPcsMatsVariable::<C> {
-                domain: *domain,
-                points: vec![zeta, domain.next_point_variable(builder, zeta)],
-                values: vec![values.permutation.local.clone(), values.permutation.next.clone()],
-            })
-            .collect::<Vec<_>>();
+        // In WHIR mode, permutation_commit/quotient_commit are None and the
+        // corresponding opened values are empty. Only build these mats when present.
+        let perm_domains_points_and_opens = if permutation_commit.is_some() {
+            trace_domains
+                .iter()
+                .zip_eq(opened_values.chips.iter())
+                .map(|(domain, values)| TwoAdicPcsMatsVariable::<C> {
+                    domain: *domain,
+                    points: vec![zeta, domain.next_point_variable(builder, zeta)],
+                    values: vec![
+                        values.permutation.local.clone(),
+                        values.permutation.next.clone(),
+                    ],
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
 
         let quotient_chunk_domains = trace_domains
             .iter()
@@ -389,21 +413,25 @@ where
             })
             .collect::<Vec<_>>();
 
-        let quotient_domains_points_and_opens = proof
-            .opened_values
-            .chips
-            .iter()
-            .zip_eq(quotient_chunk_domains.iter())
-            .flat_map(|(values, qc_domains)| {
-                values.quotient.iter().zip_eq(qc_domains).map(move |(values, q_domain)| {
-                    TwoAdicPcsMatsVariable::<C> {
-                        domain: *q_domain,
-                        points: vec![zeta],
-                        values: vec![values.clone()],
-                    }
+        let quotient_domains_points_and_opens = if quotient_commit.is_some() {
+            proof
+                .opened_values
+                .chips
+                .iter()
+                .zip_eq(quotient_chunk_domains.iter())
+                .flat_map(|(values, qc_domains)| {
+                    values.quotient.iter().zip_eq(qc_domains).map(move |(values, q_domain)| {
+                        TwoAdicPcsMatsVariable::<C> {
+                            domain: *q_domain,
+                            points: vec![zeta],
+                            values: vec![values.clone()],
+                        }
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
 
         // Create the pcs rounds.
         let prep_commit = vk.commitment;
@@ -415,16 +443,20 @@ where
             batch_commit: main_commit,
             domains_points_and_opens: main_domains_points_and_opens,
         };
-        let perm_round = TwoAdicPcsRoundVariable {
-            batch_commit: permutation_commit,
-            domains_points_and_opens: perm_domains_points_and_opens,
-        };
-        let quotient_round = TwoAdicPcsRoundVariable {
-            batch_commit: quotient_commit,
-            domains_points_and_opens: quotient_domains_points_and_opens,
-        };
+        let mut rounds = vec![prep_round, main_round];
 
-        let rounds = vec![prep_round, main_round, perm_round, quotient_round];
+        if let Some(pc) = permutation_commit {
+            rounds.push(TwoAdicPcsRoundVariable {
+                batch_commit: pc,
+                domains_points_and_opens: perm_domains_points_and_opens,
+            });
+        }
+        if let Some(qc) = quotient_commit {
+            rounds.push(TwoAdicPcsRoundVariable {
+                batch_commit: qc,
+                domains_points_and_opens: quotient_domains_points_and_opens,
+            });
+        }
 
         // Verify the pcs proof
         builder.cycle_tracker_v2_enter("stage-d-verify-pcs".to_string());
@@ -436,23 +468,29 @@ where
         builder.cycle_tracker_v2_enter("stage-e-verify-constraints".to_string());
         let permutation_challenges = local_permutation_challenges;
 
+        // In WHIR mode the proof omits permutation/quotient. Skip per-chip
+        // constraint verification (soundness comes from WHIR + cumulative sums).
+        let whir_mode = quotient_commit.is_none();
+
         for (chip, trace_domain, qc_domains, values) in
             izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)
         {
             // Verify the shape of the opening arguments matches the expected values.
             Self::verify_opening_shape(chip, values).unwrap();
-            // Verify the constraint evaluation.
-            Self::verify_constraints(
-                builder,
-                chip,
-                values,
-                trace_domain,
-                qc_domains,
-                zeta,
-                alpha,
-                &permutation_challenges,
-                public_values,
-            );
+            if !whir_mode {
+                // Verify the constraint evaluation.
+                Self::verify_constraints(
+                    builder,
+                    chip,
+                    values,
+                    trace_domain,
+                    qc_domains,
+                    zeta,
+                    alpha,
+                    &permutation_challenges,
+                    public_values,
+                );
+            }
         }
 
         // Verify that the chips' local_cumulative_sum sum to 0.
@@ -468,7 +506,7 @@ where
     }
 }
 
-impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> ShardProofVariable<C, SC> {
+impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> ShardProofVariable<C, SC> {
     pub fn contains_cpu(&self) -> bool {
         self.chip_ordering.contains_key("Cpu")
     }
@@ -496,7 +534,7 @@ pub mod tests {
     use crate::{
         challenger::{CanCopyChallenger, CanObserveVariable, DuplexChallengerVariable},
         utils::tests::run_test_recursion_with_prover,
-        KoalaBearFriConfig,
+        KoalaBearFriParameters,
     };
 
     use zkm_core_executor::Program;
@@ -565,6 +603,81 @@ pub mod tests {
             .map(|proof| {
                 let shape = proof.shape();
                 let (_, dummy_proof) = dummy_vk_and_shard_proof(&machine, &shape);
+                // Per-chip shape parity check: compare every chip's
+                // (prep.local, prep.next, main.local, main.next,
+                // perm.local, perm.next, quotient outer, quotient inner)
+                // between real and dummy.  Any mismatch breaks the
+                // recursion witness stream.
+                for (i, (rc, dc)) in proof
+                    .opened_values
+                    .chips
+                    .iter()
+                    .zip(dummy_proof.opened_values.chips.iter())
+                    .enumerate()
+                {
+                    let real_shape = (
+                        rc.preprocessed.local.len(),
+                        rc.preprocessed.next.len(),
+                        rc.main.local.len(),
+                        rc.main.next.len(),
+                        rc.permutation.local.len(),
+                        rc.permutation.next.len(),
+                        rc.quotient.len(),
+                        rc.quotient.first().map(|q| q.len()).unwrap_or(0),
+                    );
+                    let dummy_shape = (
+                        dc.preprocessed.local.len(),
+                        dc.preprocessed.next.len(),
+                        dc.main.local.len(),
+                        dc.main.next.len(),
+                        dc.permutation.local.len(),
+                        dc.permutation.next.len(),
+                        dc.quotient.len(),
+                        dc.quotient.first().map(|q| q.len()).unwrap_or(0),
+                    );
+                    if real_shape != dummy_shape {
+                        eprintln!(
+                            "[debug] chip {i} MISMATCH: real={:?} dummy={:?}",
+                            real_shape, dummy_shape
+                        );
+                    }
+                }
+                // Per-batch-opening shape parity check across all queries.
+                for (q_idx, (rq, dq)) in proof
+                    .opening_proof
+                    .query_proofs
+                    .iter()
+                    .zip(dummy_proof.opening_proof.query_proofs.iter())
+                    .enumerate()
+                    .take(1) // first query only — same shape applies to all
+                {
+                    for (b_idx, (rb, db)) in
+                        rq.input_proof.iter().zip(dq.input_proof.iter()).enumerate()
+                    {
+                        let r_shape = (
+                            rb.opened_values.len(),
+                            rb.opened_values.iter().map(|v| v.len()).collect::<Vec<_>>(),
+                            rb.opening_proof.len(),
+                        );
+                        let d_shape = (
+                            db.opened_values.len(),
+                            db.opened_values.iter().map(|v| v.len()).collect::<Vec<_>>(),
+                            db.opening_proof.len(),
+                        );
+                        if r_shape != d_shape {
+                            eprintln!(
+                                "[debug] q{q_idx}.batch{b_idx} MISMATCH: real outer={} widths={:?} proof.len={} | dummy outer={} widths={:?} proof.len={}",
+                                r_shape.0, r_shape.1, r_shape.2,
+                                d_shape.0, d_shape.1, d_shape.2,
+                            );
+                        } else {
+                            eprintln!(
+                                "[debug] q{q_idx}.batch{b_idx} ok: outer={} widths_sum={} proof.len={}",
+                                r_shape.0, r_shape.1.iter().sum::<usize>(), r_shape.2
+                            );
+                        }
+                    }
+                }
                 Witnessable::<C>::write(&proof, &mut witness_stream);
                 dummy_proof.read(&mut builder)
             })

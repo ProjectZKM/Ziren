@@ -1,4 +1,4 @@
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_recursion_core::runtime::NUM_BITS;
 
 use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
@@ -16,7 +16,7 @@ impl<C: Config> Builder<C> {
         for i in 0..NUM_BITS {
             let bit = self.get(&output, i);
             self.assert_var_eq(bit * (bit - C::N::ONE), C::N::ZERO);
-            self.assign(sum, sum + bit * C::N::from_canonical_u32(1 << i));
+            self.assign(sum, sum + bit * C::N::from_u32(1 << i));
         }
 
         self.assert_var_eq(sum, num);
@@ -66,7 +66,7 @@ impl<C: Config> Builder<C> {
             let bit = self.get(&output, i);
             self.assert_var_eq(bit * (bit - C::N::ONE), C::N::ZERO);
             self.if_eq(bit, C::N::ONE).then(|builder| {
-                builder.assign(sum, sum + C::F::from_canonical_u32(1 << i));
+                builder.assign(sum, sum + C::F::from_u32(1 << i));
             });
         }
 
@@ -96,7 +96,7 @@ impl<C: Config> Builder<C> {
         self.range(0, bits.len()).for_each(|i, builder| {
             let bit = builder.get(bits, i);
             builder.assign(num, num + bit * power);
-            builder.assign(power, power * C::N::from_canonical_u32(2));
+            builder.assign(power, power * C::N::from_u32(2));
         });
         num
     }
@@ -105,7 +105,7 @@ impl<C: Config> Builder<C> {
     pub fn bits2num_v_circuit(&mut self, bits: &[Var<C::N>]) -> Var<C::N> {
         let result: Var<_> = self.eval(C::N::ZERO);
         for i in 0..bits.len() {
-            self.assign(result, result + bits[i] * C::N::from_canonical_u32(1 << i));
+            self.assign(result, result + bits[i] * C::N::from_u32(1 << i));
         }
         result
     }
@@ -117,7 +117,7 @@ impl<C: Config> Builder<C> {
             let bit = self.get(bits, i);
             // Add `bit * 2^i` to the sum.
             self.if_eq(bit, C::N::ONE).then(|builder| {
-                builder.assign(num, num + C::F::from_canonical_u32(1 << i));
+                builder.assign(num, num + C::F::from_u32(1 << i));
             });
         }
         num

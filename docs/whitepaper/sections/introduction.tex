@@ -1,0 +1,126 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Zero-knowledge virtual machines (zkVMs) compile general-purpose
+computation into succinct cryptographic proofs.  The Ziren
+zkVM~\cite{ziren} is a MIPS-based zkVM built on the
+Plonky3~\cite{plonky3} STARK toolkit, currently shipping with FRI as
+its polynomial commitment scheme (PCS).  Although FRI offers
+excellent verification time, modern multilinear PCS such as
+WHIR~\cite{whir2024} promise simultaneously smaller proofs,
+faster verification, and a more natural multilinear-extension (MLE)
+view of trace data --- all of which are increasingly relevant as
+zkVMs adopt hypercube-style architectures~\cite{sp1-hypercube}.
+
+This paper documents the cryptographic and engineering work required
+to migrate Ziren's STARK pipeline from FRI to a production-sound
+WHIR-based pipeline.  The transition is non-trivial: the existing
+``WHIR fast path'' shipped in Ziren is a structural skip of
+permutation traces and quotient evaluation, with several unbound
+soundness gaps.  We close all of them.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item \textbf{Sumcheck-based zerocheck for transition constraints
+        (\S\ref{sec:zerocheck-phase2a}).}  Replaces the quotient
+        polynomial argument with a sumcheck protocol
+        proving $\sum_{b \in \{0,1\}^m} \mathsf{eq}(r, b) \cdot
+        C(b) = 0$, with provable soundness $O(d \cdot m / |\mathbb{F}|)$
+        for constraint degree $d$.
+
+  \item \textbf{Sumcheck-based LogUp-GKR for lookup
+        arguments (\S\ref{sec:logup-gkr-fix}).}  We identify and
+        fix a critical soundness bug in the initial folding-only
+        implementation: the combine identity
+        $(N(z\Vert 0)\cdot D(z\Vert 1) + D(z\Vert 0) \cdot
+         N(z\Vert 1), D(z\Vert 0) \cdot D(z\Vert 1))$
+        is degree-$2$ in each coordinate, which only matches the
+        verifier's degree-$1$ multilinear $N_{k+1}, D_{k+1}$ at
+        Boolean points.  Our replacement protocol uses a per-layer
+        sumcheck reduction over a degree-$3$ round polynomial to
+        ensure soundness at random points.
+
+  \item \textbf{Late-binding WHIR adapter
+        (\S\ref{sec:whir-late-binding}).}  The upstream WHIR
+        \texttt{MultilinearPcs} adapter requires evaluation points
+        \emph{at commit time}, which is incompatible with our
+        protocol where the per-chip row coordinates
+        $r_{\mathrm{row}}$ are derived \emph{after} commit via GKR.
+        We construct an in-tree adapter built directly on
+        \texttt{p3-whir} internals (\texttt{CommitmentWriter},
+        \texttt{Verifier}, \texttt{EqStatement}) that exposes
+        single-column and multi-column commit + post-commit
+        \texttt{add\_late\_claim} + open API surfaces.  The
+        cryptographic substrate is unchanged from upstream WHIR;
+        only the transcript ordering differs.
+
+  \item \textbf{Cross-binding (C.1) Brakedown spot-check
+        protocol.}  In a dual-commit setting where FRI and WHIR
+        both commit to the same trace, a malicious prover can
+        commit divergent traces $A \neq B$.  We close this with a
+        Brakedown-style spot-check argument~\cite{brakedown}: $K$
+        random trace positions are sampled post-commit; the prover
+        provides merkle paths against \emph{both} commits at each
+        position.  Tampering on either side is detected with
+        soundness $1 - (1 - 1/N)^K$.  For $K = 80$ and $N = 2^{17}$
+        this gives $\sim 2^{-80}$ missed-detection probability.
+
+  \item \textbf{Jagged late-binding construction.}  We combine
+        Jagged~\cite{jagged} variable-height trace packing with the
+        late-binding adapter via a sumcheck reduction that ties
+        per-chip per-column row-MLE claims to a single dense
+        commitment.  This collapses $\sim 570$ per-chip-per-column
+        WHIR commits to a single shard-level commit, reducing
+        proof size by a factor of $57$--$85\times$ in our
+        evaluation (\S\ref{sec:performance}).
+
+  \item \textbf{Recursion-circuit WHIR verifier scaffolding.}  We
+        port the host-side verification logic into the
+        recursion-circuit through a series of focused sub-systems:
+        a \texttt{SumcheckVerify} chip (full DSL$\to$AIR pipeline,
+        seven layers), a merkle-path verifier built atop the
+        existing Poseidon2 chip, OOD evaluation primitives, and
+        STIR query position derivation.  Each sub-system is
+        independently testable and serves as a stepping stone
+        toward in-circuit \texttt{verify\_whir\_pcs}.
+\end{enumerate}
+
+\subsection{Implementation and Open-Source Release}
+
+All host-side prover and verifier code is implemented in the open-
+source Ziren codebase, opt-in via two environment variables:
+\texttt{ZIREN\_USE\_WHIR=1} (selects the WHIR fast path with
+zerocheck and LogUp-GKR), and \texttt{ZIREN\_LATE\_BINDING=jagged}
+(selects the jagged late-binding path).  A third flag
+\texttt{ZIREN\_CROSS\_BINDING=1} activates the cross-binding spot-
+check protocol.  Defaults preserve the original FRI pipeline so
+existing deployments are unaffected.
+
+We test each cryptographic mechanism via end-to-end round-trip and
+tamper-rejection unit tests, plus end-to-end smoke tests on the
+fibonacci, JSON, and keccak workloads.  At the time of writing,
+$24$ late-binding-related tests, $9$ zerocheck and LogUp-GKR tests,
+$18$ recursion-circuit WHIR verifier tests, and the existing $34$
+recursion-core tests all pass.  Compressed-proof verification of
+each smoke-tested workload completes successfully.
+
+\subsection{Paper Outline}
+
+\S\ref{sec:preliminaries} reviews the necessary preliminaries
+(STARK, sumcheck, WHIR, LogUp-GKR, Plonky3 architecture).
+\S\ref{sec:background} sets the engineering context, summarises
+the Plonky3 upgrade work, and tabulates implementation status.
+\S\ref{sec:plonky3-upgrade} details the recursion-circuit FRI
+verifier upgrade required by upstream Plonky3 protocol changes.
+\S\ref{sec:soundness-fix} formalises the threat model of the
+existing WHIR fast path.
+\S\S\ref{sec:zerocheck-phase2a}--\ref{sec:whir-late-binding}
+present the three new constructions: zerocheck (Phase 2a),
+LogUp-GKR (Phase 2b), and late-binding WHIR with cross-binding
+and jagged packing (Phase 2c+).
+\S\ref{sec:performance} reports performance measurements.
+\S\ref{sec:related-work} positions the work against prior
+constructions.  \S\ref{sec:conclusion} concludes with future
+directions.  Appendices document detailed implementation status
+and a session-by-session changelog.

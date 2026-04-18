@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
 use serde::{Deserialize, Serialize};
 
 use crate::*;
@@ -17,6 +17,8 @@ pub enum Instruction<F> {
     HintAddCurve(HintAddCurveInstr<F>),
     FriFold(Box<FriFoldInstr<F>>),
     BatchFRI(Box<BatchFRIInstr<F>>),
+    /// WHIR sumcheck round verification instruction.
+    SumcheckVerify(Box<SumcheckVerifyInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
@@ -61,13 +63,35 @@ pub struct HintExt2FeltsInstr<F> {
     pub input_addr: Address<F>,
 }
 
+/// Instruction for verifying one sumcheck round in a WHIR proof.
+///
+/// Each instruction verifies:
+///   p(0) + p(1) = claimed_sum
+///   new_claim = p(challenge)
+/// where p(X) = c_0 + c_1·X + c_2·X²
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SumcheckVerifyInstr<F> {
+    /// Address of the Fiat-Shamir challenge r_i (extension field).
+    pub challenge_addr: Address<F>,
+    /// Address of the previous claimed sum s_i (extension field).
+    pub claimed_sum_addr: Address<F>,
+    /// Addresses of polynomial coefficients c_0, c_1, c_2 (extension field).
+    pub c0_addr: Address<F>,
+    pub c1_addr: Address<F>,
+    pub c2_addr: Address<F>,
+    /// Address to write the new claimed sum s_{i+1} (extension field).
+    pub new_claim_addr: Address<F>,
+    /// Write multiplicity for the output.
+    pub new_claim_mult: F,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum FieldEltType {
     Base,
     Extension,
 }
 
-pub fn base_alu<F: FieldAlgebra>(
+pub fn base_alu<F: PrimeCharacteristicRing>(
     opcode: BaseAluOpcode,
     mult: u32,
     out: u32,
@@ -76,16 +100,16 @@ pub fn base_alu<F: FieldAlgebra>(
 ) -> Instruction<F> {
     Instruction::BaseAlu(BaseAluInstr {
         opcode,
-        mult: F::from_canonical_u32(mult),
+        mult: F::from_u32(mult),
         addrs: BaseAluIo {
-            out: Address(F::from_canonical_u32(out)),
-            in1: Address(F::from_canonical_u32(in1)),
-            in2: Address(F::from_canonical_u32(in2)),
+            out: Address(F::from_u32(out)),
+            in1: Address(F::from_u32(in1)),
+            in2: Address(F::from_u32(in2)),
         },
     })
 }
 
-pub fn ext_alu<F: FieldAlgebra>(
+pub fn ext_alu<F: PrimeCharacteristicRing>(
     opcode: ExtAluOpcode,
     mult: u32,
     out: u32,
@@ -94,20 +118,20 @@ pub fn ext_alu<F: FieldAlgebra>(
 ) -> Instruction<F> {
     Instruction::ExtAlu(ExtAluInstr {
         opcode,
-        mult: F::from_canonical_u32(mult),
+        mult: F::from_u32(mult),
         addrs: ExtAluIo {
-            out: Address(F::from_canonical_u32(out)),
-            in1: Address(F::from_canonical_u32(in1)),
-            in2: Address(F::from_canonical_u32(in2)),
+            out: Address(F::from_u32(out)),
+            in1: Address(F::from_u32(in1)),
+            in2: Address(F::from_u32(in2)),
         },
     })
 }
 
-pub fn mem<F: FieldAlgebra>(kind: MemAccessKind, mult: u32, addr: u32, val: u32) -> Instruction<F> {
-    mem_single(kind, mult, addr, F::from_canonical_u32(val))
+pub fn mem<F: PrimeCharacteristicRing>(kind: MemAccessKind, mult: u32, addr: u32, val: u32) -> Instruction<F> {
+    mem_single(kind, mult, addr, F::from_u32(val))
 }
 
-pub fn mem_single<F: FieldAlgebra>(
+pub fn mem_single<F: PrimeCharacteristicRing>(
     kind: MemAccessKind,
     mult: u32,
     addr: u32,
@@ -116,45 +140,45 @@ pub fn mem_single<F: FieldAlgebra>(
     mem_block(kind, mult, addr, Block::from(val))
 }
 
-pub fn mem_ext<F: FieldAlgebra + Copy, EF: FieldExtensionAlgebra<F>>(
+pub fn mem_ext<F: Field + Copy, EF: ExtensionField<F>>(
     kind: MemAccessKind,
     mult: u32,
     addr: u32,
     val: EF,
 ) -> Instruction<F> {
-    mem_block(kind, mult, addr, val.as_base_slice().into())
+    mem_block(kind, mult, addr, val.as_basis_coefficients_slice().into())
 }
 
-pub fn mem_block<F: FieldAlgebra>(
+pub fn mem_block<F: PrimeCharacteristicRing>(
     kind: MemAccessKind,
     mult: u32,
     addr: u32,
     val: Block<F>,
 ) -> Instruction<F> {
     Instruction::Mem(MemInstr {
-        addrs: MemIo { inner: Address(F::from_canonical_u32(addr)) },
+        addrs: MemIo { inner: Address(F::from_u32(addr)) },
         vals: MemIo { inner: val },
-        mult: F::from_canonical_u32(mult),
+        mult: F::from_u32(mult),
         kind,
     })
 }
 
-pub fn poseidon2<F: FieldAlgebra>(
+pub fn poseidon2<F: PrimeCharacteristicRing>(
     mults: [u32; WIDTH],
     output: [u32; WIDTH],
     input: [u32; WIDTH],
 ) -> Instruction<F> {
     Instruction::Poseidon2(Box::new(Poseidon2Instr {
-        mults: mults.map(F::from_canonical_u32),
+        mults: mults.map(F::from_u32),
         addrs: Poseidon2Io {
-            output: output.map(F::from_canonical_u32).map(Address),
-            input: input.map(F::from_canonical_u32).map(Address),
+            output: output.map(F::from_u32).map(Address),
+            input: input.map(F::from_u32).map(Address),
         },
     }))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn select<F: FieldAlgebra>(
+pub fn select<F: PrimeCharacteristicRing>(
     mult1: u32,
     mult2: u32,
     bit: u32,
@@ -164,26 +188,26 @@ pub fn select<F: FieldAlgebra>(
     in2: u32,
 ) -> Instruction<F> {
     Instruction::Select(SelectInstr {
-        mult1: F::from_canonical_u32(mult1),
-        mult2: F::from_canonical_u32(mult2),
+        mult1: F::from_u32(mult1),
+        mult2: F::from_u32(mult2),
         addrs: SelectIo {
-            bit: Address(F::from_canonical_u32(bit)),
-            out1: Address(F::from_canonical_u32(out1)),
-            out2: Address(F::from_canonical_u32(out2)),
-            in1: Address(F::from_canonical_u32(in1)),
-            in2: Address(F::from_canonical_u32(in2)),
+            bit: Address(F::from_u32(bit)),
+            out1: Address(F::from_u32(out1)),
+            out2: Address(F::from_u32(out2)),
+            in1: Address(F::from_u32(in1)),
+            in2: Address(F::from_u32(in2)),
         },
     })
 }
 
-pub fn exp_reverse_bits_len<F: FieldAlgebra>(
+pub fn exp_reverse_bits_len<F: PrimeCharacteristicRing>(
     mult: u32,
     base: F,
     exp: Vec<F>,
     result: F,
 ) -> Instruction<F> {
     Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
-        mult: F::from_canonical_u32(mult),
+        mult: F::from_u32(mult),
         addrs: ExpReverseBitsIo {
             base: Address(base),
             exp: exp.into_iter().map(Address).collect(),
@@ -192,8 +216,35 @@ pub fn exp_reverse_bits_len<F: FieldAlgebra>(
     })
 }
 
+/// Build a `SumcheckVerify` instruction that verifies one sumcheck
+/// round.  Address arguments are u32-encoded; the runtime memory
+/// reads/writes happen at these addresses.
+///
+/// `new_claim_mult` is the write-multiplicity of the output (matches
+/// the convention used by other recursion instructions for memory
+/// consistency).
+pub fn sumcheck_verify<F: PrimeCharacteristicRing>(
+    challenge_addr: u32,
+    claimed_sum_addr: u32,
+    c0_addr: u32,
+    c1_addr: u32,
+    c2_addr: u32,
+    new_claim_addr: u32,
+    new_claim_mult: u32,
+) -> Instruction<F> {
+    Instruction::SumcheckVerify(Box::new(SumcheckVerifyInstr {
+        challenge_addr: Address(F::from_u32(challenge_addr)),
+        claimed_sum_addr: Address(F::from_u32(claimed_sum_addr)),
+        c0_addr: Address(F::from_u32(c0_addr)),
+        c1_addr: Address(F::from_u32(c1_addr)),
+        c2_addr: Address(F::from_u32(c2_addr)),
+        new_claim_addr: Address(F::from_u32(new_claim_addr)),
+        new_claim_mult: F::from_u32(new_claim_mult),
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
-pub fn fri_fold<F: FieldAlgebra>(
+pub fn fri_fold<F: PrimeCharacteristicRing>(
     z: u32,
     alpha: u32,
     x: u32,
@@ -207,35 +258,35 @@ pub fn fri_fold<F: FieldAlgebra>(
     ro_mults: Vec<u32>,
 ) -> Instruction<F> {
     Instruction::FriFold(Box::new(FriFoldInstr {
-        base_single_addrs: FriFoldBaseIo { x: Address(F::from_canonical_u32(x)) },
+        base_single_addrs: FriFoldBaseIo { x: Address(F::from_u32(x)) },
         ext_single_addrs: FriFoldExtSingleIo {
-            z: Address(F::from_canonical_u32(z)),
-            alpha: Address(F::from_canonical_u32(alpha)),
+            z: Address(F::from_u32(z)),
+            alpha: Address(F::from_u32(alpha)),
         },
         ext_vec_addrs: FriFoldExtVecIo {
             mat_opening: mat_opening
                 .iter()
-                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .map(|elm| Address(F::from_u32(*elm)))
                 .collect(),
-            ps_at_z: ps_at_z.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            ps_at_z: ps_at_z.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
             alpha_pow_input: alpha_pow_input
                 .iter()
-                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .map(|elm| Address(F::from_u32(*elm)))
                 .collect(),
-            ro_input: ro_input.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            ro_input: ro_input.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
             alpha_pow_output: alpha_pow_output
                 .iter()
-                .map(|elm| Address(F::from_canonical_u32(*elm)))
+                .map(|elm| Address(F::from_u32(*elm)))
                 .collect(),
-            ro_output: ro_output.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            ro_output: ro_output.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
         },
-        alpha_pow_mults: alpha_mults.iter().map(|mult| F::from_canonical_u32(*mult)).collect(),
-        ro_mults: ro_mults.iter().map(|mult| F::from_canonical_u32(*mult)).collect(),
+        alpha_pow_mults: alpha_mults.iter().map(|mult| F::from_u32(*mult)).collect(),
+        ro_mults: ro_mults.iter().map(|mult| F::from_u32(*mult)).collect(),
     }))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn batch_fri<F: FieldAlgebra>(
+pub fn batch_fri<F: PrimeCharacteristicRing>(
     acc: u32,
     alpha_pows: Vec<u32>,
     p_at_zs: Vec<u32>,
@@ -244,21 +295,21 @@ pub fn batch_fri<F: FieldAlgebra>(
 ) -> Instruction<F> {
     Instruction::BatchFRI(Box::new(BatchFRIInstr {
         base_vec_addrs: BatchFRIBaseVecIo {
-            p_at_x: p_at_xs.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            p_at_x: p_at_xs.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
         },
-        ext_single_addrs: BatchFRIExtSingleIo { acc: Address(F::from_canonical_u32(acc)) },
+        ext_single_addrs: BatchFRIExtSingleIo { acc: Address(F::from_u32(acc)) },
         ext_vec_addrs: BatchFRIExtVecIo {
-            p_at_z: p_at_zs.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
-            alpha_pow: alpha_pows.iter().map(|elm| Address(F::from_canonical_u32(*elm))).collect(),
+            p_at_z: p_at_zs.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
+            alpha_pow: alpha_pows.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
         },
-        acc_mult: F::from_canonical_u32(acc_mult),
+        acc_mult: F::from_u32(acc_mult),
     }))
 }
 
-pub fn commit_public_values<F: FieldAlgebra>(
+pub fn commit_public_values<F: PrimeCharacteristicRing>(
     public_values_a: &RecursionPublicValues<u32>,
 ) -> Instruction<F> {
-    let pv_a = public_values_a.as_array().map(|pv| Address(F::from_canonical_u32(pv)));
+    let pv_a = public_values_a.as_array().map(|pv| Address(F::from_u32(pv)));
     let pv_address: &RecursionPublicValues<Address<F>> = pv_a.as_slice().borrow();
 
     Instruction::CommitPublicValues(Box::new(CommitPublicValuesInstr {

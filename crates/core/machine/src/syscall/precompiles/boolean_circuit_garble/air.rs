@@ -6,8 +6,8 @@ use crate::syscall::precompiles::boolean_circuit_garble::columns::{
 use crate::syscall::precompiles::boolean_circuit_garble::{
     BooleanCircuitGarbleChip, GATE_INFO_BYTES, OR_GATE_ID,
 };
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 use zkm_core_executor::syscalls::SyscallCode;
@@ -25,14 +25,14 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &BooleanCircuitGarbleCols<AB::Var> = (*local).borrow();
         let next: &BooleanCircuitGarbleCols<AB::Var> = (*next).borrow();
 
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::BOOLEAN_CIRCUIT_GARBLE.syscall_id()),
+            AB::F::from_u32(SyscallCode::BOOLEAN_CIRCUIT_GARBLE.syscall_id()),
             local.input_address, // adjust for num_gates u32
             local.output_address,
             local.is_first_row,
@@ -83,7 +83,7 @@ impl BooleanCircuitGarbleChip {
             builder.eval_memory_access(
                 local.shard,
                 local.clk,
-                local.input_address + AB::F::from_canonical_u32(4 + (i as u32) * 4),
+                local.input_address + AB::F::from_u32(4 + (i as u32) * 4),
                 &local.gates_input_mem[i + 1],
                 local.is_first_row,
             );
@@ -94,7 +94,7 @@ impl BooleanCircuitGarbleChip {
             builder.eval_memory_access(
                 local.shard,
                 local.clk,
-                local.input_address + AB::F::from_canonical_u32((i as u32) * 4),
+                local.input_address + AB::F::from_u32((i as u32) * 4),
                 &local.gates_input_mem[i],
                 local.is_gate,
             );
@@ -189,11 +189,13 @@ impl BooleanCircuitGarbleChip {
         local: &BooleanCircuitGarbleCols<AB::Var>,
         next: &BooleanCircuitGarbleCols<AB::Var>,
     ) {
-        let bytes_shift = AB::F::from_canonical_u32(256);
+        let bytes_shift = AB::F::from_u32(256);
+        let bs2 = bytes_shift.clone() * bytes_shift.clone();
+        let bs3 = bs2.clone() * bytes_shift.clone();
         let num_gates = local.gates_input_mem[0].access.value.0[0]
             + local.gates_input_mem[0].access.value.0[1] * bytes_shift
-            + local.gates_input_mem[0].access.value.0[2] * bytes_shift * bytes_shift
-            + local.gates_input_mem[0].access.value.0[3] * bytes_shift * bytes_shift * bytes_shift;
+            + local.gates_input_mem[0].access.value.0[2] * bs2
+            + local.gates_input_mem[0].access.value.0[3] * bs3;
         builder.when_first_row().assert_eq(local.gates_num, num_gates.clone());
 
         for i in 0..4 {
@@ -203,17 +205,17 @@ impl BooleanCircuitGarbleChip {
             }
         }
 
-        let gate_type_value = local.gate_type[0] * AB::Expr::zero() + local.gate_type[1];
+        let gate_type_value = local.gate_type[0] * AB::Expr::ZERO + local.gate_type[1];
         builder
             .when(local.is_gate)
-            .assert_eq(gate_type_value * AB::Expr::from_canonical_u32(OR_GATE_ID), num_gates);
+            .assert_eq(gate_type_value * AB::Expr::from_u32(OR_GATE_ID), num_gates);
 
         builder.when(local.is_first_gate).assert_zero(local.gate_id);
         builder.when(local.is_last_gate).assert_eq(local.gates_num - AB::F::ONE, local.gate_id);
         builder.when(local.not_last_gate).assert_eq(local.gate_id + AB::F::ONE, next.gate_id);
 
         builder.when(local.not_last_gate * local.is_gate).assert_eq(
-            local.input_address + AB::F::from_canonical_usize(GATE_INFO_BYTES * 4),
+            local.input_address + AB::F::from_usize(GATE_INFO_BYTES * 4),
             next.input_address,
         );
 

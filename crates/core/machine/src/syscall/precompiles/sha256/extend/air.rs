@@ -1,5 +1,5 @@
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_stark::air::{LookupScope, ZKMAirBuilder};
@@ -29,12 +29,12 @@ where
     fn eval(&self, builder: &mut AB) {
         // Initialize columns.
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &ShaExtendCols<AB::Var> = (*local).borrow();
         let next: &ShaExtendCols<AB::Var> = (*next).borrow();
 
-        let i_start = AB::F::from_canonical_u32(16);
-        let nb_bytes_in_word = AB::F::from_canonical_u32(4);
+        let i_start = AB::F::from_u32(16);
+        let nb_bytes_in_word = AB::F::from_u32(4);
 
         // Evaluate the control flags.
         self.eval_flags(builder);
@@ -57,7 +57,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - AB::F::from_canonical_u32(15)) * nb_bytes_in_word,
+            local.w_ptr + (local.i - AB::F::from_u32(15)) * nb_bytes_in_word,
             &local.w_i_minus_15,
             local.is_real,
         );
@@ -66,7 +66,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - AB::F::from_canonical_u32(2)) * nb_bytes_in_word,
+            local.w_ptr + (local.i - AB::F::from_u32(2)) * nb_bytes_in_word,
             &local.w_i_minus_2,
             local.is_real,
         );
@@ -75,7 +75,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - AB::F::from_canonical_u32(16)) * nb_bytes_in_word,
+            local.w_ptr + (local.i - AB::F::from_u32(16)) * nb_bytes_in_word,
             &local.w_i_minus_16,
             local.is_real,
         );
@@ -84,7 +84,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - AB::F::from_canonical_u32(7)) * nb_bytes_in_word,
+            local.w_ptr + (local.i - AB::F::from_u32(7)) * nb_bytes_in_word,
             &local.w_i_minus_7,
             local.is_real,
         );
@@ -199,9 +199,9 @@ where
         builder.receive_syscall(
             local.shard,
             local.clk,
-            AB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
+            AB::F::from_u32(SyscallCode::SHA_EXTEND.syscall_id()),
             local.w_ptr,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.cycle_48_start,
             LookupScope::Local,
         );

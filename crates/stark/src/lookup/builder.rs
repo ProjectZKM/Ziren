@@ -1,7 +1,7 @@
-use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder, PairCol, VirtualPairCol};
+use p3_air::{AirBuilder, BaseEntry, PairCol, VirtualPairCol, WindowAccess};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
+use p3_uni_stark::{SymbolicExpression, SymbolicVariable};
 
 use crate::{
     air::{AirLookup, LookupScope, MessageBuilder},
@@ -16,7 +16,7 @@ pub struct LookupBuilder<F: Field> {
     main: RowMajorMatrix<SymbolicVariable<F>>,
     sends: Vec<Lookup<F>>,
     receives: Vec<Lookup<F>>,
-    public_values: Vec<F>,
+    public_values: Vec<SymbolicVariable<F>>,
 }
 
 impl<F: Field> LookupBuilder<F> {
@@ -28,7 +28,7 @@ impl<F: Field> LookupBuilder<F> {
             .into_iter()
             .flat_map(|offset| {
                 (0..preprocessed_width).map(move |column| {
-                    SymbolicVariable::new(Entry::Preprocessed { offset }, column)
+                    SymbolicVariable::new(BaseEntry::Preprocessed { offset }, column)
                 })
             })
             .collect();
@@ -37,8 +37,12 @@ impl<F: Field> LookupBuilder<F> {
             .into_iter()
             .flat_map(|offset| {
                 (0..main_width)
-                    .map(move |column| SymbolicVariable::new(Entry::Main { offset }, column))
+                    .map(move |column| SymbolicVariable::new(BaseEntry::Main { offset }, column))
             })
+            .collect();
+
+        let public_values = (0..PROOF_MAX_NUM_PVS)
+            .map(|i| SymbolicVariable::new(BaseEntry::Public, i))
             .collect();
 
         Self {
@@ -46,7 +50,7 @@ impl<F: Field> LookupBuilder<F> {
             main: RowMajorMatrix::new(main_values, main_width),
             sends: vec![],
             receives: vec![],
-            public_values: vec![F::ZERO; PROOF_MAX_NUM_PVS],
+            public_values,
         }
     }
 
@@ -61,34 +65,38 @@ impl<F: Field> AirBuilder for LookupBuilder<F> {
     type F = F;
     type Expr = SymbolicExpression<F>;
     type Var = SymbolicVariable<F>;
-    type M = RowMajorMatrix<Self::Var>;
+    type PreprocessedWindow = RowMajorMatrix<Self::Var>;
+    type MainWindow = RowMajorMatrix<Self::Var>;
+    type PublicVar = SymbolicVariable<F>;
 
-    fn main(&self) -> Self::M {
+    fn main(&self) -> Self::MainWindow {
         self.main.clone()
     }
 
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed
+    }
+
     fn is_first_row(&self) -> Self::Expr {
-        SymbolicExpression::IsFirstRow
+        SymbolicExpression::Leaf(p3_air::symbolic::BaseLeaf::IsFirstRow)
     }
 
     fn is_last_row(&self) -> Self::Expr {
-        SymbolicExpression::IsLastRow
+        SymbolicExpression::Leaf(p3_air::symbolic::BaseLeaf::IsLastRow)
     }
 
     fn is_transition_window(&self, size: usize) -> Self::Expr {
         if size == 2 {
-            SymbolicExpression::IsTransition
+            SymbolicExpression::Leaf(p3_air::symbolic::BaseLeaf::IsTransition)
         } else {
             panic!("uni-stark only supports a window size of 2")
         }
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, _x: I) {}
-}
 
-impl<F: Field> PairBuilder for LookupBuilder<F> {
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed.clone()
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &self.public_values
     }
 }
 
@@ -112,14 +120,6 @@ impl<F: Field> MessageBuilder<AirLookup<SymbolicExpression<F>>> for LookupBuilde
     }
 }
 
-impl<F: Field> AirBuilderWithPublicValues for LookupBuilder<F> {
-    type PublicVar = F;
-
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &self.public_values
-    }
-}
-
 fn symbolic_to_virtual_pair<F: Field>(expression: &SymbolicExpression<F>) -> VirtualPairCol<F> {
     if expression.degree_multiple() > 1 {
         panic!("degree multiple is too high");
@@ -135,14 +135,28 @@ fn symbolic_to_virtual_pair<F: Field>(expression: &SymbolicExpression<F>) -> Vir
 fn eval_symbolic_to_virtual_pair<F: Field>(
     expression: &SymbolicExpression<F>,
 ) -> (Vec<(PairCol, F)>, F) {
+    use p3_air::symbolic::BaseLeaf;
     match expression {
-        SymbolicExpression::Constant(c) => (vec![], *c),
-        SymbolicExpression::Variable(v) => match v.entry {
-            Entry::Preprocessed { offset: 0 } => {
-                (vec![(PairCol::Preprocessed(v.index), F::ONE)], F::ZERO)
+        SymbolicExpression::Leaf(leaf) => match leaf {
+            BaseLeaf::Constant(c) => (vec![], *c),
+            BaseLeaf::Variable(v) => match v.entry {
+                BaseEntry::Preprocessed { offset: 0 } => {
+                    (vec![(PairCol::Preprocessed(v.index), F::ONE)], F::ZERO)
+                }
+                BaseEntry::Main { offset: 0 } => {
+                    (vec![(PairCol::Main(v.index), F::ONE)], F::ZERO)
+                }
+                _ => panic!("not an affine expression in current row elements {:?}", v.entry),
+            },
+            BaseLeaf::IsFirstRow => {
+                panic!("not an affine expression in current row elements for first row")
             }
-            Entry::Main { offset: 0 } => (vec![(PairCol::Main(v.index), F::ONE)], F::ZERO),
-            _ => panic!("not an affine expression in current row elements {:?}", v.entry),
+            BaseLeaf::IsLastRow => {
+                panic!("not an affine expression in current row elements for last row")
+            }
+            BaseLeaf::IsTransition => {
+                panic!("not an affine expression in current row elements for transition row")
+            }
         },
         SymbolicExpression::Add { x, y, .. } => {
             let (v_l, c_l) = eval_symbolic_to_virtual_pair(x);
@@ -173,15 +187,6 @@ fn eval_symbolic_to_virtual_pair<F: Field>(
 
             (v, c_l * c_r)
         }
-        SymbolicExpression::IsFirstRow => {
-            panic!("not an affine expression in current row elements for first row")
-        }
-        SymbolicExpression::IsLastRow => {
-            panic!("not an affine expression in current row elements for last row")
-        }
-        SymbolicExpression::IsTransition => {
-            panic!("not an affine expression in current row elements for transition row")
-        }
     }
 }
 
@@ -189,8 +194,8 @@ fn eval_symbolic_to_virtual_pair<F: Field>(
 mod tests {
     use std::borrow::Borrow;
 
-    use p3_air::{Air, BaseAir};
-    use p3_field::FieldAlgebra;
+    use p3_air::{Air, BaseAir, BaseEntry, WindowAccess};
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
 
@@ -201,9 +206,9 @@ mod tests {
     fn test_symbolic_to_virtual_pair_col() {
         type F = KoalaBear;
 
-        let x = SymbolicVariable::<F>::new(Entry::Main { offset: 0 }, 0);
+        let x = SymbolicVariable::<F>::new(BaseEntry::Main { offset: 0 }, 0);
 
-        let y = SymbolicVariable::<F>::new(Entry::Main { offset: 0 }, 1);
+        let y = SymbolicVariable::<F>::new(BaseEntry::Main { offset: 0 }, 1);
 
         let z = x + y;
 
@@ -233,8 +238,7 @@ mod tests {
     impl<AB: ZKMAirBuilder> Air<AB> for LookupTestAir {
         fn eval(&self, builder: &mut AB) {
             let main = builder.main();
-            let local = main.row_slice(0);
-            let local: &[AB::Var] = (*local).borrow();
+            let local = main.current_slice();
 
             let x = local[0];
             let y = local[1];
@@ -243,7 +247,7 @@ mod tests {
             builder.send(
                 AirLookup::new(
                     vec![x.into(), y.into()],
-                    AB::F::from_canonical_u32(3).into(),
+                    AB::F::from_u32(3).into(),
                     LookupKind::Byte,
                 ),
                 LookupScope::Local,
@@ -251,7 +255,7 @@ mod tests {
             builder.send(
                 AirLookup::new(
                     vec![x + y, z.into()],
-                    AB::F::from_canonical_u32(5).into(),
+                    AB::F::from_u32(5).into(),
                     LookupKind::Byte,
                 ),
                 LookupScope::Local,

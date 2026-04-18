@@ -1,12 +1,11 @@
 use std::marker::PhantomData;
 
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 pub mod air;
 pub mod columns;
 pub mod trace;
 use p3_koala_bear::KoalaBear;
-use p3_poseidon2::matmul_internal;
 
 /// The width of the permutation.
 pub const WIDTH: usize = 16;
@@ -29,7 +28,7 @@ impl<const DEGREE: usize> Default for Poseidon2SkinnyChip<DEGREE> {
 }
 pub fn apply_m_4<AF>(x: &mut [AF])
 where
-    AF: FieldAlgebra,
+    AF: PrimeCharacteristicRing,
 {
     let t01 = x[0].clone() + x[1].clone();
     let t23 = x[2].clone() + x[3].clone();
@@ -43,7 +42,7 @@ where
     x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
 }
 
-pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
+pub(crate) fn external_linear_layer<AF: PrimeCharacteristicRing>(state: &mut [AF; WIDTH]) {
     for j in (0..WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
     }
@@ -74,15 +73,16 @@ const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] = Koala
     127,
 ]);
 
-pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
-        POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY
-            .iter()
-            .map(|x| <F as FieldAlgebra>::F::from_wrapped_u32(x.as_canonical_u32()))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-    matmul_internal(state, matmul_constants);
+pub(crate) fn internal_linear_layer<F: PrimeCharacteristicRing>(state: &mut [F; WIDTH]) {
+    let matmul_constants: [F; WIDTH] = core::array::from_fn(|i| {
+        F::from_u32(POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY[i].as_canonical_u32())
+    });
+    // Implement matmul_internal inline: (1 + diag(v))state
+    let sum: F = state.iter().cloned().sum();
+    for i in 0..WIDTH {
+        state[i] *= matmul_constants[i].clone();
+        state[i] += sum.clone();
+    }
 }
 
 #[cfg(test)]
@@ -94,9 +94,10 @@ pub(crate) mod tests {
         machine::RecursionAir, runtime::instruction as instr, MemAccessKind, RecursionProgram,
         Runtime,
     };
-    use p3_field::{FieldAlgebra, PrimeField32};
+    use p3_field::{PrimeCharacteristicRing, PrimeField32};
     use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_symmetric::Permutation;
+    use rand::Rng;
 
     use crate::stark::KoalaBearPoseidon2Outer;
     use zkhash::ark_ff::UniformRand;
@@ -115,11 +116,11 @@ pub(crate) mod tests {
 
         let input = [1; WIDTH];
         let output = inner_perm()
-            .permute(input.map(KoalaBear::from_canonical_u32))
+            .permute(input.map(KoalaBear::from_u32))
             .map(|x| KoalaBear::as_canonical_u32(&x));
 
         let rng = &mut rand::thread_rng();
-        let input_1: [KoalaBear; WIDTH] = std::array::from_fn(|_| KoalaBear::rand(rng));
+        let input_1: [KoalaBear; WIDTH] = std::array::from_fn(|_| KoalaBear::from_u64(rng.gen::<u64>()));
         let output_1 = inner_perm().permute(input_1).map(|x| KoalaBear::as_canonical_u32(&x));
         let input_1 = input_1.map(|x| KoalaBear::as_canonical_u32(&x));
 

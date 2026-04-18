@@ -1,7 +1,7 @@
 use crate::events::{Poseidon2PermuteEvent, PrecompileEvent};
 use crate::syscalls::{Syscall, SyscallCode, SyscallContext};
 use crate::ExecutionError;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::Permutation;
 use zkm_primitives::poseidon2_init;
@@ -32,7 +32,7 @@ impl Syscall for Poseidon2PermuteSyscall {
         let pre_state = ctx.slice_unsafe(state_ptr, STATE_SIZE);
         let pre_state: [u32; 16] = pre_state.as_slice().try_into().unwrap();
 
-        let mut state = pre_state.map(KoalaBear::from_canonical_u32);
+        let mut state = pre_state.map(KoalaBear::from_u32);
 
         let hasher = poseidon2_init();
         hasher.permute_mut(&mut state);

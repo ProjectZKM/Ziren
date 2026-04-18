@@ -1,0 +1,239 @@
+\section{Soundness Fix Design: Making WHIR Mode Production-Sound}
+\label{sec:soundness-fix}
+
+\subsection{Current State}
+
+The WHIR fast path (\texttt{ZIREN\_USE\_WHIR=1}) in
+\texttt{crates/stark/src/prover.rs} skips transition-constraint verification
+entirely. The core prover:
+\begin{enumerate}
+  \item Commits to the main trace only (no permutation trace, no quotient).
+  \item Opens the main trace at $\zeta$ via WHIR (Jagged).
+  \item Sets \texttt{ShardCommitment.permutation\_commit = None} and
+        \texttt{quotient\_commit = None}.
+  \item Leaves \texttt{ChipOpenedValues.permutation} and \texttt{quotient}
+        empty.
+\end{enumerate}
+
+The recursion verifier (both native and circuit) short-circuits when
+\texttt{permutation\_commit.is\_none()}: it skips the PCS round for
+permutation/quotient, skips \texttt{verify\_constraints}, and only checks:
+\begin{itemize}
+  \item PCS opening of preprocessed + main.
+  \item $\sum_i \text{local\_cumulative\_sum}_i = 0$.
+\end{itemize}
+
+\subsection{What This Leaves Unchecked}
+
+Given a committed main trace $M$ and cumulative-sum extraction from the last
+14 base-field columns of $M$, the verifier does \emph{not} check:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+\textbf{AIR check} & \textbf{FRI mode} & \textbf{WHIR fast path} \\
+\midrule
+$\sum \text{lookup events} = 0$ (permutation argument) &
+  \checkmark\ via quotient check &
+  \checkmark\ via cumulative sum \\
+Transition: $C(M[i], M[i+1], P[i]) = 0 \ \forall i$ &
+  \checkmark\ via quotient check &
+  $\times$\ NOT CHECKED \\
+Boundary: $C_{\text{first}}(M[0]) = 0$, $C_{\text{last}}(M[n{-}1]) = 0$ &
+  \checkmark\ via Lagrange selectors &
+  $\times$\ NOT CHECKED \\
+Public values = $M[0][\text{pub\_cols}]$ &
+  \checkmark\ via boundary constraint &
+  $\times$\ NOT CHECKED \\
+\bottomrule
+\end{tabular}
+\caption{What is verified in each mode.}
+\label{tab:soundness-gap}
+\end{table}
+
+A malicious prover can therefore produce a ``verifying'' proof for a main
+trace that does not come from any valid execution of the MIPS program,
+forge public outputs, or violate transition constraints. Only the global
+septic digest (extracted from the last 14 columns) is bound, and that is
+bindable separately to memory-init/finalize events.
+
+\emph{The current WHIR mode is a benchmark prototype, not a zk-proof.}
+
+\subsection{Target Soundness Design}
+
+The fix must re-introduce transition-constraint verification while
+preserving the Jagged + WHIR performance characteristics. There are three
+standard options.
+
+\paragraph{Option A --- Keep the quotient polynomial, batch it into WHIR.}
+Commit to the quotient polynomial alongside the main trace, open both at
+$\zeta$, check $q(\zeta) \cdot Z_H(\zeta) = \text{folded\_constraints}(\zeta)$.
+\emph{Pro:} minimal change. \emph{Con:} defeats most of the WHIR speedup ---
+quotient width is $2^{\text{log\_quotient\_degree}}$ (= 2 in Ziren), each
+column must be computed, committed, and opened. The tendermint $4.5\times$
+speedup would collapse to $\sim$1.3$\times$. \emph{Status:} not recommended.
+
+\paragraph{Option B --- Logup-GKR plus sumcheck-based constraint verification
+(SP1 hypercube model).}
+Replace both the permutation argument and the quotient polynomial with GKR /
+sumcheck reductions:
+\begin{enumerate}
+  \item \textbf{Constraints $\to$ sumcheck.} The transition-constraint
+        polynomial $C(X) = \alpha \cdot C_0(X) + \alpha^2 \cdot C_1(X) + \cdots$
+        is viewed as a multilinear polynomial over the Boolean hypercube
+        $\{0,1\}^{\log n}$. The prover proves
+        $$
+          \sum_{x \in \{0,1\}^{\log n}} \mathsf{eq}(r, x) \cdot C(x, x_{\text{next}}) = 0
+        $$
+        via sumcheck ($\log n$ rounds, $\sim$3 field elements per round).
+  \item \textbf{Lookups $\to$ Logup-GKR.} The lookup identity becomes a GKR
+        circuit whose final claim is a multilinear evaluation of a fraction
+        polynomial. The prover runs a few sumcheck rounds to reduce it to a
+        single evaluation.
+  \item \textbf{Final opening.} All final claims are batched and opened at
+        one multilinear point via WHIR.
+\end{enumerate}
+\emph{Pro:} matches SP1's direction; Logup-GKR has battle-tested designs;
+preserves most of the WHIR speedup because no extra trace is committed.
+\emph{Con:} large implementation effort (requires sumcheck-verifier chips
+inside the recursion circuit). \emph{Status:} recommended (this document's
+focus).
+
+\paragraph{Option C --- Multilinear constraint check via WHIR opening at $\zeta$.}
+Keep the univariate STARK constraint check but express it in multilinear
+form. The verifier:
+\begin{enumerate}
+  \item Samples $\alpha, \zeta$.
+  \item Opens $\text{main}(\zeta), \text{main}(\zeta \omega), \text{preproc}(\zeta), \text{preproc}(\zeta \omega)$ via WHIR.
+  \item Locally computes $\text{folded\_constraints}(\zeta)$ from the opened values.
+  \item Asserts $\text{folded\_constraints}(\zeta) = 0$.
+\end{enumerate}
+The last step replaces the identity $q(\zeta) \cdot Z_H(\zeta) = \text{folded}(\zeta)$
+with the direct assertion $\text{folded}(\zeta) = 0$. This is only sound if
+$\text{folded\_constraints}(X)$ vanishes on the trace domain, which still
+requires a sumcheck argument to prove --- collapsing Option C into
+Option B. \emph{Status:} subsumed by Option B.
+
+\subsection{Chosen Design: Option B}
+
+\subsubsection*{Protocol sketch (prover)}
+
+Let $M$ be the main trace (multilinear, dimension $\log n$ over
+$\{0,1\}^{\log n}$), $P$ the preprocessed trace, $\mathrm{pub}$ the public
+values.
+
+\begin{enumerate}[label=\textbf{Round \arabic*.}, wide=0pt]
+  \item Commit to $M$ via WHIR (same as today).
+  \item Sample constraint-mixing challenge $\alpha$.
+  \item \textbf{Constraint sumcheck.} Prover and verifier run sumcheck for
+        $$
+          \sum_{x \in \{0,1\}^{\log n}} \mathsf{eq}(r, x) \cdot \Bigl[ \sum_i \alpha^i \cdot C_i\bigl(M(x), M(x \omega), P(x), P(x \omega), \mathrm{pub}\bigr) \Bigr] = 0,
+        $$
+        where $r \in \mathbb{F}^{\log n}$ is sampled by the verifier at the
+        start. After $\log n$ rounds, the claim reduces to a single
+        multilinear-value claim on $M$ and $P$ at point $r' \in \mathbb{F}^{\log n}$.
+  \item \textbf{Lookup (Logup-GKR).} For each lookup table $T$ with events
+        $e_1, \dots, e_k$:
+        $$
+          \sum_j \frac{1}{\beta - e_j} = \sum_t \frac{\text{multiplicity}(t)}{\beta - t}.
+        $$
+        The prover runs a GKR circuit whose output wire is $0$. The GKR
+        reduction ends with a claim on $M, P$ at another point $r''$.
+  \item \textbf{Batched WHIR opening.} All multilinear claims on $M$ (from
+        sumchecks and GKR) are batched via random linear combination and
+        opened at a single point via WHIR. Same for $P$.
+\end{enumerate}
+
+\subsubsection*{Verifier cost}
+
+\begin{itemize}
+  \item Sumcheck of degree-$d$ polynomial over $\log n$ rounds:
+        $\log n \cdot (d+1)$ field elements observed, one final multilinear
+        evaluation check.
+  \item Logup-GKR: $O(\log k)$ sumcheck rounds per table.
+  \item WHIR opening: same cost as today's Jagged + WHIR open.
+\end{itemize}
+Total verifier work: $O\bigl(\log n \cdot (d + |\text{tables}|)\bigr)$ ---
+roughly the same asymptotic cost as today, \emph{plus} constraint
+soundness.
+
+\subsubsection*{Recursion implications}
+
+The recursion circuit currently contains:
+\begin{itemize}
+  \item \texttt{verify\_shard} --- iterates over chips, calls
+        \texttt{verify\_constraints}.
+  \item \texttt{verify\_constraints} --- computes
+        $\text{folded\_constraints}(\zeta)$ and
+        $q(\zeta) \cdot Z_H(\zeta)$ and asserts equality.
+\end{itemize}
+
+Under Option B the recursion circuit needs:
+\begin{enumerate}
+  \item A \texttt{SumcheckVerify} chip (skeleton already exists in
+        \texttt{crates/recursion/core/src/chips/sumcheck\_verify.rs}).
+  \item A \texttt{GKRVerifier} circuit (new).
+  \item A \texttt{MultilinearEvalCheck} that reconciles a claimed
+        multilinear evaluation at $r$ with the value opened by WHIR.
+  \item A replacement for \texttt{verify\_constraints} that runs
+        \texttt{SumcheckVerify} per chip, runs \texttt{GKRVerifier} per
+        lookup table, batches all multilinear claims, and checks them
+        against WHIR-opened values.
+\end{enumerate}
+
+\subsubsection*{Migration path}
+
+\begin{enumerate}
+  \item \textbf{Phase 2a (done)} --- sumcheck primitives, hypercube
+        constraint evaluator, \texttt{ShardProof::zerocheck\_proofs} field,
+        prover + verifier wiring. See Section~\ref{sec:zerocheck-phase2a}.
+  \item \textbf{Phase 2b} --- Logup-GKR for lookup arguments in the native
+        prover. Removes the permutation trace entirely.
+  \item \textbf{Phase 2c} --- wire \texttt{SumcheckVerify} and
+        \texttt{GKRVerifier} into the recursion circuit. Replace
+        \texttt{verify\_constraints} with the sumcheck-based version.
+  \item \textbf{Phase 3} --- formal verification of the sumcheck / GKR
+        verifier chips.
+\end{enumerate}
+
+\subsection{Projected Performance Impact}
+
+Compared to the current (unsound) WHIR fast path:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lllc}
+\toprule
+\textbf{Operation} & \textbf{WHIR fast path} & \textbf{WHIR + Logup-GKR} & \textbf{Overhead} \\
+\midrule
+Main trace commit   & same   & same    & 0\%       \\
+Constraint check    & skipped & sumcheck ($\log n$ rounds) & +10--15\% \\
+Lookup check        & cumulative sum read & Logup-GKR sumcheck & +5--10\%  \\
+PCS open            & one point & batched multi-point & +5\%      \\
+\midrule
+\textbf{Total expected} & \textbf{baseline} & \multicolumn{2}{r}{\textbf{+20--30\%}} \\
+\bottomrule
+\end{tabular}
+\caption{Projected end-to-end overhead of Option B relative to the unsound
+WHIR fast path.}
+\label{tab:sound-overhead}
+\end{table}
+
+Projected tendermint performance: $502\,\text{s} \cdot 1.25 \approx 630\,\text{s}$,
+still $\mathbf{3.6\times}$ faster than main FRI (2270\,s), with full
+soundness restored.
+
+\subsection{Immediate Action Items}
+\begin{enumerate}
+  \item Rename the current flag to \texttt{ZIREN\_WHIR\_UNSAFE=1} with a
+        runtime warning; the existing name misleads about soundness.
+  \item Complete Phase 2a follow-up: multi-point WHIR opening so the
+        sumcheck final claim $C(r')$ can be checked against an actual
+        opening.
+  \item Implement Phase 2b (Logup-GKR) to make all chips zerocheck-eligible.
+  \item Wire into the recursion circuit (Phase 2c).
+  \item Formal-verification pass (Phase 3).
+\end{enumerate}

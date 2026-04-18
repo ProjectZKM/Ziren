@@ -1,51 +1,39 @@
-use std::{
-    iter::{Skip, Take},
-    ops::{Deref, Range},
-};
+use std::ops::Range;
 
-use p3_air::{AirBuilder, BaseAir};
-use p3_matrix::Matrix;
+use p3_air::{AirBuilder, BaseAir, WindowAccess};
 
-/// A submatrix of a matrix.  The matrix will contain a subset of the columns of `self.inner`.
-pub struct SubMatrixRowSlices<M: Matrix<T>, T: Send + Sync> {
-    inner: M,
+/// A sub-window that only exposes a column range from a parent window.
+pub struct SubWindow<W: WindowAccess<T>, T> {
+    inner: W,
     column_range: Range<usize>,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<M: Matrix<T>, T: Send + Sync> SubMatrixRowSlices<M, T> {
-    /// Creates a new [`SubMatrixRowSlices`].
+impl<W: WindowAccess<T>, T> SubWindow<W, T> {
+    /// Creates a new [`SubWindow`].
     #[must_use]
-    pub const fn new(inner: M, column_range: Range<usize>) -> Self {
+    pub fn new(inner: W, column_range: Range<usize>) -> Self {
         Self { inner, column_range, _phantom: std::marker::PhantomData }
     }
 }
 
-/// Implement `Matrix` for `SubMatrixRowSlices`.
-impl<M: Matrix<T>, T: Send + Sync> Matrix<T> for SubMatrixRowSlices<M, T> {
-    type Row<'a>
-        = Skip<Take<M::Row<'a>>>
-    where
-        Self: 'a;
+impl<W: WindowAccess<T> + Clone, T: Clone> Clone for SubWindow<W, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            column_range: self.column_range.clone(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
 
-    #[inline]
-    fn row(&self, r: usize) -> Self::Row<'_> {
-        self.inner.row(r).take(self.column_range.end).skip(self.column_range.start)
+impl<W: WindowAccess<T>, T: Clone> WindowAccess<T> for SubWindow<W, T> {
+    fn current_slice(&self) -> &[T] {
+        &self.inner.current_slice()[self.column_range.clone()]
     }
 
-    #[inline]
-    fn row_slice(&self, r: usize) -> impl Deref<Target = [T]> {
-        self.row(r).collect::<Vec<_>>()
-    }
-
-    #[inline]
-    fn width(&self) -> usize {
-        self.column_range.len()
-    }
-
-    #[inline]
-    fn height(&self) -> usize {
-        self.inner.height()
+    fn next_slice(&self) -> &[T] {
+        &self.inner.next_slice()[self.column_range.clone()]
     }
 }
 
@@ -71,12 +59,17 @@ impl<AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'_, AB,
     type F = AB::F;
     type Expr = AB::Expr;
     type Var = AB::Var;
-    type M = SubMatrixRowSlices<AB::M, Self::Var>;
+    type PreprocessedWindow = AB::PreprocessedWindow;
+    type MainWindow = SubWindow<AB::MainWindow, Self::Var>;
+    type PublicVar = AB::PublicVar;
 
-    fn main(&self) -> Self::M {
+    fn main(&self) -> Self::MainWindow {
         let matrix = self.inner.main();
+        SubWindow::new(matrix, self.column_range.clone())
+    }
 
-        SubMatrixRowSlices::new(matrix, self.column_range.clone())
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.inner.preprocessed()
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -93,5 +86,9 @@ impl<AB: AirBuilder, SubAir: BaseAir<F>, F> AirBuilder for SubAirBuilder<'_, AB,
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
         self.inner.assert_zero(x.into());
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.inner.public_values()
     }
 }

@@ -8,8 +8,17 @@ pub mod air;
 mod chip;
 mod config;
 mod debug;
-mod folder;
+pub mod folder;
 mod kb31_poseidon2;
+#[cfg(feature = "basefold")]
+pub mod basefold;
+#[cfg(feature = "basefold")]
+pub mod basefold_late_binding;
+#[cfg(feature = "basefold")]
+pub mod jagged;
+#[cfg(feature = "basefold")]
+pub mod jagged_sumcheck;
+pub mod logup_gkr;
 mod lookup;
 mod machine;
 mod opts;
@@ -17,6 +26,8 @@ mod permutation;
 mod proof;
 mod prover;
 mod quotient;
+pub mod zerocheck;
+pub mod zerocheck_prover;
 mod record;
 pub mod septic_curve;
 pub mod septic_digest;

@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder};
-use p3_field::FieldAlgebra;
+use p3_air::{WindowAccess, Air, AirBuilder};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
@@ -22,7 +22,7 @@ where
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryInstructionsColumns<AB::Var> = (*local).borrow();
 
         // SAFETY: All selectors are checked to be boolean.
@@ -80,18 +80,18 @@ where
             local.clk,
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
-            AB::Expr::zero(),
+            local.next_pc + AB::Expr::from_u32(4),
+            AB::Expr::ZERO,
             opcode,
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
             local.prev_a_val,
             local.is_sb + local.is_sh + local.is_sw + local.is_swl + local.is_swr,
-            AB::Expr::one(),
-            AB::Expr::one(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
+            AB::Expr::ONE,
+            AB::Expr::ONE,
+            AB::Expr::ZERO,
+            AB::Expr::ONE,
             is_real,
         );
     }
@@ -134,7 +134,7 @@ impl MemoryInstructionsChip {
     ) {
         // Send to the ALU table to verify correct calculation of addr_word.
         builder.send_alu(
-            AB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            AB::Expr::from_u32(Opcode::ADD as u32),
             local.addr_word,
             local.op_b_value,
             local.op_c_value,
@@ -158,8 +158,8 @@ impl MemoryInstructionsChip {
         // least NUM_REGISTERS.
         builder.send_byte(
             ByteOpcode::LTU.as_field::<AB::F>(),
-            AB::Expr::one(),
-            AB::Expr::from_canonical_u8(NUM_REGISTERS as u8 - 1),
+            AB::Expr::ONE,
+            AB::Expr::from_u8(NUM_REGISTERS as u8 - 1),
             local.addr_word[0],
             local.most_sig_bytes_zero.result,
         );
@@ -195,7 +195,7 @@ impl MemoryInstructionsChip {
             ByteOpcode::AND.as_field::<AB::F>(),
             local.addr_ls_two_bits,
             local.addr_word[0],
-            AB::Expr::from_canonical_u8(0b11),
+            AB::Expr::from_u8(0b11),
             is_real.clone(),
         );
 
@@ -203,7 +203,7 @@ impl MemoryInstructionsChip {
         // value into the memory columns.
         builder.eval_memory_access(
             local.shard,
-            local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
+            local.clk + AB::F::from_u32(MemoryAccessPosition::Memory as u32),
             local.addr_aligned,
             &local.memory_access,
             is_real.clone(),
@@ -244,7 +244,7 @@ impl MemoryInstructionsChip {
             ByteOpcode::MSB.as_field::<AB::F>(),
             local.most_sig_bit,
             local.most_sig_byte,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
             local.is_lb + local.is_lh,
         );
         builder.assert_eq(
@@ -255,10 +255,10 @@ impl MemoryInstructionsChip {
         // When the memory value is negative and not writing to x0, use the SUB opcode to compute
         // the signed value of the memory value and verify that the op_a value is correct.
         let signed_value = Word([
-            AB::Expr::zero(),
-            AB::Expr::one() * local.is_lb,
-            AB::Expr::one() * local.is_lh,
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ONE * local.is_lb,
+            AB::Expr::ONE * local.is_lh,
+            AB::Expr::ZERO,
         ]);
 
         // SAFETY: As we mentioned before, `mem_value_is_neg` is correct in all cases and boolean in all cases.
@@ -293,10 +293,10 @@ impl MemoryInstructionsChip {
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
         let offset_is_zero =
-            AB::Expr::one() - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
+            AB::Expr::ONE - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
 
         // Compute the expected stored value for a SB instruction.
-        let one = AB::Expr::one();
+        let one = AB::Expr::ONE;
         let a_val = local.op_a_value;
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
@@ -410,7 +410,7 @@ impl MemoryInstructionsChip {
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
         let offset_is_zero =
-            AB::Expr::one() - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
+            AB::Expr::ONE - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
 
         // Compute the byte value.
         let mem_byte = mem_val[0] * offset_is_zero.clone()
@@ -437,8 +437,8 @@ impl MemoryInstructionsChip {
         let half_value = Word([
             use_lower_half.clone() * mem_val[0] + use_upper_half * mem_val[2],
             use_lower_half * mem_val[1] + use_upper_half * mem_val[3],
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
         ]);
         builder
             .when(local.is_lh + local.is_lhu)
@@ -447,7 +447,7 @@ impl MemoryInstructionsChip {
         // When the instruction is LW, just use the word.
         builder.when(local.is_lw).assert_word_eq(mem_val, local.unsigned_mem_val);
 
-        let one = AB::Expr::one();
+        let one = AB::Expr::ONE;
         let prev_a_val = local.prev_a_val;
         // Compute the expected stored value for a LWR instruction.
         let lwr_expected_load_value = Word([
@@ -499,7 +499,7 @@ impl MemoryInstructionsChip {
         local: &MemoryInstructionsColumns<AB::Var>,
     ) {
         let offset_is_zero =
-            AB::Expr::one() - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
+            AB::Expr::ONE - local.ls_bits_is_one - local.ls_bits_is_two - local.ls_bits_is_three;
 
         // Assert that the value flags are boolean
         builder.assert_bool(local.ls_bits_is_one);
@@ -512,9 +512,9 @@ impl MemoryInstructionsChip {
         // As their sum is constrained to be 1, the only possibility is that exactly one flag is on, with value 1.
         builder.when(offset_is_zero).assert_zero(local.addr_ls_two_bits);
         builder.when(local.ls_bits_is_one).assert_one(local.addr_ls_two_bits);
-        builder.when(local.ls_bits_is_two).assert_eq(local.addr_ls_two_bits, AB::Expr::two());
+        builder.when(local.ls_bits_is_two).assert_eq(local.addr_ls_two_bits, AB::Expr::TWO);
         builder
             .when(local.ls_bits_is_three)
-            .assert_eq(local.addr_ls_two_bits, AB::Expr::from_canonical_u8(3));
+            .assert_eq(local.addr_ls_two_bits, AB::Expr::from_u8(3));
     }
 }

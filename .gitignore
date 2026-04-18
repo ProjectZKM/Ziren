@@ -16,3 +16,5 @@ proof-with-is-prime.bin
 **/program.bin
 **/stdin.bin
 
+/.claude/scheduled_tasks.lock
+.claude/ralph-loop.local.md

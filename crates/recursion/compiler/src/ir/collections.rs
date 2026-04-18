@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 use super::{Builder, Config, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
 
@@ -111,7 +111,7 @@ impl<C: Config> Builder<C> {
     /// Creates a dynamic array for a length.
     pub fn dyn_array<V: MemVariable<C>>(&mut self, len: impl Into<Usize<C::N>>) -> Array<C, V> {
         let len = match len.into() {
-            Usize::Const(len) => self.eval(C::N::from_canonical_usize(len)),
+            Usize::Const(len) => self.eval(C::N::from_usize(len)),
             Usize::Var(len) => len,
         };
         let len = Usize::Var(len);

@@ -1,0 +1,116 @@
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+We have presented a production-sound integration of the WHIR
+multilinear PCS into Ziren's STARK pipeline, closing all three
+identified soundness gaps in the existing WHIR fast path.  Our
+contributions span three layers:
+
+\begin{itemize}
+  \item \emph{Cryptographic protocols}: a sumcheck-based zerocheck
+        for transition constraints, a sumcheck-corrected LogUp-GKR
+        for lookup arguments, a late-binding WHIR adapter
+        supporting post-commit evaluation points, a cross-binding
+        spot-check protocol that ties FRI and WHIR commits to a
+        single trace, and a Jagged + late-binding sumcheck reduction.
+
+  \item \emph{Engineering integration}: opt-in env-flag wiring
+        (\texttt{ZIREN\_USE\_WHIR=1},
+        \texttt{ZIREN\_LATE\_BINDING=jagged},
+        \texttt{ZIREN\_CROSS\_BINDING=1}) with default-preserved
+        FRI behaviour; the recursion-circuit verifier scaffolding
+        (covering all four protocol sub-steps); and a host-side
+        prover/verifier path that integrates the new mechanisms
+        without requiring upstream Plonky3 changes.
+
+  \item \emph{Empirical validation}: end-to-end smoke tests on
+        fibonacci, JSON, keccak, and large-sum (multi-shard)
+        workloads, plus per-mechanism unit tests covering
+        round-trips and tamper rejections.
+\end{itemize}
+
+\subsection{Future Work}
+
+\paragraph{Recursion-circuit constraint emission --- orchestrator
+shipped.}  \texttt{verify\_whir\_pcs\_in\_circuit} in
+\texttt{crates/recursion/circuit/src/whir\_verifier.rs} composes
+\texttt{emit\_sumcheck\_rounds}, \texttt{emit\_merkle\_path}, and
+\texttt{emit\_final\_poly\_eval} into a single Builder<C>-emitting
+orchestrator that mirrors
+\texttt{p3\_whir::pcs::verifier::Verifier::verify} phase-by-phase:
+(1)~observe initial commit + OOD answers,
+(2)~initial sumcheck,
+(3)~per WHIR round (tracking a rolling \texttt{prev\_commitment}):
+observe new round commitment, observe OOD, sample STIR positions
+via \texttt{challenger.sample\_bits}, verify each merkle path
+against \emph{\texttt{prev\_commitment}} (not the new round
+commitment), emit per-round sumcheck, roll \texttt{prev\_commitment
+= round.commitment},
+(4)~observe final-poly coefficients,
+(5)~final STIR queries against the last \texttt{prev\_commitment},
+(6)~assert \texttt{emit\_final\_poly\_eval} at the cumulative
+challenges equals the running sumcheck claim, and
+(7)~close each late-binding eq-statement claim.
+
+A focused review identified and fixed one soundness bug in the
+first draft: STIR queries had been asserted against
+\texttt{round.commitment} (the NEW folded-poly root) instead of
+\texttt{prev\_commitment} (the codeword actually being probed); a
+malicious prover could have satisfied STIR by providing merkle
+paths against a freshly-committed codeword while the openings came
+from a divergent source.  Fixed by explicitly tracking
+\texttt{prev\_commitment} and rolling it at the end of each round.
+
+The orchestrator is intentionally simplified on two points relative
+to upstream: no in-circuit \texttt{query\_pow\_witness} grinding
+check (PoW bits are gated at the host), and the final
+\emph{constraint-polynomial weight} check (\texttt{claimed\_eval
+== weight * f(r)} in the upstream verifier) is approximated as a
+direct final-eval equality, which is sound for our row-MLE usage
+but not for general boundary constraints.  Extending to the full
+\texttt{ConstraintPolyEvaluator} mirror is follow-up engineering
+work.  Remaining integration steps: wire the orchestrator into the
+recursion machine root verifier and feed a host \texttt{WhirProof}
+through the witness stream as an \texttt{InCircuitWhirProof}.
+
+\paragraph{Performance optimisation.}  Our profiling
+(\S\ref{sec:performance}) shows that the WHIR open phase inside
+\texttt{p3-whir}'s \texttt{Prover::prove} accounts for $97.9\%$
+of jagged late-binding cost on a fibonacci shard.  The sumcheck
+reduction we added is essentially free ($0.2\%$).  Upstream
+parallelisation of \texttt{p3-whir}'s sumcheck rounds and merkle
+folding is the highest-impact optimisation; alternatively,
+splitting the jagged commit into multiple smaller WHIR proofs
+trades a fraction of the proof-size win for wall-clock improvement.
+
+\paragraph{Soundness analysis formalisation.}  The constructions
+in this paper are presented operationally with informal soundness
+sketches.  A formal soundness analysis (in the style of WHIR's
+Theorem~5.2) for the late-binding adapter, the cross-binding
+protocol, and the jagged sumcheck reduction would tighten the
+security argument and enable third-party security audits.
+
+\paragraph{Recursion-circuit \texttt{is\_div\_active} fix.}  The
+preprocessed gate added to handle dead-DivF in \texttt{Select}
+branches has a known interaction with \texttt{assert\_eq}'s
+soundness DivF that bypasses the constraint when the witness
+output cell is unread.  A focused fix --- either an
+\texttt{is\_div\_soundness} flag or a Select-emission change ---
+unblocks two pre-existing \texttt{should\_panic} unit tests and
+removes a soundness footgun.
+
+\paragraph{Production deployment.}  With the late-binding and
+cross-binding chains complete on the host side, the next
+deployment step is regenerating the gnark BN254 wrap circuit
+artifacts (broken by the orthogonal Plonky3 FRI upgrade) and the
+recursion compress \texttt{vk\_map.bin} (only required if the
+recursion circuit changes propagate end-to-end).  The host-side
+soundness work is independent of these regenerations.
+
+\subsection{Acknowledgements}
+
+This work builds on the open-source Plonky3 toolkit, the WHIR PCS
+construction, and the LogUp-GKR lookup argument.  We thank the
+authors of the SP1 hypercube architecture for the
+\texttt{RecursiveWhirVerifier} reference implementation that
+guided our recursion-circuit scaffolding port plan.

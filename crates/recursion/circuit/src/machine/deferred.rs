@@ -7,12 +7,12 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use p3_air::Air;
 use p3_commit::Mmcs;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_recursion_compiler::ir::{Builder, Felt};
+use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
 use zkm_stark::septic_curve::SepticCurve;
 use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
@@ -32,7 +32,7 @@ use crate::{
     hash::{FieldHasher, FieldHasherVariable},
     machine::assert_recursion_public_values_valid,
     stark::{ShardProofVariable, StarkVerifier},
-    CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriParameters, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
 use super::{
@@ -57,7 +57,7 @@ pub struct ZKMDeferredShape {
 #[serde(bound(
     deserialize = "SC::Challenger: Deserialize<'de>, ShardProof<SC>: Deserialize<'de>, Dom<SC>: DeserializeOwned, [SC::Val; DIGEST_SIZE]: Deserialize<'de>, SC::Digest: Deserialize<'de>"
 ))]
-pub struct ZKMDeferredWitnessValues<SC: KoalaBearFriConfig + FieldHasher<KoalaBear>> {
+pub struct ZKMDeferredWitnessValues<SC: KoalaBearFriParameters + FieldHasher<KoalaBear>> {
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, ShardProof<SC>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; POSEIDON_NUM_WORDS],
@@ -74,7 +74,7 @@ pub struct ZKMDeferredWitnessValues<SC: KoalaBearFriConfig + FieldHasher<KoalaBe
 
 pub struct ZKMDeferredWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
-    SC: FieldHasherVariable<C> + KoalaBearFriConfigVariable<C>,
+    SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
     pub vks_and_proofs: Vec<(VerifyingKeyVariable<C, SC>, ShardProofVariable<C, SC>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -92,14 +92,14 @@ pub struct ZKMDeferredWitnessVariable<
 
 impl<C, SC, A> ZKMDeferredVerifier<C, SC, A>
 where
-    SC: KoalaBearFriConfigVariable<
+    SC: KoalaBearFriParametersVariable<
         C,
         FriChallengerVariable = DuplexChallengerVariable<C>,
         DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
     >,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
 {
     /// Verify a batch of deferred proofs.
     ///

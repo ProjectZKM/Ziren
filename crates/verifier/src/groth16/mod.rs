@@ -5,7 +5,7 @@ mod verify;
 include!(concat!(env!("OUT_DIR"), "/part_stark_vk_registry.rs"));
 
 use p3_bn254_fr::Bn254Fr;
-use p3_field::{FieldAlgebra, PrimeField};
+use p3_field::{PrimeCharacteristicRing, PrimeField};
 use substrate_bn::Fr;
 
 use alloc::vec::Vec;
@@ -275,9 +275,9 @@ pub fn bn254fr_to_fr(value: Bn254Fr) -> Result<[u8; 32], Groth16Error> {
 
 pub fn bytes_to_bn254fr(bytes: &[u8; 32]) -> Bn254Fr {
     let mut acc = Bn254Fr::ZERO;
-    let base = Bn254Fr::from_canonical_u32(256);
+    let base = Bn254Fr::from_u32(256);
     for byte in bytes.iter() {
-        acc = acc * base + Bn254Fr::from_canonical_u32(*byte as u32);
+        acc = acc * base + Bn254Fr::from_u32(*byte as u32);
     }
     acc
 }

@@ -1,11 +1,11 @@
 use p3_air::Air;
 use p3_commit::PolynomialSpace;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PackedValue};
+use p3_field::{PrimeCharacteristicRing, ExtensionField, PackedValue, BasedVectorSpace};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 
-use crate::{air::MachineAir, septic_digest::SepticDigest};
+use crate::{air::MachineAir, folder::PairWindow, septic_digest::SepticDigest};
 
 use super::{
     folder::ProverConstraintFolder, Chip, Domain, PackedChallenge, PackedVal, StarkGenericConfig,
@@ -44,7 +44,7 @@ where
     let qdb = log2_strict_usize(quotient_domain.size()) - log2_strict_usize(trace_domain.size());
     let next_step = 1 << qdb;
 
-    let ext_degree = SC::Challenge::D;
+    let ext_degree = <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION;
 
     assert!(
         quotient_size >= PackedVal::<SC>::WIDTH,
@@ -64,14 +64,14 @@ where
             let is_first_row = *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);
             let is_last_row = *PackedVal::<SC>::from_slice(&sels.is_last_row[i_range.clone()]);
             let is_transition = *PackedVal::<SC>::from_slice(&sels.is_transition[i_range.clone()]);
-            let inv_zeroifier = *PackedVal::<SC>::from_slice(&sels.inv_zeroifier[i_range.clone()]);
+            let inv_vanishing = *PackedVal::<SC>::from_slice(&sels.inv_vanishing[i_range.clone()]);
 
             let prep_local: Vec<_> = (0..prep_width)
                 .map(|col| {
                     PackedVal::<SC>::from_fn(|offset| {
                         preprocessed_trace_on_quotient_domain
                             .as_ref()
-                            .map_or(Val::<SC>::ZERO, |x| x.get(wrap(i_start + offset), col))
+                            .map_or(Val::<SC>::ZERO, |x| x.get(wrap(i_start + offset), col).unwrap())
                     })
                 })
                 .collect();
@@ -81,7 +81,7 @@ where
                         preprocessed_trace_on_quotient_domain
                             .as_ref()
                             .map_or(Val::<SC>::ZERO, |x| {
-                                x.get(wrap(i_start + next_step + offset), col)
+                                x.get(wrap(i_start + next_step + offset), col).unwrap()
                             })
                     })
                 })
@@ -90,14 +90,14 @@ where
             let local: Vec<_> = (0..main_width)
                 .map(|col| {
                     PackedVal::<SC>::from_fn(|offset| {
-                        main_trace_on_quotient_domain.get(wrap(i_start + offset), col)
+                        main_trace_on_quotient_domain.get(wrap(i_start + offset), col).unwrap()
                     })
                 })
                 .collect();
             let next: Vec<_> = (0..main_width)
                 .map(|col| {
                     PackedVal::<SC>::from_fn(|offset| {
-                        main_trace_on_quotient_domain.get(wrap(i_start + next_step + offset), col)
+                        main_trace_on_quotient_domain.get(wrap(i_start + next_step + offset), col).unwrap()
                     })
                 })
                 .collect();
@@ -105,10 +105,10 @@ where
             let perm_local: Vec<_> = (0..perm_width)
                 .step_by(ext_degree)
                 .map(|col| {
-                    PackedChallenge::<SC>::from_base_fn(|i| {
+                    PackedChallenge::<SC>::from_basis_coefficients_fn(|i| {
                         PackedVal::<SC>::from_fn(|offset| {
                             permutation_trace_on_quotient_domain
-                                .get(wrap(i_start + offset), col + i)
+                                .get(wrap(i_start + offset), col + i).unwrap()
                         })
                     })
                 })
@@ -117,10 +117,10 @@ where
             let perm_next: Vec<_> = (0..perm_width)
                 .step_by(ext_degree)
                 .map(|col| {
-                    PackedChallenge::<SC>::from_base_fn(|i| {
+                    PackedChallenge::<SC>::from_basis_coefficients_fn(|i| {
                         PackedVal::<SC>::from_fn(|offset| {
                             permutation_trace_on_quotient_domain
-                                .get(wrap(i_start + next_step + offset), col + i)
+                                .get(wrap(i_start + next_step + offset), col + i).unwrap()
                         })
                     })
                 })
@@ -128,13 +128,19 @@ where
 
             let accumulator = PackedChallenge::<SC>::ZERO;
 
-            let packed_local_cumulative_sum = PackedChallenge::<SC>::from_f(*local_cumulative_sum);
+            let packed_local_cumulative_sum = PackedChallenge::<SC>::from(*local_cumulative_sum);
 
+            let preprocessed_vp = VerticalPair::new(
+                RowMajorMatrixView::new_row(&prep_local),
+                RowMajorMatrixView::new_row(&prep_next),
+            );
+            let preprocessed_window = PairWindow {
+                local: &prep_local,
+                next: &prep_next,
+            };
             let mut folder = ProverConstraintFolder {
-                preprocessed: VerticalPair::new(
-                    RowMajorMatrixView::new_row(&prep_local),
-                    RowMajorMatrixView::new_row(&prep_next),
-                ),
+                preprocessed: preprocessed_vp,
+                preprocessed_window,
                 main: VerticalPair::new(
                     RowMajorMatrixView::new_row(&local),
                     RowMajorMatrixView::new_row(&next),
@@ -157,14 +163,14 @@ where
             chip.eval(&mut folder);
 
             // quotient(x) = constraints(x) / Z_H(x)
-            let quotient = folder.accumulator * inv_zeroifier;
+            let quotient = folder.accumulator * inv_vanishing;
 
             // "Transpose" D packed base coefficients into WIDTH scalar extension coefficients.
             (0..PackedVal::<SC>::WIDTH).map(move |idx_in_packing| {
-                let quotient_value = (0..<SC::Challenge as FieldExtensionAlgebra<Val<SC>>>::D)
-                    .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
+                let quotient_value = (0..<SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION)
+                    .map(|coeff_idx| quotient.as_basis_coefficients_slice()[coeff_idx].as_slice()[idx_in_packing])
                     .collect::<Vec<_>>();
-                SC::Challenge::from_base_slice(&quotient_value)
+                SC::Challenge::from_basis_coefficients_slice(&quotient_value).unwrap()
             })
         })
         .collect()

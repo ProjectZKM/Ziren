@@ -251,8 +251,8 @@ fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Ve
         // Get the vk variable from the input.
         let vk = input.vks_and_proofs.first().unwrap().0.clone();
         // Get the expected commitment.
-        let expected_commitment: [_; 1] = template_vk.commit.into();
-        let expected_commitment = expected_commitment.map(|x| builder.eval(x));
+        let cap: &[_] = template_vk.commit.as_ref();
+        let expected_commitment = [builder.eval(cap[0][0])];
         // Constrain `commit` to be the same as the template `vk`.
         OuterSC::assert_digest_eq(&mut builder, expected_commitment, vk.commitment);
         // Constrain `pc_start` to be the same as the template `vk`.

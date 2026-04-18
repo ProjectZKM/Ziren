@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
-use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra, PrimeField32, TwoAdicField};
+use p3_air::{AirBuilder, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
@@ -12,7 +12,7 @@ use super::{ShaExtendChip, ShaExtendCols};
 impl<F: Field> ShaExtendCols<F> {
     pub fn populate_flags(&mut self, i: usize) {
         // The generator of the multiplicative subgroup.
-        let g = F::from_canonical_u32(KoalaBear::two_adic_generator(4).as_canonical_u32());
+        let g = F::from_u32(KoalaBear::two_adic_generator(4).as_canonical_u32());
 
         // Populate the columns needed to keep track of cycles of 16 rows.
         self.cycle_16 = g.exp_u64((i + 1) as u64);
@@ -25,7 +25,7 @@ impl<F: Field> ShaExtendCols<F> {
 
         // Populate the columns needed to keep track of cycles of 48 rows.
         let j = 16 + (i % 48);
-        self.i = F::from_canonical_usize(j);
+        self.i = F::from_usize(j);
         self.cycle_48[0] = F::from_bool((16..32).contains(&j));
         self.cycle_48[1] = F::from_bool((32..48).contains(&j));
         self.cycle_48[2] = F::from_bool((48..64).contains(&j));
@@ -37,20 +37,20 @@ impl<F: Field> ShaExtendCols<F> {
 impl ShaExtendChip {
     pub fn eval_flags<AB: ZKMAirBuilder>(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &ShaExtendCols<AB::Var> = (*local).borrow();
         let next: &ShaExtendCols<AB::Var> = (*next).borrow();
 
         let one = AB::Expr::from(AB::F::ONE);
 
         // Generator with order 16 within KoalaBear.
-        let g = AB::F::from_canonical_u32(KoalaBear::two_adic_generator(4).as_canonical_u32());
+        let g = AB::F::from_u32(KoalaBear::two_adic_generator(4).as_canonical_u32());
 
         // First row of the table must have g^1.
         builder.when_first_row().assert_eq(local.cycle_16, g);
 
         // First row of the table must have i = 16.
-        builder.when_first_row().assert_eq(local.i, AB::F::from_canonical_u32(16));
+        builder.when_first_row().assert_eq(local.i, AB::F::from_u32(16));
 
         // Every row's `cycle_16` must be previous multiplied by `g`.
         builder.when_transition().assert_eq(local.cycle_16 * g, next.cycle_16);
@@ -66,7 +66,7 @@ impl ShaExtendChip {
         // Constrain `cycle_16_end.result` to be `cycle_16 - 1 == 0`. Intuitively g^16 is 1.
         IsZeroOperation::<AB::F>::eval(
             builder,
-            local.cycle_16 - AB::Expr::one(),
+            local.cycle_16 - AB::Expr::ONE,
             local.cycle_16_end,
             one.clone(),
         );
@@ -106,7 +106,7 @@ impl ShaExtendChip {
         builder
             .when_transition()
             .when(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(next.i, AB::F::from_canonical_u32(16));
+            .assert_eq(next.i, AB::F::from_u32(16));
 
         // When it's not the end of a 48-cycle, the next `i` must be the current plus one.
         builder

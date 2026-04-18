@@ -1,0 +1,49 @@
+\section{Plonky3 Upgrade}
+\label{sec:plonky3-upgrade}
+
+The recursion circuit needed several fixes to work with the new
+upstream FRI verifier.  All fixes are committed on
+\texttt{feat/upgrade-plonky3}.
+
+\subsection{Per-round PoW witnesses}
+
+Upstream's new FRI requires the prover to grind a proof-of-work
+witness once per round (not just at the final query stage).  The
+recursion-circuit FRI verifier
+(\texttt{crates/recursion/circuit/src/fri.rs}) was missing the
+per-round \texttt{check\_witness} call.  Added.
+
+\subsection{Log-arity observations and opened-values restoration}
+
+The new FRI verifier observes the log-arity of each round and absorbs
+the opened-values vector into the transcript before sampling the next
+fold randomness.  Both observations were stripped in an earlier
+"compatibility" patch and were restored in
+\texttt{p3-whir} commit \texttt{715fdb5}.  The recursion circuit
+mirrors them.
+
+\subsection{\texttt{check\_witness} early-return for zero PoW bits}
+
+\texttt{GrindingChallenger::check\_witness} returns \texttt{true} when
+the requested bits is zero.  The recursion circuit's variable-arity
+version was running the hash anyway; aligned to native behaviour.
+
+\subsection{\texttt{is\_div\_active} preprocessed column}
+
+The recursion compiler emits \texttt{DivF}/\texttt{DivE} instructions
+in both branches of \texttt{Select}, including dead branches where the
+divisor is zero.  Native execution handles this gracefully because
+\texttt{mult==0} skips the operation.  The AIR didn't.  Added a
+preprocessed column \texttt{is\_div\_active = is\_div AND
+mult\_active} (where \texttt{mult\_active} marks active alu rows) and
+gated the division constraint on it.  Mirror runtime guard added in
+\texttt{crates/recursion/core/src/runtime/mod.rs}.
+
+\subsection{Result}
+
+Compressed proofs for fibonacci and other benchmarks verify with the
+upgraded recursion circuit.  Aggregation runs through
+\texttt{prove\_core $\to$ compress $\to$ shrink $\to$ wrap\_bn254}
+successfully; the gnark BN254 wrap fails with witness-count mismatch
+because the gnark circuit artifacts predate the FRI changes (250
+extra witness elements; see \S\ref{sec:performance}).

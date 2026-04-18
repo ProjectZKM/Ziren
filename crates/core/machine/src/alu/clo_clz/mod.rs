@@ -15,8 +15,8 @@ use core::{
     mem::size_of,
 };
 use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
@@ -109,8 +109,8 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
 
             cols.a = Word::from(event.a);
             cols.b = Word::from(event.b);
-            cols.pc = F::from_canonical_u32(event.pc);
-            cols.next_pc = F::from_canonical_u32(event.next_pc);
+            cols.pc = F::from_u32(event.pc);
+            cols.next_pc = F::from_u32(event.next_pc);
             cols.is_real = F::ONE;
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
 
@@ -186,7 +186,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &CloClzCols<AB::Var> = (*local).borrow();
         let one: AB::Expr = AB::F::ONE.into();
         let zero: AB::Expr = AB::F::ZERO.into();
@@ -197,7 +197,7 @@ where
         // if clz, bb == b, else bb = !b
         {
             local.b.0.iter().zip_eq(local.bb.0.iter()).for_each(|(a, b)| {
-                builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_canonical_u32(255));
+                builder.when(is_clo.clone()).assert_eq(*a + *b, AB::Expr::from_u32(255));
                 builder.when(local.is_clz).assert_eq(*a, *b);
             });
 
@@ -210,7 +210,7 @@ where
             ByteOpcode::LTU.as_field::<AB::F>(),
             AB::F::ONE,
             local.a[0],
-            AB::Expr::from_canonical_u8(33),
+            AB::Expr::from_u8(33),
             local.is_real,
         );
 
@@ -230,7 +230,7 @@ where
             AB::Expr::zero(),
             local.pc,
             local.next_pc,
-            local.next_pc + AB::Expr::from_canonical_u32(4),
+            local.next_pc + AB::Expr::from_u32(4),
             AB::Expr::zero(),
             cpu_opcode,
             local.a,
@@ -252,7 +252,7 @@ where
             builder.when(local.is_bb_zero).assert_zero(local.bb.reduce::<AB>());
             builder.when(local.is_bb_zero).assert_zero(local.bb[3]);
 
-            builder.when(local.is_bb_zero).assert_eq(local.a[0], AB::Expr::from_canonical_u32(32));
+            builder.when(local.is_bb_zero).assert_eq(local.a[0], AB::Expr::from_u32(32));
         }
 
         {
@@ -264,7 +264,7 @@ where
                 Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.bb,
                 Word([
-                    AB::Expr::from_canonical_u32(31) - local.a[0],
+                    AB::Expr::from_u32(31) - local.a[0],
                     zero.clone(),
                     zero.clone(),
                     zero.clone(),

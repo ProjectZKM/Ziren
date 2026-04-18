@@ -4,10 +4,9 @@ use crate::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
-use p3_field::FieldAlgebra;
-use p3_field::FieldExtensionAlgebra;
-use p3_field::{ExtensionField, Field, PrimeField};
+use p3_air::{AirBuilder, ExtensionBuilder, WindowAccess};
+use p3_field::PrimeCharacteristicRing;
+use p3_field::{ExtensionField, BasedVectorSpace, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
@@ -52,7 +51,7 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
                 let mut denominator = alpha;
                 let mut betas = betas.clone();
                 denominator +=
-                    betas.next().unwrap() * EF::from_canonical_usize(lookup.argument_index());
+                    betas.next().unwrap() * EF::from_usize(lookup.argument_index());
                 for (columns, beta) in lookup.values.iter().zip(betas) {
                     denominator += beta * columns.apply::<F, F>(preprocessed_row, main_row);
                 }
@@ -62,7 +61,7 @@ pub fn populate_local_permutation_row<F: PrimeField, EF: ExtensionField<F>>(
                     mult = -mult;
                 }
 
-                EF::from_base(mult) / denominator
+                EF::from(mult) / denominator
             })
             .sum();
     }
@@ -211,7 +210,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
 ) where
     F: Field,
     AB::EF: ExtensionField<F>,
-    AB: MultiTableAirBuilder<'a, F = F> + PairBuilder,
+    AB: MultiTableAirBuilder<'a, F = F>,
     AB: 'a,
 {
     let empty = vec![];
@@ -224,19 +223,15 @@ pub fn eval_permutation_constraints<'a, F, AB>(
 
     let permutation_trace_width = local_permutation_width;
 
-    let preprocessed = builder.preprocessed();
+    let preprocessed = builder.preprocessed().clone();
     let main = builder.main();
-    let perm = builder.permutation().to_row_major_matrix();
+    let perm = builder.permutation();
 
-    let preprocessed_local = preprocessed.row_slice(0);
-    let main_local = main.to_row_major_matrix();
-    let main_local = main_local.row_slice(0);
-    let main_local: &[AB::Var] = (*main_local).borrow();
-    let perm_local = perm.row_slice(0);
-    let perm_local: &[AB::VarEF] = (*perm_local).borrow();
-    let perm_next = perm.row_slice(1);
-    let perm_next: &[AB::VarEF] = (*perm_next).borrow();
-    let perm_width = perm.width();
+    let preprocessed_local = preprocessed.current_slice();
+    let main_local = main.current_slice();
+    let perm_local = perm.current_slice();
+    let perm_next = perm.next_slice();
+    let perm_width = perm_local.len();
 
     // Assert that the permutation trace width is correct.
     if perm_width != permutation_trace_width {
@@ -275,7 +270,7 @@ pub fn eval_permutation_constraints<'a, F, AB>(
 
                 rlc = rlc.clone()
                     + betas.next().unwrap()
-                        * AB::ExprEF::from_canonical_usize(lookup.argument_index());
+                        * AB::ExprEF::from_usize(lookup.argument_index());
                 for (field, beta) in lookup.values.iter().zip(betas.clone()) {
                     let elem = field.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local);
                     rlc = rlc.clone() + beta * elem;
@@ -290,20 +285,20 @@ pub fn eval_permutation_constraints<'a, F, AB>(
             }
 
             // Now we can calculate the numerator and denominator of the combined batch.
-            let mut product = AB::ExprEF::one();
-            let mut numerator = AB::ExprEF::zero();
+            let mut product = AB::ExprEF::ONE;
+            let mut numerator = AB::ExprEF::ZERO;
             for (i, (m, rlc)) in multiplicities.into_iter().zip(rlcs.iter()).enumerate() {
                 // Calculate the running product of all rlcs.
                 product = product.clone() * rlc.clone();
 
                 // Calculate the product of all but the current rlc.
-                let mut all_but_current = AB::ExprEF::one();
+                let mut all_but_current = AB::ExprEF::ONE;
                 for other_rlc in
                     rlcs.iter().enumerate().filter(|(j, _)| i != *j).map(|(_, rlc)| rlc)
                 {
                     all_but_current = all_but_current.clone() * other_rlc.clone();
                 }
-                numerator = numerator.clone() + AB::ExprEF::from_base(m) * all_but_current;
+                numerator = numerator.clone() + AB::ExprEF::from(m) * all_but_current;
             }
 
             // Finally, assert that the entry is equal to the numerator divided by the product.

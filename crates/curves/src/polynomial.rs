@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use core::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 use itertools::Itertools;
-use p3_field::{FieldExtensionAlgebra, FieldAlgebra, Field};
+use p3_field::{ExtensionField, PrimeCharacteristicRing, Field};
 
 /// A polynomial represented as a vector of coefficients.
 #[derive(Debug, Clone)]
@@ -42,9 +42,9 @@ impl<T> Polynomial<T> {
     }
 
     /// Evaluates the polynomial at a given point.
-    pub fn eval<S: FieldExtensionAlgebra<T>>(&self, x: S) -> S
+    pub fn eval<S: ExtensionField<T>>(&self, x: S) -> S
     where
-        T: FieldAlgebra,
+        T: PrimeCharacteristicRing,
     {
         let powers = x.powers();
         self.coefficients
@@ -194,7 +194,7 @@ impl<T: Sub<Output = T> + Neg<Output = T> + Clone> Sub for &Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul for Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul for Polynomial<T> {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
@@ -208,7 +208,7 @@ impl<T: FieldAlgebra> Mul for Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul for &Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul for &Polynomial<T> {
     type Output = Polynomial<T>;
 
     fn mul(self, other: Self) -> Polynomial<T> {
@@ -222,7 +222,7 @@ impl<T: FieldAlgebra> Mul for &Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul<T> for Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul<T> for Polynomial<T> {
     type Output = Self;
 
     fn mul(self, other: T) -> Self {
@@ -235,7 +235,7 @@ impl<T: FieldAlgebra> Mul<T> for Polynomial<T> {
     }
 }
 
-impl<T: FieldAlgebra> Mul<T> for &Polynomial<T> {
+impl<T: PrimeCharacteristicRing> Mul<T> for &Polynomial<T> {
     type Output = Polynomial<T>;
 
     fn mul(self, other: T) -> Polynomial<T> {
@@ -249,7 +249,7 @@ impl<T: FieldAlgebra> Mul<T> for &Polynomial<T> {
     }
 }
 
-impl<T: Eq + FieldAlgebra> PartialEq<Polynomial<T>> for Polynomial<T> {
+impl<T: Eq + PrimeCharacteristicRing> PartialEq<Polynomial<T>> for Polynomial<T> {
     fn eq(&self, other: &Polynomial<T>) -> bool {
         if self.coefficients.len() != other.coefficients.len() {
             let (shorter, longer) = if self.coefficients.len() < other.coefficients.len() {
@@ -277,7 +277,7 @@ impl Polynomial<u8> {
             coefficients: self
                 .coefficients
                 .iter()
-                .map(|x| F::from_canonical_u8(*x))
+                .map(|x| F::from_u8(*x))
                 .collect(),
         }
     }

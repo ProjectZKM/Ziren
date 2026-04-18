@@ -1,7 +1,7 @@
 //! Elliptic Curve digests with a starting point to avoid weierstrass addition exceptions.
 use crate::septic_curve::SepticCurve;
 use crate::septic_extension::SepticExtension;
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField};
 use serde::{Deserialize, Serialize};
 use std::iter::Sum;
 
@@ -27,16 +27,16 @@ pub const DIGEST_SUM_START_Y: [u32; 7] =
 #[repr(C)]
 pub struct SepticDigest<F>(pub SepticCurve<F>);
 
-impl<F: FieldAlgebra> SepticDigest<F> {
+impl<F: PrimeCharacteristicRing> SepticDigest<F> {
     #[must_use]
     /// The zero digest, the starting point of the accumulation of curve points derived from the scheme.
     pub fn zero() -> Self {
         SepticDigest(SepticCurve {
-            x: SepticExtension::<F>::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_CUMULATIVE_SUM_START_X[i])
+            x: SepticExtension::<F>::from_basis_coefficients_fn(|i| {
+                F::from_u32(CURVE_CUMULATIVE_SUM_START_X[i])
             }),
-            y: SepticExtension::<F>::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_CUMULATIVE_SUM_START_Y[i])
+            y: SepticExtension::<F>::from_basis_coefficients_fn(|i| {
+                F::from_u32(CURVE_CUMULATIVE_SUM_START_Y[i])
             }),
         })
     }
@@ -45,8 +45,8 @@ impl<F: FieldAlgebra> SepticDigest<F> {
     /// The digest used for starting the accumulation of digests.
     pub fn starting_digest() -> Self {
         SepticDigest(SepticCurve {
-            x: SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(DIGEST_SUM_START_X[i])),
-            y: SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(DIGEST_SUM_START_Y[i])),
+            x: SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(DIGEST_SUM_START_X[i])),
+            y: SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(DIGEST_SUM_START_Y[i])),
         })
     }
 }
@@ -83,25 +83,25 @@ mod test {
 
     #[test]
     fn test_const_points() {
-        let x: SepticExtension<KoalaBear> = SepticExtension::from_base_fn(|i| {
-            KoalaBear::from_canonical_u32(CURVE_CUMULATIVE_SUM_START_X[i])
+        let x: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {
+            KoalaBear::from_u32(CURVE_CUMULATIVE_SUM_START_X[i])
         });
-        let y: SepticExtension<KoalaBear> = SepticExtension::from_base_fn(|i| {
-            KoalaBear::from_canonical_u32(CURVE_CUMULATIVE_SUM_START_Y[i])
+        let y: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {
+            KoalaBear::from_u32(CURVE_CUMULATIVE_SUM_START_Y[i])
         });
         let point = SepticCurve { x, y };
         assert!(point.check_on_point());
         let x: SepticExtension<KoalaBear> =
-            SepticExtension::from_base_fn(|i| KoalaBear::from_canonical_u32(DIGEST_SUM_START_X[i]));
+            SepticExtension::from_basis_coefficients_fn(|i| KoalaBear::from_u32(DIGEST_SUM_START_X[i]));
         let y: SepticExtension<KoalaBear> =
-            SepticExtension::from_base_fn(|i| KoalaBear::from_canonical_u32(DIGEST_SUM_START_Y[i]));
+            SepticExtension::from_basis_coefficients_fn(|i| KoalaBear::from_u32(DIGEST_SUM_START_Y[i]));
         let point = SepticCurve { x, y };
         assert!(point.check_on_point());
-        let x: SepticExtension<KoalaBear> = SepticExtension::from_base_fn(|i| {
-            KoalaBear::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
+        let x: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {
+            KoalaBear::from_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
         });
-        let y: SepticExtension<KoalaBear> = SepticExtension::from_base_fn(|i| {
-            KoalaBear::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
+        let y: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_fn(|i| {
+            KoalaBear::from_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
         });
         let point = SepticCurve { x, y };
         assert!(point.check_on_point());

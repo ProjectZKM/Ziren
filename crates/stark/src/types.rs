@@ -36,8 +36,10 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardCommitment<C> {
     pub main_commit: C,
-    pub permutation_commit: C,
-    pub quotient_commit: C,
+    /// Permutation trace commitment. None when using LogUp-GKR (no permutation trace).
+    pub permutation_commit: Option<C>,
+    /// Quotient polynomial commitment. None when using Zerocheck (no quotient trace).
+    pub quotient_commit: Option<C>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,9 +79,82 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub commitment: ShardCommitment<Com<SC>>,
     pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    /// FRI opening proof.  In WHIR mode (default), the prover emits
+    /// an empty `FriProof` placeholder via
+    /// `LateBindingCapable::empty_opening_proof()` and the verifier
+    /// short-circuits before `pcs.verify` (see verifier.rs
+    /// `whir_mode` branch).  Phase 3 cleanup target: change to
+    /// `Option<OpeningProof<SC>>` once the WHIR-default proof shape
+    /// stabilizes.
     pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
+    /// Per-chip zerocheck proofs, present only when the shard was produced
+    /// with sumcheck-based constraint verification (WHIR fast path).
+    /// `None` in FRI/quotient mode.
+    #[serde(default)]
+    pub zerocheck_proofs: Option<Vec<crate::zerocheck::ZerocheckProof<Challenge<SC>>>>,
+    /// Per-chip LogUp-GKR proofs, present when the shard was produced
+    /// with GKR-based lookup verification (WHIR fast path, Phase 2b).
+    /// Each inner `Vec` carries one proof per chip, in `chip_ordering` order.
+    /// `None` in FRI mode or in the interim Phase 2a WHIR path.
+    #[serde(default)]
+    pub logup_gkr_proofs: Option<Vec<crate::logup_gkr::LogUpGkrProof<Challenge<SC>>>>,
+    /// Per-chip openings of the main and preprocessed traces at the row
+    /// coordinates of each chip's LogUp-GKR `eval_point`.  Used by the
+    /// verifier to reconstruct the leaf-claim and tie the GKR proof back
+    /// to the trace values.  Present iff `logup_gkr_proofs` is.
+    ///
+    /// **Soundness note (Phase 2b interim).**  These openings are
+    /// supplied by the prover but are **not yet** bound to the main-trace
+    /// PCS commitment.  Closing that gap requires a multi-point WHIR
+    /// opening at the GKR evaluation point; until then a malicious prover
+    /// could lie about these values.  The wiring is in place so the
+    /// verifier-side check runs and will become cryptographically sound
+    /// the moment multi-point opening lands.
+    #[serde(default)]
+    pub logup_row_openings: Option<Vec<LogUpRowOpening<Challenge<SC>>>>,
+    /// Per-chip late-binding WHIR opening proofs that bind
+    /// `logup_row_openings.main_at_r_row` to the main-trace WHIR
+    /// commitment.  Each inner `Vec<u8>` is a bincode-serialised
+    /// `Vec<WhirProof>` (one per column of the chip's main trace),
+    /// produced by
+    /// `whir_late_binding::WhirLateBinding::open_multi_column`.
+    /// Bytes-typed because the WHIR concrete types
+    /// (`WhirVal=KoalaBear`, `WhirChallenge=BinomialExtensionField<KoalaBear, 4>`,
+    /// `WhirValMmcs`) cannot be expressed via `SC` generics on
+    /// `ShardProof`.  Present iff the WHIR fast path was used and
+    /// the per-chip late-binding wiring is enabled.  `None` in FRI
+    /// mode, in the interim Phase 2c-pre-wiring WHIR path, or when
+    /// the Phase 2c+ jagged path is in use (then
+    /// `late_binding_jagged_proof` carries the bytes instead).
+    #[serde(default)]
+    pub late_binding_proofs: Option<Vec<Vec<u8>>>,
+    /// Phase 2c+ jagged + late-binding bundle for the entire shard
+    /// (one bundle per shard, not per chip).  Encodes the jagged
+    /// sumcheck reduction + the single shard-level WHIR proof + the
+    /// per-chip per-column row-MLE values, serialised via
+    /// `JaggedLateBindingBundle::to_bytes`.  Present iff the WHIR
+    /// fast path used the jagged + late-binding path (set via
+    /// `ZIREN_LATE_BINDING=jagged`); mutually exclusive with
+    /// `late_binding_proofs`.
+    #[serde(default)]
+    pub late_binding_jagged_proof: Option<Vec<u8>>,
+}
+
+/// Opened main- and preprocessed-trace values at the row coordinates of
+/// a chip's LogUp-GKR evaluation point.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "EF: Serialize", deserialize = "EF: serde::de::DeserializeOwned"))]
+pub struct LogUpRowOpening<EF> {
+    /// Main-trace columns evaluated at `r_row` (length = chip's main width).
+    pub main_at_r_row: Vec<EF>,
+    /// Preprocessed-trace columns evaluated at `r_row` (length = chip's
+    /// preprocessed width; may be empty if the chip has no preprocessed
+    /// columns).
+    pub preproc_at_r_row: Vec<EF>,
+    /// Number of interactions per row used when leaves were built (powerof-two).
+    pub interactions_per_row: usize,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {

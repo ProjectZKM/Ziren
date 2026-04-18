@@ -1,0 +1,297 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {paragraph}{Keywords:}{1}{section*.1}\protected@file@percent }
+\citation{ziren}
+\citation{plonky3}
+\citation{whir2024}
+\citation{sp1-hypercube}
+\citation{brakedown}
+\citation{jagged}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{4}{section.1}\protected@file@percent }
+\newlabel{sec:introduction}{{1}{4}{Introduction}{section.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Contributions}{4}{subsection.1.1}\protected@file@percent }
+\citation{logup-gkr}
+\citation{sumcheck}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Implementation and Open-Source Release}{5}{subsection.1.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.3}Paper Outline}{5}{subsection.1.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Preliminaries}{5}{section.2}\protected@file@percent }
+\newlabel{sec:preliminaries}{{2}{5}{Preliminaries}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Notation}{5}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}STARKs and the Ziren Pipeline}{5}{subsection.2.2}\protected@file@percent }
+\citation{whir2024}
+\citation{logup-gkr}
+\citation{logup-gkr}
+\citation{plonky3}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Sumcheck Protocol}{6}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}WHIR}{6}{subsection.2.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.5}LogUp-GKR}{6}{subsection.2.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.6}Plonky3 Architecture}{6}{subsection.2.6}\protected@file@percent }
+\citation{whir2024}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Background and Motivation}{7}{section.3}\protected@file@percent }
+\newlabel{sec:background}{{3}{7}{Background and Motivation}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}The starting point}{7}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}The Plonky3 / WHIR upgrade}{7}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}The architecture of this work}{7}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Status of the work}{9}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Plonky3 Upgrade}{10}{section.4}\protected@file@percent }
+\newlabel{sec:plonky3-upgrade}{{4}{10}{Plonky3 Upgrade}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Per-round PoW witnesses}{10}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Log-arity observations and opened-values restoration}{10}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}\texttt  {check\_witness} early-return for zero PoW bits}{10}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}\texttt  {is\_div\_active} preprocessed column}{10}{subsection.4.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Result}{10}{subsection.4.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Soundness Fix Design: Making WHIR Mode Production-Sound}{10}{section.5}\protected@file@percent }
+\newlabel{sec:soundness-fix}{{5}{10}{Soundness Fix Design: Making WHIR Mode Production-Sound}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Current State}{10}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}What This Leaves Unchecked}{11}{subsection.5.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces What is verified in each mode.}}{11}{table.1}\protected@file@percent }
+\newlabel{tab:soundness-gap}{{1}{11}{What is verified in each mode}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Target Soundness Design}{11}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Option A --- Keep the quotient polynomial, batch it into WHIR.}{11}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Option B --- Logup-GKR plus sumcheck-based constraint verification (SP1 hypercube model).}{11}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Option C --- Multilinear constraint check via WHIR opening at $\zeta $.}{12}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Chosen Design: Option B}{12}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Projected Performance Impact}{13}{subsection.5.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Projected end-to-end overhead of Option B relative to the unsound WHIR fast path.}}{13}{table.2}\protected@file@percent }
+\newlabel{tab:sound-overhead}{{2}{13}{Projected end-to-end overhead of Option B relative to the unsound WHIR fast path}{table.2}{}}
+\citation{jagged}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Immediate Action Items}{14}{subsection.5.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}System Design: Proof-System Architecture}{14}{section.6}\protected@file@percent }
+\newlabel{sec:design}{{6}{14}{System Design: Proof-System Architecture}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Proof-System Overview}{14}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Data Layout: Jagged Polynomial Commitment}{14}{subsection.6.2}\protected@file@percent }
+\newlabel{sec:design-jagged}{{6.2}{14}{Data Layout: Jagged Polynomial Commitment}{subsection.6.2}{}}
+\newlabel{cons:jagged-pack}{{6.1}{14}{Jagged trace packing}{theorem.6.1}{}}
+\citation{whir2024}
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{15}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Polynomial Commitment: WHIR}{15}{subsection.6.3}\protected@file@percent }
+\newlabel{sec:design-whir}{{6.3}{15}{Polynomial Commitment: WHIR}{subsection.6.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Folding-factor scaling.}{15}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{15}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Late-Binding WHIR}{15}{subsection.6.4}\protected@file@percent }
+\newlabel{sec:design-late-binding}{{6.4}{15}{Late-Binding WHIR}{subsection.6.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Motivation.}{15}{section*.13}\protected@file@percent }
+\newlabel{cons:late-binding}{{6.2}{15}{Late-binding WHIR}{theorem.6.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Soundness.}{16}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Multi-column variant.}{16}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{16}{section*.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Jagged + Late-Binding Reduction}{16}{subsection.6.5}\protected@file@percent }
+\newlabel{sec:design-jagged-late-binding}{{6.5}{16}{Jagged + Late-Binding Reduction}{subsection.6.5}{}}
+\newlabel{sec:design-jagged-sumcheck}{{6.5}{16}{Jagged + Late-Binding Reduction}{subsection.6.5}{}}
+\newlabel{cons:jagged-sumcheck}{{6.3}{16}{Jagged sumcheck reduction}{theorem.6.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Cost analysis.}{17}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{17}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.6}Cross-Binding}{17}{subsection.6.6}\protected@file@percent }
+\newlabel{sec:design-cross-binding}{{6.6}{17}{Cross-Binding}{subsection.6.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Threat model.}{17}{section*.19}\protected@file@percent }
+\newlabel{cons:cross-binding}{{6.5}{17}{Brakedown-style cross-binding spot check}{theorem.6.5}{}}
+\@writefile{toc}{\contentsline {paragraph}{Soundness.}{17}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Status.}{17}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{18}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.7}Soundness Layers Summary}{18}{subsection.6.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.8}Implementation Activation Matrix}{18}{subsection.6.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Phase 2a: Zerocheck Integration}{18}{section.7}\protected@file@percent }
+\newlabel{sec:zerocheck-phase2a}{{7}{18}{Phase 2a: Zerocheck Integration}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}What Ships}{18}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Sumcheck core (\texttt  {crates/stark/src/zerocheck\_prover.rs}, 5 unit tests, all passing).}{18}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hypercube constraint evaluator.}{19}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\texttt  {ShardProof::zerocheck\_proofs} field.}{19}{section*.25}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Prover wiring (WHIR fast path).}{19}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Verifier wiring.}{19}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Downstream fixes.}{19}{section*.28}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}End-to-End Test Results}{19}{subsection.7.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Phase 2a end-to-end verification on fibonacci.}}{19}{table.3}\protected@file@percent }
+\newlabel{tab:phase2a-e2e}{{3}{19}{Phase 2a end-to-end verification on fibonacci}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Phase 2a Scope Limitation (By Design)}{20}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Files Changed (Phase 2a)}{20}{subsection.7.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Phase 2b: LogUp-GKR Protocol Core}{20}{section.8}\protected@file@percent }
+\newlabel{sec:logup-gkr-phase2b}{{8}{20}{Phase 2b: LogUp-GKR Protocol Core}{section.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}Fraction-Sum Combine}{20}{subsection.8.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}GKR Reduction}{21}{subsection.8.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}Soundness Tests}{21}{subsection.8.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces LogUp-GKR unit tests, all passing.}}{21}{table.4}\protected@file@percent }
+\newlabel{tab:logup-gkr-tests}{{4}{21}{LogUp-GKR unit tests, all passing}{table.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.4}Public API}{21}{subsection.8.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.5}Integration Path (Phase 2b Steps 2 -- 4)}{22}{subsection.8.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.6}Combined Soundness Picture}{22}{subsection.8.6}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Soundness status across phases.}}{22}{table.5}\protected@file@percent }
+\newlabel{tab:soundness-phases}{{5}{22}{Soundness status across phases}{table.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}LogUp-GKR: Bug, Fix, and End-to-End Integration}{23}{section.9}\protected@file@percent }
+\newlabel{sec:logup-gkr-fix}{{9}{23}{LogUp-GKR: Bug, Fix, and End-to-End Integration}{section.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}The Soundness Bug (And Why It Was Hard to Spot)}{23}{subsection.9.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Why the original test suite didn't catch it.}{23}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}The Correct Reduction}{23}{subsection.9.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}Implementation}{24}{subsection.9.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Proof shape.}{24}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Variable ordering.}{24}{section*.32}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Unit tests.}{24}{section*.33}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{End-to-end.}{24}{section*.34}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Fibonacci core-proof times across configurations. LogUp-GKR adds ~5\% over the bare WHIR path thanks to the 1.5\,s per-shard sumcheck cost. Compared to main FRI, we keep 74\% of the measured speedup while restoring lookup-argument binding.}}{24}{table.6}\protected@file@percent }
+\newlabel{tab:logup-gkr-perf}{{6}{24}{Fibonacci core-proof times across configurations. LogUp-GKR adds ~5\% over the bare WHIR path thanks to the 1.5\,s per-shard sumcheck cost. Compared to main FRI, we keep 74\% of the measured speedup while restoring lookup-argument binding}{table.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.4}Closing the Soundness Loop}{25}{subsection.9.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Outstanding infrastructure.}{25}{section*.35}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.5}Files Touched}{25}{subsection.9.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Phase 2c: WHIR Late-Binding and Per-Chip Row-MLE}{25}{section.10}\protected@file@percent }
+\newlabel{sec:whir-late-binding}{{10}{25}{Phase 2c: WHIR Late-Binding and Per-Chip Row-MLE}{section.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.1}The Problem with the Standard WHIR Adapter}{26}{subsection.10.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.2}Late-Binding Adapter}{26}{subsection.10.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Insight.}{26}{section*.36}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{26}{section*.37}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Soundness validation.}{26}{section*.38}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Constraint ordering subtlety.}{26}{section*.39}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.3}Architectural Choice for Multi-Column Binding}{27}{subsection.10.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{(A) Per-column WHIR commits.}{27}{section*.40}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{(B) Single $\alpha $-combined commit + restructured GKR.}{27}{section*.41}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Why (B) is sound.}{27}{section*.42}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Why we choose (B).}{27}{section*.43}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.4}Restructured Leaf-Claim Reconstruction}{27}{subsection.10.4}\protected@file@percent }
+\citation{veil2026}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {10.4.1}The Fix: Fingerprint Re-Batching at GKR Time}{28}{subsubsection.10.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Concrete construction.}{28}{section*.44}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Soundness sketch.}{28}{section*.45}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.5}The VEIL Multilinear PCS Construction (the actual answer)}{28}{subsection.10.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Construction overview.}{29}{section*.46}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Commit phase.}{29}{section*.47}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Open at a post-commit point $x = (x^{(1)}, x^{(2)})$.}{29}{section*.48}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Why this works (and the previous design didn't).}{29}{section*.49}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cost analysis (Lemma 4.7, $k=0$).}{30}{section*.50}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Mapping to our STARK pipeline.}{30}{section*.51}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.6}Cross-Binding Plan (Closing the First-Iteration Gap)}{30}{subsection.10.6}\protected@file@percent }
+\newlabel{sec:cross-binding-plan}{{10.6}{30}{Cross-Binding Plan (Closing the First-Iteration Gap)}{subsection.10.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Two viable closures (in increasing scope).}{31}{section*.52}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{C.1 implementation reality check.}{31}{section*.53}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{C.1 WHIR-side: shipped.}{31}{section*.54}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{C.1 FRI-side: not yet started.}{31}{section*.55}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Recommendation.}{32}{section*.56}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {10.7}Implementation Plan}{32}{subsection.10.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Performance Evaluation: Plonky3 Upgrade and WHIR PCS}{33}{section.11}\protected@file@percent }
+\newlabel{sec:performance}{{11}{33}{Performance Evaluation: Plonky3 Upgrade and WHIR PCS}{section.11}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.1}Test Environment}{33}{subsection.11.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.2}Core Proof Performance}{34}{subsection.11.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Core proving performance across branches. ``Speedup'' compares WHIR throughput to main (FRI).}}{34}{table.7}\protected@file@percent }
+\newlabel{tab:core-perf}{{7}{34}{Core proving performance across branches. ``Speedup'' compares WHIR throughput to main (FRI)}{table.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.3}Compressed Proof Performance}{34}{subsection.11.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Compressed proofs. The WHIR-compressed case required patches to the recursion circuit to handle the WHIR proof shape (no \texttt  {permutation\_commit}, no \texttt  {quotient\_commit}, empty permutation/quotient opened values). Patches live in \texttt  {crates/recursion/circuit/src/stark.rs} and \texttt  {crates/recursion/circuit/src/constraints.rs}.}}{34}{table.8}\protected@file@percent }
+\newlabel{tab:compressed-perf}{{8}{34}{Compressed proofs. The WHIR-compressed case required patches to the recursion circuit to handle the WHIR proof shape (no \texttt {permutation\_commit}, no \texttt {quotient\_commit}, empty permutation/quotient opened values). Patches live in \texttt {crates/recursion/circuit/src/stark.rs} and \texttt {crates/recursion/circuit/src/constraints.rs}}{table.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.4}Proof Size Comparison}{34}{subsection.11.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {9}{\ignorespaces Proof size, in bytes. WHIR consistently produces smaller proofs, with the largest reduction on the tendermint workload.}}{34}{table.9}\protected@file@percent }
+\newlabel{tab:proof-size}{{9}{34}{Proof size, in bytes. WHIR consistently produces smaller proofs, with the largest reduction on the tendermint workload}{table.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.5}Key Findings}{34}{subsection.11.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Performance gains scale with workload size.}{34}{table.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Throughput at scale.}{34}{section*.58}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Proof size reduction.}{34}{section*.59}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {10}{\ignorespaces WHIR speedup as a function of workload size.}}{35}{table.10}\protected@file@percent }
+\newlabel{tab:scale}{{10}{35}{WHIR speedup as a function of workload size}{table.10}{}}
+\@writefile{toc}{\contentsline {paragraph}{Recursion / compression status.}{35}{section*.60}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.6}Soundness Caveat for the Current WHIR Fast Path}{35}{subsection.11.6}\protected@file@percent }
+\newlabel{subsec:whir-soundness-caveat}{{11.6}{35}{Soundness Caveat for the Current WHIR Fast Path}{subsection.11.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.7}Wrap / Groth16 Status}{35}{subsection.11.7}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {11}{\ignorespaces Groth16 wrap status across modes.}}{35}{table.11}\protected@file@percent }
+\newlabel{tab:wrap}{{11}{35}{Groth16 wrap status across modes}{table.11}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.8}Known Failures (Pre-existing, Not WHIR-related)}{35}{subsection.11.8}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {12}{\ignorespaces Failures that pre-date this work.}}{35}{table.12}\protected@file@percent }
+\newlabel{tab:known-failures}{{12}{35}{Failures that pre-date this work}{table.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {11.9}Notes}{35}{subsection.11.9}\protected@file@percent }
+\citation{whir2024}
+\citation{plonky3}
+\citation{veil2026}
+\citation{logup-gkr}
+\citation{sp1-hypercube}
+\citation{brakedown}
+\@writefile{toc}{\contentsline {section}{\numberline {12}Related Work}{36}{section.12}\protected@file@percent }
+\newlabel{sec:related-work}{{12}{36}{Related Work}{section.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.1}WHIR PCS Constructions}{36}{subsection.12.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.2}Sumcheck-Based STARK Verification}{36}{subsection.12.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.3}SP1 Hypercube and Recursion Architectures}{36}{subsection.12.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.4}Brakedown and Spot-Check Protocols}{36}{subsection.12.4}\protected@file@percent }
+\citation{jagged}
+\@writefile{toc}{\contentsline {subsection}{\numberline {12.5}Jagged Polynomial Commitments}{37}{subsection.12.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {13}Conclusion and Future Work}{37}{section.13}\protected@file@percent }
+\newlabel{sec:conclusion}{{13}{37}{Conclusion and Future Work}{section.13}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.1}Future Work}{37}{subsection.13.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Recursion-circuit constraint emission --- orchestrator shipped.}{37}{section*.61}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Performance optimisation.}{38}{section*.62}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Soundness analysis formalisation.}{38}{section*.63}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Recursion-circuit \texttt  {is\_div\_active} fix.}{38}{section*.64}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Production deployment.}{38}{section*.65}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {13.2}Acknowledgements}{38}{subsection.13.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Implementation Status and Next Steps}{38}{appendix.A}\protected@file@percent }
+\newlabel{sec:status-next}{{A}{38}{Implementation Status and Next Steps}{appendix.A}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}What ships today}{38}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}What's next}{39}{subsection.A.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Soundness summary}{39}{subsection.A.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {B}Changelog: Phase 2c Late-Binding Implementation}{39}{appendix.B}\protected@file@percent }
+\newlabel{sec:changelog-phase2c}{{B}{39}{Changelog: Phase 2c Late-Binding Implementation}{appendix.B}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Shipped (2026-04-16 / 17)}{39}{subsection.B.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Late-binding adapter (foundation).}{39}{section*.66}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Trait dispatch + prover/verifier wiring.}{40}{section*.67}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Serialisation.}{40}{section*.68}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{End-to-end validation.}{40}{section*.69}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.2}Cross-Binding (FRI $\leftrightarrow $ WHIR consistency)}{41}{subsection.B.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Closed via C.1 Brakedown-style spot check.}{41}{section*.70}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementation.}{41}{section*.71}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.3}Plonky3 \texttt  {MerkleTree::Clone} Fix (Pre-Existing Bug Found)}{41}{subsection.B.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Fix.}{41}{section*.72}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Result: 34/34 zkm-recursion-core tests pass.}{41}{section*.73}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.4}Recursion Circuit Host-Shape Verifier Benchmark}{42}{subsection.B.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Benchmark on a fibonacci jagged shard ($\text  {num\_variables}=27$).}{42}{section*.74}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Constraint count (estimated).}{42}{section*.75}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Scaling sweep across proof shapes.}{42}{section*.76}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implication for in-circuit work.}{42}{section*.77}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.5}Recursion Circuit: Full DSL→AIR Pipeline for SumcheckVerify}{43}{subsection.B.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Test counts.}{43}{section*.78}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Remaining work for a fully-running in-circuit WHIR verification.}{43}{section*.79}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.6}Recursion-Circuit WHIR Verifier Scaffolding (2026-04-17)}{44}{subsection.B.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Test counts.}{44}{section*.80}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Helper inventory (in \texttt  {whir\_verifier.rs}).}{44}{section*.81}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{What's left to make \texttt  {verify\_whir\_pcs\_in\_circuit} non-stub.}{44}{section*.82}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.7}Final Soundness Chain Status (2026-04-17, end of session)}{45}{subsection.B.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Activation matrix.}{45}{section*.83}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Test count (lib).}{45}{section*.84}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Build matrix.}{45}{section*.85}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{End-to-end smoke tests passing.}{45}{section*.86}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.8}Phase 2c+ Session Summary (2026-04-17)}{45}{subsection.B.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.9}Phase 2c+ Jagged + Late-Binding (Shipped 2026-04-17)}{46}{subsection.B.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Shipped components.}{46}{section*.87}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{End-to-end fibonacci validation.}{46}{section*.88}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Per-phase profile (rayon, fibonacci shard, n=27).}{46}{section*.89}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Reference WHIR benchmark (\texttt  {bench\_whir\_pcs}).}{47}{section*.90}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{WHIR scaling benchmark (\texttt  {bench\_whir\_scaling}).}{47}{section*.91}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Verifier microbenchmark (\texttt  {bench\_jagged\_late\_binding\_verify}).}{47}{section*.92}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Per-chip vs jagged verify side-by-side (\texttt  {bench\_per\_chip\_vs\_jagged\_verify}).}{48}{section*.93}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Bundle byte breakdown (\texttt  {bench\_jagged\_bundle\_byte\_breakdown}).}{48}{section*.94}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implication for fibonacci-scale shard.}{48}{section*.95}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Serde cost (\texttt  {bench\_jagged\_bundle\_serde\_cost}).}{49}{section*.96}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Inner-loop parallel scalability (\texttt  {bench\_jagged\_sumcheck\_inner\_loops}).}{49}{section*.97}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Amdahl's law explains the modest end-to-end speedup.}{49}{section*.98}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Verify scaling vs chip count (\texttt  {bench\_jagged\_verify\_scaling\_with\_chip\_count}).}{49}{section*.99}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Per-chip verify scaling (symmetric measurement, \texttt  {bench\_per\_chip\_verify\_scaling\_with\_chip\_count}).}{50}{section*.100}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Jagged speedup grows with chip count (combined view).}{50}{section*.101}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.10}Phase 2c+ Performance Scoreboard}{50}{subsection.B.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Summary verdict.}{50}{section*.102}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-workload validation: JSON example.}{50}{section*.103}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Apples-to-apples comparison at 80-bit security.}{51}{section*.104}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-binding (C.1) WHIR-side cryptographic.}{51}{section*.105}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cross-binding C.1 END-TO-END FUNCTIONAL.}{52}{section*.106}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{C.1 FRI-side helpers: shipped.}{52}{section*.107}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{C.1 FRI-side legacy scoping note (now obsolete):}{52}{section*.108}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Three-workload jagged comparison (80-bit, single shard).}{53}{section*.109}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Three-workload jagged comparison (80-bit, single shard).}{53}{section*.110}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Multi-shard scaling observation.}{53}{section*.111}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Bottleneck and next steps.}{53}{section*.112}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Two subtle bugs found and fixed during integration.}{53}{section*.113}\protected@file@percent }
+\bibstyle{plain}
+\bibcite{whir2024}{1}
+\bibcite{veil2026}{2}
+\bibcite{logup-gkr}{3}
+\bibcite{sumcheck}{4}
+\bibcite{brakedown}{5}
+\bibcite{jagged}{6}
+\bibcite{plonky3}{7}
+\bibcite{ziren}{8}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.11}Cost Optimisation: VEIL Lemma 4.7}{54}{subsection.B.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.12}Crisp Next Steps (Code Pointers)}{54}{subsection.B.12}\protected@file@percent }
+\bibcite{sp1-hypercube}{9}
+\gdef \@abspage@last{55}

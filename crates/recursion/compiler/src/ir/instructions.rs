@@ -296,6 +296,21 @@ pub enum DslIr<C: Config> {
     CircuitV2BatchFRI(
         Box<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>, Vec<Ext<C::F, C::EF>>, Vec<Felt<C::F>>)>,
     ),
+    /// WHIR sumcheck round verification (Phase 2c+ recursion verifier).
+    /// Tuple is (challenge, claimed_sum, c0, c1, c2, new_claim).  The
+    /// runtime emits a SumcheckVerifyEvent that the
+    /// SumcheckVerifyChip's AIR re-checks (p(0)+p(1)=claimed_sum and
+    /// new_claim=p(challenge)).
+    CircuitV2SumcheckVerify(
+        Box<(
+            Ext<C::F, C::EF>, // challenge
+            Ext<C::F, C::EF>, // claimed_sum
+            Ext<C::F, C::EF>, // c0
+            Ext<C::F, C::EF>, // c1
+            Ext<C::F, C::EF>, // c2
+            Ext<C::F, C::EF>, // new_claim (output)
+        )>,
+    ),
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).
     /// Should only be used when target is a gnark circuit.
     CircuitSelectV(Var<C::N>, Var<C::N>, Var<C::N>, Var<C::N>),
@@ -305,10 +320,14 @@ pub enum DslIr<C: Config> {
     /// Select's an extension field element based on a condition. (select(cond, true_val,
     /// false_val) => output). Should only be used when target is a gnark circuit.
     CircuitSelectE(Var<C::N>, Ext<C::F, C::EF>, Ext<C::F, C::EF>, Ext<C::F, C::EF>),
-    /// Converts an ext to a slice of felts. Should only be used when target is a gnark circuit.
+    /// Converts an ext to a slice of felts (D=4). Should only be used when target is a gnark circuit.
     CircuitExt2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
-    /// Converts a slice of felts to an ext. Should only be used when target is a gnark circuit.
+    /// Converts a slice of felts to an ext (D=4). Should only be used when target is a gnark circuit.
     CircuitFelts2Ext([Felt<C::F>; 4], Ext<C::F, C::EF>),
+    /// Converts an ext to a slice of felts (D=5). Should only be used when target is a gnark circuit.
+    CircuitExt2Felt5([Felt<C::F>; 5], Ext<C::F, C::EF>),
+    /// Converts a slice of felts to an ext (D=5). Should only be used when target is a gnark circuit.
+    CircuitFelts2Ext5([Felt<C::F>; 5], Ext<C::F, C::EF>),
 
     // Debugging instructions.
     /// Executes less than (var = var < var).  This operation is NOT constrained.

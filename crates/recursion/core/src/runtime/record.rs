@@ -1,12 +1,13 @@
 use std::{array, sync::Arc};
 
 use hashbrown::HashMap;
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use zkm_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
     FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues, SelectEvent,
+    SumcheckVerifyEvent,
 };
 
 #[derive(Clone, Default, Debug)]
@@ -28,6 +29,10 @@ pub struct ExecutionRecord<F> {
     pub fri_fold_events: Vec<FriFoldEvent<F>>,
     pub batch_fri_events: Vec<BatchFRIEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
+    /// Events for `SumcheckVerifyChip` (Phase 2c+ recursion WHIR
+    /// verifier).  One event per sumcheck round.  Empty in pure-FRI
+    /// recursion (no SumcheckVerify instructions emitted).
+    pub sumcheck_verify_events: Vec<SumcheckVerifyEvent<F>>,
 }
 
 impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
@@ -42,6 +47,10 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());
         stats.insert("fri_fold_events".to_string(), self.fri_fold_events.len());
+        stats.insert(
+            "sumcheck_verify_events".to_string(),
+            self.sumcheck_verify_events.len(),
+        );
 
         stats
     }
@@ -62,6 +71,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             fri_fold_events,
             batch_fri_events,
             commit_pv_hash_events,
+            sumcheck_verify_events,
         } = self;
         base_alu_events.append(&mut other.base_alu_events);
         ext_alu_events.append(&mut other.ext_alu_events);
@@ -73,14 +83,15 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         fri_fold_events.append(&mut other.fri_fold_events);
         batch_fri_events.append(&mut other.batch_fri_events);
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
+        sumcheck_verify_events.append(&mut other.sumcheck_verify_events);
     }
 
-    fn public_values<T: FieldAlgebra>(&self) -> Vec<T> {
+    fn public_values<T: PrimeCharacteristicRing>(&self) -> Vec<T> {
         let pv_elms = self.public_values.as_array();
 
         let ret: [T; PROOF_MAX_NUM_PVS] = array::from_fn(|i| {
             if i < pv_elms.len() {
-                T::from_canonical_u32(pv_elms[i].as_canonical_u32())
+                T::from_u32(pv_elms[i].as_canonical_u32())
             } else {
                 T::ZERO
             }

@@ -13,7 +13,7 @@ use std::{
 };
 use thiserror::Error;
 
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
@@ -407,7 +407,7 @@ impl ZKMProofShape {
     ) -> BTreeMap<[KoalaBear; DIGEST_SIZE], usize> {
         Self::generate(core_shape_config, recursion_shape_config, reduce_batch_size)
             .enumerate()
-            .map(|(i, _)| ([KoalaBear::from_canonical_usize(i); DIGEST_SIZE], i))
+            .map(|(i, _)| ([KoalaBear::from_usize(i); DIGEST_SIZE], i))
             .collect()
     }
 }

@@ -489,13 +489,22 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
+                                    let t_commit = std::time::Instant::now();
                                     let main_data = prover.commit(&record, main_traces);
+                                    let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();
+                                    let t_open = std::time::Instant::now();
                                     let proof = prover
                                         .open(pk, main_data, &mut challenger.clone())
                                         .unwrap();
+                                    let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
+
+                                    tracing::info!(
+                                        "PCS timing: commit={}ms open={}ms total={}ms",
+                                        commit_ms, open_ms, commit_ms + open_ms
+                                    );
 
                                     #[cfg(debug_assertions)]
                                     {
@@ -715,7 +724,7 @@ where
     SC::Val: p3_field::PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
+    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
 {
     let prover = CpuProver::new(machine);
@@ -764,9 +773,9 @@ where
     SC: StarkGenericConfig,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
+    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
 }
 
 #[cfg(not(debug_assertions))]
@@ -781,7 +790,7 @@ where
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
+    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
 }
 
 #[cfg(debug_assertions)]
@@ -796,9 +805,9 @@ where
     SC: StarkGenericConfig,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
 }
 
 #[cfg(not(debug_assertions))]
@@ -813,7 +822,7 @@ where
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
 }
 
 use p3_air::Air;

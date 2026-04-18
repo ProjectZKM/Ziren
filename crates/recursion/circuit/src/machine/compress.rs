@@ -11,12 +11,12 @@ use p3_air::Air;
 use p3_koala_bear::KoalaBear;
 
 use p3_commit::Mmcs;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_recursion_compiler::circuit::CircuitV2Builder;
-use zkm_recursion_compiler::ir::{Builder, Felt, SymbolicFelt};
+use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt, SymbolicFelt};
 use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 
 use zkm_stark::{
@@ -34,7 +34,7 @@ use crate::{
         root_public_values_digest,
     },
     stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
-    CircuitConfig, KoalaBearFriConfig, KoalaBearFriConfigVariable, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriParameters, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
 /// A program to verify a batch of recursive proofs and aggregate their public values.
@@ -51,7 +51,7 @@ pub enum PublicValuesOutputDigest {
 /// Witness layout for the compress stage verifier.
 pub struct ZKMCompressWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
 > {
     /// The shard proofs to verify.
     pub vks_and_proofs: Vec<(VerifyingKeyVariable<C, SC>, ShardProofVariable<C, SC>)>,
@@ -74,10 +74,10 @@ pub struct ZKMCompressShape {
 
 impl<C, SC, A> ZKMCompressVerifier<C, SC, A>
 where
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
 {
     /// Verify a batch of recursive proofs and aggregate their public values.
     ///
@@ -499,7 +499,7 @@ where
     }
 }
 
-impl<SC: KoalaBearFriConfig> ZKMCompressWitnessValues<SC> {
+impl<SC: KoalaBearFriParameters> ZKMCompressWitnessValues<SC> {
     pub fn shape(&self) -> ZKMCompressShape {
         let proof_shapes = self.vks_and_proofs.iter().map(|(_, proof)| proof.shape()).collect();
         ZKMCompressShape { proof_shapes }

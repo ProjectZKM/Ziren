@@ -1,6 +1,6 @@
 //! Elliptic Curve `y^2 = x^3 + 3z*x - 3` over the `F_{p^7} = F_p[z]/(z^7 + 2z - 8)` extension field.
 use crate::septic_extension::SepticExtension;
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, PrimeField32};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 
@@ -28,11 +28,11 @@ impl<F: Field> SepticCurve<F> {
     #[must_use]
     pub fn dummy() -> Self {
         Self {
-            x: SepticExtension::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
+            x: SepticExtension::from_basis_coefficients_fn(|i| {
+                F::from_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
             }),
-            y: SepticExtension::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
+            y: SepticExtension::from_basis_coefficients_fn(|i| {
+                F::from_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
             }),
         }
     }
@@ -67,15 +67,15 @@ impl<F: Field> SepticCurve<F> {
     #[must_use]
     /// Double the elliptic curve point.
     pub fn double(&self) -> Self {
-        let slope = (self.x * self.x * F::from_canonical_u8(3u8)
+        let slope = (self.x * self.x * F::from_u8(3u8)
             + SepticExtension::from_base_slice(&[
-                F::zero(),
-                F::from_canonical_u32(3),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
+                F::ZERO,
+                F::from_u32(3),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
             ]))
             / (self.y * F::TWO);
         let result_x = slope.square() - self.x * F::TWO;
@@ -97,27 +97,27 @@ impl<F: Field> SepticCurve<F> {
     }
 }
 
-impl<F: FieldAlgebra> SepticCurve<F> {
+impl<F: PrimeCharacteristicRing> SepticCurve<F> {
     /// Evaluates the curve formula y^2 = x^3 + 3z*x -3
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
         x.cube()
             + x * SepticExtension::from_base_slice(&[
-                F::zero(),
-                F::from_canonical_u32(3),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
+                F::ZERO,
+                F::from_u32(3),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
             ])
             - SepticExtension::from_base_slice(&[
-                F::from_canonical_u32(3),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
+                F::from_u32(3),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
             ])
     }
 }
@@ -136,7 +136,7 @@ impl<F: PrimeField32> SepticCurve<F> {
                 m.0[3],
                 m.0[4],
                 m.0[5],
-                m.0[6] * F::from_canonical_u16(256) + F::from_canonical_u8(offset),
+                m.0[6] * F::from_u16(256) + F::from_u8(offset),
             ]);
 
             let y_sq = Self::curve_formula(x_trial);
@@ -154,7 +154,7 @@ impl<F: PrimeField32> SepticCurve<F> {
     }
 }
 
-impl<F: FieldAlgebra> SepticCurve<F> {
+impl<F: PrimeCharacteristicRing> SepticCurve<F> {
     /// Given three points p1, p2, p3, the function is zero if and only if p3.x == (p1 + p2).x assuming that no weierstrass edge cases occur.
     pub fn sum_checker_x(
         p1: SepticCurve<F>,
@@ -247,13 +247,13 @@ mod tests {
     #[test]
     fn test_lift_x1() {
         let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(&[
-            KoalaBear::from_canonical_u32(1511106837),
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(0),
-            KoalaBear::from_canonical_u32(0),
+            KoalaBear::from_u32(1511106837),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(0),
+            KoalaBear::from_u32(0),
         ]);
         let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
         assert!(curve_point.check_on_point());
@@ -263,13 +263,13 @@ mod tests {
     #[test]
     fn test_lift_x() {
         let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(&[
-            KoalaBear::from_canonical_u32(0x2013),
-            KoalaBear::from_canonical_u32(0x2015),
-            KoalaBear::from_canonical_u32(0x2016),
-            KoalaBear::from_canonical_u32(0x2023),
-            KoalaBear::from_canonical_u32(0x2024),
-            KoalaBear::from_canonical_u32(0x2016),
-            KoalaBear::from_canonical_u32(0x2017),
+            KoalaBear::from_u32(0x2013),
+            KoalaBear::from_u32(0x2015),
+            KoalaBear::from_u32(0x2016),
+            KoalaBear::from_u32(0x2023),
+            KoalaBear::from_u32(0x2024),
+            KoalaBear::from_u32(0x2016),
+            KoalaBear::from_u32(0x2017),
         ]);
         let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
         assert!(curve_point.check_on_point());
@@ -278,13 +278,13 @@ mod tests {
     #[test]
     fn test_double() {
         let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(&[
-            KoalaBear::from_canonical_u32(0x2013),
-            KoalaBear::from_canonical_u32(0x2015),
-            KoalaBear::from_canonical_u32(0x2016),
-            KoalaBear::from_canonical_u32(0x2023),
-            KoalaBear::from_canonical_u32(0x2024),
-            KoalaBear::from_canonical_u32(0x2016),
-            KoalaBear::from_canonical_u32(0x2017),
+            KoalaBear::from_u32(0x2013),
+            KoalaBear::from_u32(0x2015),
+            KoalaBear::from_u32(0x2016),
+            KoalaBear::from_u32(0x2023),
+            KoalaBear::from_u32(0x2024),
+            KoalaBear::from_u32(0x2016),
+            KoalaBear::from_u32(0x2017),
         ]);
         let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
         let double_point = curve_point.double();
@@ -300,13 +300,13 @@ mod tests {
         let start = Instant::now();
         for i in 0..D {
             let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(&[
-                KoalaBear::from_canonical_u32(i + 25),
-                KoalaBear::from_canonical_u32(2 * i + 376),
-                KoalaBear::from_canonical_u32(4 * i + 23),
-                KoalaBear::from_canonical_u32(8 * i + 531),
-                KoalaBear::from_canonical_u32(16 * i + 542),
-                KoalaBear::from_canonical_u32(32 * i + 196),
-                KoalaBear::from_canonical_u32(64 * i + 667),
+                KoalaBear::from_u32(i + 25),
+                KoalaBear::from_u32(2 * i + 376),
+                KoalaBear::from_u32(4 * i + 23),
+                KoalaBear::from_u32(8 * i + 531),
+                KoalaBear::from_u32(16 * i + 542),
+                KoalaBear::from_u32(32 * i + 196),
+                KoalaBear::from_u32(64 * i + 667),
             ]);
             let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
             vec.push(curve_point);
@@ -339,13 +339,13 @@ mod tests {
         let start = Instant::now();
         for i in 0..D {
             let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(&[
-                KoalaBear::from_canonical_u32(i + 25),
-                KoalaBear::from_canonical_u32(2 * i + 376),
-                KoalaBear::from_canonical_u32(4 * i + 23),
-                KoalaBear::from_canonical_u32(8 * i + 531),
-                KoalaBear::from_canonical_u32(16 * i + 542),
-                KoalaBear::from_canonical_u32(32 * i + 196),
-                KoalaBear::from_canonical_u32(64 * i + 667),
+                KoalaBear::from_u32(i + 25),
+                KoalaBear::from_u32(2 * i + 376),
+                KoalaBear::from_u32(4 * i + 23),
+                KoalaBear::from_u32(8 * i + 531),
+                KoalaBear::from_u32(16 * i + 542),
+                KoalaBear::from_u32(32 * i + 196),
+                KoalaBear::from_u32(64 * i + 667),
             ]);
             let (curve_point, _) = SepticCurve::<KoalaBear>::lift_x(x);
             vec.push(SepticCurveComplete::Affine(curve_point));

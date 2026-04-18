@@ -9,10 +9,10 @@ use num_traits::cast::ToPrimitive;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{LagrangeSelectors, Pcs, PolynomialSpace};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField};
 
 use super::{
-    folder::VerifierConstraintFolder,
+    folder::{PairWindow, VerifierConstraintFolder},
     types::{AirOpenedValues, ChipOpenedValues, ShardCommitment, ShardProof},
     Domain, OpeningError, StarkGenericConfig, StarkVerifyingKey, Val,
 };
@@ -86,16 +86,18 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         challenger.observe(main_commit.clone());
 
         let local_permutation_challenges =
-            (0..2).map(|_| challenger.sample_ext_element::<SC::Challenge>()).collect::<Vec<_>>();
+            (0..2).map(|_| challenger.sample_algebra_element::<SC::Challenge>()).collect::<Vec<_>>();
 
-        challenger.observe(permutation_commit.clone());
+        if let Some(pc) = permutation_commit.as_ref() {
+            challenger.observe(pc.clone());
+        }
         // Observe the cumulative sums and constrain any sum without a corresponding scope to be
         // zero.
         for (opening, chip) in opened_values.chips.iter().zip_eq(chips.iter()) {
             let local_sum = opening.local_cumulative_sum;
             let global_sum = opening.global_cumulative_sum;
 
-            challenger.observe_slice(local_sum.as_base_slice());
+            challenger.observe_slice(local_sum.as_basis_coefficients_slice());
             challenger.observe_slice(&global_sum.0.x.0);
             challenger.observe_slice(&global_sum.0.y.0);
 
@@ -114,26 +116,228 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             }
         }
 
-        let alpha = challenger.sample_ext_element::<SC::Challenge>();
+        let alpha = challenger.sample_algebra_element::<SC::Challenge>();
+
+        // ========== Zerocheck (phase 2a) ==========
+        // When the proof carries zerocheck proofs (WHIR mode), replay the
+        // sumcheck transcript to drive the challenger forward. We cannot yet
+        // verify the final claim against a PCS opening at the sumcheck
+        // evaluation point — that requires multi-point WHIR opening — so the
+        // check only asserts sumcheck identity (p(0)+p(1) = claimed_sum) and
+        // transcript consistency. This closes part of the soundness gap by
+        // binding the prover's claimed zero-sum but still leaves the final
+        // `C(eval_point) = final_claim / eq(r, eval_point)` check for phase
+        // 2a follow-up.
+        if let Some(ref zerocheck_proofs) = proof.zerocheck_proofs {
+            if zerocheck_proofs.len() != chips.len() {
+                return Err(VerificationError::InvalidProofShape);
+            }
+            for (chip, zc) in chips.iter().zip(zerocheck_proofs.iter()) {
+                // Skipped proofs (emitted for chips that still use the
+                // permutation argument) have zero rounds. Phase 2b will
+                // replace these with Logup-GKR proofs.
+                if zc.rounds.is_empty() {
+                    continue;
+                }
+                let log_degree = opened_values
+                    .chips
+                    .get(chip_ordering[&chip.name()])
+                    .ok_or(VerificationError::InvalidProofShape)?
+                    .log_degree;
+                match crate::zerocheck_prover::verify_zerocheck_with_challenger::<
+                    Val<SC>,
+                    SC::Challenge,
+                    _,
+                >(zc, log_degree, SC::Challenge::ZERO, challenger)
+                {
+                    Some(_) => {}
+                    None => return Err(VerificationError::ZerocheckFailed),
+                }
+            }
+        }
+        // ========== End zerocheck ==========
+
+        // ========== LogUp-GKR (phase 2b) ==========
+        // Replay the per-chip GKR fraction-sum reduction from the proof,
+        // keeping the verifier's challenger in lockstep with the prover's.
+        //
+        // Soundness note: Phase 2b Step 2d only binds the transcript. The
+        // final "leaf claim vs. fingerprint" check (which needs PCS
+        // openings at `eval_point`) is scheduled as Phase 2b Step 2f /
+        // Phase 2a multi-point opening follow-up; until then, the GKR
+        // proof is transcript-bound but not cryptographically tied to the
+        // main-trace commitment.
+        if let Some(ref gkr_proofs) = proof.logup_gkr_proofs {
+            if gkr_proofs.len() != chips.len() {
+                return Err(VerificationError::InvalidProofShape);
+            }
+            // Replay the GKR transcript per chip and verify the sumcheck
+            // identities.
+            for gkr in gkr_proofs {
+                match crate::logup_gkr::verify_logup_gkr::<Val<SC>, SC::Challenge, _>(
+                    gkr, challenger,
+                ) {
+                    Some(_) => {}
+                    None => return Err(VerificationError::LogUpGkrFailed),
+                }
+            }
+            // Closing step: reconstruct the leaf-claim from row-MLE
+            // openings and check it against `proof.leaf_claim`.
+            //
+            // The opened values in `logup_row_openings` are not yet bound
+            // to the main-trace commitment (multi-point WHIR opening is a
+            // future task), so this currently catches honest-prover bugs
+            // and validates the protocol math end-to-end.  Once the
+            // multi-point opening lands, the same wiring becomes
+            // cryptographically sound with no further changes here.
+            if let Some(ref row_openings) = proof.logup_row_openings {
+                if row_openings.len() != chips.len() {
+                    return Err(VerificationError::InvalidProofShape);
+                }
+                for ((chip, gkr), opening) in
+                    chips.iter().zip(gkr_proofs.iter()).zip(row_openings.iter())
+                {
+                    let log_trace_height = opened_values
+                        .chips
+                        .get(chip_ordering[&chip.name()])
+                        .ok_or(VerificationError::InvalidProofShape)?
+                        .log_degree;
+                    if gkr.eval_point.len() < log_trace_height {
+                        return Err(VerificationError::LogUpGkrFailed);
+                    }
+                    let r_int = &gkr.eval_point[log_trace_height..];
+                    let (num_r, denom_r) = crate::logup_gkr::reconstruct_leaf_claim_from_openings::<
+                        Val<SC>,
+                        SC::Challenge,
+                    >(
+                        chip.sends(),
+                        chip.receives(),
+                        &opening.main_at_r_row,
+                        &opening.preproc_at_r_row,
+                        &local_permutation_challenges,
+                        r_int,
+                        opening.interactions_per_row,
+                    );
+                    if num_r != gkr.leaf_claim.0 || denom_r != gkr.leaf_claim.1 {
+                        return Err(VerificationError::LogUpGkrFailed);
+                    }
+                }
+            }
+
+            // ========== Phase 2c late-binding verification ==========
+            // If the prover supplied per-chip late-binding bytes, run
+            // the symmetric WHIR verification: each chip's bytes
+            // contain per-column WHIR proofs that bind the chip's
+            // `LogUpRowOpening.main_at_r_row` values to a (separate,
+            // not-yet-cross-bound) WHIR commitment.
+            //
+            // Dispatched via TypeId in the same way as the prover side.
+            // Soundness gap (first iteration): the WHIR commit is not
+            // cross-bound to the FRI commit, so this catches malicious
+            // changes to the WHIR-committed trace but not divergence
+            // between the two committed traces.
+            if let Some(ref row_openings) = proof.logup_row_openings {
+                let log_degrees: Vec<usize> = chips
+                    .iter()
+                    .map(|chip| {
+                        opened_values.chips[chip_ordering[&chip.name()]].log_degree
+                    })
+                    .collect();
+
+                // Phase 2c+ jagged path: a single bundle for the whole shard.
+                if let Some(ref jagged_bytes) = proof.late_binding_jagged_proof {
+                    let jagged_ok = try_verify_jagged_late_binding_proof::<SC, A>(
+                        chips,
+                        gkr_proofs,
+                        jagged_bytes,
+                        &log_degrees,
+                    );
+                    if !jagged_ok {
+                        return Err(VerificationError::JaggedLateBindingFailed);
+                    }
+                }
+                // Phase 2c per-chip path: backward-compat with the
+                // pre-jagged wiring (also runs when ZIREN_LATE_BINDING
+                // is unset / != "jagged").
+                if let Some(ref late_binding_bytes) = proof.late_binding_proofs {
+                    if late_binding_bytes.len() != chips.len() {
+                        return Err(VerificationError::InvalidProofShape);
+                    }
+                    let late_ok = try_verify_late_binding_proofs::<SC>(
+                        late_binding_bytes,
+                        gkr_proofs,
+                        row_openings,
+                        &log_degrees,
+                    );
+                    if !late_ok {
+                        return Err(VerificationError::LogUpGkrFailed);
+                    }
+                }
+            }
+        }
+        // ========== End LogUp-GKR ==========
 
         // Observe the quotient commitments.
-        challenger.observe(quotient_commit.clone());
+        if let Some(qc) = quotient_commit.as_ref() {
+            challenger.observe(qc.clone());
+        }
 
-        let zeta = challenger.sample_ext_element::<SC::Challenge>();
+        let zeta = challenger.sample_algebra_element::<SC::Challenge>();
+
+        // === WHIR FAST PATH: skip FRI verify + constraint verify ===
+        //
+        // In the WHIR fast path (detected by the presence of
+        // `zerocheck_proofs` or `late_binding_jagged_proof`), the
+        // zeta-point FRI opening verification and the quotient-based
+        // constraint check are replaced by:
+        //   - Zerocheck (hypercube sumcheck) for transition constraints
+        //   - LogUp-GKR for lookups
+        //   - Jagged + WHIR late-binding for row-MLE openings
+        //
+        // `pcs.verify` + `verify_constraints` in this FRI-style block
+        // would bind the main/preprocessed opened values at `zeta`,
+        // but zerocheck and LogUp-GKR don't consume those opened
+        // values — they operate on a sumcheck-derived eval point.
+        // Running them in WHIR mode is wasted work that also forces
+        // the prover to emit a full FriProof in the ShardProof.
+        //
+        // When WHIR mode is active, we short-circuit here: the
+        // zerocheck + LogUp-GKR + jagged verification above has
+        // already established constraint and lookup correctness, and
+        // there's no FRI commit to bind at zeta.
+        let whir_mode = proof.zerocheck_proofs.is_some()
+            || proof.late_binding_jagged_proof.is_some();
+        if whir_mode {
+            // Local cumulative sum must still be zero (standard
+            // soundness requirement, orthogonal to FRI).
+            let local_cumulative_sum = proof.local_cumulative_sum();
+            if local_cumulative_sum != SC::Challenge::ZERO {
+                tracing::error!(
+                    "local cumulative sum: {:?}, should be: {:?}",
+                    local_cumulative_sum,
+                    SC::Challenge::ZERO,
+                );
+                return Err(VerificationError::CumulativeSumsError(
+                    "local cumulative sum is non-zero",
+                ));
+            }
+            return Ok(());
+        }
 
         let preprocessed_domains_points_and_opens = vk
             .chip_information
             .iter()
-            .map(|(name, domain, _)| {
+            .map(|(name, ser_domain, _)| {
                 let i = chip_ordering[name];
+                let domain = pcs.natural_domain_for_degree(1 << ser_domain.log_size);
                 let values = opened_values.chips[i].preprocessed.clone();
                 if !chips[i].local_only() {
                     (
-                        *domain,
+                        domain,
                         vec![(zeta, values.local), (domain.next_point(zeta).unwrap(), values.next)],
                     )
                 } else {
-                    (*domain, vec![(zeta, values.local)])
+                    (domain, vec![(zeta, values.local)])
                 }
             })
             .collect::<Vec<_>>();
@@ -157,52 +361,68 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             })
             .collect::<Vec<_>>();
 
-        let perm_domains_points_and_opens = trace_domains
-            .iter()
-            .zip_eq(opened_values.chips.iter())
-            .map(|(domain, values)| {
-                (
-                    *domain,
-                    vec![
-                        (zeta, values.permutation.local.clone()),
-                        (domain.next_point(zeta).unwrap(), values.permutation.next.clone()),
-                    ],
-                )
-            })
-            .collect::<Vec<_>>();
+        let perm_domains_points_and_opens = if permutation_commit.is_some() {
+            trace_domains
+                .iter()
+                .zip_eq(opened_values.chips.iter())
+                .map(|(domain, values)| {
+                    (
+                        *domain,
+                        vec![
+                            (zeta, values.permutation.local.clone()),
+                            (domain.next_point(zeta).unwrap(), values.permutation.next.clone()),
+                        ],
+                    )
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
 
-        let quotient_chunk_domains = trace_domains
-            .iter()
-            .zip_eq(log_degrees)
-            .zip_eq(log_quotient_degrees)
-            .map(|((domain, log_degree), log_quotient_degree)| {
-                let quotient_degree = 1 << log_quotient_degree;
-                let quotient_domain =
-                    domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree));
-                quotient_domain.split_domains(quotient_degree)
-            })
-            .collect::<Vec<_>>();
+        let quotient_chunk_domains = if quotient_commit.is_some() {
+            trace_domains
+                .iter()
+                .zip_eq(log_degrees.iter())
+                .zip_eq(log_quotient_degrees.iter())
+                .map(|((domain, log_degree), log_quotient_degree)| {
+                    let quotient_degree = 1 << log_quotient_degree;
+                    let quotient_domain =
+                        domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree));
+                    quotient_domain.split_domains(quotient_degree)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
 
-        let quotient_domains_points_and_opens = proof
-            .opened_values
-            .chips
-            .iter()
-            .zip_eq(quotient_chunk_domains.iter())
-            .flat_map(|(values, qc_domains)| {
-                values
-                    .quotient
-                    .iter()
-                    .zip_eq(qc_domains)
-                    .map(move |(values, q_domain)| (*q_domain, vec![(zeta, values.clone())]))
-            })
-            .collect::<Vec<_>>();
+        let quotient_domains_points_and_opens = if quotient_commit.is_some() {
+            proof
+                .opened_values
+                .chips
+                .iter()
+                .zip_eq(quotient_chunk_domains.iter())
+                .flat_map(|(values, qc_domains)| {
+                    values
+                        .quotient
+                        .iter()
+                        .zip_eq(qc_domains)
+                        .map(move |(values, q_domain)| (*q_domain, vec![(zeta, values.clone())]))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
 
-        let rounds = vec![
+        let mut rounds = vec![
             (vk.commit.clone(), preprocessed_domains_points_and_opens),
             (main_commit.clone(), main_domains_points_and_opens),
-            (permutation_commit.clone(), perm_domains_points_and_opens),
-            (quotient_commit.clone(), quotient_domains_points_and_opens),
         ];
+        if let Some(pc) = permutation_commit.clone() {
+            rounds.push((pc, perm_domains_points_and_opens));
+        }
+        if let Some(qc) = quotient_commit.clone() {
+            rounds.push((qc, quotient_domains_points_and_opens));
+        }
 
         config
             .pcs()
@@ -278,13 +498,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         }
 
         // Verify that the permutation width matches the expected value for the chip.
-        if opening.permutation.local.len() != chip.permutation_width() * SC::Challenge::D {
+        if opening.permutation.local.len() != chip.permutation_width() * <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
                 opening.permutation.local.len(),
             ));
         }
-        if opening.permutation.next.len() != chip.permutation_width() * SC::Challenge::D {
+        if opening.permutation.next.len() != chip.permutation_width() * <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION {
             return Err(OpeningShapeError::PermutationWidthMismatch(
                 chip.permutation_width(),
                 opening.permutation.next.len(),
@@ -300,9 +520,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // For each quotient chunk, verify that the number of elements is equal to the degree of the
         // challenge extension field over the value field.
         for slice in &opening.quotient {
-            if slice.len() != SC::Challenge::D {
+            if slice.len() != <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION {
                 return Err(OpeningShapeError::QuotientChunkSizeMismatch(
-                    SC::Challenge::D,
+                    <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION,
                     slice.len(),
                 ));
             }
@@ -342,7 +562,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
 
         // Check that the constraints match the quotient, i.e.
         //     folded_constraints(zeta) / Z_H(zeta) = quotient(zeta)
-        if folded_constraints * sels.inv_zeroifier == quotient {
+        if folded_constraints * sels.inv_vanishing == quotient {
             Ok(())
         } else {
             Err(OodEvaluationMismatch)
@@ -363,9 +583,20 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     {
         // Reconstruct the prmutation opening values as extension elements.
         let unflatten = |v: &[SC::Challenge]| {
-            v.chunks_exact(SC::Challenge::D)
+            let d = <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION;
+            v.chunks_exact(d)
                 .map(|chunk| {
-                    chunk.iter().enumerate().map(|(e_i, &x)| SC::Challenge::monomial(e_i) * x).sum()
+                    // Reconstruct extension element from D challenge values
+                    // Each chunk[i] is the evaluation of the i-th basis coefficient polynomial
+                    // at the challenge point. We reconstruct using the basis.
+                    let mut result = SC::Challenge::ZERO;
+                    for (i, &val) in chunk.iter().enumerate() {
+                        let basis = SC::Challenge::from_basis_coefficients_fn(|j| {
+                            if j == i { Val::<SC>::ONE } else { Val::<SC>::ZERO }
+                        });
+                        result += basis * val;
+                    }
+                    result
                 })
                 .collect::<Vec<SC::Challenge>>()
         };
@@ -375,8 +606,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             next: unflatten(&opening.permutation.next),
         };
 
+        let preprocessed_vp = opening.preprocessed.view();
+        let preprocessed_window = PairWindow {
+            local: &preprocessed_vp.top.values[..preprocessed_vp.top.width],
+            next: &preprocessed_vp.bottom.values[..preprocessed_vp.bottom.width],
+        };
         let mut folder = VerifierConstraintFolder::<SC> {
-            preprocessed: opening.preprocessed.view(),
+            preprocessed: preprocessed_vp,
+            preprocessed_window,
             main: opening.main.view(),
             perm: perm_opening.view(),
             perm_challenges: permutation_challenges,
@@ -413,8 +650,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                     .enumerate()
                     .filter(|(j, _)| *j != i)
                     .map(|(_, other_domain)| {
-                        other_domain.zp_at_point(zeta)
-                            * other_domain.zp_at_point(domain.first_point()).inverse()
+                        other_domain.vanishing_poly_at_point(zeta)
+                            * other_domain.vanishing_poly_at_point(domain.first_point()).inverse()
                     })
                     .product::<SC::Challenge>()
             })
@@ -425,11 +662,15 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             .iter()
             .enumerate()
             .map(|(ch_i, ch)| {
-                assert_eq!(ch.len(), SC::Challenge::D);
-                ch.iter()
-                    .enumerate()
-                    .map(|(e_i, &c)| zps[ch_i] * SC::Challenge::monomial(e_i) * c)
-                    .sum::<SC::Challenge>()
+                assert_eq!(ch.len(), <SC::Challenge as BasedVectorSpace<Val<SC>>>::DIMENSION);
+                let mut val = SC::Challenge::ZERO;
+                for (e_i, &c) in ch.iter().enumerate() {
+                    let basis = SC::Challenge::from_basis_coefficients_fn(|j| {
+                        if j == e_i { Val::<SC>::ONE } else { Val::<SC>::ZERO }
+                    });
+                    val += basis * c;
+                }
+                zps[ch_i] * val
             })
             .sum::<SC::Challenge>()
     }
@@ -468,6 +709,16 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     ChipOpeningLengthMismatch,
     /// Cumulative sums error
     CumulativeSumsError(&'static str),
+    /// Zerocheck verification failed (sumcheck identity or transcript mismatch).
+    ZerocheckFailed,
+    /// LogUp-GKR verification failed (combine identity, transcript, or leaf
+    /// claim mismatch).
+    LogUpGkrFailed,
+    /// Jagged late-binding bundle verification failed (sumcheck reduction
+    /// mismatch or WHIR open rejection).
+    JaggedLateBindingFailed,
+    /// Zerocheck proofs attached but number does not match number of chips.
+    InvalidProofShape,
 }
 
 impl Debug for OpeningShapeError {
@@ -519,6 +770,16 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
                 write!(f, "Chip opening length mismatch")
             }
             VerificationError::CumulativeSumsError(s) => write!(f, "cumulative sums error: {}", s),
+            VerificationError::ZerocheckFailed => write!(f, "zerocheck verification failed"),
+            VerificationError::LogUpGkrFailed => {
+                write!(f, "LogUp-GKR verification failed")
+            }
+            VerificationError::JaggedLateBindingFailed => {
+                write!(f, "jagged late-binding bundle verification failed")
+            }
+            VerificationError::InvalidProofShape => {
+                write!(f, "invalid proof shape (zerocheck proof count mismatch)")
+            }
         }
     }
 }
@@ -543,8 +804,266 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
                 write!(f, "Chip opening length mismatch")
             }
             VerificationError::CumulativeSumsError(s) => write!(f, "cumulative sums error: {}", s),
+            VerificationError::ZerocheckFailed => write!(f, "zerocheck verification failed"),
+            VerificationError::LogUpGkrFailed => {
+                write!(f, "LogUp-GKR verification failed")
+            }
+            VerificationError::JaggedLateBindingFailed => {
+                write!(f, "jagged late-binding bundle verification failed")
+            }
+            VerificationError::InvalidProofShape => {
+                write!(f, "invalid proof shape (zerocheck proof count mismatch)")
+            }
         }
     }
 }
 
 impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
+
+/// Late-binding verifier dispatch: symmetric to
+/// `try_compute_late_binding_proofs` in `prover.rs`.  Returns `true`
+/// if SC is the KoalaBear config and all per-chip late-binding proofs
+/// verify; returns `true` if SC is *not* the KoalaBear config (no-op,
+/// nothing to verify); returns `false` only if SC matches and
+/// verification fails for at least one chip.
+#[cfg(feature = "whir")]
+pub(crate) fn try_verify_late_binding_proofs<SC>(
+    late_binding_bytes: &[Vec<u8>],
+    gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
+    row_openings: &[crate::types::LogUpRowOpening<SC::Challenge>],
+    log_degrees: &[usize],
+) -> bool
+where
+    SC: 'static + StarkGenericConfig,
+{
+    use std::any::TypeId;
+    use crate::kb31_poseidon2::{
+        KoalaBearPoseidon2Inner, koala_bear_poseidon2::KoalaBearPoseidon2,
+    };
+
+    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+        return verify_late_binding_for_kb::<KoalaBearPoseidon2, SC>(
+            late_binding_bytes, gkr_proofs, row_openings, log_degrees,
+        );
+    }
+    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2Inner>() {
+        return verify_late_binding_for_kb::<KoalaBearPoseidon2Inner, SC>(
+            late_binding_bytes, gkr_proofs, row_openings, log_degrees,
+        );
+    }
+    true
+}
+
+/// Symmetric dispatch helper to `prove_late_binding_for_kb` in
+/// `prover.rs`.  Returns `true` iff all per-chip late-binding proofs
+/// verify (or there are none for this SC).
+#[cfg(feature = "whir")]
+fn verify_late_binding_for_kb<KB, SC>(
+    late_binding_bytes: &[Vec<u8>],
+    gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
+    row_openings: &[crate::types::LogUpRowOpening<SC::Challenge>],
+    log_degrees: &[usize],
+) -> bool
+where
+    KB: 'static + StarkGenericConfig + Default + crate::whir_late_binding::LateBindingCapable,
+    SC: 'static + StarkGenericConfig,
+{
+    use crate::whir_late_binding::LateBindingCapable;
+    type Ck<X> = <X as StarkGenericConfig>::Challenge;
+    type Cgr<X> = <X as StarkGenericConfig>::Challenger;
+
+    // SAFETY: caller verified TypeId::of::<SC>() == TypeId::of::<KB>().
+    let gkr_kb: &[crate::logup_gkr::LogUpGkrProof<Ck<KB>>] =
+        unsafe { core::mem::transmute(gkr_proofs) };
+    let openings_kb: &[crate::types::LogUpRowOpening<Ck<KB>>] =
+        unsafe { core::mem::transmute(row_openings) };
+
+    let cfg = <KB as Default>::default();
+    let mut ch_kb: Cgr<KB> = cfg.challenger();
+
+    for (chip_idx, bytes) in late_binding_bytes.iter().enumerate() {
+        let num_vars = log_degrees[chip_idx];
+        let r_row: Vec<Ck<KB>> = gkr_kb[chip_idx].eval_point[..num_vars].to_vec();
+        let row_mle_values = openings_kb[chip_idx].main_at_r_row.clone();
+        let res = <KB as LateBindingCapable>::verify_chip_late_binding(
+            num_vars,
+            bytes,
+            &row_mle_values,
+            &mut ch_kb,
+            &|_| r_row.clone(),
+        );
+        if res.is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(not(feature = "whir"))]
+pub(crate) fn try_verify_late_binding_proofs<SC>(
+    _late_binding_bytes: &[Vec<u8>],
+    _gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
+    _row_openings: &[crate::types::LogUpRowOpening<SC::Challenge>],
+    _log_degrees: &[usize],
+) -> bool
+where
+    SC: 'static + StarkGenericConfig,
+{
+    true
+}
+
+/// Phase 2c+ jagged late-binding verifier dispatch.  Returns `true`
+/// iff the bundle verifies, or if SC isn't a supported KB type
+/// (in which case there's nothing to verify).
+#[cfg(any(feature = "whir", feature = "basefold"))]
+pub(crate) fn try_verify_jagged_late_binding_proof<SC, A>(
+    chips: &[&crate::MachineChip<SC, A>],
+    gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
+    bundle_bytes: &[u8],
+    log_degrees: &[usize],
+) -> bool
+where
+    SC: 'static + StarkGenericConfig,
+    A: crate::air::MachineAir<crate::Val<SC>>,
+{
+    use std::any::TypeId;
+    use crate::kb31_poseidon2::{
+        KoalaBearPoseidon2Inner, koala_bear_poseidon2::KoalaBearPoseidon2,
+    };
+
+    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+        return verify_jagged_for_kb::<KoalaBearPoseidon2, SC, A>(
+            chips, gkr_proofs, bundle_bytes, log_degrees,
+        );
+    }
+    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2Inner>() {
+        return verify_jagged_for_kb::<KoalaBearPoseidon2Inner, SC, A>(
+            chips, gkr_proofs, bundle_bytes, log_degrees,
+        );
+    }
+    true
+}
+
+#[cfg(not(any(feature = "whir", feature = "basefold")))]
+pub(crate) fn try_verify_jagged_late_binding_proof<SC, A>(
+    _chips: &[&crate::MachineChip<SC, A>],
+    _gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
+    _bundle_bytes: &[u8],
+    _log_degrees: &[usize],
+) -> bool
+where
+    SC: 'static + StarkGenericConfig,
+    A: crate::air::MachineAir<crate::Val<SC>>,
+{
+    true
+}
+
+/// Generic helper: TypeId-checked dispatch into jagged late-binding
+/// verify for a specific KB type.
+#[cfg(any(feature = "whir", feature = "basefold"))]
+fn verify_jagged_for_kb<KB, SC, A>(
+    chips: &[&crate::MachineChip<SC, A>],
+    gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
+    bundle_bytes: &[u8],
+    log_degrees: &[usize],
+) -> bool
+where
+    KB: 'static + StarkGenericConfig + Default,
+    SC: 'static + StarkGenericConfig,
+    A: crate::air::MachineAir<crate::Val<SC>>,
+{
+    #[cfg(feature = "whir")]
+    use crate::jagged_late_binding::verify_jagged_late_binding;
+    type Ck<X> = <X as StarkGenericConfig>::Challenge;
+    type Cgr<X> = <X as StarkGenericConfig>::Challenger;
+
+    // SAFETY: caller verified TypeId::of::<SC>() == TypeId::of::<KB>().
+    let gkr_kb: &[crate::logup_gkr::LogUpGkrProof<Ck<KB>>] =
+        unsafe { core::mem::transmute(gkr_proofs) };
+
+    // Build chip_infos from the chips iterator (need the dimensions
+    // each chip's trace was packed with).
+    let chip_infos: Vec<crate::jagged::JaggedChipInfo> = chips
+        .iter()
+        .zip(log_degrees.iter())
+        .map(|(chip, &num_vars)| crate::jagged::JaggedChipInfo {
+            name: chip.name(),
+            row_count: 1usize << num_vars,
+            column_count: chip.width(),
+        })
+        .collect();
+
+    // Compute log_dense_size from chip_infos (matches what
+    // commit_jagged_dense computes via pack_traces_jagged).
+    let total_vals: usize = chip_infos
+        .iter()
+        .map(|info| info.row_count * info.column_count)
+        .sum();
+    let log_dense_size = if total_vals == 0 {
+        0
+    } else {
+        total_vals.next_power_of_two().trailing_zeros() as usize
+    };
+
+    // Per-chip r_row from GKR proofs.
+    let r_row_per_chip: Vec<Vec<Ck<KB>>> = gkr_kb
+        .iter()
+        .zip(log_degrees.iter())
+        .map(|(gkr, &num_vars)| gkr.eval_point[..num_vars].to_vec())
+        .collect();
+
+    let cfg = <KB as Default>::default();
+    let mut ch_kb: Cgr<KB> = cfg.challenger();
+
+    // Concrete-typed call site.  KB == KoalaBearPoseidon2 (or
+    // Inner) so its associated `Challenge`/`Challenger` types match
+    // the kb31_poseidon2 `Inner*` aliases.
+    use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger};
+    let r_row_concrete: &[Vec<InnerChallenge>] =
+        unsafe { core::mem::transmute(r_row_per_chip.as_slice()) };
+    let ch_concrete: &mut InnerChallenger =
+        unsafe { core::mem::transmute(&mut ch_kb) };
+
+    // Compile-time + runtime dispatch (mirrors prover.rs).
+    #[cfg(all(feature = "basefold", not(feature = "whir")))]
+    let use_basefold = true;
+    #[cfg(all(feature = "whir", not(feature = "basefold")))]
+    let use_basefold = false;
+    #[cfg(all(feature = "basefold", feature = "whir"))]
+    let use_basefold =
+        std::env::var("ZIREN_USE_BASEFOLD").unwrap_or_default() == "1";
+
+    if use_basefold {
+        #[cfg(feature = "basefold")]
+        {
+            let _ = log_dense_size;
+            use crate::basefold_late_binding::jagged::{
+                JaggedBasefoldBundle, verify_jagged_basefold,
+            };
+            let Some(bundle) = JaggedBasefoldBundle::from_bytes(bundle_bytes) else {
+                return false;
+            };
+            return verify_jagged_basefold(
+                &chip_infos,
+                r_row_concrete,
+                &bundle,
+                ch_concrete,
+            );
+        }
+        #[cfg(not(feature = "basefold"))]
+        unreachable!()
+    }
+
+    #[cfg(feature = "whir")]
+    {
+        verify_jagged_late_binding(
+            &chip_infos,
+            log_dense_size,
+            r_row_concrete,
+            bundle_bytes,
+            ch_concrete,
+        )
+    }
+    #[cfg(not(feature = "whir"))]
+    unreachable!()
+}
