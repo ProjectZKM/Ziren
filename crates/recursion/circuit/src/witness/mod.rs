@@ -145,12 +145,23 @@ where
         let public_values = self.public_values.read(builder);
         let chip_ordering = self.chip_ordering.clone();
 
+        // The new `basefold_logup_gkr_proofs` field is reserved
+        // for a future PR that updates the dummy_vk_and_shard_proof
+        // path to emit the same shape as the real prover.  Reading
+        // it here would desync the witness stream when the dummy
+        // and real proofs disagree on whether the field is `Some`.
+        // Set to `None` for now; the field is non-load-bearing
+        // until the dummy + machine call sites are updated in
+        // lockstep.
+        let basefold_logup_gkr_proofs = None;
+
         ShardProofVariable {
             commitment,
             opened_values,
             opening_proof,
             public_values,
             chip_ordering,
+            basefold_logup_gkr_proofs,
         }
     }
 

@@ -45,6 +45,16 @@ pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriPar
     pub opening_proof: FriProofVariable<C, SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Felt<C::F>>,
+    /// Per-chip LogUp-GKR proofs (prover-shape, matching
+    /// `zkm_stark::logup_gkr::LogUpGkrProof<EF>`).  `None` in the
+    /// legacy 4-batch FRI pipeline; `Some(Vec)` in the
+    /// BaseFold pipeline where the LogUp soundness chain is
+    /// checked per-chip via
+    /// [`crate::per_chip_logup_gkr::verify_per_chip_logup_gkr`].
+    #[allow(clippy::type_complexity)]
+    pub basefold_logup_gkr_proofs: Option<
+        Vec<crate::per_chip_logup_gkr::PerChipLogUpGkrProofVariable<C::F, C::EF>>,
+    >,
 }
 
 /// Get a dummy duplex challenger for use in dummy proofs.
@@ -304,6 +314,7 @@ where
             opening_proof,
             chip_ordering,
             public_values,
+            basefold_logup_gkr_proofs: _,
         } = proof;
 
         // Assert that the byte multiplicities don't overflow.
