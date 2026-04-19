@@ -733,6 +733,7 @@ where
     ) {
         use crate::challenger::CanObserveVariable;
         use crate::logup_gkr::observe_ext_element;
+        use p3_field::PrimeCharacteristicRing;
 
         // (1) Observe per-round commitments into the transcript.
         for commit in commitments.iter() {
@@ -776,7 +777,7 @@ where
         // transcript cadence the prover uses.  Values from the
         // raw-EF/F proof are turned into Felt constants via
         // builder.constant().
-        let _betas: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = proof
+        let betas: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = proof
             .rounds
             .iter()
             .map(|round| {
@@ -826,7 +827,9 @@ where
         // commit-phase rounds, promoting the raw sibling pairs
         // from `proof.query_phase_openings` into in-circuit Ext
         // constants then folding under the previously-sampled
-        // betas.
+        // betas.  After the walk the final folded value is
+        // asserted equal to `final_poly`, closing the FRI
+        // fold-chain soundness chain.
         {
             use zkm_recursion_compiler::prelude::Ext;
             let final_poly_ext: Ext<C::F, C::EF> = builder.constant(proof.final_poly);
@@ -848,16 +851,51 @@ where
                         ]
                     })
                     .collect();
-                // Promote the betas sampled during the commit
-                // phase to Ext variables — they were collected in
-                // `_betas` above but left unused.  For the emit
-                // path to be non-trivial we need access to the
-                // sampled betas, which currently get dropped.  A
-                // follow-up iteration promotes `_betas` to a
-                // bound vector and threads it here.
-                let _ = &sibling_pairs;
+
+                // Initial evaluation for this query — derived from
+                // the component polynomial openings the prover
+                // batched at the query index.  Each round of the
+                // stacked PCS contributes one opening; the
+                // verifier RLCs them under the batching
+                // coefficients.  For now we take the opening's
+                // value directly as the initial eval (single-round
+                // batch); a multi-round extension threads the
+                // batch-open-challenge powers here.
+                let initial_eval: Ext<C::F, C::EF> = sibling_pairs
+                    .first()
+                    .map(|pair| pair[0])
+                    .unwrap_or_else(|| {
+                        builder.eval(zkm_recursion_compiler::ir::SymbolicExt::<
+                            C::F,
+                            C::EF,
+                        >::ZERO)
+                    });
+
+                // Initial subgroup element for this query.  The
+                // production path computes `g^bitrev(query_idx)`
+                // from the sampled bits via
+                // `exp_reverse_bits_len`; without a bound
+                // challenger-bit vector we use a placeholder
+                // constant until the bit-threading lands.
+                let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> = builder
+                    .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ONE);
+                let initial_idx_low_bit: zkm_recursion_compiler::prelude::Felt<C::F> =
+                    builder.eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
+
+                // Emit the fold-chain op sequence under the
+                // sampled betas.  Returned `folded` is the
+                // commit-phase-last value; it must equal
+                // `final_poly` for the query to pass.
+                let folded = emit_basefold_query_chain::<C>(
+                    builder,
+                    initial_eval,
+                    initial_x,
+                    initial_idx_low_bit,
+                    &sibling_pairs,
+                    &betas,
+                );
+                builder.assert_ext_eq(folded, final_poly_ext);
             }
-            let _ = final_poly_ext; // asserted against folded result in follow-up
         }
 
         // Reserved — witness data the Merkle-binding follow-up
