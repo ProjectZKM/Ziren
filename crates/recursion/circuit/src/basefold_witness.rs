@@ -368,6 +368,7 @@ where
             position: self.position,
             sibling_pair: self.sibling_pair,
             merkle_path_bytes: self.merkle_path_bytes.clone(),
+            merkle_path_digests: self.merkle_path_digests.clone(),
             _phantom: core::marker::PhantomData,
         }
     }

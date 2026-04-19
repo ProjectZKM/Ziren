@@ -628,6 +628,7 @@ where
                         position: 0,
                         sibling_pair: [C::EF::ZERO; 2],
                         merkle_path_bytes: vec![],
+                        merkle_path_digests: vec![],
                         _phantom: core::marker::PhantomData,
                     }]
                 })

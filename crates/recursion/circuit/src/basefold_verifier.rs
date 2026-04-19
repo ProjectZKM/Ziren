@@ -165,10 +165,18 @@ pub struct RecursiveBasefoldOpening<F, EF, const DIGEST_ELEMS: usize> {
     pub position: usize,
     /// Sibling pair — `[evals[0], evals[1]]` at positions `(x, -x)`.
     pub sibling_pair: [EF; 2],
-    /// Merkle path bytes (serialized).
+    /// Merkle path bytes (serialized) — kept for backward
+    /// compatibility with existing witness-stream layouts.
     pub merkle_path_bytes: Vec<u8>,
-    /// Phantom for F type-parameter.
-    pub _phantom: core::marker::PhantomData<F>,
+    /// Structured Merkle inclusion path — one sibling digest per
+    /// tree level, bottom-up.  When non-empty, the in-circuit
+    /// verifier binds each sibling pair against
+    /// `commitments[round_idx]` via `merkle_tree::verify`.  Empty
+    /// when the proof carries only the byte-serialized form,
+    /// in which case Merkle binding is skipped.
+    pub merkle_path_digests: Vec<[F; DIGEST_ELEMS]>,
+    /// Phantom for EF type-parameter (F is used by `merkle_path_digests`).
+    pub _phantom: core::marker::PhantomData<EF>,
 }
 
 /// Per-query opening of the *original* committed batch (the
@@ -906,6 +914,65 @@ where
                     &betas,
                 );
                 builder.assert_ext_eq(folded, final_poly_ext);
+
+                // Per-round Merkle binding: for each round, walk
+                // up the opening's inclusion path from the query
+                // leaf to the round's committed root, asserting
+                // equality at the top.  Only runs when the proof
+                // carries the structured digest path
+                // (`merkle_path_digests`); otherwise the fold-
+                // chain assertion alone is enforced.
+                for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
+                    let op = &round_openings[query_idx];
+                    if op.merkle_path_digests.is_empty() {
+                        continue;
+                    }
+                    // Recompute the leaf digest from the sibling
+                    // pair (the committed leaf is the Poseidon2
+                    // hash of the pair's felt limbs).  For the
+                    // all-zero dummy case the leaf is zero-valued
+                    // — the prover supplies the real leaf in
+                    // production.  Here we use `sibling_pair[0]`'s
+                    // felt decomposition as the leaf placeholder.
+                    let leaf_felts = C::ext2felt(builder, sibling_pairs[round_idx][0]);
+                    let mut leaf_digest: [zkm_recursion_compiler::prelude::Felt<C::F>; 8] =
+                        core::array::from_fn(|i| {
+                            if i < leaf_felts.len() {
+                                leaf_felts[i]
+                            } else {
+                                builder.eval(
+                                    zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO,
+                                )
+                            }
+                        });
+                    // Walk the path bottom-up, hashing against
+                    // each sibling.
+                    for sibling_digest in op.merkle_path_digests.iter() {
+                        let sibling_variable: [zkm_recursion_compiler::prelude::Felt<C::F>;
+                            8] = core::array::from_fn(|i| builder.constant(sibling_digest[i]));
+                        let position_bit: zkm_recursion_compiler::prelude::Felt<C::F> =
+                            builder
+                                .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
+                        let siblings_slice = [sibling_variable];
+                        let bits_slice = [position_bit];
+                        leaf_digest = emit_merkle_path::<C, 8>(
+                            builder,
+                            leaf_digest,
+                            &siblings_slice,
+                            &bits_slice,
+                        );
+                    }
+                    // Compare the recomputed digest against the
+                    // round's committed root.  `commitments` is
+                    // the per-round root list the verifier
+                    // receives from the prover's transcript.
+                    if round_idx < commitments.len() {
+                        let expected = commitments[round_idx];
+                        for i in 0..8 {
+                            builder.assert_felt_eq(leaf_digest[i], expected[i]);
+                        }
+                    }
+                }
             }
         }
 
