@@ -28,6 +28,7 @@ pub mod merkle_tree;
 pub mod stark;
 pub(crate) mod utils;
 /// BaseFold proof verifier — see [`basefold_verifier`] module doc.
+pub mod basefold_constraint_folder;
 pub mod basefold_verifier;
 pub mod jagged_circuit;
 pub mod logup_gkr;

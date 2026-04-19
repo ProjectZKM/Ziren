@@ -24,9 +24,15 @@
 //! and supporting `slop_multilinear` MLE helpers (`full_geq`,
 //! `Mle::full_lagrange_eval`).
 
-use p3_field::PrimeCharacteristicRing;
-use zkm_recursion_compiler::ir::SymbolicExt;
+use std::marker::PhantomData;
 
+use p3_air::{Air, BaseAir};
+use p3_field::PrimeCharacteristicRing;
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
+use zkm_stark::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
+use zkm_stark::folder::PairWindow;
+
+use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::CircuitConfig;
 
 /// In-circuit "≥" indicator for `eval_point` ≥ `threshold` in
@@ -105,6 +111,115 @@ pub fn eq_eval<C: CircuitConfig>(
         .fold(one, |acc, (ai, bi)| {
             acc * ((one - *ai) * (one - *bi) + *ai * *bi)
         })
+}
+
+/// Verify that a chip's opening has the expected per-batch widths.
+///
+/// Returns `Ok(())` if the preprocessed and main widths match the
+/// chip's expected dimensions; otherwise returns an
+/// [`OpeningShapeError`].  Called by the zerocheck verifier
+/// before evaluating the chip's constraints to catch shape
+/// mismatches early.
+///
+/// # Reference
+///
+/// Mirrors [`verify_opening_shape`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:88-109).
+pub fn verify_opening_shape<C, A>(
+    chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+    opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+) -> Result<(), OpeningShapeError>
+where
+    C: CircuitConfig,
+    A: MachineAir<p3_koala_bear::KoalaBear>,
+{
+    if opening.preprocessed.local.len() != chip.preprocessed_width() {
+        return Err(OpeningShapeError::PreprocessedWidthMismatch(
+            chip.preprocessed_width(),
+            opening.preprocessed.local.len(),
+        ));
+    }
+    if opening.main.local.len() != chip.width() {
+        return Err(OpeningShapeError::MainWidthMismatch(
+            chip.width(),
+            opening.main.local.len(),
+        ));
+    }
+    Ok(())
+}
+
+/// Evaluate a chip's constraint polynomial at the sumcheck point
+/// implied by `opening` (the chip's preprocessed and main local
+/// values), returning the constraint accumulator as a single Ext
+/// value.
+///
+/// # Status
+///
+/// Signature complete; body deferred.  The full implementation
+/// requires the [`crate::basefold_constraint_folder::BasefoldConstraintFolder`]
+/// to additionally implement [`zkm_stark::air::MultiTableAirBuilder`]
+/// — which carries `local_cumulative_sum` and `global_cumulative_sum`
+/// references that the per-chip permutation-constraint code path
+/// reads.  In the BaseFold pipeline these sums live in the
+/// LogUp-GKR sumcheck output rather than as per-chip Air-side
+/// fields, so the implementation needs a bridging strategy:
+/// either (a) adapt the folder to carry placeholder sums that
+/// trip-no-op through `eval_permutation_constraints`, or (b)
+/// invoke `chip.air.eval(&mut folder)` directly, bypassing the
+/// permutation-emit wrapper around `Chip::eval`.
+///
+/// # Reference
+///
+/// Mirrors [`eval_constraints`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:37-58).
+pub fn eval_constraints<C, A>(
+    _builder: &mut Builder<C>,
+    _chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+    _opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+    _alpha: Ext<C::F, C::EF>,
+    _public_values: &[Felt<C::F>],
+) -> Ext<C::F, C::EF>
+where
+    C: CircuitConfig,
+    A: MachineAir<p3_koala_bear::KoalaBear>
+        + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
+{
+    let _ = (PhantomData::<()>, PairWindow::<Ext<C::F, C::EF>> { local: &[], next: &[] });
+    unimplemented!(
+        "eval_constraints: chip.eval bridging requires MultiTableAirBuilder \
+         on BasefoldConstraintFolder + cumulative-sum field plumbing. See \
+         module-level note + docs/recursion_verifier_port.md."
+    )
+}
+
+/// Compute the "padded row adjustment" — the constraint-folder
+/// accumulator that a chip's eval would produce if invoked on a
+/// dummy all-zero row.  Used by the zerocheck verifier to subtract
+/// the constraint contribution from out-of-range padded rows.
+///
+/// # Status
+///
+/// Signature complete; body deferred for the same reason as
+/// [`eval_constraints`].
+///
+/// # Reference
+///
+/// Mirrors [`compute_padded_row_adjustment`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:61-85).
+pub fn compute_padded_row_adjustment<C, A>(
+    _builder: &mut Builder<C>,
+    _chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+    _alpha: Ext<C::F, C::EF>,
+    _public_values: &[Felt<C::F>],
+) -> Ext<C::F, C::EF>
+where
+    C: CircuitConfig,
+    A: MachineAir<p3_koala_bear::KoalaBear>
+        + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
+{
+    unimplemented!(
+        "compute_padded_row_adjustment: same chip.eval bridging \
+         deferral as eval_constraints"
+    )
 }
 
 #[cfg(test)]
