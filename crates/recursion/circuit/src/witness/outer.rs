@@ -117,9 +117,18 @@ impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChal
     type WitnessVariable = FriCommitPhaseProofStepVariable<OuterConfig, KoalaBearPoseidon2Outer>;
 
     fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
+        use p3_field::PrimeCharacteristicRing;
         let sibling_value = self.sibling_values[0].read(builder);
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { sibling_value, opening_proof }
+        // Every FRI round currently uses binary folding
+        // (log_arity = 1); promoted to a Felt so the wire format
+        // is ready for variable-arity schedules.
+        let log_arity = builder.constant(
+            <OuterConfig as zkm_recursion_compiler::ir::Config>::F::from_canonical_usize(
+                self.log_arity.into(),
+            ),
+        );
+        Self::WitnessVariable { log_arity, sibling_value, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {

@@ -151,10 +151,16 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<KoalaBear>>>
     type WitnessVariable = FriCommitPhaseProofStepVariable<C, KoalaBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        use p3_field::PrimeCharacteristicRing;
         // In binary folding (log_arity=1), there's exactly one sibling value.
         let sibling_value = self.sibling_values[0].read(builder);
         let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { sibling_value, opening_proof }
+        // Thread the per-round log_arity through as a Felt so the
+        // verifier can read variable-arity schedules from the
+        // proof instead of hardcoding 1.
+        let log_arity =
+            builder.constant(<C::F>::from_canonical_usize(self.log_arity.into()));
+        Self::WitnessVariable { log_arity, sibling_value, opening_proof }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {

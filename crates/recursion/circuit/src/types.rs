@@ -36,6 +36,11 @@ pub struct FriProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
 /// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/fri/src/proof.rs#L35
 #[derive(Clone)]
 pub struct FriCommitPhaseProofStepVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
+    /// Per-round folding arity (log2).  Currently every commit
+    /// phase round uses arity 2 (log_arity = 1) — binary folding —
+    /// but the field is part of the proof so future variable-arity
+    /// schedules don't break the wire format.
+    pub log_arity: Felt<C::F>,
     pub sibling_value: Ext<C::F, C::EF>,
     pub opening_proof: Vec<H::DigestVariable>,
 }

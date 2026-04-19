@@ -62,11 +62,27 @@ pub fn verify_shape_and_sample_challenges<
     });
 
     // Observe log arities to match upstream FRI verifier protocol.
-    // TODO: Currently hardcoded to log_arity=1 (binary folding). When variable
-    // arity FRI is supported, read actual log_arity from the proof.
-    for _ in 0..proof.commit_phase_commits.len() {
-        let log_arity: Felt<C::F> = builder.eval(C::F::ONE);
-        challenger.observe(builder, log_arity);
+    // Per-round log_arity is read from the proof's first query's
+    // commit-phase openings — every query shares the same round
+    // schedule, so reading from the first is sufficient.  For
+    // variable-arity schedules the values differ per round; for
+    // the current binary-folding scheme every value is 1.
+    if let Some(first_query) = proof.query_proofs.first() {
+        assert_eq!(
+            first_query.commit_phase_openings.len(),
+            proof.commit_phase_commits.len(),
+            "FRI: per-query commit-phase opening count must match commit-phase round count",
+        );
+        for opening in first_query.commit_phase_openings.iter() {
+            challenger.observe(builder, opening.log_arity);
+        }
+    } else {
+        // No queries — fall back to observing a zero per round
+        // so the transcript shape still matches.
+        for _ in 0..proof.commit_phase_commits.len() {
+            let log_arity: Felt<C::F> = builder.eval(C::F::ZERO);
+            challenger.observe(builder, log_arity);
+        }
     }
 
     assert_eq!(proof.query_proofs.len(), config.num_queries);
@@ -574,7 +590,10 @@ mod tests {
                             .iter()
                             .map(|sibling| sibling.map(|x| builder.eval(x)))
                             .collect::<Vec<_>>();
-                        FriCommitPhaseProofStepVariable { sibling_value, opening_proof }
+                        let log_arity: Felt<F> = builder.constant(
+                            F::from_canonical_usize(commit_phase_opening.log_arity.into()),
+                        );
+                        FriCommitPhaseProofStepVariable { log_arity, sibling_value, opening_proof }
                     })
                     .collect::<Vec<_>>();
                 let input_proof: Vec<_> = query_proof
