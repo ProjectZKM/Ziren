@@ -35,6 +35,7 @@ pub mod partial_sumcheck;
 pub mod sumcheck;
 pub mod univariate;
 pub mod witness;
+pub mod zerocheck;
 
 pub use types::*;
 use zkm_stark::{
