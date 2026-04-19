@@ -35,25 +35,31 @@
 //!
 //! # Status
 //!
-//! This iteration lands the orchestrator type + the four-phase
-//! shape with cycle markers.  The body of each phase delegates to
-//! the per-phase verifier; the **inner verifier methods themselves
-//! are not yet wired** — they require infrastructure that lands in
-//! follow-up iterations:
+//! All four phases are wired end-to-end:
 //!
-//!   - **Phase 2** needs `verify_public_values` (depends on the
-//!     not-yet-ported public-values constraint folder)
-//!   - **Phase 3** needs the full constraint-eval bridge for the
-//!     BaseFold proof shape
-//!   - **Phase 4** needs the integration of the existing
-//!     [`crate::basefold_verifier::RecursiveBasefoldVerifier`]
-//!     through the
-//!     [`crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier`]
-//!     trait
+//!   - Phase 1 (transcript prologue) observes public values +
+//!     main-commit + per-chip metadata hashes into the challenger.
+//!   - Phase 2 calls [`crate::logup_gkr::verify_logup_gkr`] for
+//!     the LogUp sumcheck-stack replay.
+//!   - Phase 3 calls
+//!     [`crate::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`]
+//!     for the transition-constraint zerocheck IOP — internally
+//!     dispatches `chip.eval` via
+//!     [`crate::basefold_constraint_folder::BasefoldConstraintFolder`].
+//!   - Phase 4 constructs a
+//!     [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier`]
+//!     over the shard verifier's stacked-PCS wrapper and calls
+//!     `verify_trusted_evaluations`, which drives both the jagged
+//!     sumcheck reduction and the BaseFold FRI opening underneath.
 //!
-//! Each phase body is an explicit TODO with a pointer to the
-//! upstream reference source line that needs to be ported.  No
-//! stub implementation pretends to verify anything.
+//! Call-site wiring into the `compress` / `deferred` / `wrap`
+//! recursion machines is the remaining cross-crate step.  Those
+//! machines currently call [`crate::stark::StarkVerifier::verify_shard`]
+//! on [`crate::stark::ShardProofVariable`] and need to switch to
+//! `BasefoldShardVerifier::verify_shard` on
+//! [`BasefoldShardProofVariable`], supplying the additional inputs
+//! the new verifier takes: per-chip metadata, insertion points,
+//! public-values-constraint + jagged-eval closures.
 //!
 //! # Reference
 //!
