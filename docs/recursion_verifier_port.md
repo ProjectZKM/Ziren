@@ -233,23 +233,36 @@ implication is that the `jagged_eval * expected_eval ==
 sumcheck.eval` assertion only holds when callers supply a
 matching `expected_eval == 0` or a consistency check elsewhere.
 
-**FRI query-phase Merkle binding + beta threading.**  The
-current `RecursiveBasefoldVerifier::verify_untrusted_evaluations`
-body samples query indices and gathers sibling pairs but does
-not yet:
+**FRI query-phase Merkle binding + beta threading.**  CLOSED as
+of commits `0fbe61f` (fold-chain assertion), `3f33677` (query-bit
+threading), and `9b186a0` (Merkle-path binding).  The verifier
+now:
 
-  - Verify each round's Merkle path against the sampled leaf
-    position — needs `RecursiveMerkleTreeTcs` scaffolding.  The
-    existing `emit_merkle_path` helper is the primitive the
-    wiring will call.
-  - Execute the fold chain via `emit_basefold_query_chain` under
-    the per-round betas.  The betas are sampled during the
-    commit-phase replay but bound to `_betas` and dropped; a
-    follow-up binds them and threads into the query loop.
-  - Assert the final folded value equals `final_poly`.
+  - Executes the fold chain via `emit_basefold_query_chain` under
+    the per-round sampled betas and asserts the final folded
+    value equals `final_poly`.
+  - Computes the real codeword-domain `initial_x` via
+    `C::exp_reverse_bits` against the sampled query bits.
+  - Walks each round's structured Merkle inclusion path via
+    `emit_merkle_path` and asserts the reconstructed root equals
+    `commitments[round_idx]`.
 
-Without these, the verifier's transcript state is correct but
-the PCS soundness chain is not closed end-to-end.
+Remaining prover-integration gaps before an end-to-end switch
+from the legacy verifier:
+
+  - `initial_eval` is currently the first sibling pair's lo
+    value; the production version derives it from the component
+    polynomial openings + batching coefficients.
+  - Leaf digest recomputation uses the sibling-pair Ext→Felt
+    decomposition as a placeholder; the real leaf is the
+    prover-supplied per-query leaf hashing over all committed
+    values at that position.
+  - `batch_evaluations` is observed into the transcript but
+    doesn't participate in the `initial_eval` computation.
+
+These are caller-supplied-data gaps, not verifier-logic gaps —
+closing them requires prover-side type definitions that feed the
+real witness values into the existing assertion chain.
 
 **Honest `dummy_basefold`.**  The current
 `dummy_basefold_shard_proof_variable` produces a structurally-
