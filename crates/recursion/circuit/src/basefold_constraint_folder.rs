@@ -36,6 +36,7 @@ use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{Algebra, ExtensionField, Field};
 use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
 use zkm_stark::folder::PairWindow;
+use zkm_stark::septic_digest::SepticDigest;
 
 /// In-circuit chip-constraint folder for the BaseFold pipeline.
 ///
@@ -59,6 +60,20 @@ pub struct BasefoldConstraintFolder<'a, C: Config> {
     pub accumulator: SymbolicExt<C::F, C::EF>,
     /// Shard public values.
     pub public_values: &'a [Felt<C::F>],
+    /// Local cumulative sum reference required by
+    /// [`zkm_stark::air::MultiTableAirBuilder`].  In the BaseFold
+    /// pipeline the per-chip cumulative sums live in the LogUp-GKR
+    /// sumcheck output rather than as Air-side fields, so this
+    /// reference can point at a placeholder / zero value when the
+    /// folder is invoked from contexts that don't carry a real
+    /// per-chip sum (e.g.,
+    /// [`crate::zerocheck::compute_padded_row_adjustment`]'s
+    /// dummy-row constraint evaluation).
+    pub local_cumulative_sum: &'a Ext<C::F, C::EF>,
+    /// Global cumulative sum reference required by
+    /// [`zkm_stark::air::MultiTableAirBuilder`].  Same placeholder
+    /// convention as `local_cumulative_sum`.
+    pub global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
     /// Phantom for the circuit-config parameter.
     pub _marker: PhantomData<C>,
 }
@@ -133,6 +148,53 @@ where
 {
 }
 
+impl<'a, C: Config> p3_air::PermutationAirBuilder for BasefoldConstraintFolder<'a, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    type MP = PairWindow<'a, Ext<C::F, C::EF>>;
+    type RandomVar = Ext<C::F, C::EF>;
+    type PermutationVar = Ext<C::F, C::EF>;
+
+    fn permutation(&self) -> Self::MP {
+        // The BaseFold pipeline has no permutation matrix on the
+        // wire — return an empty pair window.  Any chip that reads
+        // permutation columns through this folder is misusing the
+        // BaseFold-pipeline contract.
+        PairWindow { local: &[], next: &[] }
+    }
+
+    fn permutation_randomness(&self) -> &[Self::Var] {
+        // No permutation challenges in the BaseFold pipeline; the
+        // per-chip permutation soundness moved to LogUp-GKR.
+        &[]
+    }
+
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        &[]
+    }
+}
+
+impl<'a, C: Config> zkm_stark::air::MultiTableAirBuilder<'a> for BasefoldConstraintFolder<'a, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    type LocalSum = Ext<C::F, C::EF>;
+    type GlobalSum = Felt<C::F>;
+
+    fn local_cumulative_sum(&self) -> &'a Self::LocalSum {
+        self.local_cumulative_sum
+    }
+
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+        self.global_cumulative_sum
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,12 +220,32 @@ mod tests {
         let public_values: Vec<Felt<F>> =
             (0..4).map(|_| builder.constant(F::ZERO)).collect();
 
+        let local_sum = builder.constant(EF::ZERO);
+        // Construct a placeholder SepticDigest by re-using the
+        // zero-Felt for every coordinate.  The folder doesn't read
+        // back from the SepticDigest in any code path the BaseFold
+        // pipeline exercises, so the placeholder values are
+        // structurally inert.
+        let zero_felt: Felt<F> = builder.constant(F::ZERO);
+        use zkm_stark::septic_curve::SepticCurve;
+        use zkm_stark::septic_extension::SepticExtension;
+        let global_sum: SepticDigest<Felt<F>> = SepticDigest(SepticCurve {
+            x: SepticExtension::<Felt<F>>([
+                zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt,
+            ]),
+            y: SepticExtension::<Felt<F>>([
+                zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt,
+            ]),
+        });
+
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,
             accumulator: SymbolicExt::ZERO,
             public_values: &public_values,
+            local_cumulative_sum: &local_sum,
+            global_cumulative_sum: &global_sum,
             _marker: PhantomData,
         };
 

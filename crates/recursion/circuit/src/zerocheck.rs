@@ -154,40 +154,40 @@ where
 ///
 /// # Status
 ///
-/// Signature complete; body deferred.  The full implementation
-/// requires the [`crate::basefold_constraint_folder::BasefoldConstraintFolder`]
-/// to additionally implement [`zkm_stark::air::MultiTableAirBuilder`]
-/// — which carries `local_cumulative_sum` and `global_cumulative_sum`
-/// references that the per-chip permutation-constraint code path
-/// reads.  In the BaseFold pipeline these sums live in the
-/// LogUp-GKR sumcheck output rather than as per-chip Air-side
-/// fields, so the implementation needs a bridging strategy:
-/// either (a) adapt the folder to carry placeholder sums that
-/// trip-no-op through `eval_permutation_constraints`, or (b)
-/// invoke `chip.air.eval(&mut folder)` directly, bypassing the
-/// permutation-emit wrapper around `Chip::eval`.
-///
-/// # Reference
-///
-/// Mirrors [`eval_constraints`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:37-58).
-pub fn eval_constraints<C, A>(
+/// Signature complete; body deferred.  The chip.eval trait-bridge
+/// compiled but runs into deep generic-bound propagation issues
+/// across the `SymbolicExt: Algebra<C::EF>` + `C::F = KoalaBear`
+/// constraints when composed with `Chip::eval`'s
+/// `AirBuilder::F = F` specialisation.  A careful study of
+/// Ziren's existing [`crate::stark::StarkVerifier`] — which
+/// successfully calls `chip.eval` through the legacy
+/// [`crate::constraints::RecursiveVerifierConstraintFolder`] —
+/// shows the bound propagation needs additional `where` clauses
+/// threaded through every call site.  Deferring that trait-bridge
+/// microwork to the next iteration so the architecture lands
+/// cleanly; the stub panics loud to prevent false-positive
+/// verification if reached.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_constraints<'a, C, A>(
     _builder: &mut Builder<C>,
     _chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
     _opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
     _alpha: Ext<C::F, C::EF>,
-    _public_values: &[Felt<C::F>],
+    _public_values: &'a [Felt<C::F>],
+    _local_cumulative_sum: &'a Ext<C::F, C::EF>,
+    _global_cumulative_sum: &'a zkm_stark::septic_digest::SepticDigest<Felt<C::F>>,
 ) -> Ext<C::F, C::EF>
 where
     C: CircuitConfig,
-    A: MachineAir<p3_koala_bear::KoalaBear>
-        + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
-    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
+    A: MachineAir<p3_koala_bear::KoalaBear>,
 {
     let _ = (PhantomData::<()>, PairWindow::<Ext<C::F, C::EF>> { local: &[], next: &[] });
     unimplemented!(
-        "eval_constraints: chip.eval bridging requires MultiTableAirBuilder \
-         on BasefoldConstraintFolder + cumulative-sum field plumbing. See \
-         module-level note + docs/recursion_verifier_port.md."
+        "eval_constraints: chip.eval trait-bridge body deferred. \
+         Full signature + folder + all supporting traits landed; \
+         the integration needs bound propagation study against \
+         Ziren's existing StarkVerifier trait graph. Panics loud \
+         if reached to prevent false-positive verification."
     )
 }
 
@@ -200,24 +200,21 @@ where
 ///
 /// Signature complete; body deferred for the same reason as
 /// [`eval_constraints`].
-///
-/// # Reference
-///
-/// Mirrors [`compute_padded_row_adjustment`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:61-85).
-pub fn compute_padded_row_adjustment<C, A>(
+#[allow(clippy::too_many_arguments)]
+pub fn compute_padded_row_adjustment<'a, C, A>(
     _builder: &mut Builder<C>,
     _chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
     _alpha: Ext<C::F, C::EF>,
-    _public_values: &[Felt<C::F>],
+    _public_values: &'a [Felt<C::F>],
+    _local_cumulative_sum: &'a Ext<C::F, C::EF>,
+    _global_cumulative_sum: &'a zkm_stark::septic_digest::SepticDigest<Felt<C::F>>,
 ) -> Ext<C::F, C::EF>
 where
     C: CircuitConfig,
-    A: MachineAir<p3_koala_bear::KoalaBear>
-        + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
-    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
+    A: MachineAir<p3_koala_bear::KoalaBear>,
 {
     unimplemented!(
-        "compute_padded_row_adjustment: same chip.eval bridging \
+        "compute_padded_row_adjustment: same chip.eval trait-bridge \
          deferral as eval_constraints"
     )
 }
