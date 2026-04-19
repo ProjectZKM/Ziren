@@ -353,6 +353,94 @@ verification") is largely subsumed by the BaseFold migration:
 No direct action required on the roadmap document itself; the
 in-tree state reflects the new path.
 
+## Proof-shape divergence blocker (the actual atomic-PR blocker)
+
+The `is_some` retirement / machine-wiring chain is one PR away
+from production default, but that PR depends on resolving a
+**genuine protocol-shape divergence** between the prover's
+output and the recursion verifier's expected input.
+
+### The two LogUp-GKR proof types
+
+**Stark-side** (`crates/stark/src/logup_gkr.rs:127`) — emitted by
+the prover, **per-chip**, in layer-based descent form:
+
+```rust
+pub struct LogUpGkrProof<EF> {
+    pub root: (EF, EF),
+    pub layers: Vec<LogUpGkrLayerProof<EF>>,
+    pub eval_point: Vec<EF>,
+    pub leaf_claim: (EF, EF),
+}
+```
+
+**Recursion-side** (`crates/recursion/circuit/src/logup_proof.rs:75`)
+— consumed by `BasefoldShardVerifier`, **per-shard**, in
+round-based sumcheck-stack form:
+
+```rust
+pub struct LogupGkrProof<F, EF> {
+    pub circuit_output: LogUpGkrOutput<EF>,
+    pub round_proofs: Vec<LogupGkrRoundProof<EF>>,
+    pub logup_evaluations: LogUpEvaluations<EF>,
+    pub witness: F,
+}
+```
+
+Same protocol, different serialization, different granularity.
+The two were designed independently — stark predates the BaseFold
+migration, recursion was written ahead of the eventual prover
+migration.
+
+### What unification looks like
+
+Three approaches, in order of cleanest → most surgical:
+
+1. **Migrate the prover to emit recursion-shape proofs.** Replace
+   stark's `LogUpGkrProof` with the recursion-shape type
+   end-to-end.  Cleanest architectural outcome.  Affects the
+   prover proof-emit code, the host verifier's BaseFold branch,
+   and the wire format (so all existing serialized proofs become
+   incompatible).
+
+2. **Add a per-shard-level adapter at proof-construction time.**
+   Prover keeps emitting per-chip `LogUpGkrProof` but a
+   conversion step (running once per shard) reformats them into
+   the recursion-shape `LogupGkrProof` before serialization.
+   Wire-format-compatible with the new shape if downstream
+   consumes only the new shape.
+
+3. **Add a per-chip recursion verifier.**  Mirror the stark-side
+   `LogUpGkrProof` shape on the recursion side and write a
+   parallel `verify_logup_gkr_per_chip`.  Most invasive on the
+   recursion-circuit side; least invasive on the prover.  The
+   shard-level `verify_logup_gkr` becomes dead code.
+
+Approach 1 or 2 is the right long-term direction.  Approach 3 is
+fastest to land but creates duplication that needs cleanup later.
+
+### After unification
+
+Once unified:
+
+- Extend `ShardProofVariable` with optional BaseFold-pipeline
+  fields (`logup_gkr_proofs`, `zerocheck_proofs`, jagged proof
+  bytes).
+- Update the `ShardProof → ShardProofVariable` Witnessable impl
+  to read these fields.
+- Replace the `whir_mode` short-circuit in
+  `crate::stark::StarkVerifier::verify_shard` with a call to
+  `BasefoldShardVerifier::verify_shard` over the new fields.
+- Switch compress/deferred/wrap/core machines to invoke the new
+  verifier path.
+- Delete the legacy `RecursiveVerifierConstraintFolder` +
+  `StarkVerifier::verify_shard` once no caller remains.
+- Regenerate VK maps against the new circuit shape.
+
+Estimated 1500-2500 LOC delta across ~10 files plus a multi-day
+VK regen window.  All prerequisites in the verifier layer are
+now in-tree.
+
 ## Current state (post-retirement sweep)
 
 After the WHIR/BaseFold retirement sweep, the in-tree state is:
