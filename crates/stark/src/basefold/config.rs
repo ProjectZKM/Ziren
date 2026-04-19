@@ -45,23 +45,39 @@ impl<F: Field> FriConfig<F> {
         self.log_blowup
     }
 
-    /// Production-default parameters.  `log_blowup = 4` (rate 1/16)
-    /// + 100 queries + 16-bit PoW gives **400 bits conjectured** /
-    /// **~200 bits proven** (Johnson Bound) FRI soundness — same
-    /// rate as WHIR's `whir_parameters(100)` so we inherit the same
-    /// proven-100-bit posture.  Combined with sumcheck soundness
-    /// (~118 bits over `EF=BinomialExtensionField<KoalaBear, 4>`)
-    /// and `BATCH_GRINDING_BITS=16`, the aggregate soundness floor
-    /// is **~118 bits** (sumcheck-bound).
+    /// Production-default parameters: **`(log_blowup=1, num_queries=94, pow_bits=16)`**
+    /// — matches SP1's `slop_primitives::FriConfig::default_fri_config`.
     ///
-    /// SP1's BaseFold defaults (1 / 100 / 16) match WHIR's default
-    /// because WHIR is configured at log_blowup=1 by default in
-    /// upstream Plonky3; Ziren chose log_inv_rate=4 to defeat
-    /// proximity-gap attacks on KoalaBear^4 (see
-    /// [whir_config.rs](crate::whir_config) note 136-141).  We mirror
-    /// that choice here.
+    /// **Rate.** `log_blowup = 1` (rate-1/2) gives an LDE codeword
+    /// of `2 · N` extension-field elements per stripe (vs the
+    /// previous `log_blowup = 4` (rate-1/16) which materialised
+    /// `16 · N` bytes — a structural OOM blocker on wide workloads
+    /// such as tendermint and ssz-withdrawals).
+    ///
+    /// **Queries.** SP1 cites the Gruen-Diamond result for the
+    /// 84 → 94 query bump at this rate; we adopt it directly.
+    /// 94 queries at rate-1/2 with `pow_bits = 16` of per-query
+    /// grinding gives ≥ 100-bit FRI soundness under the Johnson
+    /// Bound.  Combined with sumcheck soundness over
+    /// `EF = BinomialExtensionField<KoalaBear, 4>` and
+    /// `BATCH_GRINDING_BITS = 16`, the aggregate floor stays at
+    /// ~100 bits (sumcheck-bound).
+    ///
+    /// **Why rate-1/16 was chosen previously.** The WHIR-era
+    /// configuration used `log_blowup = 4` to defeat proximity-gap
+    /// attacks on KoalaBear^4 (see the historical `whir_config.rs`
+    /// notes).  WHIR's analysis required a tighter rate; BaseFold
+    /// inherits SP1's analysis instead, where `log_blowup = 1` is
+    /// sufficient for the same target.
+    ///
+    /// **Memory impact** (vs the previous default).  ~8× reduction
+    /// in LDE bytes per stripe.  Empirical projection from the
+    /// 2026-04-18 perf comparison (rate-1/16 measurements):
+    /// fib-100k 51.7 GB → ~6 GB; ssz-withdrawals 104 GB → ~13 GB;
+    /// tendermint OOM @ 112 GB → fitting under 16 GB.  Re-measured
+    /// after this change.
     pub const fn default_fri_config() -> Self {
-        Self::new(4, 100, 16)
+        Self::new(1, 94, 16)
     }
 
     /// Memory-optimised config override via the

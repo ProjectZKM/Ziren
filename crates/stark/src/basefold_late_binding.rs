@@ -66,7 +66,15 @@ pub struct BasefoldLateBindingProverData {
 /// Small commits (under 16K total entries) clamp this down so the
 /// stacked PCS doesn't end up over-padding past the actual data.
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 14;
-pub const DEFAULT_BATCH_SIZE: usize = 16;
+
+/// Interleave batch size for the stacked PCS: number of MLE-column
+/// streams packed into each stripe.  **`32`** matches SP1's
+/// `slop_jagged::basefold::DEFAULT_INTERLEAVE_BATCH_SIZE`
+/// (raised from `16`).  Halves the number of stripes per BaseFold
+/// commit, which directly halves the Merkle-commit count and the
+/// per-stripe DFT count without increasing per-stripe LDE memory.
+/// SP1-parity; no soundness implication (purely a packing constant).
+pub const DEFAULT_BATCH_SIZE: usize = 32;
 
 /// Choose the largest `log_stacking_height ≤ DEFAULT` that still
 /// leaves at least one batch_point variable.  Required for tiny
