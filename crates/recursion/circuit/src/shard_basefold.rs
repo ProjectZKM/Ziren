@@ -811,6 +811,68 @@ mod tests {
         PhantomData
     }
 
+    /// Reference pattern for machine-wiring call sites.  Shows the
+    /// full sequence of setup the compress / deferred / wrap
+    /// machines will use when they switch from the legacy
+    /// `StarkVerifier::verify_shard` to
+    /// `BasefoldShardVerifier::verify_shard`.  Exists as a
+    /// compile-time documentation fixture; the actual
+    /// `verify_shard` call is elided here because the integration
+    /// test would require constructing a full MachineChip set,
+    /// which the per-machine callers supply at the real call site.
+    ///
+    /// The five inputs a machine-wiring call site must thread
+    /// (beyond the proof + opened-values + challenger which are
+    /// direct witness reads):
+    ///
+    ///   1. `shard_chips: &[&MachineChip<SC, A>]` — from the
+    ///      machine's chip set.
+    ///   2. `chip_metadata: &LogupGkrShardChipMetadata` — derived
+    ///      via [`BasefoldShardVerifier::chip_metadata_from_chips`].
+    ///   3. `insertion_points: &[usize]` — derived via
+    ///      [`BasefoldShardVerifier::insertion_points_from_column_counts`]
+    ///      from the machine's per-round column-count table.
+    ///   4. `eval_public_values_fn: FnOnce(&mut RecursivePublicValuesConstraintFolder)`
+    ///      — machine-specific public-values constraint closure.
+    ///   5. `jagged_evaluator_fn: JE` — construct from
+    ///      `RecursiveJaggedEvalSumcheckConfig::new(
+    ///         emit_branching_program_eval,
+    ///         emit_prefix_sum_check,
+    ///      )`.
+    #[allow(dead_code)]
+    fn _machine_wiring_reference_pattern<C: CircuitConfig>() {
+        use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
+        use crate::jagged_eval_primitives::{
+            emit_branching_program_eval, emit_prefix_sum_check,
+        };
+        // Construct the jagged evaluator from the in-tree
+        // primitives.  The closures are `fn`-pointer-coercible
+        // because `emit_branching_program_eval` /
+        // `emit_prefix_sum_check` take references + plain types.
+        let _evaluator: RecursiveJaggedEvalSumcheckConfig<
+            (),
+            fn(
+                &mut Builder<C>,
+                &[SymbolicExt<C::F, C::EF>],
+                &[SymbolicExt<C::F, C::EF>],
+                &[SymbolicExt<C::F, C::EF>],
+                &[SymbolicExt<C::F, C::EF>],
+            ) -> SymbolicExt<C::F, C::EF>,
+            fn(
+                &mut Builder<C>,
+                Vec<Felt<C::F>>,
+                Vec<Ext<C::F, C::EF>>,
+            ) -> (SymbolicExt<C::F, C::EF>, Felt<C::F>),
+        > = RecursiveJaggedEvalSumcheckConfig::new(
+            emit_branching_program_eval::<C>,
+            emit_prefix_sum_check::<C>,
+        );
+        // The machine call site would invoke
+        // `_evaluator.jagged_evaluation(...)` via the closure the
+        // shard verifier's `jagged_evaluator_fn` parameter takes.
+        let _ = &_evaluator;
+    }
+
     /// Construction smoke test: dummy_basefold_shard_proof_variable
     /// builds a structurally-valid placeholder for the chosen shape
     /// without panicking — verifies the Vec lengths cascade through
