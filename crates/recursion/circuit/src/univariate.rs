@@ -12,18 +12,26 @@
 
 use core::ops::{Add, Mul};
 
-use p3_field::Field;
+use p3_field::{Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
 /// A univariate polynomial in coefficient form, indexed
 /// least-significant-degree first: `coefficients[i]` is the
 /// coefficient of `X^i`.
+///
+/// The base bound is [`PrimeCharacteristicRing`], which lets the
+/// type carry both concrete field elements (e.g. [`p3_koala_bear::KoalaBear`])
+/// and symbolic algebra elements (e.g. `SymbolicExt<F, EF>` from
+/// the recursion compiler) — needed by the in-circuit sumcheck
+/// verifier where coefficients are symbolic expressions over the
+/// builder's hypercube allocator.  Operations that need division
+/// (interpolation, RLC) tighten the bound to [`Field`].
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UnivariatePolynomial<K> {
     pub coefficients: Vec<K>,
 }
 
-impl<K: Field> UnivariatePolynomial<K> {
+impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
     /// Construct from a coefficient vector.
     pub fn new(coefficients: Vec<K>) -> Self {
         Self { coefficients }
@@ -66,13 +74,17 @@ impl<K: Field> UnivariatePolynomial<K> {
         if self.coefficients.is_empty() {
             K::ZERO
         } else {
-            let sum_all: K = self.coefficients.iter().copied().sum();
+            let sum_all = self
+                .coefficients
+                .iter()
+                .copied()
+                .fold(K::ZERO, |acc, x| acc + x);
             self.coefficients[0] + sum_all
         }
     }
 }
 
-impl<K: Field> Mul<K> for UnivariatePolynomial<K> {
+impl<K: PrimeCharacteristicRing + Copy> Mul<K> for UnivariatePolynomial<K> {
     type Output = Self;
     fn mul(self, rhs: K) -> Self::Output {
         Self {
@@ -81,7 +93,7 @@ impl<K: Field> Mul<K> for UnivariatePolynomial<K> {
     }
 }
 
-impl<K: Field> Add for UnivariatePolynomial<K> {
+impl<K: PrimeCharacteristicRing + Copy> Add for UnivariatePolynomial<K> {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         let len = self.coefficients.len().max(rhs.coefficients.len());
