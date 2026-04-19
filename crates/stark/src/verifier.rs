@@ -837,80 +837,11 @@ impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
 /// verify; returns `true` if SC is *not* the KoalaBear config (no-op,
 /// nothing to verify); returns `false` only if SC matches and
 /// verification fails for at least one chip.
-#[cfg(feature = "whir")]
-pub(crate) fn try_verify_late_binding_proofs<SC>(
-    late_binding_bytes: &[Vec<u8>],
-    gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    row_openings: &[crate::types::LogUpRowOpening<SC::Challenge>],
-    log_degrees: &[usize],
-) -> bool
-where
-    SC: 'static + StarkGenericConfig,
-{
-    use std::any::TypeId;
-    use crate::kb31_poseidon2::{
-        KoalaBearPoseidon2Inner, koala_bear_poseidon2::KoalaBearPoseidon2,
-    };
-
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
-        return verify_late_binding_for_kb::<KoalaBearPoseidon2, SC>(
-            late_binding_bytes, gkr_proofs, row_openings, log_degrees,
-        );
-    }
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2Inner>() {
-        return verify_late_binding_for_kb::<KoalaBearPoseidon2Inner, SC>(
-            late_binding_bytes, gkr_proofs, row_openings, log_degrees,
-        );
-    }
-    true
-}
-
-/// Symmetric dispatch helper to `prove_late_binding_for_kb` in
-/// `prover.rs`.  Returns `true` iff all per-chip late-binding proofs
-/// verify (or there are none for this SC).
-#[cfg(feature = "whir")]
-fn verify_late_binding_for_kb<KB, SC>(
-    late_binding_bytes: &[Vec<u8>],
-    gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    row_openings: &[crate::types::LogUpRowOpening<SC::Challenge>],
-    log_degrees: &[usize],
-) -> bool
-where
-    KB: 'static + StarkGenericConfig + Default + crate::whir_late_binding::LateBindingCapable,
-    SC: 'static + StarkGenericConfig,
-{
-    use crate::whir_late_binding::LateBindingCapable;
-    type Ck<X> = <X as StarkGenericConfig>::Challenge;
-    type Cgr<X> = <X as StarkGenericConfig>::Challenger;
-
-    // SAFETY: caller verified TypeId::of::<SC>() == TypeId::of::<KB>().
-    let gkr_kb: &[crate::logup_gkr::LogUpGkrProof<Ck<KB>>] =
-        unsafe { core::mem::transmute(gkr_proofs) };
-    let openings_kb: &[crate::types::LogUpRowOpening<Ck<KB>>] =
-        unsafe { core::mem::transmute(row_openings) };
-
-    let cfg = <KB as Default>::default();
-    let mut ch_kb: Cgr<KB> = cfg.challenger();
-
-    for (chip_idx, bytes) in late_binding_bytes.iter().enumerate() {
-        let num_vars = log_degrees[chip_idx];
-        let r_row: Vec<Ck<KB>> = gkr_kb[chip_idx].eval_point[..num_vars].to_vec();
-        let row_mle_values = openings_kb[chip_idx].main_at_r_row.clone();
-        let res = <KB as LateBindingCapable>::verify_chip_late_binding(
-            num_vars,
-            bytes,
-            &row_mle_values,
-            &mut ch_kb,
-            &|_| r_row.clone(),
-        );
-        if res.is_err() {
-            return false;
-        }
-    }
-    true
-}
-
-#[cfg(not(feature = "whir"))]
+/// Per-chip late-binding verifier — retired alongside the WHIR
+/// pipeline.  BaseFold's opening chain lives on
+/// `ShardProof.late_binding_jagged_proof`; this stub now always
+/// returns `true` because the BaseFold prover emits an empty
+/// per-chip `late_binding_proofs` vec that has nothing to check.
 pub(crate) fn try_verify_late_binding_proofs<SC>(
     _late_binding_bytes: &[Vec<u8>],
     _gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
@@ -926,7 +857,7 @@ where
 /// Phase 2c+ jagged late-binding verifier dispatch.  Returns `true`
 /// iff the bundle verifies, or if SC isn't a supported KB type
 /// (in which case there's nothing to verify).
-#[cfg(any(feature = "whir", feature = "basefold"))]
+#[cfg(feature = "basefold")]
 pub(crate) fn try_verify_jagged_late_binding_proof<SC, A>(
     chips: &[&crate::MachineChip<SC, A>],
     gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
@@ -955,7 +886,7 @@ where
     true
 }
 
-#[cfg(not(any(feature = "whir", feature = "basefold")))]
+#[cfg(not(feature = "basefold"))]
 pub(crate) fn try_verify_jagged_late_binding_proof<SC, A>(
     _chips: &[&crate::MachineChip<SC, A>],
     _gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
@@ -971,7 +902,7 @@ where
 
 /// Generic helper: TypeId-checked dispatch into jagged late-binding
 /// verify for a specific KB type.
-#[cfg(any(feature = "whir", feature = "basefold"))]
+#[cfg(feature = "basefold")]
 fn verify_jagged_for_kb<KB, SC, A>(
     chips: &[&crate::MachineChip<SC, A>],
     gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
@@ -983,8 +914,6 @@ where
     SC: 'static + StarkGenericConfig,
     A: crate::air::MachineAir<crate::Val<SC>>,
 {
-    #[cfg(feature = "whir")]
-    use crate::jagged_late_binding::verify_jagged_late_binding;
     type Ck<X> = <X as StarkGenericConfig>::Challenge;
     type Cgr<X> = <X as StarkGenericConfig>::Challenger;
 
@@ -1035,46 +964,23 @@ where
     let ch_concrete: &mut InnerChallenger =
         unsafe { core::mem::transmute(&mut ch_kb) };
 
-    // Compile-time + runtime dispatch (mirrors prover.rs).
-    #[cfg(all(feature = "basefold", not(feature = "whir")))]
-    let use_basefold = true;
-    #[cfg(all(feature = "whir", not(feature = "basefold")))]
-    let use_basefold = false;
-    #[cfg(all(feature = "basefold", feature = "whir"))]
-    let use_basefold =
-        std::env::var("ZIREN_USE_BASEFOLD").unwrap_or_default() == "1";
-
-    if use_basefold {
-        #[cfg(feature = "basefold")]
-        {
-            let _ = log_dense_size;
-            use crate::basefold_late_binding::jagged::{
-                JaggedBasefoldBundle, verify_jagged_basefold,
-            };
-            let Some(bundle) = JaggedBasefoldBundle::from_bytes(bundle_bytes) else {
-                return false;
-            };
-            return verify_jagged_basefold(
-                &chip_infos,
-                r_row_concrete,
-                &bundle,
-                ch_concrete,
-            );
-        }
-        #[cfg(not(feature = "basefold"))]
-        unreachable!()
-    }
-
-    #[cfg(feature = "whir")]
+    // BaseFold is the only production PCS — WHIR retired.
+    #[cfg(feature = "basefold")]
     {
-        verify_jagged_late_binding(
-            &chip_infos,
-            log_dense_size,
-            r_row_concrete,
-            bundle_bytes,
-            ch_concrete,
+        let _ = log_dense_size;
+        use crate::basefold_late_binding::jagged::{
+            JaggedBasefoldBundle, verify_jagged_basefold,
+        };
+        let Some(bundle) = JaggedBasefoldBundle::from_bytes(bundle_bytes) else {
+            return false;
+        };
+        return verify_jagged_basefold(&chip_infos, r_row_concrete, &bundle, ch_concrete);
+    }
+    #[cfg(not(feature = "basefold"))]
+    {
+        let _ = (chip_infos, log_dense_size, r_row_concrete, bundle_bytes, ch_concrete);
+        unreachable!(
+            "jagged late-binding verification requires the `basefold` feature"
         )
     }
-    #[cfg(not(feature = "whir"))]
-    unreachable!()
 }

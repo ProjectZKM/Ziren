@@ -1217,34 +1217,10 @@ where
 /// `TypeId` check guarantees `SC` *is* the matching concrete type, so
 /// `SC::Val`, `SC::Challenge`, and `SC::Challenger` are the
 /// associated types of `KoalaBearPoseidon2Inner`.
-#[cfg(feature = "whir")]
-fn try_compute_late_binding_proofs<SC>(
-    traces: &[RowMajorMatrix<Val<SC>>],
-    logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    log_degrees: &[usize],
-) -> Option<Vec<Vec<u8>>>
-where
-    SC: 'static + StarkGenericConfig,
-{
-    use std::any::TypeId;
-    use crate::kb31_poseidon2::{KoalaBearPoseidon2Inner, koala_bear_poseidon2::KoalaBearPoseidon2};
-
-    // Dispatch to the public-facing config first (the one core/recursion
-    // actually use).  Fall through to the inner config for completeness.
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
-        return prove_late_binding_for_kb::<KoalaBearPoseidon2, SC>(
-            traces, logup_gkr_proofs, log_degrees,
-        );
-    }
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2Inner>() {
-        return prove_late_binding_for_kb::<KoalaBearPoseidon2Inner, SC>(
-            traces, logup_gkr_proofs, log_degrees,
-        );
-    }
-    None
-}
-
-#[cfg(not(feature = "whir"))]
+/// Per-chip late-binding proofs (WHIR pipeline) — retired.  The
+/// BaseFold pipeline emits a single bundled `late_binding_jagged_proof`
+/// via `try_compute_jagged_late_binding_proof` instead, so this
+/// call site always returns `None` after the WHIR retirement.
 fn try_compute_late_binding_proofs<SC>(
     _traces: &[RowMajorMatrix<Val<SC>>],
     _logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
@@ -1256,114 +1232,22 @@ where
     None
 }
 
-/// Phase 3 helper: return an empty `OpeningProof<SC>` when SC is a
-/// supported KB config, `None` otherwise.  Dispatches via TypeId to
-/// the concrete `LateBindingCapable::empty_opening_proof` impl.
-#[cfg(feature = "whir")]
-fn try_compute_empty_opening_proof<SC>() -> Option<OpeningProof<SC>>
-where
-    SC: 'static + StarkGenericConfig,
-{
-    use std::any::TypeId;
-    use crate::kb31_poseidon2::{KoalaBearPoseidon2Inner, koala_bear_poseidon2::KoalaBearPoseidon2};
-    use crate::whir_late_binding::LateBindingCapable;
-
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
-        // SAFETY: TypeId equality guarantees layout-identical
-        // OpeningProof<SC> == OpeningProof<KoalaBearPoseidon2>.
-        let p = <KoalaBearPoseidon2 as LateBindingCapable>::empty_opening_proof();
-        return Some(unsafe { core::mem::transmute_copy::<_, OpeningProof<SC>>(&p) });
-    }
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2Inner>() {
-        let p = <KoalaBearPoseidon2Inner as LateBindingCapable>::empty_opening_proof();
-        return Some(unsafe { core::mem::transmute_copy::<_, OpeningProof<SC>>(&p) });
-    }
-    None
-}
-
-#[cfg(not(feature = "whir"))]
+/// Empty `OpeningProof<SC>` helper — retired alongside the WHIR
+/// pipeline.  BaseFold does not need an empty-opening-proof
+/// fallback because its opening bundle lives on
+/// `ShardProof.late_binding_jagged_proof`.
 fn try_compute_empty_opening_proof<SC>() -> Option<OpeningProof<SC>>
 where
     SC: 'static + StarkGenericConfig,
 {
     None
-}
-
-/// Generic helper: given that SC is known to match the concrete KB
-/// type (TypeId checked by caller), transmute and dispatch via
-/// `LateBindingCapable`.  Encapsulates the unsafe transmute so the
-/// dispatch function above only needs to call this per supported KB
-/// type.
-#[cfg(feature = "whir")]
-fn prove_late_binding_for_kb<KB, SC>(
-    traces: &[RowMajorMatrix<Val<SC>>],
-    logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    log_degrees: &[usize],
-) -> Option<Vec<Vec<u8>>>
-where
-    KB: 'static + StarkGenericConfig + Default + crate::whir_late_binding::LateBindingCapable,
-    SC: 'static + StarkGenericConfig,
-{
-    use crate::whir_late_binding::LateBindingCapable;
-    type Vk<X> = <X as StarkGenericConfig>::Val;
-    type Ck<X> = <X as StarkGenericConfig>::Challenge;
-    type Cgr<X> = <X as StarkGenericConfig>::Challenger;
-
-    // SAFETY: caller verified TypeId::of::<SC>() == TypeId::of::<KB>().
-    let traces_kb: &[RowMajorMatrix<Vk<KB>>] =
-        unsafe { core::mem::transmute(traces) };
-    let gkr_kb: &[crate::logup_gkr::LogUpGkrProof<Ck<KB>>] =
-        unsafe { core::mem::transmute(logup_gkr_proofs) };
-
-    let cfg = <KB as Default>::default();
-    let mut ch_kb: Cgr<KB> = cfg.challenger();
-
-    let t = std::time::Instant::now();
-    let mut serialized_per_chip: Vec<Vec<u8>> = Vec::with_capacity(traces_kb.len());
-    let mut total_bytes = 0usize;
-    let mut total_commit_ms: u128 = 0;
-    let mut total_open_ms: u128 = 0;
-    for (chip_idx, trace) in traces_kb.iter().enumerate() {
-        let num_vars = log_degrees[chip_idx];
-        let r_row: Vec<Ck<KB>> = gkr_kb[chip_idx].eval_point[..num_vars].to_vec();
-        let (_values, bytes, timings) =
-            <KB as LateBindingCapable>::prove_chip_late_binding(
-                trace,
-                &mut ch_kb,
-                &|_| r_row.clone(),
-            );
-        total_bytes += bytes.len();
-        total_commit_ms += timings.commit_ms;
-        total_open_ms += timings.open_ms;
-        serialized_per_chip.push(bytes);
-    }
-    let elapsed_ms = t.elapsed().as_millis();
-    let serialize_ms = elapsed_ms.saturating_sub(total_commit_ms + total_open_ms);
-    {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
-        {
-            let _ = writeln!(
-                f,
-                "LATE_BINDING total={}ms chips={} bytes={} commit={}ms open={}ms serialize={}ms",
-                elapsed_ms,
-                traces_kb.len(),
-                total_bytes,
-                total_commit_ms,
-                total_open_ms,
-                serialize_ms,
-            );
-        }
-    }
-    Some(serialized_per_chip)
 }
 
 /// Phase 2c+ jagged late-binding dispatch: TypeId-checks SC against
 /// the supported KoalaBear configs, then runs the
 /// `prove_jagged_late_binding` one-call API.  Returns serialized
 /// bundle bytes if SC matches, `None` otherwise.
-#[cfg(any(feature = "whir", feature = "basefold"))]
+#[cfg(feature = "basefold")]
 fn try_compute_jagged_late_binding_proof<SC>(
     traces: &[RowMajorMatrix<Val<SC>>],
     chips: &[&MachineChip<SC, impl MachineAir<Val<SC>>>],
@@ -1389,7 +1273,7 @@ where
     None
 }
 
-#[cfg(not(any(feature = "whir", feature = "basefold")))]
+#[cfg(not(feature = "basefold"))]
 fn try_compute_jagged_late_binding_proof<SC>(
     _traces: &[RowMajorMatrix<Val<SC>>],
     _chips: &[&MachineChip<SC, impl MachineAir<Val<SC>>>],
@@ -1405,7 +1289,7 @@ where
 /// Generic helper: TypeId-checked dispatch into jagged late-binding
 /// for a specific KB type.  Caller verified the TypeId match, so the
 /// transmute is sound.
-#[cfg(any(feature = "whir", feature = "basefold"))]
+#[cfg(feature = "basefold")]
 fn prove_jagged_for_kb<KB, SC>(
     traces: &[RowMajorMatrix<Val<SC>>],
     chips: &[&MachineChip<SC, impl MachineAir<Val<SC>>>],
@@ -1416,8 +1300,6 @@ where
     KB: 'static + StarkGenericConfig + Default,
     SC: 'static + StarkGenericConfig,
 {
-    #[cfg(feature = "whir")]
-    use crate::jagged_late_binding::prove_jagged_late_binding;
     type Vk<X> = <X as StarkGenericConfig>::Val;
     type Ck<X> = <X as StarkGenericConfig>::Challenge;
     type Cgr<X> = <X as StarkGenericConfig>::Challenger;
@@ -1459,53 +1341,30 @@ where
 
     let t = std::time::Instant::now();
 
-    // Runtime + compile-time dispatch:
-    //   - basefold-only build: always BaseFold.
-    //   - whir-only build: always WHIR.
-    //   - both built: ZIREN_USE_BASEFOLD=1 selects BaseFold (default WHIR
-    //     for back-compat with existing recursion verifier).
-    #[cfg(all(feature = "basefold", not(feature = "whir")))]
-    let use_basefold = true;
-    #[cfg(all(feature = "whir", not(feature = "basefold")))]
-    let use_basefold = false;
-    #[cfg(all(feature = "basefold", feature = "whir"))]
-    let use_basefold =
-        std::env::var("ZIREN_USE_BASEFOLD").unwrap_or_default() == "1";
-
-    let (bytes, path_label) = if use_basefold {
-        #[cfg(feature = "basefold")]
-        {
-            // chip_traces_concrete is &[..] but prove_jagged_basefold
-            // takes by-ref slice — clone into Vec only at the call.
-            let chip_traces_owned: Vec<(String, RowMajorMatrix<InnerVal>)> =
-                chip_traces_concrete.to_vec();
-            // Dispatch picks the per-chip streaming path when
-            // `ZIREN_E3_PER_CHIP=1` (memory-optimised: no dense_q,
-            // no w materialisation during round 0 of the jagged
-            // sumcheck — saves ~20N bytes on wide workloads).  Default
-            // stays on the dense path for bit-for-bit equivalence
-            // with existing test fixtures.
-            use crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch;
-            let bundle = prove_jagged_basefold_dispatch(
-                &chip_traces_owned,
-                r_row_concrete,
-                ch_concrete,
-            );
-            (bundle.to_bytes(), "BASEFOLD")
-        }
-        #[cfg(not(feature = "basefold"))]
-        unreachable!()
-    } else {
-        #[cfg(feature = "whir")]
-        {
-            (
-                prove_jagged_late_binding(chip_traces_concrete, r_row_concrete, ch_concrete),
-                "WHIR",
-            )
-        }
-        #[cfg(not(feature = "whir"))]
-        unreachable!()
+    // BaseFold is the only production PCS path — the WHIR pipeline
+    // was retired in favour of the Jagged+BaseFold stack.
+    #[cfg(feature = "basefold")]
+    let bytes = {
+        // `chip_traces_concrete` is `&[..]` but `prove_jagged_basefold`
+        // takes by-ref slice — clone into Vec only at the call.
+        let chip_traces_owned: Vec<(String, RowMajorMatrix<InnerVal>)> =
+            chip_traces_concrete.to_vec();
+        // Dispatch picks the per-chip streaming path when
+        // `ZIREN_E3_PER_CHIP=1` (memory-optimised: no dense_q, no
+        // `w` materialisation during round 0 of the jagged sumcheck
+        // — saves ~20N bytes on wide workloads).  Default stays on
+        // the dense path for bit-for-bit equivalence with existing
+        // test fixtures.
+        use crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch;
+        let bundle =
+            prove_jagged_basefold_dispatch(&chip_traces_owned, r_row_concrete, ch_concrete);
+        bundle.to_bytes()
     };
+    #[cfg(not(feature = "basefold"))]
+    let bytes: Vec<u8> = unreachable!(
+        "jagged late-binding requires the `basefold` feature; \
+         workspace builds enable it by default"
+    );
 
     let elapsed_ms = t.elapsed().as_millis();
     {
@@ -1515,8 +1374,7 @@ where
         {
             let _ = writeln!(
                 f,
-                "LATE_BINDING_JAGGED path={} total={}ms chips={} bytes={}",
-                path_label,
+                "LATE_BINDING_JAGGED path=BASEFOLD total={}ms chips={} bytes={}",
                 elapsed_ms,
                 chips.len(),
                 bytes.len(),
