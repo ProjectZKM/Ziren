@@ -286,6 +286,85 @@ where
     }
 }
 
+// ── Per-chip LogUp-GKR (prover-shape) ────────────────────────────
+
+impl<C> Witnessable<C> for zkm_stark::logup_gkr::LogUpGkrLayerProof<InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable =
+        crate::per_chip_logup_gkr::PerChipLogUpGkrLayerProofVariable<C::F, C::EF>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let sumcheck_rounds: Vec<[Ext<C::F, C::EF>; 4]> = self
+            .sumcheck_rounds
+            .iter()
+            .map(|arr| {
+                [
+                    arr[0].read(builder),
+                    arr[1].read(builder),
+                    arr[2].read(builder),
+                    arr[3].read(builder),
+                ]
+            })
+            .collect();
+        let final_evals: [Ext<C::F, C::EF>; 4] = [
+            self.final_evals[0].read(builder),
+            self.final_evals[1].read(builder),
+            self.final_evals[2].read(builder),
+            self.final_evals[3].read(builder),
+        ];
+        crate::per_chip_logup_gkr::PerChipLogUpGkrLayerProofVariable {
+            sumcheck_rounds,
+            final_evals,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        for arr in self.sumcheck_rounds.iter() {
+            for v in arr.iter() {
+                v.write(witness);
+            }
+        }
+        for v in self.final_evals.iter() {
+            v.write(witness);
+        }
+    }
+}
+
+impl<C> Witnessable<C> for zkm_stark::logup_gkr::LogUpGkrProof<InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable =
+        crate::per_chip_logup_gkr::PerChipLogUpGkrProofVariable<C::F, C::EF>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let root = (self.root.0.read(builder), self.root.1.read(builder));
+        let layers = self.layers.read(builder);
+        let eval_point = self.eval_point.read(builder);
+        let leaf_claim = (
+            self.leaf_claim.0.read(builder),
+            self.leaf_claim.1.read(builder),
+        );
+        crate::per_chip_logup_gkr::PerChipLogUpGkrProofVariable {
+            root,
+            layers,
+            eval_point,
+            leaf_claim,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.root.0.write(witness);
+        self.root.1.write(witness);
+        self.layers.write(witness);
+        self.eval_point.write(witness);
+        self.leaf_claim.0.write(witness);
+        self.leaf_claim.1.write(witness);
+    }
+}
+
 // ── Jagged-PCS proof types ───────────────────────────────────────
 
 impl<C> Witnessable<C> for JaggedDimensionMetadata<InnerVal>
