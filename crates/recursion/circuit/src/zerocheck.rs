@@ -29,11 +29,18 @@ use std::marker::PhantomData;
 use p3_air::{Air, BaseAir};
 use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
-use zkm_stark::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
+use zkm_stark::{
+    air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError, ShardOpenedValues,
+};
 use zkm_stark::folder::PairWindow;
 use zkm_stark::septic_digest::SepticDigest;
 
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
+use crate::challenger::FieldChallengerVariable;
+use crate::logup_gkr::observe_ext_slice;
+use crate::logup_proof::LogUpEvaluations;
+use crate::partial_sumcheck::PartialSumcheckProof;
+use crate::sumcheck::verify_sumcheck;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
 /// In-circuit "≥" indicator for `eval_point` ≥ `threshold` in
@@ -253,6 +260,310 @@ where
         };
         chip.eval(&mut folder);
         builder.eval(folder.accumulator)
+    }
+
+    /// Full zerocheck-phase verifier for a single shard.
+    ///
+    /// Replays the BaseFold zerocheck IOP on the in-circuit
+    /// transcript: samples the per-chip constraint-folding scalar,
+    /// the GKR-batch-open challenge, and the chip-RLC scalar; for
+    /// each chip, batches the constraint accumulator with the
+    /// padded-row mask and the chip's main+preprocessed openings;
+    /// asserts the cross-chip RLC matches the prover's claimed
+    /// evaluation; reduces the GKR-side modifier into the zerocheck
+    /// `claimed_sum`; runs [`verify_sumcheck`]; and observes the
+    /// per-chip openings into the transcript so the next phase
+    /// (jagged PCS opening) sees a consistent challenger state.
+    ///
+    /// # Arguments
+    ///
+    ///   * `shard_chips` — ordered slice of chips active in this
+    ///     shard, parallel to `opened_values.chips`.
+    ///   * `opened_values` — per-chip preprocessed/main openings
+    ///     at the sumcheck-reduced point.
+    ///   * `chip_degrees` — per-chip "degree point" (big-endian
+    ///     boolean coordinates of the chip's height); used by
+    ///     [`full_geq`] to compute the padded-row mask.  In the
+    ///     SP1 reference these live on `ChipOpenedValues::degree`;
+    ///     in Ziren they're passed separately until a
+    ///     `BasefoldChipOpenedValues` type is introduced.
+    ///   * `cumulative_sums` — per-chip local cumulative-sum value
+    ///     from the LogUp-GKR sumcheck output (the BaseFold
+    ///     pipeline replaced the legacy permutation-column opening
+    ///     with this).
+    ///   * `global_cumulative_sums` — per-chip global
+    ///     cumulative-sum digest references; same source as
+    ///     `cumulative_sums`.
+    ///   * `gkr_evaluations` — output of [`verify_logup_gkr`]:
+    ///     the GKR-emitted evaluation point + per-chip column
+    ///     evaluations the zerocheck reduction targets.
+    ///   * `zerocheck_proof` — the zerocheck sumcheck proof
+    ///     itself.
+    ///   * `pcs_max_log_row_count` — the PCS verifier's
+    ///     `max_log_row_count` parameter; the zerocheck reduced
+    ///     point's dimension is asserted equal to this.
+    ///   * `public_values` — shard public values (passed through
+    ///     to per-chip constraint folders).
+    ///   * `challenger` — in-circuit transcript.
+    ///
+    /// # Reference
+    ///
+    /// Mirrors [`StarkVerifier::verify_zerocheck`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:111-249).
+    /// Substitutions:
+    ///   - `BTreeSet<Chip>` → ordered `&[&MachineChip<SC, A>]`.
+    ///   - `openings.degree` (SP1's per-opening field) →
+    ///     separate `chip_degrees` parameter (Ziren's
+    ///     `ChipOpenedValues` doesn't yet carry this BaseFold-
+    ///     pipeline field; introduce
+    ///     `BasefoldChipOpenedValues` in a follow-up step).
+    ///   - `Mle::full_lagrange_eval` → [`eq_eval`].
+    ///   - `Point::add_dimension` → `Vec::push`.
+    ///   - `observe_variable_length_extension_slice` →
+    ///     [`observe_ext_slice`] (Ziren's variable-length
+    ///     observation helper).
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
+    pub fn verify_zerocheck<'a, FC>(
+        builder: &mut Builder<C>,
+        shard_chips: &[&MachineChip<SC, A>],
+        opened_values: &'a ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        chip_degrees: &[Vec<Ext<C::F, C::EF>>],
+        cumulative_sums: &'a [Ext<C::F, C::EF>],
+        global_cumulative_sums: &'a [SepticDigest<Felt<C::F>>],
+        gkr_evaluations: &LogUpEvaluations<Ext<C::F, C::EF>>,
+        zerocheck_proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
+        pcs_max_log_row_count: usize,
+        public_values: &'a [Felt<C::F>],
+        challenger: &mut FC,
+    ) where
+        FC: FieldChallengerVariable<C, C::Bit>,
+    {
+        assert_eq!(
+            shard_chips.len(),
+            opened_values.chips.len(),
+            "verify_zerocheck: chip count mismatch (chips={}, openings={})",
+            shard_chips.len(),
+            opened_values.chips.len(),
+        );
+        assert_eq!(
+            shard_chips.len(),
+            chip_degrees.len(),
+            "verify_zerocheck: chip_degrees count mismatch",
+        );
+        assert_eq!(
+            shard_chips.len(),
+            cumulative_sums.len(),
+            "verify_zerocheck: cumulative_sums count mismatch",
+        );
+        assert_eq!(
+            shard_chips.len(),
+            global_cumulative_sums.len(),
+            "verify_zerocheck: global_cumulative_sums count mismatch",
+        );
+
+        let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
+        let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
+
+        // (1) Sample per-phase challenges from the transcript.
+        let alpha = challenger.sample_ext(builder);
+        let gkr_batch_open_challenge: SymbolicExt<C::F, C::EF> =
+            challenger.sample_ext(builder).into();
+        let lambda = challenger.sample_ext(builder);
+
+        // (2) eq(zerocheck reduced point, GKR-emitted point).
+        let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = zerocheck_proof
+            .point_and_eval
+            .0
+            .iter()
+            .map(|x| (*x).into())
+            .collect();
+        let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            gkr_evaluations.point.iter().map(|x| (*x).into()).collect();
+        let zerocheck_eq_val = eq_eval::<C>(&gkr_point_symbolic, &point_symbolic);
+
+        // (3) Pre-compute the GKR-batch-open challenge powers,
+        // sized for the widest chip's combined preprocessed+main
+        // width — those powers index across both opening vectors.
+        let max_elements = shard_chips
+            .iter()
+            .map(|chip| chip.width() + chip.preprocessed_width())
+            .max()
+            .unwrap_or(0);
+        let gkr_batch_open_challenge_powers: Vec<SymbolicExt<C::F, C::EF>> =
+            std::iter::successors(Some(SymbolicExt::ONE), |prev| {
+                Some(*prev * gkr_batch_open_challenge)
+            })
+            .skip(1)
+            .take(max_elements)
+            .collect();
+
+        // (4) Per-chip RLC accumulator.  After the loop this
+        // equals zerocheck_proof.point_and_eval.1 (the prover's
+        // claimed evaluation at the sumcheck-reduced point).
+        let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
+
+        for (((chip, openings), degree), (cum_sum, global_sum)) in shard_chips
+            .iter()
+            .zip(opened_values.chips.iter())
+            .zip(chip_degrees.iter())
+            .zip(cumulative_sums.iter().zip(global_cumulative_sums.iter()))
+        {
+            // (4a) Shape sanity check on the chip's openings.
+            verify_opening_shape::<C, SC, A>(chip, openings)
+                .expect("verify_zerocheck: chip opening shape mismatch");
+
+            // (4b) Sumcheck point dimension == PCS max_log_row_count.
+            let dimension = zerocheck_proof.point_and_eval.0.len();
+            assert_eq!(
+                dimension, pcs_max_log_row_count,
+                "verify_zerocheck: zerocheck point dimension {} != pcs max_log_row_count {}",
+                dimension, pcs_max_log_row_count,
+            );
+
+            // (4c) Build the extended sumcheck point (one extra
+            // zero coordinate) for the geq comparison.
+            let mut proof_point_extended = point_symbolic.clone();
+            proof_point_extended.push(SymbolicExt::ZERO);
+
+            // (4d) Assert each degree coordinate is boolean and
+            // that all-but-the-first coordinates are zero unless
+            // the first is also zero (the BaseFold-pipeline
+            // big-endian-degree convention).
+            let degree_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+                degree.iter().map(|x| (*x).into()).collect();
+            for (i, x) in degree_symbolic.iter().enumerate() {
+                builder.assert_ext_eq(*x * (*x - SymbolicExt::ONE), SymbolicExt::ZERO);
+                if i >= 1 {
+                    builder.assert_ext_eq(
+                        *x * *degree_symbolic.first().unwrap(),
+                        SymbolicExt::ZERO,
+                    );
+                }
+            }
+
+            // (4e) Padded-row mask + adjustment.
+            let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
+            let padded_row_adjustment = Self::compute_padded_row_adjustment(
+                builder,
+                chip,
+                alpha,
+                public_values,
+                cum_sum,
+                global_sum,
+            );
+
+            // (4f) Constraint accumulator at the sumcheck point
+            // minus the padded-row contribution.
+            let constraint_eval_ext = Self::eval_constraints(
+                builder,
+                chip,
+                openings,
+                alpha,
+                public_values,
+                cum_sum,
+                global_sum,
+            );
+            let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
+            let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
+            let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val;
+
+            // (4g) Batch the chip's openings (main first, then
+            // preprocessed) by the pre-computed challenge powers.
+            let openings_batch: SymbolicExt<C::F, C::EF> = openings
+                .main
+                .local
+                .iter()
+                .chain(openings.preprocessed.local.iter())
+                .copied()
+                .zip(
+                    gkr_batch_open_challenge_powers
+                        .iter()
+                        .take(
+                            openings.main.local.len()
+                                + openings.preprocessed.local.len(),
+                        )
+                        .copied(),
+                )
+                .map(|(opening, power)| {
+                    let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
+                    o_sym * power
+                })
+                .sum();
+
+            // (4h) Fold this chip's contribution into the cross-
+            // chip RLC.
+            let rlc_sym: SymbolicExt<C::F, C::EF> = rlc_eval.into();
+            let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
+            let new_rlc: SymbolicExt<C::F, C::EF> = rlc_sym * lambda_sym
+                + zerocheck_eq_val * (constraint_eval + openings_batch);
+            rlc_eval = builder.eval(new_rlc);
+        }
+
+        // (5) Assert the cross-chip RLC matches the prover's
+        // claimed evaluation at the sumcheck-reduced point.
+        builder.assert_ext_eq(rlc_eval, zerocheck_proof.point_and_eval.1);
+
+        // (6) Reduce the GKR-side openings into the zerocheck
+        // claimed_sum modifier (lambda-RLC across chips).
+        let zerocheck_sum_modifications_from_gkr: Vec<SymbolicExt<C::F, C::EF>> = gkr_evaluations
+            .chip_openings
+            .values()
+            .map(|chip_evaluation| {
+                chip_evaluation
+                    .main_trace_evaluations
+                    .iter()
+                    .copied()
+                    .chain(
+                        chip_evaluation
+                            .preprocessed_trace_evaluations
+                            .as_ref()
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[])
+                            .iter()
+                            .copied(),
+                    )
+                    .zip(gkr_batch_open_challenge_powers.iter().copied())
+                    .map(|(opening, power)| {
+                        let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
+                        o_sym * power
+                    })
+                    .sum::<SymbolicExt<C::F, C::EF>>()
+            })
+            .collect();
+
+        let zero_sym: SymbolicExt<C::F, C::EF> = zero_ext.into();
+        let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
+        let zerocheck_sum_modification: SymbolicExt<C::F, C::EF> =
+            zerocheck_sum_modifications_from_gkr
+                .iter()
+                .fold(zero_sym, |acc, modification| lambda_sym * acc + *modification);
+
+        // (7) Assert the prover's zerocheck claimed_sum equals
+        // the GKR-derived modification.
+        builder.assert_ext_eq(zerocheck_proof.claimed_sum, zerocheck_sum_modification);
+
+        // Silence the `one_ext` unused-binding lint (kept for
+        // parity with the SP1 reference, which threads it
+        // through future intermediate values).
+        let _ = one_ext;
+
+        // (8) Verify the zerocheck sumcheck proof itself.
+        verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
+
+        // (9) Observe the per-chip openings into the transcript
+        // so subsequent phases (jagged PCS opening) replay a
+        // consistent challenger state.
+        let len_felt: Felt<C::F> =
+            builder.constant(C::F::from_canonical_usize(shard_chips.len()));
+        challenger.observe(builder, len_felt);
+        for opening in opened_values.chips.iter() {
+            observe_ext_slice::<C, FC>(
+                builder,
+                challenger,
+                &opening.preprocessed.local,
+            );
+            observe_ext_slice::<C, FC>(builder, challenger, &opening.main.local);
+        }
     }
 }
 
