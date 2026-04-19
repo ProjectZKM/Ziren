@@ -42,6 +42,33 @@ pub struct ShardCommitment<C> {
     pub quotient_commit: Option<C>,
 }
 
+impl<C: Clone> ShardCommitment<C> {
+    /// Iterator over the non-main commitments present on this
+    /// shard.  In the BaseFold pipeline (no permutation trace, no
+    /// quotient trace) this is empty; in the legacy pipeline it
+    /// yields the permutation commitment then the quotient
+    /// commitment.
+    ///
+    /// Refactors the `if permutation_commit.is_some() { ... }`
+    /// idiom into `for commit in auxiliary_commits() { ... }`
+    /// without breaking the legacy field layout.  Lands ahead of
+    /// the full field rename so the is_some retirement can be
+    /// done in one coordinated change set later.
+    pub fn auxiliary_commits(&self) -> impl Iterator<Item = &C> {
+        self.permutation_commit
+            .iter()
+            .chain(self.quotient_commit.iter())
+    }
+
+    /// `true` when no auxiliary (permutation + quotient)
+    /// commitments are present — the case for the BaseFold
+    /// pipeline.  Replaces the common `permutation_commit.is_none()
+    /// && quotient_commit.is_none()` check.
+    pub fn has_no_auxiliary_commits(&self) -> bool {
+        self.permutation_commit.is_none() && self.quotient_commit.is_none()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "T: Serialize"))]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
