@@ -193,3 +193,117 @@ technical debt but **not blocking any production functionality**:
   laid out in that shape.
 
 Future iterations can use this document as the porting checklist.
+
+## Post-E4 follow-ups — status snapshot
+
+After the initial porting roadmap (E4) landed the in-circuit
+verifier skeleton, several follow-up items remain.  This section
+tracks their status as of the most recent commit sweep.
+
+### Landed after E4
+
+| Item | Commit | Notes |
+|---|---|---|
+| Wire phase 2/3/4 in `BasefoldShardVerifier::verify_shard` | `3ab04de` | Replaces `unimplemented!()` stubs with real calls to per-phase verifiers. |
+| `BasefoldChipOpenedValues` / `BasefoldShardOpenedValues` bundle + `eval_constraints_basefold` variant | `0af8425` | Retires the parallel-slice plumbing the orchestrator previously threaded. |
+| `RecursiveJaggedEvalConfig` trait + trivial evaluator | `0af8425` | Typed abstraction over the jagged-eval sub-protocol. |
+| `Witnessable` impls for BaseFold proof types | `a9d5b79` | `UnivariatePolynomial`, `PartialSumcheckProof`, `LogupGkrProof`, `BasefoldChipOpenedValues`, `RecursiveBasefoldProof`, etc. |
+| FRI query-phase sampling + sibling-pair emission | `6c90e3c` | Samples `num_queries` query indices; promotes per-round sibling pairs for `emit_basefold_query_chain`. |
+| Variable-arity FRI plumbing | `7499f71` | `log_arity` field on `FriCommitPhaseProofStepVariable`; verifier reads per-round arity from proof. |
+| `is_div_active` / `is_div_soundness` populated in C++ FFI trace gen | `e7a0480` | `alu_base.hpp` / `alu_ext.hpp` mirror the Rust preprocessed-trace logic so `--features sys` (GPU) paths produce identical traces. |
+
+### Open follow-ups
+
+**Jagged-eval sumcheck-based strategy.**  The
+`RecursiveJaggedEvalSumcheckConfig` trait impl is a placeholder
+type with no implementation.  The sumcheck-based evaluator
+mirrors upstream's
+[`RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:91-171)
+and needs two primitives Ziren doesn't yet have:
+
+  - In-circuit `BranchingProgram` evaluation — the upstream's
+    `BranchingProgram::new(z_row, z_trace).eval(first, second)`.
+  - `C::prefix_sum_checks` — the recursion-compiler helper that
+    emits the per-prefix-sum Horner reduction with witness felts.
+
+Both are ~100 LOC of DSL-IR emission each.  Until landed, the
+jagged PCS orchestrator uses the trivial evaluator (which
+returns zero plus an empty prefix-sum witness).  The soundness
+implication is that the `jagged_eval * expected_eval ==
+sumcheck.eval` assertion only holds when callers supply a
+matching `expected_eval == 0` or a consistency check elsewhere.
+
+**FRI query-phase Merkle binding + beta threading.**  The
+current `RecursiveBasefoldVerifier::verify_untrusted_evaluations`
+body samples query indices and gathers sibling pairs but does
+not yet:
+
+  - Verify each round's Merkle path against the sampled leaf
+    position — needs `RecursiveMerkleTreeTcs` scaffolding.  The
+    existing `emit_merkle_path` helper is the primitive the
+    wiring will call.
+  - Execute the fold chain via `emit_basefold_query_chain` under
+    the per-round betas.  The betas are sampled during the
+    commit-phase replay but bound to `_betas` and dropped; a
+    follow-up binds them and threads into the query loop.
+  - Assert the final folded value equals `final_poly`.
+
+Without these, the verifier's transcript state is correct but
+the PCS soundness chain is not closed end-to-end.
+
+**Honest `dummy_basefold`.**  The current
+`dummy_basefold_shard_proof_variable` produces a structurally-
+valid proof but all fields carry zero payloads — the verifier
+fails real content assertions.  An honest dummy matching the
+prover's actual output needs the FRI query-phase and jagged-eval
+follow-ups above.
+
+**`is_some()` shim retirement.**  Four-step cleanup landing in
+its own series:
+
+1. Switch `examples/aggregation/host` to `BasefoldShardVerifier`.
+2. Rename the prover's `permutation_commit` / `quotient_commit`
+   fields to a single `auxiliary_commits: Vec` so the "is None"
+   branch collapses to `is_empty()`.
+3. Delete the `if permutation_commit.is_some()` blocks in
+   `dummy_vk_and_shard_proof` and `zkm_stark::verifier`.
+4. Delete `RecursiveVerifierConstraintFolder` (the legacy 4-batch
+   folder) and `StarkVerifier::verify_shard` once no caller
+   remains.
+
+Estimate: ~600-1000 LOC delta, ~3-5 iterations.  Independent of
+the BaseFold verifier work — must happen after it is
+wire-complete so the BaseFold path can be swapped in first.
+
+**VK map regeneration.**  The existing `vk_map.bin` /
+`dummy_vk_map.bin` were computed for the pre-BaseFold circuit;
+the rewrite uses `VERIFY_VK=false` as a temporary bypass.  Full
+regeneration runs `build_compress_vks` and takes multiple days
+on production hardware.  Scheduled for the pre-release sweep.
+
+**Recursion-compiler dead-branch divisions.**  The `DivF` in
+assert helpers + the runtime mult=0 guard + the `is_div_active`
+preprocessed column form the currently-shipping design.  A
+cleaner "skip division emission in dead Select branches"
+alternative would require compile-time branch-deadness analysis,
+which the compiler does not have.  The current design matches
+SP1's behaviour on identical DSL patterns, and the net cost is a
+single preprocessed column — the "fix" listed in earlier notes
+is not an obvious architectural improvement.  Kept as-is.
+
+**Security/performance roadmap alignment.**  The April-2026
+three-phase roadmap ("WHIR default → LogUp-GKR → formal
+verification") is largely subsumed by the BaseFold migration:
+
+  - Phase 1 (WHIR default + degree reduction) — replaced by the
+    BaseFold+jagged architecture, which provides the same
+    security posture with better performance.
+  - Phase 2 (LogUp-GKR + recursion) — LogUp-GKR is integrated;
+    the recursion verifier for it is the work tracked in this
+    document.
+  - Phase 3 (formal verification + 128-bit) — unchanged; still
+    future work.
+
+No direct action required on the roadmap document itself; the
+in-tree state reflects the new path.
+
