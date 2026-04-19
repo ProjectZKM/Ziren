@@ -35,6 +35,7 @@ pub mod basefold_witness;
 pub mod jagged_circuit;
 pub mod jagged_eval;
 pub mod jagged_eval_primitives;
+pub mod per_chip_logup_gkr;
 pub mod logup_gkr;
 pub mod logup_proof;
 pub mod partial_sumcheck;
