@@ -258,8 +258,8 @@ fails real content assertions.  An honest dummy matching the
 prover's actual output needs the FRI query-phase and jagged-eval
 follow-ups above.
 
-**`is_some()` shim retirement.**  Four-step cleanup landing in
-its own series:
+**`is_some()` shim retirement.**  Four-step cleanup that must
+land as a single coordinated change set:
 
 1. Switch `examples/aggregation/host` to `BasefoldShardVerifier`.
 2. Rename the prover's `permutation_commit` / `quotient_commit`
@@ -271,9 +271,21 @@ its own series:
    folder) and `StarkVerifier::verify_shard` once no caller
    remains.
 
-Estimate: ~600-1000 LOC delta, ~3-5 iterations.  Independent of
-the BaseFold verifier work — must happen after it is
-wire-complete so the BaseFold path can be swapped in first.
+Why this must land as a unit: step 3 deletes the defensive
+`is_some()` branches that handle the legacy `None`-producing
+prover output; step 2 changes the prover to emit the new shape;
+step 1 rewires aggregation to the new verifier.  Each in
+isolation breaks either the legacy path (step 3 without 2) or
+the BaseFold path (step 2 without 4).  The only safe ordering
+is: land the full sequence atomically after the BaseFold
+verifier is wire-complete (i.e., after FRI query-phase Merkle
+binding + real query-bit threading land).
+
+Estimate: ~600-1000 LOC delta, single iteration once
+dependencies are met.  Production aggregation runs on the
+legacy path in the meantime with no observable impact — the
+`is_some()` branches correctly short-circuit when the prover
+emits `None`.
 
 **VK map regeneration.**  The existing `vk_map.bin` /
 `dummy_vk_map.bin` were computed for the pre-BaseFold circuit;
