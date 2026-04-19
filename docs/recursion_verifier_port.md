@@ -133,6 +133,41 @@ takes a generic `SP1FieldConfigVariable<C>` parameter.
 8. **`dummy_basefold`** + test fixture rewrite — remove the
    pragmatic `is_some()` adapter shims.
 
+   **Step 9 status (afe22da+)**: `dummy_basefold_shard_proof_variable`
+   landed in `crate::shard_basefold` — produces a structurally-
+   valid in-circuit `BasefoldShardProofVariable` from a
+   `BasefoldProofShape` config (chip count, max log row count,
+   round counts, etc.).  Sufficient for shape-driven circuit
+   compilation tests and witness-stream layout work; not yet a
+   "honest dummy" that passes verification (full verification
+   needs the FRI query phase + jagged-eval sub-protocol that
+   land in follow-up steps).
+
+   **`is_some()` shim retirement** is a separate cleanup that
+   touches the legacy verifier path's live callers (the prover,
+   the host verifier, build_compress_vks, the shape-cluster
+   dedup logic).  Plan:
+
+   1. Switch `examples/aggregation/host` to the BaseFold shard
+      verifier when phase 2/3/4 wiring lands in
+      `BasefoldShardVerifier::verify_shard`.
+   2. Switch the prover's commitment emit path to always emit
+      `permutation_commit = None`, `quotient_commit = None`
+      (and rename the field to `auxiliary_commits: Vec` so the
+      "is None" branch becomes `is_empty()`).
+   3. Delete the `if permutation_commit.is_some()` and `if
+      quotient_commit.is_some()` blocks in
+      `crate::stark::dummy_vk_and_shard_proof` (legacy
+      compatibility path) and `zkm_stark::verifier` (live
+      verifier path).
+   4. Delete `RecursiveVerifierConstraintFolder` (legacy 4-batch
+      folder) and `StarkVerifier::verify_shard` once no caller
+      remains.
+
+   Estimate: ~600-1000 LOC delta across 5 files, ~3-5 careful
+   iterations.  Independent of E4 — requires the BaseFold
+   verifier to be wire-complete first.
+
 ## Iteration economics
 
 Realistic per-iteration progress: 200-400 lines of careful port +
