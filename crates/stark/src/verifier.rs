@@ -361,57 +361,66 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             })
             .collect::<Vec<_>>();
 
-        let perm_domains_points_and_opens = if permutation_commit.is_some() {
-            trace_domains
-                .iter()
-                .zip_eq(opened_values.chips.iter())
-                .map(|(domain, values)| {
-                    (
-                        *domain,
-                        vec![
-                            (zeta, values.permutation.local.clone()),
-                            (domain.next_point(zeta).unwrap(), values.permutation.next.clone()),
-                        ],
-                    )
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+        // Permutation + quotient are present in the legacy 4-batch
+        // FRI pipeline; absent in the BaseFold pipeline (which
+        // replaces them with a sumcheck-based binding + folded
+        // quotient).  The `Option::iter()` idiom naturally yields
+        // zero or one pass depending on which pipeline emitted
+        // the proof.
+        let perm_domains_points_and_opens: Vec<_> = permutation_commit
+            .iter()
+            .flat_map(|_| {
+                trace_domains
+                    .iter()
+                    .zip_eq(opened_values.chips.iter())
+                    .map(|(domain, values)| {
+                        (
+                            *domain,
+                            vec![
+                                (zeta, values.permutation.local.clone()),
+                                (
+                                    domain.next_point(zeta).unwrap(),
+                                    values.permutation.next.clone(),
+                                ),
+                            ],
+                        )
+                    })
+            })
+            .collect();
 
-        let quotient_chunk_domains = if quotient_commit.is_some() {
-            trace_domains
-                .iter()
-                .zip_eq(log_degrees.iter())
-                .zip_eq(log_quotient_degrees.iter())
-                .map(|((domain, log_degree), log_quotient_degree)| {
-                    let quotient_degree = 1 << log_quotient_degree;
-                    let quotient_domain =
-                        domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree));
-                    quotient_domain.split_domains(quotient_degree)
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+        let quotient_chunk_domains: Vec<_> = quotient_commit
+            .iter()
+            .flat_map(|_| {
+                trace_domains
+                    .iter()
+                    .zip_eq(log_degrees.iter())
+                    .zip_eq(log_quotient_degrees.iter())
+                    .map(|((domain, log_degree), log_quotient_degree)| {
+                        let quotient_degree = 1 << log_quotient_degree;
+                        let quotient_domain = domain
+                            .create_disjoint_domain(1 << (log_degree + log_quotient_degree));
+                        quotient_domain.split_domains(quotient_degree)
+                    })
+            })
+            .collect();
 
-        let quotient_domains_points_and_opens = if quotient_commit.is_some() {
-            proof
-                .opened_values
-                .chips
-                .iter()
-                .zip_eq(quotient_chunk_domains.iter())
-                .flat_map(|(values, qc_domains)| {
-                    values
-                        .quotient
-                        .iter()
-                        .zip_eq(qc_domains)
-                        .map(move |(values, q_domain)| (*q_domain, vec![(zeta, values.clone())]))
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+        let quotient_domains_points_and_opens: Vec<_> = quotient_commit
+            .iter()
+            .flat_map(|_| {
+                proof
+                    .opened_values
+                    .chips
+                    .iter()
+                    .zip_eq(quotient_chunk_domains.iter())
+                    .flat_map(|(values, qc_domains)| {
+                        values.quotient.iter().zip_eq(qc_domains).map(
+                            move |(values, q_domain)| {
+                                (*q_domain, vec![(zeta, values.clone())])
+                            },
+                        )
+                    })
+            })
+            .collect();
 
         let mut rounds = vec![
             (vk.commit.clone(), preprocessed_domains_points_and_opens),

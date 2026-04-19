@@ -416,8 +416,12 @@ where
             })
             .collect::<Vec<_>>();
 
-        // In WHIR mode, permutation_commit/quotient_commit are None and the
-        // corresponding opened values are empty. Only build these mats when present.
+        // In the BaseFold pipeline, permutation_commit / quotient_commit
+        // are None and the corresponding opened values are empty.
+        // Kept as an explicit `if` ternary rather than the
+        // `Option::iter().flat_map(...)` idiom because the
+        // permutation-mats body borrows `&mut builder`, which
+        // cannot escape a FnMut closure.
         let perm_domains_points_and_opens = if permutation_commit.is_some() {
             trace_domains
                 .iter()
@@ -447,25 +451,25 @@ where
             })
             .collect::<Vec<_>>();
 
-        let quotient_domains_points_and_opens = if quotient_commit.is_some() {
-            proof
-                .opened_values
-                .chips
-                .iter()
-                .zip_eq(quotient_chunk_domains.iter())
-                .flat_map(|(values, qc_domains)| {
-                    values.quotient.iter().zip_eq(qc_domains).map(move |(values, q_domain)| {
-                        TwoAdicPcsMatsVariable::<C> {
-                            domain: *q_domain,
-                            points: vec![zeta],
-                            values: vec![values.clone()],
-                        }
+        let quotient_domains_points_and_opens: Vec<_> = quotient_commit
+            .iter()
+            .flat_map(|_| {
+                proof
+                    .opened_values
+                    .chips
+                    .iter()
+                    .zip_eq(quotient_chunk_domains.iter())
+                    .flat_map(|(values, qc_domains)| {
+                        values.quotient.iter().zip_eq(qc_domains).map(
+                            move |(values, q_domain)| TwoAdicPcsMatsVariable::<C> {
+                                domain: *q_domain,
+                                points: vec![zeta],
+                                values: vec![values.clone()],
+                            },
+                        )
                     })
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+            })
+            .collect();
 
         // Create the pcs rounds.
         let prep_commit = vk.commitment;
