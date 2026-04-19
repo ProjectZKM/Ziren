@@ -205,19 +205,30 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     };
 
     // Per-chip dummy LogUp-GKR proofs sized to match the BaseFold
-    // prover's output shape.  The sumcheck-layers count grows
-    // 0..log_degree (matching the verifier's
-    // `expected_sumcheck_vars = layer_idx` invariant) and the
-    // eval_point dimension equals log_degree.  All values zero —
-    // intended only for shape-fixture parity with the real
-    // prover; doesn't pass real verification (the assertion
-    // chain in `verify_per_chip_logup_gkr` rejects all-zero
+    // prover's output.  The leaf count is
+    //   `(trace_height * interactions_per_row).next_power_of_two()`
+    // where `interactions_per_row =
+    //   (sends.len() + receives.len()).max(1).next_power_of_two()`.
+    // From `m = leaves.len().trailing_zeros()`,
+    //   `m = log_degree + log2(interactions_per_row)`.
+    // All values zero — shape-parity only; doesn't pass real
+    // verification (verify_per_chip_logup_gkr rejects all-zero
     // proofs at the leaf-claim equality step).
     let logup_gkr_proofs_dummy: Vec<zkm_stark::logup_gkr::LogUpGkrProof<InnerChallenge>> = shape
         .inner
         .iter()
-        .map(|(_, log_degree)| {
-            let m = *log_degree as usize;
+        .map(|(name, log_degree)| {
+            let chip_idx = chip_ordering[name];
+            let chip = &shard_chips[chip_idx];
+            let raw = chip.sends().len() + chip.receives().len();
+            let interactions_per_row = raw.max(1).next_power_of_two();
+            let log_iprow = (interactions_per_row as u32).trailing_zeros() as usize;
+            let trace_part = if *log_degree as usize + log_iprow == 0 {
+                0
+            } else {
+                *log_degree as usize + log_iprow
+            };
+            let m = trace_part;
             let layers: Vec<zkm_stark::logup_gkr::LogUpGkrLayerProof<InnerChallenge>> = (0..m)
                 .map(|layer_idx| zkm_stark::logup_gkr::LogUpGkrLayerProof {
                     sumcheck_rounds: vec![[InnerChallenge::ZERO; 4]; layer_idx],

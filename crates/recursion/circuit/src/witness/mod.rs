@@ -145,14 +145,15 @@ where
         let public_values = self.public_values.read(builder);
         let chip_ordering = self.chip_ordering.clone();
 
-        // `basefold_logup_gkr_proofs` stays `None` until the
-        // dummy_vk_and_shard_proof path generates proof structures
-        // that match the real prover's per-chip layer/sumcheck
-        // counts.  The layer count depends on each chip's
-        // interaction count (leaves.len().trailing_zeros()), not
-        // just log_degree, so a shape-parity dummy needs chip
-        // metadata the current dummy generator doesn't consult.
-        let basefold_logup_gkr_proofs = None;
+        // Read the optional per-chip LogUp-GKR proofs.  The
+        // updated `dummy_vk_and_shard_proof` (sized via
+        // log_degree + log2(interactions_per_row)) now agrees
+        // with real-proof shape, so this read is
+        // synchronisation-safe.
+        let basefold_logup_gkr_proofs = self
+            .logup_gkr_proofs
+            .as_ref()
+            .map(|proofs| proofs.iter().map(|p| p.read(builder)).collect());
 
         ShardProofVariable {
             commitment,
@@ -169,6 +170,11 @@ where
         self.opened_values.write(witness);
         self.opening_proof.write(witness);
         self.public_values.write(witness);
+        if let Some(proofs) = self.logup_gkr_proofs.as_ref() {
+            for p in proofs.iter() {
+                p.write(witness);
+            }
+        }
     }
 }
 
