@@ -24,3 +24,19 @@ shard proof-and-verify only).
 - Proof size scales ~1.57x between the two examples (4.97→7.80 MB)
   for ~1.95x cycle ratio — proof size is more a function of shard
   count / chip count than raw cycle count.
+
+## Post-LogUp-GKR-recursion landing (commit 26bfec3)
+
+Re-measured after the recursion verifier started binding the
+LogUp-GKR soundness chain (root → layered descent → leaf claim)
+inside the recursion circuit.  Adds zero-cost overhead at the
+host-prover-verify level (the new code lives behind the
+`StarkVerifier::verify_shard` recursion path, not the host
+verifier path).
+
+| Example | e2e Wall | Δ vs baseline |
+|---|---|---|
+| fibonacci | 8.60 s | +0.32 s (+4%, within noise) |
+| keccak-precompile | 18.97 s | -0.57 s (-3%, within noise) |
+
+Both examples continue to prove-and-verify successfully.
