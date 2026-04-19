@@ -31,6 +31,7 @@ pub(crate) mod utils;
 pub mod basefold_chip_opened_values;
 pub mod basefold_constraint_folder;
 pub mod basefold_verifier;
+pub mod basefold_witness;
 pub mod jagged_circuit;
 pub mod jagged_eval;
 pub mod logup_gkr;
