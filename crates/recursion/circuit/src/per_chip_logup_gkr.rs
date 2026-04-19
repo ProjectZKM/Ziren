@@ -28,7 +28,12 @@
 //! with `EF` replaced by `Ext<F, EF>` for the in-circuit witness
 //! cells.
 
-use zkm_recursion_compiler::ir::Ext;
+use p3_field::{Field, PrimeCharacteristicRing};
+use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
+
+use crate::challenger::FieldChallengerVariable;
+use crate::logup_gkr::observe_ext_element;
+use crate::CircuitConfig;
 
 /// In-circuit variable of [`zkm_stark::logup_gkr::LogUpGkrLayerProof`].
 ///
@@ -71,6 +76,187 @@ pub struct PerChipLogUpGkrProofVariable<F, EF> {
     /// Final leaf-layer fraction claim at `eval_point`:
     /// `(N(eval_point), D(eval_point))`.
     pub leaf_claim: (Ext<F, EF>, Ext<F, EF>),
+}
+
+/// Evaluate a degree-3 univariate polynomial (given as four
+/// evaluation-form coefficients at `x = 0, 1, 2, 3`) at `r` via
+/// Lagrange interpolation.  Matches
+/// [`zkm_stark::logup_gkr::eval_degree3_poly`].
+fn emit_eval_degree3_poly<C: CircuitConfig>(
+    coeffs: &[Ext<C::F, C::EF>; 4],
+    r: Ext<C::F, C::EF>,
+) -> SymbolicExt<C::F, C::EF> {
+    let r_sym: SymbolicExt<C::F, C::EF> = r.into();
+    // Lagrange basis at x = 0, 1, 2, 3.  Compute the scalar
+    // inverses (1/2, 1/6) in `C::EF` at circuit-compile time and
+    // lift them to symbolic constants.
+    let one_ef = C::EF::ONE;
+    let two_ef = one_ef + one_ef;
+    let three_ef = two_ef + one_ef;
+    let inv_2_ef = two_ef.inverse();
+    let inv_6_ef = (two_ef * three_ef).inverse();
+    let neg_inv_6_ef = C::EF::ZERO - inv_6_ef;
+    let neg_inv_2_ef = C::EF::ZERO - inv_2_ef;
+
+    let one: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
+    let two: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(two_ef);
+    let three: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(three_ef);
+    let half: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(inv_2_ef);
+    let neg_half: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(neg_inv_2_ef);
+    let six_inv: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(inv_6_ef);
+    let neg_six_inv: SymbolicExt<C::F, C::EF> = SymbolicExt::Const(neg_inv_6_ef);
+
+    let c0_sym: SymbolicExt<C::F, C::EF> = coeffs[0].into();
+    let c1_sym: SymbolicExt<C::F, C::EF> = coeffs[1].into();
+    let c2_sym: SymbolicExt<C::F, C::EF> = coeffs[2].into();
+    let c3_sym: SymbolicExt<C::F, C::EF> = coeffs[3].into();
+
+    let l0 = (r_sym - one) * (r_sym - two) * (r_sym - three) * neg_six_inv;
+    let l1 = r_sym * (r_sym - two) * (r_sym - three) * half;
+    let l2 = r_sym * (r_sym - one) * (r_sym - three) * neg_half;
+    let l3 = r_sym * (r_sym - one) * (r_sym - two) * six_inv;
+
+    c0_sym * l0 + c1_sym * l1 + c2_sym * l2 + c3_sym * l3
+}
+
+/// Full-Lagrange equality at two points `a, b` (MSB-first index
+/// ordering — matches [`zkm_stark::logup_gkr::eq_eval_msb_first`]).
+///
+/// Computes `Π_k ((1-a_k)(1-b_k) + a_k · b_k)`.
+fn emit_eq_eval_msb_first<C: CircuitConfig>(
+    a: &[SymbolicExt<C::F, C::EF>],
+    b: &[SymbolicExt<C::F, C::EF>],
+) -> SymbolicExt<C::F, C::EF> {
+    assert_eq!(a.len(), b.len(), "eq_eval_msb_first: dimension mismatch");
+    let one = SymbolicExt::ONE;
+    a.iter()
+        .zip(b.iter())
+        .fold(one, |acc, (ai, bi)| acc * ((one - *ai) * (one - *bi) + *ai * *bi))
+}
+
+/// Verify a per-chip LogUp-GKR proof in-circuit.  Port of
+/// [`zkm_stark::logup_gkr::verify_logup_gkr`], emitting the same
+/// soundness chain as in-circuit constraints.
+///
+/// Returns the reconstructed `(eval_point, leaf_num, leaf_denom)`
+/// triple so the caller can bind the leaf claim against the
+/// main-trace openings at `eval_point`'s row coordinates.
+///
+/// Soundness checks emitted:
+///
+///   1. Root fraction observed into transcript.
+///   2. Per layer: lambda sampled, `cur_claim = λ·N + D` initialised,
+///      sumcheck identity `round[0] + round[1] == cur_claim` asserted
+///      per round, all round coefficients observed, challenge sampled,
+///      `cur_claim` updated via degree-3 Lagrange interpolation.
+///   3. After each layer's sumcheck: final-evals `(fn0, fn1, fd0, fd1)`
+///      bound via `cur_claim == eq(cur_point, r*_rev) · g` where
+///      `g = λ·(fn0·fd1 + fd0·fn1) + fd0·fd1`.
+///   4. Line challenge `t` sampled, `(cur_num, cur_denom)` folded.
+///   5. Final: `cur_point == proof.eval_point` (element-wise) and
+///      `(cur_num, cur_denom) == proof.leaf_claim`.
+pub fn verify_per_chip_logup_gkr<C, FC>(
+    builder: &mut Builder<C>,
+    proof: &PerChipLogUpGkrProofVariable<C::F, C::EF>,
+    challenger: &mut FC,
+) -> (
+    Vec<Ext<C::F, C::EF>>,
+    Ext<C::F, C::EF>,
+    Ext<C::F, C::EF>,
+)
+where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit>,
+{
+    // (1) Observe the root fraction.
+    observe_ext_element::<C, FC>(builder, challenger, proof.root.0);
+    observe_ext_element::<C, FC>(builder, challenger, proof.root.1);
+
+    let mut cur_num: Ext<C::F, C::EF> = proof.root.0;
+    let mut cur_denom: Ext<C::F, C::EF> = proof.root.1;
+    let mut cur_point: Vec<SymbolicExt<C::F, C::EF>> = Vec::new();
+
+    for layer in proof.layers.iter() {
+        // (2) Sample lambda, init claim.
+        let lambda = challenger.sample_ext(builder);
+        let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
+        let cur_num_sym: SymbolicExt<C::F, C::EF> = cur_num.into();
+        let cur_denom_sym: SymbolicExt<C::F, C::EF> = cur_denom.into();
+        let mut cur_claim_sym: SymbolicExt<C::F, C::EF> =
+            lambda_sym * cur_num_sym + cur_denom_sym;
+
+        // Per-round sumcheck replay.
+        let mut r_star: Vec<Ext<C::F, C::EF>> = Vec::with_capacity(layer.sumcheck_rounds.len());
+        for round in layer.sumcheck_rounds.iter() {
+            // Sumcheck identity: `round(0) + round(1) == cur_claim`.
+            let r0_sym: SymbolicExt<C::F, C::EF> = round[0].into();
+            let r1_sym: SymbolicExt<C::F, C::EF> = round[1].into();
+            let sum_01 = r0_sym + r1_sym;
+            let expected: Ext<C::F, C::EF> = builder.eval(cur_claim_sym);
+            let sum_ext: Ext<C::F, C::EF> = builder.eval(sum_01);
+            builder.assert_ext_eq(sum_ext, expected);
+
+            // Observe all four coefficients.
+            for v in round.iter() {
+                observe_ext_element::<C, FC>(builder, challenger, *v);
+            }
+            let r = challenger.sample_ext(builder);
+            r_star.push(r);
+            cur_claim_sym = emit_eval_degree3_poly::<C>(round, r);
+        }
+
+        let fn0 = layer.final_evals[0];
+        let fn1 = layer.final_evals[1];
+        let fd0 = layer.final_evals[2];
+        let fd1 = layer.final_evals[3];
+
+        // (3) Equality binding.  `r_star_rev` reverses the
+        // sumcheck-fold-order r_star so the pairing matches the
+        // prover's natural-order point propagation.
+        let r_star_rev_sym: Vec<SymbolicExt<C::F, C::EF>> =
+            r_star.iter().rev().map(|&v| v.into()).collect();
+        let eq_at = emit_eq_eval_msb_first::<C>(&cur_point, &r_star_rev_sym);
+        let fn0_sym: SymbolicExt<C::F, C::EF> = fn0.into();
+        let fn1_sym: SymbolicExt<C::F, C::EF> = fn1.into();
+        let fd0_sym: SymbolicExt<C::F, C::EF> = fd0.into();
+        let fd1_sym: SymbolicExt<C::F, C::EF> = fd1.into();
+        let g = lambda_sym * (fn0_sym * fd1_sym + fd0_sym * fn1_sym)
+            + fd0_sym * fd1_sym;
+        let expected_claim: Ext<C::F, C::EF> = builder.eval(eq_at * g);
+        let cur_claim_ext: Ext<C::F, C::EF> = builder.eval(cur_claim_sym);
+        builder.assert_ext_eq(cur_claim_ext, expected_claim);
+
+        // (4) Observe final_evals, sample line challenge, fold.
+        for v in layer.final_evals.iter() {
+            observe_ext_element::<C, FC>(builder, challenger, *v);
+        }
+        let t = challenger.sample_ext(builder);
+        let t_sym: SymbolicExt<C::F, C::EF> = t.into();
+        let one = SymbolicExt::ONE;
+        cur_num = builder.eval((one - t_sym) * fn0_sym + t_sym * fn1_sym);
+        cur_denom = builder.eval((one - t_sym) * fd0_sym + t_sym * fd1_sym);
+
+        // Propagate point: r_star (reversed) + t at the end.
+        cur_point = r_star.iter().rev().map(|&v| v.into()).collect();
+        cur_point.push(t_sym);
+    }
+
+    // (5) Final bindings.
+    assert_eq!(
+        cur_point.len(),
+        proof.eval_point.len(),
+        "per-chip LogUp-GKR: eval_point dimension mismatch",
+    );
+    for (sym, ext) in cur_point.iter().zip(proof.eval_point.iter()) {
+        let lhs_ext: Ext<C::F, C::EF> = builder.eval(*sym);
+        builder.assert_ext_eq(lhs_ext, *ext);
+    }
+    builder.assert_ext_eq(cur_num, proof.leaf_claim.0);
+    builder.assert_ext_eq(cur_denom, proof.leaf_claim.1);
+
+    let eval_point_ext: Vec<Ext<C::F, C::EF>> =
+        cur_point.iter().map(|s| builder.eval(*s)).collect();
+    (eval_point_ext, cur_num, cur_denom)
 }
 
 #[cfg(test)]
