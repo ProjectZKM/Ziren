@@ -64,6 +64,7 @@ use std::marker::PhantomData;
 
 use p3_air::Air;
 use p3_field::{Algebra, TwoAdicField};
+use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use zkm_stark::{air::MachineAir, MachineChip};
 
@@ -80,6 +81,36 @@ use crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier;
 use crate::recursive_stacked_pcs::{RecursiveMultilinearPcsVerifier, RecursiveStackedPcsVerifier};
 use crate::zerocheck::BasefoldZerocheckVerifier;
 use crate::{CircuitConfig, KoalaBearFriParametersVariable};
+
+/// Host-side BaseFold shard proof — the concrete type the prover
+/// produces and the recursion harness feeds into the verifier.
+///
+/// Field layout mirrors [`BasefoldShardProofVariable`] one-to-one
+/// (the host-side variant uses raw `F` / `EF` where the variable
+/// uses `Felt<F>` / `Ext<F, EF>`), with a `Witnessable` impl that
+/// reads the host proof through the builder and emits the
+/// in-circuit variable proof with field layout preserved.
+///
+/// The `opened_values` bundle rides alongside the proof rather
+/// than inside it — the shard verifier's `verify_shard` takes the
+/// proof and the opened-values separately because the BaseFold
+/// pipeline emits them through different transcript slots.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "F: Serialize, EF: Serialize"))]
+#[serde(bound(deserialize = "F: Deserialize<'de>, EF: Deserialize<'de>"))]
+pub struct BasefoldShardProof<F, EF> {
+    /// Commitment digest to the main trace.
+    pub main_commitment: [F; 8],
+    /// Per-chip (name, height-bits) list.  Height bits are big-
+    /// endian boolean coordinates of chip height.
+    pub chip_height_bits: Vec<(String, Vec<F>)>,
+    /// Public values for the shard.
+    pub public_values: Vec<F>,
+    /// LogUp-GKR sumcheck-stack proof.
+    pub logup_gkr_proof: crate::logup_proof::LogupGkrProof<F, EF>,
+    /// Zerocheck sumcheck reduction proof.
+    pub zerocheck_proof: crate::partial_sumcheck::PartialSumcheckProof<EF>,
+}
 
 /// In-circuit shard proof variable — the BaseFold-pipeline 5-field
 /// shape (replaces the legacy

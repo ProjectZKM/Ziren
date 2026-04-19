@@ -394,6 +394,47 @@ where
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
 }
 
+// ── Top-level BaseFold shard proof ──────────────────────────────
+
+impl<C> Witnessable<C> for crate::shard_basefold::BasefoldShardProof<InnerVal, InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable = crate::shard_basefold::BasefoldShardProof<
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
+    >;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let main_commitment: [Felt<C::F>; 8] =
+            core::array::from_fn(|i| self.main_commitment[i].read(builder));
+        let chip_height_bits: Vec<(String, Vec<Felt<C::F>>)> = self
+            .chip_height_bits
+            .iter()
+            .map(|(name, bits)| (name.clone(), bits.read(builder)))
+            .collect();
+        crate::shard_basefold::BasefoldShardProof {
+            main_commitment,
+            chip_height_bits,
+            public_values: self.public_values.read(builder),
+            logup_gkr_proof: self.logup_gkr_proof.read(builder),
+            zerocheck_proof: self.zerocheck_proof.read(builder),
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        for f in self.main_commitment.iter() {
+            f.write(witness);
+        }
+        for (_name, bits) in self.chip_height_bits.iter() {
+            bits.write(witness);
+        }
+        self.public_values.write(witness);
+        self.logup_gkr_proof.write(witness);
+        self.zerocheck_proof.write(witness);
+    }
+}
+
 impl<C, const DIGEST_ELEMS: usize> Witnessable<C>
     for RecursiveBasefoldProof<InnerVal, InnerChallenge, DIGEST_ELEMS>
 where
