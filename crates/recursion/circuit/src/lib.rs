@@ -33,6 +33,7 @@ pub mod jagged_circuit;
 pub mod logup_gkr;
 pub mod logup_proof;
 pub mod partial_sumcheck;
+pub mod recursive_stacked_pcs;
 pub mod sumcheck;
 pub mod univariate;
 pub mod witness;
