@@ -583,6 +583,26 @@ where
         // the underlying shard proofs.
         let whir_mode = quotient_commit.is_none();
 
+        // BaseFold-pipeline: when per-chip LogUp-GKR proofs are
+        // present on the proof variable, run the per-chip
+        // verifier over each chip's proof.  This binds the LogUp
+        // soundness chain (root → layered descent → leaf claim
+        // at eval_point) inside the recursion circuit.
+        if let Some(per_chip_proofs) = proof.basefold_logup_gkr_proofs.as_ref() {
+            for (chip_proof, _chip) in per_chip_proofs.iter().zip(chips.iter()) {
+                let (_eval_point, _leaf_num, _leaf_denom) =
+                    crate::per_chip_logup_gkr::verify_per_chip_logup_gkr::<C, SC::FriChallengerVariable>(
+                        builder,
+                        chip_proof,
+                        challenger,
+                    );
+                // The leaf-claim binding against main-trace
+                // openings at `eval_point` is the next step;
+                // currently we only verify the GKR soundness
+                // chain, not the tie-back to the trace.
+            }
+        }
+
         for (chip, trace_domain, qc_domains, values) in
             izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)
         {
