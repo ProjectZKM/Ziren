@@ -60,11 +60,22 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
-    // Make a dummy commitment.
+    // Make a dummy commitment matching the real BaseFold prover's
+    // shape: `permutation_commit = None`, `quotient_commit = None`
+    // (see `crates/stark/src/prover.rs:783-784`).  The soundness
+    // work replaced permutation-phase opening with sumcheck-based
+    // binding (zerocheck + LogUp-GKR) and folded quotient terms into
+    // the FRI commit; neither commitment appears on the wire.
+    //
+    // The legacy 4-commit shape (Some, Some) is kept-compatible by
+    // the existing `if permutation_commit.is_some()` / `if
+    // quotient_commit.is_some()` guards inside `verify_shard`, which
+    // gracefully skip the corresponding PCS-mat construction +
+    // verification when None.
     let commitment = ShardCommitment {
         main_commit: dummy_commit(),
-        permutation_commit: Some(dummy_commit()),
-        quotient_commit: Some(dummy_commit()),
+        permutation_commit: None,
+        quotient_commit: None,
     };
 
     // Get dummy opened values by reading the chip ordering from the shape.
@@ -123,12 +134,32 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         }
     }
 
-    let batch_shapes = vec![
-        PolynomialBatchShape { shapes: preprocessed_batch_shape },
-        PolynomialBatchShape { shapes: main_batch_shape },
-        PolynomialBatchShape { shapes: permutation_batch_shape },
-        PolynomialBatchShape { shapes: quotient_batch_shape },
-    ];
+    // Build the batch_shapes list including only non-empty batches
+    // (matches the BaseFold-prover commit ordering: only commits to
+    // batches the wire actually carries).  After the BaseFold
+    // migration the permutation + quotient batches are empty on the
+    // wire — including them would crash `dummy_pcs_proof` at its
+    // `max().unwrap()` over the empty shapes vec.
+    //
+    // Permutation entries with `width = 0` add no PCS rows even if
+    // the batch itself is non-empty (single-chip case where the
+    // chip happens to have permutation_width 0); drop them so the
+    // batch-vs-real-shape comparison stays consistent.
+    let permutation_batch_shape: Vec<_> =
+        permutation_batch_shape.into_iter().filter(|s| s.width > 0).collect();
+    let mut batch_shapes = Vec::with_capacity(4);
+    if !preprocessed_batch_shape.is_empty() {
+        batch_shapes.push(PolynomialBatchShape { shapes: preprocessed_batch_shape });
+    }
+    if !main_batch_shape.is_empty() {
+        batch_shapes.push(PolynomialBatchShape { shapes: main_batch_shape });
+    }
+    if !permutation_batch_shape.is_empty() {
+        batch_shapes.push(PolynomialBatchShape { shapes: permutation_batch_shape });
+    }
+    if !quotient_batch_shape.is_empty() {
+        batch_shapes.push(PolynomialBatchShape { shapes: quotient_batch_shape });
+    }
 
     let fri_queries = machine.config().fri_config().num_queries;
     let log_blowup = machine.config().fri_config().log_blowup;
@@ -193,13 +224,16 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
     let main =
         AirOpenedValues { local: vec![EF::ZERO; main_width], next: vec![EF::ZERO; main_width] };
 
-    let permutation_width = chip.permutation_width();
-    let permutation = AirOpenedValues {
-        local: vec![EF::ZERO; permutation_width * <EF as p3_field::BasedVectorSpace<F>>::DIMENSION],
-        next: vec![EF::ZERO; permutation_width * <EF as p3_field::BasedVectorSpace<F>>::DIMENSION],
-    };
-    let quotient_width = chip.quotient_width();
-    let quotient = (0..quotient_width).map(|_| vec![EF::ZERO; <EF as p3_field::BasedVectorSpace<F>>::DIMENSION]).collect::<Vec<_>>();
+    // Match the BaseFold-pipeline real prover: empty permutation +
+    // quotient opened values at the proof level (see
+    // `crates/stark/src/prover.rs:715-716`).  `chip.permutation_width()`
+    // / `chip.quotient_width()` still report nonzero values (those
+    // dimensions live inside the AIR for sumcheck constraint
+    // evaluation), but they're not on the proof wire.  This pairs
+    // with the `permutation_commit = None` / `quotient_commit = None`
+    // dummy commitment above.
+    let permutation = AirOpenedValues { local: vec![], next: vec![] };
+    let quotient: Vec<Vec<EF>> = vec![];
 
     ChipOpenedValues {
         preprocessed,
