@@ -67,6 +67,7 @@ use p3_field::{Algebra, TwoAdicField};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use zkm_stark::{air::MachineAir, MachineChip};
 
+use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
@@ -239,10 +240,7 @@ impl<P> BasefoldShardVerifier<P> {
         proof: &'a BasefoldShardProofVariable<C>,
         shard_chips: &[&MachineChip<SC, A>],
         chip_metadata: &LogupGkrShardChipMetadata,
-        chip_degrees: &[Vec<Ext<C::F, C::EF>>],
-        cumulative_sums: &'a [Ext<C::F, C::EF>],
-        global_cumulative_sums: &'a [zkm_stark::septic_digest::SepticDigest<Felt<C::F>>],
-        opened_values: &'a zkm_stark::ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
         insertion_points: &[usize],
         challenger: &mut FC,
         num_pv_elts: usize,
@@ -366,9 +364,6 @@ impl<P> BasefoldShardVerifier<P> {
             builder,
             shard_chips,
             opened_values,
-            chip_degrees,
-            cumulative_sums,
-            global_cumulative_sums,
             &logup_gkr_proof.logup_evaluations,
             zerocheck_proof,
             self.max_log_row_count,

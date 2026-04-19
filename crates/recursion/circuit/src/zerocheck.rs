@@ -30,11 +30,12 @@ use p3_air::{Air, BaseAir};
 use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use zkm_stark::{
-    air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError, ShardOpenedValues,
+    air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError,
 };
 use zkm_stark::folder::PairWindow;
 use zkm_stark::septic_digest::SepticDigest;
 
+use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::challenger::FieldChallengerVariable;
 use crate::logup_gkr::observe_ext_slice;
@@ -156,6 +157,33 @@ where
     Ok(())
 }
 
+/// Verify a chip's BaseFold-pipeline opening has the expected
+/// per-batch widths.  Mirrors [`verify_opening_shape`] but
+/// consumes the BaseFold-shape opening type.
+pub fn verify_opening_shape_basefold<C, SC, A>(
+    chip: &MachineChip<SC, A>,
+    opening: &crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+) -> Result<(), OpeningShapeError>
+where
+    C: CircuitConfig<F = SC::Val>,
+    SC: KoalaBearFriParametersVariable<C>,
+    A: MachineAir<C::F>,
+{
+    if opening.preprocessed.local.len() != chip.preprocessed_width() {
+        return Err(OpeningShapeError::PreprocessedWidthMismatch(
+            chip.preprocessed_width(),
+            opening.preprocessed.local.len(),
+        ));
+    }
+    if opening.main.local.len() != chip.width() {
+        return Err(OpeningShapeError::MainWidthMismatch(
+            chip.width(),
+            opening.main.local.len(),
+        ));
+    }
+    Ok(())
+}
+
 /// Zerocheck verifier wrapper that threads the trait bounds needed
 /// for [`MachineChip::eval`] dispatch through a [`BasefoldConstraintFolder`].
 ///
@@ -194,6 +222,70 @@ where
     /// chips that read them via that trait see consistent values
     /// (in the BaseFold pipeline these come from the LogUp-GKR
     /// sumcheck output, not a per-chip permutation column).
+    /// Variant of [`Self::eval_constraints`] consuming a
+    /// [`BasefoldChipOpenedValuesVariable`] (with the cumulative
+    /// sums and degree bundled into the opening).
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_constraints_basefold<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        opening: &'a crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+    ) -> Ext<C::F, C::EF> {
+        let preprocessed = PairWindow {
+            local: &opening.preprocessed.local,
+            next: &opening.preprocessed.local,
+        };
+        let main = PairWindow {
+            local: &opening.main.local,
+            next: &opening.main.local,
+        };
+        let mut folder = BasefoldConstraintFolder::<C> {
+            preprocessed,
+            main,
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum: &opening.local_cumulative_sum,
+            global_cumulative_sum: &opening.global_cumulative_sum,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    /// Variant of [`Self::compute_padded_row_adjustment`]
+    /// consuming a [`BasefoldChipOpenedValuesVariable`] (so the
+    /// per-chip cumulative-sum references come from the opening
+    /// rather than parallel slices).
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_padded_row_adjustment_basefold<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        opening: &'a crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+    ) -> Ext<C::F, C::EF> {
+        let main_width = chip.width();
+        let preproc_width = chip.preprocessed_width();
+        let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
+        let preproc_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; preproc_width];
+        let main_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main_width];
+        let mut folder = BasefoldConstraintFolder::<C> {
+            preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
+            main: PairWindow { local: &main_row, next: &main_row },
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum: &opening.local_cumulative_sum,
+            global_cumulative_sum: &opening.global_cumulative_sum,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn eval_constraints<'a>(
         builder: &mut Builder<C>,
@@ -326,10 +418,7 @@ where
     pub fn verify_zerocheck<'a, FC>(
         builder: &mut Builder<C>,
         shard_chips: &[&MachineChip<SC, A>],
-        opened_values: &'a ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-        chip_degrees: &[Vec<Ext<C::F, C::EF>>],
-        cumulative_sums: &'a [Ext<C::F, C::EF>],
-        global_cumulative_sums: &'a [SepticDigest<Felt<C::F>>],
+        opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
         gkr_evaluations: &LogUpEvaluations<Ext<C::F, C::EF>>,
         zerocheck_proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
         pcs_max_log_row_count: usize,
@@ -344,21 +433,6 @@ where
             "verify_zerocheck: chip count mismatch (chips={}, openings={})",
             shard_chips.len(),
             opened_values.chips.len(),
-        );
-        assert_eq!(
-            shard_chips.len(),
-            chip_degrees.len(),
-            "verify_zerocheck: chip_degrees count mismatch",
-        );
-        assert_eq!(
-            shard_chips.len(),
-            cumulative_sums.len(),
-            "verify_zerocheck: cumulative_sums count mismatch",
-        );
-        assert_eq!(
-            shard_chips.len(),
-            global_cumulative_sums.len(),
-            "verify_zerocheck: global_cumulative_sums count mismatch",
         );
 
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
@@ -402,14 +476,11 @@ where
         // claimed evaluation at the sumcheck-reduced point).
         let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
 
-        for (((chip, openings), degree), (cum_sum, global_sum)) in shard_chips
-            .iter()
-            .zip(opened_values.chips.iter())
-            .zip(chip_degrees.iter())
-            .zip(cumulative_sums.iter().zip(global_cumulative_sums.iter()))
-        {
+        for (chip, opening) in shard_chips.iter().zip(opened_values.chips.iter()) {
+            let degree = &opening.degree;
+
             // (4a) Shape sanity check on the chip's openings.
-            verify_opening_shape::<C, SC, A>(chip, openings)
+            verify_opening_shape_basefold::<C, SC, A>(chip, opening)
                 .expect("verify_zerocheck: chip opening shape mismatch");
 
             // (4b) Sumcheck point dimension == PCS max_log_row_count.
@@ -443,25 +514,22 @@ where
 
             // (4e) Padded-row mask + adjustment.
             let geq_val = full_geq::<C>(&degree_symbolic, &proof_point_extended);
-            let padded_row_adjustment = Self::compute_padded_row_adjustment(
+            let padded_row_adjustment = Self::compute_padded_row_adjustment_basefold(
                 builder,
                 chip,
+                opening,
                 alpha,
                 public_values,
-                cum_sum,
-                global_sum,
             );
 
             // (4f) Constraint accumulator at the sumcheck point
             // minus the padded-row contribution.
-            let constraint_eval_ext = Self::eval_constraints(
+            let constraint_eval_ext = Self::eval_constraints_basefold(
                 builder,
                 chip,
-                openings,
+                opening,
                 alpha,
                 public_values,
-                cum_sum,
-                global_sum,
             );
             let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
             let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
@@ -469,18 +537,18 @@ where
 
             // (4g) Batch the chip's openings (main first, then
             // preprocessed) by the pre-computed challenge powers.
-            let openings_batch: SymbolicExt<C::F, C::EF> = openings
+            let openings_batch: SymbolicExt<C::F, C::EF> = opening
                 .main
                 .local
                 .iter()
-                .chain(openings.preprocessed.local.iter())
+                .chain(opening.preprocessed.local.iter())
                 .copied()
                 .zip(
                     gkr_batch_open_challenge_powers
                         .iter()
                         .take(
-                            openings.main.local.len()
-                                + openings.preprocessed.local.len(),
+                            opening.main.local.len()
+                                + opening.preprocessed.local.len(),
                         )
                         .copied(),
                 )
