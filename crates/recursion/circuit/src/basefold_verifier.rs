@@ -819,7 +819,7 @@ where
         // emitted constraint chain covers the fold-math soundness
         // but not the commitment-binding soundness.
         let log_codeword_size = self.params.log_codeword_size();
-        let _query_indices: Vec<Vec<C::Bit>> = (0..self.params.num_queries)
+        let query_indices: Vec<Vec<C::Bit>> = (0..self.params.num_queries)
             .map(|_| challenger.sample_bits(builder, log_codeword_size))
             .collect();
 
@@ -872,15 +872,26 @@ where
                     });
 
                 // Initial subgroup element for this query.  The
-                // production path computes `g^bitrev(query_idx)`
-                // from the sampled bits via
-                // `exp_reverse_bits_len`; without a bound
-                // challenger-bit vector we use a placeholder
-                // constant until the bit-threading lands.
-                let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> = builder
-                    .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ONE);
-                let initial_idx_low_bit: zkm_recursion_compiler::prelude::Felt<C::F> =
-                    builder.eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
+                // `log_codeword_size` leading bits of the query
+                // index identify a codeword-domain position; the
+                // generator raised to `bitrev(bits)` is the
+                // corresponding subgroup element.  `exp_reverse_bits`
+                // emits the in-circuit Horner ladder that computes
+                // this against the sampled bit vector.
+                use p3_field::TwoAdicField;
+                let two_adic_generator: zkm_recursion_compiler::prelude::Felt<C::F> =
+                    builder.constant(C::F::two_adic_generator(log_codeword_size));
+                let bits_for_exp: Vec<C::Bit> =
+                    query_indices[query_idx][..log_codeword_size].to_vec();
+                let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> =
+                    C::exp_reverse_bits(builder, two_adic_generator, bits_for_exp);
+                // `initial_idx_low_bit` is unused by the fold
+                // chain op-sequence (the emitter threads its own
+                // sibling-pair ordering from the supplied pairs),
+                // but the signature keeps the slot for future
+                // low-bit-conditional swaps.
+                let initial_idx_low_bit: zkm_recursion_compiler::prelude::Felt<C::F> = builder
+                    .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
 
                 // Emit the fold-chain op sequence under the
                 // sampled betas.  Returned `folded` is the
