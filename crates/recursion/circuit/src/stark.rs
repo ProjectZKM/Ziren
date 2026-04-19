@@ -204,6 +204,35 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         chip_ordering: preprocessed_chip_ordering,
     };
 
+    // Per-chip dummy LogUp-GKR proofs sized to match the BaseFold
+    // prover's output shape.  The sumcheck-layers count grows
+    // 0..log_degree (matching the verifier's
+    // `expected_sumcheck_vars = layer_idx` invariant) and the
+    // eval_point dimension equals log_degree.  All values zero —
+    // intended only for shape-fixture parity with the real
+    // prover; doesn't pass real verification (the assertion
+    // chain in `verify_per_chip_logup_gkr` rejects all-zero
+    // proofs at the leaf-claim equality step).
+    let logup_gkr_proofs_dummy: Vec<zkm_stark::logup_gkr::LogUpGkrProof<InnerChallenge>> = shape
+        .inner
+        .iter()
+        .map(|(_, log_degree)| {
+            let m = *log_degree as usize;
+            let layers: Vec<zkm_stark::logup_gkr::LogUpGkrLayerProof<InnerChallenge>> = (0..m)
+                .map(|layer_idx| zkm_stark::logup_gkr::LogUpGkrLayerProof {
+                    sumcheck_rounds: vec![[InnerChallenge::ZERO; 4]; layer_idx],
+                    final_evals: [InnerChallenge::ZERO; 4],
+                })
+                .collect();
+            zkm_stark::logup_gkr::LogUpGkrProof {
+                root: (InnerChallenge::ZERO, InnerChallenge::ZERO),
+                layers,
+                eval_point: vec![InnerChallenge::ZERO; m],
+                leaf_claim: (InnerChallenge::ZERO, InnerChallenge::ZERO),
+            }
+        })
+        .collect();
+
     let shard_proof = ShardProof {
         commitment,
         opened_values,
@@ -211,7 +240,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         chip_ordering,
         public_values,
         zerocheck_proofs: None,
-        logup_gkr_proofs: None,
+        logup_gkr_proofs: Some(logup_gkr_proofs_dummy),
         logup_row_openings: None,
         late_binding_proofs: None,
         late_binding_jagged_proof: None,
