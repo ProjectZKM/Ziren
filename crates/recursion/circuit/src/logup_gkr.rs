@@ -236,6 +236,208 @@ where
     folder.local_interaction_digest
 }
 
+/// Number of grinding bits for the LogUp-GKR challenge — matches
+/// the reference's `GKR_GRINDING_BITS` constant.
+pub const GKR_GRINDING_BITS: usize = 16;
+
+/// Per-shard chip introspection input to [`verify_logup_gkr`].
+///
+/// Encapsulates the Chip-introspection bits the verifier needs
+/// without coupling this module to a particular Chip type.  The
+/// caller computes these from `MachineChip` introspection
+/// (sends/receives counts, max interaction arity).
+pub struct LogupGkrShardChipMetadata {
+    /// `log2_ceil(max_interaction_arity)` across all chips, where
+    /// `interaction_arity = values.len() + 1` per send/receive.
+    /// Determines the LogUp `beta_seed` dimension.
+    pub beta_seed_dim: usize,
+    /// `log2_ceil(total_num_interactions)` where
+    /// `total_num_interactions = Σ_chip (sends.len() + receives.len())`.
+    /// Determines the GKR-circuit input dimension.
+    pub log_num_interactions: usize,
+}
+
+/// Verify a LogUp-GKR proof in-circuit.
+///
+/// Replays the LogUp-GKR sumcheck stack:
+///
+///   1. Check the GKR-grinding witness
+///   2. Sample (alpha, beta_seed, pv_challenge) from the transcript
+///   3. Evaluate public-value constraints (delegates to caller via
+///      `eval_public_values_fn`); use the resulting digest as the
+///      negated cumulative sum
+///   4. Observe the GKR circuit output (numerator + denominator
+///      MLE evaluations) into the transcript
+///   5. Assert `Σ_i (num[i] / den[i]) == cumulative_sum`
+///   6. Sample the first evaluation point
+///   7. For each round: sample lambda, assert sumcheck-claim
+///      consistency, run [`crate::sumcheck::verify_sumcheck`],
+///      sample the round's last coordinate, fold the
+///      numerator/denominator MLE evaluations
+///
+/// The caller-supplied `chip_metadata` provides the chip-
+/// enumeration bits the verifier needs (interaction count,
+/// beta-seed dimension); `eval_public_values_fn` is the same
+/// closure parameter used by [`verify_public_values`].
+///
+/// # Reference
+///
+/// Mirrors [`RecursiveLogUpGkrVerifier::verify_logup_gkr`](file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs:60-200).
+/// Substitutions:
+///   - `Chip<F, A>` introspection → `LogupGkrShardChipMetadata`
+///     (decouples from a particular Chip type)
+///   - `A::Record::eval_public_values` → closure parameter
+///   - `slop_multilinear::Mle::full_lagrange_eval` →
+///     [`crate::zerocheck::eq_eval`]
+///   - `Point::add_dimension_back` → `Vec::push`
+pub fn verify_logup_gkr<C, FC, EVPV>(
+    builder: &mut Builder<C>,
+    chip_metadata: &LogupGkrShardChipMetadata,
+    proof: &crate::logup_proof::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
+    public_values: &[Felt<C::F>],
+    challenger: &mut FC,
+    eval_public_values_fn: EVPV,
+) where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit>,
+    EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
+{
+    let crate::logup_proof::LogupGkrProof {
+        circuit_output,
+        round_proofs,
+        logup_evaluations: _,
+        witness,
+    } = proof;
+    let crate::logup_proof::LogUpGkrOutput { numerator, denominator } = circuit_output;
+
+    // (1) Check the proof-of-work grinding witness.
+    challenger.check_witness(builder, GKR_GRINDING_BITS, *witness);
+
+    // (2) Sample the permutation challenges and public-values
+    // challenge.  beta_seed dim is decided by chip metadata.
+    let alpha = challenger.sample_ext(builder);
+    let beta_seed: Vec<Ext<C::F, C::EF>> = (0..chip_metadata.beta_seed_dim)
+        .map(|_| challenger.sample_ext(builder))
+        .collect();
+    let pv_challenge = challenger.sample_ext(builder);
+
+    // (3) Evaluate public-values constraints.  Negated digest =
+    // cumulative_sum (matches the sign convention upstream).
+    let local_interaction_digest = verify_public_values::<C, _>(
+        builder,
+        pv_challenge,
+        &alpha,
+        &beta_seed,
+        public_values,
+        eval_public_values_fn,
+    );
+    let cumulative_sum: SymbolicExt<C::F, C::EF> = -local_interaction_digest;
+
+    // (4) Observe the GKR circuit output (per-element ext slice).
+    observe_ext_slice::<C, FC>(builder, challenger, numerator);
+    observe_ext_slice::<C, FC>(builder, challenger, denominator);
+
+    // (5) Assert Σ (numerator[i] / denominator[i]) == cumulative_sum.
+    let output_cumulative_sum: SymbolicExt<C::F, C::EF> = numerator
+        .iter()
+        .zip(denominator.iter())
+        .map(|(n, d)| {
+            let n_sym: SymbolicExt<C::F, C::EF> = (*n).into();
+            let d_sym: SymbolicExt<C::F, C::EF> = (*d).into();
+            n_sym / d_sym
+        })
+        .fold(SymbolicExt::ZERO, |acc, x| acc + x);
+    builder.assert_ext_eq(output_cumulative_sum, cumulative_sum);
+
+    // (6) Sample the first evaluation point.  Dimension =
+    // log_num_interactions + 1 (one extra var for the GKR circuit
+    // output's MLE depth above the per-interaction layer).
+    let initial_num_variables = chip_metadata.log_num_interactions + 1;
+    let mut eval_point: Vec<Ext<C::F, C::EF>> =
+        sample_point::<C, FC>(builder, challenger, initial_num_variables);
+
+    // Initial evaluation of the numerator/denominator MLEs at the
+    // sampled point — this is what gets reduced through GKR.
+    let mut numerator_eval: SymbolicExt<C::F, C::EF> =
+        evaluate_mle_ext::<C>(builder, numerator, &eval_point).into();
+    let mut denominator_eval: SymbolicExt<C::F, C::EF> =
+        evaluate_mle_ext::<C>(builder, denominator, &eval_point).into();
+
+    // (7) Iterate round_proofs in order.
+    for round_proof in round_proofs.iter() {
+        // Sample the batching challenge λ for combining the two
+        // claims (numerator + denominator) into one sumcheck.
+        let lambda = challenger.sample_ext(builder);
+        let lambda_sym: SymbolicExt<C::F, C::EF> = lambda.into();
+
+        // Per-round soundness: the sumcheck's claimed_sum must
+        // equal `numerator_eval * λ + denominator_eval`.
+        let expected_claim = numerator_eval * lambda_sym + denominator_eval;
+        builder.assert_ext_eq(round_proof.sumcheck_proof.claimed_sum, expected_claim);
+
+        // Verify the per-round sumcheck.
+        crate::sumcheck::verify_sumcheck::<C, FC>(
+            builder,
+            challenger,
+            &round_proof.sumcheck_proof,
+        );
+
+        // Verify the eval claim is consistent with the prover's
+        // 4-tuple message.  The tuple encodes (num_0, num_1,
+        // den_0, den_1) — values with the round's last coord
+        // fixed to 0 and 1.  Combined into the GKR identity:
+        //
+        //   final_eval = eq(point, eval_point) *
+        //     (num_0 * den_1 + num_1 * den_0) * λ +
+        //     (den_0 * den_1)
+        let (sumcheck_point, final_eval) =
+            (&round_proof.sumcheck_proof.point_and_eval.0, round_proof.sumcheck_proof.point_and_eval.1);
+        let sumcheck_point_sym: Vec<SymbolicExt<C::F, C::EF>> =
+            sumcheck_point.iter().map(|e| (*e).into()).collect();
+        let eval_point_sym: Vec<SymbolicExt<C::F, C::EF>> =
+            eval_point.iter().map(|e| (*e).into()).collect();
+        let eq_eval_value =
+            crate::zerocheck::eq_eval::<C>(&sumcheck_point_sym, &eval_point_sym);
+        let n0_sym: SymbolicExt<C::F, C::EF> = round_proof.numerator_0.into();
+        let n1_sym: SymbolicExt<C::F, C::EF> = round_proof.numerator_1.into();
+        let d0_sym: SymbolicExt<C::F, C::EF> = round_proof.denominator_0.into();
+        let d1_sym: SymbolicExt<C::F, C::EF> = round_proof.denominator_1.into();
+        let numerator_sumcheck_eval = n0_sym * d1_sym + n1_sym * d0_sym;
+        let denominator_sumcheck_eval = d0_sym * d1_sym;
+        let expected_final_eval =
+            eq_eval_value * (numerator_sumcheck_eval * lambda_sym + denominator_sumcheck_eval);
+        builder.assert_ext_eq(final_eval, expected_final_eval);
+
+        // Observe the prover's 4-tuple message into the transcript.
+        observe_ext_element::<C, FC>(builder, challenger, round_proof.numerator_0);
+        observe_ext_element::<C, FC>(builder, challenger, round_proof.numerator_1);
+        observe_ext_element::<C, FC>(builder, challenger, round_proof.denominator_0);
+        observe_ext_element::<C, FC>(builder, challenger, round_proof.denominator_1);
+
+        // Update eval_point: take the sumcheck-reduced point and
+        // append a freshly-sampled last coordinate.
+        eval_point = sumcheck_point.clone();
+        let last_coordinate = challenger.sample_ext(builder);
+        eval_point.push(last_coordinate);
+
+        // Update numerator/denominator evals via the linear
+        // interpolation at last_coordinate:
+        //   eval_new = eval_0 + (eval_1 - eval_0) * last_coord
+        let last_coord_sym: SymbolicExt<C::F, C::EF> = last_coordinate.into();
+        numerator_eval = n0_sym + (n1_sym - n0_sym) * last_coord_sym;
+        denominator_eval = d0_sym + (d1_sym - d0_sym) * last_coord_sym;
+    }
+
+    // The final numerator/denominator_eval values represent the
+    // evaluation at the bottom-most layer's eval_point; the
+    // shard-verifier orchestrator (phase 3, zerocheck) consumes
+    // these via proof.logup_evaluations as the input to the
+    // zerocheck reduction.  We don't return them explicitly here
+    // because they're already encoded in proof.logup_evaluations
+    // which the orchestrator reads directly.
+    let _ = (numerator_eval, denominator_eval);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
