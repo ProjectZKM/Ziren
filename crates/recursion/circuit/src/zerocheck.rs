@@ -27,13 +27,14 @@
 use std::marker::PhantomData;
 
 use p3_air::{Air, BaseAir};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 use zkm_stark::{air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError};
 use zkm_stark::folder::PairWindow;
+use zkm_stark::septic_digest::SepticDigest;
 
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
-use crate::CircuitConfig;
+use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
 /// In-circuit "≥" indicator for `eval_point` ≥ `threshold` in
 /// lexicographic order, where `threshold` is a boolean point and
@@ -124,13 +125,14 @@ pub fn eq_eval<C: CircuitConfig>(
 /// # Reference
 ///
 /// Mirrors [`verify_opening_shape`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:88-109).
-pub fn verify_opening_shape<C, A>(
-    chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
+pub fn verify_opening_shape<C, SC, A>(
+    chip: &MachineChip<SC, A>,
     opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
 ) -> Result<(), OpeningShapeError>
 where
-    C: CircuitConfig,
-    A: MachineAir<p3_koala_bear::KoalaBear>,
+    C: CircuitConfig<F = SC::Val>,
+    SC: KoalaBearFriParametersVariable<C>,
+    A: MachineAir<C::F>,
 {
     if opening.preprocessed.local.len() != chip.preprocessed_width() {
         return Err(OpeningShapeError::PreprocessedWidthMismatch(
@@ -147,76 +149,111 @@ where
     Ok(())
 }
 
-/// Evaluate a chip's constraint polynomial at the sumcheck point
-/// implied by `opening` (the chip's preprocessed and main local
-/// values), returning the constraint accumulator as a single Ext
-/// value.
+/// Zerocheck verifier wrapper that threads the trait bounds needed
+/// for [`MachineChip::eval`] dispatch through a [`BasefoldConstraintFolder`].
 ///
-/// # Status
+/// Methods are gathered on this zero-sized struct so the
+/// `where SymbolicExt: Algebra<EF>` + `for<'a> Air<...>` bounds
+/// can be declared once at impl level rather than repeated at every
+/// function signature — the same pattern Ziren's existing
+/// [`crate::stark::StarkVerifier`] uses for the legacy verifier.
 ///
-/// Signature complete; body deferred.  The chip.eval trait-bridge
-/// compiled but runs into deep generic-bound propagation issues
-/// across the `SymbolicExt: Algebra<C::EF>` + `C::F = KoalaBear`
-/// constraints when composed with `Chip::eval`'s
-/// `AirBuilder::F = F` specialisation.  A careful study of
-/// Ziren's existing [`crate::stark::StarkVerifier`] — which
-/// successfully calls `chip.eval` through the legacy
-/// [`crate::constraints::RecursiveVerifierConstraintFolder`] —
-/// shows the bound propagation needs additional `where` clauses
-/// threaded through every call site.  Deferring that trait-bridge
-/// microwork to the next iteration so the architecture lands
-/// cleanly; the stub panics loud to prevent false-positive
-/// verification if reached.
-#[allow(clippy::too_many_arguments)]
-pub fn eval_constraints<'a, C, A>(
-    _builder: &mut Builder<C>,
-    _chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
-    _opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-    _alpha: Ext<C::F, C::EF>,
-    _public_values: &'a [Felt<C::F>],
-    _local_cumulative_sum: &'a Ext<C::F, C::EF>,
-    _global_cumulative_sum: &'a zkm_stark::septic_digest::SepticDigest<Felt<C::F>>,
-) -> Ext<C::F, C::EF>
-where
-    C: CircuitConfig,
-    A: MachineAir<p3_koala_bear::KoalaBear>,
-{
-    let _ = (PhantomData::<()>, PairWindow::<Ext<C::F, C::EF>> { local: &[], next: &[] });
-    unimplemented!(
-        "eval_constraints: chip.eval trait-bridge body deferred. \
-         Full signature + folder + all supporting traits landed; \
-         the integration needs bound propagation study against \
-         Ziren's existing StarkVerifier trait graph. Panics loud \
-         if reached to prevent false-positive verification."
-    )
-}
+/// `SC` is generic for the same reason the legacy verifier is:
+/// keeping `MachineChip<SC, A>` opaque lets the compiler elaborate
+/// `MachineChip<SC, A>::F = SC::Val = C::F` (via the
+/// `C: CircuitConfig<F = SC::Val>` bound) so the `Chip::eval` impl's
+/// `ZKMAirBuilder<F = chip.F>` requirement unifies with the folder's
+/// `AirBuilder::F = C::F`.  Pinning `SC` to `KoalaBearPoseidon2`
+/// up front sounds cleaner but trips a normalisation gap where the
+/// compiler doesn't see `Chip<KoalaBear, A>::F` and `C::F` as the
+/// same type even with `C::F = KoalaBear` declared.
+pub struct BasefoldZerocheckVerifier<C, SC, A>(PhantomData<(C, SC, A)>);
 
-/// Compute the "padded row adjustment" — the constraint-folder
-/// accumulator that a chip's eval would produce if invoked on a
-/// dummy all-zero row.  Used by the zerocheck verifier to subtract
-/// the constraint contribution from out-of-range padded rows.
-///
-/// # Status
-///
-/// Signature complete; body deferred for the same reason as
-/// [`eval_constraints`].
-#[allow(clippy::too_many_arguments)]
-pub fn compute_padded_row_adjustment<'a, C, A>(
-    _builder: &mut Builder<C>,
-    _chip: &MachineChip<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2, A>,
-    _alpha: Ext<C::F, C::EF>,
-    _public_values: &'a [Felt<C::F>],
-    _local_cumulative_sum: &'a Ext<C::F, C::EF>,
-    _global_cumulative_sum: &'a zkm_stark::septic_digest::SepticDigest<Felt<C::F>>,
-) -> Ext<C::F, C::EF>
+impl<C, SC, A> BasefoldZerocheckVerifier<C, SC, A>
 where
-    C: CircuitConfig,
-    A: MachineAir<p3_koala_bear::KoalaBear>,
+    C::F: TwoAdicField,
+    SC: KoalaBearFriParametersVariable<C>,
+    C: CircuitConfig<F = SC::Val>,
+    A: MachineAir<C::F> + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
-    unimplemented!(
-        "compute_padded_row_adjustment: same chip.eval trait-bridge \
-         deferral as eval_constraints"
-    )
+    /// Evaluate a chip's constraint polynomial at the sumcheck point
+    /// implied by `opening` (the chip's preprocessed and main local
+    /// values), returning the constraint accumulator as a single Ext
+    /// value.
+    ///
+    /// `local_cumulative_sum` and `global_cumulative_sum` thread
+    /// through to the `MultiTableAirBuilder` impl on the folder so
+    /// chips that read them via that trait see consistent values
+    /// (in the BaseFold pipeline these come from the LogUp-GKR
+    /// sumcheck output, not a per-chip permutation column).
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_constraints<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        opening: &'a ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+        local_cumulative_sum: &'a Ext<C::F, C::EF>,
+        global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
+    ) -> Ext<C::F, C::EF> {
+        let preprocessed = PairWindow {
+            local: &opening.preprocessed.local,
+            next: &opening.preprocessed.local,
+        };
+        let main = PairWindow {
+            local: &opening.main.local,
+            next: &opening.main.local,
+        };
+        let mut folder = BasefoldConstraintFolder::<C> {
+            preprocessed,
+            main,
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum,
+            global_cumulative_sum,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    /// Compute the "padded row adjustment" — the constraint-folder
+    /// accumulator that a chip's eval would produce if invoked on a
+    /// dummy all-zero row.  Used by the zerocheck verifier to subtract
+    /// the constraint contribution from out-of-range padded rows.
+    ///
+    /// The padded-row mask returned by [`full_geq`] gates this value
+    /// to fire only outside the chip's real-data window; inside the
+    /// real window the mask is zero and this adjustment cancels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_padded_row_adjustment<'a>(
+        builder: &mut Builder<C>,
+        chip: &MachineChip<SC, A>,
+        alpha: Ext<C::F, C::EF>,
+        public_values: &'a [Felt<C::F>],
+        local_cumulative_sum: &'a Ext<C::F, C::EF>,
+        global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
+    ) -> Ext<C::F, C::EF> {
+        let main_width = chip.width();
+        let preproc_width = chip.preprocessed_width();
+        let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
+        let preproc_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; preproc_width];
+        let main_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main_width];
+        let mut folder = BasefoldConstraintFolder::<C> {
+            preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
+            main: PairWindow { local: &main_row, next: &main_row },
+            alpha,
+            accumulator: SymbolicExt::ZERO,
+            public_values,
+            local_cumulative_sum,
+            global_cumulative_sum,
+            _marker: PhantomData,
+        };
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
 }
 
 #[cfg(test)]

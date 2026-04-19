@@ -82,7 +82,6 @@ impl<'a, C: Config> AirBuilder for BasefoldConstraintFolder<'a, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
-    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
 {
     type F = C::F;
     type Expr = SymbolicExt<C::F, C::EF>;
