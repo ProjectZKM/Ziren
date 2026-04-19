@@ -277,7 +277,7 @@ pub mod jagged {
         JaggedReductionProof, prove_jagged_reduction, prove_jagged_reduction_streaming,
         verify_jagged_reduction,
     };
-    use crate::kb31_poseidon2::{InnerChallenge as WhirChallenge, InnerVal as WhirVal};
+    use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
     use super::{
         BasefoldLateBindingCommit, BasefoldLateBindingProverData, DEFAULT_LOG_STACKING_HEIGHT,
@@ -299,13 +299,13 @@ pub mod jagged {
 
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
     pub struct JaggedBasefoldBundle {
-        pub reduction: JaggedReductionProof<WhirChallenge>,
+        pub reduction: JaggedReductionProof<InnerChallenge>,
         pub basefold_proof: StackedBasefoldProof<
-            WhirVal,
-            WhirChallenge,
+            InnerVal,
+            InnerChallenge,
             crate::basefold_late_binding::LbMmcs,
         >,
-        pub y_per_chip: Vec<Vec<WhirChallenge>>,
+        pub y_per_chip: Vec<Vec<InnerChallenge>>,
         pub commit: BasefoldLateBindingCommit,
         pub packing: PackingMeta,
     }
@@ -327,12 +327,12 @@ pub mod jagged {
     /// reduction, open dense at the reduction's `z*` via BaseFold,
     /// bundle for the wire.
     pub fn prove_jagged_basefold(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<WhirVal>)],
-        r_row_per_chip: &[Vec<WhirChallenge>],
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
         // (1) Pack metadata.
-        let packing = compute_jagged_metadata::<WhirVal>(chip_traces);
+        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
 
         // (2) Commit dense as a single Mle via BaseFold-stacked.  The
         // stacked PCS interleaves into stripes of bounded size — the
@@ -348,7 +348,7 @@ pub mod jagged {
         // in the commit.
         let (commit, prover_data) = {
             let dense_q =
-                materialize_dense_jagged::<WhirVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
             debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
             let dense_traces = vec![(
                 alloc::string::String::from("<jagged-dense>"),
@@ -358,19 +358,19 @@ pub mod jagged {
         };
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
-        let mut y_per_chip: Vec<Vec<WhirChallenge>> = Vec::with_capacity(chip_traces.len());
+        let mut y_per_chip: Vec<Vec<InnerChallenge>> = Vec::with_capacity(chip_traces.len());
         for ((_name, trace), r_row_c) in chip_traces.iter().zip(r_row_per_chip.iter()) {
             let h = trace.values.len() / trace.width.max(1);
             let w = trace.width;
             let h_padded = h.next_power_of_two();
             assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
-            let eq_c = crate::zerocheck_prover::eq_mle_table::<WhirChallenge>(r_row_c);
+            let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
             let mut chip_ys = Vec::with_capacity(w);
             for col in 0..w {
-                let mut acc = WhirChallenge::ZERO;
+                let mut acc = InnerChallenge::ZERO;
                 for row in 0..h {
-                    acc += eq_c[row] * WhirChallenge::from(trace.values[row * w + col]);
+                    acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                 }
                 chip_ys.push(acc);
             }
@@ -383,7 +383,7 @@ pub mod jagged {
         // buffers never coexist.
         let reduction = {
             let dense_q =
-                materialize_dense_jagged::<WhirVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
             prove_jagged_reduction(
                 &dense_q,
                 &packing,
@@ -455,12 +455,12 @@ pub mod jagged {
     /// Routing: set `ZIREN_E3_PER_CHIP=1` to opt into this entry
     /// point from the dispatch below.
     pub fn prove_jagged_basefold_per_chip(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<WhirVal>)],
-        r_row_per_chip: &[Vec<WhirChallenge>],
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
         // (1) Pack metadata.
-        let packing = compute_jagged_metadata::<WhirVal>(chip_traces);
+        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
 
         // (2) Per-chip commit.  We still wrap the dense polynomial as
         // the committed MLE because the reduction's eval_point is of
@@ -474,7 +474,7 @@ pub mod jagged {
         // move-by-value API.
         let (commit, prover_data) = {
             let dense_q =
-                materialize_dense_jagged::<WhirVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
             debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
             let dense_traces = alloc::vec![(
                 alloc::string::String::from("<jagged-dense-per-chip>"),
@@ -484,7 +484,7 @@ pub mod jagged {
         };
 
         // (3) Per-chip row-MLE y_{c, j} claims — same as dense path.
-        let mut y_per_chip: Vec<Vec<WhirChallenge>> =
+        let mut y_per_chip: Vec<Vec<InnerChallenge>> =
             Vec::with_capacity(chip_traces.len());
         for ((_name, trace), r_row_c) in chip_traces.iter().zip(r_row_per_chip.iter()) {
             let h = trace.values.len() / trace.width.max(1);
@@ -492,12 +492,12 @@ pub mod jagged {
             let h_padded = h.next_power_of_two();
             assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
-            let eq_c = crate::zerocheck_prover::eq_mle_table::<WhirChallenge>(r_row_c);
+            let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
             let mut chip_ys = Vec::with_capacity(w);
             for col in 0..w {
-                let mut acc = WhirChallenge::ZERO;
+                let mut acc = InnerChallenge::ZERO;
                 for row in 0..h {
-                    acc += eq_c[row] * WhirChallenge::from(trace.values[row * w + col]);
+                    acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                 }
                 chip_ys.push(acc);
             }
@@ -509,7 +509,7 @@ pub mod jagged {
         // `test_jagged_reduction_streaming_matches_dense` in
         // `jagged_sumcheck.rs`).  Peak round-0 RSS ≈ 16N bytes vs
         // the dense path's ≈ 36N.
-        let reduction = prove_jagged_reduction_streaming::<WhirVal>(
+        let reduction = prove_jagged_reduction_streaming::<InnerVal>(
             chip_traces,
             &packing,
             r_row_per_chip,
@@ -542,8 +542,8 @@ pub mod jagged {
     /// path based on the `ZIREN_E3_PER_CHIP` env variable.  Default
     /// is the dense path.
     pub fn prove_jagged_basefold_dispatch(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<WhirVal>)],
-        r_row_per_chip: &[Vec<WhirChallenge>],
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
         let use_per_chip = std::env::var("ZIREN_E3_PER_CHIP")
@@ -559,7 +559,7 @@ pub mod jagged {
     /// Verifier mirror.
     pub fn verify_jagged_basefold(
         chip_infos: &[JaggedChipInfo],
-        r_row_per_chip: &[Vec<WhirChallenge>],
+        r_row_per_chip: &[Vec<InnerChallenge>],
         bundle: &JaggedBasefoldBundle,
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> bool {
