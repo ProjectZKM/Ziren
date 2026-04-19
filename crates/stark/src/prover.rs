@@ -780,8 +780,7 @@ where
             return Ok(ShardProof::<SC> {
                 commitment: ShardCommitment {
                     main_commit: data.main_commit.clone(),
-                    permutation_commit: None,
-                    quotient_commit: None,
+                    auxiliary_commits: Vec::new(),
                 },
                 opened_values: ShardOpenedValues { chips: opened_values },
                 opening_proof,
@@ -1135,8 +1134,7 @@ where
         Ok(ShardProof::<SC> {
             commitment: ShardCommitment {
                 main_commit: data.main_commit.clone(),
-                permutation_commit: Some(permutation_commit),
-                quotient_commit: Some(quotient_commit),
+                auxiliary_commits: vec![permutation_commit, quotient_commit],
             },
             opened_values: ShardOpenedValues { chips: opened_values },
             opening_proof,

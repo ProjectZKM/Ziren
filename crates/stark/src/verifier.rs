@@ -81,7 +81,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             .map(|log_degree| pcs.natural_domain_for_degree(1 << log_degree))
             .collect::<Vec<_>>();
 
-        let ShardCommitment { main_commit, permutation_commit, quotient_commit } = commitment;
+        let main_commit = &commitment.main_commit;
+        let permutation_commit = commitment.permutation_commit().cloned();
+        let quotient_commit = commitment.quotient_commit().cloned();
 
         challenger.observe(main_commit.clone());
 

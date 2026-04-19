@@ -74,8 +74,7 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     // verification when None.
     let commitment = ShardCommitment {
         main_commit: dummy_commit(),
-        permutation_commit: None,
-        quotient_commit: None,
+        auxiliary_commits: Vec::new(),
     };
 
     // Get dummy opened values by reading the chip ordering from the shape.
@@ -334,7 +333,9 @@ where
             .map(|log_degree| Self::natural_domain_for_degree(machine.config(), 1 << log_degree))
             .collect::<Vec<_>>();
 
-        let ShardCommitment { main_commit, permutation_commit, quotient_commit } = *commitment;
+        let main_commit = commitment.main_commit;
+        let permutation_commit = commitment.permutation_commit().copied();
+        let quotient_commit = commitment.quotient_commit().copied();
 
         challenger.observe(builder, main_commit);
 

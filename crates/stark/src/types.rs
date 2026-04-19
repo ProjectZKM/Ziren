@@ -36,36 +36,34 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardCommitment<C> {
     pub main_commit: C,
-    /// Permutation trace commitment. None when using LogUp-GKR (no permutation trace).
-    pub permutation_commit: Option<C>,
-    /// Quotient polynomial commitment. None when using Zerocheck (no quotient trace).
-    pub quotient_commit: Option<C>,
+    /// Auxiliary commitments emitted alongside the main trace
+    /// commit.  Empty in the BaseFold pipeline (no permutation
+    /// trace, no quotient commitment — the soundness work moved
+    /// into a sumcheck-based binding + folded FRI commit).  In the
+    /// legacy 4-batch FRI pipeline this holds two entries in
+    /// strict `[permutation, quotient]` order.
+    pub auxiliary_commits: Vec<C>,
 }
 
 impl<C: Clone> ShardCommitment<C> {
-    /// Iterator over the non-main commitments present on this
-    /// shard.  In the BaseFold pipeline (no permutation trace, no
-    /// quotient trace) this is empty; in the legacy pipeline it
-    /// yields the permutation commitment then the quotient
-    /// commitment.
-    ///
-    /// Refactors the `if permutation_commit.is_some() { ... }`
-    /// idiom into `for commit in auxiliary_commits() { ... }`
-    /// without breaking the legacy field layout.  Lands ahead of
-    /// the full field rename so the is_some retirement can be
-    /// done in one coordinated change set later.
-    pub fn auxiliary_commits(&self) -> impl Iterator<Item = &C> {
-        self.permutation_commit
-            .iter()
-            .chain(self.quotient_commit.iter())
+    /// The permutation-trace commitment, if present.  Accessor
+    /// that preserves the legacy semantic slot after the field
+    /// rename (`auxiliary_commits[0]` in the new layout).
+    pub fn permutation_commit(&self) -> Option<&C> {
+        self.auxiliary_commits.first()
     }
 
-    /// `true` when no auxiliary (permutation + quotient)
-    /// commitments are present — the case for the BaseFold
-    /// pipeline.  Replaces the common `permutation_commit.is_none()
-    /// && quotient_commit.is_none()` check.
+    /// The quotient-polynomial commitment, if present.  Accessor
+    /// that preserves the legacy semantic slot after the field
+    /// rename (`auxiliary_commits[1]` in the new layout).
+    pub fn quotient_commit(&self) -> Option<&C> {
+        self.auxiliary_commits.get(1)
+    }
+
+    /// `true` when no auxiliary commitments are present — the
+    /// case for the BaseFold pipeline.
     pub fn has_no_auxiliary_commits(&self) -> bool {
-        self.permutation_commit.is_none() && self.quotient_commit.is_none()
+        self.auxiliary_commits.is_empty()
     }
 }
 

@@ -162,23 +162,23 @@ where
     }
 }
 
-impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for ShardCommitment<T> {
+impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for ShardCommitment<T>
+where
+    T::WitnessVariable: Clone,
+{
     type WitnessVariable = ShardCommitment<T::WitnessVariable>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commit = self.main_commit.read(builder);
-        let permutation_commit = self.permutation_commit.as_ref().map(|pc| pc.read(builder));
-        let quotient_commit = self.quotient_commit.as_ref().map(|qc| qc.read(builder));
-        Self::WitnessVariable { main_commit, permutation_commit, quotient_commit }
+        let auxiliary_commits =
+            self.auxiliary_commits.iter().map(|c| c.read(builder)).collect();
+        Self::WitnessVariable { main_commit, auxiliary_commits }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.main_commit.write(witness);
-        if let Some(pc) = &self.permutation_commit {
-            pc.write(witness);
-        }
-        if let Some(qc) = &self.quotient_commit {
-            qc.write(witness);
+        for c in self.auxiliary_commits.iter() {
+            c.write(witness);
         }
     }
 }
