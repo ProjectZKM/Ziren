@@ -507,8 +507,29 @@ where
         builder.cycle_tracker_v2_enter("stage-e-verify-constraints".to_string());
         let permutation_challenges = local_permutation_challenges;
 
-        // In WHIR mode the proof omits permutation/quotient. Skip per-chip
-        // constraint verification (soundness comes from WHIR + cumulative sums).
+        // BaseFold-pipeline detection: the prover emits no
+        // permutation/quotient commitments in this mode (the
+        // soundness work moved to zerocheck + LogUp-GKR + jagged-
+        // PCS).  When detected, this verifier currently SKIPS
+        // per-chip constraint verification entirely.
+        //
+        // ⚠ Soundness gap (tracked in
+        // `docs/recursion_verifier_port.md`): this branch
+        // previously trusted the shard proof without re-verifying
+        // the BaseFold-pipeline sumcheck/jagged-PCS chains.  The
+        // host-side verifier handles re-verification (see
+        // `zkm_stark::verifier::Verifier::verify_shard_proof`
+        // around line 133+) but the recursion circuit's machines
+        // currently skip that step.  Closing the gap requires
+        // wiring `BasefoldShardVerifier::verify_shard` into
+        // `compress` / `deferred` / `wrap` / `core`, which in
+        // turn needs the prover's per-chip
+        // `LogUpGkrProof<Challenge>` shape unified with the
+        // recursion-side shard-level
+        // `LogupGkrProof<Felt, Ext>` shape — a coordinated
+        // prover/verifier refactor.  Until then, aggregation
+        // proofs validate the aggregation logic but don't re-bind
+        // the underlying shard proofs.
         let whir_mode = quotient_commit.is_none();
 
         for (chip, trace_domain, qc_domains, values) in
