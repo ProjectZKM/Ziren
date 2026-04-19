@@ -207,6 +207,56 @@ impl<P> BasefoldShardVerifier<P> {
     ) -> Self {
         Self { stacked_pcs_verifier, max_log_row_count }
     }
+
+    /// Derive `LogupGkrShardChipMetadata` from a machine's chip
+    /// set.  Encapsulates the interaction-count + beta-seed-dim
+    /// computation the `verify_shard` call site would otherwise
+    /// have to open-code.
+    ///
+    /// `beta_seed_dim = log2_ceil(max_interaction_arity)` where
+    /// `interaction_arity = values.len() + 1` per send/receive;
+    /// `log_num_interactions = log2_ceil(total_num_interactions)`.
+    pub fn chip_metadata_from_chips<SC, A>(
+        chips: &[&MachineChip<SC, A>],
+    ) -> LogupGkrShardChipMetadata
+    where
+        SC: zkm_stark::StarkGenericConfig,
+        A: MachineAir<zkm_stark::Val<SC>>,
+    {
+        let max_arity = chips
+            .iter()
+            .flat_map(|chip| chip.sends().iter().chain(chip.receives()))
+            .map(|interaction| interaction.values.len() + 1)
+            .max()
+            .unwrap_or(1);
+        let total_interactions: usize = chips
+            .iter()
+            .map(|chip| chip.sends().len() + chip.receives().len())
+            .sum();
+        let log2_ceil = |x: usize| -> usize {
+            if x <= 1 { 0 } else { (x - 1).ilog2() as usize + 1 }
+        };
+        LogupGkrShardChipMetadata {
+            beta_seed_dim: log2_ceil(max_arity),
+            log_num_interactions: log2_ceil(total_interactions.max(1)),
+        }
+    }
+
+    /// Derive `insertion_points` for the jagged-PCS zero-column
+    /// padding from a per-round column-count table.  Matches
+    /// [`crate::recursive_jagged_pcs::RecursiveMachineJaggedPcsVerifier::new`]'s
+    /// scan pattern.
+    pub fn insertion_points_from_column_counts(
+        column_counts_by_round: &[Vec<usize>],
+    ) -> Vec<usize> {
+        column_counts_by_round
+            .iter()
+            .scan(0usize, |state, round_cols| {
+                *state += round_cols.iter().sum::<usize>();
+                Some(*state)
+            })
+            .collect()
+    }
 }
 
 impl<P> BasefoldShardVerifier<P> {
