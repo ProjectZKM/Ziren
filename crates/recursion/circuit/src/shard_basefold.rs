@@ -62,15 +62,23 @@
 
 use std::marker::PhantomData;
 
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
+use p3_air::Air;
+use p3_field::{Algebra, TwoAdicField};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
+use zkm_stark::{air::MachineAir, MachineChip};
 
+use crate::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
-use crate::jagged_circuit::JaggedPcsProofVariable;
+use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof, JaggedPcsProofVariable};
+use crate::logup_gkr::{verify_logup_gkr, LogupGkrShardChipMetadata};
 use crate::logup_proof::LogupGkrProof;
 use crate::partial_sumcheck::PartialSumcheckProof;
-use crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier;
-use crate::CircuitConfig;
+use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
+use crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier;
+use crate::recursive_stacked_pcs::{RecursiveMultilinearPcsVerifier, RecursiveStackedPcsVerifier};
+use crate::zerocheck::BasefoldZerocheckVerifier;
+use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 
 /// In-circuit shard proof variable — the BaseFold-pipeline 5-field
 /// shape (replaces the legacy
@@ -182,25 +190,96 @@ impl<P> BasefoldShardVerifier<P> {
     ///   - per-chip (height_felt, name_bytes) for each chip
     ///
     /// This phase is fully implemented in this iteration.
-    pub fn verify_shard<C, FC>(
+    /// Verify a BaseFold-pipeline shard proof, end-to-end.
+    ///
+    /// The four-phase verification flow:
+    ///   1. Transcript prologue — binds public values, main-trace
+    ///      commitment, and per-chip metadata into the challenger
+    ///      state.
+    ///   2. LogUp-GKR sumcheck — replays the per-layer sumcheck
+    ///      reductions for the global LogUp permutation argument.
+    ///   3. Zerocheck — verifies the transition-constraint zerocheck
+    ///      IOP against the LogUp-GKR-emitted per-chip evaluations.
+    ///   4. Jagged-PCS opening — checks the prover's claimed main-
+    ///      trace evaluations at the zerocheck-reduced point are
+    ///      consistent with the committed digest.
+    ///
+    /// Several caller-supplied inputs bridge data that lives
+    /// outside the proof struct:
+    ///
+    ///   * `shard_chips` — the machine's chip set (BaseFold
+    ///     pipeline does not embed the chip list in the proof; the
+    ///     verifier introspects it from the machine reference).
+    ///   * `chip_metadata` — interaction-count bits for the
+    ///     LogUp-GKR phase.  Derived from the shard-chip sends/
+    ///     receives; the caller computes this once per machine.
+    ///   * `chip_degrees`, `cumulative_sums`, `global_cumulative_sums` —
+    ///     per-chip degree points and cumulative-sum values.
+    ///     These live on the BaseFold-pipeline opening wire; until
+    ///     a `BasefoldChipOpenedValues` type bundles them, the
+    ///     caller passes them as parallel slices aligned to
+    ///     `shard_chips` order.
+    ///   * `insertion_points` — jagged-PCS zero-column insertion
+    ///     positions; typically derived via
+    ///     `RecursiveMachineJaggedPcsVerifier::new(...)`.
+    ///   * `eval_public_values_fn` — closure that evaluates the
+    ///     machine record's public-value constraints over a
+    ///     [`RecursivePublicValuesConstraintFolder`].  Abstracted
+    ///     because the public-value constraint set is machine-
+    ///     specific.
+    ///   * `jagged_evaluator_fn` — closure running the jagged-eval
+    ///     sub-protocol.  Abstracted behind a closure so this
+    ///     orchestrator doesn't depend on the jagged-eval module.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::type_complexity)]
+    pub fn verify_shard<'a, C, SC, A, FC, EVPV, JE>(
         &self,
         builder: &mut Builder<C>,
         vk: &BasefoldVerifyingKeyVariable<C>,
-        proof: &BasefoldShardProofVariable<C>,
+        proof: &'a BasefoldShardProofVariable<C>,
+        shard_chips: &[&MachineChip<SC, A>],
+        chip_metadata: &LogupGkrShardChipMetadata,
+        chip_degrees: &[Vec<Ext<C::F, C::EF>>],
+        cumulative_sums: &'a [Ext<C::F, C::EF>],
+        global_cumulative_sums: &'a [zkm_stark::septic_digest::SepticDigest<Felt<C::F>>],
+        opened_values: &'a zkm_stark::ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        insertion_points: &[usize],
         challenger: &mut FC,
         num_pv_elts: usize,
+        eval_public_values_fn: EVPV,
+        jagged_evaluator_fn: JE,
     ) where
-        C: CircuitConfig,
+        C: CircuitConfig<F = SC::Val>,
+        C::F: TwoAdicField,
+        SC: KoalaBearFriParametersVariable<C>,
+        A: MachineAir<C::F> + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
         FC: FieldChallengerVariable<C, C::Bit>,
+        SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+        P: RecursiveMultilinearPcsVerifier<
+                C,
+                FC,
+                Commitment = [Felt<C::F>; 8],
+                Proof = RecursiveBasefoldProof<C::F, C::EF, 8>,
+            > + Clone,
+        EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
+        JE: FnOnce(
+            &mut Builder<C>,
+            &JaggedDimensionMetadata<Felt<C::F>>,
+            &[Ext<C::F, C::EF>],
+            &[Ext<C::F, C::EF>],
+            &[Ext<C::F, C::EF>],
+            &JaggedSumcheckEvalProof<Ext<C::F, C::EF>>,
+            &mut FC,
+        ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
         let _ = vk; // used by the transcript prologue and phase 4
         let BasefoldShardProofVariable {
             main_commitment,
             chip_height_bits,
             public_values,
-            logup_gkr_proof: _,
-            zerocheck_proof: _,
-            evaluation_proof: _,
+            logup_gkr_proof,
+            zerocheck_proof,
+            evaluation_proof,
         } = proof;
 
         // ── Phase 1: Transcript prologue ────────────────────────
@@ -258,66 +337,100 @@ impl<P> BasefoldShardVerifier<P> {
             }
         }
 
-        // Suppress unused warning for num_pv_elts (used by phase 2).
-        let _ = num_pv_elts;
+        let _ = num_pv_elts; // reserved for public-value length check
 
         // ── Phase 2: LogUp-GKR sumcheck verification ────────────
-
-        // TODO(E4 step 8): port and call
-        //   RecursiveLogUpGkrVerifier::verify_logup_gkr
-        // Reference: file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs:65-200
         //
-        // Requires:
-        //   - The not-yet-landed RecursiveVerifierPublicValuesConstraintFolder
-        //     (delegates to A::Record::eval_public_values).
-        //   - Cycle-tracker entries for verify-public-values + the
-        //     per-round sumcheck (already supported by Builder).
-        //
-        // Until ported, the shard orchestrator panics here so any
-        // integration test that reaches phase 2 fails loud rather
-        // than producing a false-positive verification.
+        // Reduces the per-chip LogUp cumulative-sum identity to a
+        // single point/eval claim per chip.  The verifier samples
+        // (alpha, beta_seed, pv_challenge), observes the GKR
+        // circuit output, and replays each layer's sumcheck via
+        // the transcript-bound challenger.
+        verify_logup_gkr::<C, FC, EVPV>(
+            builder,
+            chip_metadata,
+            logup_gkr_proof,
+            public_values,
+            challenger,
+            eval_public_values_fn,
+        );
 
         // ── Phase 3: Zerocheck sumcheck verification ────────────
-
-        // TODO(E4 step 8): port and call
-        //   RecursiveShardVerifier::verify_zerocheck
-        // Reference: file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:117-249
         //
-        // Requires:
-        //   - eval_constraints<C, A> bridge to the existing
-        //     crate::constraints::RecursiveVerifierConstraintFolder
-        //     (the BaseFold pipeline uses a 2-batch shape so the
-        //     existing folder needs an adapter).
-        //   - compute_padded_row_adjustment helper.
-        //   - verify_opening_shape helper.
-        //
-        // The crate::zerocheck::full_geq + eq_eval helpers landed
-        // in step 5 are the building blocks; this orchestrator
-        // composition is what's missing.
+        // Verifies the transition-constraint zerocheck IOP.
+        // Consumes the LogUp-GKR-emitted per-chip evaluations and
+        // reduces the combined-chip constraint identity to a
+        // single (point, evaluation) claim, leaving the claimed
+        // evaluation for the jagged-PCS opening phase to verify.
+        BasefoldZerocheckVerifier::<C, SC, A>::verify_zerocheck::<FC>(
+            builder,
+            shard_chips,
+            opened_values,
+            chip_degrees,
+            cumulative_sums,
+            global_cumulative_sums,
+            &logup_gkr_proof.logup_evaluations,
+            zerocheck_proof,
+            self.max_log_row_count,
+            public_values,
+            challenger,
+        );
 
         // ── Phase 4: Jagged-PCS opening verification ────────────
-
-        // TODO(E4 step 8): port and call
-        //   RecursiveJaggedPcsVerifier::verify_trusted_evaluations
-        // Reference: file:///tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:50-200
         //
-        // Requires:
-        //   - The existing crate::basefold_verifier::RecursiveBasefoldVerifier
-        //     to implement the
-        //     crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier
-        //     trait (added in step 7) so it can be the underlying
-        //     P in stacked_pcs_verifier.
-        //   - Port of the upstream RecursiveJaggedPcsVerifier
-        //     orchestrator that drives the per-chip evaluation
-        //     reduction → sumcheck → BaseFold opening pipeline.
+        // The prover's claimed main-trace evaluation at the
+        // zerocheck-reduced point must be consistent with the
+        // committed digest.  Uses the jagged reduction on top of
+        // the stacked BaseFold PCS.
+        //
+        // Constructs a local jagged verifier wrapping a shallow
+        // clone of self's stacked-PCS verifier (two-field clone of
+        // a Clone-derived struct — the inner PCS verifier is by
+        // convention a zero-sized type or carries only parameter
+        // structs that are cheap to duplicate).
+        let jagged_verifier = RecursiveJaggedPcsVerifier::<P> {
+            stacked_pcs_verifier: self.stacked_pcs_verifier.clone(),
+            max_log_row_count: self.max_log_row_count,
+        };
 
-        unimplemented!(
-            "BasefoldShardVerifier::verify_shard phase 2/3/4 not yet \
-             ported. Phase 1 (transcript prologue) is implemented; \
-             follow-up iterations land verify_logup_gkr + \
-             verify_zerocheck + RecursiveJaggedPcsVerifier per the \
-             TODOs above. See docs/recursion_verifier_port.md."
+        // The jagged-PCS phase expects the sumcheck-reduced point
+        // from phase 3 as its `point` argument.  Evaluation claims
+        // are flattened from the GKR emission: one row per chip,
+        // consisting of (main_trace_evaluations ++ preprocessed_trace_evaluations).
+        let evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = logup_gkr_proof
+            .logup_evaluations
+            .chip_openings
+            .values()
+            .map(|chip_eval| {
+                let mut row = chip_eval.main_trace_evaluations.clone();
+                if let Some(prep) = chip_eval.preprocessed_trace_evaluations.as_ref() {
+                    row.extend(prep.iter().copied());
+                }
+                row
+            })
+            .collect();
+
+        // Assemble the commitments vector — the main-trace
+        // commitment is the only one in the BaseFold pipeline's
+        // wire; additional commit rounds (if any) would extend
+        // this slice.
+        let commitments = [*main_commitment];
+
+        let _prefix_sum_felts = jagged_verifier.verify_trusted_evaluations::<C, FC, JE>(
+            builder,
+            &commitments,
+            &zerocheck_proof.point_and_eval.0,
+            &evaluation_claims,
+            evaluation_proof,
+            insertion_points,
+            challenger,
+            jagged_evaluator_fn,
         );
+
+        // The returned prefix_sum_felts are consumed by callers
+        // that need the per-column row-count prefix witness; the
+        // shard-verify path itself doesn't need them after the
+        // assertion chain inside verify_trusted_evaluations.
     }
 }
 
