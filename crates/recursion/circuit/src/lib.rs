@@ -35,6 +35,7 @@ pub mod logup_gkr;
 pub mod logup_proof;
 pub mod partial_sumcheck;
 pub mod public_values_folder;
+pub mod recursive_jagged_pcs;
 pub mod recursive_stacked_pcs;
 pub mod shard_basefold;
 pub mod sumcheck;

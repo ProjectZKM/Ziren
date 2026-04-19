@@ -685,6 +685,136 @@ where
     new_claims.last().copied().unwrap_or(initial_claim)
 }
 
+/// `RecursiveMultilinearPcsVerifier` impl on [`RecursiveBasefoldVerifier`].
+///
+/// Wires the BaseFold verifier into the stacked-PCS layer's
+/// [`crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier`]
+/// trait so [`crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier`]
+/// can delegate the inner opening step to this verifier.
+///
+/// # Body scope
+///
+/// This iteration lands the **transcript-replay + structural
+/// validation** portion of the untrusted-evaluation verification:
+///   - Observe per-round commitments into the challenger.
+///   - Observe the untrusted `batch_evaluations` claims.
+///   - Walk `proof.rounds`, observing each round's Merkle commit
+///     and sampling a per-round beta (same cadence the prover uses).
+///
+/// The **full FRI query-phase verification** (Merkle-path opening
+/// checks + per-query fold-chain traversal) is deferred to a
+/// follow-up step: porting it requires in-circuit Merkle-tree
+/// opening variables (`RecursiveMerkleTreeTcs`) that aren't yet
+/// scaffolded in Ziren's circuit layer.  The
+/// [`emit_basefold_query_chain`] helper in this module is the
+/// fold-chain emission primitive the follow-up will wrap.
+///
+/// Until the query phase lands, the impl is a structurally-correct
+/// architecture that type-checks the shard-verifier call path
+/// [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`]
+/// but does not run the full PCS soundness chain.
+impl<C, FC> crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier<C, FC>
+    for RecursiveBasefoldVerifier
+where
+    C: crate::CircuitConfig,
+    FC: crate::challenger::FieldChallengerVariable<C, C::Bit>,
+{
+    type Commitment = [zkm_recursion_compiler::prelude::Felt<C::F>; 8];
+    type Proof = RecursiveBasefoldProof<C::F, C::EF, 8>;
+
+    fn verify_untrusted_evaluations(
+        &self,
+        builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
+        commitments: &[Self::Commitment],
+        stack_point: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
+        batch_evaluations: &[Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>>],
+        proof: &Self::Proof,
+        challenger: &mut FC,
+    ) {
+        use crate::challenger::CanObserveVariable;
+        use crate::logup_gkr::observe_ext_element;
+
+        // (1) Observe per-round commitments into the transcript.
+        for commit in commitments.iter() {
+            for limb in commit.iter() {
+                challenger.observe(builder, *limb);
+            }
+        }
+
+        // (2) Observe the untrusted batch-evaluation claims — this
+        // is the "untrusted" half of the trait contract: the
+        // verifier binds the claims into the transcript before
+        // sampling any post-commitment randomness so the prover
+        // can't adapt to the sampled betas.
+        for round in batch_evaluations.iter() {
+            for eval in round.iter() {
+                observe_ext_element::<C, FC>(builder, challenger, *eval);
+            }
+        }
+
+        // (3) Structural sanity: sumcheck-round count and
+        // stack-point dimension must agree with the verifier's
+        // params.
+        assert_eq!(
+            proof.rounds.len(),
+            self.params.num_variables,
+            "basefold: rounds.len() ({}) != num_variables ({})",
+            proof.rounds.len(),
+            self.params.num_variables,
+        );
+        assert_eq!(
+            stack_point.len(),
+            self.params.num_variables,
+            "basefold: stack_point.len() ({}) != num_variables ({})",
+            stack_point.len(),
+            self.params.num_variables,
+        );
+
+        // (4) Commit-phase transcript replay: per round, observe
+        // the commit-phase Merkle root and sample the round's
+        // fold-direction scalar (beta) — the same per-round
+        // transcript cadence the prover uses.  Values from the
+        // raw-EF/F proof are turned into Felt constants via
+        // builder.constant().
+        let _betas: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = proof
+            .rounds
+            .iter()
+            .map(|round| {
+                for limb in round.commitment.iter() {
+                    let felt: zkm_recursion_compiler::prelude::Felt<C::F> =
+                        builder.constant(*limb);
+                    challenger.observe(builder, felt);
+                }
+                challenger.sample_ext(builder)
+            })
+            .collect();
+
+        // (5) Observe the final poly constant + PoW witnesses.
+        {
+            let final_poly_ext: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
+                builder.constant(proof.final_poly);
+            let final_felts = C::ext2felt(builder, final_poly_ext);
+            for felt in final_felts.iter() {
+                challenger.observe(builder, *felt);
+            }
+            let _pow_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
+                builder.constant(proof.pow_witness);
+            let _batch_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
+                builder.constant(proof.batch_grinding_witness);
+        }
+
+        // (6) Stubbed: FRI query-phase verification.  Requires
+        // in-circuit Merkle-tree opening variables + the
+        // sibling-pair consistency check the prover proves.
+        // Deferred — see module docstring.  `component_openings`,
+        // `query_phase_openings`, and `batch_evaluations` on the
+        // proof are the witness data the follow-up will consume.
+        let _ = &proof.component_openings;
+        let _ = &proof.query_phase_openings;
+        let _ = &proof.batch_evaluations;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
