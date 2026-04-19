@@ -271,6 +271,27 @@ fails real content assertions.  An honest dummy matching the
 prover's actual output needs the FRI query-phase and jagged-eval
 follow-ups above.
 
+**WHIR feature retirement.**  CLOSED as of commit `b15b9a5`.
+The WHIR feature was already absent from the `zkm-stark`
+`Cargo.toml` (only `basefold` is declared), so every
+`#[cfg(feature = "whir")]` block had become dead code.  Swept
+through prover + verifier and dropped the stranded
+`LateBindingCapable` impls, dispatch branches, and `ZIREN_USE_WHIR`
+/ `ZIREN_USE_BASEFOLD` runtime toggle.  Net delta: −345 lines.
+BaseFold is now the only production PCS path; the `basefold`
+feature stays as a compile-time cfg so no-feature builds still
+compile cleanly (returning `None`/`true` stubs).
+
+**Jagged-eval sumcheck primitives.**  CLOSED as of commit
+`4bda9bf`.  `emit_branching_program_eval` (DP over a 4×16
+compile-time-constant transition table, mirrors host-side
+`BranchingProgram::eval`) and `emit_prefix_sum_check`
+(Horner-reduce bit vector + full-Lagrange at sumcheck point)
+both shipped.  The sumcheck-based
+`RecursiveJaggedEvalSumcheckConfig::jagged_evaluation` trait impl
+(commit `8a5f7de`) accepts both as closure parameters, so real
+sumcheck-based jagged evaluation is now constructible in-tree.
+
 **`is_some()` shim retirement.**  Four-step cleanup that must
 land as a single coordinated change set:
 
@@ -331,4 +352,59 @@ verification") is largely subsumed by the BaseFold migration:
 
 No direct action required on the roadmap document itself; the
 in-tree state reflects the new path.
+
+## Current state (post-retirement sweep)
+
+After the WHIR/BaseFold retirement sweep, the in-tree state is:
+
+- **WHIR is retired.**  The `whir` Cargo feature no longer exists;
+  every `#[cfg(feature = "whir")]` gate was dead code.
+  `b15b9a5` deleted the gates and dispatch branches (-345 LOC).
+- **BaseFold is the only PCS.**  Prover (`prove_jagged_basefold`)
+  and host verifier (`verify_jagged_basefold`) both run
+  BaseFold unconditionally.  No runtime env-var toggle.
+- **Recursion verifier is wire-complete.**  All four phases
+  (transcript prologue / LogUp-GKR / zerocheck / jagged-PCS)
+  land end-to-end.  FRI query-phase includes fold chain +
+  query-bit threading + Merkle-path binding.
+- **Jagged-eval trait has real implementation.**  The
+  sumcheck-based strategy (`RecursiveJaggedEvalSumcheckConfig`)
+  takes `branching_program_eval` + `prefix_sum_check` closures,
+  which the recursion compiler supplies via
+  `emit_branching_program_eval` / `emit_prefix_sum_check`
+  (`4bda9bf`).
+- **Host-side proof types exist.**  `BasefoldShardProof<F, EF>`
+  + `Witnessable` impl — a `.read(builder)` cascades the whole
+  host proof into its in-circuit counterpart.
+- **`ShardCommitment` field rename landed.**
+  `permutation_commit`/`quotient_commit` → `auxiliary_commits: Vec<C>`
+  with `[perm, quot]` positional ordering.  BaseFold pipeline
+  emits an empty vec; legacy pipeline (if ever reactivated) would
+  emit a 2-element vec.
+
+What's left is a single cross-crate refactor:
+
+- **`compress` / `deferred` / `wrap` machines still call
+  `StarkVerifier::verify_shard`.**  Switching them to
+  `BasefoldShardVerifier::verify_shard` requires extending the
+  `ShardProofVariable` shape they consume (or replacing it with
+  `BasefoldShardProofVariable`) and supplying the new verifier's
+  additional inputs: `shard_chips` iterator, chip metadata,
+  insertion points, and closures for the public-values
+  constraint folder + jagged-eval.
+- **VK map regeneration** lands afterwards (multi-day compute).
+- **Legacy deletion** — `StarkVerifier::verify_shard` +
+  `RecursiveVerifierConstraintFolder` — follows once no caller
+  remains.
+
+The atomic change is approximately:
+
+```
+crates/recursion/circuit/src/machine/{compress,deferred,wrap}.rs
+crates/recursion/circuit/src/stark.rs         (legacy verifier)
+crates/recursion/circuit/src/constraints.rs   (legacy folder)
+```
+
+Estimated 600-1000 LOC delta spread across ~5 files, plus the VK
+regen compute job.  Prerequisites are all in place.
 
