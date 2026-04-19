@@ -29,6 +29,8 @@ pub mod stark;
 pub(crate) mod utils;
 /// BaseFold proof verifier — see [`basefold_verifier`] module doc.
 pub mod basefold_verifier;
+pub mod partial_sumcheck;
+pub mod univariate;
 pub mod witness;
 
 pub use types::*;
