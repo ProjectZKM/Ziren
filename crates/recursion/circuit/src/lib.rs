@@ -29,6 +29,7 @@ pub mod stark;
 pub(crate) mod utils;
 /// BaseFold proof verifier — see [`basefold_verifier`] module doc.
 pub mod basefold_verifier;
+pub mod jagged_circuit;
 pub mod logup_gkr;
 pub mod logup_proof;
 pub mod partial_sumcheck;
