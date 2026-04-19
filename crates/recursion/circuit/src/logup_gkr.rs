@@ -24,10 +24,13 @@
 //! [`logup_gkr.rs`](file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs)
 //! verifier helpers.
 
+use std::marker::PhantomData;
+
 use p3_field::PrimeCharacteristicRing;
-use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
 
 use crate::challenger::{CanObserveVariable, FieldChallengerVariable};
+use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 use crate::CircuitConfig;
 
 /// Sample `num_variables` extension-field challenges from the
@@ -135,6 +138,104 @@ pub fn evaluate_mle_ext<C: CircuitConfig>(
     builder.eval(acc)
 }
 
+/// Build a symbolic partial-Lagrange table for a point of length
+/// `n`, returning `Vec<SymbolicExt>` of length `2^n`.
+///
+/// Index ordering matches [`evaluate_mle_ext`]: LSB-first
+/// (index `i`'s bit `k` corresponds to point coordinate `k`).
+/// Used by [`verify_public_values`] to expand the LogUp
+/// `beta_seed` into the per-interaction beta-power table.
+pub fn partial_lagrange_symbolic<C: CircuitConfig>(
+    point: &[SymbolicExt<C::F, C::EF>],
+) -> Vec<SymbolicExt<C::F, C::EF>> {
+    let mut weights: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ONE];
+    for &r in point {
+        let old_len = weights.len();
+        let mut next: Vec<SymbolicExt<C::F, C::EF>> =
+            vec![SymbolicExt::ZERO; old_len * 2];
+        for j in 0..old_len {
+            let prod = weights[j] * r;
+            next[j] = weights[j] - prod;
+            next[j + old_len] = prod;
+        }
+        weights = next;
+    }
+    weights
+}
+
+/// Verify the public-values portion of the LogUp-GKR argument.
+///
+/// Builds the per-record constraint folder, lets the caller emit
+/// record-level constraints into it via `eval_public_values_fn`,
+/// asserts the accumulator is zero, and returns the resulting
+/// `local_interaction_digest`.
+///
+/// The caller-supplied closure decouples this verifier from any
+/// concrete `MachineRecord::eval_public_values` trait method —
+/// the closure receives a mutable reference to the folder and is
+/// expected to call `assert_zero` for each per-record constraint.
+/// Records with no public-values constraints can pass an empty
+/// closure.
+///
+/// # Arguments
+///
+/// * `challenge` — alpha for constraint folding
+/// * `alpha` — the LogUp permutation `alpha` challenge
+/// * `beta_seed` — the LogUp `beta_seed` point (length =
+///   `log2_ceil(max_interaction_arity)`); expanded to per-
+///   interaction beta-powers via partial Lagrange
+/// * `public_values` — the shard's public values
+/// * `eval_public_values_fn` — closure that emits record-level
+///   constraints into the folder
+///
+/// # Returns
+///
+/// The `local_interaction_digest` symbolic value, which the LogUp
+/// orchestrator compares against the GKR-circuit-derived
+/// cumulative-sum value.
+///
+/// # Reference
+///
+/// Mirrors [`RecursiveLogUpGkrVerifier::verify_public_values`](file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs:36-58).
+/// Substitution: the upstream's `A::Record::eval_public_values`
+/// trait dispatch becomes a closure parameter so this function
+/// doesn't depend on a Record trait extension on the Ziren side.
+pub fn verify_public_values<C, F>(
+    builder: &mut Builder<C>,
+    challenge: Ext<C::F, C::EF>,
+    alpha: &Ext<C::F, C::EF>,
+    beta_seed: &[Ext<C::F, C::EF>],
+    public_values: &[Felt<C::F>],
+    eval_public_values_fn: F,
+) -> SymbolicExt<C::F, C::EF>
+where
+    C: CircuitConfig,
+    F: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
+{
+    // Lift beta_seed into the symbolic algebra and expand to per-
+    // interaction beta-powers via partial Lagrange.
+    let beta_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+        beta_seed.iter().map(|e| SymbolicExt::from(*e)).collect();
+    let betas = partial_lagrange_symbolic::<C>(&beta_symbolic);
+
+    let mut folder = RecursivePublicValuesConstraintFolder::<C> {
+        perm_challenges: (alpha, &betas),
+        alpha: challenge,
+        accumulator: SymbolicExt::ZERO,
+        public_values,
+        local_interaction_digest: SymbolicExt::ZERO,
+        _marker: PhantomData,
+    };
+
+    eval_public_values_fn(&mut folder);
+
+    // Assert the accumulator is zero — the constraints emitted
+    // through the folder must hold for the proof to be sound.
+    builder.assert_ext_eq(folder.accumulator, SymbolicExt::ZERO);
+
+    folder.local_interaction_digest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +279,46 @@ mod tests {
             builder.constant(EF::from(F::ONE)),
         ];
         let _result = evaluate_mle_ext(&mut builder, &mle, &point);
+    }
+
+    /// Construction smoke test for partial_lagrange_symbolic.
+    #[test]
+    fn partial_lagrange_symbolic_returns_correct_length() {
+        use zkm_recursion_compiler::config::InnerConfig;
+        let mut builder = AsmBuilder::<F, EF>::default();
+        let point: Vec<SymbolicExt<F, EF>> = (0..3)
+            .map(|_| {
+                let e: Ext<F, EF> = builder.constant(EF::ZERO);
+                e.into()
+            })
+            .collect();
+        let weights = partial_lagrange_symbolic::<InnerConfig>(&point);
+        assert_eq!(weights.len(), 1usize << 3);
+    }
+
+    /// Construction smoke test for verify_public_values: empty
+    /// closure should produce a folder where accumulator stays at
+    /// zero (assert_ext_eq passes trivially) and digest stays at
+    /// zero too.
+    #[test]
+    fn verify_public_values_with_empty_closure() {
+        use zkm_recursion_compiler::config::InnerConfig;
+        use zkm_recursion_compiler::ir::Felt;
+        let mut builder = AsmBuilder::<F, EF>::default();
+        let challenge: Ext<F, EF> = builder.constant(EF::ONE);
+        let alpha: Ext<F, EF> = builder.constant(EF::ONE);
+        let beta_seed: Vec<Ext<F, EF>> = (0..2).map(|_| builder.constant(EF::ZERO)).collect();
+        let public_values: Vec<Felt<F>> = (0..4).map(|_| builder.constant(F::ZERO)).collect();
+
+        let _digest = verify_public_values::<InnerConfig, _>(
+            &mut builder,
+            challenge,
+            &alpha,
+            &beta_seed,
+            &public_values,
+            |_folder| {
+                // intentionally empty — no per-record constraints
+            },
+        );
     }
 }
