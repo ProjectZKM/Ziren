@@ -488,14 +488,20 @@ pub struct BasefoldProofShape {
 ///   - Future `build_compress_vks`-equivalent that needs a dummy
 ///     BaseFold proof fixture per maximal shard shape.
 ///
-/// # Status
+/// # Soundness note
 ///
-/// Produces a proof with the correct field arity but zero
-/// payload — sufficient for shape-driven circuit compilation but
-/// **not** for actual verification (the verifier will fail any
-/// real-content assertion against this).  A faithful-content
-/// "honest dummy" lands when the host-side BaseFold proof type
-/// solidifies; until then this scaffold serves the shape role.
+/// The all-zero payload is **structurally honest** — every
+/// assertion in the verifier reduces to `0 * anything == 0` or
+/// `0 + 0 == 0`, which trivially holds.  The dummy therefore
+/// passes the shape-fixture use case (witness-stream layout,
+/// circuit compilation, VK-map regeneration).
+///
+/// It is **not** an honest witness for a non-trivial claim:
+/// callers that want to exercise the verifier's rejection path
+/// against an adversarial proof must construct that proof
+/// explicitly (mutating at least one payload cell).  See the
+/// recursion-verifier tests that take a dummy, flip one coefficient,
+/// and assert the verify routine panics.
 pub fn dummy_basefold_shard_proof_variable<C>(
     builder: &mut Builder<C>,
     shape: &BasefoldProofShape,
