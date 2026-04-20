@@ -42,6 +42,7 @@ pub mod extract;
 pub mod first_layer;
 pub mod layer;
 pub mod round;
+pub mod top_level;
 pub mod transition;
 
 pub use build::*;
@@ -49,4 +50,5 @@ pub use extract::*;
 pub use first_layer::*;
 pub use layer::*;
 pub use round::*;
+pub use top_level::*;
 pub use transition::*;

@@ -1,0 +1,277 @@
+//! Top-level SP1-style shard LogUp-GKR prover (task #24, A.2 step 6).
+//!
+//! Assembles the full pipeline: first-layer generation, row-by-row
+//! reduction, per-round sumcheck, and final per-chip trace openings.
+//! Produces a [`LogupGkrProof`] with the SP1 output shape that the
+//! recursion verifier consumes.
+//!
+//! Replaces the structurally-mismatched `circuit_output` emission in
+//! [`super::super::logup_gkr_prover::prove_shard_logup_gkr`] — see
+//! `docs/task_23_blocker.md` for the mismatch analysis.
+//!
+//! ## Pipeline
+//!
+//!   1. Sample `[alpha, beta_0, beta_1, ..., beta_{arity}]` from
+//!      the challenger.
+//!   2. Call [`super::build::build_gkr_circuit`] to construct the
+//!      full layer stack + extract the unified output MLEs.
+//!   3. Sample `first_eval_point` of dimension
+//!      `num_interaction_variables + 1`.
+//!   4. Evaluate output.numerator and output.denominator at that
+//!      point → initial `(numerator_eval, denominator_eval)` claim.
+//!   5. Walk layers bottom-up.  For each layer:
+//!      - Sample `lambda` from the challenger.
+//!      - Call [`super::round::prove_gkr_round`] to run the degree-3
+//!        sumcheck.
+//!      - Observe the 4 openings `(n_0, n_1, d_0, d_1)` into the
+//!        challenger.
+//!      - Sample the line challenge, extend `eval_point` by one.
+//!      - Update `numerator_eval` / `denominator_eval` via the line
+//!        formula.
+//!   6. Compute per-chip trace MLE evaluations at the terminal
+//!      `eval_point` for the [`LogUpEvaluations`] payload.
+//!   7. Assemble the [`LogupGkrProof`].
+
+use alloc::vec::Vec;
+use std::collections::BTreeMap;
+
+use p3_challenger::{CanObserve, FieldChallenger};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
+use p3_matrix::dense::RowMajorMatrix;
+
+use super::build::build_gkr_circuit;
+use super::layer::GkrCircuitLayer;
+use super::round::prove_gkr_round;
+use crate::air::MachineAir;
+use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
+use crate::zerocheck_prover::eq_mle_table;
+use crate::Chip;
+
+/// SP1-style shard LogUp-GKR prover (the corrected top-level
+/// replacement for
+/// [`super::super::logup_gkr_prover::prove_shard_logup_gkr`]).
+///
+/// # Inputs
+///
+/// - `chips`: per-chip lookup specs (in fixed iteration order).
+/// - `preprocessed_traces`, `main_traces`: per-chip raw row-major
+///   matrices.  `preprocessed_traces[i]` may have width 0.
+/// - `challenger`: the Fiat-Shamir transcript state.  The prover
+///   samples `alpha`, `beta_seed`, and per-round `lambda` / line
+///   challenges from it.
+///
+/// # Output
+///
+/// A [`LogupGkrProof<F, EF>`] carrying
+/// `circuit_output.numerator/denominator` of length
+/// `2^(num_interaction_variables + 1)` — matching the recursion
+/// verifier's expected shape.
+#[allow(clippy::too_many_arguments)]
+pub fn prove_shard_logup_gkr_sp1<F, EF, A, Challenger>(
+    chips: &[&Chip<F, A>],
+    preprocessed_traces: &[RowMajorMatrix<F>],
+    main_traces: &[RowMajorMatrix<F>],
+    challenger: &mut Challenger,
+) -> LogupGkrProof<F, EF>
+where
+    F: PrimeField,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    A: MachineAir<F>,
+    Challenger: FieldChallenger<F>,
+{
+    // Step 1: sample [alpha, beta].  `beta_seed_dim` = log2(max_arity
+    // rounded up).  `betas.len()` = 1 + max_arity (slot 0 is for
+    // argument_index, slots 1..=arity for per-column values).
+    let alpha: EF = challenger.sample_algebra_element::<EF>();
+    let max_arity = chips
+        .iter()
+        .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
+        .map(|interaction| interaction.values.len() + 1)
+        .max()
+        .unwrap_or(1);
+    let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
+    let beta_seed: Vec<EF> = (0..beta_seed_dim)
+        .map(|_| challenger.sample_algebra_element::<EF>())
+        .collect();
+    // Expand beta_seed to the partial-lagrange table over {0,1}^beta_seed_dim.
+    let betas = if beta_seed.is_empty() {
+        vec![EF::ONE]
+    } else {
+        eq_mle_table::<EF>(&beta_seed)
+    };
+
+    // Determine num_row_variables = log2(max chip height rounded up).
+    // Must be >= 2 so build_gkr_circuit's inner loop terminates at
+    // num_row_variables == 1 for extract_outputs.
+    let max_height = main_traces
+        .iter()
+        .map(|t| if t.width == 0 { 0 } else { t.values.len() / t.width })
+        .max()
+        .unwrap_or(0);
+    let num_row_variables = max_height.max(1).next_power_of_two().trailing_zeros().max(2) as usize;
+
+    // Step 2: build GKR circuit + extract output MLEs.
+    let (output, mut circuit) = build_gkr_circuit::<F, EF, A>(
+        chips,
+        preprocessed_traces,
+        main_traces,
+        alpha,
+        &betas,
+        num_row_variables,
+    );
+    let num_interaction_variables =
+        output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
+
+    // Step 3: sample first eval_point (dim = num_interaction_variables + 1).
+    let mut eval_point: Vec<EF> = (0..(num_interaction_variables + 1))
+        .map(|_| challenger.sample_algebra_element::<EF>())
+        .collect();
+
+    // Step 4: initial claim = output MLE evaluation at eval_point.
+    let eq_first = eq_mle_table::<EF>(&eval_point);
+    let mut numerator_eval: EF =
+        eq_first.iter().zip(output.numerator.iter()).map(|(e, v)| *e * *v).sum();
+    let mut denominator_eval: EF =
+        eq_first.iter().zip(output.denominator.iter()).map(|(e, v)| *e * *v).sum();
+
+    // Step 5: walk layers bottom-up.  `circuit.layers` is stored
+    // top-down (first = largest num_row_vars); `pop_bottom` pops the
+    // smallest first, which is the extraction source — skip it and
+    // start from the next one up (num_row_variables == 1 terminal).
+    //
+    // Invariant check: after extract_outputs consumed layers[N-2] (the
+    // terminal), the remaining layers we want to prove against are
+    // layers[0..N-2] in bottom-up order.  Reverse the stack, skip the
+    // layers[N-1] entry (which has num_row_variables == 0 and was
+    // never extracted from), and iterate.
+    let mut round_proofs = Vec::with_capacity(circuit.layers.len());
+    circuit.layers.reverse();
+
+    // Skip the num_row_variables == 0 terminal (unused — only there to
+    // enable clean termination of the build loop).
+    for layer in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
+        // Sample lambda for this round.
+        let lambda: EF = challenger.sample_algebra_element::<EF>();
+
+        // Run the sumcheck.
+        let round_proof = prove_gkr_round::<F, EF, _>(
+            layer,
+            &eval_point,
+            numerator_eval,
+            denominator_eval,
+            lambda,
+            challenger,
+        );
+
+        // Observe the 4 openings into the challenger (as extension elements).
+        observe_ext::<F, EF, _>(challenger, round_proof.numerator_0);
+        observe_ext::<F, EF, _>(challenger, round_proof.denominator_0);
+        observe_ext::<F, EF, _>(challenger, round_proof.numerator_1);
+        observe_ext::<F, EF, _>(challenger, round_proof.denominator_1);
+
+        // Take the reduced point from the sumcheck as the base for the
+        // next layer's eval_point; extend by the line challenge.
+        let mut next_eval_point = round_proof.sumcheck_proof.point_and_eval.0.clone();
+        let line_challenge: EF = challenger.sample_algebra_element::<EF>();
+        next_eval_point.push(line_challenge);
+
+        // Line-formula: at the sumcheck's reduced point + line_challenge,
+        //   n_eval = n_0 + line · (n_1 - n_0) = (1 - line) · n_0 + line · n_1
+        //   d_eval = d_0 + line · (d_1 - d_0) = (1 - line) · d_0 + line · d_1
+        numerator_eval = round_proof.numerator_0
+            + (round_proof.numerator_1 - round_proof.numerator_0) * line_challenge;
+        denominator_eval = round_proof.denominator_0
+            + (round_proof.denominator_1 - round_proof.denominator_0) * line_challenge;
+
+        eval_point = next_eval_point;
+        round_proofs.push(round_proof);
+    }
+
+    // Step 6: per-chip trace evaluations at the terminal eval_point.
+    // The eval_point has dimension (num_row_variables + num_interaction_variables + 1)
+    // after all the line-challenge extensions.  The trace evaluation
+    // point is the last `log(chip_height)` coords of eval_point (the
+    // row axis trailing bits), matching the slop-side shape.
+    let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
+        .iter()
+        .zip(main_traces.iter())
+        .zip(preprocessed_traces.iter())
+        .map(|((chip, main_trace), prep_trace)| {
+            let main_height = if main_trace.width == 0 {
+                1
+            } else {
+                main_trace.values.len() / main_trace.width
+            };
+            let log_main_height =
+                main_height.max(1).next_power_of_two().trailing_zeros() as usize;
+            let main_eval_point: &[EF] = if eval_point.len() >= log_main_height {
+                &eval_point[eval_point.len() - log_main_height..]
+            } else {
+                &eval_point[..]
+            };
+            let main_evals = evaluate_trace_columns_at_point::<F, EF>(
+                &main_trace.values,
+                main_trace.width,
+                main_eval_point,
+            );
+
+            let prep_evals = if prep_trace.width > 0 {
+                let prep_height = prep_trace.values.len() / prep_trace.width.max(1);
+                let log_prep_height =
+                    prep_height.max(1).next_power_of_two().trailing_zeros() as usize;
+                let prep_eval_point: &[EF] = if eval_point.len() >= log_prep_height {
+                    &eval_point[eval_point.len() - log_prep_height..]
+                } else {
+                    &eval_point[..]
+                };
+                Some(evaluate_trace_columns_at_point::<F, EF>(
+                    &prep_trace.values,
+                    prep_trace.width,
+                    prep_eval_point,
+                ))
+            } else {
+                None
+            };
+
+            (
+                chip.name().to_string(),
+                ChipEvaluation {
+                    main_trace_evaluations: main_evals,
+                    preprocessed_trace_evaluations: prep_evals,
+                },
+            )
+        })
+        .collect();
+
+    // Step 7: assemble.
+    LogupGkrProof {
+        circuit_output: LogUpGkrOutput {
+            numerator: output.numerator,
+            denominator: output.denominator,
+        },
+        round_proofs,
+        logup_evaluations: LogUpEvaluations { point: eval_point, chip_openings },
+        witness: F::ZERO,
+    }
+}
+
+#[inline]
+fn observe_ext<F, EF, Challenger>(challenger: &mut Challenger, v: EF)
+where
+    F: Field,
+    EF: BasedVectorSpace<F>,
+    Challenger: CanObserve<F>,
+{
+    for c in v.as_basis_coefficients_slice() {
+        challenger.observe(*c);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // End-to-end shard-level prove tests require Chip<F, A> instances
+    // from zkm_core_machine.  Deferred to step 7 (smoke test re-enable)
+    // which exercises this from the recursion circuit side via
+    // produce_real_basefold_shard_proof.
+}
