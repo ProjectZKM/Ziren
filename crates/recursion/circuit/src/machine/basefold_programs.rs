@@ -351,39 +351,20 @@ mod tests {
     /// completion without panicking on a structurally-valid empty
     /// shard.
     ///
-    /// End-to-end smoke test: wires the real `prove_shard_to_basefold`
-    /// host path through the normalize basefold program constructor.
+    /// End-to-end structural smoke test: wires the real
+    /// `prove_shard_to_basefold` host path through the normalize
+    /// basefold program constructor.
     ///
-    /// **Status**: task #24 (SP1 GKR backend port) closed the protocol
-    /// mismatch on `circuit_output.numerator/denominator` shape.  The
-    /// verifier now progresses past `verify_logup_gkr` cleanly.  Next
-    /// blocker (for #23 continuation):
+    /// Validates the full shard-level pipeline end-to-end at the
+    /// structural level (all verifier layers — LogUp-GKR, zerocheck,
+    /// permutation short-circuit, jagged-PCS, stacked-PCS, basefold
+    /// query fold — run to completion without panicking on shape
+    /// mismatches).
     ///
-    /// ```
-    /// panic at crates/recursion/circuit/src/zerocheck.rs:112
-    ///   assertion `left == right` failed: eq_eval: points must have equal dimension
-    ///     left: 6   (gkr_evaluations.point — correct full dim)
-    ///    right: 0   (zerocheck_proof.point_and_eval.0 — empty)
-    /// ```
-    ///
-    /// Root cause: Ziren's `prove_shard_zerocheck` skips every chip
-    /// with `permutation_width() > 0` — i.e. every chip that uses
-    /// lookups (essentially all MIPS chips).  When every chip is
-    /// skipped, `max_log_degree = 0` and the sumcheck runs 0 rounds
-    /// → empty `eval_point`.  The skip is a workaround because the
-    /// hypercube evaluator doesn't synthesize permutation traces from
-    /// LogUp-GKR openings.
-    ///
-    /// **Fix**: port SP1's zerocheck at
-    /// `/tmp/sp1/crates/hypercube/src/prover/zerocheck/` which uses
-    /// the LogUp-GKR openings directly instead of requiring a
-    /// permutation trace.  Own task — not for #24.
-    ///
-    /// The zero-filled trace won't pass cryptographic soundness, but
-    /// the structural invariants through LogUp-GKR are satisfied by
-    /// construction.
+    /// The zero-filled trace doesn't pass cryptographic soundness,
+    /// but the structural invariants are all satisfied by construction.
+    /// Closed tasks #23, #24, #25, #26, #27.
     #[test]
-    #[ignore = "task #23 next blocker: prove_shard_zerocheck skips lookup chips — see docstring"]
     fn build_normalize_basefold_program_compiles_dummy_witness() {
         use zkm_core_machine::mips::MipsAir;
         use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
