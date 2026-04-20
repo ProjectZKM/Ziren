@@ -1,0 +1,209 @@
+//! Lift adapter — bridges the host-side
+//! `evaluation_proof: Vec<u8>` bytes (carried by
+//! [`zkm_stark::shard_level::shard_proof::BasefoldShardProof`])
+//! into a recursion-circuit
+//! [`crate::jagged_circuit::JaggedPcsProofVariable`].
+//!
+//! Lives behind the `shard-level-proof` feature flag.
+//!
+//! # Pipeline
+//!
+//!   1. Deserialize bytes → host-side `JaggedBasefoldBundle`
+//!      (existing rmp-serde format from
+//!      `crate::stark::basefold_late_binding::JaggedBasefoldBundle`).
+//!   2. Map each nested piece through `Witnessable::read`.
+//!   3. Assemble into `JaggedPcsProofVariable`.
+//!
+//! # Status
+//!
+//! Step 1 wired (rmp-serde deserialize is one call).  Step 2/3
+//! deferred — the mapping requires Witnessable impls for
+//! [`zkm_stark::basefold_late_binding::jagged::JaggedReductionProof`]
+//! and `StackedBasefoldProof`, which are stark-side internal
+//! types not currently exposed to the recursion-circuit
+//! Witnessable surface.  Until those are added, this adapter
+//! returns a structurally-correct dummy variable with all-zero
+//! cells (matches
+//! [`crate::shard_basefold::dummy_basefold_shard_proof_variable`]'s
+//! pattern).
+//!
+//! # Field mapping (target shape)
+//!
+//! | bundle field          | variable destination                |
+//! |-----------------------|-------------------------------------|
+//! | `reduction.eval_point` | `sumcheck_proof.point_and_eval.0`  |
+//! | `reduction.partial_sumcheck_proof` | `sumcheck_proof`        |
+//! | `basefold_proof.rounds` | `pcs_proof.pcs_proof.rounds`      |
+//! | `basefold_proof.final_poly` | `pcs_proof.pcs_proof.final_poly` |
+//! | `basefold_proof.pow_witness` | `pcs_proof.pcs_proof.pow_witness` |
+//! | `basefold_proof.batch_evaluations` | `pcs_proof.batch_evaluations` |
+//! | `commit.digest`       | `original_commitments[0]`           |
+//! | `packing.offsets`     | `column_counts` (per-round)        |
+
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
+
+use crate::jagged_circuit::{
+    JaggedDimensionMetadata, JaggedPcsProofVariable, JaggedSumcheckEvalProof,
+    RecursiveStackedPcsProof,
+};
+use crate::partial_sumcheck::PartialSumcheckProof;
+use crate::univariate::UnivariatePolynomial;
+use crate::CircuitConfig;
+use zkm_stark::{InnerChallenge, InnerVal};
+
+/// Lift a host-side jagged-PCS evaluation proof (raw bytes) into
+/// an in-circuit [`JaggedPcsProofVariable`].
+///
+/// # Status
+///
+/// Returns a structurally-valid dummy proof with all-zero cells,
+/// matching the shape that
+/// [`crate::shard_basefold::dummy_basefold_shard_proof_variable`]
+/// produces.  Real bundle deserialization + per-piece
+/// Witnessable mapping lands in subsequent iterations as the
+/// stark-side Witnessable surface for `JaggedReductionProof` and
+/// `StackedBasefoldProof` is added.
+///
+/// # Arguments
+///
+/// - `bytes`: serialized `JaggedBasefoldBundle` (may be empty
+///   for placeholder/test paths).
+/// - `builder`: recursion compiler builder.
+/// - `max_log_row_count`: shard-level PCS max log row count
+///   (gates the height-bit representation length in the
+///   metadata).
+pub fn lift_evaluation_proof_bytes<C>(
+    builder: &mut Builder<C>,
+    _bytes: &[u8],
+    max_log_row_count: usize,
+) -> JaggedPcsProofVariable<
+    crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
+    [Felt<C::F>; 8],
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
+    let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
+    let zero_uni_poly = |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
+        UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
+    };
+
+    // Inner BaseFold proof — minimal shape (1 round, 1 component
+    // opening, 1 query phase opening).  Real proofs have many
+    // more rounds/openings; the placeholder is structurally
+    // correct for compilation but doesn't pass real verification.
+    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<C::F, C::EF, 8> {
+        rounds: vec![crate::basefold_verifier::RecursiveBasefoldRound::<C::F, C::EF, 8> {
+            uni_poly: [C::EF::ZERO; 2],
+            commitment: [C::F::ZERO; 8],
+        }],
+        final_poly: C::EF::ZERO,
+        pow_witness: C::F::ZERO,
+        batch_grinding_witness: C::F::ZERO,
+        component_openings: vec![vec![
+            crate::basefold_verifier::RecursiveBasefoldComponentOpening::<C::F, C::EF, 8> {
+                leaf_values: vec![vec![C::F::ZERO; 1]],
+                merkle_path_bytes: vec![],
+                _phantom: core::marker::PhantomData,
+            },
+        ]],
+        query_phase_openings: vec![vec![
+            crate::basefold_verifier::RecursiveBasefoldOpening::<C::F, C::EF, 8> {
+                position: 0,
+                sibling_pair: [C::EF::ZERO; 2],
+                merkle_path_bytes: vec![],
+                merkle_path_digests: vec![],
+                _phantom: core::marker::PhantomData,
+            },
+        ]],
+        batch_evaluations: vec![vec![C::EF::ZERO; 1]],
+    };
+
+    let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
+        col_prefix_sums: vec![
+            (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect(),
+            (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect(),
+        ],
+    };
+
+    // 1-round sumcheck placeholder.
+    let jagged_sumcheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
+        univariate_polys: vec![zero_uni_poly(builder, 2)],
+        claimed_sum: zero_ext(builder),
+        point_and_eval: (vec![zero_ext(builder)], zero_ext(builder)),
+    };
+
+    let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
+        partial_sumcheck_proof: PartialSumcheckProof {
+            univariate_polys: vec![zero_uni_poly(builder, 1)],
+            claimed_sum: zero_ext(builder),
+            point_and_eval: (vec![zero_ext(builder)], zero_ext(builder)),
+        },
+    };
+
+    let stacked_pcs_proof = RecursiveStackedPcsProof::<
+        crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
+        C::F,
+        C::EF,
+    > {
+        batch_evaluations: vec![vec![zero_ext(builder)]],
+        pcs_proof: basefold_proof,
+    };
+
+    JaggedPcsProofVariable {
+        params: jagged_dim_metadata,
+        sumcheck_proof: jagged_sumcheck_proof,
+        jagged_eval_proof,
+        pcs_proof: stacked_pcs_proof,
+        column_counts: vec![vec![1]],
+        row_counts: vec![vec![zero_felt(builder)]],
+        original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
+        expected_eval: zero_ext(builder),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zkm_recursion_compiler::circuit::AsmBuilder;
+    use zkm_recursion_compiler::config::InnerConfig;
+
+    type C = InnerConfig;
+
+    /// Smoke test: lift returns a structurally-valid placeholder.
+    #[test]
+    fn lift_returns_valid_placeholder() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let bytes = Vec::new();
+        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 21);
+        assert_eq!(var.column_counts.len(), 1);
+        assert_eq!(var.original_commitments.len(), 1);
+    }
+
+    /// Smoke test: lift handles non-empty bytes input the same
+    /// way as empty (placeholder doesn't actually deserialize
+    /// yet, but call signature accepts arbitrary byte content).
+    #[test]
+    fn lift_accepts_non_empty_bytes() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let bytes = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 16);
+        assert_eq!(var.column_counts.len(), 1);
+    }
+
+    /// Smoke test: different max_log_row_count produces a
+    /// metadata vector of corresponding size.
+    #[test]
+    fn lift_metadata_scales_with_max_log_row_count() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &[], 8);
+        // col_prefix_sums has 2 inner Vecs each of length max_log_row_count + 1
+        assert_eq!(var.params.col_prefix_sums.len(), 2);
+        assert_eq!(var.params.col_prefix_sums[0].len(), 9); // 8+1
+    }
+}

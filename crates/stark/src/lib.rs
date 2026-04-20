@@ -19,6 +19,8 @@ pub mod jagged;
 #[cfg(feature = "basefold")]
 pub mod jagged_sumcheck;
 pub mod logup_gkr;
+#[cfg(feature = "shard-level-proof")]
+pub mod shard_level;
 mod lookup;
 mod machine;
 mod opts;

@@ -1,6 +1,14 @@
 mod complete;
 mod compress;
+#[cfg(feature = "shard-level-proof")]
+pub mod compress_basefold;
 mod core;
+#[cfg(feature = "shard-level-proof")]
+pub mod core_basefold;
+#[cfg(feature = "shard-level-proof")]
+pub mod deferred_basefold;
+#[cfg(feature = "shard-level-proof")]
+pub mod wrap_basefold;
 mod deferred;
 mod public_values;
 mod root;

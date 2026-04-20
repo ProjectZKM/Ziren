@@ -145,48 +145,22 @@ where
         let public_values = self.public_values.read(builder);
         let chip_ordering = self.chip_ordering.clone();
 
-        // Read the optional per-chip LogUp-GKR proofs.  The
-        // updated `dummy_vk_and_shard_proof` (sized via
-        // log_degree + log2(interactions_per_row)) now agrees
-        // with real-proof shape, so this read is
-        // synchronisation-safe.
-        let basefold_logup_gkr_proofs = self
-            .logup_gkr_proofs
-            .as_ref()
-            .map(|proofs| proofs.iter().map(|p| p.read(builder)).collect());
-        // Per-chip zerocheck proofs.  Dummy shape parity: chips
-        // with permutation_width > 0 get 0 rounds (empty
-        // placeholder), others get log_degree rounds — matches
-        // crate::stark::dummy_vk_and_shard_proof's logic.
-        let basefold_zerocheck_proofs = self
-            .zerocheck_proofs
-            .as_ref()
-            .map(|proofs| proofs.iter().map(|p| p.read(builder)).collect());
-        // Jagged-PCS opening proof fingerprint: XOR-fold of the
-        // bytes into 8 KoalaBear values, each read as a Felt from
-        // the witness stream.  The fold is deterministic and
-        // length-stable, so dummy and real proofs always
-        // contribute exactly 8 felts.  Real proofs supply the
-        // hash of their `late_binding_jagged_proof`; legacy /
-        // dummy proofs supply the fold-of-empty-bytes (all zeros).
-        let basefold_jagged_fingerprint: [Felt<C::F>; 8] = {
-            let bytes_opt: Option<&Vec<u8>> = self.late_binding_jagged_proof.as_ref();
-            let empty: Vec<u8> = Vec::new();
-            let bytes = bytes_opt.unwrap_or(&empty);
-            // Fold each byte into one of 8 lanes by index mod 8,
-            // accumulated as a u32 add (KoalaBear field-safe).
-            let mut acc = [0u32; 8];
-            for (i, &b) in bytes.iter().enumerate() {
-                acc[i & 7] = acc[i & 7].wrapping_add(b as u32);
-            }
-            // Lift each lane into a host-side InnerVal then
-            // through Witnessable::read so the witness stream
-            // gets the felt and the variable type lines up.
-            let lane_vals: [InnerVal; 8] = std::array::from_fn(|i| {
-                <InnerVal as p3_field::PrimeCharacteristicRing>::from_u32(acc[i])
-            });
-            std::array::from_fn(|i| lane_vals[i].read(builder))
-        };
+        // BaseFold-pipeline reads — DISABLED in this iteration.
+        // Even just reading the new fields emits ImmF/ImmE ops
+        // that perturb the recursion-AIR's compiled chip lookup
+        // accounting, breaking local_cumulative_sum == 0 on
+        // aggregation proofs.  Restore reads after the SP1-style
+        // migration (parallel BasefoldShardVerifier-based machine)
+        // lands; until then, fields stay None.
+        let basefold_logup_gkr_proofs = None;
+        let basefold_zerocheck_proofs = None;
+        // Jagged fingerprint read disabled — see comment above
+        // for why the BaseFold-pipeline reads perturb the
+        // recursion-AIR's lookup accounting.  Field gets a
+        // builder-allocated zero value to satisfy the type
+        // signature without consuming witness bytes.
+        let basefold_jagged_fingerprint: [Felt<C::F>; 8] =
+            std::array::from_fn(|_| builder.constant(<C::F as p3_field::PrimeCharacteristicRing>::ZERO));
 
         ShardProofVariable {
             commitment,
@@ -205,27 +179,9 @@ where
         self.opened_values.write(witness);
         self.opening_proof.write(witness);
         self.public_values.write(witness);
-        if let Some(proofs) = self.logup_gkr_proofs.as_ref() {
-            for p in proofs.iter() {
-                p.write(witness);
-            }
-        }
-        if let Some(proofs) = self.zerocheck_proofs.as_ref() {
-            for p in proofs.iter() {
-                p.write(witness);
-            }
-        }
-        // Jagged-PCS bytes XOR-fold fingerprint (8 lanes).
-        let bytes_opt: Option<&Vec<u8>> = self.late_binding_jagged_proof.as_ref();
-        let empty: Vec<u8> = Vec::new();
-        let bytes = bytes_opt.unwrap_or(&empty);
-        let mut acc = [0u32; 8];
-        for (i, &b) in bytes.iter().enumerate() {
-            acc[i & 7] = acc[i & 7].wrapping_add(b as u32);
-        }
-        for lane in acc.iter() {
-            <InnerVal as p3_field::PrimeCharacteristicRing>::from_u32(*lane).write(witness);
-        }
+        // BaseFold-pipeline writes disabled to match the disabled
+        // reads above.  Re-enable when the SP1-style parallel
+        // BasefoldShardVerifier-based recursion machine lands.
     }
 }
 

@@ -214,6 +214,7 @@ pub struct RecursiveBasefoldProof<F, EF, const DIGEST_ELEMS: usize> {
 }
 
 /// Top-level recursion verifier for a BaseFold shard proof.
+#[derive(Clone)]
 pub struct RecursiveBasefoldVerifier {
     pub params: BasefoldVerifierParams,
 }
