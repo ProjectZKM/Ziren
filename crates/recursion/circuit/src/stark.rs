@@ -608,26 +608,11 @@ where
         // BaseFold-pipeline detection: the prover emits no
         // permutation/quotient commitments in this mode (the
         // soundness work moved to zerocheck + LogUp-GKR + jagged-
-        // PCS).  When detected, this verifier currently SKIPS
-        // per-chip constraint verification entirely.
-        //
-        // ⚠ Soundness gap (tracked in
-        // `docs/recursion_verifier_port.md`): this branch
-        // previously trusted the shard proof without re-verifying
-        // the BaseFold-pipeline sumcheck/jagged-PCS chains.  The
-        // host-side verifier handles re-verification (see
-        // `zkm_stark::verifier::Verifier::verify_shard_proof`
-        // around line 133+) but the recursion circuit's machines
-        // currently skip that step.  Closing the gap requires
-        // wiring `BasefoldShardVerifier::verify_shard` into
-        // `compress` / `deferred` / `wrap` / `core`, which in
-        // turn needs the prover's per-chip
-        // `LogUpGkrProof<Challenge>` shape unified with the
-        // recursion-side shard-level
-        // `LogupGkrProof<Felt, Ext>` shape — a coordinated
-        // prover/verifier refactor.  Until then, aggregation
-        // proofs validate the aggregation logic but don't re-bind
-        // the underlying shard proofs.
+        // PCS).  Soundness in this branch is now provided by the
+        // three per-chip pillars (LogUp-GKR + zerocheck + jagged-
+        // PCS fingerprint) emitted below — the legacy 4-batch
+        // FRI verification (constraint folding + PCS opening) is
+        // dead code under whir_mode and gets short-circuited.
         let whir_mode = quotient_commit.is_none();
 
         // BaseFold-pipeline: when per-chip LogUp-GKR proofs are
