@@ -245,13 +245,28 @@ where
         .collect();
 
     // Step 7: assemble.
+    // The LogUpEvaluations.point is the trace-dimension slice of the
+    // full eval_point — the last `num_row_variables` coordinates.
+    // This matches SP1's convention (prover.rs:183 — last_k of the
+    // full GKR eval_point) and satisfies the recursion verifier's
+    // `zerocheck_point.dim == gkr_point.dim == pcs_max_log_row_count`
+    // invariant at `zerocheck.rs:488`.
+    let trace_dim_point = if eval_point.len() >= num_row_variables {
+        eval_point[eval_point.len() - num_row_variables..].to_vec()
+    } else {
+        eval_point.clone()
+    };
+
     LogupGkrProof {
         circuit_output: LogUpGkrOutput {
             numerator: output.numerator,
             denominator: output.denominator,
         },
         round_proofs,
-        logup_evaluations: LogUpEvaluations { point: eval_point, chip_openings },
+        logup_evaluations: LogUpEvaluations {
+            point: trace_dim_point,
+            chip_openings,
+        },
         witness: F::ZERO,
     }
 }

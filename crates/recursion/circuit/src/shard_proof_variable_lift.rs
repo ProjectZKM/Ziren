@@ -238,6 +238,7 @@ pub fn build_opened_values_from_chip_openings<C>(
         String,
         zkm_stark::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
     >,
+    max_log_row_count: usize,
 ) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
@@ -258,6 +259,14 @@ where
             let main_evals = opening.main_trace_evaluations.clone();
             let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
+            // `degree` is the bit-decomposition of chip height padded
+            // to `max_log_row_count + 1` bits — matches the shape
+            // `verify_zerocheck` expects at zerocheck.rs:503 when
+            // it constructs `degree_symbolic` of the same length as
+            // `proof_point_extended` (= max_log_row_count + 1).
+            let degree_bits: Vec<Ext<C::F, C::EF>> = (0..max_log_row_count + 1)
+                .map(|_| builder.constant(C::EF::ZERO))
+                .collect();
             crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
                 preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
                     local: preprocessed_evals,
@@ -265,7 +274,7 @@ where
                 main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
                     local: main_evals,
                 },
-                degree: Vec::new(), // TBD: derive from chip log_height
+                degree: degree_bits,
                 local_cumulative_sum: zero_ext,
                 global_cumulative_sum: SepticDigest(SepticCurve {
                     x: SepticExtension(core::array::from_fn(|_| zero_felt)),
@@ -352,6 +361,7 @@ mod tests {
         let opened = build_opened_values_from_chip_openings::<InnerConfig>(
             &mut builder,
             &chip_openings,
+            4,
         );
         assert_eq!(opened.chips.len(), 2);
         // BTreeMap iteration is sorted: Cpu < Memory.
@@ -359,6 +369,9 @@ mod tests {
         assert_eq!(opened.chips[0].preprocessed.local.len(), 1);
         assert_eq!(opened.chips[1].main.local.len(), 2);
         assert_eq!(opened.chips[1].preprocessed.local.len(), 0);
+        // degree has max_log_row_count + 1 = 5 bits per chip.
+        assert_eq!(opened.chips[0].degree.len(), 5);
+        assert_eq!(opened.chips[1].degree.len(), 5);
     }
 
     /// Numerical test: LogupGkrProof lifter preserves all
@@ -465,6 +478,7 @@ mod tests {
         let opened = build_opened_values_from_chip_openings::<InnerConfig>(
             &mut builder,
             &chip_openings,
+            4,
         );
         assert_eq!(opened.chips.len(), 0);
     }

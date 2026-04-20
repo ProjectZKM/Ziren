@@ -266,9 +266,12 @@ mod tests {
             vec![p3_koala_bear::KoalaBear::ZERO; main_width * height],
             main_width,
         );
+        // Use the chip's actual preprocessed width (0 for AddSub —
+        // no preprocessed trace).  Empty values + width 0 is valid
+        // for RowMajorMatrix and matches the verifier's shape check.
         let prep_trace = RowMajorMatrix::<p3_koala_bear::KoalaBear>::new(
-            vec![p3_koala_bear::KoalaBear::ZERO; prep_width.max(1) * height],
-            prep_width.max(1),
+            vec![p3_koala_bear::KoalaBear::ZERO; prep_width * height],
+            prep_width,
         );
 
         let main_commit = std::array::from_fn(|_| p3_koala_bear::KoalaBear::ZERO);
@@ -388,10 +391,13 @@ mod tests {
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_basefold_witness(&machine);
+        // Use max_log_row_count = 3 to match the dummy trace's actual
+        // log_height (see produce_real_basefold_shard_proof).  Real
+        // shards use 22; the test's small fixture avoids heavy padding.
         let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
             &witness,
-            22,
+            3,
         );
         // Bare-minimum sanity: program produced, has at least one
         // instruction.  Tighter bounds + RecursionExecutor::run land

@@ -326,6 +326,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             crate::shard_proof_variable_lift::build_opened_values_from_chip_openings::<C>(
                 builder,
                 &logup_gkr_proof.logup_evaluations.chip_openings,
+                max_log_row_count,
             );
 
         // Step 5e: per-shard challenger.  In the legacy compress,

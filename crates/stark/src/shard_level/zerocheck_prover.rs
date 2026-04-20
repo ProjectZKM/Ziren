@@ -185,7 +185,28 @@ where
 
     // Step 3: determine the shard's max log_degree (== sumcheck
     // round count) and pad each chip table up to that size.
-    let max_log_degree = chip_tables.iter().map(|(d, _)| *d).max().unwrap_or(0);
+    //
+    // Shard-level invariant: the sumcheck must run over exactly
+    // `shard_log_row_count` variables (== the shared shard-padded
+    // height), which equals `log2(max trace height)` across all
+    // chips — whether or not they were skipped in step 2.  The
+    // recursion verifier enforces
+    // `zerocheck_point.dim == pcs_max_log_row_count` at
+    // `recursion/circuit/src/zerocheck.rs:488`.
+    let shard_log_row_count: usize = main_traces
+        .iter()
+        .map(|t| {
+            let h = if t.width == 0 { 0 } else { t.values.len() / t.width };
+            h.max(1).next_power_of_two().trailing_zeros() as usize
+        })
+        .max()
+        .unwrap_or(0);
+    let max_log_degree = chip_tables
+        .iter()
+        .map(|(d, _)| *d)
+        .max()
+        .unwrap_or(0)
+        .max(shard_log_row_count);
     let target_size = 1usize << max_log_degree;
     let padded: Vec<Vec<Challenge<SC>>> = chip_tables
         .into_iter()

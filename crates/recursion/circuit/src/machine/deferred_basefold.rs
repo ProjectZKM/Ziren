@@ -227,6 +227,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             crate::shard_proof_variable_lift::build_opened_values_from_chip_openings::<C>(
                 builder,
                 &logup_gkr_proof.logup_evaluations.chip_openings,
+                max_log_row_count,
             );
         let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
         let jagged_evaluator_fn =
