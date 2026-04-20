@@ -253,14 +253,21 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         })
         .collect();
 
-    // Per-chip dummy zerocheck proofs.  Rounds count = log_degree
-    // (one round per trace variable), eval_point dimension =
-    // log_degree.  All-zero payload — shape parity only.
+    // Per-chip dummy zerocheck proofs.  Real prover (see
+    // crates/stark/src/prover.rs:407-444): chips with
+    // `permutation_width > 0` get an EMPTY placeholder proof
+    // (rounds.len() == 0); other chips get log_degree rounds.
     let zerocheck_proofs_dummy: Vec<zkm_stark::zerocheck::ZerocheckProof<InnerChallenge>> = shape
         .inner
         .iter()
-        .map(|(_, log_degree)| {
-            let m = *log_degree as usize;
+        .map(|(name, log_degree)| {
+            let chip_idx = chip_ordering[name];
+            let chip = &shard_chips[chip_idx];
+            let m = if chip.permutation_width() > 0 {
+                0
+            } else {
+                *log_degree as usize
+            };
             zkm_stark::zerocheck::ZerocheckProof {
                 rounds: vec![[InnerChallenge::ZERO; 3]; m],
                 eval_point: vec![InnerChallenge::ZERO; m],
