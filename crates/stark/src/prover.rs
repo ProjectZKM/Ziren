@@ -777,6 +777,33 @@ where
                 (per_chip, None)
             };
 
+            // ── Task #28 opt-in: populate basefold_shard_proof ────
+            //
+            // When `ZIREN_SHARD_LEVEL_BASEFOLD=1` is set and SC is
+            // KoalaBearPoseidon2, additionally drive the shard-level
+            // prover (`prove_shard_to_basefold`) and carry the result
+            // alongside the per-chip proofs.  Non-destructive: the
+            // legacy WHIR fields stay populated so existing verifier
+            // paths keep working.  Uses a cloned challenger so the
+            // outer transcript isn't disturbed.
+            #[cfg(feature = "shard-level-proof")]
+            let basefold_shard_proof = if std::env::var("ZIREN_SHARD_LEVEL_BASEFOLD")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
+                try_prove_shard_to_basefold_boxed::<SC, A>(
+                    &chips,
+                    &pk.traces,
+                    &pk.chip_ordering,
+                    &traces,
+                    &data.main_commit,
+                    data.public_values.clone(),
+                    &*challenger,
+                )
+            } else {
+                None
+            };
+
             return Ok(ShardProof::<SC> {
                 commitment: ShardCommitment {
                     main_commit: data.main_commit.clone(),
@@ -791,9 +818,8 @@ where
                 logup_row_openings,
                 late_binding_proofs,
                 late_binding_jagged_proof,
-                // Legacy WHIR path — shard-level basefold proof not populated.
                 #[cfg(feature = "shard-level-proof")]
-                basefold_shard_proof: None,
+                basefold_shard_proof,
             });
         }
 
@@ -1425,3 +1451,112 @@ impl Display for CpuProverError {
 }
 
 impl Error for CpuProverError {}
+
+// ───────────────────────────────────────────────────────────
+// Task #28 helper: drive prove_shard_to_basefold from inside
+// StarkMachine::open() when ZIREN_SHARD_LEVEL_BASEFOLD=1.
+// ───────────────────────────────────────────────────────────
+
+/// Drive [`crate::shard_level::prover::prove_shard_to_basefold`]
+/// using a cloned challenger so the outer transcript isn't perturbed.
+///
+/// Returns `Some(Box::new(basefold_proof))` when SC is
+/// `KoalaBearPoseidon2` (monomorphic dispatch gate — see
+/// `crate::shard_level::prover::emit_jagged_pcs_bytes`) and
+/// `None` otherwise.
+///
+/// Used only from the opt-in `ZIREN_SHARD_LEVEL_BASEFOLD=1`
+/// branch in `StarkMachine::open`.  This helper is the bridge
+/// between the per-chip WHIR path's in-scope values and the
+/// shard-level prover's monomorphic KoalaBear API.
+#[cfg(feature = "shard-level-proof")]
+#[allow(clippy::too_many_arguments)]
+fn try_prove_shard_to_basefold_boxed<SC, A>(
+    chips: &[&MachineChip<SC, A>],
+    pk_traces: &[RowMajorMatrix<Val<SC>>],
+    pk_chip_ordering: &hashbrown::HashMap<String, usize>,
+    main_traces: &[RowMajorMatrix<Val<SC>>],
+    main_commit: &Com<SC>,
+    public_values: Vec<Val<SC>>,
+    challenger: &SC::Challenger,
+) -> Option<
+    Box<
+        crate::shard_level::shard_proof::BasefoldShardProof<
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
+        >,
+    >,
+>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Val<SC>: PrimeField32,
+    SC::Challenger: Clone + 'static,
+    Val<SC>: 'static,
+    <SC as StarkGenericConfig>::Challenge: 'static,
+    Com<SC>: 'static,
+{
+    use core::any::TypeId;
+    use crate::{InnerChallenge, InnerVal};
+
+    // Gate on SC == KoalaBearPoseidon2 (monomorphic dispatch).
+    if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
+        || TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
+            != TypeId::of::<InnerChallenge>()
+        || TypeId::of::<SC::Challenger>()
+            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+    {
+        return None;
+    }
+
+    // Build per-chip preprocessed traces aligned with `chips` (empty
+    // when a chip has no preprocessed column).
+    let preprocessed_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
+        .iter()
+        .map(|chip| {
+            pk_chip_ordering
+                .get(&chip.name().to_string())
+                .map(|&idx| pk_traces[idx].clone())
+                .unwrap_or_else(|| RowMajorMatrix::new(vec![], 0))
+        })
+        .collect();
+
+    // Convert `Com<SC>` to `[Val<SC>; 8]`.  For KoalaBearPoseidon2
+    // (the gated config) `Com<SC>` is `Hash<Val, Val, 8>`, a
+    // transparent wrapper around `[Val; 8]`.  Use Any-downcast on a
+    // cloned value to avoid any layout assumptions.
+    let mut digest = [Val::<SC>::ZERO; 8];
+    {
+        let main_commit_cloned: Com<SC> = main_commit.clone();
+        let (ptr, _len, _cap) = {
+            let mut v = core::mem::ManuallyDrop::new(vec![main_commit_cloned]);
+            (v.as_mut_ptr(), v.len(), v.capacity())
+        };
+        // SAFETY: Com<SC> is Hash<Val, Val, 8> under the TypeId gate
+        // above — a #[repr(transparent)] wrapper around [Val; 8].
+        // Reading `*ptr as [Val; 8]` is valid.  Leak the Vec (don't
+        // free) since we've consumed the single element.
+        let hash_arr: [Val<SC>; 8] = unsafe { core::ptr::read(ptr as *const [Val<SC>; 8]) };
+        digest = hash_arr;
+    }
+
+    // Clone the outer challenger so our shard-level run doesn't
+    // perturb the legacy transcript state.
+    let mut shard_challenger: SC::Challenger = challenger.clone();
+
+    // Convert &[&Chip] into &[&Chip<Val<SC>, A>] — Chip alias check.
+    let chips_reborrow: Vec<&crate::Chip<Val<SC>, A>> =
+        chips.iter().map(|c| *c as &crate::Chip<Val<SC>, A>).collect();
+
+    let proof = crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
+        &chips_reborrow,
+        &preprocessed_traces,
+        main_traces,
+        digest,
+        public_values,
+        &mut shard_challenger,
+    );
+
+    Some(Box::new(proof))
+}
