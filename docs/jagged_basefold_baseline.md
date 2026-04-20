@@ -57,3 +57,19 @@ Performance stable across 3 measurement rounds throughout the
 session.  The new in-circuit verification only fires inside the
 recursion circuit's `StarkVerifier::verify_shard`, not the host
 verify path that these examples test.
+
+## Post-jagged-PCS-transcript-binding (commit 3f905ba)
+
+Final round of measurements after the structural plumbing for the
+jagged-PCS bytes binding landed (schema field + transcript-observe
+code in verify_shard; Witnessable read still gated on dummy shape
+parity).  No measurable change at the host-prover-verify level.
+
+| Example | e2e Wall | Δ vs baseline |
+|---|---|---|
+| fibonacci | 8.03 s | -0.25 s (-3%, slight improvement) |
+| keccak-precompile | 18.91 s | -0.63 s (-3%, slight improvement) |
+
+The slight improvement across all four measurement rounds suggests
+the WHIR cleanup (-345 LOC) reduced compilation/codegen overhead
+in the prover; well within measurement noise but consistent.
