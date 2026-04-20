@@ -64,6 +64,17 @@ pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriPar
     pub basefold_zerocheck_proofs: Option<
         Vec<crate::per_chip_zerocheck::PerChipZerocheckProofVariable<C::F, C::EF>>,
     >,
+    /// Jagged-PCS opening proof bytes, packed one byte per Felt.
+    /// `None` in the legacy 4-batch FRI pipeline; `Some(Vec<Felt>)`
+    /// in the BaseFold pipeline (the host's
+    /// `late_binding_jagged_proof`).  Observed into the
+    /// challenger transcript inside `verify_shard` so the
+    /// prover can't equivocate on the bytes content.  Full
+    /// BaseFold-PCS in-circuit verification of the bytes
+    /// (deserialize → run sumcheck + FRI) is a separate task;
+    /// the transcript binding establishes the necessary
+    /// commitment.
+    pub basefold_jagged_bytes: Option<Vec<Felt<C::F>>>,
 }
 
 /// Get a dummy duplex challenger for use in dummy proofs.
@@ -388,6 +399,7 @@ where
             public_values,
             basefold_logup_gkr_proofs: _,
             basefold_zerocheck_proofs: _,
+            basefold_jagged_bytes: _,
         } = proof;
 
         // Assert that the byte multiplicities don't overflow.

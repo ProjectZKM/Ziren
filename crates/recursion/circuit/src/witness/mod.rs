@@ -162,6 +162,15 @@ where
             .zerocheck_proofs
             .as_ref()
             .map(|proofs| proofs.iter().map(|p| p.read(builder)).collect());
+        // Jagged-PCS opening proof bytes — packed one byte per
+        // Felt and read in stream.  Witness-stream synchronisation
+        // requires the dummy proof to emit a Some(Vec) of matching
+        // length; the dummy emits None for now (no shape parity
+        // anchor on Vec<u8> length yet), so this read stays None
+        // to avoid desync.  The verify_shard binding is wired so
+        // that flipping the dummy + read together is a one-line
+        // change.
+        let basefold_jagged_bytes = None;
 
         ShardProofVariable {
             commitment,
@@ -171,6 +180,7 @@ where
             chip_ordering,
             basefold_logup_gkr_proofs,
             basefold_zerocheck_proofs,
+            basefold_jagged_bytes,
         }
     }
 
