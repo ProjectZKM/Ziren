@@ -114,3 +114,23 @@ Final stage. Takes a Shrink output, verifies VK is in the allowed set via merkle
 **Total:** 8-12 working days for #22 alone.
 
 Once #22 lands, #21 is a trivial ~1-day config flip + legacy-path compat shim removal.
+
+---
+
+## Status update (post-body-port session)
+
+Subtasks 22.1-22.5 all landed and compile clean under `--features shard-level-proof`:
+
+- `2ffc315` — 22.1 real jagged-evaluator closure in compress_basefold.rs
+- `c82055e` — 22.2 EVPV audit + wire real closure into core/compress call sites
+- `02d4db5` — 22.3 core_basefold body (full shard-consistency chain port)
+- `fda59e8` — 22.4 deferred_basefold body
+- `488bb59` — 22.5 wrap_basefold body
+
+**Only 22.6 remains** — end-to-end smoke test feeding a real shard proof through the pipeline. Scoped as a separate effort because it needs:
+
+1. A host-side shard-level proof to use as fixture. Generated via `zkm_stark::shard_level::prove_shard_to_basefold` — exists but has no known test caller yet.
+2. Recursion-compiler-level executor run to verify the program compiles + runs. Pattern in existing `compress_basefold::tests` but those are construction smoke tests, not aggregation smoke tests.
+3. Witnessable plumbing for each new `ZKM*BasefoldWitnessValues` → `ZKM*BasefoldWitnessVariable` (tuple-shape input is already supported by existing `shard_level_witness`; new stage-specific fields need additions).
+
+Recommend filing 22.6 as its own task once #21 is unblocked and CI can be wired.
