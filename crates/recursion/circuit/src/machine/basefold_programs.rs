@@ -193,3 +193,84 @@ impl ZKMBasefoldRecursionStage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Smoke test: ZKMBasefoldRecursionStage enum dispatch + names
+    /// match what SP1 uses for its VK-map keys.
+    #[test]
+    fn stage_names_match_sp1_convention() {
+        assert_eq!(ZKMBasefoldRecursionStage::Normalize.name(), "Normalize");
+        assert_eq!(ZKMBasefoldRecursionStage::Compose { arity: 2 }.name(), "Compose");
+        assert_eq!(ZKMBasefoldRecursionStage::Deferred.name(), "Deferred");
+        assert_eq!(ZKMBasefoldRecursionStage::Wrap.name(), "Wrap");
+    }
+
+    /// Compose arity equality: two Compose values with the same
+    /// arity are equal; with different arities are not.
+    #[test]
+    fn compose_arity_distinguishes_variants() {
+        let a = ZKMBasefoldRecursionStage::Compose { arity: 2 };
+        let b = ZKMBasefoldRecursionStage::Compose { arity: 2 };
+        let c = ZKMBasefoldRecursionStage::Compose { arity: 4 };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    /// Compile-only smoke test: each program-builder function exists
+    /// at the right type and can be coerced to a function pointer
+    /// with the expected signature.  Validates the type bounds on
+    /// the public API without actually running the AsmCompiler
+    /// (which needs valid witness fixtures — see task #23 for the
+    /// runtime end-to-end test).
+    ///
+    /// Catches the most common breakage class — generic-bound drift
+    /// after upstream changes — without requiring proof fixtures.
+    #[test]
+    fn program_builders_have_expected_signatures() {
+        // Take each builder as a `fn` pointer.  If the signature
+        // changes (e.g. a new generic bound or extra parameter
+        // added), this test fails to compile.
+        use zkm_core_machine::mips::MipsAir;
+        use p3_koala_bear::KoalaBear;
+
+        let _normalize: fn(
+            &zkm_stark::StarkMachine<
+                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                MipsAir<KoalaBear>,
+            >,
+            &super::ZKMCoreBasefoldWitnessValues<
+                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            >,
+            usize,
+        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
+            build_normalize_basefold_program::<MipsAir<KoalaBear>>;
+
+        let _deferred: fn(
+            &zkm_stark::StarkMachine<
+                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                MipsAir<KoalaBear>,
+            >,
+            &super::ZKMDeferredBasefoldWitnessValues<
+                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            >,
+            usize,
+            bool,
+        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
+            build_deferred_basefold_program::<MipsAir<KoalaBear>>;
+
+        let _wrap: fn(
+            &zkm_stark::StarkMachine<
+                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                MipsAir<KoalaBear>,
+            >,
+            &super::ZKMWrapBasefoldWitnessValues<
+                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            >,
+            usize,
+        ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
+            build_wrap_basefold_program::<MipsAir<KoalaBear>>;
+    }
+}
