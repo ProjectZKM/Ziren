@@ -114,15 +114,16 @@ where
     // z_col coord + one per row coord).
     let stacked_point_dim = num_col_variables + max_log_row_count;
 
-    // Inner BaseFold proof — minimal shape (1 round, 1 component
-    // opening, 1 query phase opening).  Real proofs have many
-    // more rounds/openings; the placeholder is structurally
-    // correct for compilation but doesn't pass real verification.
+    // Inner BaseFold proof.  rounds.len() must equal the
+    // BasefoldVerifierParams::num_variables which build_basefold_shard_verifier
+    // sets to max_log_row_count (see shard_proof_variable_lift.rs:206-212).
     let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<C::F, C::EF, 8> {
-        rounds: vec![crate::basefold_verifier::RecursiveBasefoldRound::<C::F, C::EF, 8> {
-            uni_poly: [C::EF::ZERO; 2],
-            commitment: [C::F::ZERO; 8],
-        }],
+        rounds: (0..max_log_row_count)
+            .map(|_| crate::basefold_verifier::RecursiveBasefoldRound::<C::F, C::EF, 8> {
+                uni_poly: [C::EF::ZERO; 2],
+                commitment: [C::F::ZERO; 8],
+            })
+            .collect(),
         final_poly: C::EF::ZERO,
         pow_witness: C::F::ZERO,
         batch_grinding_witness: C::F::ZERO,
@@ -133,15 +134,22 @@ where
                 _phantom: core::marker::PhantomData,
             },
         ]],
-        query_phase_openings: vec![vec![
-            crate::basefold_verifier::RecursiveBasefoldOpening::<C::F, C::EF, 8> {
-                position: 0,
-                sibling_pair: [C::EF::ZERO; 2],
-                merkle_path_bytes: vec![],
-                merkle_path_digests: vec![],
-                _phantom: core::marker::PhantomData,
-            },
-        ]],
+        // query_phase_openings: outer Vec = num_variables (rounds),
+        // inner Vec = num_queries.  At basefold_verifier.rs:852 the
+        // verifier reads `query_phase_openings[round][query_idx]`
+        // and collects one sibling_pair per round, so outer length
+        // must equal num_variables (== max_log_row_count here).
+        query_phase_openings: (0..max_log_row_count)
+            .map(|_| vec![
+                crate::basefold_verifier::RecursiveBasefoldOpening::<C::F, C::EF, 8> {
+                    position: 0,
+                    sibling_pair: [C::EF::ZERO; 2],
+                    merkle_path_bytes: vec![],
+                    merkle_path_digests: vec![],
+                    _phantom: core::marker::PhantomData,
+                },
+            ])
+            .collect(),
         batch_evaluations: vec![vec![C::EF::ZERO; 1]],
     };
 
@@ -183,16 +191,41 @@ where
         },
     };
 
-    // Stacked-PCS batch_evaluations shape: one Vec per round.
+    // Stacked-PCS batch_evaluations shape.  The verifier asserts
+    // `batch_evaluations.flatten().len() == 2^batch_dim` where
+    // `batch_dim = num_col_variables - log_stacking_height` and
+    // `log_stacking_height == max_log_row_count` in Ziren's current
+    // shard-level config (see core_basefold.rs:135-139).
+    //
+    // Distribute `2^batch_dim` entries across the `num_rounds`
+    // per-round slots: first round gets `ceil(total / num_rounds)`
+    // entries, later rounds get the remainder.
     let num_rounds = column_counts_by_round.len().max(1);
+    let batch_dim = num_col_variables.saturating_sub(max_log_row_count);
+    let total_batch_evals = 1usize << batch_dim;
+    let per_round = total_batch_evals.div_ceil(num_rounds);
+    let mut batch_evaluations: Vec<Vec<Ext<C::F, C::EF>>> = Vec::with_capacity(num_rounds);
+    let mut remaining = total_batch_evals;
+    for _ in 0..num_rounds {
+        let take = per_round.min(remaining);
+        batch_evaluations.push((0..take).map(|_| zero_ext(builder)).collect());
+        remaining = remaining.saturating_sub(take);
+    }
+    // If per_round * num_rounds > total, the excess goes into the
+    // last round's slot as empty entries; otherwise if total >
+    // per_round * num_rounds, add to the last round.
+    if remaining > 0 {
+        for _ in 0..remaining {
+            batch_evaluations.last_mut().unwrap().push(zero_ext(builder));
+        }
+    }
+
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
         crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
         C::F,
         C::EF,
     > {
-        batch_evaluations: (0..num_rounds)
-            .map(|_| vec![zero_ext(builder)])
-            .collect(),
+        batch_evaluations,
         pcs_proof: basefold_proof,
     };
 
