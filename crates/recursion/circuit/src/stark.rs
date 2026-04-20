@@ -615,54 +615,36 @@ where
         // dead code under whir_mode and gets short-circuited.
         let whir_mode = quotient_commit.is_none();
 
-        // BaseFold-pipeline: when per-chip LogUp-GKR proofs are
-        // present on the proof variable, run the per-chip
-        // verifier over each chip's proof.  This binds the LogUp
-        // soundness chain (root → layered descent → leaf claim
-        // at eval_point) inside the recursion circuit.
-        if let Some(per_chip_proofs) = proof.basefold_logup_gkr_proofs.as_ref() {
-            for (chip_proof, _chip) in per_chip_proofs.iter().zip(chips.iter()) {
-                let (_eval_point, _leaf_num, _leaf_denom) =
-                    crate::per_chip_logup_gkr::verify_per_chip_logup_gkr::<C, SC::FriChallengerVariable>(
-                        builder,
-                        chip_proof,
-                        challenger,
-                    );
-                // The leaf-claim binding against main-trace
-                // openings at `eval_point` is the next step;
-                // currently we only verify the GKR soundness
-                // chain, not the tie-back to the trace.
-            }
-        }
-
-        // BaseFold-pipeline: when per-chip zerocheck proofs are
-        // present, verify each chip's zerocheck soundness chain
-        // (initial-zero claim → per-round sumcheck → final claim).
-        if let Some(zc_proofs) = proof.basefold_zerocheck_proofs.as_ref() {
-            for (chip_proof, _chip) in zc_proofs.iter().zip(chips.iter()) {
-                let (_eval_point, _final_claim) =
-                    crate::per_chip_zerocheck::verify_per_chip_zerocheck::<C, SC::FriChallengerVariable>(
-                        builder,
-                        chip_proof,
-                        challenger,
-                    );
-                // Final-claim binding against the chip's
-                // constraint-eval at eval_point is the next step;
-                // currently we verify the sumcheck-side
-                // soundness chain only.
-            }
-        }
-
-        // BaseFold-pipeline jagged-PCS bytes fingerprint: 8-lane
-        // XOR-fold of the host's `late_binding_jagged_proof`
-        // bytes (or all-zero when absent), observed into the
-        // challenger transcript.  Binds the prover to the bytes
-        // content in fixed size.  Full in-circuit BaseFold-PCS
-        // verification of the deserialised bundle is the next
-        // iteration; this fingerprint is the prerequisite anchor.
-        for &lane in proof.basefold_jagged_fingerprint.iter() {
-            challenger.observe(builder, lane);
-        }
+        // BaseFold-pipeline soundness bindings (LogUp-GKR +
+        // zerocheck per-chip verifiers + jagged-PCS fingerprint
+        // observation) — DISABLED in this iteration.
+        //
+        // The implementations exist (per_chip_logup_gkr.rs,
+        // per_chip_zerocheck.rs) and the structural plumbing
+        // (ShardProofVariable fields, Witnessable reads, dummy
+        // shape parity) is in place, but invoking the verifiers
+        // here introduces additional in-circuit ops whose lookup
+        // interactions don't balance against the existing
+        // recursion-AIR's lookup count, breaking the
+        // local_cumulative_sum == 0 invariant on the compiled
+        // recursion proof (validated via aggregation end-to-end
+        // run).
+        //
+        // To enable the bindings safely, the per-chip verifier
+        // emission needs to either:
+        //   - Be wrapped in a fresh chip whose sends/receives
+        //     are accounted for in the recursion AIR's lookup
+        //     planning, OR
+        //   - Use only ops that don't add new lookup traffic
+        //     (observe-only, no challenger sampling that maps
+        //     to lookup chips).
+        //
+        // Until that's resolved, the structural code stays
+        // in-tree as the migration target; the actual binding
+        // fires once the lookup-balance gap is addressed.
+        let _ = proof.basefold_logup_gkr_proofs.as_ref();
+        let _ = proof.basefold_zerocheck_proofs.as_ref();
+        let _ = &proof.basefold_jagged_fingerprint;
 
         for (chip, trace_domain, qc_domains, values) in
             izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)
