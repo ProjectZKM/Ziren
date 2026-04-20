@@ -385,7 +385,7 @@ fn normalize_constraint(
 }
 
 fn postprocess_module(chip_name: &str, module: &mut PicusModule) {
-    if chip_name == "BooleanCircuitGarble" {
+    if matches!(chip_name, "BooleanCircuitGarble" | "SysLinux") {
         let protected_vars = collect_interface_vars(module);
         let mut constraints = Vec::with_capacity(module.constraints.len());
         let mut seen = BTreeSet::new();
