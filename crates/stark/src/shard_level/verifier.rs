@@ -196,19 +196,134 @@ impl BasefoldShardVerifier {
         )?;
 
         // ── Phase 3: Zerocheck sumcheck verification ────────────
-        Err(BasefoldVerifyError::Unimplemented(
-            "Phase 3 (zerocheck verification) — port from \
-             crates/recursion/circuit/src/zerocheck.rs::BasefoldZerocheckVerifier",
-        ))
+        //
+        // Partial port from
+        //   crates/recursion/circuit/src/zerocheck.rs::BasefoldZerocheckVerifier::verify_zerocheck
+        //
+        // Fully implemented:
+        //   - Challenge sampling (alpha, gkr_batch_open, lambda)
+        //   - Chip count / opening shape / point dimension checks
+        //   - Zerocheck sumcheck verification via verify_sumcheck_host
+        //   - Per-chip opening transcript observations
+        //
+        // Deferred (Unimplemented) — requires BasefoldConstraintFolder
+        // host port (its own task):
+        //   - AIR constraint evaluation (eval_constraints_basefold)
+        //   - Padded-row adjustment (compute_padded_row_adjustment_basefold)
+        //   - Cross-chip RLC identity check (step 5 of the circuit version)
+        //   - GKR sum-modification identity (step 7)
+        //
+        // The partial port catches all structural/shape failures in
+        // the zerocheck phase; full soundness requires the folder port.
+        verify_zerocheck_host::<SC, A>(
+            chips,
+            &proof.zerocheck_proof,
+            &proof.logup_gkr_proof.logup_evaluations,
+            self.max_log_row_count,
+            challenger,
+        )?;
 
         // ── Phase 4: Jagged-PCS opening verification ────────────
-        //
-        // Port from
-        //   crates/recursion/circuit/src/recursive_jagged_pcs.rs::verify_trusted_evaluations
-        // Again, strip out the in-circuit Builder ops.  Consume the
-        // rmp-serde-deserialised JaggedBasefoldBundle from
-        // proof.evaluation_proof.
+        Err(BasefoldVerifyError::Unimplemented(
+            "Phase 4 (jagged-PCS verification) — port from \
+             crates/recursion/circuit/src/recursive_jagged_pcs.rs::verify_trusted_evaluations",
+        ))
     }
+}
+
+/// Host-side zerocheck verification (partial port, see phase 3
+/// comments in verify_shard).  Validates:
+///
+///   1. Point dimension == `max_log_row_count`
+///   2. Point dimension == gkr_evaluations.point dimension
+///   3. Inner sumcheck proof via verify_sumcheck_host (degree 3,
+///      `max_log_row_count` rounds)
+///   4. Transcript observations matching the prover's ordering
+fn verify_zerocheck_host<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
+    gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    max_log_row_count: usize,
+    challenger: &mut SC::Challenger,
+) -> Result<(), BasefoldVerifyError>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
+{
+    // (1) Sample the per-phase challenges.  We don't use alpha /
+    // gkr_batch_open / lambda in the partial port (they drive the
+    // constraint-folder-dependent RLC), but sampling keeps the
+    // transcript in sync with the prover's ordering.
+    let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let _gkr_batch_open: Challenge<SC> =
+        challenger.sample_algebra_element::<Challenge<SC>>();
+    let _lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+
+    // (2) Point dimension == max_log_row_count.
+    let point_dim = zerocheck_proof.point_and_eval.0.len();
+    if point_dim != max_log_row_count {
+        return Err(BasefoldVerifyError::Zerocheck(format!(
+            "zerocheck point dim {point_dim} != max_log_row_count {max_log_row_count}"
+        )));
+    }
+
+    // (3) gkr_point dim must match zerocheck point dim (verified by
+    // the eq_eval identity in the full port; here we just shape-check).
+    if gkr_evaluations.point.len() != point_dim {
+        return Err(BasefoldVerifyError::Zerocheck(format!(
+            "gkr_evaluations.point dim {} != zerocheck point dim {}",
+            gkr_evaluations.point.len(),
+            point_dim
+        )));
+    }
+
+    // (4) Inner sumcheck: degree 3, max_log_row_count rounds.
+    // The zerocheck sumcheck proves the constraint identity; the
+    // coefficient-level verifier we already have handles the
+    // round-poly consistency.
+    verify_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
+        zerocheck_proof,
+        challenger,
+        max_log_row_count,
+        3,
+    )
+    .map_err(|e| match e {
+        BasefoldVerifyError::LogupGkr(msg) => BasefoldVerifyError::Zerocheck(msg),
+        other => other,
+    })?;
+
+    // (5) Observe per-chip opening count + openings.
+    challenger.observe(Val::<SC>::from_u64(chips.len() as u64));
+    for chip in chips.iter() {
+        let name = chip.name().to_string();
+        let opening = match gkr_evaluations.chip_openings.get(&name) {
+            Some(o) => o,
+            None => {
+                return Err(BasefoldVerifyError::Zerocheck(format!(
+                    "chip {name} missing from gkr_evaluations.chip_openings"
+                )));
+            }
+        };
+        if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
+            for c in prep.iter() {
+                for basis in c.as_basis_coefficients_slice() {
+                    challenger.observe(*basis);
+                }
+            }
+        }
+        for c in opening.main_trace_evaluations.iter() {
+            for basis in c.as_basis_coefficients_slice() {
+                challenger.observe(*basis);
+            }
+        }
+    }
+
+    // Full constraint-folder identity check is deferred.  The
+    // partial port above catches all structural failures; full
+    // soundness requires the BasefoldConstraintFolder host port.
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────
