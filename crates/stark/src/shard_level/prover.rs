@@ -48,8 +48,8 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::logup_gkr_prover::prove_shard_logup_gkr;
 use super::shard_proof::BasefoldShardProof;
+use super::sp1_gkr::top_level::prove_shard_logup_gkr_sp1;
 use super::zerocheck_prover::prove_shard_zerocheck;
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
@@ -115,7 +115,10 @@ where
     }
 
     // ── Phase 2: LogUp-GKR ─────────────────────────────────
-    let logup_gkr_proof = prove_shard_logup_gkr::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
+    // SP1-style row-only reduction: emits circuit_output of length
+    // 2^(num_interaction_variables + 1) matching the recursion verifier.
+    // See docs/task_23_blocker.md for the protocol mismatch this fixes.
+    let logup_gkr_proof = prove_shard_logup_gkr_sp1::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
         chips,
         preprocessed_traces,
         main_traces,
