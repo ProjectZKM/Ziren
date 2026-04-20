@@ -300,6 +300,8 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         logup_row_openings: None,
         late_binding_proofs: None,
         late_binding_jagged_proof: None,
+        #[cfg(feature = "shard-level-proof")]
+        basefold_shard_proof: None,
     };
 
     (vk, shard_proof)

@@ -57,9 +57,17 @@ serde_json = "1.0.140"
 test-artifacts = { workspace = true }
 
 [features]
-default = ["network"]
+default = ["network", "shard-level-proof"]
 pre-alloc = [ "zkm-core-executor/pre-alloc" ]
 native-gnark = ["zkm-prover/native-gnark"]
+# Propagates shard-level-proof to both zkm-stark (ShardProof field)
+# and zkm-recursion-circuit (machine/basefold_programs.rs gated
+# cfg).  Both crates' `default` feature sets include this so the
+# SDK default build has the field active.
+shard-level-proof = [
+  "zkm-stark/shard-level-proof",
+  "zkm-prover/shard-level-proof",
+]
 network = [
   "dep:prost",
   "dep:alloy-primitives",

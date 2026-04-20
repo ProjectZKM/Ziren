@@ -165,6 +165,29 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// `late_binding_proofs`.
     #[serde(default)]
     pub late_binding_jagged_proof: Option<Vec<u8>>,
+    /// SP1-style shard-level proof (task #28 dual-path compat shim).
+    ///
+    /// When `Some`, the shard was produced via
+    /// `crate::shard_level::prove_shard_to_basefold` — one LogUp-GKR
+    /// + one zerocheck per shard instead of one per chip.  Verifier
+    /// dispatches to `BasefoldShardVerifier::verify_shard` when this
+    /// field is populated; otherwise falls through to the legacy
+    /// per-chip `zerocheck_proofs` / `logup_gkr_proofs` path.
+    ///
+    /// `Box` keeps the ShardProof size footprint flat — the
+    /// BasefoldShardProof is ~KB of nested structs.  Feature-gated
+    /// behind `shard-level-proof` so serde wire format stays stable
+    /// for consumers built without the feature.
+    #[cfg(feature = "shard-level-proof")]
+    #[serde(default)]
+    pub basefold_shard_proof: Option<
+        Box<
+            crate::shard_level::shard_proof::BasefoldShardProof<
+                Val<SC>,
+                Challenge<SC>,
+            >,
+        >,
+    >,
 }
 
 /// Opened main- and preprocessed-trace values at the row coordinates of

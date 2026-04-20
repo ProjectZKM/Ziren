@@ -95,6 +95,8 @@ impl Prover<DefaultProverComponents> for MockProver {
                     logup_row_openings: None,
                     late_binding_proofs: None,
                     late_binding_jagged_proof: None,
+                    #[cfg(feature = "shard-level-proof")]
+                    basefold_shard_proof: None,
                 };
 
                 let reduce_vk = StarkVerifyingKey {

@@ -791,6 +791,9 @@ where
                 logup_row_openings,
                 late_binding_proofs,
                 late_binding_jagged_proof,
+                // Legacy WHIR path — shard-level basefold proof not populated.
+                #[cfg(feature = "shard-level-proof")]
+                basefold_shard_proof: None,
             });
         }
 
@@ -1146,6 +1149,9 @@ where
             logup_row_openings: None,
             late_binding_proofs: None,
             late_binding_jagged_proof: None,
+            // FRI path — no shard-level basefold proof either.
+            #[cfg(feature = "shard-level-proof")]
+            basefold_shard_proof: None,
         })
     }
 
