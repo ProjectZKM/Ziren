@@ -221,10 +221,15 @@ pub fn verify_compress_basefold<C, SC, A>(
         // JaggedPcsProofVariable.  Currently returns a
         // structurally-valid placeholder; real bundle
         // deserialization lands in subsequent iterations.
+        // Placeholder column_counts — compress doesn't yet drive the
+        // smoke test; the real wiring lands alongside the core shape
+        // when the compress-stage test comes online.
+        let column_counts_by_round_placeholder: Vec<Vec<usize>> = Vec::new();
         let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
             builder,
             &evaluation_proof_bytes,
             max_log_row_count,
+            &column_counts_by_round_placeholder,
         );
 
         // Step 3: assemble BasefoldShardProofVariable from the

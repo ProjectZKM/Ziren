@@ -269,10 +269,29 @@ pub fn verify_core_basefold<C, SC, A>(
         }
 
         // ---- Verify the shard via BasefoldShardVerifier ----
+        // Build column_counts_by_round before the lift so the
+        // jagged-PCS metadata matches the actual opened_values shape.
+        let shard_chips_pre: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+            .chips()
+            .iter()
+            .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
+            .collect();
+        let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
+            .iter()
+            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .collect();
+        let main_widths_pre: Vec<usize> = shard_chips_pre
+            .iter()
+            .map(|c| p3_air::BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+            .collect();
+        let column_counts_by_round_pre: Vec<Vec<usize>> =
+            vec![preprocessed_widths_pre, main_widths_pre];
+
         let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
             builder,
             &evaluation_proof_bytes,
             max_log_row_count,
+            &column_counts_by_round_pre,
         );
         let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
             builder,

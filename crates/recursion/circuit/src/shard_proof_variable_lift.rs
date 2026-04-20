@@ -521,11 +521,13 @@ mod tests {
             claimed_sum: builder.constant(InnerChallenge::ZERO),
             point_and_eval: (Vec::new(), builder.constant(InnerChallenge::ZERO)),
         };
+        let empty_cols: Vec<Vec<usize>> = Vec::new();
         let evaluation_proof =
             crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<InnerConfig>(
                 &mut builder,
                 &[],
                 21,
+                &empty_cols,
             );
         let chip_height_bits = empty_chip_height_bits::<InnerConfig>(&mut builder, &[], 21);
 

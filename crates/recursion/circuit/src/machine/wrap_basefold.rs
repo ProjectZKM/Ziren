@@ -102,10 +102,12 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let chip_names: Vec<String> =
         logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
+    let column_counts_by_round_placeholder: Vec<Vec<usize>> = Vec::new();
     let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
         builder,
         &evaluation_proof_bytes,
         max_log_row_count,
+        &column_counts_by_round_placeholder,
     );
     let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
         builder,

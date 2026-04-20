@@ -76,6 +76,7 @@ pub fn lift_evaluation_proof_bytes<C>(
     builder: &mut Builder<C>,
     _bytes: &[u8],
     max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
     crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
     [Felt<C::F>; 8],
@@ -92,6 +93,26 @@ where
     let zero_uni_poly = |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
         UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
     };
+
+    // Compute the padded column count from the actual per-round
+    // shape.  This is the total number of columns (summed across
+    // chips, per round) plus 1 artificial zero per round, then
+    // rounded up to a power of two.  Matches the padding logic in
+    // RecursiveJaggedPcsVerifier::verify_trusted_evaluations.
+    let total_cols_before_pad: usize = column_counts_by_round
+        .iter()
+        .map(|cc| cc.iter().sum::<usize>() + 1) // +1 artificial zero per round
+        .sum();
+    let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
+    // col_prefix_sums must satisfy `col_prefix_sums.len() - 1 == num_cols`
+    // where `num_cols` is the padded column count the MLE is taken over.
+    let col_prefix_sums_len = padded_cols + 1;
+    // Per-column sumcheck point dim (post-padding).
+    let num_col_variables = padded_cols.trailing_zeros() as usize;
+    // The stacked-PCS evaluation point has
+    // `num_col_variables + max_log_row_count` dimensions (one per
+    // z_col coord + one per row coord).
+    let stacked_point_dim = num_col_variables + max_log_row_count;
 
     // Inner BaseFold proof — minimal shape (1 round, 1 component
     // opening, 1 query phase opening).  Real proofs have many
@@ -124,45 +145,81 @@ where
         batch_evaluations: vec![vec![C::EF::ZERO; 1]],
     };
 
+    // col_prefix_sums: per-round outer Vec, per-column inner Vec of
+    // bit-decomposed felts.  Each inner slot must have
+    // `max_log_row_count + 1` bits to match the verifier's Horner
+    // decode at `recursive_jagged_pcs.rs:262-272`.
     let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
-        col_prefix_sums: vec![
-            (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect(),
-            (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect(),
-        ],
+        col_prefix_sums: (0..col_prefix_sums_len)
+            .map(|_| (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect())
+            .collect(),
     };
 
-    // 1-round sumcheck placeholder.
+    // Sumcheck runs over `num_col_variables` rounds → one univariate
+    // poly per round, and point_and_eval.0 has that many coords.
     let jagged_sumcheck_proof = PartialSumcheckProof::<Ext<C::F, C::EF>> {
-        univariate_polys: vec![zero_uni_poly(builder, 2)],
+        univariate_polys: (0..num_col_variables)
+            .map(|_| zero_uni_poly(builder, 2))
+            .collect(),
         claimed_sum: zero_ext(builder),
-        point_and_eval: (vec![zero_ext(builder)], zero_ext(builder)),
+        point_and_eval: (
+            (0..num_col_variables).map(|_| zero_ext(builder)).collect(),
+            zero_ext(builder),
+        ),
     };
 
+    // Jagged-eval sub-protocol proof — shape-matches a degree-1
+    // sumcheck over num_col_variables rounds.
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
         partial_sumcheck_proof: PartialSumcheckProof {
-            univariate_polys: vec![zero_uni_poly(builder, 1)],
+            univariate_polys: (0..num_col_variables)
+                .map(|_| zero_uni_poly(builder, 1))
+                .collect(),
             claimed_sum: zero_ext(builder),
-            point_and_eval: (vec![zero_ext(builder)], zero_ext(builder)),
+            point_and_eval: (
+                (0..num_col_variables).map(|_| zero_ext(builder)).collect(),
+                zero_ext(builder),
+            ),
         },
     };
 
+    // Stacked-PCS batch_evaluations shape: one Vec per round.
+    let num_rounds = column_counts_by_round.len().max(1);
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
         crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
         C::F,
         C::EF,
     > {
-        batch_evaluations: vec![vec![zero_ext(builder)]],
+        batch_evaluations: (0..num_rounds)
+            .map(|_| vec![zero_ext(builder)])
+            .collect(),
         pcs_proof: basefold_proof,
     };
+
+    // column_counts / row_counts / original_commitments shape-match
+    // the per-round, per-chip pattern expected by the verifier's
+    // prefix-sum consistency check at
+    // `recursive_jagged_pcs.rs:248-260`.
+    let column_counts: Vec<Vec<usize>> = column_counts_by_round.to_vec();
+    let row_counts: Vec<Vec<Felt<C::F>>> = column_counts_by_round
+        .iter()
+        .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
+        .collect();
+    let original_commitments: Vec<[Felt<C::F>; 8]> = (0..num_rounds)
+        .map(|_| std::array::from_fn(|_| zero_felt(builder)))
+        .collect();
+
+    // stacked_point_dim used for silencing dead_code warning.
+    let _ = stacked_point_dim;
 
     JaggedPcsProofVariable {
         params: jagged_dim_metadata,
         sumcheck_proof: jagged_sumcheck_proof,
         jagged_eval_proof,
         pcs_proof: stacked_pcs_proof,
-        column_counts: vec![vec![1]],
-        row_counts: vec![vec![zero_felt(builder)]],
-        original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
+        column_counts,
+        row_counts,
+        original_commitments,
         expected_eval: zero_ext(builder),
     }
 }
@@ -180,9 +237,11 @@ mod tests {
     fn lift_returns_valid_placeholder() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = Vec::new();
-        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 21);
-        assert_eq!(var.column_counts.len(), 1);
-        assert_eq!(var.original_commitments.len(), 1);
+        let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
+        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 21, &cols);
+        // column_counts lifted through verbatim.
+        assert_eq!(var.column_counts, cols);
+        assert_eq!(var.original_commitments.len(), 2);
     }
 
     /// Smoke test: lift handles non-empty bytes input the same
@@ -192,8 +251,9 @@ mod tests {
     fn lift_accepts_non_empty_bytes() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 16);
-        assert_eq!(var.column_counts.len(), 1);
+        let cols: Vec<Vec<usize>> = vec![vec![1, 2]];
+        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 16, &cols);
+        assert_eq!(var.column_counts, cols);
     }
 
     /// Smoke test: different max_log_row_count produces a
@@ -201,9 +261,11 @@ mod tests {
     #[test]
     fn lift_metadata_scales_with_max_log_row_count() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &[], 8);
-        // col_prefix_sums has 2 inner Vecs each of length max_log_row_count + 1
-        assert_eq!(var.params.col_prefix_sums.len(), 2);
-        assert_eq!(var.params.col_prefix_sums[0].len(), 9); // 8+1
+        // 2 rounds × 2 chips each with 3 cols = 6 per round + 1 pad
+        // = 7 → padded to 8.  col_prefix_sums.len() == 9.
+        let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];
+        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &[], 8, &cols);
+        assert_eq!(var.params.col_prefix_sums.len(), 17); // 2*(6+1) = 14 → padded to 16 → +1 = 17
+        assert_eq!(var.params.col_prefix_sums[0].len(), 9); // max_log_row_count + 1
     }
 }
