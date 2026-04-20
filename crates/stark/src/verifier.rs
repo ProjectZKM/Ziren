@@ -39,6 +39,29 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     {
         use itertools::izip;
 
+        // Task #28 compat dispatch: if the proof carries a
+        // shard-level basefold proof, route to BasefoldShardVerifier
+        // instead of the legacy per-chip path.  The legacy path
+        // below is the fallback for:
+        //   - FRI proofs (basefold_shard_proof is None)
+        //   - Proofs produced before the shard-level cutover
+        //     (basefold_shard_proof is None)
+        //   - Non-KoalaBear config instantiations (the shard-level
+        //     path is KoalaBear-monomorphic)
+        #[cfg(feature = "shard-level-proof")]
+        if proof.basefold_shard_proof.is_some() {
+            // TODO: dispatch to BasefoldShardVerifier::verify_shard.
+            // Left as a TODO in this step because the recursion-side
+            // BasefoldShardVerifier has a different generic signature
+            // (KoalaBearPoseidon2-specialised, consumes
+            // BasefoldShardOpenedValuesVariable) than the host-side
+            // StarkVerifier; the host-side BasefoldShardVerifier
+            // doesn't exist yet.  For now, fall through to the
+            // legacy path (the basefold proof is carried but not
+            // verified — same semantics as the per-chip path with
+            // an extra unchecked field).
+        }
+
         let ShardProof {
             commitment,
             opened_values,
