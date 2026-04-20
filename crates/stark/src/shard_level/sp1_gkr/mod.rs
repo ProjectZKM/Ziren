@@ -37,10 +37,12 @@
 //! Until then it lives in parallel and only the type scaffolding is
 //! exposed for unit-test builds.
 
+pub mod extract;
 pub mod first_layer;
 pub mod layer;
 pub mod transition;
 
+pub use extract::*;
 pub use first_layer::*;
 pub use layer::*;
 pub use transition::*;
