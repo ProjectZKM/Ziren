@@ -174,3 +174,37 @@ zero entries where the verifier expects at least 2.
    `dummy_wrap_basefold_witness`.
 4. Add an executor smoke run that compiles the program *and* runs it
    on the dummy witness via `RecursionExecutor::run`.
+
+### Status update — real-fixture path landed; uncovers next-byte blocker
+
+Replaced `BasefoldShardProof::empty()` in `dummy_core_basefold_witness`
+with `produce_real_basefold_shard_proof(machine)` — drives Ziren's
+real `zkm_stark::shard_level::prove_shard_to_basefold` against a
+single zero-filled AddSub trace.  This eliminates the cascade of
+hand-built structural fields and gets the verifier deep into its
+soundness assertions.
+
+**Next-byte blocker uncovered** (filed inline in test docstring):
+
+```
+panic at crates/recursion/circuit/src/logup_gkr.rs:105
+  assertion `left == right` failed: mle eval vector size must be 2^point.dimension
+    left: 1
+   right: 16   // = 2^(log_num_interactions+1) for AddSub
+```
+
+Cause: `prove_shard_logup_gkr` (Ziren) emits the GKR **root** as
+`circuit_output.numerator/denominator` (length 1), but SP1's
+verifier protocol expects the GKR circuit's **input layer**
+(length `2^(num_interaction_variables+1)`).  Confirmed against
+SP1 prover at `/tmp/sp1/crates/hypercube/src/logup_gkr/prover.rs:147-159`.
+
+**Concrete fix** (own task — not for #23):
+1. In `crates/stark/src/shard_level/logup_gkr_prover.rs`, after
+   `prove_logup_gkr_inner` returns, serialise the input-layer MLEs
+   instead of `inner_proof.root.{0,1}`.
+2. Re-run `build_normalize_basefold_program_compiles_dummy_witness`
+   to find the next blocker.
+
+Test currently `#[ignore]`d with the diagnosis pinned in the
+docstring so the next person can pick it up.
