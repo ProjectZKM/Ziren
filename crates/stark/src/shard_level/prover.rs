@@ -148,20 +148,15 @@ where
     //   - per-chip `r_row` = trailing log(chip_height) coords of the
     //     LogUp-GKR final eval_point (matches SP1's convention of
     //     opening the trace MLE at that sub-point)
-    //   - a fresh LbChallenger (KoalaBear-Poseidon2)
-    //
-    // Note: the LbChallenger is fresh rather than a clone of the
-    // main challenger because Ziren's generic SC::Challenger isn't
-    // guaranteed to match LbChallenger's concrete type.  This means
-    // the jagged-PCS transcript isn't bound to the shard's outer
-    // transcript in this call path — full binding lands alongside
-    // the KoalaBearPoseidon2 specialization of prove_shard_to_basefold.
-    // For the smoke test / structural pipeline this produces
-    // wire-shape-correct bytes.
+    //   - the outer `SC::Challenger` downcast to `&mut LbChallenger`
+    //     when SC is KoalaBearPoseidon2 (full transcript binding).
+    //     Falls back to a fresh challenger + empty bytes when SC
+    //     isn't the KoalaBear configuration.
     let evaluation_proof = emit_jagged_pcs_bytes::<SC, A>(
         chips,
         main_traces,
         &logup_gkr_proof.logup_evaluations.point,
+        challenger,
     );
 
     // ── Phase 5: Assembly ──────────────────────────────────
@@ -199,42 +194,46 @@ where
 /// # Field-type gate
 ///
 /// `prove_jagged_basefold_dispatch` is monomorphic over KoalaBear /
-/// `InnerVal` / `InnerChallenge`.  The generic `Val<SC>` /
-/// `Challenge<SC>` here could in principle differ.  This helper runs
-/// the full pipeline only when the runtime type IDs match; otherwise
-/// returns an empty byte vector (matching the pre-#26 behaviour so
-/// callers outside the KoalaBearPoseidon2 shard-level path are not
-/// affected).
+/// `InnerVal` / `InnerChallenge` / `LbChallenger`.  The generic
+/// `Val<SC>` / `Challenge<SC>` / `SC::Challenger` here could in
+/// principle differ.  This helper runs the full pipeline only when
+/// the runtime type IDs match; otherwise returns an empty byte
+/// vector.
 ///
-/// # Transcript-binding caveat
+/// # Transcript binding
 ///
-/// The LbChallenger used here is a fresh instance — the jagged-PCS
-/// transcript is *not* bound to the outer `SC::Challenger` state.
-/// Structurally correct for the smoke-test pipeline; full binding
-/// lands alongside a KoalaBearPoseidon2-specialised call path.
+/// When the type gate passes (SC == KoalaBearPoseidon2 in practice),
+/// the outer `SC::Challenger` is downcast via `Any::downcast_mut` to
+/// `&mut LbChallenger` and passed through to the jagged-PCS prover.
+/// This binds the jagged-PCS transcript to the shard's outer
+/// transcript state — no fresh instance, no divergence.  (Task #26
+/// had previously used a fresh challenger; the soundness caveat
+/// from 4a9685e is now resolved.)
 fn emit_jagged_pcs_bytes<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
+    challenger: &mut SC::Challenger,
 ) -> Vec<u8>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static,
 {
-    use core::any::TypeId;
+    use core::any::{Any, TypeId};
     use crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch;
     use crate::{InnerChallenge, InnerVal};
-    use p3_challenger::DuplexChallenger;
 
-    // Gate on Val<SC> == InnerVal AND Challenge<SC> == InnerChallenge.
+    // Gate on Val<SC> == InnerVal, Challenge<SC> == InnerChallenge,
+    // AND SC::Challenger == LbChallenger (all three must match for
+    // the monomorphic dispatch to apply).
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
+        || TypeId::of::<SC::Challenger>()
+            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
     {
-        // Other field instantiations aren't supported by the
-        // KoalaBear-monomorphic dispatch.  Caller gets empty bytes
-        // exactly as before this wiring landed.
         return Vec::new();
     }
 
@@ -297,12 +296,16 @@ where
         })
         .collect();
 
-    let perm = crate::kb31_poseidon2::inner_perm();
-    let mut lb_challenger: crate::basefold_late_binding::LbChallenger =
-        DuplexChallenger::new(perm);
+    // Downcast the outer SC::Challenger to &mut LbChallenger.  The
+    // TypeId gate above guarantees the downcast succeeds, so
+    // expect() is unreachable in practice.
+    let challenger_any: &mut dyn Any = challenger;
+    let lb_challenger = challenger_any
+        .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
+        .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
 
     let bundle =
-        prove_jagged_basefold_dispatch(&chip_traces, &r_row_per_chip, &mut lb_challenger);
+        prove_jagged_basefold_dispatch(&chip_traces, &r_row_per_chip, lb_challenger);
     bundle.to_bytes()
 }
 
