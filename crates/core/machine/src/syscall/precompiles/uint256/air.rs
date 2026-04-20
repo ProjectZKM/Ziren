@@ -32,10 +32,10 @@ use zkm_curves::{
     params::{Limbs, NumLimbs, NumWords},
     uint256::U256Field,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
-    MachineRecord,
+    MachineRecord, PicusInfo,
 };
 
 /// The number of columns in the Uint256MulCols.
@@ -54,7 +54,7 @@ type WordsFieldElement = <U256Field as NumWords>::WordsFieldElement;
 const WORDS_FIELD_ELEMENT: usize = WordsFieldElement::USIZE;
 
 /// A set of columns for the Uint256Mul operation.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct Uint256MulCols<T> {
     /// The shard number of the syscall.
@@ -87,6 +87,7 @@ pub struct Uint256MulCols<T> {
 
     pub output_range_check: FieldLtCols<T, U256Field>,
 
+    #[picus(selector)]
     pub is_real: T,
 }
 
@@ -97,6 +98,10 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
 
     fn name(&self) -> String {
         "Uint256MulMod".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        Uint256MulCols::<u8>::picus_info()
     }
 
     fn generate_trace(

@@ -25,10 +25,10 @@ use zkm_curves::{
     params::{NumLimbs, NumWords},
     uint256::U256Field,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::{
     air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
-    MachineRecord,
+    MachineRecord, PicusInfo,
 };
 
 /// The number of columns in the U256x2048MulCols.
@@ -48,7 +48,7 @@ const LO_REGISTER: u32 = Register::A2 as u32;
 const HI_REGISTER: u32 = Register::A3 as u32;
 
 /// A set of columns for the U256x2048Mul operation.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct U256x2048MulCols<T> {
     /// The shard number of the syscall.
@@ -84,6 +84,7 @@ pub struct U256x2048MulCols<T> {
     pub ab6_plus_carry: FieldOpCols<T, U256Field>,
     pub ab7_plus_carry: FieldOpCols<T, U256Field>,
     pub ab8_plus_carry: FieldOpCols<T, U256Field>,
+    #[picus(selector)]
     pub is_real: T,
 }
 
@@ -94,6 +95,10 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
 
     fn name(&self) -> String {
         "U256XU2048Mul".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        U256x2048MulCols::<u8>::picus_info()
     }
 
     fn generate_trace(

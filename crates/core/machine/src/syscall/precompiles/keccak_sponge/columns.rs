@@ -7,12 +7,12 @@ use crate::syscall::precompiles::keccak_sponge::{
 };
 
 use p3_keccak_air::KeccakCols;
-use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{PicusInfo, Word};
 
 /// KeccakSpongeCols is the column layout for the keccak sponge.
 /// The number of rows equal to the number of block.
-#[derive(AlignedBorrow)]
+#[derive(AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub(crate) struct KeccakSpongeCols<T> {
     pub keccak: KeccakCols<T>,

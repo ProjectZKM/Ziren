@@ -9,7 +9,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_stark::{air::MachineAir, PicusInfo};
 
 use crate::CoreChipError;
 
@@ -24,6 +24,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
 
     fn name(&self) -> String {
         "ShaExtend".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        ShaExtendCols::<u8>::picus_info()
     }
 
     fn generate_trace(

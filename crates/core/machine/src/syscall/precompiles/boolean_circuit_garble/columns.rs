@@ -1,11 +1,11 @@
 use crate::memory::{MemoryReadCols, MemoryWriteCols};
 use crate::operations::{IsEqualWordOperation, XorOperation};
-use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{PicusInfo, Word};
 
 /// BooleanCircuitGarbleCols is the column layout for the Boolean Circuit Garble.
 /// The number of rows equal to the number of gates
-#[derive(AlignedBorrow)]
+#[derive(AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct BooleanCircuitGarbleCols<T> {
     pub shard: T,
@@ -13,7 +13,9 @@ pub struct BooleanCircuitGarbleCols<T> {
     pub is_real: T,
     pub input_address: T,
     pub output_address: T,
+    #[picus(selector)]
     pub is_first_row: T, // The first row contains gates_num and delta
+    #[picus(selector)]
     pub is_gate: T,
     pub is_first_gate: T,
     pub is_last_gate: T,
@@ -21,13 +23,15 @@ pub struct BooleanCircuitGarbleCols<T> {
     pub gate_type: [T; 2],
     pub gate_id: T,
     pub gates_num: T,
-    pub delta: [Word<T>; 4],                      // [u8; 16]
+    #[picus(transition_input, transition_output)]
+    pub delta: [Word<T>; 4], // [u8; 16]
     pub gates_input_mem: [MemoryReadCols<T>; 17], // gate_type, h0, h1, label_b, expected_ciphertext
     pub result_mem: MemoryWriteCols<T>,
     pub aux1: [XorOperation<T>; 4],                   // h1 ^ h0
     pub aux2: [XorOperation<T>; 4],                   // h1 ^ h0 ^ label_b
     pub aux3: [XorOperation<T>; 4],                   // h1 ^ h0 ^ label_b ^ delta
     pub is_equal_words: [IsEqualWordOperation<T>; 4], // computed ciphertext == expected_ciphertext
+    #[picus(transition_input, transition_output)]
     pub checks: [T; 4], // check result for each pair of is_equal_words
 }
 

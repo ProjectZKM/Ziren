@@ -24,8 +24,11 @@ use zkm_curves::{
     params::{limbs_from_vec, FieldParameters, Limbs},
     CurveError,
 };
-use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{
+    air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder},
+    PicusInfo,
+};
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -40,9 +43,10 @@ pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();
 /// compressed Y (without sign bit).
 ///
 /// After `EdDecompress`, the first 32 bytes of the slice are overwritten with the decompressed X.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct EdDecompressCols<T> {
+    #[picus(selector)]
     pub is_real: T,
     pub shard: T,
     pub clk: T,
@@ -208,6 +212,10 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
 
     fn name(&self) -> String {
         "EdDecompress".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        EdDecompressCols::<u8>::picus_info()
     }
 
     fn generate_trace(

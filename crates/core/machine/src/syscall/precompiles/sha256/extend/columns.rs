@@ -1,6 +1,7 @@
 use std::mem::size_of;
 
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::PicusInfo;
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -12,7 +13,7 @@ use crate::{
 
 pub const NUM_SHA_EXTEND_COLS: usize = size_of::<ShaExtendCols<u8>>();
 
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShaExtendCols<T> {
     /// Inputs.
