@@ -32,6 +32,7 @@ pub mod prover;
 pub mod shard_proof;
 pub mod sp1_gkr;
 pub mod types;
+pub mod verifier;
 pub mod zerocheck_prover;
 
 pub use logup_gkr_prover::*;
