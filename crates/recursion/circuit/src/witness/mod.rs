@@ -154,6 +154,11 @@ where
             .logup_gkr_proofs
             .as_ref()
             .map(|proofs| proofs.iter().map(|p| p.read(builder)).collect());
+        // Per-chip zerocheck proofs read deferred — the dummy
+        // shape parity needs more work (the real prover's rounds
+        // count isn't simply log_degree).  Field stays None so
+        // witness streams stay synchronised.
+        let basefold_zerocheck_proofs = None;
 
         ShardProofVariable {
             commitment,
@@ -162,6 +167,7 @@ where
             public_values,
             chip_ordering,
             basefold_logup_gkr_proofs,
+            basefold_zerocheck_proofs,
         }
     }
 

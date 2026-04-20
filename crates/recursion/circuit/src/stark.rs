@@ -55,6 +55,15 @@ pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriPar
     pub basefold_logup_gkr_proofs: Option<
         Vec<crate::per_chip_logup_gkr::PerChipLogUpGkrProofVariable<C::F, C::EF>>,
     >,
+    /// Per-chip zerocheck proofs (prover-shape, matching
+    /// `zkm_stark::zerocheck::ZerocheckProof<EF>`).  Same Some/
+    /// None convention as `basefold_logup_gkr_proofs`.  Verified
+    /// per-chip via
+    /// [`crate::per_chip_zerocheck::verify_per_chip_zerocheck`].
+    #[allow(clippy::type_complexity)]
+    pub basefold_zerocheck_proofs: Option<
+        Vec<crate::per_chip_zerocheck::PerChipZerocheckProofVariable<C::F, C::EF>>,
+    >,
 }
 
 /// Get a dummy duplex challenger for use in dummy proofs.
@@ -244,13 +253,29 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         })
         .collect();
 
+    // Per-chip dummy zerocheck proofs.  Rounds count = log_degree
+    // (one round per trace variable), eval_point dimension =
+    // log_degree.  All-zero payload — shape parity only.
+    let zerocheck_proofs_dummy: Vec<zkm_stark::zerocheck::ZerocheckProof<InnerChallenge>> = shape
+        .inner
+        .iter()
+        .map(|(_, log_degree)| {
+            let m = *log_degree as usize;
+            zkm_stark::zerocheck::ZerocheckProof {
+                rounds: vec![[InnerChallenge::ZERO; 3]; m],
+                eval_point: vec![InnerChallenge::ZERO; m],
+                final_claim: InnerChallenge::ZERO,
+            }
+        })
+        .collect();
+
     let shard_proof = ShardProof {
         commitment,
         opened_values,
         opening_proof,
         chip_ordering,
         public_values,
-        zerocheck_proofs: None,
+        zerocheck_proofs: Some(zerocheck_proofs_dummy),
         logup_gkr_proofs: Some(logup_gkr_proofs_dummy),
         logup_row_openings: None,
         late_binding_proofs: None,
@@ -355,6 +380,7 @@ where
             chip_ordering,
             public_values,
             basefold_logup_gkr_proofs: _,
+            basefold_zerocheck_proofs: _,
         } = proof;
 
         // Assert that the byte multiplicities don't overflow.
@@ -600,6 +626,24 @@ where
                 // openings at `eval_point` is the next step;
                 // currently we only verify the GKR soundness
                 // chain, not the tie-back to the trace.
+            }
+        }
+
+        // BaseFold-pipeline: when per-chip zerocheck proofs are
+        // present, verify each chip's zerocheck soundness chain
+        // (initial-zero claim → per-round sumcheck → final claim).
+        if let Some(zc_proofs) = proof.basefold_zerocheck_proofs.as_ref() {
+            for (chip_proof, _chip) in zc_proofs.iter().zip(chips.iter()) {
+                let (_eval_point, _final_claim) =
+                    crate::per_chip_zerocheck::verify_per_chip_zerocheck::<C, SC::FriChallengerVariable>(
+                        builder,
+                        chip_proof,
+                        challenger,
+                    );
+                // Final-claim binding against the chip's
+                // constraint-eval at eval_point is the next step;
+                // currently we verify the sumcheck-side
+                // soundness chain only.
             }
         }
 

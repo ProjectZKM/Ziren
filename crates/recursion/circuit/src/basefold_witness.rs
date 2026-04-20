@@ -286,6 +286,47 @@ where
     }
 }
 
+// ── Per-chip zerocheck (prover-shape) ────────────────────────────
+
+impl<C> Witnessable<C> for zkm_stark::zerocheck::ZerocheckProof<InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable =
+        crate::per_chip_zerocheck::PerChipZerocheckProofVariable<C::F, C::EF>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let rounds: Vec<[Ext<C::F, C::EF>; 3]> = self
+            .rounds
+            .iter()
+            .map(|arr| {
+                [
+                    arr[0].read(builder),
+                    arr[1].read(builder),
+                    arr[2].read(builder),
+                ]
+            })
+            .collect();
+        let eval_point = self.eval_point.read(builder);
+        let final_claim = self.final_claim.read(builder);
+        crate::per_chip_zerocheck::PerChipZerocheckProofVariable {
+            rounds,
+            eval_point,
+            final_claim,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        for arr in self.rounds.iter() {
+            for v in arr.iter() {
+                v.write(witness);
+            }
+        }
+        self.eval_point.write(witness);
+        self.final_claim.write(witness);
+    }
+}
+
 // ── Per-chip LogUp-GKR (prover-shape) ────────────────────────────
 
 impl<C> Witnessable<C> for zkm_stark::logup_gkr::LogUpGkrLayerProof<InnerChallenge>
