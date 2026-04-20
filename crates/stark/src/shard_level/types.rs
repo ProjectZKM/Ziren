@@ -1,6 +1,6 @@
 //! Shard-level proof types — pure data, no prover/verifier logic.
 //!
-//! Mirror of SP1's hypercube proof shapes:
+//! Mirror of the hypercube proof shapes:
 //!   - `UnivariatePolynomial<K>` from
 //!     `/tmp/sp1/slop/crates/algebra/src/univariate.rs`
 //!   - `PartialSumcheckProof<K>` from
@@ -104,7 +104,7 @@ pub struct LogUpEvaluations<EF> {
 }
 
 /// Shard-level LogUp-GKR proof — replaces Ziren's `Vec<LogUpGkrProof<EF>>`
-/// (per-chip) with a single shard-level proof per SP1's design.
+/// (per-chip) with a single shard-level proof per the design.
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct LogupGkrProof<F, EF> {
     pub circuit_output: LogUpGkrOutput<EF>,

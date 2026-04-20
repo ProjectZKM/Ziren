@@ -1,6 +1,6 @@
-//! SP1-style stacked shape types for Ziren recursion (task #20).
+//! row-reduction stacked shape types for Ziren recursion (task #20).
 //!
-//! Ports SP1's `CoreProofShape` / `MachineShape` / `SP1RecursionProgramShape`
+//! Ports the `CoreProofShape` / `MachineShape` / `SP1RecursionProgramShape`
 //! design into Ziren under the `shard-level-proof` feature flag.
 //!
 //! Tactic chosen (per scoping report at docs/task_22_plan.md): **size-class
@@ -19,13 +19,13 @@
 //!
 //! This module is purely a *shape enumeration* layer at the recursion
 //! boundary.  Ziren's per-chip core proof shape stays unchanged; the
-//! SP1-style shapes here serve as the VK-indexing key and the upper-
+//! row-reduction shapes here serve as the VK-indexing key and the upper-
 //! bound contract the recursion circuit verifies against.  No
 //! executor/trace-gen/AIR changes.
 //!
 //! ## Mapping to SP1
 //!
-//! | Ziren (this module)          | SP1 source                                          |
+//! | Ziren (this module)          | the source                                          |
 //! |------------------------------|-----------------------------------------------------|
 //! | [`CoreProofShape`]           | `/tmp/sp1/crates/hypercube/src/prover/shard.rs:798` |
 //! | [`MachineShape`]             | `/tmp/sp1/crates/hypercube/src/machine.rs:10`       |

@@ -1,6 +1,6 @@
-# SP1-style Shard-Level Proof Pipeline
+# Shard-Level Proof Pipeline
 
-This module implements the SP1-style shard-level proof shape — one
+This module implements the shard-level proof shape — one
 `LogupGkrProof` + one `PartialSumcheckProof` + one jagged-PCS
 opening per shard, instead of Ziren's legacy per-chip lists.
 
@@ -15,10 +15,10 @@ per-chip path via a dual-path compat shim on `ShardProof<SC>`; see
 | Module | Purpose |
 |---|---|
 | `types` | Pure data: `LogupGkrProof`, `PartialSumcheckProof`, `LogUpEvaluations`, `ChipEvaluation`, `LogUpGkrOutput`, `LogupGkrRoundProof`, `UnivariatePolynomial` |
-| `shard_proof` | Host-side `BasefoldShardProof<F, EF>` — the SP1-shape 6-field proof |
+| `shard_proof` | Host-side `BasefoldShardProof<F, EF>` — the 6-field shard proof |
 | `logup_gkr_prover` | Legacy (fraction-tree) per-chip LogUp-GKR prover + helpers; kept for interop |
 | `zerocheck_prover` | Shard-level zerocheck prover + helpers |
-| `sp1_gkr/` | SP1-style row-only LogUp-GKR backend — `layer.rs`, `first_layer.rs`, `transition.rs`, `extract.rs`, `build.rs`, `round.rs`, `top_level.rs` (30 unit tests) |
+| `row_gkr/` | Row-only LogUp-GKR backend — `layer.rs`, `first_layer.rs`, `transition.rs`, `extract.rs`, `build.rs`, `round.rs`, `top_level.rs` (30 unit tests) |
 | `prover` | Top-level orchestrator `prove_shard_to_basefold` + opt-in SDK wiring `try_prove_shard_to_basefold_boxed` |
 | `verifier` | Host-side `BasefoldShardVerifier` with 4-phase verification |
 
@@ -31,7 +31,7 @@ per-chip path via a dual-path compat shim on `ShardProof<SC>`; see
   ┌──────────────────────────────────────────────────┐
   │ prove_shard_to_basefold (host)                   │
   │   Phase 1: transcript prologue                   │
-  │   Phase 2: LogUp-GKR sumcheck (sp1_gkr backend)  │
+  │   Phase 2: LogUp-GKR sumcheck (row_gkr backend)  │
   │   Phase 3: zerocheck sumcheck                    │
   │   Phase 4: jagged-PCS opening (LbChallenger)     │
   │   Output: BasefoldShardProof<F, EF>              │
@@ -124,7 +124,7 @@ requires this port.
 
 ## Test coverage
 
-- `sp1_gkr`: 30 unit tests (layer types, first-layer generation,
+- `row_gkr`: 30 unit tests (layer types, first-layer generation,
   transitions, extraction, sumcheck rounds, build orchestrator)
 - `verifier`: 4 unit tests (construction, error display)
 - Recursion smoke: `build_normalize_basefold_program_compiles_dummy_witness`
@@ -137,7 +137,7 @@ requires this port.
 - #18-#22: Initial scope — host types, prover orchestration,
   recursion machine ports.
 - #23: End-to-end smoke test (green).
-- #24: SP1 GKR backend port (closed the protocol-mismatch documented
+- #24: Row-only GKR backend port (closed the protocol-mismatch documented
   in `docs/task_23_blocker.md`).
 - #25: zerocheck permutation short-circuit + jagged-PCS single-chip
   fixes.

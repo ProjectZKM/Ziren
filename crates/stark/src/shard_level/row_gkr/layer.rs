@@ -1,10 +1,10 @@
-//! Layer types for the SP1-style row-only GKR backend (task #24, A.2 step 1).
+//! Layer types for the row-only GKR backend (task #24, A.2 step 1).
 //!
 //! Direct port of
 //! [`/tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs:27-73`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L27-L73)
 //! with the `slop_*` types replaced by Ziren-native containers:
 //!
-//! | SP1                          | Ziren equivalent                              |
+//! | the                          | Ziren equivalent                              |
 //! |------------------------------|-----------------------------------------------|
 //! | `Vec<PaddedMle<F>>`          | `Vec<RowMajorTable<F>>` (defined below)       |
 //! | `Arc<Mle<F>>`                | `Vec<F>` of length `2^num_variables`          |
@@ -35,7 +35,7 @@ use p3_field::{ExtensionField, Field};
 /// A 2-D table indexed `[row, interaction]` row-major.  The
 /// inner `Vec` has length `(1 << num_row_variables) * (1 << num_interaction_variables)`.
 ///
-/// Replaces SP1's `PaddedMle<F>` for our needs: we don't carry the
+/// Replaces the `PaddedMle<F>` for our needs: we don't carry the
 /// padding lazily, we just resize-fill at construction time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowMajorTable<F> {

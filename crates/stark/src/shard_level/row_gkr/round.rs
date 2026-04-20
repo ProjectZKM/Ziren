@@ -1,4 +1,4 @@
-//! Per-layer GKR round sumcheck for the SP1-style row-only backend
+//! Per-layer GKR round sumcheck for the row-only backend
 //! (task #24, A.2 step 5).
 //!
 //! Port of
@@ -24,14 +24,14 @@
 //!
 //! ## Simplifications vs SP1
 //!
-//! SP1's `LogupRoundPolynomial` keeps the per-chip `PaddedMle`
+//! the `LogupRoundPolynomial` keeps the per-chip `PaddedMle`
 //! representation and uses `eq_row × eq_interaction` factoring plus a
 //! `padding_adjustment` term to save multiplications on chip-boundary
 //! padded rows.  We instead **flatten** all per-chip tables into a
 //! single length-`2^n` MLE at entry, eliminating the padding-
 //! adjustment machinery.  The resulting round-polynomial arithmetic
 //! is straightforward degree-3 sumcheck over the fully-materialised
-//! MLEs; memory is `O(chips × rows × cols)` instead of SP1's lazy
+//! MLEs; memory is `O(chips × rows × cols)` instead of the lazy
 //! version.  For shard-level aggregation this is an acceptable
 //! trade-off — the flattening cost is `O(2^n × 4)` per layer which
 //! is the same order as extract_outputs.
@@ -364,7 +364,7 @@ mod tests {
     use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 
     use super::*;
-    use crate::shard_level::sp1_gkr::layer::RowMajorTable;
+    use crate::shard_level::row_gkr::layer::RowMajorTable;
     use crate::Challenge;
 
     type SC = crate::koala_bear_poseidon2::KoalaBearPoseidon2;

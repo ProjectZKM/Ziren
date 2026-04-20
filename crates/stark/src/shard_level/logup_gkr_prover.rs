@@ -2,7 +2,7 @@
 //!
 //! Replaces Ziren's per-chip
 //! [`crate::logup_gkr::prove_logup_gkr`] loop (one proof per chip)
-//! with a single shard-level proof per SP1's design.  The output
+//! with a single shard-level proof per the design.  The output
 //! type is the SP1-shape [`super::types::LogupGkrProof<F, EF>`].
 //!
 //! # Algorithm
@@ -162,7 +162,7 @@ where
 
 /// Shard-level LogUp-GKR prover.
 ///
-/// SP1 reference: `prove_logup_gkr` at
+/// the reference: `prove_logup_gkr` at
 /// `/tmp/sp1/crates/hypercube/src/logup_gkr/prover.rs:70-215`.
 ///
 /// Concrete pipeline:
@@ -213,7 +213,7 @@ where
     // produces a Ziren-shape proof with per-layer arrays.
     let inner_proof = prove_logup_gkr_inner::<F, EF, _>(&combined_leaves, challenger);
 
-    // Step 4: project per-layer proofs into SP1 round-proof shape.
+    // Step 4: project per-layer proofs into the round-proof shape.
     // Ziren's layer order is descent (root → leaf); SP1's
     // round_proofs are also bottom-up — same direction, so
     // direct map.  The `eval_point` carried alongside the inner
@@ -299,7 +299,7 @@ where
 /// output carry the same algebraic content, just different field
 /// names.
 ///
-/// SP1's shape (`/tmp/sp1/crates/hypercube/src/logup_gkr/proof.rs:19-31`):
+/// the shape (`/tmp/sp1/crates/hypercube/src/logup_gkr/proof.rs:19-31`):
 ///   - `numerator_0/1`, `denominator_0/1` — the layer's GKR
 ///     reduction values at last-coordinate 0 and 1.
 ///   - `sumcheck_proof: PartialSumcheckProof` — the round

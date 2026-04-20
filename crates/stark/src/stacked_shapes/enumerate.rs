@@ -12,7 +12,7 @@
 //!
 //! ## Cluster list
 //!
-//! Curated from Ziren's MIPS chip inventory + SP1's chip_clusters
+//! Curated from Ziren's MIPS chip inventory + the chip_clusters
 //! pattern:
 //!
 //! | Cluster              | Chip family                                              |
@@ -175,10 +175,10 @@ pub fn size_class_bands() -> Vec<(usize, usize)> {
     ]
 }
 
-/// Padding column variants to enumerate.  In SP1 the padding is
-/// determined by the area + stacking stripe size; Ziren's variant
-/// stays simple and enumerates a fixed set up to the max allowed by
-/// `2^LOG_STACKING_HEIGHT / 2^CORE_MAX_LOG_ROW_COUNT`.
+/// Padding column variants to enumerate.  In the upstream pipeline the
+/// padding is determined by the area + stacking stripe size; Ziren's
+/// variant stays simple and enumerates a fixed set up to the max allowed
+/// by `2^LOG_STACKING_HEIGHT / 2^CORE_MAX_LOG_ROW_COUNT`.
 pub fn padding_col_variants() -> Vec<usize> {
     // Typical padding column widths — trace widths are usually
     // 32-512 cols, so we only need a few representative paddings.

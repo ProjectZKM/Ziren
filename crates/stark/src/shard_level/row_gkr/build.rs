@@ -33,7 +33,7 @@ use crate::Chip;
 ///
 /// **Output:**
 /// `(LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)` — same shape as
-/// SP1's `generate_gkr_circuit` return type, lets the caller (step 5)
+/// the `generate_gkr_circuit` return type, lets the caller (step 5)
 /// walk the layer stack bottom-up to drive per-round sumchecks.
 ///
 /// **Panics** when `num_row_variables == 0` (degenerate empty shard
@@ -87,7 +87,7 @@ where
     }
 
     // Find the terminal layer (num_row_variables == 1) for output
-    // extraction.  SP1's invariant: the layer just before the
+    // extraction.  the invariant: the layer just before the
     // num_row_variables==0 terminal has num_row_variables == 1.
     //
     // Our layers vec stores ascending num_row_variables (first =

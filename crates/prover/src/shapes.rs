@@ -338,15 +338,39 @@ pub fn build_vk_map_to_file<C: ZKMProverComponents>(
 }
 
 impl ZKMProofShape {
+    /// Generate all Recursion/Compose/Deferred/Shrink shapes that
+    /// need VK setup.
+    ///
+    /// Recursion shapes come from the size-class quantized
+    /// `zkm_stark::stacked_shapes::create_all_input_shapes` — ≤ 5,000
+    /// `CoreProofShape`s that, after `to_ordered_shape`'s
+    /// uniform-area projection + dedup, collapse to a much smaller
+    /// per-chip `OrderedShape` set (~13-30 unique).  This
+    /// replaces Ziren's legacy ~1.25M-shape per-chip cartesian
+    /// (`CoreShapeConfig::all_shapes`); task #32 commits to
+    /// stacked_shapes as the sole Recursion-shape source.
+    ///
+    /// The `core_shape_config` argument is retained for API
+    /// stability but is no longer consulted.
     pub fn generate<'a>(
-        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
+        _core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
-        core_shape_config
-            .all_shapes()
+        use zkm_stark::stacked_shapes::{build_mips_machine_shape, create_all_input_shapes};
+
+        let machine_shape = build_mips_machine_shape();
+        let small_shapes: Vec<OrderedShape> = create_all_input_shapes(&machine_shape)
+            .into_iter()
+            .map(|cps| cps.to_ordered_shape())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        small_shapes
+            .into_iter()
             .map(Self::Recursion)
-            .chain((1..=reduce_batch_size).flat_map(|batch_size| {
+            .chain((1..=reduce_batch_size).flat_map(move |batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
             }))
             .chain(
@@ -478,5 +502,37 @@ mod tests {
                 .collect::<BTreeSet<_>>();
 
         println!("Number of compress shapes: {}", all_shapes.len());
+    }
+
+    /// Task #32: the Recursion shape count is now strictly bounded
+    /// by stacked_shapes' size-class quantization.  Before this change,
+    /// `ZKMProofShape::generate` sourced ~1.25M shapes from the
+    /// per-chip cartesian `CoreShapeConfig::all_shapes`; now it
+    /// sources from `create_all_input_shapes` followed by
+    /// `to_ordered_shape` dedup, yielding a much smaller set.
+    #[test]
+    fn generate_uses_stacked_shapes_for_recursion() {
+        let core_shape_config = CoreShapeConfig::default();
+        let recursion_shape_config = RecursionShapeConfig::default();
+        let reduce_batch_size = 2;
+
+        let all: BTreeSet<_> =
+            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
+                .collect();
+        let recursion_count =
+            all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
+
+        // stacked_shapes → to_ordered_shape with uniform-area projection
+        // and dedup collapses to ≤ ~30 unique OrderedShapes (one per
+        // chip cluster × band that maps to a distinct log_height).
+        assert!(
+            recursion_count <= 100,
+            "Recursion shape count {} should be ≤ 100 (stacked_shapes path)",
+            recursion_count
+        );
+        assert!(
+            recursion_count >= 1,
+            "generate should produce at least 1 Recursion shape"
+        );
     }
 }

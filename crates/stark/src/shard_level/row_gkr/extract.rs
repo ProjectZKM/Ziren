@@ -1,4 +1,4 @@
-//! Output extraction for the SP1-style row-only GKR backend
+//! Output extraction for the row-only GKR backend
 //! (task #24, A.2 step 4).
 //!
 //! Port of

@@ -1,10 +1,10 @@
-//! First-layer generator for the SP1-style row-only GKR backend
+//! First-layer generator for the row-only GKR backend
 //! (task #24, A.2 step 2).
 //!
 //! Port of
 //! [`generate_first_layer`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs#L110-L252)
 //! against Ziren's [`Lookup`]/[`VirtualPairCol`]/`RowMajorMatrix`
-//! types instead of SP1's `Interaction`/`PaddedMle`/`Mle`.
+//! types instead of the `Interaction`/`PaddedMle`/`Mle`.
 //!
 //! ## Algorithm
 //!

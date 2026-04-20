@@ -1,4 +1,4 @@
-//! Layer transition for the SP1-style row-only GKR backend
+//! Layer transition for the row-only GKR backend
 //! (task #24, A.2 step 3).
 //!
 //! Port of

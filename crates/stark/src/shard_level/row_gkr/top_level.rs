@@ -1,8 +1,8 @@
-//! Top-level SP1-style shard LogUp-GKR prover (task #24, A.2 step 6).
+//! Top-level row-reduction shard LogUp-GKR prover (task #24, A.2 step 6).
 //!
 //! Assembles the full pipeline: first-layer generation, row-by-row
 //! reduction, per-round sumcheck, and final per-chip trace openings.
-//! Produces a [`LogupGkrProof`] with the SP1 output shape that the
+//! Produces a [`LogupGkrProof`] with the output shape that the
 //! recursion verifier consumes.
 //!
 //! Replaces the structurally-mismatched `circuit_output` emission in
@@ -48,7 +48,7 @@ use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
 
-/// SP1-style shard LogUp-GKR prover (the corrected top-level
+/// row-reduction shard LogUp-GKR prover (the corrected top-level
 /// replacement for
 /// [`super::super::logup_gkr_prover::prove_shard_logup_gkr`]).
 ///
@@ -68,7 +68,7 @@ use crate::Chip;
 /// `2^(num_interaction_variables + 1)` — matching the recursion
 /// verifier's expected shape.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_logup_gkr_sp1<F, EF, A, Challenger>(
+pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
     main_traces: &[RowMajorMatrix<F>],
@@ -247,7 +247,7 @@ where
     // Step 7: assemble.
     // The LogUpEvaluations.point is the trace-dimension slice of the
     // full eval_point — the last `num_row_variables` coordinates.
-    // This matches SP1's convention (prover.rs:183 — last_k of the
+    // This matches the convention (prover.rs:183 — last_k of the
     // full GKR eval_point) and satisfies the recursion verifier's
     // `zerocheck_point.dim == gkr_point.dim == pcs_max_log_row_count`
     // invariant at `zerocheck.rs:488`.

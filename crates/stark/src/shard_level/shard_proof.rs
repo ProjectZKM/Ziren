@@ -1,4 +1,4 @@
-//! Host-side `BasefoldShardProof<F, EF>` — the SP1-style 6-field
+//! Host-side `BasefoldShardProof<F, EF>` — the row-reduction 6-field
 //! shard proof shape.
 //!
 //! Mirror of `/tmp/sp1/crates/hypercube/src/verifier/proof.rs:47-60`,
@@ -41,10 +41,10 @@ use crate::ShardOpenedValues;
 
 /// Host-side BaseFold-pipeline shard proof.
 ///
-/// SP1 reference: `ShardProof` at
+/// the reference: `ShardProof` at
 /// `/tmp/sp1/crates/hypercube/src/verifier/proof.rs:47-60`.
 ///
-/// Field declaration order matches SP1 so the wire format
+/// Field declaration order matches the so the wire format
 /// transports byte-identically (modulo the inner-type
 /// substitutions noted in [`mod-level docs`](super)).
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,7 +60,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub zerocheck_proof: PartialSumcheckProof<EF>,
     /// Per-chip opened values at the zerocheck-reduced point.
     /// Reuses the existing per-chip [`ShardOpenedValues`] —
-    /// SP1's `ShardOpenedValues` (`/tmp/sp1/crates/hypercube/src/verifier/proof.rs:67-72`)
+    /// the `ShardOpenedValues` (`/tmp/sp1/crates/hypercube/src/verifier/proof.rs:67-72`)
     /// is structurally compatible (BTreeMap-of-chip-name →
     /// per-chip openings) once Ziren's switches to BTreeMap
     /// ordering.

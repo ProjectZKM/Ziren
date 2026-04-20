@@ -303,23 +303,16 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             })
     }
 
-    pub fn all_shapes(&self) -> Box<dyn Iterator<Item = OrderedShape> + '_> {
-        // Task #32 kill switch: ZIREN_KILL_VK_GEN=1 short-circuits
-        // the ~1.25M-shape cartesian enumeration to an empty iterator.
-        // Used when the legacy VK gen is being retired in favour of
-        // the sp1_shapes size-class quantization path.  With the kill
-        // switch on, `count_shapes` prints 0 and `build_compress_vks`
-        // has nothing to build — VK gen finishes in seconds instead
-        // of days.  Re-enable with `unset ZIREN_KILL_VK_GEN` (or set
-        // to 0) when legacy VK maps are needed.
-        if std::env::var("ZIREN_KILL_VK_GEN").map(|v| v == "1").unwrap_or(false) {
-            return Box::new(std::iter::empty());
-        }
-
-        Box::new(self.all_shapes_inner())
-    }
-
-    fn all_shapes_inner(&self) -> impl Iterator<Item = OrderedShape> + '_ {
+    /// Legacy per-chip cartesian enumeration of all possible shard
+    /// shapes.  Produces ~1.25M shapes for MIPS.  **Superseded** by
+    /// `zkm_stark::stacked_shapes::create_all_input_shapes` (≤ 5,000
+    /// shapes, size-class quantization) which is now the sole path
+    /// used by `ZKMProofShape::generate` for VK generation.
+    ///
+    /// This function is retained for the pre-existing `#[ignore]`d
+    /// test at `test_making_shapes` and for any diagnostic callers
+    /// that specifically need the per-chip cartesian view.
+    pub fn all_shapes(&self) -> impl Iterator<Item = OrderedShape> + '_ {
         let preprocessed_heights = self
             .partial_preprocessed_shapes
             .iter()

@@ -1,6 +1,6 @@
 //! Shard-level prover assembly entry point.
 //!
-//! Mirror of SP1's `ShardProver::prove_shard_with_data` at
+//! Mirror of the `ShardProver::prove_shard_with_data` at
 //! `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792` —
 //! orchestrates the LogUp-GKR + zerocheck + jagged-PCS phases
 //! into a single host-side [`super::shard_proof::BasefoldShardProof`].
@@ -40,7 +40,7 @@
 //! shard-level jagged-PCS dispatch port.  Phase (5) assembles
 //! the new struct.  The `opened_values` field is built from the
 //! per-chip evaluations the LogUp-GKR phase emits — this is
-//! cheaper than reconstructing them and matches SP1's pattern
+//! cheaper than reconstructing them and matches the pattern
 //! of carrying the openings forward through the pipeline.
 
 use p3_air::Air;
@@ -49,7 +49,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeF
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::shard_proof::BasefoldShardProof;
-use super::sp1_gkr::top_level::prove_shard_logup_gkr_sp1;
+use super::row_gkr::top_level::prove_shard_logup_gkr_rows;
 use super::zerocheck_prover::prove_shard_zerocheck;
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
@@ -115,10 +115,10 @@ where
     }
 
     // ── Phase 2: LogUp-GKR ─────────────────────────────────
-    // SP1-style row-only reduction: emits circuit_output of length
+    // Row-only reduction: emits circuit_output of length
     // 2^(num_interaction_variables + 1) matching the recursion verifier.
     // See docs/task_23_blocker.md for the protocol mismatch this fixes.
-    let logup_gkr_proof = prove_shard_logup_gkr_sp1::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
+    let logup_gkr_proof = prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
         chips,
         preprocessed_traces,
         main_traces,
@@ -129,7 +129,7 @@ where
     //
     // Pass the LogUp-GKR-emitted per-chip evaluations through
     // so the zerocheck prover can build its initial sumcheck
-    // claims from them (matches SP1's wiring at
+    // claims from them (matches the wiring at
     // `prover/shard.rs:560-572`).
     let zerocheck_proof = prove_shard_zerocheck::<SC, A>(
         chips,
@@ -146,7 +146,7 @@ where
     // with:
     //   - per-chip (name, main trace)
     //   - per-chip `r_row` = trailing log(chip_height) coords of the
-    //     LogUp-GKR final eval_point (matches SP1's convention of
+    //     LogUp-GKR final eval_point (matches the convention of
     //     opening the trace MLE at that sub-point)
     //   - the outer `SC::Challenger` downcast to `&mut LbChallenger`
     //     when SC is KoalaBearPoseidon2 (full transcript binding).
@@ -164,7 +164,7 @@ where
     // Build per-chip opened_values from the LogUp-GKR phase's
     // chip_openings (`logup_evaluations.chip_openings`).  The
     // existing per-chip ChipOpenedValues type carries more
-    // fields than the SP1 shape uses; for now we leave the
+    // fields than the shape uses; for now we leave the
     // unused fields empty (preprocessed/permutation/quotient
     // become Vec::new(), cumulative sums become ZERO).  The
     // SP1-shape ShardOpenedValues port lands in the next

@@ -7,7 +7,7 @@
 //!
 //! ## Identification strategy: chip names, not `Chip<F, A>`
 //!
-//! SP1 uses `BTreeSet<Chip<F, A>>` for `shard_chips`.  Ziren's
+//! The upstream design uses `BTreeSet<Chip<F, A>>` for `shard_chips`.  Ziren's
 //! [`crate::Chip<F, A>`] doesn't implement `Ord`/`Hash` (it wraps an
 //! AIR that's only `MachineAir`-bounded), and adding those bounds
 //! would ripple through every MIPS chip AIR — out of scope per task
@@ -49,6 +49,49 @@ pub struct CoreProofShape {
     /// Number of zero-padding columns added to the main commit so the
     /// total column count aligns to the stacking stripe size.
     pub main_padding_cols: usize,
+}
+
+impl CoreProofShape {
+    /// Project this CoreProofShape onto the legacy per-chip
+    /// [`crate::shape::OrderedShape`] representation.
+    ///
+    /// The stacked_shapes representation is an area/padding abstract
+    /// upper bound; OrderedShape needs concrete per-chip log_heights.
+    /// The mapping distributes `main_area` uniformly across the
+    /// chips in `shard_chip_names` and takes the `log₂` of the
+    /// resulting per-chip cell count (rounded up to the next power
+    /// of two).
+    ///
+    /// This is deliberately lossy — many CoreProofShapes collapse to
+    /// the same OrderedShape, which is the point (the whole reason
+    /// stacked_shapes exists is to have fewer representative shapes than
+    /// per-chip cartesian).
+    #[must_use]
+    pub fn to_ordered_shape(&self) -> crate::shape::OrderedShape {
+        let num_chips = self.shard_chip_names.len().max(1);
+        let main_area = self.main_area.max(1);
+        // area is measured in stacking-height multiples; convert to cells.
+        let total_cells: u128 =
+            (main_area as u128) * (1u128 << consts::LOG_STACKING_HEIGHT);
+        let per_chip_cells = (total_cells / num_chips as u128).max(1);
+        // ceil(log2(per_chip_cells))
+        let log_height: usize = if per_chip_cells.is_power_of_two() {
+            per_chip_cells.trailing_zeros() as usize
+        } else {
+            per_chip_cells.next_power_of_two().trailing_zeros() as usize
+        };
+        // Cap at CORE_MAX_LOG_ROW_COUNT so we don't emit shapes the
+        // recursion verifier won't accept.
+        let log_height = log_height.min(consts::CORE_MAX_LOG_ROW_COUNT);
+
+        crate::shape::OrderedShape::from_log2_heights(
+            &self
+                .shard_chip_names
+                .iter()
+                .map(|name| (name.clone(), log_height))
+                .collect::<Vec<_>>(),
+        )
+    }
 }
 
 /// The shape of the machine — a curated list of "chip clusters": sets
@@ -189,6 +232,40 @@ mod tests {
         let bytes = rmp_serde::to_vec(&shape).unwrap();
         let back: CoreProofShape = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(shape, back);
+    }
+
+    #[test]
+    fn to_ordered_shape_distributes_area_uniformly() {
+        let shape = CoreProofShape {
+            shard_chip_names: ["Cpu", "AddSub"].iter().map(|s| s.to_string()).collect(),
+            preprocessed_area: 1,
+            main_area: 4, // 4 stacking-height multiples = 4 * 2^21 cells total
+            preprocessed_padding_cols: 0,
+            main_padding_cols: 0,
+        };
+        let ordered = shape.to_ordered_shape();
+        // 2 chips, main_area=4 → per-chip total = 2 * 2^21 = 2^22 cells.
+        // log₂(2^22) = 22 (capped at CORE_MAX_LOG_ROW_COUNT = 22).
+        assert_eq!(ordered.inner.len(), 2);
+        for (_, log_h) in &ordered.inner {
+            assert_eq!(*log_h, 22);
+        }
+    }
+
+    #[test]
+    fn to_ordered_shape_caps_at_max_log_row_count() {
+        // Huge area that would overflow CORE_MAX_LOG_ROW_COUNT if
+        // uncapped.
+        let shape = CoreProofShape {
+            shard_chip_names: ["Cpu"].iter().map(|s| s.to_string()).collect(),
+            preprocessed_area: 1,
+            main_area: 1024, // 1024 * 2^21 = 2^31 cells per chip
+            preprocessed_padding_cols: 0,
+            main_padding_cols: 0,
+        };
+        let ordered = shape.to_ordered_shape();
+        assert_eq!(ordered.inner.len(), 1);
+        assert_eq!(ordered.inner[0].1, consts::CORE_MAX_LOG_ROW_COUNT);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Replaces Ziren's per-chip
 //! [`crate::zerocheck_prover::prove_zerocheck_with_challenger`]
 //! loop (one ZerocheckProof per chip) with a single shard-level
-//! [`super::types::PartialSumcheckProof<EF>`] per SP1's design.
+//! [`super::types::PartialSumcheckProof<EF>`] per the design.
 //!
 //! # Algorithm
 //!
@@ -27,7 +27,7 @@
 //!   3. Run a single [`crate::zerocheck_prover::prove_zerocheck_with_challenger`]
 //!      on the combined table.
 //!   4. The produced [`crate::zerocheck::ZerocheckProof`] (per-chip
-//!      shape) projects onto SP1's [`super::types::PartialSumcheckProof`]
+//!      shape) projects onto the [`super::types::PartialSumcheckProof`]
 //!      shape by:
 //!        - `univariate_polys` ← per-round 3-tuples reconstructed
 //!          as degree-2 polynomials via Lagrange interpolation
@@ -83,7 +83,7 @@ where
 /// constraint polynomial evaluates to 0 (no row to constrain),
 /// so zero-padding preserves the sum identity.
 ///
-/// Note: SP1 uses `VirtualGeq` to encode the height threshold
+/// Note: the upstream design uses `VirtualGeq` to encode the height threshold
 /// differently — it tracks "real-rows-so-far" via a virtual
 /// counter that takes the value `1` for real rows and `0` for
 /// padding.  Both approaches yield equivalent zerocheck claims;
@@ -108,7 +108,7 @@ where
 
 /// Shard-level zerocheck prover skeleton.
 ///
-/// SP1 reference: `ShardProver::zerocheck` at
+/// the reference: `ShardProver::zerocheck` at
 /// `/tmp/sp1/crates/hypercube/src/prover/shard.rs:474-646`.
 ///
 /// # Status
@@ -151,7 +151,7 @@ where
 
     // Step 1: sample the per-chip constraint-batching challenge
     // (powers-of-alpha) and the inter-chip RLC challenge (lambda).
-    // SP1 samples batching_challenge upstream and passes in;
+    // the samples batching_challenge upstream and passes in;
     // here we sample both at entry for self-containment.
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
@@ -321,7 +321,7 @@ where
 /// Per-chip max log_degree across a slice of chips' main traces.
 ///
 /// Used to determine the shard-level zerocheck round count
-/// (`= max_log_degree` per SP1's design).
+/// (`= max_log_degree` per the design).
 pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usize {
     main_traces
         .iter()

@@ -22,7 +22,7 @@ pub mod logup_gkr;
 #[cfg(feature = "shard-level-proof")]
 pub mod shard_level;
 #[cfg(feature = "shard-level-proof")]
-pub mod sp1_shapes;
+pub mod stacked_shapes;
 mod lookup;
 mod machine;
 mod opts;

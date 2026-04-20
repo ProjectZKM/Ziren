@@ -1,4 +1,4 @@
-//! Parallel SP1-style shard-level proof pipeline.
+//! Parallel row-reduction shard-level proof pipeline.
 //!
 //! This module hosts the gradually-growing port of SP1's
 //! shard-level proof shape — one `LogupGkrProof` + one
@@ -14,7 +14,7 @@
 //!   - [`types`] — pure data types (`LogupGkrProof`,
 //!     `PartialSumcheckProof`, `LogUpEvaluations`, etc.)
 //!   - [`shard_proof`] — host-side `BasefoldShardProof<F, EF>`
-//!     mirroring SP1's `ShardProof` (6 fields: public_values,
+//!     mirroring the `ShardProof` (6 fields: public_values,
 //!     main_commitment, logup_gkr_proof, zerocheck_proof,
 //!     opened_values, evaluation_proof).
 //!   - [`logup_gkr_prover`] — shard-level LogUp-GKR prover.
@@ -30,7 +30,7 @@
 pub mod logup_gkr_prover;
 pub mod prover;
 pub mod shard_proof;
-pub mod sp1_gkr;
+pub mod row_gkr;
 pub mod types;
 pub mod verifier;
 pub mod zerocheck_prover;
