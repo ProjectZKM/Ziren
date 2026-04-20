@@ -53,12 +53,10 @@ rand = "0.8.5"
 test-artifacts = { workspace = true }
 
 [features]
-default = ["native-gnark"]
+default = ["native-gnark", "shard-level-proof"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
 debug = ["zkm-core-machine/debug"]
-# Parallel codebase Option B port — exposes the SP1-style
-# shard-level proof Witnessable impls bridging the new
-# `zkm_stark::shard_level::*` host types into recursion-circuit
-# variables.  Default-off; the legacy per-chip path stays the
-# production verifier surface until #12 wires call sites.
+# SP1-style shard-level proof Witnessable impls + recursion-circuit
+# machine modules for Normalize/Compose/Deferred/Wrap basefold
+# stages.  Default-on as of task #21.
 shard-level-proof = ["zkm-stark/shard-level-proof"]
