@@ -27,12 +27,14 @@
 
 use std::marker::PhantomData;
 
-use p3_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder};
+use p3_air::{Air, AirBuilder, ExtensionBuilder, PermutationAirBuilder};
 use p3_field::{ExtensionField, Field};
 
-use crate::air::{EmptyMessageBuilder, MultiTableAirBuilder};
+use crate::air::{EmptyMessageBuilder, MachineAir, MultiTableAirBuilder};
 use crate::folder::PairWindow;
 use crate::septic_digest::SepticDigest;
+use crate::types::ChipOpenedValues;
+use crate::Chip;
 
 /// Host chip-constraint folder for the BaseFold pipeline.
 ///
@@ -153,6 +155,87 @@ impl<'a, F: Field, EF: ExtensionField<F>> MultiTableAirBuilder<'a>
     fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
         self.global_cumulative_sum
     }
+}
+
+/// Evaluate a chip's constraint polynomial at the BaseFold zerocheck
+/// sumcheck point.  Host port of
+/// [`zkm_recursion_circuit::zerocheck::BasefoldZerocheckVerifier::eval_constraints_basefold`].
+///
+/// Returns the constraint-fold accumulator after the chip's `Air::eval`
+/// has folded each constraint via `assert_zero`.  The accumulator is
+/// the polynomial `Σ alpha^(n-i) · c_i` where `c_i` are the chip's
+/// individual constraint expressions evaluated at the opening row.
+pub fn eval_constraints_basefold_host<F, EF, A>(
+    chip: &Chip<F, A>,
+    opening: &ChipOpenedValues<F, EF>,
+    alpha: EF,
+    public_values: &[F],
+) -> EF
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+{
+    let preprocessed = PairWindow {
+        local: &opening.preprocessed.local,
+        next: &opening.preprocessed.local,
+    };
+    let main = PairWindow {
+        local: &opening.main.local,
+        next: &opening.main.local,
+    };
+    let mut folder = BasefoldConstraintFolder::<F, EF> {
+        preprocessed,
+        main,
+        alpha,
+        accumulator: EF::ZERO,
+        public_values,
+        local_cumulative_sum: &opening.local_cumulative_sum,
+        global_cumulative_sum: &opening.global_cumulative_sum,
+        _marker: PhantomData,
+    };
+    chip.eval(&mut folder);
+    folder.accumulator
+}
+
+/// Compute the "padded row adjustment" — the constraint accumulator
+/// the chip's `Air::eval` would produce on a dummy all-zero row.  Used
+/// by the zerocheck verifier to subtract the constraint contribution
+/// from out-of-range padded rows; the padded-row mask returned by
+/// `full_geq` gates this value to fire only outside the chip's
+/// real-data window.
+///
+/// Host port of
+/// [`zkm_recursion_circuit::zerocheck::BasefoldZerocheckVerifier::compute_padded_row_adjustment_basefold`].
+pub fn compute_padded_row_adjustment_basefold_host<F, EF, A>(
+    chip: &Chip<F, A>,
+    opening: &ChipOpenedValues<F, EF>,
+    alpha: EF,
+    public_values: &[F],
+) -> EF
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+{
+    use p3_air::BaseAir;
+
+    let main_width = <Chip<F, A> as BaseAir<F>>::width(chip);
+    let preproc_width = <A as MachineAir<F>>::preprocessed_width(&chip.air);
+    let preproc_row: Vec<EF> = vec![EF::ZERO; preproc_width];
+    let main_row: Vec<EF> = vec![EF::ZERO; main_width];
+    let mut folder = BasefoldConstraintFolder::<F, EF> {
+        preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
+        main: PairWindow { local: &main_row, next: &main_row },
+        alpha,
+        accumulator: EF::ZERO,
+        public_values,
+        local_cumulative_sum: &opening.local_cumulative_sum,
+        global_cumulative_sum: &opening.global_cumulative_sum,
+        _marker: PhantomData,
+    };
+    chip.eval(&mut folder);
+    folder.accumulator
 }
 
 #[cfg(test)]
