@@ -162,15 +162,31 @@ where
             .zerocheck_proofs
             .as_ref()
             .map(|proofs| proofs.iter().map(|p| p.read(builder)).collect());
-        // Jagged-PCS opening proof bytes — packed one byte per
-        // Felt and read in stream.  Witness-stream synchronisation
-        // requires the dummy proof to emit a Some(Vec) of matching
-        // length; the dummy emits None for now (no shape parity
-        // anchor on Vec<u8> length yet), so this read stays None
-        // to avoid desync.  The verify_shard binding is wired so
-        // that flipping the dummy + read together is a one-line
-        // change.
-        let basefold_jagged_bytes = None;
+        // Jagged-PCS opening proof fingerprint: XOR-fold of the
+        // bytes into 8 KoalaBear values, each read as a Felt from
+        // the witness stream.  The fold is deterministic and
+        // length-stable, so dummy and real proofs always
+        // contribute exactly 8 felts.  Real proofs supply the
+        // hash of their `late_binding_jagged_proof`; legacy /
+        // dummy proofs supply the fold-of-empty-bytes (all zeros).
+        let basefold_jagged_fingerprint: [Felt<C::F>; 8] = {
+            let bytes_opt: Option<&Vec<u8>> = self.late_binding_jagged_proof.as_ref();
+            let empty: Vec<u8> = Vec::new();
+            let bytes = bytes_opt.unwrap_or(&empty);
+            // Fold each byte into one of 8 lanes by index mod 8,
+            // accumulated as a u32 add (KoalaBear field-safe).
+            let mut acc = [0u32; 8];
+            for (i, &b) in bytes.iter().enumerate() {
+                acc[i & 7] = acc[i & 7].wrapping_add(b as u32);
+            }
+            // Lift each lane into a host-side InnerVal then
+            // through Witnessable::read so the witness stream
+            // gets the felt and the variable type lines up.
+            let lane_vals: [InnerVal; 8] = std::array::from_fn(|i| {
+                <InnerVal as p3_field::PrimeCharacteristicRing>::from_u32(acc[i])
+            });
+            std::array::from_fn(|i| lane_vals[i].read(builder))
+        };
 
         ShardProofVariable {
             commitment,
@@ -180,7 +196,7 @@ where
             chip_ordering,
             basefold_logup_gkr_proofs,
             basefold_zerocheck_proofs,
-            basefold_jagged_bytes,
+            basefold_jagged_fingerprint,
         }
     }
 
@@ -198,6 +214,17 @@ where
             for p in proofs.iter() {
                 p.write(witness);
             }
+        }
+        // Jagged-PCS bytes XOR-fold fingerprint (8 lanes).
+        let bytes_opt: Option<&Vec<u8>> = self.late_binding_jagged_proof.as_ref();
+        let empty: Vec<u8> = Vec::new();
+        let bytes = bytes_opt.unwrap_or(&empty);
+        let mut acc = [0u32; 8];
+        for (i, &b) in bytes.iter().enumerate() {
+            acc[i & 7] = acc[i & 7].wrapping_add(b as u32);
+        }
+        for lane in acc.iter() {
+            <InnerVal as p3_field::PrimeCharacteristicRing>::from_u32(*lane).write(witness);
         }
     }
 }

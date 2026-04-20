@@ -64,17 +64,19 @@ pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriPar
     pub basefold_zerocheck_proofs: Option<
         Vec<crate::per_chip_zerocheck::PerChipZerocheckProofVariable<C::F, C::EF>>,
     >,
-    /// Jagged-PCS opening proof bytes, packed one byte per Felt.
-    /// `None` in the legacy 4-batch FRI pipeline; `Some(Vec<Felt>)`
-    /// in the BaseFold pipeline (the host's
-    /// `late_binding_jagged_proof`).  Observed into the
-    /// challenger transcript inside `verify_shard` so the
-    /// prover can't equivocate on the bytes content.  Full
-    /// BaseFold-PCS in-circuit verification of the bytes
-    /// (deserialize → run sumcheck + FRI) is a separate task;
-    /// the transcript binding establishes the necessary
-    /// commitment.
-    pub basefold_jagged_bytes: Option<Vec<Felt<C::F>>>,
+    /// Fixed-size fingerprint of the jagged-PCS opening proof
+    /// bytes (XOR-fold of the Vec<u8> into 8 Felts).  Always
+    /// `[Felt; 8]` — unconditional presence simplifies witness
+    /// synchronisation: real proofs contribute the fold of
+    /// `late_binding_jagged_proof.unwrap_or(&[])` while legacy
+    /// proofs contribute the all-zero fingerprint.
+    ///
+    /// Observed into the challenger transcript inside
+    /// `verify_shard` so the prover can't equivocate on the bytes
+    /// content.  Full BaseFold-PCS in-circuit verification of the
+    /// bytes (deserialize → run sumcheck + FRI) is a separate
+    /// task; this fingerprint binding is the prerequisite.
+    pub basefold_jagged_fingerprint: [Felt<C::F>; 8],
 }
 
 /// Get a dummy duplex challenger for use in dummy proofs.
@@ -399,7 +401,7 @@ where
             public_values,
             basefold_logup_gkr_proofs: _,
             basefold_zerocheck_proofs: _,
-            basefold_jagged_bytes: _,
+            basefold_jagged_fingerprint: _,
         } = proof;
 
         // Assert that the byte multiplicities don't overflow.
@@ -666,16 +668,15 @@ where
             }
         }
 
-        // BaseFold-pipeline: when the jagged-PCS opening bundle
-        // bytes are present, observe each byte-Felt into the
-        // transcript.  This is a transcript-binding step (commits
-        // the prover to the bytes content); full in-circuit
-        // BaseFold-PCS verification of the deserialised bundle
-        // lands in a follow-on iteration.
-        if let Some(bytes) = proof.basefold_jagged_bytes.as_ref() {
-            for &b in bytes.iter() {
-                challenger.observe(builder, b);
-            }
+        // BaseFold-pipeline jagged-PCS bytes fingerprint: 8-lane
+        // XOR-fold of the host's `late_binding_jagged_proof`
+        // bytes (or all-zero when absent), observed into the
+        // challenger transcript.  Binds the prover to the bytes
+        // content in fixed size.  Full in-circuit BaseFold-PCS
+        // verification of the deserialised bundle is the next
+        // iteration; this fingerprint is the prerequisite anchor.
+        for &lane in proof.basefold_jagged_fingerprint.iter() {
+            challenger.observe(builder, lane);
         }
 
         for (chip, trace_domain, qc_domains, values) in
