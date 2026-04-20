@@ -195,8 +195,19 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // "Artificial zero" padding: one zero per round inserted
         // at the corresponding insertion_point (reversed iteration
         // so later insertions don't invalidate earlier indices).
-        let added_columns: Vec<usize> =
-            column_counts.iter().map(|cc| cc[cc.len() - 2] + 1).collect();
+        // Guard against `cc.len() < 2` (degenerate single-chip
+        // shards — emit 1 zero-column pad as the penultimate-width
+        // fallback).
+        let added_columns: Vec<usize> = column_counts
+            .iter()
+            .map(|cc| {
+                if cc.len() >= 2 {
+                    cc[cc.len() - 2] + 1
+                } else {
+                    1
+                }
+            })
+            .collect();
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         for (insertion_point, num_added) in
             insertion_points.iter().rev().zip(added_columns.iter().rev())

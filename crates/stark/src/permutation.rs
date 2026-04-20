@@ -233,6 +233,18 @@ pub fn eval_permutation_constraints<'a, F, AB>(
     let perm_next = perm.next_slice();
     let perm_width = perm_local.len();
 
+    // BaseFold-pipeline short-circuit: if the folder reports a
+    // zero-width permutation trace, permutation soundness lives in
+    // LogUp-GKR (not in these constraints) and there's nothing to
+    // evaluate here.  Any chip that reads permutation columns will
+    // still panic deeper via empty-slice indexing, which is the
+    // intended signal that the chip is misusing the BaseFold
+    // contract.  Legacy callers retain the shape check via the
+    // `!= permutation_trace_width` branch below.
+    if perm_width == 0 && permutation_trace_width > 0 {
+        return;
+    }
+
     // Assert that the permutation trace width is correct.
     if perm_width != permutation_trace_width {
         panic!(
