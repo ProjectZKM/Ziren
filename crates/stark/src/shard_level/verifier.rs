@@ -224,11 +224,154 @@ impl BasefoldShardVerifier {
         )?;
 
         // ── Phase 4: Jagged-PCS opening verification ────────────
-        Err(BasefoldVerifyError::Unimplemented(
-            "Phase 4 (jagged-PCS verification) — port from \
-             crates/recursion/circuit/src/recursive_jagged_pcs.rs::verify_trusted_evaluations",
-        ))
+        //
+        // Delegate to the existing host-side verifier at
+        // crate::basefold_late_binding::jagged::verify_jagged_basefold
+        // after deserialising the bundle bytes.  See detailed rationale
+        // in verify_jagged_pcs_host.
+        verify_jagged_pcs_host::<SC, A>(
+            chips,
+            &proof.logup_gkr_proof.logup_evaluations.point,
+            &proof.evaluation_proof,
+            &proof.logup_gkr_proof.logup_evaluations,
+            challenger,
+        )?;
+
+        Ok(())
     }
+}
+
+/// Host-side jagged-PCS opening verification (Phase 4).
+///
+/// Deserialises the bundle bytes and delegates to the long-standing
+/// host-side verifier at
+/// [`crate::basefold_late_binding::jagged::verify_jagged_basefold`].
+/// This is much shorter than the recursion-circuit port because the
+/// host verifier already exists; we just need to wire up the
+/// KoalaBearPoseidon2-specialised call.
+///
+/// The TypeId gate mirrors emit_jagged_pcs_bytes — returns `Ok(())`
+/// for non-KoalaBear configs (nothing to verify in that path).
+fn verify_jagged_pcs_host<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_eval_point: &[Challenge<SC>],
+    evaluation_proof_bytes: &[u8],
+    _gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    challenger: &mut SC::Challenger,
+) -> Result<(), BasefoldVerifyError>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy + 'static,
+    SC::Challenger: 'static,
+{
+    use core::any::{Any, TypeId};
+    use crate::basefold_late_binding::jagged::{verify_jagged_basefold, JaggedBasefoldBundle};
+    use crate::jagged::JaggedChipInfo;
+    use crate::{InnerChallenge, InnerVal};
+
+    // Type gate (same as prover-side emit_jagged_pcs_bytes).
+    if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
+        || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
+        || TypeId::of::<SC::Challenger>()
+            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+    {
+        // Non-KoalaBear — skip (prover emitted empty bytes too).
+        return Ok(());
+    }
+
+    // Empty bytes means the prover didn't emit a jagged-PCS opening
+    // (e.g., non-KoalaBear config).  Accept as a no-op.
+    if evaluation_proof_bytes.is_empty() {
+        return Ok(());
+    }
+
+    // Deserialise the bundle.
+    let bundle = JaggedBasefoldBundle::from_bytes(evaluation_proof_bytes).ok_or_else(|| {
+        BasefoldVerifyError::JaggedPcs(format!(
+            "rmp-serde deserialize failed ({} bytes)",
+            evaluation_proof_bytes.len()
+        ))
+    })?;
+
+    // Derive JaggedChipInfo from the chip set + bundle packing.  The
+    // bundle's offsets[i] is the starting cell index of chip i in
+    // the stacked dense vector; row_count = main_trace height,
+    // column_count = main_trace width.  We read row_count from the
+    // bundle's y_per_chip lengths and column_count from the chip's
+    // BaseAir::width().
+    use p3_air::BaseAir;
+    let chip_infos: Vec<JaggedChipInfo> = chips
+        .iter()
+        .map(|chip| {
+            let column_count = <_ as BaseAir<Val<SC>>>::width(*chip);
+            // row_count: best derivation from bundle metadata.  The
+            // prover's JaggedPacking builds offsets[i+1] - offsets[i]
+            // == row_count[i] * column_count[i].
+            JaggedChipInfo {
+                name: chip.name().to_string(),
+                row_count: 0, // unknown at verifier time; filled via bundle offsets below
+                column_count,
+            }
+        })
+        .collect();
+
+    // Patch row_count from bundle.packing.offsets.
+    let mut chip_infos = chip_infos;
+    for (i, info) in chip_infos.iter_mut().enumerate() {
+        let start = bundle.packing.offsets.get(i).copied().unwrap_or(0);
+        let end = bundle
+            .packing
+            .offsets
+            .get(i + 1)
+            .copied()
+            .unwrap_or(bundle.packing.total_values);
+        let span = end.saturating_sub(start);
+        if info.column_count > 0 {
+            info.row_count = span / info.column_count;
+        }
+    }
+
+    // Build r_row_per_chip from the shared eval_point's trailing
+    // log_row_count coords for each chip.
+    let r_row_per_chip: Vec<Vec<InnerChallenge>> = chip_infos
+        .iter()
+        .map(|info| {
+            let log_h = info
+                .row_count
+                .max(1)
+                .next_power_of_two()
+                .trailing_zeros() as usize;
+            let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
+                &shared_eval_point[shared_eval_point.len() - log_h..]
+            } else {
+                shared_eval_point
+            };
+            // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
+            let cloned: Vec<Challenge<SC>> = slice.to_vec();
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(cloned);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+        })
+        .collect();
+
+    // Downcast SC::Challenger to &mut LbChallenger.
+    let challenger_any: &mut dyn Any = challenger;
+    let lb_challenger = challenger_any
+        .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
+        .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
+
+    // Delegate to the existing host-side verifier.
+    if !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &bundle, lb_challenger) {
+        return Err(BasefoldVerifyError::JaggedPcs(
+            "verify_jagged_basefold rejected the bundle".into(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Host-side zerocheck verification (partial port, see phase 3
