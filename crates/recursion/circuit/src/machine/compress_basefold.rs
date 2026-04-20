@@ -750,10 +750,8 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 
 /// Placeholder jagged-evaluator closure.  Returns
 /// `(zero_ext, vec![])` — structurally correct for compilation
-/// but doesn't pass real verification.  Full composition with
-/// [`crate::jagged_eval_primitives`] lands once the
-/// `RecursiveJaggedEvalSumcheckConfig` driver is exposed at this
-/// layer.
+/// but doesn't pass real verification.  Kept for bring-up / A-B
+/// testing while `real_jagged_evaluator_fn` matures.
 pub fn placeholder_jagged_evaluator_fn<C, FC>(
     _builder: &mut Builder<C>,
 ) -> impl FnOnce(
@@ -780,6 +778,156 @@ where
         use p3_field::PrimeCharacteristicRing;
         let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         (zero, Vec::new())
+    }
+}
+
+/// Real jagged-evaluator closure.
+///
+/// Runs the jagged-eval sub-sumcheck verification entirely in-circuit,
+/// mirroring the host-side verifier at
+/// [`zkm_stark::jagged_sumcheck::verify_jagged_reduction`] and SP1's
+/// `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`
+/// (`/tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:97-170`).
+///
+/// # Protocol
+///
+///   1. Observe `claimed_sum` (= `jagged_eval`) into the transcript.
+///   2. Run [`crate::sumcheck::verify_sumcheck`] on the embedded
+///      `partial_sumcheck_proof` — this verifies the round polys
+///      and samples challenges in-circuit.
+///   3. For each column pair `(col_prefix_sums[k], col_prefix_sums[k+1])`:
+///      merge bits, compute `(full_lagrange, prefix_sum_felt)` via
+///      [`crate::jagged_eval_primitives::emit_prefix_sum_check`],
+///      weight by `z_col_partial_lagrange[k]`, accumulate.
+///   4. Split the sumcheck reduced point in half; evaluate the
+///      branching-program polynomial via
+///      [`crate::jagged_eval_primitives::emit_branching_program_eval`]
+///      parameterized by `(z_row, z_eval)`.
+///   5. Multiply the accumulator by the BP eval.
+///   6. Assert the result equals `partial_sumcheck_proof.point_and_eval.1`.
+///   7. Return `(jagged_eval, prefix_sum_felts)`.
+///
+/// # Arguments
+///
+/// - `meta.col_prefix_sums[k]` — bit decomposition of column `k`'s
+///   cumulative row offset (Felt vec).
+/// - `z_row` — outer zerocheck row-direction eval point.
+/// - `z_col` — column-index challenges sampled just before this
+///   closure in [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier`].
+/// - `z_eval` — outer jagged sumcheck reduced point
+///   (acts as the BP's `z_trace` parameter).
+/// - `proof.partial_sumcheck_proof` — the sub-sumcheck to verify.
+/// - `challenger` — in-circuit transcript.
+pub fn real_jagged_evaluator_fn<C, FC>(
+    _builder_outer: &mut Builder<C>,
+) -> impl FnOnce(
+    &mut Builder<C>,
+    &JaggedDimensionMetadata<Felt<C::F>>,
+    &[Ext<C::F, C::EF>],
+    &[Ext<C::F, C::EF>],
+    &[Ext<C::F, C::EF>],
+    &JaggedSumcheckEvalProof<Ext<C::F, C::EF>>,
+    &mut FC,
+) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>)
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    FC: crate::challenger::FieldChallengerVariable<C, C::Bit>,
+{
+    move |builder: &mut Builder<C>,
+          meta: &JaggedDimensionMetadata<Felt<C::F>>,
+          z_row: &[Ext<C::F, C::EF>],
+          z_col: &[Ext<C::F, C::EF>],
+          z_eval: &[Ext<C::F, C::EF>],
+          proof: &JaggedSumcheckEvalProof<Ext<C::F, C::EF>>,
+          challenger: &mut FC|
+          -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>) {
+        use p3_field::PrimeCharacteristicRing;
+        use zkm_recursion_compiler::ir::SymbolicExt;
+
+        let JaggedSumcheckEvalProof { partial_sumcheck_proof } = proof;
+
+        // (1) jagged_eval is the opening the sub-sumcheck proves.
+        //     Observe it into the transcript *before* running sumcheck so
+        //     that the verifier's challenge samples align with the host.
+        //     Ext is decomposed into D felts and observed as a slice —
+        //     mirrors [`sumcheck::observe_poly_coeffs`] and the upstream
+        //     `challenger.observe_ext_element(...)` pattern.
+        let jagged_eval = partial_sumcheck_proof.claimed_sum;
+        let jagged_eval_felts: Vec<Felt<C::F>> = C::ext2felt(builder, jagged_eval).to_vec();
+        challenger.observe_slice(builder, jagged_eval_felts);
+
+        // (2) Verify the sub-sumcheck (round polys, challenges, final
+        //     point-and-eval consistency all handled inside).
+        crate::sumcheck::verify_sumcheck::<C, FC>(
+            builder,
+            challenger,
+            partial_sumcheck_proof,
+        );
+
+        // (3) Split the reduced point in half — first half flows into
+        //     the BP as `prefix_sum`, second half as `next_prefix_sum`.
+        let proof_point: &[Ext<C::F, C::EF>] = &partial_sumcheck_proof.point_and_eval.0;
+        let half = proof_point.len() / 2;
+        let first_half_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            proof_point[..half].iter().map(|e| (*e).into()).collect();
+        let second_half_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            proof_point[half..].iter().map(|e| (*e).into()).collect();
+
+        // (4) Full partial-Lagrange over z_col.
+        let z_col_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            z_col.iter().map(|e| (*e).into()).collect();
+        let z_col_lagrange: Vec<SymbolicExt<C::F, C::EF>> =
+            crate::logup_gkr::partial_lagrange_symbolic::<C>(&z_col_symbolic);
+
+        // (5) Per-column accumulation: for each (curr, next) prefix-sum pair,
+        //     merge bits, run prefix_sum_check, weight by z_col_lagrange[k].
+        let mut prefix_sum_felts: Vec<Felt<C::F>> = Vec::new();
+        let mut expected_eval: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+
+        // col_prefix_sums has num_cols + 1 entries; pair each with the next.
+        let pairs = meta.col_prefix_sums.iter().zip(meta.col_prefix_sums.iter().skip(1));
+        let proof_point_vec: Vec<Ext<C::F, C::EF>> = proof_point.to_vec();
+
+        for ((curr_ps, next_ps), z_col_eq) in pairs.zip(z_col_lagrange.iter()) {
+            // Merge bit decompositions: curr || next.
+            let mut merged: Vec<Felt<C::F>> = curr_ps.clone();
+            merged.extend_from_slice(next_ps);
+
+            let (full_lagrange, ps_felt) =
+                crate::jagged_eval_primitives::emit_prefix_sum_check::<C>(
+                    builder,
+                    merged,
+                    proof_point_vec.clone(),
+                );
+            prefix_sum_felts.push(ps_felt);
+
+            expected_eval = expected_eval + (*z_col_eq * full_lagrange);
+        }
+
+        // (6) Multiply by the branching-program evaluation.
+        //     BP parameterized by (z_row, z_eval) ≈ SP1's (z_row, z_trace);
+        //     evaluated with first/second halves of the sub-sumcheck point.
+        let z_row_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            z_row.iter().map(|e| (*e).into()).collect();
+        let z_eval_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
+            z_eval.iter().map(|e| (*e).into()).collect();
+
+        let bp_eval: SymbolicExt<C::F, C::EF> =
+            crate::jagged_eval_primitives::emit_branching_program_eval::<C>(
+                builder,
+                &z_row_symbolic,
+                &z_eval_symbolic,
+                &first_half_symbolic,
+                &second_half_symbolic,
+            );
+        expected_eval = expected_eval * bp_eval;
+
+        // (7) Close the identity: accumulated expected_eval must equal
+        //     the sumcheck's final point-eval claim.
+        let expected_ext: Ext<C::F, C::EF> = builder.eval(expected_eval);
+        builder.assert_ext_eq(expected_ext, partial_sumcheck_proof.point_and_eval.1);
+
+        (jagged_eval, prefix_sum_felts)
     }
 }
 
