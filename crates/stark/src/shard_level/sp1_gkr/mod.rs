@@ -39,6 +39,8 @@
 
 pub mod first_layer;
 pub mod layer;
+pub mod transition;
 
 pub use first_layer::*;
 pub use layer::*;
+pub use transition::*;
