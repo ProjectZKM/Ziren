@@ -27,6 +27,7 @@
 //!     Mirrors `ShardProver::prove_shard_with_data` from
 //!     `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792`.
 
+pub mod basefold_constraint_folder;
 pub mod logup_gkr_prover;
 pub mod prover;
 pub mod shard_proof;
