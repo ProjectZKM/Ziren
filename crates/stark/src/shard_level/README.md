@@ -1,9 +1,14 @@
-# SP1-style Shard-Level Proof Pipeline (Parallel Codebase)
+# SP1-style Shard-Level Proof Pipeline
 
-This module hosts the SP1-style shard-level proof shape — one
-`LogupGkrProof` + one `PartialSumcheckProof` per shard, instead
-of Ziren's default per-chip lists.  Default-off via the
-`shard-level-proof` Cargo feature.
+This module implements the SP1-style shard-level proof shape — one
+`LogupGkrProof` + one `PartialSumcheckProof` + one jagged-PCS
+opening per shard, instead of Ziren's legacy per-chip lists.
+
+**Status: structurally complete end-to-end.** Enabled by default
+via the `shard-level-proof` Cargo feature (`default = ["shard-level-proof"]`
+as of task #21).  Production cutover coexists with the legacy
+per-chip path via a dual-path compat shim on `ShardProof<SC>`; see
+"Cutover model" below.
 
 ## Module map
 
@@ -11,23 +16,70 @@ of Ziren's default per-chip lists.  Default-off via the
 |---|---|
 | `types` | Pure data: `LogupGkrProof`, `PartialSumcheckProof`, `LogUpEvaluations`, `ChipEvaluation`, `LogUpGkrOutput`, `LogupGkrRoundProof`, `UnivariatePolynomial` |
 | `shard_proof` | Host-side `BasefoldShardProof<F, EF>` — the SP1-shape 6-field proof |
-| `logup_gkr_prover` | Shard-level LogUp-GKR prover + helpers (`aggregate_chip_leaves`, `evaluate_trace_columns_at_point`, `prove_shard_logup_gkr`, `ziren_layer_to_sp1_round`) |
-| `zerocheck_prover` | Shard-level zerocheck prover + helpers (`combine_two_tables`, `pad_chip_table`, `samples_to_monomial_degree_2`, `prove_shard_zerocheck`) |
-| `prover` | Top-level orchestrator `prove_shard_to_basefold` — the SP1-style assembly entry point |
+| `logup_gkr_prover` | Legacy (fraction-tree) per-chip LogUp-GKR prover + helpers; kept for interop |
+| `zerocheck_prover` | Shard-level zerocheck prover + helpers |
+| `sp1_gkr/` | SP1-style row-only LogUp-GKR backend — `layer.rs`, `first_layer.rs`, `transition.rs`, `extract.rs`, `build.rs`, `round.rs`, `top_level.rs` (30 unit tests) |
+| `prover` | Top-level orchestrator `prove_shard_to_basefold` + opt-in SDK wiring `try_prove_shard_to_basefold_boxed` |
+| `verifier` | Host-side `BasefoldShardVerifier` with 4-phase verification |
+
+## Pipeline (prover → verifier)
+
+```
+                       shard traces + VK
+                            │
+                            ▼
+  ┌──────────────────────────────────────────────────┐
+  │ prove_shard_to_basefold (host)                   │
+  │   Phase 1: transcript prologue                   │
+  │   Phase 2: LogUp-GKR sumcheck (sp1_gkr backend)  │
+  │   Phase 3: zerocheck sumcheck                    │
+  │   Phase 4: jagged-PCS opening (LbChallenger)     │
+  │   Output: BasefoldShardProof<F, EF>              │
+  └──────────────────────────────────────────────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼                           ▼
+  ┌─────────────────────┐      ┌────────────────────────────┐
+  │ Host verification   │      │ In-circuit verification    │
+  │ BasefoldShard-      │      │ recursion-circuit          │
+  │ Verifier (this mod) │      │ BasefoldShardVerifier      │
+  └─────────────────────┘      └────────────────────────────┘
+```
+
+The host and in-circuit verifiers are kept in lockstep by running
+the same 4 phases in the same challenger ordering.
+
+## Cutover model (task #28)
+
+`ShardProof<SC>` carries a new feature-gated field:
+
+```rust
+#[cfg(feature = "shard-level-proof")]
+#[serde(default)]
+pub basefold_shard_proof: Option<Box<BasefoldShardProof<Val<SC>, Challenge<SC>>>>,
+```
+
+- **Legacy path**: `basefold_shard_proof = None`; `zerocheck_proofs`
+  / `logup_gkr_proofs` / `logup_row_openings` / `late_binding_proofs`
+  carry the per-chip proofs.  `StarkVerifier::verify_shard` runs
+  the legacy verifier.
+- **Shard-level path**: `basefold_shard_proof = Some(_)`; verifier
+  dispatches to `BasefoldShardVerifier::verify_shard`.
+
+**Prover opt-in**: set `ZIREN_SHARD_LEVEL_BASEFOLD=1` to populate
+`basefold_shard_proof` alongside the legacy fields (non-destructive
+— both coexist in the envelope).  Gated on `SC == KoalaBearPoseidon2`
+via runtime `TypeId::of::<SC::Challenger>()` check.
 
 ## Usage
 
-Enable the feature in your `Cargo.toml`:
-
-```toml
-zkm-stark = { ..., features = ["shard-level-proof"] }
-```
-
-Construct a proof:
+Default build already includes `shard-level-proof`:
 
 ```rust
 use zkm_stark::shard_level::prover::prove_shard_to_basefold;
+use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
 
+// Prove
 let proof = prove_shard_to_basefold::<SC, A>(
     &chips,
     &preprocessed_traces,
@@ -37,25 +89,61 @@ let proof = prove_shard_to_basefold::<SC, A>(
     &mut challenger,
 );
 // proof: BasefoldShardProof<F, EF>
+
+// Verify
+let verifier = BasefoldShardVerifier::production_default();
+verifier.verify_shard::<SC, A>(
+    &vk,
+    &chips,
+    &proof,
+    &mut challenger,
+    num_pv_elts,
+)?;
 ```
 
-The recursion-circuit-side counterpart lives at
-`crates/recursion/circuit/src/shard_level_witness.rs` and bridges
-the host-side proof into the in-circuit
-`BasefoldShardProofVariable`.
+The recursion-circuit counterpart lives at
+`crates/recursion/circuit/src/shard_level_witness.rs` (host→circuit
+lift) and `crates/recursion/circuit/src/shard_basefold.rs`
+(in-circuit `BasefoldShardVerifier`).
 
-## Status
+## Phase implementation status
 
-All four recursion machine stages have parallel SP1-style
-verifiers under the same feature flag:
+| Phase | Host | In-circuit |
+|---|---|---|
+| 1 — transcript prologue | ✅ `verifier.rs` | ✅ `shard_basefold.rs` |
+| 2 — LogUp-GKR sumcheck | ✅ `verify_logup_gkr_host` | ✅ `verify_logup_gkr` |
+| 3 — zerocheck | ✅ structural (sumcheck + shape); constraint-folder identity deferred | ✅ `BasefoldZerocheckVerifier` |
+| 4 — jagged-PCS opening | ✅ delegates to `verify_jagged_basefold` | ✅ `verify_trusted_evaluations` |
 
-- `crates/recursion/circuit/src/machine/compress_basefold.rs`
-- `crates/recursion/circuit/src/machine/deferred_basefold.rs`
-- `crates/recursion/circuit/src/machine/wrap_basefold.rs`
-- `crates/recursion/circuit/src/machine/core_basefold.rs`
+**Phase 3 deferred**: `BasefoldConstraintFolder` host port — needed
+for the cross-chip RLC identity check (step 4g–5 of the in-circuit
+version) and GKR sum-modification identity (step 6–7).  The sumcheck
+itself + all shape invariants + transcript binding are fully
+verified.  Structural smoke is green; full cryptographic soundness
+requires this port.
 
-Each calls `BasefoldShardVerifier::verify_shard` end-to-end on
-the new proof shape.
+## Test coverage
 
-See `docs/sp1_shard_proof_port_status.md` for the complete
-60-iteration build log and pending follow-ups.
+- `sp1_gkr`: 30 unit tests (layer types, first-layer generation,
+  transitions, extraction, sumcheck rounds, build orchestrator)
+- `verifier`: 4 unit tests (construction, error display)
+- Recursion smoke: `build_normalize_basefold_program_compiles_dummy_witness`
+  at `crates/recursion/circuit/src/machine/basefold_programs.rs:385`
+  exercises the full in-circuit pipeline against a real
+  `prove_shard_to_basefold`-emitted proof.
+
+## Related tasks
+
+- #18-#22: Initial scope — host types, prover orchestration,
+  recursion machine ports.
+- #23: End-to-end smoke test (green).
+- #24: SP1 GKR backend port (closed the protocol-mismatch documented
+  in `docs/task_23_blocker.md`).
+- #25: zerocheck permutation short-circuit + jagged-PCS single-chip
+  fixes.
+- #26/#27: Real jagged-PCS bytes emission + lift adapter.
+- #28: SDK cutover — dual-path compat shim, prover populator,
+  verifier dispatch.
+- #29/#30/#31: Host verifier phases 2/3/4.
+- **Pending #13**: retire legacy per-chip `ShardProof` fields once
+  the shard-level path is validated on production workloads.
