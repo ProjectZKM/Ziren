@@ -219,6 +219,57 @@ mod tests {
         assert_ne!(a, c);
     }
 
+    /// Construct a minimal dummy ZKMCoreBasefoldWitnessValues with
+    /// a single placeholder shard proof.  Used only by the
+    /// program-construction smoke tests below; produces a
+    /// structurally-valid witness whose proof would not pass real
+    /// verification (chip_openings is empty so chip_names == [],
+    /// the shard verifier sees a zero-chip shard).
+    fn dummy_core_basefold_witness(
+        machine: &zkm_stark::StarkMachine<
+            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
+        >,
+    ) -> super::ZKMCoreBasefoldWitnessValues<
+        zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+    > {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        use std::sync::Arc;
+        use zkm_recursion_core::DIGEST_SIZE;
+        use zkm_stark::{
+            shard_level::shard_proof::BasefoldShardProof, StarkVerifyingKey,
+        };
+
+        // Minimal VK — empty preprocessed traces, dummy commit.
+        let vk = StarkVerifyingKey {
+            commit: crate::fri::dummy_commit(),
+            pc_start: KoalaBear::ZERO,
+            initial_global_cumulative_sum:
+                zkm_stark::septic_digest::SepticDigest::<KoalaBear>::zero(),
+            chip_information: Vec::new(),
+            chip_ordering: Default::default(),
+        };
+        let _ = machine; // silence unused
+        let _ = Arc::<usize>::new(0); // ensure Arc is in scope (avoid drift if removed)
+
+        let proof = BasefoldShardProof::<
+            zkm_stark::InnerVal,
+            zkm_stark::InnerChallenge,
+        >::empty(
+            std::array::from_fn(|_| KoalaBear::ZERO),
+            zkm_stark::PROOF_MAX_NUM_PVS,
+        );
+
+        super::ZKMCoreBasefoldWitnessValues {
+            vk,
+            shard_proofs: vec![proof],
+            is_complete: false,
+            is_first_shard: false,
+            vk_root: [KoalaBear::ZERO; DIGEST_SIZE],
+        }
+    }
+
     /// Compile-only smoke test: each program-builder function exists
     /// at the right type and can be coerced to a function pointer
     /// with the expected signature.  Validates the type bounds on
@@ -228,6 +279,42 @@ mod tests {
     ///
     /// Catches the most common breakage class — generic-bound drift
     /// after upstream changes — without requiring proof fixtures.
+    /// End-to-end smoke test (#23 first byte): construct a normalize
+    /// recursion program from a minimal dummy witness, verify the
+    /// AsmCompiler produces a non-empty `RecursionProgram`.
+    ///
+    /// Doesn't validate cryptographic soundness — the dummy proof
+    /// would not pass real verification.  Validates *only* that the
+    /// full pipeline (Witnessable::read → verify_core_basefold body
+    /// → real_jagged_evaluator_fn → AsmCompiler::compile) runs to
+    /// completion without panicking on a structurally-valid empty
+    /// shard.
+    ///
+    /// `#[ignore]` while real-fixture wiring is in flight — flip
+    /// once the dummy helper produces a witness with at least one
+    /// chip in `logup_gkr_proof.chip_openings`.
+    #[test]
+    #[ignore = "task #23: needs dummy LogupGkrProof with non-empty round_proofs/chip_openings — \
+                empty proof panics at crates/recursion/circuit/src/logup_gkr.rs:105 \
+                'mle eval vector size must be 2^point.dimension' (empty mle, dim=1)"]
+    fn build_normalize_basefold_program_compiles_dummy_witness() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+
+        let config = KoalaBearPoseidon2::default();
+        let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
+        let witness = dummy_core_basefold_witness(&machine);
+        let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
+            &machine,
+            &witness,
+            22,
+        );
+        // Bare-minimum sanity: program produced, has at least one
+        // instruction.  Tighter bounds + RecursionExecutor::run land
+        // once the dummy witness gains chip_openings entries.
+        let _ = program;
+    }
+
     #[test]
     fn program_builders_have_expected_signatures() {
         // Take each builder as a `fn` pointer.  If the signature

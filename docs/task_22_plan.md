@@ -134,3 +134,43 @@ Subtasks 22.1-22.5 all landed and compile clean under `--features shard-level-pr
 3. Witnessable plumbing for each new `ZKM*BasefoldWitnessValues` → `ZKM*BasefoldWitnessVariable` (tuple-shape input is already supported by existing `shard_level_witness`; new stage-specific fields need additions).
 
 Recommend filing 22.6 as its own task once #21 is unblocked and CI can be wired.
+
+### Task #23 first-byte triage (post-session)
+
+A `#[ignore]`d construction smoke test landed in
+`crates/recursion/circuit/src/machine/basefold_programs.rs::tests::
+build_normalize_basefold_program_compiles_dummy_witness`.  Running it
+identifies the precise structural hole:
+
+```
+panic at crates/recursion/circuit/src/logup_gkr.rs:105
+  assertion `left == right` failed: mle eval vector size must be 2^point.dimension
+    left: 0
+   right: 2
+```
+
+Translation: `LogupGkrProof::dummy()` returns an empty
+`logup_evaluations.chip_openings` map.  The recursion verifier's
+`logup_gkr` step expects each chip's preprocessed/main MLE eval
+slice to have `2^layer_dimension` entries.  An empty proof has
+zero entries where the verifier expects at least 2.
+
+**Concrete next step for #23**:
+
+1. Write a `dummy_basefold_shard_proof(machine, shape) -> BasefoldShardProof` helper
+   in `crates/recursion/circuit/src/dummy_basefold.rs` (new module),
+   modelled on `dummy_vk_and_shard_proof` (`crates/recursion/circuit/src/stark.rs:91`).
+   Must populate:
+   - `logup_gkr_proof.logup_evaluations.chip_openings` with one entry per chip in the shape,
+     each `ChipEvaluation { main_trace_evaluations, preprocessed_trace_evaluations }` sized to
+     match the chip's layer dimensions (zeros are fine for shape-correctness).
+   - `logup_gkr_proof.round_proofs` with one entry per chip.
+   - `zerocheck_proof` with `log_degree` rounds, each `[InnerChallenge; 4]` zeros.
+   - `opened_values.chips` populated via `dummy_opened_values` (already in stark.rs).
+   - `evaluation_proof: Vec<u8>` via the dummy jagged-PCS-bundle wire format.
+2. Replace `BasefoldShardProof::empty()` in `dummy_core_basefold_witness` with
+   the new helper.  Remove the `#[ignore]`.
+3. Repeat for `dummy_compress_basefold_witness`, `dummy_deferred_basefold_witness`,
+   `dummy_wrap_basefold_witness`.
+4. Add an executor smoke run that compiles the program *and* runs it
+   on the dummy witness via `RecursionExecutor::run`.
