@@ -40,3 +40,20 @@ verifier path).
 | keccak-precompile | 18.97 s | -0.57 s (-3%, within noise) |
 
 Both examples continue to prove-and-verify successfully.
+
+## Post-zerocheck-binding landing (commit a2ca1e3)
+
+Re-measured after both LogUp-GKR and zerocheck soundness chains
+became bound inside the recursion circuit (chips with
+permutation_width > 0 get empty zerocheck placeholders matching
+the prover's pattern; the rest get full log_degree-rounds binding).
+
+| Example | e2e Wall | Δ vs baseline |
+|---|---|---|
+| fibonacci | 8.34 s | +0.06 s (+1%, within noise) |
+| keccak-precompile | 19.44 s | -0.10 s (-1%, within noise) |
+
+Performance stable across 3 measurement rounds throughout the
+session.  The new in-circuit verification only fires inside the
+recursion circuit's `StarkVerifier::verify_shard`, not the host
+verify path that these examples test.
