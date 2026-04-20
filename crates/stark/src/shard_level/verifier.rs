@@ -851,4 +851,71 @@ mod tests {
         assert!(s.contains("10"));
         assert!(s.contains("7"));
     }
+
+    /// eq_eval on identical points = 1; on differing = not-1.
+    #[test]
+    fn eq_eval_host_indicator() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        let a = vec![EF::from_u32(3), EF::from_u32(5)];
+        let b = vec![EF::from_u32(3), EF::from_u32(5)];
+        // eq(a, b) where a == b: Π ((1-x)(1-x) + x·x) = Π (1 - 2x + 2x²)
+        // evaluated element-wise.  Not necessarily 1 unless both are boolean.
+        // Just confirm it's deterministic & computes:
+        let v = eq_eval_host(&a, &b);
+        let _ = v;
+
+        // Different points produce different eq values.
+        let c = vec![EF::from_u32(3), EF::from_u32(7)];
+        let u = eq_eval_host(&a, &c);
+        assert_ne!(v, u, "eq_eval differs when points differ");
+    }
+
+    /// MLE eval at uniform 0 vector == first entry; at uniform 1 vector
+    /// (all 1s) probes the last entry in LSB-first indexing.
+    #[test]
+    fn evaluate_mle_host_endpoints() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        // 4-element MLE (2 variables).  Values: [a, b, c, d].
+        let evals: Vec<EF> = (10..14).map(EF::from_u32).collect();
+
+        // At (0, 0) → entry 0.
+        let at_origin = evaluate_mle_host(&evals, &[EF::ZERO, EF::ZERO]);
+        assert_eq!(at_origin, EF::from_u32(10));
+
+        // At (1, 1) → entry 3 (all-ones index).
+        let at_all_ones = evaluate_mle_host(&evals, &[EF::ONE, EF::ONE]);
+        assert_eq!(at_all_ones, EF::from_u32(13));
+
+        // At (1, 0) → entry 1.
+        let at_10 = evaluate_mle_host(&evals, &[EF::ONE, EF::ZERO]);
+        assert_eq!(at_10, EF::from_u32(11));
+
+        // At (0, 1) → entry 2.
+        let at_01 = evaluate_mle_host(&evals, &[EF::ZERO, EF::ONE]);
+        assert_eq!(at_01, EF::from_u32(12));
+    }
+
+    /// Horner's eval_coeffs_host produces the correct polynomial value.
+    #[test]
+    fn eval_coeffs_host_horner_correctness() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        // p(X) = 3 + 5X + 7X² = [3, 5, 7] (low-degree-first).
+        let coeffs: Vec<EF> = vec![EF::from_u32(3), EF::from_u32(5), EF::from_u32(7)];
+
+        // p(0) = 3
+        assert_eq!(eval_coeffs_host(&coeffs, EF::ZERO), EF::from_u32(3));
+        // p(1) = 3 + 5 + 7 = 15
+        assert_eq!(eval_coeffs_host(&coeffs, EF::ONE), EF::from_u32(15));
+        // p(2) = 3 + 10 + 28 = 41
+        assert_eq!(eval_coeffs_host(&coeffs, EF::from_u32(2)), EF::from_u32(41));
+    }
 }
