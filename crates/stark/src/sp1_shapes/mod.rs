@@ -32,6 +32,8 @@
 //! | [`ZKMRecursionProgramShape`] | `/tmp/sp1/crates/prover/src/shapes.rs:84`           |
 //! | [`ZKMNormalizeInputShape`]   | `/tmp/sp1/crates/prover/src/shapes.rs:76`           |
 
+pub mod enumerate;
 pub mod types;
 
+pub use enumerate::*;
 pub use types::*;
