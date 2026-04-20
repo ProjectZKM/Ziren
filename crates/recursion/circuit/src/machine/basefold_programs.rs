@@ -253,13 +253,24 @@ mod tests {
         let _ = machine; // silence unused
         let _ = Arc::<usize>::new(0); // ensure Arc is in scope (avoid drift if removed)
 
-        let proof = BasefoldShardProof::<
+        let mut proof = BasefoldShardProof::<
             zkm_stark::InnerVal,
             zkm_stark::InnerChallenge,
         >::empty(
             std::array::from_fn(|_| KoalaBear::ZERO),
             zkm_stark::PROOF_MAX_NUM_PVS,
         );
+
+        // The recursion circuit's verify_logup_gkr expects
+        // numerator/denominator MLEs of size `2^initial_num_variables`
+        // where `initial_num_variables = log_num_interactions + 1`.
+        // For an empty shard (0 chips), log_num_interactions = 0
+        // (via chip_metadata_from_chips's `total.max(1)` guard), so
+        // `numerator.len() == denominator.len() == 2`.
+        proof.logup_gkr_proof.circuit_output.numerator =
+            vec![zkm_stark::InnerChallenge::ZERO; 2];
+        proof.logup_gkr_proof.circuit_output.denominator =
+            vec![zkm_stark::InnerChallenge::ZERO; 2];
 
         super::ZKMCoreBasefoldWitnessValues {
             vk,
@@ -294,9 +305,17 @@ mod tests {
     /// once the dummy helper produces a witness with at least one
     /// chip in `logup_gkr_proof.chip_openings`.
     #[test]
-    #[ignore = "task #23: needs dummy LogupGkrProof with non-empty round_proofs/chip_openings — \
-                empty proof panics at crates/recursion/circuit/src/logup_gkr.rs:105 \
-                'mle eval vector size must be 2^point.dimension' (empty mle, dim=1)"]
+    /// After fixing circuit_output.numerator/denominator → len 2,
+    /// the panic moves to `BasefoldZerocheckVerifier::verify_zerocheck`
+    /// → `verify_sumcheck(.. &empty univariate_polys)` → OOB at
+    /// `sumcheck.rs:68` (`univariate_polys[0]` on len-0 vec).
+    /// Next structural field to size is `zerocheck_proof.univariate_polys`.
+    ///
+    /// Honest conclusion: the expedient path to unblocking #23 is to
+    /// produce a real proof via `zkm_stark::shard_level::prove_shard_to_basefold`
+    /// on a minimal program, not to hand-build a zero-valued structural
+    /// match of N interdependent verifier invariants.
+    #[ignore = "task #23: verify_zerocheck requires univariate_polys populated; real-fixture path preferred"]
     fn build_normalize_basefold_program_compiles_dummy_witness() {
         use zkm_core_machine::mips::MipsAir;
         use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
