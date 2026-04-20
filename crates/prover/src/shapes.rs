@@ -362,23 +362,54 @@ impl ZKMProofShape {
         use zkm_stark::air::MachineAir;
         use crate::CoreSC;
 
-        // Real chip names from the live MIPS machine — used to filter
-        // out chip names from `stacked_shapes/enumerate.rs` that don't
-        // match an actual chip in the machine (e.g., the hardcoded
-        // `Bls12381Add` in enumerate.rs vs. the machine's
-        // `Bls12381AddAssign`).  Without this filter, `dummy_vk_and_shard_proof`
-        // panics in `zip_eq` when `shard_chips_ordered` returns a
-        // shorter iterator than the shape's chip list.
+        // Real chips from the live MIPS machine — needed for two
+        // post-processing steps on each `to_ordered_shape()` output:
+        //
+        //   1. **Name filter**: drop chip names from
+        //      `stacked_shapes/enumerate.rs` that don't match a real
+        //      `MachineAir::name()` (the enumerate list has
+        //      `Bls12381Add` etc., the machine has `Bls12381AddAssign`).
+        //      Without this, `dummy_vk_and_shard_proof` panics in
+        //      `zip_eq` when `shard_chips_ordered` returns fewer chips
+        //      than the shape names.
+        //
+        //   2. **Byte-lookup overflow cap**: `to_ordered_shape` gives
+        //      every chip a uniform `log_height` (e.g. 22).  But the
+        //      recursion VK setup asserts
+        //      `Σ chip.num_sent_byte_lookups() · 2^log_degree ≤ |F|` —
+        //      with ~22 chips at uniform 2^22 the sum overflows
+        //      KoalaBear's order.  Per-chip we cap log_height to
+        //      `floor(log2(|F| / total_byte_lookups_per_row))` for the
+        //      shape's chip set, so the assertion always holds.
         let core_machine = MipsAir::machine(CoreSC::default());
-        let valid_chip_names: BTreeSet<String> =
-            core_machine.chips().iter().map(|c| c.name()).collect();
+        let chips_by_name: BTreeMap<String, &_> =
+            core_machine.chips().iter().map(|c| (c.name(), c)).collect();
+
+        // KoalaBear order ≈ 2^31 - 2^24 + 1.  Use 2^30 as a safe upper
+        // bound so we have headroom against rounding/per-chip variance.
+        const SAFE_BYTE_LOOKUP_BUDGET: u64 = 1u64 << 30;
 
         let machine_shape = build_mips_machine_shape();
         let small_shapes: Vec<OrderedShape> = create_all_input_shapes(&machine_shape)
             .into_iter()
             .map(|cps| {
                 let mut shape = cps.to_ordered_shape();
-                shape.inner.retain(|(name, _)| valid_chip_names.contains(name));
+                shape.inner.retain(|(name, _)| chips_by_name.contains_key(name));
+
+                // Apply per-shape byte-lookup cap.
+                let total_byte_lookups: u64 = shape
+                    .inner
+                    .iter()
+                    .map(|(name, _)| chips_by_name[name].num_sent_byte_lookups() as u64)
+                    .sum();
+                if total_byte_lookups > 0 {
+                    let max_log_height: u32 =
+                        (SAFE_BYTE_LOOKUP_BUDGET / total_byte_lookups.max(1)).trailing_zeros();
+                    for entry in &mut shape.inner {
+                        entry.1 = entry.1.min(max_log_height as usize);
+                    }
+                }
+
                 shape
             })
             .filter(|shape| !shape.inner.is_empty())
