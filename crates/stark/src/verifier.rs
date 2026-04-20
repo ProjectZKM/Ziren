@@ -45,21 +45,31 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         // below is the fallback for:
         //   - FRI proofs (basefold_shard_proof is None)
         //   - Proofs produced before the shard-level cutover
-        //     (basefold_shard_proof is None)
-        //   - Non-KoalaBear config instantiations (the shard-level
-        //     path is KoalaBear-monomorphic)
+        //   - Non-KoalaBear config instantiations
         #[cfg(feature = "shard-level-proof")]
-        if proof.basefold_shard_proof.is_some() {
-            // TODO: dispatch to BasefoldShardVerifier::verify_shard.
-            // Left as a TODO in this step because the recursion-side
-            // BasefoldShardVerifier has a different generic signature
-            // (KoalaBearPoseidon2-specialised, consumes
-            // BasefoldShardOpenedValuesVariable) than the host-side
-            // StarkVerifier; the host-side BasefoldShardVerifier
-            // doesn't exist yet.  For now, fall through to the
-            // legacy path (the basefold proof is carried but not
-            // verified — same semantics as the per-chip path with
-            // an extra unchecked field).
+        if let Some(basefold_proof) = proof.basefold_shard_proof.as_ref() {
+            // Dispatch to the host-side BasefoldShardVerifier.  When
+            // phases 2-4 of the host port land (currently
+            // Unimplemented), this becomes the full verification.
+            // In the interim, the skeleton at least verifies Phase 1
+            // (transcript prologue) and checks basic shape invariants;
+            // failing with `Unimplemented` signals that the host-side
+            // port is still in progress.
+            let shard_verifier =
+                crate::shard_level::verifier::BasefoldShardVerifier::production_default();
+            let num_pv_elts = proof.public_values.len();
+            shard_verifier
+                .verify_shard::<SC, A>(
+                    vk,
+                    chips,
+                    basefold_proof.as_ref(),
+                    challenger,
+                    num_pv_elts,
+                )
+                .map_err(|e| {
+                    VerificationError::BasefoldShardVerifier(format!("{e}"))
+                })?;
+            return Ok(());
         }
 
         let ShardProof {
@@ -753,6 +763,10 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     JaggedLateBindingFailed,
     /// Zerocheck proofs attached but number does not match number of chips.
     InvalidProofShape,
+    /// Shard-level BaseFold verifier (task #28 path) rejected the proof.
+    /// The message carries the inner BasefoldVerifyError's display.
+    #[cfg(feature = "shard-level-proof")]
+    BasefoldShardVerifier(String),
 }
 
 impl Debug for OpeningShapeError {
@@ -814,6 +828,10 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
             }
+            #[cfg(feature = "shard-level-proof")]
+            VerificationError::BasefoldShardVerifier(msg) => {
+                write!(f, "BasefoldShardVerifier: {}", msg)
+            }
         }
     }
 }
@@ -847,6 +865,10 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
             }
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
+            }
+            #[cfg(feature = "shard-level-proof")]
+            VerificationError::BasefoldShardVerifier(msg) => {
+                write!(f, "BasefoldShardVerifier: {}", msg)
             }
         }
     }
