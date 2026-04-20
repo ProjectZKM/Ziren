@@ -357,12 +357,31 @@ impl ZKMProofShape {
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
+        use zkm_core_machine::mips::MipsAir;
         use zkm_stark::stacked_shapes::{build_mips_machine_shape, create_all_input_shapes};
+        use zkm_stark::air::MachineAir;
+        use crate::CoreSC;
+
+        // Real chip names from the live MIPS machine — used to filter
+        // out chip names from `stacked_shapes/enumerate.rs` that don't
+        // match an actual chip in the machine (e.g., the hardcoded
+        // `Bls12381Add` in enumerate.rs vs. the machine's
+        // `Bls12381AddAssign`).  Without this filter, `dummy_vk_and_shard_proof`
+        // panics in `zip_eq` when `shard_chips_ordered` returns a
+        // shorter iterator than the shape's chip list.
+        let core_machine = MipsAir::machine(CoreSC::default());
+        let valid_chip_names: BTreeSet<String> =
+            core_machine.chips().iter().map(|c| c.name()).collect();
 
         let machine_shape = build_mips_machine_shape();
         let small_shapes: Vec<OrderedShape> = create_all_input_shapes(&machine_shape)
             .into_iter()
-            .map(|cps| cps.to_ordered_shape())
+            .map(|cps| {
+                let mut shape = cps.to_ordered_shape();
+                shape.inner.retain(|(name, _)| valid_chip_names.contains(name));
+                shape
+            })
+            .filter(|shape| !shape.inner.is_empty())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
