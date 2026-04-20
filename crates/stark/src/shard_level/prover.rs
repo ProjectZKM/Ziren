@@ -140,14 +140,29 @@ where
         challenger,
     );
 
-    // ── Phase 4: Jagged-PCS opening (placeholder) ──────────
+    // ── Phase 4: Jagged-PCS opening ────────────────────────
     //
-    // Wire `crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch`
-    // here in the next iteration.  For now: empty bytes.  The
-    // recursion-side verifier consumes these bytes as the proof
-    // witness for the multilinear PCS opening at the
-    // zerocheck-reduced point.
-    let evaluation_proof: Vec<u8> = Vec::new();
+    // Drive crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch
+    // with:
+    //   - per-chip (name, main trace)
+    //   - per-chip `r_row` = trailing log(chip_height) coords of the
+    //     LogUp-GKR final eval_point (matches SP1's convention of
+    //     opening the trace MLE at that sub-point)
+    //   - a fresh LbChallenger (KoalaBear-Poseidon2)
+    //
+    // Note: the LbChallenger is fresh rather than a clone of the
+    // main challenger because Ziren's generic SC::Challenger isn't
+    // guaranteed to match LbChallenger's concrete type.  This means
+    // the jagged-PCS transcript isn't bound to the shard's outer
+    // transcript in this call path — full binding lands alongside
+    // the KoalaBearPoseidon2 specialization of prove_shard_to_basefold.
+    // For the smoke test / structural pipeline this produces
+    // wire-shape-correct bytes.
+    let evaluation_proof = emit_jagged_pcs_bytes::<SC, A>(
+        chips,
+        main_traces,
+        &logup_gkr_proof.logup_evaluations.point,
+    );
 
     // ── Phase 5: Assembly ──────────────────────────────────
     //
@@ -174,5 +189,120 @@ where
         opened_values,
         evaluation_proof,
     }
+}
+
+/// Emit jagged-PCS opening bytes by driving
+/// [`crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch`]
+/// against the shard's per-chip main traces.  Returns the bundle
+/// serialized via rmp-serde.
+///
+/// # Field-type gate
+///
+/// `prove_jagged_basefold_dispatch` is monomorphic over KoalaBear /
+/// `InnerVal` / `InnerChallenge`.  The generic `Val<SC>` /
+/// `Challenge<SC>` here could in principle differ.  This helper runs
+/// the full pipeline only when the runtime type IDs match; otherwise
+/// returns an empty byte vector (matching the pre-#26 behaviour so
+/// callers outside the KoalaBearPoseidon2 shard-level path are not
+/// affected).
+///
+/// # Transcript-binding caveat
+///
+/// The LbChallenger used here is a fresh instance — the jagged-PCS
+/// transcript is *not* bound to the outer `SC::Challenger` state.
+/// Structurally correct for the smoke-test pipeline; full binding
+/// lands alongside a KoalaBearPoseidon2-specialised call path.
+fn emit_jagged_pcs_bytes<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    main_traces: &[RowMajorMatrix<Val<SC>>],
+    shared_eval_point: &[Challenge<SC>],
+) -> Vec<u8>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+{
+    use core::any::TypeId;
+    use crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch;
+    use crate::{InnerChallenge, InnerVal};
+    use p3_challenger::DuplexChallenger;
+
+    // Gate on Val<SC> == InnerVal AND Challenge<SC> == InnerChallenge.
+    if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
+        || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
+    {
+        // Other field instantiations aren't supported by the
+        // KoalaBear-monomorphic dispatch.  Caller gets empty bytes
+        // exactly as before this wiring landed.
+        return Vec::new();
+    }
+
+    // Build per-chip (name, cloned trace) in the expected concrete
+    // type.  We clone + byte-reinterpret each Vec<Val<SC>> into a
+    // Vec<InnerVal>; the layout is identical under the TypeId match
+    // above so this is a safe reinterpretation.
+    //
+    // Use Vec::into_raw_parts + Vec::from_raw_parts to move
+    // ownership without double-freeing.
+    let chip_traces: Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = chips
+        .iter()
+        .zip(main_traces.iter())
+        .map(|(chip, trace)| {
+            let name = chip.name().to_string();
+            let values_cloned: Vec<Val<SC>> = trace.values.clone();
+            // SAFETY: Val<SC> == InnerVal at runtime (guarded by
+            // TypeId above).  We're converting a Vec<A> into Vec<B>
+            // where A and B are the same underlying type.  Use
+            // into_raw_parts to transfer ownership without double
+            // free.
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(values_cloned);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            let values: Vec<InnerVal> = unsafe {
+                Vec::from_raw_parts(ptr as *mut InnerVal, len, cap)
+            };
+            (
+                name,
+                RowMajorMatrix::new(values, trace.width),
+            )
+        })
+        .collect();
+
+    // Per-chip r_row = trailing log(chip_height) coords of the shared
+    // eval_point.
+    let r_row_per_chip: Vec<Vec<InnerChallenge>> = chips
+        .iter()
+        .zip(main_traces.iter())
+        .map(|(_, trace)| {
+            let main_height = if trace.width == 0 {
+                1
+            } else {
+                trace.values.len() / trace.width
+            };
+            let log_h = main_height.max(1).next_power_of_two().trailing_zeros() as usize;
+            let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
+                &shared_eval_point[shared_eval_point.len() - log_h..]
+            } else {
+                shared_eval_point
+            };
+            // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate above).
+            let cloned: Vec<Challenge<SC>> = slice.to_vec();
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(cloned);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+        })
+        .collect();
+
+    let perm = crate::kb31_poseidon2::inner_perm();
+    let mut lb_challenger: crate::basefold_late_binding::LbChallenger =
+        DuplexChallenger::new(perm);
+
+    let bundle =
+        prove_jagged_basefold_dispatch(&chip_traces, &r_row_per_chip, &mut lb_challenger);
+    bundle.to_bytes()
 }
 
