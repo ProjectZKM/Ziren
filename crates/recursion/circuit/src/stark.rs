@@ -666,6 +666,18 @@ where
             }
         }
 
+        // BaseFold-pipeline: when the jagged-PCS opening bundle
+        // bytes are present, observe each byte-Felt into the
+        // transcript.  This is a transcript-binding step (commits
+        // the prover to the bytes content); full in-circuit
+        // BaseFold-PCS verification of the deserialised bundle
+        // lands in a follow-on iteration.
+        if let Some(bytes) = proof.basefold_jagged_bytes.as_ref() {
+            for &b in bytes.iter() {
+                challenger.observe(builder, b);
+            }
+        }
+
         for (chip, trace_domain, qc_domains, values) in
             izip!(chips.iter(), trace_domains, quotient_chunk_domains, opened_values.chips.iter(),)
         {
