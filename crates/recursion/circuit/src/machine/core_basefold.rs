@@ -146,9 +146,19 @@ pub fn verify_core_basefold<C, SC, A>(
                 builder,
                 &logup_gkr_proof.logup_evaluations.chip_openings,
             );
+        // EVPV audit (see docs/task_22_plan.md #22.2): the noop is
+        // intentional at this call site — Ziren's per-shard public-
+        // values consistency is asserted *inline* below (port pending
+        // from crates/recursion/circuit/src/machine/core.rs:176-330),
+        // not via the EVPV closure.
         let _eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
+        // Real jagged-eval sub-sumcheck verifier (#22.1 shipped in
+        // commit 2ffc315).  Mirrors host `verify_jagged_reduction` and
+        // SP1's `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`.
         let _jagged_evaluator_fn =
-            super::compress_basefold::placeholder_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(builder);
+            super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
+                builder,
+            );
         let mut _challenger = machine.config().challenger_variable(builder);
 
         _basefold_shard_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(

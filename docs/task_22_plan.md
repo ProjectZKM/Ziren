@@ -50,19 +50,22 @@ closure(builder, meta, z_row, z_index, z_eval, proof, challenger) -> (jagged_eva
 
 **Validation:** port the existing host-side `verify_jagged_reduction` test fixtures to the circuit. Generate a real jagged-PCS proof host-side, feed into the circuit, assert the closure returns the same `(q_at_z, prefix_sum_felts)` the host computed.
 
-### Subtask 22.2 — Audit `noop_eval_public_values_fn`
+### Subtask 22.2 — Audit `noop_eval_public_values_fn` — CONCLUDED
 
-**File:** `compress_basefold.rs:733`
+**Audit result:** The no-op is **correct for the Compose stage** (compress_basefold.rs) but Ziren doesn't use the EVPV closure pattern for per-shard public-values consistency anyway — the legacy Normalize equivalent (`core.rs`, 601 LOC) asserts shard-to-shard consistency **inline**, directly against `shard_proof.public_values` interpreted as `PublicValues<Word<Felt>, Felt>`:
 
-**Current comment's argument:** "Compress public-values are already constraint-checked at production time of each input proof."
+- `initial_shard / current_shard` chain
+- `initial_execution_shard / current_execution_shard` chain
+- `start_pc / current_pc` evolution
+- `previous_init_addr_bits / previous_finalize_addr_bits`
+- `exit_code`, `committed_value_digest`, `deferred_proofs_digest` accumulation
+- `assert_complete` on last shard
 
-**The question:** Is this sound? The recursion circuit verifies that each input proof is valid; once the FRI/Basefold opening proof is verified, the public values claimed by that proof are bound. But the *semantic* constraints on public values (e.g., pc_next == pc + 4, halt flag monotonicity) are part of the AIR, not the PCS opening. Those checks are in the AIR of the proving program that produced the proof. If the Compress program accepts any public values that came out of a valid FRI opening, it's correct — the inner proof already enforced the AIR constraints.
+**Action for #22:**
+- Leave `noop_eval_public_values_fn` as-is for `compress_basefold.rs` (Compose stage — input proofs already validated).
+- For `core_basefold.rs` (Normalize stage): port the inline shard-consistency assertions from `crates/recursion/circuit/src/machine/core.rs:176-330` verbatim. The closure pattern is not the right abstraction here — Ziren inlines.
 
-**Conclusion:** The no-op is likely correct under the "trusted input proofs" model. But: (a) Normalize is the leaf, not Compress — Normalize needs to constrain-check public values itself. (b) The comment should be moved into `compress_basefold.rs` and a real (non-noop) EVPV should land in `core_basefold.rs` for the Normalize role.
-
-**Action:**
-- Leave `noop_eval_public_values_fn` as-is for Compose/Compress (batching recursion) since input proofs are already verified.
-- Port a real `recursion_public_values_eval_fn` into `core_basefold.rs` mirroring the legacy `core.rs` public-values constraints.
+This audit removes a fake dependency from 22.3/22.4/22.5: they do NOT need a new EVPV closure, they need to port inline assertions.
 
 ### Subtask 22.3 — Fill `core_basefold.rs` body
 

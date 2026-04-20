@@ -305,14 +305,16 @@ pub fn verify_compress_basefold<C, SC, A>(
         // when it was produced by core/deferred/wrap).
         //
         // The jagged_evaluator_fn wraps the in-tree primitives
-        // [`crate::jagged_eval_primitives::{emit_branching_program_eval,emit_prefix_sum_check}`]
-        // — currently a placeholder that returns the right shape;
-        // real composition into a sumcheck-config-driven
-        // evaluator lands once the
-        // RecursiveJaggedEvalSumcheckConfig dispatch is hooked up.
+        // EVPV: noop is correct at the Compose stage — input proofs
+        // were already verified upstream (Normalize), so their
+        // public values are already bound by the inner AIR.  See
+        // docs/task_22_plan.md #22.2 for the audit.
         let _eval_public_values_fn = noop_eval_public_values_fn::<C>();
+        // Jagged-eval sub-sumcheck verifier (#22.1).  Composes
+        // verify_sumcheck + emit_branching_program_eval +
+        // emit_prefix_sum_check + partial_lagrange_symbolic.
         let _jagged_evaluator_fn =
-            placeholder_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(builder);
+            real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(builder);
 
         // Step 5d: opened_values built from the LogUp-GKR
         // chip_openings via the shared adapter.  Per-chip
