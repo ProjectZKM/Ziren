@@ -9,6 +9,8 @@ pub mod core_basefold;
 pub mod deferred_basefold;
 #[cfg(feature = "shard-level-proof")]
 pub mod wrap_basefold;
+#[cfg(feature = "shard-level-proof")]
+pub mod basefold_programs;
 mod deferred;
 mod public_values;
 mod root;
