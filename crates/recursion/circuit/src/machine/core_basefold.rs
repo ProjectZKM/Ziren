@@ -5,7 +5,6 @@
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
-//! Lives behind the `shard-level-proof` feature flag.
 //!
 //! # Status
 //!

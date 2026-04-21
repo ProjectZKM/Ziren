@@ -58,12 +58,10 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// Assembly entry point: produce a [`BasefoldShardProof`] from a
 /// chip set + traces + transcript challenger.
 ///
-/// This is the SP1-shape orchestrator that subsequent recursion
-/// machine wiring (#12) will call.  Until task #12 lands, this
-/// function exists in the parallel codebase under
-/// `shard-level-proof` feature; calling it from a real shard
-/// prove path requires switching the host SDK output type from
-/// the legacy `ShardProof<SC>` to `BasefoldShardProof<F, EF>`.
+/// Top-level shard-level orchestrator.  Invoked from
+/// `try_prove_shard_to_basefold_boxed` (in `crates/stark/src/prover.rs`)
+/// for every KoalaBear MIPS shard; the produced
+/// [`BasefoldShardProof`] is carried on `ShardProof.basefold_shard_proof`.
 ///
 /// # Soundness note
 ///

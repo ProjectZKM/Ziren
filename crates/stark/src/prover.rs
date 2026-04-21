@@ -387,91 +387,41 @@ where
             // === Phase 3: skip FRI open in WHIR mode ===
             //
             // In the WHIR fast path the zeta-point FRI opening is
-            // vestigial: zerocheck (hypercube sumcheck) and LogUp-GKR
-            // handle constraints and lookups without consuming zeta-
-            // point main-trace values, and row-MLE claims are bound
-            // by the jagged late-binding WHIR open.  The verifier
-            // short-circuits before `pcs.verify` when WHIR mode is
-            // detected (`verifier.rs::whir_mode`); the prover can
-            // therefore skip `pcs.open` entirely and emit a
-            // zero-shaped `openings` placeholder plus an empty
-            // `FriProof` as the `opening_proof`.
-            //
-            // This saves MBs of proof size and seconds of prover
-            // wall-clock on fibonacci-scale shards.  When SC is not a
-            // supported KB config (no `empty_opening_proof` impl),
-            // we fall back to the real `pcs.open` for safety.
-            use p3_field::PrimeCharacteristicRing;
-
-            let empty_opening_proof_opt =
-                try_compute_empty_opening_proof::<SC>();
-            let (openings, opening_proof) = if let Some(empty) = empty_opening_proof_opt
-            {
-                // Shape-preserving zeroed openings.  Verifier's WHIR
-                // short-circuit doesn't consume these, but the
-                // ShardProof wire format requires them populated.
-                let zeroed_per_chip =
-                    |widths: Vec<usize>, local_only: bool| -> Vec<Vec<SC::Challenge>> {
-                        let points = if local_only { 1 } else { 2 };
-                        (0..points)
-                            .map(|_| {
-                                widths
-                                    .iter()
-                                    .flat_map(|w| std::iter::repeat_n(SC::Challenge::ZERO, *w))
-                                    .collect()
-                            })
-                            .collect()
-                    };
-                let preproc_opens: Vec<Vec<Vec<SC::Challenge>>> = pk.traces
-                    .iter()
-                    .zip(pk.local_only.iter())
-                    .map(|(trace, local_only)| {
-                        zeroed_per_chip(vec![trace.width()], *local_only)
-                    })
-                    .collect();
-                let main_opens: Vec<Vec<Vec<SC::Challenge>>> = chips
-                    .iter()
-                    .map(|chip| {
-                        zeroed_per_chip(
-                            vec![p3_air::BaseAir::<Val<SC>>::width(*chip)],
-                            chip.local_only(),
-                        )
-                    })
-                    .collect();
-                (vec![preproc_opens, main_opens], empty)
-            } else {
-                // Non-KB SC: keep the real FRI open.
-                let main_trace_opening_points: Vec<Vec<SC::Challenge>> = trace_domains
-                    .iter()
-                    .zip(chips.iter())
-                    .map(|(domain, chip)| {
-                        if !chip.local_only() {
-                            vec![_zeta, domain.next_point(_zeta).unwrap()]
-                        } else {
-                            vec![_zeta]
-                        }
-                    })
-                    .collect();
-                let preprocessed_opening_points: Vec<Vec<SC::Challenge>> = pk.traces
-                    .iter()
-                    .zip(pk.local_only.iter())
-                    .map(|(trace, local_only)| {
-                        let domain = pcs.natural_domain_for_degree(trace.height());
-                        if !local_only {
-                            vec![_zeta, domain.next_point(_zeta).unwrap()]
-                        } else {
-                            vec![_zeta]
-                        }
-                    })
-                    .collect();
-                pcs.open(
-                    vec![
-                        (&pk.data, preprocessed_opening_points),
-                        (&data.main_data, main_trace_opening_points),
-                    ],
-                    challenger,
-                )
-            };
+            // FRI open at zeta.  The empty-FriProof short-circuit that
+            // used to live here (paired with `verifier.rs::whir_mode`'s
+            // legacy short-circuit) retired with #13 — KoalaBear MIPS
+            // shards now produce a `BasefoldShardProof` instead, and
+            // the WHIR shortcut in the legacy verifier is gone.
+            let main_trace_opening_points: Vec<Vec<SC::Challenge>> = trace_domains
+                .iter()
+                .zip(chips.iter())
+                .map(|(domain, chip)| {
+                    if !chip.local_only() {
+                        vec![_zeta, domain.next_point(_zeta).unwrap()]
+                    } else {
+                        vec![_zeta]
+                    }
+                })
+                .collect();
+            let preprocessed_opening_points: Vec<Vec<SC::Challenge>> = pk.traces
+                .iter()
+                .zip(pk.local_only.iter())
+                .map(|(trace, local_only)| {
+                    let domain = pcs.natural_domain_for_degree(trace.height());
+                    if !local_only {
+                        vec![_zeta, domain.next_point(_zeta).unwrap()]
+                    } else {
+                        vec![_zeta]
+                    }
+                })
+                .collect();
+            let (openings, opening_proof) = pcs.open(
+                vec![
+                    (&pk.data, preprocessed_opening_points),
+                    (&data.main_data, main_trace_opening_points),
+                ],
+                challenger,
+            );
 
             let whir_ms = t_whir.elapsed().as_millis();
 
@@ -1005,24 +955,6 @@ where
 /// + opens with a fresh challenger and return the per-chip serialised
 /// bytes.  Otherwise return `None`.
 ///
-/// Dispatched via `TypeId` because adding `SC: LateBindingCapable` as
-/// a bound to `MachineProver::open` would break every caller that
-/// uses an SC without that impl.  The transmute is sound because the
-/// `TypeId` check guarantees `SC` *is* the matching concrete type, so
-/// Empty `OpeningProof<SC>` helper for the WHIR fast-path's
-/// FRI-skip.  Always returns `None` here so the outer code paths
-/// fall through to the real `pcs.open` (the helper used to detect
-/// KoalaBear and emit a typed empty `FriProof`, but that wiring
-/// retired alongside the legacy MIPS verify path in #13 — the
-/// BaseFold pipeline carries its opening bundle inside
-/// `basefold_shard_proof.evaluation_proof`).
-fn try_compute_empty_opening_proof<SC>() -> Option<OpeningProof<SC>>
-where
-    SC: 'static + StarkGenericConfig,
-{
-    None
-}
-
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>
 where
     SC: 'static + StarkGenericConfig + Send + Sync,

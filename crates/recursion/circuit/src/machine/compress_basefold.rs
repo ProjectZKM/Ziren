@@ -6,7 +6,6 @@
 //! to [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`]
 //! instead of [`crate::stark::StarkVerifier::verify_shard`].
 //!
-//! Lives behind the `shard-level-proof` feature flag so the
 //! legacy compress program stays the production verifier surface
 //! until aggregation end-to-end validates against this path.
 //!

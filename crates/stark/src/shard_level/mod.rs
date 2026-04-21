@@ -1,11 +1,8 @@
-//! Parallel row-reduction shard-level proof pipeline.
+//! Shard-level BaseFold proof pipeline.
 //!
-//! This module hosts the gradually-growing port of SP1's
-//! shard-level proof shape — one `LogupGkrProof` + one
-//! `PartialSumcheckProof` per shard, instead of Ziren's default
-//! per-chip lists.  Lives under the `shard-level-proof` feature
-//! flag so the legacy per-chip path stays the production prover
-//! until this path reaches parity.
+//! Production proof shape for KoalaBear MIPS shards as of #13:
+//! one `LogupGkrProof` + one `PartialSumcheckProof` per shard
+//! (vs. the legacy per-chip lists, retired in #13).
 //!
 //! Reference: `/tmp/sp1/crates/hypercube/src/{logup_gkr,prover/zerocheck,prover/shard.rs,verifier/proof.rs}`.
 //!

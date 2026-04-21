@@ -12,7 +12,6 @@
 //! time during the E4 work, and the stark-side types mirror SP1
 //! identically).  The "conversion" is field-by-field copy.
 //!
-//! Lives behind the `shard-level-proof` feature flag.
 
 use std::collections::BTreeMap;
 

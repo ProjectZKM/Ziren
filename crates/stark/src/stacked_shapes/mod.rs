@@ -1,7 +1,7 @@
-//! row-reduction stacked shape types for Ziren recursion (task #20).
+//! Stacked shape types for Ziren recursion (task #20).
 //!
 //! Ports the `CoreProofShape` / `MachineShape` / `SP1RecursionProgramShape`
-//! design into Ziren under the `shard-level-proof` feature flag.
+//! design into Ziren.
 //!
 //! Tactic chosen (per scoping report at docs/task_22_plan.md): **size-class
 //! quantization**.  Instead of enumerating every per-chip log-height

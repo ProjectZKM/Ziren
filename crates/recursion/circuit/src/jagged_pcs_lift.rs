@@ -4,7 +4,6 @@
 //! into a recursion-circuit
 //! [`crate::jagged_circuit::JaggedPcsProofVariable`].
 //!
-//! Lives behind the `shard-level-proof` feature flag.
 //!
 //! # Pipeline
 //!

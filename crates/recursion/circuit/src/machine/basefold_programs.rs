@@ -7,7 +7,6 @@
 //! witness, invoke the verifier body, compile the operations into a
 //! [`RecursionProgram`].
 //!
-//! Gated behind the `shard-level-proof` feature flag.
 //!
 //! ## Mapping to SP1's [`SP1RecursionProgramShape`]
 //!

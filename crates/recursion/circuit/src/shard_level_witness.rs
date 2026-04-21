@@ -10,7 +10,6 @@
 //! while the new shard-level prover output drives the new
 //! verifier through these impls.
 //!
-//! Gated behind the `shard-level-proof` feature flag.
 
 use std::collections::BTreeMap;
 
