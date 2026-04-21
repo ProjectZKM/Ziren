@@ -1627,6 +1627,24 @@ pub mod tests {
         )
     }
 
+    /// Core + recursion + compress only.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_compress_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::Compress,
+        )
+    }
+
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
     /// pipeline in addition to verifying deferred proofs.
     #[test]
