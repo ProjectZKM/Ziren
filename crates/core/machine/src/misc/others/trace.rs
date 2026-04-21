@@ -36,6 +36,10 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
         MiscInstrColumns::<u8>::picus_info()
     }
 
+    fn local_only(&self) -> bool {
+        true
+    }
+
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
         let nb_rows = next_power_of_two(
             input.misc_events.len(),
