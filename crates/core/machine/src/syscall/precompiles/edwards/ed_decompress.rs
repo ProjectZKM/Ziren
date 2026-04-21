@@ -46,7 +46,6 @@ pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();
 #[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct EdDecompressCols<T> {
-    #[picus(selector)]
     pub is_real: T,
     pub shard: T,
     pub clk: T,

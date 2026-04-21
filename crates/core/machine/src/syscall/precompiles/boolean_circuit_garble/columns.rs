@@ -13,9 +13,7 @@ pub struct BooleanCircuitGarbleCols<T> {
     pub is_real: T,
     pub input_address: T,
     pub output_address: T,
-    #[picus(selector)]
-    pub is_first_row: T, // The first row contains gates_num and delta
-    #[picus(selector)]
+    pub is_first_row: T, // The first row contains gates_num and delt
     pub is_gate: T,
     pub is_first_gate: T,
     pub is_last_gate: T,

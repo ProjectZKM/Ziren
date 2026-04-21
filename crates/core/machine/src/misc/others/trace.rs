@@ -86,6 +86,10 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
             !shard.misc_events.is_empty()
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl MiscInstrsChip {

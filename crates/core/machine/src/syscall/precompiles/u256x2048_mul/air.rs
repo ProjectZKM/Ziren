@@ -84,7 +84,6 @@ pub struct U256x2048MulCols<T> {
     pub ab6_plus_carry: FieldOpCols<T, U256Field>,
     pub ab7_plus_carry: FieldOpCols<T, U256Field>,
     pub ab8_plus_carry: FieldOpCols<T, U256Field>,
-    #[picus(selector)]
     pub is_real: T,
 }
 
@@ -246,6 +245,10 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
         } else {
             !shard.get_precompile_events(SyscallCode::U256XU2048_MUL).is_empty()
         }
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 }
 

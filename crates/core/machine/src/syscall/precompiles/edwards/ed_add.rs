@@ -45,7 +45,6 @@ pub const NUM_ED_ADD_COLS: usize = size_of::<EdAddAssignCols<u8>>();
 #[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct EdAddAssignCols<T> {
-    #[picus(selector)]
     pub is_real: T,
     pub shard: T,
     pub clk: T,
