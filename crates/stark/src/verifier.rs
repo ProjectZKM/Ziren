@@ -46,7 +46,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         //   - FRI proofs (basefold_shard_proof is None)
         //   - Proofs produced before the shard-level cutover
         //   - Non-KoalaBear config instantiations
-        #[cfg(feature = "shard-level-proof")]
         if let Some(basefold_proof) = proof.basefold_shard_proof.as_ref() {
             // Dispatch to the host-side BasefoldShardVerifier.  When
             // phases 2-4 of the host port land (currently
@@ -579,7 +578,6 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     InvalidProofShape,
     /// Shard-level BaseFold verifier (task #28 path) rejected the proof.
     /// The message carries the inner BasefoldVerifyError's display.
-    #[cfg(feature = "shard-level-proof")]
     BasefoldShardVerifier(String),
 }
 
@@ -642,7 +640,6 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
             }
-            #[cfg(feature = "shard-level-proof")]
             VerificationError::BasefoldShardVerifier(msg) => {
                 write!(f, "BasefoldShardVerifier: {}", msg)
             }
@@ -680,7 +677,6 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
             }
-            #[cfg(feature = "shard-level-proof")]
             VerificationError::BasefoldShardVerifier(msg) => {
                 write!(f, "BasefoldShardVerifier: {}", msg)
             }

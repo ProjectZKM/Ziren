@@ -277,7 +277,6 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         opening_proof,
         chip_ordering,
         public_values,
-        #[cfg(feature = "shard-level-proof")]
         basefold_shard_proof: None,
     };
 

@@ -129,7 +129,6 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     /// BasefoldShardProof is ~KB of nested structs.  Feature-gated
     /// behind `shard-level-proof` so serde wire format stays stable
     /// for consumers built without the feature.
-    #[cfg(feature = "shard-level-proof")]
     #[serde(default)]
     pub basefold_shard_proof: Option<
         Box<

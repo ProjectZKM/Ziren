@@ -90,14 +90,8 @@ name = "sha2_perf"
 path = "scripts/sha2_perf.rs"
 
 [features]
-default = ["native-gnark", "shard-level-proof"]
+default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
 debug = ["zkm-core-machine/debug"]
 # The Groth16 verification key (vk) is not affected by the Ziren upgrade.
 imm-wrap-vk = ["zkm-recursion-core/imm-wrap-vk"]
-# Propagates to zkm-recursion-circuit (machine/basefold_programs.rs)
-# and zkm-stark (ShardProof basefold_shard_proof field).
-shard-level-proof = [
-  "zkm-recursion-circuit/shard-level-proof",
-  "zkm-stark/shard-level-proof",
-]

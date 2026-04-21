@@ -51,14 +51,7 @@ num-traits = "0.2.19"
 sysinfo = "0.30.13"
 
 [features]
-default = ["shard-level-proof"]
+default = ["basefold"]
 basefold = ["p3-multilinear-util", "rmp-serde"]
-# SP1-style shard-level proof shape (one LogUp-GKR + one zerocheck
-# per shard, vs Ziren's legacy per-chip).  Default-on as of task
-# #21 — the shard-level pipeline at `crate::shard_level` is now
-# structurally complete end-to-end (see task #23 smoke test).
-# Legacy per-chip provers remain available when this feature is
-# disabled; their removal lives under task #13.
-shard-level-proof = ["basefold"]
 
 [dev-dependencies]

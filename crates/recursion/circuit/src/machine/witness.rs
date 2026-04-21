@@ -290,7 +290,6 @@ where
 // (which produces a 5-tuple variable, see shard_level_witness.rs:198-241).
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "shard-level-proof")]
 mod basefold_witness {
     use super::*;
     use crate::machine::{

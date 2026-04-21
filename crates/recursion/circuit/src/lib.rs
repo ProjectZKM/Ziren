@@ -32,11 +32,8 @@ pub mod basefold_chip_opened_values;
 pub mod basefold_constraint_folder;
 pub mod basefold_verifier;
 pub mod basefold_witness;
-#[cfg(feature = "shard-level-proof")]
 pub mod jagged_pcs_lift;
-#[cfg(feature = "shard-level-proof")]
 pub mod shard_level_witness;
-#[cfg(feature = "shard-level-proof")]
 pub mod shard_proof_variable_lift;
 pub mod jagged_circuit;
 pub mod jagged_eval;

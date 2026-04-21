@@ -569,7 +569,6 @@ where
             // `Some(_)`, so the legacy per-chip code path is dead
             // for KoalaBear MIPS shards (kept only for compress /
             // non-KoalaBear configs).
-            #[cfg(feature = "shard-level-proof")]
             let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A>(
                 &chips,
                 &pk.traces,
@@ -589,7 +588,6 @@ where
                 opening_proof,
                 chip_ordering: data.chip_ordering,
                 public_values: data.public_values,
-                #[cfg(feature = "shard-level-proof")]
                 basefold_shard_proof,
             });
         }
@@ -941,7 +939,6 @@ where
             chip_ordering: data.chip_ordering,
             public_values: data.public_values,
             // FRI path — no shard-level basefold proof.
-            #[cfg(feature = "shard-level-proof")]
             basefold_shard_proof: None,
         })
     }
@@ -1080,7 +1077,6 @@ impl Error for CpuProverError {}
 /// MIPS shards (#13).  Bridges between the per-chip WHIR path's
 /// in-scope values and the shard-level prover's monomorphic
 /// KoalaBear API.
-#[cfg(feature = "shard-level-proof")]
 #[allow(clippy::too_many_arguments)]
 fn try_prove_shard_to_basefold_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],

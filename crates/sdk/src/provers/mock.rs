@@ -90,7 +90,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                     },
                     chip_ordering: HashMap::new(),
                     public_values: vec![],
-                    #[cfg(feature = "shard-level-proof")]
                     basefold_shard_proof: None,
                 };
 
