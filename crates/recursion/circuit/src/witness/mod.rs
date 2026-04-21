@@ -145,20 +145,12 @@ where
         let public_values = self.public_values.read(builder);
         let chip_ordering = self.chip_ordering.clone();
 
-        // BaseFold-pipeline reads — DISABLED in this iteration.
-        // Even just reading the new fields emits ImmF/ImmE ops
-        // that perturb the recursion-AIR's compiled chip lookup
-        // accounting, breaking local_cumulative_sum == 0 on
-        // aggregation proofs.  Restore reads after the SP1-style
-        // migration (parallel BasefoldShardVerifier-based machine)
-        // lands; until then, fields stay None.
-        let basefold_logup_gkr_proofs = None;
-        let basefold_zerocheck_proofs = None;
-        // Jagged fingerprint read disabled — see comment above
-        // for why the BaseFold-pipeline reads perturb the
-        // recursion-AIR's lookup accounting.  Field gets a
-        // builder-allocated zero value to satisfy the type
-        // signature without consuming witness bytes.
+        // Jagged fingerprint read disabled — reading it emits
+        // ImmF/ImmE ops that perturb the recursion-AIR's compiled
+        // chip lookup accounting, breaking local_cumulative_sum == 0
+        // on aggregation proofs.  Field gets a builder-allocated
+        // zero value to satisfy the type signature without consuming
+        // witness bytes.
         let basefold_jagged_fingerprint: [Felt<C::F>; 8] =
             std::array::from_fn(|_| builder.constant(<C::F as p3_field::PrimeCharacteristicRing>::ZERO));
 
@@ -168,8 +160,6 @@ where
             opening_proof,
             public_values,
             chip_ordering,
-            basefold_logup_gkr_proofs,
-            basefold_zerocheck_proofs,
             basefold_jagged_fingerprint,
         }
     }

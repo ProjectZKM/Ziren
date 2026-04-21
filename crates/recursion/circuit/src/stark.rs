@@ -45,25 +45,6 @@ pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriPar
     pub opening_proof: FriProofVariable<C, SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Felt<C::F>>,
-    /// Per-chip LogUp-GKR proofs (prover-shape, matching
-    /// `zkm_stark::logup_gkr::LogUpGkrProof<EF>`).  `None` in the
-    /// legacy 4-batch FRI pipeline; `Some(Vec)` in the
-    /// BaseFold pipeline where the LogUp soundness chain is
-    /// checked per-chip via
-    /// [`crate::per_chip_logup_gkr::verify_per_chip_logup_gkr`].
-    #[allow(clippy::type_complexity)]
-    pub basefold_logup_gkr_proofs: Option<
-        Vec<crate::per_chip_logup_gkr::PerChipLogUpGkrProofVariable<C::F, C::EF>>,
-    >,
-    /// Per-chip zerocheck proofs (prover-shape, matching
-    /// `zkm_stark::zerocheck::ZerocheckProof<EF>`).  Same Some/
-    /// None convention as `basefold_logup_gkr_proofs`.  Verified
-    /// per-chip via
-    /// [`crate::per_chip_zerocheck::verify_per_chip_zerocheck`].
-    #[allow(clippy::type_complexity)]
-    pub basefold_zerocheck_proofs: Option<
-        Vec<crate::per_chip_zerocheck::PerChipZerocheckProofVariable<C::F, C::EF>>,
-    >,
     /// Fixed-size fingerprint of the jagged-PCS opening proof
     /// bytes (XOR-fold of the Vec<u8> into 8 Felts).  Always
     /// `[Felt; 8]` — unconditional presence simplifies witness
@@ -397,8 +378,6 @@ where
             opening_proof,
             chip_ordering,
             public_values,
-            basefold_logup_gkr_proofs: _,
-            basefold_zerocheck_proofs: _,
             basefold_jagged_fingerprint: _,
         } = proof;
 
@@ -640,8 +619,6 @@ where
         // Until that's resolved, the structural code stays
         // in-tree as the migration target; the actual binding
         // fires once the lookup-balance gap is addressed.
-        let _ = proof.basefold_logup_gkr_proofs.as_ref();
-        let _ = proof.basefold_zerocheck_proofs.as_ref();
         let _ = &proof.basefold_jagged_fingerprint;
 
         for (chip, trace_domain, qc_domains, values) in
