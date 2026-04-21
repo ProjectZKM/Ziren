@@ -640,8 +640,26 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                     match self.shr_carry_summary_mode {
                         ShrCarrySummaryMode::AbstractModule => {
                             if !self.aux_modules.contains_key("ShrCarry") {
-                                let carry_module =
+                                let mut carry_module =
                                     PicusModule::build_empty("ShrCarry".to_string(), 2, 2);
+                                // Keep the abstract helper byte-shaped even when we do not inline
+                                // the precise `shr_carry` semantics. The first operand and both
+                                // returned limbs are bytes, while the rotation amount is always in
+                                // [0, 7].
+                                carry_module.constraints.push(PicusConstraint::new_leq(
+                                    carry_module.inputs[0].clone(),
+                                    PicusExpr::Const(255),
+                                ));
+                                carry_module.constraints.push(PicusConstraint::new_leq(
+                                    carry_module.inputs[1].clone(),
+                                    PicusExpr::Const(7),
+                                ));
+                                for expr in carry_module.outputs.iter().cloned() {
+                                    carry_module.constraints.push(PicusConstraint::new_leq(
+                                        expr,
+                                        PicusExpr::Const(255),
+                                    ));
+                                }
                                 self.aux_modules.insert("ShrCarry".to_string(), carry_module);
                             }
                             let shrcarry = PicusCall::new(
