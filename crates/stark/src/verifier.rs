@@ -39,21 +39,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     {
         use itertools::izip;
 
-        // Task #28 compat dispatch: if the proof carries a
-        // shard-level basefold proof, route to BasefoldShardVerifier
-        // instead of the legacy per-chip path.  The legacy path
-        // below is the fallback for:
-        //   - FRI proofs (basefold_shard_proof is None)
-        //   - Proofs produced before the shard-level cutover
-        //   - Non-KoalaBear config instantiations
+        // KoalaBear MIPS shards always carry a shard-level BaseFold
+        // proof (#13 always-on); dispatch to BasefoldShardVerifier.
+        // The FRI/STARK code path below remains for compress and
+        // non-KoalaBear shard proofs, which never populate
+        // basefold_shard_proof.
         if let Some(basefold_proof) = proof.basefold_shard_proof.as_ref() {
-            // Dispatch to the host-side BasefoldShardVerifier.  When
-            // phases 2-4 of the host port land (currently
-            // Unimplemented), this becomes the full verification.
-            // In the interim, the skeleton at least verifies Phase 1
-            // (transcript prologue) and checks basic shape invariants;
-            // failing with `Unimplemented` signals that the host-side
-            // port is still in progress.
             let shard_verifier =
                 crate::shard_level::verifier::BasefoldShardVerifier::production_default();
             let num_pv_elts = proof.public_values.len();
