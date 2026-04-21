@@ -1088,14 +1088,33 @@ where
     let chips_reborrow: Vec<&crate::Chip<Val<SC>, A>> =
         chips.iter().map(|c| *c as &crate::Chip<Val<SC>, A>).collect();
 
-    let proof = crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
-        &chips_reborrow,
-        &preprocessed_traces,
-        main_traces,
-        digest,
-        public_values,
-        &mut shard_challenger,
-    );
+    // The shard-level prover (#13) covers the production-shape MIPS
+    // shards but the row-only LogUp-GKR backend at
+    // `crate::shard_level::row_gkr` still has known shape-handling
+    // gaps for shards with mixed per-chip interaction-variable
+    // counts (panics in `transition.rs:75`).  Catch the panic so
+    // the legacy shard-proof envelope still completes; the
+    // basefold proof is dropped and the verifier dispatches to the
+    // legacy code path.
+    let proof_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
+            &chips_reborrow,
+            &preprocessed_traces,
+            main_traces,
+            digest,
+            public_values,
+            &mut shard_challenger,
+        )
+    }));
 
-    Some(Box::new(proof))
+    match proof_result {
+        Ok(proof) => Some(Box::new(proof)),
+        Err(_) => {
+            tracing::warn!(
+                "shard-level prover panicked on this shard shape; \
+                 dropping basefold proof (legacy fields still produced)"
+            );
+            None
+        }
+    }
 }
