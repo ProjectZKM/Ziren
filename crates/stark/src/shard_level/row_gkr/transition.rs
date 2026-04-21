@@ -57,7 +57,6 @@ where
     debug_assert_eq!(layer.denominator_1.len(), num_chips);
 
     let next_num_row_variables = layer.num_row_variables - 1;
-    let num_int_vars = layer.num_interaction_variables;
 
     let mut numerator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(num_chips);
     let mut denominator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(num_chips);
@@ -70,23 +69,26 @@ where
         let n1 = &layer.numerator_1[chip_idx];
         let d1 = &layer.denominator_1[chip_idx];
 
-        // All four tables share the same shape — assert it.
+        // Per-chip shape consistency: all four tables for this chip
+        // share the same per-chip dimensions.  The chip's
+        // `num_interactions` is per-chip (raw count) — it does NOT
+        // need to match the layer-wide aggregate.
+        let chip_num_interactions = n0.num_interactions;
         debug_assert_eq!(n0.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(n0.num_interaction_variables, num_int_vars);
         debug_assert_eq!(d0.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(d0.num_interaction_variables, num_int_vars);
+        debug_assert_eq!(d0.num_interactions, chip_num_interactions);
         debug_assert_eq!(n1.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(n1.num_interaction_variables, num_int_vars);
+        debug_assert_eq!(n1.num_interactions, chip_num_interactions);
         debug_assert_eq!(d1.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(d1.num_interaction_variables, num_int_vars);
+        debug_assert_eq!(d1.num_interactions, chip_num_interactions);
 
         let next_rows = 1usize << next_num_row_variables;
-        let int_count = 1usize << num_int_vars;
+        let int_count = chip_num_interactions;
 
-        let mut next_n0 = RowMajorTable::filled(next_num_row_variables, num_int_vars, EF::ZERO);
-        let mut next_d0 = RowMajorTable::filled(next_num_row_variables, num_int_vars, EF::ONE);
-        let mut next_n1 = RowMajorTable::filled(next_num_row_variables, num_int_vars, EF::ZERO);
-        let mut next_d1 = RowMajorTable::filled(next_num_row_variables, num_int_vars, EF::ONE);
+        let mut next_n0 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ZERO);
+        let mut next_d0 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ONE);
+        let mut next_n1 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ZERO);
+        let mut next_d1 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ONE);
 
         for k in 0..next_rows {
             let row_even = 2 * k;
@@ -126,7 +128,10 @@ where
         numerator_1,
         denominator_1,
         num_row_variables: next_num_row_variables,
-        num_interaction_variables: num_int_vars,
+        // Layer-wide num_interaction_variables is metadata; carry it
+        // through unchanged from the source layer (per-chip num_interactions
+        // varies per chip but the global aggregate is invariant).
+        num_interaction_variables: layer.num_interaction_variables,
     }
 }
 

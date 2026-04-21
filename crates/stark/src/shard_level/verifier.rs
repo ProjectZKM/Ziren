@@ -189,9 +189,21 @@ impl BasefoldShardVerifier {
         // logup_evaluations path and the check is deferred to the
         // final reduction.  For structural verification this
         // simplifies to sumcheck consistency + GKR identity.
+        // Compute beta_seed_dim the same way the prover does:
+        // log2(max_arity.next_power_of_two()) where max_arity =
+        // max(interaction.values.len() + 1) across all chips.
+        let max_arity = chips
+            .iter()
+            .flat_map(|chip| chip.sends().iter().chain(chip.receives().iter()))
+            .map(|interaction| interaction.values.len() + 1)
+            .max()
+            .unwrap_or(1);
+        let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
+
         verify_logup_gkr_host::<SC>(
             &proof.logup_gkr_proof,
             self.max_log_row_count,
+            beta_seed_dim,
             challenger,
         )?;
 
@@ -673,6 +685,7 @@ where
 fn verify_logup_gkr_host<SC>(
     proof: &LogupGkrProof<Val<SC>, Challenge<SC>>,
     max_log_row_count: usize,
+    beta_seed_dim: usize,
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
@@ -708,11 +721,6 @@ where
     // ported (see caller comment); we still sample them so the
     // transcript stays in sync with the prover's ordering.
     let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    // beta_seed_dim heuristic: derive from witness via the same
-    // rule the prover uses.  For production this should come from
-    // chip_metadata; here we infer from numerator.len() (close
-    // approximation for the smoke-test configs).
-    let beta_seed_dim: usize = 1;
     for _ in 0..beta_seed_dim {
         let _: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     }

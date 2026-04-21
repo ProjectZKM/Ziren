@@ -64,7 +64,7 @@ fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
         table.num_row_variables, 1,
         "interleave_chip expects terminal-layer table (num_row_variables == 1)"
     );
-    let cols = 1usize << table.num_interaction_variables;
+    let cols = table.num_interactions;
     debug_assert_eq!(table.cells.len(), 2 * cols);
     let row_0 = &table.cells[..cols];
     let row_1 = &table.cells[cols..2 * cols];
@@ -136,6 +136,7 @@ mod tests {
             cells,
             num_row_variables: 1,
             num_interaction_variables: num_int_vars,
+            num_interactions: cols,
         }
     }
 
@@ -245,6 +246,7 @@ mod tests {
             cells: vec![EF::ZERO; 4],
             num_row_variables: 2,
             num_interaction_variables: 0,
+            num_interactions: 1,
         };
         let layer = LogUpGkrCpuLayer {
             numerator_0: vec![n0.clone()],
