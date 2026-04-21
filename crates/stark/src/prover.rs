@@ -10,7 +10,7 @@ use crate::{air::LookupScope, AirOpenedValues, ChipOpenedValues, ShardOpenedValu
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, ExtensionField, PrimeField32};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;

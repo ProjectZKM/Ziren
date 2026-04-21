@@ -9,11 +9,11 @@ use num_traits::cast::ToPrimitive;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{LagrangeSelectors, Pcs, PolynomialSpace};
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 
 use super::{
     folder::{PairWindow, VerifierConstraintFolder},
-    types::{AirOpenedValues, ChipOpenedValues, ShardCommitment, ShardProof},
+    types::{AirOpenedValues, ChipOpenedValues, ShardProof},
     Domain, OpeningError, StarkGenericConfig, StarkVerifyingKey, Val,
 };
 use crate::{
@@ -152,25 +152,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
 
         let alpha = challenger.sample_algebra_element::<SC::Challenge>();
 
-        // ========== Zerocheck (phase 2a) ==========
-        // When the proof carries zerocheck proofs (WHIR mode), replay the
-        // sumcheck transcript to drive the challenger forward. We cannot yet
-        // verify the final claim against a PCS opening at the sumcheck
-        // Observe the quotient commitments.
+        // Observe the quotient commitments.  Compress / non-KoalaBear
+        // shards take this code path (KoalaBear MIPS shards short-circuit
+        // to BasefoldShardVerifier above).
         if let Some(qc) = quotient_commit.as_ref() {
             challenger.observe(qc.clone());
         }
 
         let zeta = challenger.sample_algebra_element::<SC::Challenge>();
-
-        if false {
-            // Sentinel: kept for parity with the original control flow.
-            // The WHIR-mode short-circuit is gone — KoalaBear MIPS
-            // shards always carry `basefold_shard_proof` and dispatch
-            // above (#13).  Compress / non-KoalaBear shards fall through
-            // to the FRI/STARK code path below.
-            return Ok(());
-        }
 
         let preprocessed_domains_points_and_opens = vk
             .chip_information
