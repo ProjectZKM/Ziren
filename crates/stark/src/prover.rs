@@ -25,12 +25,6 @@ use crate::{
     DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
     ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
 };
-use crate::logup_gkr::{
-    build_lookup_leaves, eval_mle_first_var, prove_logup_gkr, LogUpGkrProof,
-};
-use crate::types::LogUpRowOpening;
-use crate::zerocheck::ZerocheckProof;
-use crate::zerocheck_prover::{eval_constraints_on_hypercube, prove_zerocheck_with_challenger};
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
 pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
@@ -384,173 +378,10 @@ where
             // Sample alpha (constraint mixing challenge).
             let _alpha: SC::Challenge = challenger.sample_algebra_element();
 
-            // ========== Zerocheck (phase 2a) ==========
-            // Run a sumcheck-based transition-constraint check per chip. Each
-            // chip contributes one ZerocheckProof that proves the batched
-            // constraint polynomial vanishes on the Boolean hypercube.
-            //
-            // This replaces the quotient polynomial identity
-            //   quotient(ζ) · Z_H(ζ) = folded_constraints(ζ)
-            // with
-            //   Σ_{b ∈ {0,1}^m} eq(r, b) · C_batched(b) = 0
-            // checked via sumcheck.
-            //
-            // TODO(phase2b): add Logup-GKR to close the lookup soundness
-            // gap (currently only cumulative sum is observed).
-            // TODO: the current zerocheck uses a single mixing parameter
-            // `_alpha`; the hypercube evaluator does its own α-folding via
-            // the constraint folder. For higher constraint degrees, this
-            // needs to be extended to degree-`d+1` round polynomials.
-            let mut zerocheck_proofs: Vec<ZerocheckProof<SC::Challenge>> =
-                Vec::with_capacity(chips.len());
-            let t_zerocheck = std::time::Instant::now();
-            for (chip, main_trace) in chips.iter().zip(traces.iter()) {
-                // Phase 2a limitation: chips that participate in the lookup
-                // argument pull the permutation trace into their `eval`. Our
-                // hypercube evaluator can't synthesise one without Logup-GKR
-                // (Phase 2b), so we emit an empty placeholder proof for
-                // those chips. The verifier treats `rounds.len() == 0` as
-                // "skipped".
-                if chip.permutation_width() > 0 {
-                    zerocheck_proofs.push(ZerocheckProof {
-                        rounds: Vec::new(),
-                        eval_point: Vec::new(),
-                        final_claim: SC::Challenge::ZERO,
-                    });
-                    continue;
-                }
-
-                let num_vars = log2_strict_usize(main_trace.height());
-                // Preprocessed trace: look it up in the proving key.
-                let preproc_trace = pk
-                    .chip_ordering
-                    .get(&chip.name())
-                    .map(|&idx| pk.traces[idx].clone())
-                    .unwrap_or_else(|| RowMajorMatrix::new(vec![], 0));
-                let c_evals = eval_constraints_on_hypercube::<SC, _>(
-                    chip,
-                    num_vars,
-                    main_trace,
-                    &preproc_trace,
-                    &data.public_values,
-                    _alpha,
-                );
-                let (_r_eq, proof) = prove_zerocheck_with_challenger::<Val<SC>, SC::Challenge, _>(
-                    &c_evals,
-                    num_vars,
-                    challenger,
-                );
-                zerocheck_proofs.push(proof);
-            }
-            let zerocheck_ms = t_zerocheck.elapsed().as_millis();
-            {
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
-                {
-                    let _ = writeln!(f, "ZEROCHECK total={}ms chips={}", zerocheck_ms, chips.len());
-                }
-            }
-            // ========== End zerocheck ==========
-
-            // ========== LogUp-GKR (phase 2b) ==========
-            // Per-chip sumcheck-based fraction-sum proof for the lookup
-            // interactions. The permutation challenges `[alpha, beta]`
-            // sampled earlier (line ~327) are reused as the Fiat-Shamir
-            // challenges for fingerprint construction.
-            //
-            // Soundness note: the current implementation binds the full
-            // sumcheck transcript per layer.  The final step — checking
-            // the leaf claim against fingerprints reconstructed from the
-            // main-trace PCS opening at `eval_point` — is scheduled
-            // alongside the Phase 2a multi-point opening follow-up.
-            // Until that lands, these proofs are transcript-bound but
-            // not yet cryptographically tied to the main-trace commitment.
-            let mut logup_gkr_proofs: Vec<LogUpGkrProof<SC::Challenge>> =
-                Vec::with_capacity(chips.len());
-            let mut logup_row_openings: Vec<LogUpRowOpening<SC::Challenge>> =
-                Vec::with_capacity(chips.len());
-            let t_logup = std::time::Instant::now();
-            for (chip, main_trace) in chips.iter().zip(traces.iter()) {
-                let preproc_trace = pk
-                    .chip_ordering
-                    .get(&chip.name())
-                    .map(|&idx| pk.traces[idx].clone())
-                    .unwrap_or_else(|| RowMajorMatrix::new(vec![], 0));
-                let trace_height = main_trace.height();
-                let main_width = main_trace.width();
-                let preproc_width = preproc_trace.width();
-                let raw_per_row = chip.sends().len() + chip.receives().len();
-                let interactions_per_row = raw_per_row.max(1).next_power_of_two();
-                let leaves = build_lookup_leaves::<Val<SC>, SC::Challenge>(
-                    chip.sends(),
-                    chip.receives(),
-                    &preproc_trace.values,
-                    preproc_width,
-                    &main_trace.values,
-                    main_width,
-                    trace_height,
-                    &local_permutation_challenges,
-                );
-                let proof = prove_logup_gkr::<Val<SC>, SC::Challenge, _>(&leaves, challenger);
-
-                // Closing step: compute row-MLE openings at r_row =
-                // proof.eval_point[..log2(trace_height)].
-                let log_trace_height = log2_strict_usize(trace_height);
-                let r_row: Vec<SC::Challenge> =
-                    proof.eval_point[..log_trace_height].to_vec();
-                let main_at_r_row: Vec<SC::Challenge> = (0..main_width)
-                    .map(|col| {
-                        let column_ext: Vec<SC::Challenge> = (0..trace_height)
-                            .map(|row| {
-                                SC::Challenge::from(
-                                    main_trace.values[row * main_width + col],
-                                )
-                            })
-                            .collect();
-                        eval_mle_first_var(&column_ext, &r_row)
-                    })
-                    .collect();
-                let preproc_at_r_row: Vec<SC::Challenge> = if preproc_width == 0 {
-                    Vec::new()
-                } else {
-                    (0..preproc_width)
-                        .map(|col| {
-                            let column_ext: Vec<SC::Challenge> = (0..trace_height)
-                                .map(|row| {
-                                    SC::Challenge::from(
-                                        preproc_trace.values
-                                            [row * preproc_width + col],
-                                    )
-                                })
-                                .collect();
-                            eval_mle_first_var(&column_ext, &r_row)
-                        })
-                        .collect()
-                };
-
-                logup_gkr_proofs.push(proof);
-                logup_row_openings.push(LogUpRowOpening {
-                    main_at_r_row,
-                    preproc_at_r_row,
-                    interactions_per_row,
-                });
-            }
-            let logup_ms = t_logup.elapsed().as_millis();
-            {
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
-                {
-                    let _ = writeln!(f, "LOGUP_GKR total={}ms chips={}", logup_ms, chips.len());
-                }
-            }
-            let logup_gkr_proofs = Some(logup_gkr_proofs);
-            let logup_row_openings = Some(logup_row_openings);
-            // ========== End LogUp-GKR ==========
-
             // No quotient commit to observe (skipped).
-            // Sample zeta (evaluation point).
+            // Sample zeta (evaluation point) so the WHIR-mode FRI
+            // skip below has a value in scope.  Ignored at verify
+            // time when the WHIR short-circuit fires.
             let _zeta: SC::Challenge = challenger.sample_algebra_element();
 
             // === Phase 3: skip FRI open in WHIR mode ===
@@ -728,55 +559,6 @@ where
             // Dispatched via TypeId match on `SC` so this generic
             // function can call into the KoalaBear-specific
             // `LateBindingCapable` impl.  When SC matches, we commit
-            // each chip's main trace with a *fresh* challenger (a
-            // "dual commit" alongside the existing FRI commit at
-            // zeta) and serialise per-chip proofs.
-            //
-            // **Soundness gap (first iteration):** the late-binding
-            // commit uses a fresh challenger, so it is not
-            // cross-bound to the FRI commit.  A malicious prover
-            // could in principle commit a different trace to WHIR
-            // than to FRI.  Cross-binding (open both commits at a
-            // shared point and check consistency, or migrate to a
-            // single WHIR-only commitment) is the next iteration.
-            // The `logup_row_openings` values are cryptographically
-            // bound to *some* trace whose MLE matches at r_row; a
-            // follow-up will tie that trace to the FRI-committed one.
-            // Phase 2c+ mode switch: jagged late-binding is now the
-            // default for the WHIR fast path (matches SP1's
-            // single-commit architecture).  Set
-            // `ZIREN_LATE_BINDING=per-chip` to opt back into the
-            // legacy per-chip per-column path.
-            //
-            // **Cross-binding has been removed.**  It only existed to
-            // bind the FRI commit and the WHIR commit to the same
-            // trace in the dual-commit world; once FRI is dropped from
-            // the WHIR path (Phase 3 of the WHIR-default refactor),
-            // the WHIR/jagged commit is the sole source of truth and
-            // no cross-binding is needed.  Until then, the FRI commit
-            // remains in the proof for shape compatibility but is not
-            // soundness-relevant for WHIR-mode shards.
-            let use_jagged = std::env::var("ZIREN_LATE_BINDING")
-                .map(|v| v != "per-chip")
-                .unwrap_or(true);
-
-            let (late_binding_proofs, late_binding_jagged_proof) = if use_jagged {
-                let bytes = try_compute_jagged_late_binding_proof::<SC>(
-                    &traces,
-                    &chips,
-                    logup_gkr_proofs.as_ref().expect("WHIR fast path always sets this"),
-                    &log_degrees,
-                );
-                (None, bytes)
-            } else {
-                let per_chip = try_compute_late_binding_proofs::<SC>(
-                    &traces,
-                    logup_gkr_proofs.as_ref().expect("WHIR fast path always sets this"),
-                    &log_degrees,
-                );
-                (per_chip, None)
-            };
-
             // ── Task #13 always-on: populate basefold_shard_proof ────
             //
             // For KoalaBearPoseidon2 (gated inside the helper),
@@ -807,11 +589,6 @@ where
                 opening_proof,
                 chip_ordering: data.chip_ordering,
                 public_values: data.public_values,
-                zerocheck_proofs: Some(zerocheck_proofs),
-                logup_gkr_proofs,
-                logup_row_openings,
-                late_binding_proofs,
-                late_binding_jagged_proof,
                 #[cfg(feature = "shard-level-proof")]
                 basefold_shard_proof,
             });
@@ -1163,13 +940,7 @@ where
             opening_proof,
             chip_ordering: data.chip_ordering,
             public_values: data.public_values,
-            // FRI/quotient mode: no zerocheck or LogUp-GKR needed.
-            zerocheck_proofs: None,
-            logup_gkr_proofs: None,
-            logup_row_openings: None,
-            late_binding_proofs: None,
-            late_binding_jagged_proof: None,
-            // FRI path — no shard-level basefold proof either.
+            // FRI path — no shard-level basefold proof.
             #[cfg(feature = "shard-level-proof")]
             basefold_shard_proof: None,
         })
@@ -1241,173 +1012,18 @@ where
 /// a bound to `MachineProver::open` would break every caller that
 /// uses an SC without that impl.  The transmute is sound because the
 /// `TypeId` check guarantees `SC` *is* the matching concrete type, so
-/// `SC::Val`, `SC::Challenge`, and `SC::Challenger` are the
-/// associated types of `KoalaBearPoseidon2Inner`.
-/// Per-chip late-binding proofs (WHIR pipeline) — retired.  The
-/// BaseFold pipeline emits a single bundled `late_binding_jagged_proof`
-/// via `try_compute_jagged_late_binding_proof` instead, so this
-/// call site always returns `None` after the WHIR retirement.
-fn try_compute_late_binding_proofs<SC>(
-    _traces: &[RowMajorMatrix<Val<SC>>],
-    _logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    _log_degrees: &[usize],
-) -> Option<Vec<Vec<u8>>>
-where
-    SC: 'static + StarkGenericConfig,
-{
-    None
-}
-
-/// Empty `OpeningProof<SC>` helper — retired alongside the WHIR
-/// pipeline.  BaseFold does not need an empty-opening-proof
-/// fallback because its opening bundle lives on
-/// `ShardProof.late_binding_jagged_proof`.
+/// Empty `OpeningProof<SC>` helper for the WHIR fast-path's
+/// FRI-skip.  Always returns `None` here so the outer code paths
+/// fall through to the real `pcs.open` (the helper used to detect
+/// KoalaBear and emit a typed empty `FriProof`, but that wiring
+/// retired alongside the legacy MIPS verify path in #13 — the
+/// BaseFold pipeline carries its opening bundle inside
+/// `basefold_shard_proof.evaluation_proof`).
 fn try_compute_empty_opening_proof<SC>() -> Option<OpeningProof<SC>>
 where
     SC: 'static + StarkGenericConfig,
 {
     None
-}
-
-/// Phase 2c+ jagged late-binding dispatch: TypeId-checks SC against
-/// the supported KoalaBear configs, then runs the
-/// `prove_jagged_late_binding` one-call API.  Returns serialized
-/// bundle bytes if SC matches, `None` otherwise.
-#[cfg(feature = "basefold")]
-fn try_compute_jagged_late_binding_proof<SC>(
-    traces: &[RowMajorMatrix<Val<SC>>],
-    chips: &[&MachineChip<SC, impl MachineAir<Val<SC>>>],
-    logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    log_degrees: &[usize],
-) -> Option<Vec<u8>>
-where
-    SC: 'static + StarkGenericConfig,
-{
-    use std::any::TypeId;
-    use crate::kb31_poseidon2::{KoalaBearPoseidon2Inner, koala_bear_poseidon2::KoalaBearPoseidon2};
-
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
-        return prove_jagged_for_kb::<KoalaBearPoseidon2, SC>(
-            traces, chips, logup_gkr_proofs, log_degrees,
-        );
-    }
-    if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2Inner>() {
-        return prove_jagged_for_kb::<KoalaBearPoseidon2Inner, SC>(
-            traces, chips, logup_gkr_proofs, log_degrees,
-        );
-    }
-    None
-}
-
-#[cfg(not(feature = "basefold"))]
-fn try_compute_jagged_late_binding_proof<SC>(
-    _traces: &[RowMajorMatrix<Val<SC>>],
-    _chips: &[&MachineChip<SC, impl MachineAir<Val<SC>>>],
-    _logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    _log_degrees: &[usize],
-) -> Option<Vec<u8>>
-where
-    SC: 'static + StarkGenericConfig,
-{
-    None
-}
-
-/// Generic helper: TypeId-checked dispatch into jagged late-binding
-/// for a specific KB type.  Caller verified the TypeId match, so the
-/// transmute is sound.
-#[cfg(feature = "basefold")]
-fn prove_jagged_for_kb<KB, SC>(
-    traces: &[RowMajorMatrix<Val<SC>>],
-    chips: &[&MachineChip<SC, impl MachineAir<Val<SC>>>],
-    logup_gkr_proofs: &[crate::logup_gkr::LogUpGkrProof<SC::Challenge>],
-    log_degrees: &[usize],
-) -> Option<Vec<u8>>
-where
-    KB: 'static + StarkGenericConfig + Default,
-    SC: 'static + StarkGenericConfig,
-{
-    type Vk<X> = <X as StarkGenericConfig>::Val;
-    type Ck<X> = <X as StarkGenericConfig>::Challenge;
-    type Cgr<X> = <X as StarkGenericConfig>::Challenger;
-
-    // SAFETY: caller verified TypeId::of::<SC>() == TypeId::of::<KB>().
-    let traces_kb: &[RowMajorMatrix<Vk<KB>>] =
-        unsafe { core::mem::transmute(traces) };
-    let gkr_kb: &[crate::logup_gkr::LogUpGkrProof<Ck<KB>>] =
-        unsafe { core::mem::transmute(logup_gkr_proofs) };
-
-    // Build (chip_name, trace) pairs for jagged packing.
-    let chip_traces: Vec<(String, RowMajorMatrix<Vk<KB>>)> = chips
-        .iter()
-        .zip(traces_kb.iter())
-        .map(|(chip, trace)| (chip.name(), trace.clone()))
-        .collect();
-
-    // Per-chip r_row: from logup_gkr_proofs[i].eval_point[..num_vars].
-    let r_row_per_chip: Vec<Vec<Ck<KB>>> = gkr_kb
-        .iter()
-        .zip(log_degrees.iter())
-        .map(|(gkr, &num_vars)| gkr.eval_point[..num_vars].to_vec())
-        .collect();
-
-    let cfg = <KB as Default>::default();
-    let mut ch_kb: Cgr<KB> = cfg.challenger();
-
-    // Concrete-typed call site.  KB == KoalaBearPoseidon2 (or Inner)
-    // so its associated `Val`/`Challenge`/`Challenger` types match
-    // the kb31_poseidon2 `Inner*` aliases (same as the legacy
-    // `Whir*` aliases — they were always the same KoalaBear types).
-    use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
-    let chip_traces_concrete: &[(String, RowMajorMatrix<InnerVal>)] =
-        unsafe { core::mem::transmute(chip_traces.as_slice()) };
-    let r_row_concrete: &[Vec<InnerChallenge>] =
-        unsafe { core::mem::transmute(r_row_per_chip.as_slice()) };
-    let ch_concrete: &mut InnerChallenger =
-        unsafe { core::mem::transmute(&mut ch_kb) };
-
-    let t = std::time::Instant::now();
-
-    // BaseFold is the only production PCS path — the WHIR pipeline
-    // was retired in favour of the Jagged+BaseFold stack.
-    #[cfg(feature = "basefold")]
-    let bytes = {
-        // `chip_traces_concrete` is `&[..]` but `prove_jagged_basefold`
-        // takes by-ref slice — clone into Vec only at the call.
-        let chip_traces_owned: Vec<(String, RowMajorMatrix<InnerVal>)> =
-            chip_traces_concrete.to_vec();
-        // Dispatch picks the per-chip streaming path when
-        // `ZIREN_E3_PER_CHIP=1` (memory-optimised: no dense_q, no
-        // `w` materialisation during round 0 of the jagged sumcheck
-        // — saves ~20N bytes on wide workloads).  Default stays on
-        // the dense path for bit-for-bit equivalence with existing
-        // test fixtures.
-        use crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch;
-        let bundle =
-            prove_jagged_basefold_dispatch(&chip_traces_owned, r_row_concrete, ch_concrete);
-        bundle.to_bytes()
-    };
-    #[cfg(not(feature = "basefold"))]
-    let bytes: Vec<u8> = unreachable!(
-        "jagged late-binding requires the `basefold` feature; \
-         workspace builds enable it by default"
-    );
-
-    let elapsed_ms = t.elapsed().as_millis();
-    {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
-        {
-            let _ = writeln!(
-                f,
-                "LATE_BINDING_JAGGED path=BASEFOLD total={}ms chips={} bytes={}",
-                elapsed_ms,
-                chips.len(),
-                bytes.len(),
-            );
-        }
-    }
-    Some(bytes)
 }
 
 impl<SC> MachineProvingKey<SC> for StarkProvingKey<SC>

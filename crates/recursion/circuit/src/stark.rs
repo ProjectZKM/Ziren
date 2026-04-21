@@ -289,17 +289,13 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         })
         .collect();
 
+    let _ = (zerocheck_proofs_dummy, logup_gkr_proofs_dummy);
     let shard_proof = ShardProof {
         commitment,
         opened_values,
         opening_proof,
         chip_ordering,
         public_values,
-        zerocheck_proofs: Some(zerocheck_proofs_dummy),
-        logup_gkr_proofs: Some(logup_gkr_proofs_dummy),
-        logup_row_openings: None,
-        late_binding_proofs: None,
-        late_binding_jagged_proof: None,
         #[cfg(feature = "shard-level-proof")]
         basefold_shard_proof: None,
     };

@@ -90,11 +90,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                     },
                     chip_ordering: HashMap::new(),
                     public_values: vec![],
-                    zerocheck_proofs: None,
-                    logup_gkr_proofs: None,
-                    logup_row_openings: None,
-                    late_binding_proofs: None,
-                    late_binding_jagged_proof: None,
                     #[cfg(feature = "shard-level-proof")]
                     basefold_shard_proof: None,
                 };
