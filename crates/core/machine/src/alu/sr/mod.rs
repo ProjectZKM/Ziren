@@ -225,6 +225,10 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
             !shard.shift_right_events.is_empty()
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl ShiftRightChip {

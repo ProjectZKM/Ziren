@@ -7,7 +7,7 @@ use zkm_core_executor::{
     ByteOpcode::{self, U16Range},
     ExecutionRecord, Instruction, Opcode, Program,
 };
-use zkm_stark::air::{MachineAir, PicusInfo};
+use zkm_stark::air::MachineAir;
 
 use p3_field::{PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;

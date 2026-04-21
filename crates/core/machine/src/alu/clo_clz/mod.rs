@@ -172,6 +172,10 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             !shard.cloclz_events.is_empty()
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F> BaseAir<F> for CloClzChip {

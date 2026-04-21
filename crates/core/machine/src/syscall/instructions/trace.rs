@@ -10,7 +10,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_stark::{air::MachineAir, PicusInfo};
 
 use crate::{
     utils::{next_power_of_two, zeroed_f_vec},
@@ -31,6 +31,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
 
     fn name(&self) -> String {
         "SyscallInstrs".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        SyscallInstrColumns::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
