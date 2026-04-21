@@ -76,36 +76,59 @@ fn memory_cluster_extras() -> &'static [&'static str] {
 
 /// Per-precompile chip family extras.  Each is added on top of
 /// `core_base_chips` to form a precompile-specific cluster.
+///
+/// Names must match `MachineAir::name()` outputs exactly — see
+/// `crates/core/machine/src/syscall/precompiles/*/trace.rs` and
+/// `weierstrass_*.rs` for sources.  `ZKMProofShape::generate` filters
+/// shapes against the live machine's chip set as defense-in-depth, but
+/// keeping this list correct lets `to_ordered_shape` produce the
+/// expected per-cluster shapes.
 fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
     &[
         ("keccak", &["KeccakSponge"]),
-        ("sha256", &["Sha256Extend", "Sha256Compress"]),
+        ("sha256", &["ShaExtend", "ShaCompress"]),
         ("poseidon2", &["Poseidon2Permute"]),
         (
             "k256",
-            &["Secp256k1Add", "Secp256k1Double", "K256Decompress"],
+            &[
+                "Secp256k1AddAssign",
+                "Secp256k1DoubleAssign",
+                "Secp256k1Decompress",
+            ],
         ),
         (
             "p256",
-            &["Secp256r1Add", "Secp256r1Double", "P256Decompress"],
+            &[
+                "Secp256r1AddAssign",
+                "Secp256r1DoubleAssign",
+                "Secp256r1Decompress",
+            ],
         ),
         (
             "bn254",
-            &["Bn254Add", "Bn254Double", "Bn254Fp", "Bn254Fp2Mul", "Bn254Fp2AddSub"],
+            &[
+                "Bn254AddAssign",
+                "Bn254DoubleAssign",
+                "Bn254FpOpAssign",
+                "Bn254Fp2MulAssign",
+                "Bn254Fp2AddSubAssign",
+            ],
         ),
         (
             "bls12_381",
             &[
-                "Bls12381Add",
-                "Bls12381Double",
+                "Bls12381AddAssign",
+                "Bls12381DoubleAssign",
                 "Bls12381Decompress",
-                "Bls12381Fp",
-                "Bls12381Fp2Mul",
-                "Bls12381Fp2AddSub",
+                "Bls12381FpOpAssign",
+                // Note: upstream ID has typo `Bls12831` (should be `Bls12381`).
+                // Carry the typo so chip names match the live machine.
+                "Bls12831Fp2MulAssign",
+                "Bls12831Fp2AddSubAssign",
             ],
         ),
-        ("ed25519", &["Ed25519Add", "Ed25519Decompress"]),
-        ("uint256", &["Uint256Mul", "U256x2048Mul"]),
+        ("ed25519", &["EdAddAssign", "EdDecompress"]),
+        ("uint256", &["Uint256MulMod", "U256XU2048Mul"]),
         ("boolean_circuit_garble", &["BooleanCircuitGarble"]),
         ("syslinux", &["SysLinux"]),
     ]
