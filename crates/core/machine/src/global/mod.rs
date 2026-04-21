@@ -18,7 +18,7 @@ use zkm_stark::{
     septic_curve::{SepticCurve, SepticCurveComplete},
     septic_digest::SepticDigest,
     septic_extension::{SepticBlock, SepticExtension},
-    LookupKind, ZKMAirBuilder,
+    LookupKind, PicusInfo, ZKMAirBuilder,
 };
 
 use crate::{
@@ -26,7 +26,7 @@ use crate::{
     utils::{indices_arr, next_power_of_two, zeroed_f_vec},
     CoreChipError,
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 
 const NUM_GLOBAL_COLS: usize = size_of::<GlobalCols<u8>>();
 
@@ -50,13 +50,15 @@ pub struct Ghost {
 #[derive(Default)]
 pub struct GlobalChip;
 
-#[derive(AlignedBorrow)]
+#[derive(AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct GlobalCols<T: Copy> {
     pub message: [T; 7],
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
+    #[picus(selector)]
     pub is_receive: T,
+    #[picus(selector)]
     pub is_send: T,
     pub is_real: T,
     pub accumulation: GlobalAccumulationOperation<T, 1>,
@@ -72,6 +74,10 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
     fn name(&self) -> String {
         assert_eq!(GLOBAL_INITIAL_DIGEST_POS_COPY, GLOBAL_INITIAL_DIGEST_POS);
         "Global".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        GlobalCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(
