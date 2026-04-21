@@ -59,17 +59,15 @@ the same 4 phases in the same challenger ordering.
 pub basefold_shard_proof: Option<Box<BasefoldShardProof<Val<SC>, Challenge<SC>>>>,
 ```
 
-- **Legacy path**: `basefold_shard_proof = None`; `zerocheck_proofs`
-  / `logup_gkr_proofs` / `logup_row_openings` / `late_binding_proofs`
-  carry the per-chip proofs.  `StarkVerifier::verify_shard` runs
-  the legacy verifier.
-- **Shard-level path**: `basefold_shard_proof = Some(_)`; verifier
-  dispatches to `BasefoldShardVerifier::verify_shard`.
+- **KoalaBear MIPS shards**: `basefold_shard_proof = Some(_)`; verifier
+  dispatches to `BasefoldShardVerifier::verify_shard` (#13 always-on).
+- **Compress / non-KoalaBear configs**: `basefold_shard_proof = None`;
+  `Verifier::verify_shard` runs the legacy STARK code path.  These
+  proofs aren't BaseFold shard proofs — the legacy code path is the
+  correct verifier for them.
 
-**Prover opt-in**: set `ZIREN_SHARD_LEVEL_BASEFOLD=1` to populate
-`basefold_shard_proof` alongside the legacy fields (non-destructive
-— both coexist in the envelope).  Gated on `SC == KoalaBearPoseidon2`
-via runtime `TypeId::of::<SC::Challenger>()` check.
+KoalaBear gating is via runtime `TypeId::of::<SC::Challenger>()` check
+inside `try_prove_shard_to_basefold_boxed`.
 
 ## Usage
 

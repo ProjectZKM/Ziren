@@ -777,32 +777,26 @@ where
                 (per_chip, None)
             };
 
-            // ── Task #28 opt-in: populate basefold_shard_proof ────
+            // ── Task #13 always-on: populate basefold_shard_proof ────
             //
-            // When `ZIREN_SHARD_LEVEL_BASEFOLD=1` is set and SC is
-            // KoalaBearPoseidon2, additionally drive the shard-level
-            // prover (`prove_shard_to_basefold`) and carry the result
-            // alongside the per-chip proofs.  Non-destructive: the
-            // legacy WHIR fields stay populated so existing verifier
-            // paths keep working.  Uses a cloned challenger so the
-            // outer transcript isn't disturbed.
+            // For KoalaBearPoseidon2 (gated inside the helper),
+            // drive the shard-level prover unconditionally and carry
+            // the result alongside the legacy per-chip fields.
+            // `Verifier::verify_shard`'s dispatch (verifier.rs:50)
+            // routes to `BasefoldShardVerifier` whenever this is
+            // `Some(_)`, so the legacy per-chip code path is dead
+            // for KoalaBear MIPS shards (kept only for compress /
+            // non-KoalaBear configs).
             #[cfg(feature = "shard-level-proof")]
-            let basefold_shard_proof = if std::env::var("ZIREN_SHARD_LEVEL_BASEFOLD")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-            {
-                try_prove_shard_to_basefold_boxed::<SC, A>(
-                    &chips,
-                    &pk.traces,
-                    &pk.chip_ordering,
-                    &traces,
-                    &data.main_commit,
-                    data.public_values.clone(),
-                    &*challenger,
-                )
-            } else {
-                None
-            };
+            let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A>(
+                &chips,
+                &pk.traces,
+                &pk.chip_ordering,
+                &traces,
+                &data.main_commit,
+                data.public_values.clone(),
+                &*challenger,
+            );
 
             return Ok(ShardProof::<SC> {
                 commitment: ShardCommitment {
@@ -1453,8 +1447,9 @@ impl Display for CpuProverError {
 impl Error for CpuProverError {}
 
 // ───────────────────────────────────────────────────────────
-// Task #28 helper: drive prove_shard_to_basefold from inside
-// StarkMachine::open() when ZIREN_SHARD_LEVEL_BASEFOLD=1.
+// Helper: drive prove_shard_to_basefold from inside StarkMachine::open()
+// for KoalaBearPoseidon2.  Always invoked (#13) — non-KoalaBear configs
+// short-circuit to None via the TypeId gate inside the helper.
 // ───────────────────────────────────────────────────────────
 
 /// Drive [`crate::shard_level::prover::prove_shard_to_basefold`]
@@ -1465,10 +1460,10 @@ impl Error for CpuProverError {}
 /// `crate::shard_level::prover::emit_jagged_pcs_bytes`) and
 /// `None` otherwise.
 ///
-/// Used only from the opt-in `ZIREN_SHARD_LEVEL_BASEFOLD=1`
-/// branch in `StarkMachine::open`.  This helper is the bridge
-/// between the per-chip WHIR path's in-scope values and the
-/// shard-level prover's monomorphic KoalaBear API.
+/// Invoked unconditionally from `StarkMachine::open` for KoalaBear
+/// MIPS shards (#13).  Bridges between the per-chip WHIR path's
+/// in-scope values and the shard-level prover's monomorphic
+/// KoalaBear API.
 #[cfg(feature = "shard-level-proof")]
 #[allow(clippy::too_many_arguments)]
 fn try_prove_shard_to_basefold_boxed<SC, A>(
