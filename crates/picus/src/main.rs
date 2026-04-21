@@ -328,29 +328,430 @@ fn match_bit_expr(expr: &PicusExpr) -> Option<usize> {
     }
 }
 
-fn match_guarded_bit_expr(expr: &PicusExpr) -> Option<usize> {
+fn is_boolean_guard_expr(expr: &PicusExpr, known_guards: &BTreeSet<usize>) -> bool {
     match expr {
-        PicusExpr::Mul(left, right) => match_bit_expr(left).or_else(|| match_bit_expr(right)),
+        PicusExpr::Const(0 | 1) => true,
+        PicusExpr::Var(id) => known_guards.contains(id),
+        PicusExpr::Mul(left, right) => {
+            is_boolean_guard_expr(left, known_guards) && is_boolean_guard_expr(right, known_guards)
+        }
+        PicusExpr::Sub(left, right) if matches!(&**left, PicusExpr::Const(1)) => {
+            is_boolean_guard_expr(right, known_guards)
+        }
+        // `-(g - 1)` is syntactically common after simplification and is equivalent to `1 - g`.
+        PicusExpr::Neg(inner) => {
+            matches!(&**inner, PicusExpr::Sub(left, right) if matches!(&**right, PicusExpr::Const(1)) && is_boolean_guard_expr(left, known_guards))
+        }
+        _ => false,
+    }
+}
+
+fn guard_factor_count(expr: &PicusExpr, known_guards: &BTreeSet<usize>) -> Option<usize> {
+    match expr {
+        PicusExpr::Const(1) => Some(0),
+        PicusExpr::Const(0) => None,
+        PicusExpr::Var(id) if known_guards.contains(id) => Some(1),
+        PicusExpr::Mul(left, right) => {
+            Some(guard_factor_count(left, known_guards)? + guard_factor_count(right, known_guards)?)
+        }
+        // A complemented boolean still acts as a guard factor.
+        PicusExpr::Sub(left, right) if matches!(&**left, PicusExpr::Const(1)) => match &**right {
+            PicusExpr::Const(0) => Some(0),
+            PicusExpr::Const(1) => None,
+            _ if is_boolean_guard_expr(right, known_guards) => {
+                Some(guard_factor_count(right, known_guards).unwrap_or(0).max(1))
+            }
+            _ => None,
+        },
+        PicusExpr::Neg(inner) => match &**inner {
+            PicusExpr::Sub(left, right) if matches!(&**right, PicusExpr::Const(1)) => match &**left
+            {
+                PicusExpr::Const(0) => Some(0),
+                PicusExpr::Const(1) => None,
+                _ if is_boolean_guard_expr(left, known_guards) => {
+                    Some(guard_factor_count(left, known_guards).unwrap_or(0).max(1))
+                }
+                _ => None,
+            },
+            _ => None,
+        },
         _ => None,
     }
 }
 
-fn match_guarded_var_product(expr: &PicusExpr) -> Option<usize> {
+fn match_guard_definition_var(expr: &PicusExpr, known_guards: &BTreeSet<usize>) -> Option<usize> {
     match expr {
-        PicusExpr::Mul(left, right) => as_var(left).or_else(|| as_var(right)),
+        PicusExpr::Sub(left, right) => {
+            if let Some(id) = as_var(left) {
+                if is_boolean_guard_expr(right, known_guards) {
+                    return Some(id);
+                }
+            }
+            if let Some(id) = as_var(right) {
+                if is_boolean_guard_expr(left, known_guards) {
+                    return Some(id);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn collect_known_guard_vars(constraints: &[PicusConstraint]) -> BTreeSet<usize> {
+    let mut known_guards = BTreeSet::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for constraint in constraints {
+            let inferred_guard = match constraint {
+                PicusConstraint::Eq(expr) => {
+                    match_bit_expr(expr).or_else(|| match_guard_definition_var(expr, &known_guards))
+                }
+                _ => None,
+            };
+            if let Some(var_id) = inferred_guard {
+                changed |= known_guards.insert(var_id);
+            }
+        }
+    }
+    known_guards
+}
+
+fn collect_expr_guarded_uses(
+    expr: &PicusExpr,
+    active_guard: bool,
+    known_guards: &BTreeSet<usize>,
+    guarded_vars: &mut BTreeSet<usize>,
+    unguarded_vars: &mut BTreeSet<usize>,
+) {
+    match expr {
+        PicusExpr::Const(_) => {}
+        PicusExpr::Var(id) => {
+            if active_guard {
+                guarded_vars.insert(*id);
+            } else {
+                unguarded_vars.insert(*id);
+            }
+        }
+        PicusExpr::Add(left, right) | PicusExpr::Sub(left, right) | PicusExpr::Div(left, right) => {
+            collect_expr_guarded_uses(
+                left,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+            collect_expr_guarded_uses(
+                right,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+        }
+        PicusExpr::Neg(expr) | PicusExpr::Pow(_, expr) => {
+            collect_expr_guarded_uses(
+                expr,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+        }
+        PicusExpr::Mul(left, right) => {
+            let left_guard_factor_count = guard_factor_count(left, known_guards);
+            let right_guard_factor_count = guard_factor_count(right, known_guards);
+            match (left_guard_factor_count, right_guard_factor_count) {
+                (Some(left_count), None) => {
+                    collect_expr_guarded_uses(
+                        left,
+                        active_guard,
+                        known_guards,
+                        guarded_vars,
+                        unguarded_vars,
+                    );
+                    collect_expr_guarded_uses(
+                        right,
+                        active_guard || left_count > 0,
+                        known_guards,
+                        guarded_vars,
+                        unguarded_vars,
+                    );
+                }
+                (None, Some(right_count)) => {
+                    collect_expr_guarded_uses(
+                        left,
+                        active_guard || right_count > 0,
+                        known_guards,
+                        guarded_vars,
+                        unguarded_vars,
+                    );
+                    collect_expr_guarded_uses(
+                        right,
+                        active_guard,
+                        known_guards,
+                        guarded_vars,
+                        unguarded_vars,
+                    );
+                }
+                _ => {
+                    collect_expr_guarded_uses(
+                        left,
+                        active_guard,
+                        known_guards,
+                        guarded_vars,
+                        unguarded_vars,
+                    );
+                    collect_expr_guarded_uses(
+                        right,
+                        active_guard,
+                        known_guards,
+                        guarded_vars,
+                        unguarded_vars,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn collect_constraint_guarded_uses(
+    constraint: &PicusConstraint,
+    active_guard: bool,
+    known_guards: &BTreeSet<usize>,
+    guarded_vars: &mut BTreeSet<usize>,
+    unguarded_vars: &mut BTreeSet<usize>,
+) {
+    match constraint {
+        PicusConstraint::Lt(left, right)
+        | PicusConstraint::Leq(left, right)
+        | PicusConstraint::Gt(left, right)
+        | PicusConstraint::Geq(left, right) => {
+            collect_expr_guarded_uses(
+                left,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+            collect_expr_guarded_uses(
+                right,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+        }
+        PicusConstraint::Implies(left, right)
+        | PicusConstraint::Iff(left, right)
+        | PicusConstraint::And(left, right)
+        | PicusConstraint::Or(left, right) => {
+            collect_constraint_guarded_uses(
+                left,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+            collect_constraint_guarded_uses(
+                right,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+        }
+        PicusConstraint::Not(inner) => {
+            collect_constraint_guarded_uses(
+                inner,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+        }
+        PicusConstraint::Eq(expr) | PicusConstraint::Det(expr) => {
+            collect_expr_guarded_uses(
+                expr,
+                active_guard,
+                known_guards,
+                guarded_vars,
+                unguarded_vars,
+            );
+        }
+    }
+}
+
+fn collect_dominated_vars(
+    module: &PicusModule,
+    protected_vars: &BTreeSet<usize>,
+    known_guards: &BTreeSet<usize>,
+) -> BTreeSet<usize> {
+    let mut guarded_vars = BTreeSet::new();
+    let mut unguarded_vars = BTreeSet::new();
+
+    for constraint in &module.constraints {
+        collect_constraint_guarded_uses(
+            constraint,
+            false,
+            known_guards,
+            &mut guarded_vars,
+            &mut unguarded_vars,
+        );
+    }
+    for constraint in &module.postconditions {
+        collect_constraint_guarded_uses(
+            constraint,
+            false,
+            known_guards,
+            &mut guarded_vars,
+            &mut unguarded_vars,
+        );
+    }
+    for expr in &module.assume_deterministic {
+        collect_expr_guarded_uses(
+            expr,
+            false,
+            known_guards,
+            &mut guarded_vars,
+            &mut unguarded_vars,
+        );
+    }
+    for expr in &module.inputs {
+        collect_expr_guarded_uses(
+            expr,
+            false,
+            known_guards,
+            &mut guarded_vars,
+            &mut unguarded_vars,
+        );
+    }
+    for expr in &module.outputs {
+        collect_expr_guarded_uses(
+            expr,
+            false,
+            known_guards,
+            &mut guarded_vars,
+            &mut unguarded_vars,
+        );
+    }
+    for call in &module.calls {
+        for expr in &call.inputs {
+            collect_expr_guarded_uses(
+                expr,
+                false,
+                known_guards,
+                &mut guarded_vars,
+                &mut unguarded_vars,
+            );
+        }
+        for expr in &call.outputs {
+            collect_expr_guarded_uses(
+                expr,
+                false,
+                known_guards,
+                &mut guarded_vars,
+                &mut unguarded_vars,
+            );
+        }
+    }
+
+    guarded_vars
+        .difference(&unguarded_vars)
+        .copied()
+        .filter(|var_id| !protected_vars.contains(var_id))
+        .collect()
+}
+
+fn match_guarded_bit_expr(expr: &PicusExpr, known_guards: &BTreeSet<usize>) -> Option<usize> {
+    match expr {
+        PicusExpr::Mul(left, right) => {
+            if guard_factor_count(left, known_guards).is_some_and(|count| count > 0) {
+                if let Some(var_id) = match_bit_expr(right) {
+                    return Some(var_id);
+                }
+            }
+            if guard_factor_count(right, known_guards).is_some_and(|count| count > 0) {
+                if let Some(var_id) = match_bit_expr(left) {
+                    return Some(var_id);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn match_guarded_var_product(expr: &PicusExpr, known_guards: &BTreeSet<usize>) -> Option<usize> {
+    match expr {
+        PicusExpr::Mul(left, right) => {
+            if guard_factor_count(left, known_guards).is_some_and(|count| count > 0) {
+                return as_var(right);
+            }
+            if guard_factor_count(right, known_guards).is_some_and(|count| count > 0) {
+                return as_var(left);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn split_guarded_var_product(
+    expr: &PicusExpr,
+    known_guards: &BTreeSet<usize>,
+) -> Option<(PicusExpr, usize)> {
+    match expr {
+        PicusExpr::Mul(left, right) => {
+            if guard_factor_count(left, known_guards).is_some_and(|count| count > 0) {
+                if let Some(var_id) = as_var(right) {
+                    return Some(((*left.clone()), var_id));
+                }
+            }
+            if guard_factor_count(right, known_guards).is_some_and(|count| count > 0) {
+                if let Some(var_id) = as_var(left) {
+                    return Some(((*right.clone()), var_id));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn split_guarded_const_product(
+    expr: &PicusExpr,
+    known_guards: &BTreeSet<usize>,
+) -> Option<(PicusExpr, u64)> {
+    match expr {
+        PicusExpr::Mul(left, right) => {
+            if guard_factor_count(left, known_guards).is_some_and(|count| count > 0) {
+                if let PicusExpr::Const(constant) = &**right {
+                    return Some(((*left.clone()), *constant));
+                }
+            }
+            if guard_factor_count(right, known_guards).is_some_and(|count| count > 0) {
+                if let PicusExpr::Const(constant) = &**left {
+                    return Some(((*right.clone()), *constant));
+                }
+            }
+            None
+        }
         _ => None,
     }
 }
 
 fn normalize_constraint(
     constraint: PicusConstraint,
-    protected_vars: &BTreeSet<usize>,
+    known_guards: &BTreeSet<usize>,
+    dominated_vars: &BTreeSet<usize>,
 ) -> PicusConstraint {
     match constraint {
         PicusConstraint::Eq(expr) => {
             let expr = *expr;
-            if let Some(var_id) = match_guarded_bit_expr(&expr) {
-                if !protected_vars.contains(&var_id) {
+            if let Some(var_id) = match_guarded_bit_expr(&expr, known_guards) {
+                if dominated_vars.contains(&var_id) {
                     return PicusConstraint::new_bit(PicusExpr::Var(var_id));
                 }
             }
@@ -359,9 +760,20 @@ fn normalize_constraint(
         PicusConstraint::Leq(left, right) => {
             let left = *left;
             let right = *right;
+            if let (Some((left_guard, var_id)), Some((right_guard, constant))) = (
+                split_guarded_var_product(&left, known_guards),
+                split_guarded_const_product(&right, known_guards),
+            ) {
+                if left_guard == right_guard && dominated_vars.contains(&var_id) {
+                    return PicusConstraint::new_leq(
+                        PicusExpr::Var(var_id),
+                        PicusExpr::Const(constant),
+                    );
+                }
+            }
             if matches!(right, PicusExpr::Const(_)) {
-                if let Some(var_id) = match_guarded_var_product(&left) {
-                    if !protected_vars.contains(&var_id) {
+                if let Some(var_id) = match_guarded_var_product(&left, known_guards) {
+                    if dominated_vars.contains(&var_id) {
                         return PicusConstraint::new_leq(PicusExpr::Var(var_id), right);
                     }
                 }
@@ -371,9 +783,20 @@ fn normalize_constraint(
         PicusConstraint::Lt(left, right) => {
             let left = *left;
             let right = *right;
+            if let (Some((left_guard, var_id)), Some((right_guard, constant))) = (
+                split_guarded_var_product(&left, known_guards),
+                split_guarded_const_product(&right, known_guards),
+            ) {
+                if left_guard == right_guard && dominated_vars.contains(&var_id) {
+                    return PicusConstraint::new_lt(
+                        PicusExpr::Var(var_id),
+                        PicusExpr::Const(constant),
+                    );
+                }
+            }
             if matches!(right, PicusExpr::Const(_)) {
-                if let Some(var_id) = match_guarded_var_product(&left) {
-                    if !protected_vars.contains(&var_id) {
+                if let Some(var_id) = match_guarded_var_product(&left, known_guards) {
+                    if dominated_vars.contains(&var_id) {
                         return PicusConstraint::new_lt(PicusExpr::Var(var_id), right);
                     }
                 }
@@ -385,18 +808,38 @@ fn normalize_constraint(
 }
 
 fn postprocess_module(chip_name: &str, module: &mut PicusModule) {
-    if chip_name == "BooleanCircuitGarble" {
+    if matches!(chip_name, "BooleanCircuitGarble" | "SysLinux" | "MemoryInstrs") {
         let protected_vars = collect_interface_vars(module);
-        let mut constraints = Vec::with_capacity(module.constraints.len());
-        let mut seen = BTreeSet::new();
-        for constraint in std::mem::take(&mut module.constraints) {
-            let normalized = normalize_constraint(constraint, &protected_vars);
-            let rendered = normalized.to_string();
-            if seen.insert(rendered) {
+        loop {
+            // The guarded-width simplifier is only sound when the target variable is
+            // boolean-guarded everywhere it matters. We therefore infer concrete
+            // guard vars from actual constraints, including aliases and simple
+            // complements, track which hidden vars are used only under those
+            // guards, and only then strip the guards off range/bit constraints.
+            // Re-running the analysis lets newly-exposed bit constraints create
+            // more guards in later rounds.
+            let known_guards = collect_known_guard_vars(&module.constraints);
+            let dominated_vars = collect_dominated_vars(module, &protected_vars, &known_guards);
+
+            let mut changed = false;
+            let mut constraints = Vec::with_capacity(module.constraints.len());
+            let mut seen = BTreeSet::new();
+            for constraint in std::mem::take(&mut module.constraints) {
+                let original_rendered = constraint.to_string();
+                let normalized = normalize_constraint(constraint, &known_guards, &dominated_vars);
+                let rendered = normalized.to_string();
+                changed |= rendered != original_rendered;
+                if !seen.insert(rendered) {
+                    changed = true;
+                    continue;
+                }
                 constraints.push(normalized);
             }
+            module.constraints = constraints;
+            if !changed {
+                break;
+            }
         }
-        module.constraints = constraints;
     }
 }
 

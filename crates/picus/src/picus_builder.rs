@@ -537,7 +537,17 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     fn add_default_bitwise_byte_call(&mut self, values: &[PicusExpr]) {
         let byte_mod_name = "byte_interaction_mod".to_string();
         if !self.aux_modules.contains_key(&byte_mod_name) {
-            let byte_mod = PicusModule::build_empty(byte_mod_name.clone(), 2, 1);
+            let mut byte_mod = PicusModule::build_empty(byte_mod_name.clone(), 2, 1);
+            // The abstract bitwise-byte helper intentionally omits the opcode semantics, but its
+            // interface still represents a byte operation. Keep those width guarantees explicit so
+            // callers cannot satisfy the module with out-of-range field elements.
+            for expr in [
+                byte_mod.inputs[0].clone(),
+                byte_mod.inputs[1].clone(),
+                byte_mod.outputs[0].clone(),
+            ] {
+                byte_mod.constraints.push(PicusConstraint::new_leq(expr, PicusExpr::Const(255)));
+            }
             self.aux_modules.insert(byte_mod_name.clone(), byte_mod);
         }
         assert!(values.len() == 5);
@@ -943,6 +953,52 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
     }
 
+    // Syscall result bridges are encoded as:
+    //   [shard, clk, result_lo, result_hi, arg1_lo, arg1_hi, arg2_lo, arg2_hi]
+    //
+    // For Picus we care about the functional contract, not the bridge metadata, so shard/clk stay
+    // hidden. The syscall result stays exposed in the same half-word form as the lookup
+    // (`result_lo`, `result_hi`), and the argument halves are inputs.
+    //
+    // We intentionally keep everything at half-word granularity here. The interaction itself is
+    // defined over packed u16 limbs, so Picus should not invent a wider `u32` result or a finer
+    // byte-level decomposition. We still assert that each argument half is a `u16`, because those
+    // bounds are part of the bridge contract and make the interface explicit in the extracted
+    // module.
+    fn handle_syscall_result_interaction(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
+        if matches!(multiplicity, PicusExpr::Const(0)) {
+            return;
+        }
+        assert_eq!(values.len(), 8, "Expected syscall result lookup to contain 8 values");
+
+        const RESULT_LO_IDX: usize = 2;
+        const RESULT_HI_IDX: usize = 3;
+        const ARG1_LO_IDX: usize = 4;
+        const ARG1_HI_IDX: usize = 5;
+        const ARG2_LO_IDX: usize = 6;
+        const ARG2_HI_IDX: usize = 7;
+
+        let eq_mul = |multiplicity: &PicusExpr, val: &PicusExpr, expr: &PicusExpr| {
+            PicusConstraint::new_equality(expr.clone(), val.clone() * multiplicity.clone())
+        };
+        let u16_bound = |expr: PicusExpr| PicusConstraint::new_leq(expr, PicusExpr::Const(65535));
+
+        for result_half in [&values[RESULT_LO_IDX], &values[RESULT_HI_IDX]] {
+            let output_var = fresh_picus_expr();
+            self.push_output_port(output_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, result_half, &output_var));
+        }
+
+        for halfword in
+            [&values[ARG1_LO_IDX], &values[ARG1_HI_IDX], &values[ARG2_LO_IDX], &values[ARG2_HI_IDX]]
+        {
+            let input_var = fresh_picus_expr();
+            self.push_input_port(input_var.clone());
+            self.picus_module.constraints.push(eq_mul(&multiplicity, halfword, &input_var));
+            self.picus_module.constraints.push(u16_bound(input_var));
+        }
+    }
+
     fn handle_receive_global(&mut self, multiplicity: PicusExpr, values: &[PicusExpr]) {
         if matches!(multiplicity, PicusExpr::Const(0)) {
             return;
@@ -1158,6 +1214,12 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
 
                 self.add_abstract_syscall_call(specialized_multiplicity, &specialized_values);
             }
+            LookupKind::SyscallResult => {
+                self.handle_syscall_result_interaction(
+                    specialized_multiplicity,
+                    &specialized_values,
+                );
+            }
             LookupKind::Global => {
                 if matches!(specialized_multiplicity, PicusExpr::Const(0))
                     || self.submodule_mode == SubmoduleMode::Ignore
@@ -1196,6 +1258,12 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
             }
             LookupKind::Syscall => {
                 self.handle_receive_syscall(specialized_multiplicity, &specialized_values);
+            }
+            LookupKind::SyscallResult => {
+                self.handle_syscall_result_interaction(
+                    specialized_multiplicity,
+                    &specialized_values,
+                );
             }
             LookupKind::Global => {
                 self.handle_receive_global(specialized_multiplicity, &specialized_values);
