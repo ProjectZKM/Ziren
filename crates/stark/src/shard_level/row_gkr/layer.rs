@@ -32,103 +32,62 @@ use core::marker::PhantomData;
 
 use p3_field::{ExtensionField, Field};
 
-/// A 2-D table indexed `[row, interaction]` row-major.
+/// A 2-D table indexed `[row, interaction]` row-major.  The
+/// inner `Vec` has length `(1 << num_row_variables) * (1 << num_interaction_variables)`.
 ///
-/// Storage layout: `cells.len() == (1 << num_row_variables) * num_interactions`.
-/// `num_interactions` is the **raw** per-chip column count (not padded
-/// to a power of two) — keeping storage small for chips with few
-/// interactions while still letting the GKR sumcheck virtually pad to
-/// `2^num_interaction_variables` cells via zero/one fill at access
-/// time (mirrors SP1's `PaddedMle` pattern; see
-/// `/tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs:222-242`).
-///
-/// `num_interaction_variables` is the log₂ of the per-chip padded width
-/// (`num_interactions.next_power_of_two().trailing_zeros()`) — used as
-/// metadata for the row-only GKR's per-chip dimension reporting.  The
-/// LAYER's `num_interaction_variables` is the global aggregate
-/// (computed in `first_layer`) and may exceed any single chip's value.
+/// Replaces the `PaddedMle<F>` for our needs: we don't carry the
+/// padding lazily, we just resize-fill at construction time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowMajorTable<F> {
-    /// Cells in row-major layout: `cells[row * num_interactions + col]`.
+    /// Cells in row-major layout: `cells[row * (1 << num_interaction_variables) + int]`.
     pub cells: Vec<F>,
     /// log₂ of row count.
     pub num_row_variables: usize,
-    /// log₂ of `num_interactions.next_power_of_two()` — virtual padded
-    /// column dimension for sumcheck purposes.
+    /// log₂ of interaction count.
     pub num_interaction_variables: usize,
-    /// Raw per-chip column count (= number of interactions in this
-    /// chip's lookup set).  Storage stride.  Always ≤ `1 << num_interaction_variables`.
-    pub num_interactions: usize,
 }
 
 impl<F: Clone> RowMajorTable<F> {
-    /// Build a table of `2^num_row_variables × num_interactions` cells
-    /// filled with `fill`.  `num_interaction_variables` is derived as
-    /// `log₂(num_interactions.next_power_of_two())`.
-    #[must_use]
-    pub fn filled_raw(
-        num_row_variables: usize,
-        num_interactions: usize,
-        fill: F,
-    ) -> Self {
-        let total = (1usize << num_row_variables) * num_interactions;
-        let num_interaction_variables =
-            num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
-        Self {
-            cells: vec![fill; total],
-            num_row_variables,
-            num_interaction_variables,
-            num_interactions,
-        }
-    }
-
-    /// Build a table where storage width equals the virtual padded
-    /// width (`num_interactions = 1 << num_interaction_variables`).
-    /// Compatibility constructor for callers that previously used the
-    /// pow2-storage layout.
+    /// Build a table of size `2^num_row_variables × 2^num_interaction_variables`
+    /// filled with `fill`.
     #[must_use]
     pub fn filled(
         num_row_variables: usize,
         num_interaction_variables: usize,
         fill: F,
     ) -> Self {
-        let num_interactions = 1usize << num_interaction_variables;
-        let total = (1usize << num_row_variables) * num_interactions;
+        let total = (1usize << num_row_variables) * (1usize << num_interaction_variables);
         Self {
             cells: vec![fill; total],
             num_row_variables,
             num_interaction_variables,
-            num_interactions,
         }
     }
 
     /// Linear `[row, interaction] -> idx` mapping for row-major storage.
-    /// Raw indexing — `interaction` must be `< num_interactions`.
     #[inline]
     #[must_use]
     pub fn idx(&self, row: usize, interaction: usize) -> usize {
         debug_assert!(row < (1 << self.num_row_variables));
-        debug_assert!(interaction < self.num_interactions);
-        row * self.num_interactions + interaction
+        debug_assert!(interaction < (1 << self.num_interaction_variables));
+        row * (1 << self.num_interaction_variables) + interaction
     }
 
-    /// Read a cell at `[row, interaction]` — raw indexing
-    /// (no virtual padding).
+    /// Read a cell.
     #[inline]
     #[must_use]
     pub fn get(&self, row: usize, interaction: usize) -> &F {
         &self.cells[self.idx(row, interaction)]
     }
 
-    /// Mutable cell access — raw indexing.
+    /// Mutable cell access.
     #[inline]
     pub fn set(&mut self, row: usize, interaction: usize, value: F) {
         let i = self.idx(row, interaction);
         self.cells[i] = value;
     }
 
-    /// log₂ of the total virtual cell count
-    /// (`num_row_variables + num_interaction_variables`).
+    /// log₂ of the total cell count.
     #[inline]
     #[must_use]
     pub fn num_variables(&self) -> usize {

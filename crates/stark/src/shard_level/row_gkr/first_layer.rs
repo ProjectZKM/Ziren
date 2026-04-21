@@ -238,27 +238,29 @@ where
         let (n_upper, n_lower) = split_row_msb(&numer_padded, num_interactions, num_row_variables);
         let (d_upper, d_lower) = split_row_msb(&denom_padded, num_interactions, num_row_variables);
 
-        // Encode each half as a `RowMajorTable` with raw per-chip
-        // `num_interactions` storage (no per-chip column padding —
-        // SP1's `PaddedMle` pattern; padding is virtual via
-        // `num_interaction_variables` metadata).  Layer-wide global
-        // `num_interaction_variables` is computed below from
-        // `total_interactions` (sum of per-chip raw counts).
+        // Encode each half as a `RowMajorTable` with non-power-of-two
+        // interaction count.  We expose `num_interaction_variables`
+        // as a fictional "ceil log₂" — accessors still index by raw
+        // column count via `idx(row, col)`.
         let log_int_padded = num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
         let make_table = |cells: Vec<F>| -> RowMajorTable<F> {
+            let mut padded = cells;
+            // Each row's interaction slots get padded out to
+            // `2^log_int_padded` so `RowMajorTable::idx` math works.
+            padded = pad_row_cols(padded, num_interactions, num_row_variables - 1, log_int_padded, F::ZERO);
             RowMajorTable {
-                cells,
+                cells: padded,
                 num_row_variables: num_row_variables - 1,
                 num_interaction_variables: log_int_padded,
-                num_interactions,
             }
         };
         let make_table_ef = |cells: Vec<EF>| -> RowMajorTable<EF> {
+            let mut padded = cells;
+            padded = pad_row_cols(padded, num_interactions, num_row_variables - 1, log_int_padded, EF::ONE);
             RowMajorTable {
-                cells,
+                cells: padded,
                 num_row_variables: num_row_variables - 1,
                 num_interaction_variables: log_int_padded,
-                num_interactions,
             }
         };
 

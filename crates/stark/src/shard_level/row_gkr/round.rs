@@ -89,15 +89,11 @@ where
         .zip(layer.numerator_1.iter())
         .zip(layer.denominator_1.iter())
     {
-        // Use the per-chip RAW interaction count (storage stride),
-        // not the per-chip log2-padded value.  Sum-of-raw fits inside
-        // the layer's `1 << num_interaction_variables` axis (=
-        // `total_interactions.next_power_of_two()`).
-        let chip_cols = n0_chip.num_interactions;
+        let chip_cols = 1usize << n0_chip.num_interaction_variables;
         debug_assert_eq!(n0_chip.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(d0_chip.num_interactions, n0_chip.num_interactions);
-        debug_assert_eq!(n1_chip.num_interactions, n0_chip.num_interactions);
-        debug_assert_eq!(d1_chip.num_interactions, n0_chip.num_interactions);
+        debug_assert_eq!(d0_chip.num_interaction_variables, n0_chip.num_interaction_variables);
+        debug_assert_eq!(n1_chip.num_interaction_variables, n0_chip.num_interaction_variables);
+        debug_assert_eq!(d1_chip.num_interaction_variables, n0_chip.num_interaction_variables);
 
         if offset + chip_cols > cols {
             panic!(
@@ -624,12 +620,7 @@ mod tests {
         // 2-chip, 2-var layer for a meatier test.
         let mut make_table = |cells: &[u32]| -> RowMajorTable<EF> {
             let values: Vec<EF> = cells.iter().map(|&x| EF::from_u32(x)).collect();
-            RowMajorTable {
-                cells: values,
-                num_row_variables: 1,
-                num_interaction_variables: 0,
-                num_interactions: 1,
-            }
+            RowMajorTable { cells: values, num_row_variables: 1, num_interaction_variables: 0 }
         };
         let layer = LogUpGkrCpuLayer {
             numerator_0: vec![make_table(&[1, 2]), make_table(&[3, 4])],

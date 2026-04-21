@@ -123,53 +123,17 @@ where
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
 
-    // Step 2.5: observe circuit_output into the challenger before
-    // sampling eval_point.  Mirrors `verify_logup_gkr_host` lines
-    // 722-731 — without this the prover's transcript skips the
-    // observation step the verifier performs, and round 0's
-    // claimed_sum check fails.
-    use p3_field::BasedVectorSpace;
-    for &n in output.numerator.iter() {
-        for basis in n.as_basis_coefficients_slice() {
-            challenger.observe(*basis);
-        }
-    }
-    for &d in output.denominator.iter() {
-        for basis in d.as_basis_coefficients_slice() {
-            challenger.observe(*basis);
-        }
-    }
-
     // Step 3: sample first eval_point (dim = num_interaction_variables + 1).
     let mut eval_point: Vec<EF> = (0..(num_interaction_variables + 1))
         .map(|_| challenger.sample_algebra_element::<EF>())
         .collect();
 
     // Step 4: initial claim = output MLE evaluation at eval_point.
-    //
-    // Use the "evaluate_mle_host" convention (variable k at bit k of idx,
-    // LSB-first) — `eq_mle_table` uses the opposite (MSB-first) convention
-    // and would produce a different value for the same MLE.  The verifier
-    // uses `evaluate_mle_host` (verifier.rs:506); the prover must mirror.
-    fn evaluate_mle<EF: Field + Copy>(mle_evals: &[EF], point: &[EF]) -> EF {
-        let mut weights: Vec<EF> = vec![EF::ONE];
-        for &r in point {
-            let old_len = weights.len();
-            let mut next = vec![EF::ZERO; old_len * 2];
-            for j in 0..old_len {
-                let prod = weights[j] * r;
-                next[j] = weights[j] - prod;
-                next[j + old_len] = prod;
-            }
-            weights = next;
-        }
-        mle_evals
-            .iter()
-            .zip(weights.iter())
-            .fold(EF::ZERO, |acc, (v, w)| acc + *v * *w)
-    }
-    let mut numerator_eval: EF = evaluate_mle::<EF>(&output.numerator, &eval_point);
-    let mut denominator_eval: EF = evaluate_mle::<EF>(&output.denominator, &eval_point);
+    let eq_first = eq_mle_table::<EF>(&eval_point);
+    let mut numerator_eval: EF =
+        eq_first.iter().zip(output.numerator.iter()).map(|(e, v)| *e * *v).sum();
+    let mut denominator_eval: EF =
+        eq_first.iter().zip(output.denominator.iter()).map(|(e, v)| *e * *v).sum();
 
     // Step 5: walk layers bottom-up.  `circuit.layers` is stored
     // top-down (first = largest num_row_vars); `pop_bottom` pops the
