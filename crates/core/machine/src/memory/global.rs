@@ -380,13 +380,31 @@ where
 
         // Constrain the is_prev_addr_zero operation only in the first row.
         let is_first_row = builder.is_first_row();
-        IsZeroOperation::<AB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
+        IsZeroOperation::<AB::F>::eval(
+            builder,
+            prev_addr,
+            local.is_prev_addr_zero,
+            is_first_row.clone(),
+        );
+        // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
+        // its default trace value. Constraining it prevents unconstrained witness drift in
+        // extraction phases like boundary/last-row.
+        builder.when_not(is_first_row.clone()).assert_zero(local.is_prev_addr_zero.inverse);
+        builder.when_not(is_first_row.clone()).assert_zero(local.is_prev_addr_zero.result);
+
+        // When prev_addr == 0 in the first row, canonicalize the helper witness to match trace
+        // population (inverse = 0).
+        builder
+            .when_first_row()
+            .when(local.is_prev_addr_zero.result)
+            .assert_zero(local.is_prev_addr_zero.inverse);
 
         // Constrain the is_first_comp column.
         builder.assert_bool(local.is_first_comp);
         builder
             .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
+        builder.when_not(is_first_row).assert_zero(local.is_first_comp);
 
         // Ensure at least one real row.
         builder.when_first_row().assert_one(local.is_real);
