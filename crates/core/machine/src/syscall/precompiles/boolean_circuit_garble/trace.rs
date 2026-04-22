@@ -30,7 +30,11 @@ impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        BooleanCircuitGarbleCols::<u8>::picus_info()
+        let mut info = BooleanCircuitGarbleCols::<u8>::picus_info();
+        // `next` row fields are not deterministic at event boundaries (last gate -> next event/padding),
+        // so do not expose transition outputs for this chip in Picus.
+        info.transition_output_ranges.clear();
+        info
     }
 
     fn generate_dependencies(
