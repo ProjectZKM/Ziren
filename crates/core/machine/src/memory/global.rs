@@ -424,12 +424,21 @@ where
 
         // Constrain the is_prev_addr_zero operation only in the first row.
         let is_first_row = builder.is_first_row();
-        IsZeroOperation::<AB::F>::eval(
-            builder,
-            prev_addr,
-            local.is_prev_addr_zero,
-            is_first_row.clone(),
-        );
+        // Use the exact is-zero constraints inline instead of the summarized helper.
+        // This keeps the first-row witness (`is_prev_addr_zero.inverse`) fully pinned
+        // in extracted single-row Picus modules.
+        let is_prev_zero = AB::Expr::one()
+            - local.is_prev_addr_zero.inverse.into() * prev_addr.clone();
+        builder
+            .when(is_first_row.clone())
+            .assert_eq(is_prev_zero, local.is_prev_addr_zero.result);
+        builder
+            .when(is_first_row.clone())
+            .assert_bool(local.is_prev_addr_zero.result);
+        builder
+            .when(is_first_row)
+            .when(local.is_prev_addr_zero.result)
+            .assert_zero(prev_addr.clone());
         // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
         // its default trace value. Constrain this through transition `next` columns so the single
         // row case does not accidentally force first-row helpers to zero in boundary extraction.
