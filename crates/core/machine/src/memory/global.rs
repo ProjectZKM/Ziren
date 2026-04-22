@@ -372,8 +372,19 @@ where
         // - In the last real row, we need to assert that addr = last_finalize_addr.
 
         // Assert that addr < addr' when the next row is real.
-        builder.when_transition().assert_eq(next.is_next_comp, next.is_real);
-        next.lt_cols.eval(builder, &local.addr_bits.bits, &next.addr_bits.bits, next.is_next_comp);
+        //
+        // Keep these constraints transition-scoped so boundary modules don't introduce unconstrained
+        // `next`-row helper witnesses.
+        {
+            let mut transition = builder.when_transition();
+            transition.assert_eq(next.is_next_comp, next.is_real);
+            next.lt_cols.eval(
+                &mut transition,
+                &local.addr_bits.bits,
+                &next.addr_bits.bits,
+                next.is_next_comp,
+            );
+        }
 
         // Assert that the real rows are all padded to the top.
         builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
@@ -434,6 +445,14 @@ where
             .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
         builder.when_not(is_first_row).assert_zero(local.is_first_comp);
+
+        // Canonicalize local less-than helper flags when no local comparison is requested.
+        // This is exactly the case `is_first_comp = 0` and `is_next_comp = 0`.
+        let no_local_lt_check =
+            (AB::Expr::one() - local.is_first_comp) * (AB::Expr::one() - local.is_next_comp);
+        for flag in local.lt_cols.bit_flags.iter() {
+            builder.assert_zero(no_local_lt_check.clone() * (*flag));
+        }
 
         // Ensure at least one real row.
         builder.when_first_row().assert_one(local.is_real);

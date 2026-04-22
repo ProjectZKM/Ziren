@@ -9,7 +9,7 @@ use zkm_core_executor::{
     ByteOpcode,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
+use zkm_stark::air::ZKMAirBuilder;
 use zkm_stark::Word;
 
 /// Operation columns for verifying that an element is within the range `[0, modulus)`.
@@ -321,7 +321,7 @@ impl<F: PrimeField32, const N: usize> AssertLtColsBits<F, N> {
 
 impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
     pub fn eval<
-        AB: ZKMAirBuilder<Var = V>,
+        AB: AirBuilder<Var = V>,
         Ea: Into<AB::Expr> + Clone,
         Eb: Into<AB::Expr> + Clone,
     >(
@@ -377,10 +377,10 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
             a_comparison_bit = a_comparison_bit.clone() + a_bit.clone() * flag;
             b_comparison_bit = b_comparison_bit.clone() + b_bit.clone() * flag;
 
-            builder
-                .when(is_real.clone())
-                .when_not(is_inequality_visited.clone())
-                .assert_eq(a_bit.clone(), b_bit.clone());
+            builder.when(is_real.clone()).assert_zero(
+                (AB::Expr::one() - is_inequality_visited.clone())
+                    * (a_bit.clone() - b_bit.clone()),
+            );
         }
 
         builder.when(is_real.clone()).assert_eq(a_comparison_bit, AB::F::zero());
