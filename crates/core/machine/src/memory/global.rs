@@ -223,7 +223,7 @@ pub struct MemoryInitCols<T: Copy> {
     pub timestamp: T,
 
     /// The address of the memory access.
-    #[picus(input)]
+    #[picus(input, transition_input)]
     pub addr: T,
 
     /// Comparison assertions for address to be strictly increasing.
@@ -233,6 +233,7 @@ pub struct MemoryInitCols<T: Copy> {
     pub addr_bits: KoalaBearBitDecomposition<T>,
 
     /// The value of the memory access.
+    #[picus(transition_input)]
     pub value: [T; 32],
 
     /// Whether the memory access is a real access.
