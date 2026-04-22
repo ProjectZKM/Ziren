@@ -215,12 +215,15 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
 #[repr(C)]
 pub struct MemoryInitCols<T: Copy> {
     /// The shard number of the memory access.
+    #[picus(input)]
     pub shard: T,
 
     /// The timestamp of the memory access.
+    #[picus(input)]
     pub timestamp: T,
 
     /// The address of the memory access.
+    #[picus(input)]
     pub addr: T,
 
     /// Comparison assertions for address to be strictly increasing.
@@ -427,10 +430,14 @@ where
             is_first_row.clone(),
         );
         // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
-        // its default trace value. Constraining it prevents unconstrained witness drift in
-        // extraction phases like boundary/last-row.
-        builder.when_not(is_first_row.clone()).assert_zero(local.is_prev_addr_zero.inverse);
-        builder.when_not(is_first_row.clone()).assert_zero(local.is_prev_addr_zero.result);
+        // its default trace value. Constrain this through transition `next` columns so the single
+        // row case does not accidentally force first-row helpers to zero in boundary extraction.
+        builder
+            .when_transition()
+            .assert_zero(next.is_prev_addr_zero.inverse);
+        builder
+            .when_transition()
+            .assert_zero(next.is_prev_addr_zero.result);
 
         // When prev_addr == 0 in the first row, canonicalize the helper witness to match trace
         // population (inverse = 0).
@@ -444,7 +451,7 @@ where
         builder
             .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
-        builder.when_not(is_first_row).assert_zero(local.is_first_comp);
+        builder.when_transition().assert_zero(next.is_first_comp);
 
         // Canonicalize local less-than helper flags when no local comparison is requested.
         // This is exactly the case `is_first_comp = 0` and `is_next_comp = 0`.
