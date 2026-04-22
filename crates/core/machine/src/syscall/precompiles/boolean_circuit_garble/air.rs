@@ -184,13 +184,13 @@ impl BooleanCircuitGarbleChip {
         );
         builder
             .when(local.is_first_row)
-            .assert_zero(local.checks[0] + local.checks[1] + local.checks[2] + local.checks[3]);
+            .assert_zero(local.checks[0] + local.checks[1] + local.checks[2] + local.checks_acc);
         builder
             .when(local.is_first_gate)
-            .assert_eq(local.checks[3], local.checks[2]);
+            .assert_eq(local.checks_acc, local.checks[2]);
         builder
             .when(local.not_last_gate * local.is_gate)
-            .assert_eq(next.checks[3], local.checks[3] * next.checks[2]);
+            .assert_eq(next.checks_acc, local.checks_acc * next.checks[2]);
     }
 
     fn eval_transition<AB: AirBuilder>(

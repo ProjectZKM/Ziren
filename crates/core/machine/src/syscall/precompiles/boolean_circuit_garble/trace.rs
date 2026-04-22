@@ -212,7 +212,7 @@ impl BooleanCircuitGarbleChip {
             cols.checks[0] = F::from_canonical_u32(check_u32s[1]);
             cols.checks[1] = F::from_canonical_u32(check_u32s[2]);
             cols.checks[2] = F::from_canonical_u32(check_u32s[3]);
-            cols.checks[3] = F::from_canonical_u32(check_u32s[3] * (pre_check as u32));
+            cols.checks_acc = F::from_canonical_u32(check_u32s[3] * (pre_check as u32));
             pre_check = pre_check && (check_u32s[3] == 1);
 
             // if this is the last gate, write result

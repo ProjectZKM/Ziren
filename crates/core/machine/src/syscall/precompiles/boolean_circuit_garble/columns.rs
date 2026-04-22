@@ -29,7 +29,9 @@ pub struct BooleanCircuitGarbleCols<T> {
     pub aux2: [XorOperation<T>; 4],                   // h1 ^ h0 ^ label_b
     pub aux3: [XorOperation<T>; 4],                   // h1 ^ h0 ^ label_b ^ delta
     pub is_equal_words: [IsEqualWordOperation<T>; 4], // computed ciphertext == expected_ciphertext
-    pub checks: [T; 4], // check result for each pair of is_equal_words
+    pub checks: [T; 3], // row-local chaining result
+    #[picus(transition_input, transition_output)]
+    pub checks_acc: T, // cross-row accumulated check state
 }
 
 pub const NUM_BOOLEAN_CIRCUIT_GARBLE_COLS: usize = size_of::<BooleanCircuitGarbleCols<u8>>();
