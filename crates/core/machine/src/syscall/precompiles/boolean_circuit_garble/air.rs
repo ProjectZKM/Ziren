@@ -57,6 +57,7 @@ impl BooleanCircuitGarbleChip {
         builder.assert_bool(local.is_first_gate);
         builder.assert_bool(local.not_last_gate);
         builder.assert_bool(local.is_gate);
+        builder.assert_bool(local.checks_acc);
         builder.assert_eq(local.is_first_gate * local.is_gate, local.is_first_gate);
         builder.assert_eq(local.is_last_gate * local.is_gate, local.is_last_gate);
         builder.assert_eq(local.not_last_gate * local.is_gate, local.not_last_gate);
@@ -115,7 +116,7 @@ impl BooleanCircuitGarbleChip {
         // The syscall writes a boolean result (as u32) at the final gate.
         builder
             .when(local.is_last_gate)
-            .assert_eq(local.result_mem.access.value[0], local.checks_acc);
+            .assert_eq(local.result_mem.access.value[0], local.checks_acc * local.checks[2]);
         builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[1]);
         builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[2]);
         builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[3]);
@@ -190,13 +191,13 @@ impl BooleanCircuitGarbleChip {
             local.checks[2],
             local.is_equal_words[3].is_diff_zero.result * local.checks[1],
         );
-        builder
-            .when(local.is_first_row)
-            .assert_zero(local.checks[0] + local.checks[1] + local.checks[2] + local.checks_acc);
-        builder.when(local.is_first_gate).assert_eq(local.checks_acc, local.checks[2]);
+        builder.when(local.is_first_row).assert_zero(local.checks[0]);
+        builder.when(local.is_first_row).assert_zero(local.checks[1]);
+        builder.when(local.is_first_row).assert_zero(local.checks[2]);
+        builder.when(local.is_first_row).assert_one(local.checks_acc);
         builder
             .when(local.not_last_gate * local.is_gate)
-            .assert_eq(next.checks_acc, local.checks_acc * next.checks[2]);
+            .assert_eq(next.checks_acc, local.checks_acc * local.checks[2]);
     }
 
     fn eval_transition<AB: AirBuilder>(
@@ -235,6 +236,9 @@ impl BooleanCircuitGarbleChip {
         builder.when(local.is_first_row).assert_eq(next.shard, local.shard);
         builder.when(local.is_first_row).assert_eq(next.clk, local.clk);
         builder.when(local.is_first_row).assert_eq(next.gates_num, local.gates_num);
+        builder.when(local.is_first_row).assert_zero(next.is_first_row);
+        builder.when(local.is_first_row).assert_eq(next.is_gate, next.is_first_gate);
+        builder.when(local.is_first_row).assert_eq(next.checks_acc, next.is_gate);
         for i in 0..4 {
             for j in 0..4 {
                 builder.when(local.is_first_row).assert_eq(local.delta[i][j], next.delta[i][j]);
