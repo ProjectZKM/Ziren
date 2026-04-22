@@ -421,14 +421,13 @@ where
             .map(|(i, bit)| bit.clone() * AB::F::from_wrapped_u32(1 << i))
             .sum::<AB::Expr>();
 
-        // Constrain first-row-only helpers using a structural selector:
-        // `is_real && !is_next_comp` is true exactly on the first real row in this trace layout.
-        let is_first_real_row = local.is_real * (AB::Expr::one() - local.is_next_comp);
+        // Constrain the is_prev_addr_zero operation only in the first row.
+        let is_first_row = builder.is_first_row();
         IsZeroOperation::<AB::F>::eval(
             builder,
             prev_addr,
             local.is_prev_addr_zero,
-            is_first_real_row.clone(),
+            is_first_row.clone(),
         );
         // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
         // its default trace value. Constrain this through transition `next` columns so the single
@@ -443,16 +442,14 @@ where
         // When prev_addr == 0 in the first row, canonicalize the helper witness to match trace
         // population (inverse = 0).
         builder
-            .when(local.is_real)
-            .when_not(local.is_next_comp)
+            .when_first_row()
             .when(local.is_prev_addr_zero.result)
             .assert_zero(local.is_prev_addr_zero.inverse);
 
         // Constrain the is_first_comp column.
         builder.assert_bool(local.is_first_comp);
         builder
-            .when(local.is_real)
-            .when_not(local.is_next_comp)
+            .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
         builder.when_transition().assert_zero(next.is_first_comp);
         // For all non-first real rows (`is_next_comp = 1` in this trace), first-row-only helper
