@@ -52,6 +52,11 @@ impl BooleanCircuitGarbleChip {
         builder: &mut AB,
         local: &BooleanCircuitGarbleCols<AB::Var>,
     ) {
+        // In a true single-row trace, this chip only has the prelude row
+        // (num_gates + delta read), never a gate row.
+        let single_row_phase = builder.is_first_row() * builder.is_last_row();
+        builder.when(single_row_phase).assert_one(local.is_first_row);
+
         builder.assert_bool(local.is_real);
         builder.assert_bool(local.is_first_row);
         builder.assert_bool(local.is_first_gate);
