@@ -244,6 +244,15 @@ impl BooleanCircuitGarbleChip {
         // 2) padding row (is_first_row = 0, checks_acc = 0).
         builder.when(local.is_last_gate).assert_zero(next.is_gate);
         builder.when(local.is_last_gate).assert_eq(next.checks_acc, next.is_first_row);
+        // If this is not the last gate, the next row must stay in gate-processing mode.
+        builder.when(local.not_last_gate * local.is_gate).assert_one(next.is_gate);
+        builder.when(local.not_last_gate * local.is_gate).assert_zero(next.is_first_row);
+        builder.when(local.not_last_gate * local.is_gate).assert_zero(next.is_first_gate);
+        builder
+            .when(local.not_last_gate * local.is_gate)
+            .assert_eq(next.output_address, local.output_address);
+        builder.when(local.not_last_gate * local.is_gate).assert_eq(next.shard, local.shard);
+        builder.when(local.not_last_gate * local.is_gate).assert_eq(next.clk, local.clk);
         for i in 0..4 {
             for j in 0..4 {
                 builder.when(local.is_first_row).assert_eq(local.delta[i][j], next.delta[i][j]);
