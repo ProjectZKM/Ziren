@@ -124,6 +124,10 @@ impl BooleanCircuitGarbleChip {
         builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[1]);
         builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[2]);
         builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[3]);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.prev_value[0]);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.prev_value[1]);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.prev_value[2]);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.prev_value[3]);
     }
 
     fn eval_logic_check<AB: ZKMAirBuilder>(
