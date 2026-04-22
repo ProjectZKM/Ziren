@@ -8,18 +8,28 @@ use zkm_stark::{PicusInfo, Word};
 #[derive(AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct BooleanCircuitGarbleCols<T> {
+    #[picus(transition_input)]
     pub shard: T,
+    #[picus(transition_input)]
     pub clk: T,
     pub is_real: T,
+    #[picus(transition_input)]
     pub input_address: T,
+    #[picus(transition_input)]
     pub output_address: T,
     pub is_first_row: T, // The first row contains gates_num and delt
+    #[picus(transition_input)]
     pub is_gate: T,
+    #[picus(transition_input)]
     pub is_first_gate: T,
+    #[picus(transition_input)]
     pub is_last_gate: T,
+    #[picus(transition_input)]
     pub not_last_gate: T, // from first gate -> (last - 1)-th gate
     pub gate_type: [T; 2],
+    #[picus(transition_input)]
     pub gate_id: T,
+    #[picus(transition_input)]
     pub gates_num: T,
     #[picus(transition_input, transition_output)]
     pub delta: [Word<T>; 4], // [u8; 16]
