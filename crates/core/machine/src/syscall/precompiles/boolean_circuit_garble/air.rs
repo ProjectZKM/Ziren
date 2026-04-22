@@ -53,9 +53,13 @@ impl BooleanCircuitGarbleChip {
         local: &BooleanCircuitGarbleCols<AB::Var>,
     ) {
         builder.assert_bool(local.is_real);
+        builder.assert_bool(local.is_first_row);
         builder.assert_bool(local.is_first_gate);
         builder.assert_bool(local.not_last_gate);
         builder.assert_bool(local.is_gate);
+        builder.assert_eq(local.is_first_gate * local.is_gate, local.is_first_gate);
+        builder.assert_eq(local.is_last_gate * local.is_gate, local.is_last_gate);
+        builder.assert_eq(local.not_last_gate * local.is_gate, local.not_last_gate);
         builder.assert_zero(local.is_last_gate * local.is_first_gate);
         builder.when(local.is_gate).assert_one(local.is_last_gate + local.not_last_gate);
         builder.assert_bool(local.gate_type[0]);
@@ -179,7 +183,13 @@ impl BooleanCircuitGarbleChip {
             local.is_equal_words[3].is_diff_zero.result * local.checks[1],
         );
         builder
-            .when(local.not_last_gate)
+            .when(local.is_first_row)
+            .assert_zero(local.checks[0] + local.checks[1] + local.checks[2] + local.checks[3]);
+        builder
+            .when(local.is_first_gate)
+            .assert_eq(local.checks[3], local.checks[2]);
+        builder
+            .when(local.not_last_gate * local.is_gate)
             .assert_eq(next.checks[3], local.checks[3] * next.checks[2]);
     }
 
@@ -194,12 +204,12 @@ impl BooleanCircuitGarbleChip {
             + local.gates_input_mem[0].access.value.0[1] * bytes_shift
             + local.gates_input_mem[0].access.value.0[2] * bytes_shift * bytes_shift
             + local.gates_input_mem[0].access.value.0[3] * bytes_shift * bytes_shift * bytes_shift;
-        builder.when_first_row().assert_eq(local.gates_num, num_gates.clone());
+        builder.when(local.is_first_row).assert_eq(local.gates_num, num_gates.clone());
 
         for i in 0..4 {
             let delta_i = local.gates_input_mem[i + 1].access.value;
             for j in 0..4 {
-                builder.when_first_row().assert_eq(local.delta[i][j], delta_i[j]);
+                builder.when(local.is_first_row).assert_eq(local.delta[i][j], delta_i[j]);
             }
         }
 
