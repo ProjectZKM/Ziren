@@ -111,6 +111,14 @@ impl BooleanCircuitGarbleChip {
             &local.result_mem,
             local.is_last_gate,
         );
+
+        // The syscall writes a boolean result (as u32) at the final gate.
+        builder
+            .when(local.is_last_gate)
+            .assert_eq(local.result_mem.access.value[0], local.checks_acc);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[1]);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[2]);
+        builder.when(local.is_last_gate).assert_zero(local.result_mem.access.value[3]);
     }
 
     fn eval_logic_check<AB: ZKMAirBuilder>(
@@ -220,6 +228,22 @@ impl BooleanCircuitGarbleChip {
         builder.when(local.is_first_gate).assert_zero(local.gate_id);
         builder.when(local.is_last_gate).assert_eq(local.gates_num - AB::F::ONE, local.gate_id);
         builder.when(local.not_last_gate).assert_eq(local.gate_id + AB::F::ONE, next.gate_id);
+
+        // Bridge the prelude row (num_gates + delta read) to the first gate row.
+        builder
+            .when(local.is_first_row)
+            .assert_eq(next.input_address, local.input_address + AB::F::from_canonical_u32(20));
+        builder.when(local.is_first_row).assert_eq(next.output_address, local.output_address);
+        builder.when(local.is_first_row).assert_eq(next.shard, local.shard);
+        builder.when(local.is_first_row).assert_eq(next.clk, local.clk);
+        builder.when(local.is_first_row).assert_eq(next.gates_num, local.gates_num);
+        for i in 0..4 {
+            for j in 0..4 {
+                builder
+                    .when(local.is_first_row)
+                    .assert_eq(local.delta[i][j], next.delta[i][j]);
+            }
+        }
 
         builder.when(local.not_last_gate * local.is_gate).assert_eq(
             local.input_address + AB::F::from_canonical_usize(GATE_INFO_BYTES * 4),
