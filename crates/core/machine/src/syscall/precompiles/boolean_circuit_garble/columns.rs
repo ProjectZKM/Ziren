@@ -32,6 +32,8 @@ pub struct BooleanCircuitGarbleCols<T> {
     pub checks: [T; 3],                               // row-local chaining result
     #[picus(transition_input, transition_output)]
     pub checks_acc: T, // cross-row accumulated check state
+    pub result_bit: T, // current-row boolean result: checks_acc * checks[2]
+    pub is_transition_continuation: T, // whether next row must stay in same gate-processing phase
 }
 
 pub const NUM_BOOLEAN_CIRCUIT_GARBLE_COLS: usize = size_of::<BooleanCircuitGarbleCols<u8>>();

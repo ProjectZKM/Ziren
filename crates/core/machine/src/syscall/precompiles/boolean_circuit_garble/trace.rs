@@ -34,28 +34,6 @@ impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
         // `next` row fields are not deterministic at event boundaries (last gate -> next event/padding),
         // so do not expose transition outputs for this chip in Picus.
         info.transition_output_ranges.clear();
-
-        // Expose gate-control state as explicit inputs so Picus does not treat control-dependent
-        // outputs (e.g. last-gate memory write) as nondeterministic.
-        for name in [
-            "is_first_row",
-            "is_gate",
-            "is_first_gate",
-            "is_last_gate",
-            "not_last_gate",
-            "gate_id",
-            "gates_num",
-        ] {
-            if let Some((start, end)) = info.name_to_colrange.get(name).copied() {
-                let range = (start, end, name.to_string());
-                if !info.input_ranges.contains(&range) {
-                    info.input_ranges.push(range.clone());
-                }
-                if !info.transition_input_ranges.contains(&range) {
-                    info.transition_input_ranges.push(range);
-                }
-            }
-        }
         info
     }
 
@@ -151,6 +129,8 @@ impl BooleanCircuitGarbleChip {
             cols.output_address = F::from_canonical_u32(event.output_addr);
             cols.gates_num = F::from_canonical_u32(gates_num as u32);
             cols.checks_acc = F::ONE;
+            cols.result_bit = F::ZERO;
+            cols.is_transition_continuation = F::ZERO;
             for i in 0..4 {
                 let delta_i_bytes = event.delta[i].to_le_bytes();
                 cols.delta[i]
@@ -181,6 +161,7 @@ impl BooleanCircuitGarbleChip {
             cols.is_first_gate = F::from_bool(gate_id == 0);
             cols.is_last_gate = F::from_bool(gate_id == gates_num - 1);
             cols.not_last_gate = F::from_bool(gate_id != gates_num - 1);
+            cols.is_transition_continuation = F::from_bool(gate_id != gates_num - 1);
             cols.gate_id = F::from_canonical_u32(gate_id as u32);
             cols.gates_num = F::from_canonical_u32(gates_num as u32);
 
@@ -240,6 +221,7 @@ impl BooleanCircuitGarbleChip {
             cols.checks[1] = F::from_canonical_u32(check_u32s[2]);
             cols.checks[2] = F::from_canonical_u32(check_u32s[3]);
             cols.checks_acc = F::from_bool(pre_check);
+            cols.result_bit = F::from_canonical_u32((pre_check as u32) * check_u32s[3]);
             pre_check = pre_check && (check_u32s[3] == 1);
 
             // if this is the last gate, write result
