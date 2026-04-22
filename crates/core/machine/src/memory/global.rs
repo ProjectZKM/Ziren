@@ -452,6 +452,17 @@ where
             .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
         builder.when_transition().assert_zero(next.is_first_comp);
+        // For all non-first real rows (`is_next_comp = 1` in this trace), first-row-only helper
+        // columns must be zero.
+        builder
+            .when(local.is_next_comp)
+            .assert_zero(local.is_prev_addr_zero.inverse);
+        builder
+            .when(local.is_next_comp)
+            .assert_zero(local.is_prev_addr_zero.result);
+        builder
+            .when(local.is_next_comp)
+            .assert_zero(local.is_first_comp);
 
         // Canonicalize local less-than helper flags when no local comparison is requested.
         // This is exactly the case `is_first_comp = 0` and `is_next_comp = 0`.
