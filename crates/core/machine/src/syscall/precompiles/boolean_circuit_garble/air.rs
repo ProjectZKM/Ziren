@@ -239,6 +239,11 @@ impl BooleanCircuitGarbleChip {
         builder.when(local.is_first_row).assert_zero(next.is_first_row);
         builder.when(local.is_first_row).assert_eq(next.is_gate, next.is_first_gate);
         builder.when(local.is_first_row).assert_eq(next.checks_acc, next.is_gate);
+        // After the last gate of an event, the next row is either:
+        // 1) first row of the next event (is_first_row = 1, checks_acc = 1), or
+        // 2) padding row (is_first_row = 0, checks_acc = 0).
+        builder.when(local.is_last_gate).assert_zero(next.is_gate);
+        builder.when(local.is_last_gate).assert_eq(next.checks_acc, next.is_first_row);
         for i in 0..4 {
             for j in 0..4 {
                 builder.when(local.is_first_row).assert_eq(local.delta[i][j], next.delta[i][j]);
