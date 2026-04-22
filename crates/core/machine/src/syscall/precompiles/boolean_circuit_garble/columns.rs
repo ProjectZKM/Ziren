@@ -29,7 +29,6 @@ pub struct BooleanCircuitGarbleCols<T> {
     pub aux2: [XorOperation<T>; 4],                   // h1 ^ h0 ^ label_b
     pub aux3: [XorOperation<T>; 4],                   // h1 ^ h0 ^ label_b ^ delta
     pub is_equal_words: [IsEqualWordOperation<T>; 4], // computed ciphertext == expected_ciphertext
-    #[picus(transition_input, transition_output)]
     pub checks: [T; 4], // check result for each pair of is_equal_words
 }
 

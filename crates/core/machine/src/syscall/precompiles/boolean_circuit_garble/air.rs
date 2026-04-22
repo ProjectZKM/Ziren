@@ -203,10 +203,9 @@ impl BooleanCircuitGarbleChip {
             }
         }
 
-        let gate_type_value = local.gate_type[0] * AB::Expr::zero() + local.gate_type[1];
-        builder
-            .when(local.is_gate)
-            .assert_eq(gate_type_value * AB::Expr::from_canonical_u32(OR_GATE_ID), num_gates);
+        let gate_type_value =
+            local.gate_type[0] + local.gate_type[1] * AB::Expr::from_canonical_u32(OR_GATE_ID);
+        builder.when(local.is_gate).assert_eq(gate_type_value, num_gates);
 
         builder.when(local.is_first_gate).assert_zero(local.gate_id);
         builder.when(local.is_last_gate).assert_eq(local.gates_num - AB::F::ONE, local.gate_id);
