@@ -34,6 +34,28 @@ impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
         // `next` row fields are not deterministic at event boundaries (last gate -> next event/padding),
         // so do not expose transition outputs for this chip in Picus.
         info.transition_output_ranges.clear();
+
+        // Expose gate-control state as explicit inputs so Picus does not treat control-dependent
+        // outputs (e.g. last-gate memory write) as nondeterministic.
+        for name in [
+            "is_first_row",
+            "is_gate",
+            "is_first_gate",
+            "is_last_gate",
+            "not_last_gate",
+            "gate_id",
+            "gates_num",
+        ] {
+            if let Some((start, end)) = info.name_to_colrange.get(name).copied() {
+                let range = (start, end, name.to_string());
+                if !info.input_ranges.contains(&range) {
+                    info.input_ranges.push(range.clone());
+                }
+                if !info.transition_input_ranges.contains(&range) {
+                    info.transition_input_ranges.push(range);
+                }
+            }
+        }
         info
     }
 
