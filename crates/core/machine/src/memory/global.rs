@@ -265,6 +265,35 @@ where
         for i in 0..32 {
             builder.assert_bool(local.value[i]);
         }
+        // Canonicalize padded rows to the default zero trace shape so witness columns cannot
+        // drift in extraction modules.
+        builder.when_not(local.is_real).assert_zero(local.shard);
+        builder.when_not(local.is_real).assert_zero(local.timestamp);
+        builder.when_not(local.is_real).assert_zero(local.addr);
+        builder.when_not(local.is_real).assert_zero(local.is_next_comp);
+        for i in 0..32 {
+            builder.when_not(local.is_real).assert_zero(local.value[i]);
+            builder.when_not(local.is_real).assert_zero(local.addr_bits.bits[i]);
+            builder.when_not(local.is_real).assert_zero(local.lt_cols.bit_flags[i]);
+        }
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_2);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_3);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_4);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_5);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_6);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_7);
 
         let mut byte1 = AB::Expr::zero();
         let mut byte2 = AB::Expr::zero();
