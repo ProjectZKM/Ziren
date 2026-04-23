@@ -461,6 +461,11 @@ where
         builder
             .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
+        // In the degenerate single-row case, force the row to be the `%x0` address case.
+        // This removes a Picus-only underconstrained branch where `addr` can drift without inputs.
+        builder
+            .when(builder.is_first_row() * builder.is_last_row())
+            .assert_zero(local.is_first_comp);
         builder.when_transition().assert_zero(next.is_first_comp);
         // For all non-first real rows (`is_next_comp = 1` in this trace), first-row-only helper
         // columns must be zero.
