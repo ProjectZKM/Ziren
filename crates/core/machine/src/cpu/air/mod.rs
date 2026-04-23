@@ -92,6 +92,11 @@ where
         builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_b);
         builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_c);
         builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.is_rw_a);
+        builder.when(not_real.clone()).assert_zero(local.is_check_memory);
+        builder.when(not_real.clone()).assert_zero(local.is_halt);
+        builder.when(not_real.clone()).assert_zero(local.is_sequential);
+        builder.when(not_real.clone()).assert_zero(local.next_pc);
+        builder.when(not_real).assert_zero(local.next_next_pc);
     }
 }
 
