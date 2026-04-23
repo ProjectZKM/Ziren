@@ -240,6 +240,16 @@ where
         // For a syscall global lookup, `kind = LookupKind::Syscall` is used.
         // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is also known to be a `u8` value.
         // Note that `local.is_real` is constrained to be boolean in `eval_single_digest`.
+        // Enforce local consistency for direction selectors:
+        // - each selector is boolean;
+        // - real rows choose exactly one direction; padded rows choose none.
+        builder.assert_bool(local.is_receive);
+        builder.assert_bool(local.is_send);
+        builder.assert_eq(
+            local.is_receive + local.is_send,
+            local.is_real.into(),
+        );
+
         builder.receive(
             AirLookup::new(
                 vec![
