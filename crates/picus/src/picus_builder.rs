@@ -656,7 +656,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                         }
                     }
                 } else if v == (ByteOpcode::LTU as u64) {
-                    let lt_const = PicusConstraint::new_lt(values[2].clone(), values[3].clone());
+                    // Byte lookup values are laid out as: [opcode, a1, a2, b, c].
+                    // For LTU, a1 should encode (b < c), so compare values[3] and values[4].
+                    let lt_const = PicusConstraint::new_lt(values[3].clone(), values[4].clone());
                     if let PicusExpr::Const(1) = values[1] {
                         self.picus_module.constraints.push(lt_const);
                     } else {
