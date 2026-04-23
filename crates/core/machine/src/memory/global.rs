@@ -215,11 +215,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
 #[repr(C)]
 pub struct MemoryInitCols<T: Copy> {
     /// The shard number of the memory access.
-    #[picus(input)]
+    #[picus(input, transition_input)]
     pub shard: T,
 
     /// The timestamp of the memory access.
-    #[picus(input)]
+    #[picus(input, transition_input)]
     pub timestamp: T,
 
     /// The address of the memory access.
