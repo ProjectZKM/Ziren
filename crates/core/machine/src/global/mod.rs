@@ -54,6 +54,7 @@ pub struct GlobalChip;
 #[repr(C)]
 pub struct GlobalCols<T: Copy> {
     pub message: [T; 7],
+    #[picus(output)]
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
     #[picus(selector)]
