@@ -104,6 +104,10 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
             !shard.get_precompile_events(SyscallCode::SYS_LINUX).is_empty()
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl SysLinuxChip {
