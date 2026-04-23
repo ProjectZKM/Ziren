@@ -665,6 +665,10 @@ where
 
         // Range check all the bytes.
         {
+            // Constrain operands to byte limbs so extracted standalone modules
+            // cannot pick non-byte witness values for word inputs.
+            builder.slice_range_check_u8(&local.b.0, is_real.clone());
+            builder.slice_range_check_u8(&local.c.0, is_real.clone());
             builder.slice_range_check_u8(&local.quotient.0, is_real.clone());
             builder.slice_range_check_u8(&local.remainder.0, is_real.clone());
 
