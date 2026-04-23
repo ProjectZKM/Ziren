@@ -57,9 +57,7 @@ pub struct GlobalCols<T: Copy> {
     #[picus(output)]
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
-    #[picus(selector)]
     pub is_receive: T,
-    #[picus(selector)]
     pub is_send: T,
     pub is_real: T,
     pub accumulation: GlobalAccumulationOperation<T, 1>,
