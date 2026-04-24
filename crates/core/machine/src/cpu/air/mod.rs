@@ -185,12 +185,6 @@ impl CpuChip {
 
         // Verify the pc, next_pc, and next_next_pc
         builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
-        // In transition rows, each real non-halt CPU row still advances by one instruction.
-        builder
-            .when_transition()
-            .when(next.is_real)
-            .when_not(local.is_halt)
-            .assert_eq(local.pc + AB::Expr::from_canonical_u32(4), local.next_pc);
         builder
             .when_transition()
             .when(next.is_real)
