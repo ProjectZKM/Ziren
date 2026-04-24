@@ -12,7 +12,9 @@ use p3_maybe_rayon::prelude::ParallelBridge;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
 use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, PrecompileEvent};
-use zkm_core_executor::{events::SyscallEvent, ByteOpcode, ExecutionRecord, Program};
+use zkm_core_executor::{
+    events::SyscallEvent, syscalls::SyscallCode, ByteOpcode, ExecutionRecord, Program,
+};
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::air::AirLookup;
 use zkm_stark::air::{LookupScope, MachineAir, PicusInfo, ZKMAirBuilder};
@@ -56,6 +58,18 @@ impl SyscallChip {
         let rb = result.to_le_bytes();
         (rb[0] as u32 + (rb[1] as u32) * 256, rb[2] as u32 + (rb[3] as u32) * 256)
     }
+
+    fn core_forwards_to_precompile(event: &SyscallEvent) -> bool {
+        let prev = event.a_record.prev_value.to_le_bytes();
+        (prev[2] == 1) || (prev[1] != 0)
+    }
+
+    fn core_checks_result(event: &SyscallEvent) -> bool {
+        let prev = event.a_record.prev_value.to_le_bytes();
+        let is_linux = prev[1] != 0;
+        let is_hint_len = event.syscall_id == SyscallCode::SYSHINTLEN.syscall_id();
+        is_linux || is_hint_len
+    }
 }
 
 /// The column layout for the chip.
@@ -93,6 +107,12 @@ pub struct SyscallCols<T: Copy> {
     /// Whether the syscall is a linux syscall.
     pub is_linux: T,
 
+    /// Whether this row participates in cross-shard forwarding (Global Syscall lookups).
+    pub is_forwarded: T,
+
+    /// Whether this row must carry syscall result half-words.
+    pub is_result_checked: T,
+
     pub is_real: T,
 }
 
@@ -118,22 +138,20 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
     ) -> Result<(), Self::Error> {
         let is_receive = self.shard_kind == SyscallShardKind::Precompile;
 
-        let event_triples: Vec<(&SyscallEvent, u32, u32)> = match self.shard_kind {
+        let event_triples: Vec<(&SyscallEvent, u32, u32, bool)> = match self.shard_kind {
             SyscallShardKind::Core => input
                 .syscall_events
                 .iter()
-                .filter(|e| {
-                    (e.a_record.prev_value.to_le_bytes()[2] == 1)
-                        || (e.a_record.prev_value.to_le_bytes()[1] != 0)
-                })
+                .filter(|e| Self::core_forwards_to_precompile(e) || Self::core_checks_result(e))
                 .map(|event| {
-                    let is_linux = event.a_record.prev_value.to_le_bytes()[1] != 0;
-                    let (rlo, rhi) = if is_linux {
+                    let is_result_checked = Self::core_checks_result(event);
+                    let is_forwarded = Self::core_forwards_to_precompile(event);
+                    let (rlo, rhi) = if is_result_checked {
                         Self::pack_result_halves(event.a_record.value)
                     } else {
                         (0, 0)
                     };
-                    (event, rlo, rhi)
+                    (event, rlo, rhi, is_forwarded)
                 })
                 .collect(),
             SyscallShardKind::Precompile => input
@@ -144,29 +162,31 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                         PrecompileEvent::Linux(le) => Self::pack_result_halves(le.v0),
                         _ => (0, 0),
                     };
-                    (event, rlo, rhi)
+                    (event, rlo, rhi, true)
                 })
                 .collect(),
         };
 
         // Emit all global events and byte lookups in a single pass.
-        for &(event, rlo, rhi) in &event_triples {
+        for &(event, rlo, rhi, is_forwarded) in &event_triples {
             let (a1_lo, a1_hi) = Self::pack_result_halves(event.arg1);
             let (a2_lo, a2_hi) = Self::pack_result_halves(event.arg2);
 
-            // Cross-shard argument linkage using collision-resistant half-word packing.
-            output.global_lookup_events.push(GlobalLookupEvent {
-                message: [event.shard, event.clk, event.syscall_id, a1_lo, a1_hi, a2_lo, a2_hi],
-                is_receive,
-                kind: LookupKind::Syscall as u8,
-            });
+            if is_forwarded {
+                // Cross-shard argument linkage using collision-resistant half-word packing.
+                output.global_lookup_events.push(GlobalLookupEvent {
+                    message: [event.shard, event.clk, event.syscall_id, a1_lo, a1_hi, a2_lo, a2_hi],
+                    is_receive,
+                    kind: LookupKind::Syscall as u8,
+                });
 
-            // Cross-shard result linkage to ensure both shards agree on the return value.
-            output.global_lookup_events.push(GlobalLookupEvent {
-                message: [event.shard, event.clk, event.syscall_id, rlo, rhi, 0, 0],
-                is_receive,
-                kind: LookupKind::SyscallResult as u8,
-            });
+                // Cross-shard result linkage to ensure both shards agree on the return value.
+                output.global_lookup_events.push(GlobalLookupEvent {
+                    message: [event.shard, event.clk, event.syscall_id, rlo, rhi, 0, 0],
+                    is_receive,
+                    kind: LookupKind::SyscallResult as u8,
+                });
+            }
 
             // U16Range checks for half-word columns (gated by is_real in the AIR).
             output.add_u16_range_check(a1_lo as u16);
@@ -224,8 +244,18 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 Some(_) => false,
                 None => syscall_event.a_record.prev_value.to_le_bytes()[1] != 0,
             };
+            let is_forwarded = match precompile_event {
+                Some(_) => true,
+                None => Self::core_forwards_to_precompile(syscall_event),
+            };
+            let is_result_checked = match precompile_event {
+                Some(_) => is_linux,
+                None => Self::core_checks_result(syscall_event),
+            };
             cols.is_linux = F::from_bool(is_linux);
-            if is_linux {
+            cols.is_forwarded = F::from_bool(is_forwarded);
+            cols.is_result_checked = F::from_bool(is_result_checked);
+            if is_result_checked {
                 let result = match precompile_event {
                     Some(PrecompileEvent::Linux(linux_event)) => linux_event.v0,
                     _ => syscall_event.a_record.value,
@@ -244,8 +274,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 .syscall_events
                 .par_iter()
                 .filter(|event| {
-                    (event.a_record.prev_value.to_le_bytes()[2] == 1)
-                        || (event.a_record.prev_value.to_le_bytes()[1] != 0)
+                    Self::core_forwards_to_precompile(event) || Self::core_checks_result(event)
                 })
                 .map(|event| row_fn(event, None))
                 .collect::<Vec<_>>(),
@@ -276,8 +305,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                         .syscall_events
                         .iter()
                         .filter(|e| {
-                            (e.a_record.prev_value.to_le_bytes()[2] == 1)
-                                || (e.a_record.prev_value.to_le_bytes()[1] != 0)
+                            Self::core_forwards_to_precompile(e) || Self::core_checks_result(e)
                         })
                         .take(1)
                         .count()
@@ -309,12 +337,16 @@ where
 
         builder.assert_bool(local.is_real);
         builder.assert_bool(local.is_linux);
+        builder.assert_bool(local.is_forwarded);
+        builder.assert_bool(local.is_result_checked);
         // is_linux can only be 1 when is_real is 1.
         builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_linux);
-        // result_lo/result_hi must be zero when is_linux is 0, so they
-        // can be used directly (degree 1) in the global lookup.
-        builder.when_not(local.is_linux).assert_zero(local.result_lo);
-        builder.when_not(local.is_linux).assert_zero(local.result_hi);
+        builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_forwarded);
+        builder.when(AB::Expr::one() - local.is_real).assert_zero(local.is_result_checked);
+        builder.when(local.is_linux).assert_one(local.is_result_checked);
+        // result_lo/result_hi are present for linux and SYSHINTLEN(core) rows only.
+        builder.when_not(local.is_result_checked).assert_zero(local.result_lo);
+        builder.when_not(local.is_result_checked).assert_zero(local.result_hi);
 
         // Derive reduced arg1/arg2 inline from half-word columns.
         // These are NOT stored as columns — saves 2 columns per row.
@@ -362,7 +394,7 @@ where
                     local.syscall_id,
                     arg1.clone(),
                     arg2.clone(),
-                    local.is_real,
+                    local.is_forwarded,
                     LookupScope::Local,
                 );
 
@@ -375,7 +407,7 @@ where
                     local.arg1_hi,
                     local.arg2_lo,
                     local.arg2_hi,
-                    local.is_linux,
+                    local.is_result_checked,
                     LookupScope::Local,
                 );
 
@@ -391,11 +423,11 @@ where
                             local.arg1_hi.into(),
                             local.arg2_lo.into(),
                             local.arg2_hi.into(),
-                            local.is_real.into() * AB::Expr::one(),
+                            local.is_forwarded.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
                         ],
-                        local.is_real.into(),
+                        local.is_forwarded.into(),
                         LookupKind::Global,
                     ),
                     LookupScope::Local,
@@ -413,11 +445,11 @@ where
                             local.result_hi.into(),
                             AB::Expr::zero(),
                             AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
+                            local.is_forwarded.into() * AB::Expr::one(),
                             local.is_real.into() * AB::Expr::zero(),
                             AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
                         ],
-                        local.is_real.into(),
+                        local.is_forwarded.into(),
                         LookupKind::Global,
                     ),
                     LookupScope::Local,
@@ -460,10 +492,10 @@ where
                             local.arg2_lo.into(),
                             local.arg2_hi.into(),
                             local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
+                            local.is_forwarded.into() * AB::Expr::one(),
                             AB::Expr::from_canonical_u8(LookupKind::Syscall as u8),
                         ],
-                        local.is_real.into(),
+                        local.is_forwarded.into(),
                         LookupKind::Global,
                     ),
                     LookupScope::Local,
@@ -481,10 +513,10 @@ where
                             AB::Expr::zero(),
                             AB::Expr::zero(),
                             local.is_real.into() * AB::Expr::zero(),
-                            local.is_real.into() * AB::Expr::one(),
+                            local.is_forwarded.into() * AB::Expr::one(),
                             AB::Expr::from_canonical_u8(LookupKind::SyscallResult as u8),
                         ],
-                        local.is_real.into(),
+                        local.is_forwarded.into(),
                         LookupKind::Global,
                     ),
                     LookupScope::Local,
