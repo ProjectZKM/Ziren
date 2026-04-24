@@ -10,7 +10,7 @@ use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
+use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir};
 
 #[cfg(feature = "sys")]
 use crate::ExpReverseBitsEvent;
@@ -357,7 +357,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
 
 impl<const DEGREE: usize> ExpReverseBitsLenChip<DEGREE> {
     pub fn eval_exp_reverse_bits_len<
-        AB: BaseAirBuilder + ExtensionAirBuilder + ZKMRecursionAirBuilder + ZKMAirBuilder,
+        AB: BaseAirBuilder + ExtensionAirBuilder + ZKMRecursionAirBuilder,
     >(
         &self,
         builder: &mut AB,
