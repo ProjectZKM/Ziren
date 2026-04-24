@@ -10,7 +10,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::{air::MachineAir, Word};
+use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use super::{
     columns::{ShaCompressCols, NUM_SHA_COMPRESS_COLS},
@@ -27,6 +27,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
 
     fn name(&self) -> String {
         "ShaCompress".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        ShaCompressCols::<u8>::picus_info()
     }
 
     fn generate_trace(
