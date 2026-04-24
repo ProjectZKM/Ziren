@@ -320,11 +320,7 @@ impl<F: PrimeField32, const N: usize> AssertLtColsBits<F, N> {
 }
 
 impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
-    pub fn eval<
-        AB: AirBuilder<Var = V>,
-        Ea: Into<AB::Expr> + Clone,
-        Eb: Into<AB::Expr> + Clone,
-    >(
+    pub fn eval<AB: AirBuilder<Var = V>, Ea: Into<AB::Expr> + Clone, Eb: Into<AB::Expr> + Clone>(
         &self,
         builder: &mut AB,
         a: &[Ea],
@@ -378,8 +374,7 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
             b_comparison_bit = b_comparison_bit.clone() + b_bit.clone() * flag;
 
             builder.when(is_real.clone()).assert_zero(
-                (AB::Expr::one() - is_inequality_visited.clone())
-                    * (a_bit.clone() - b_bit.clone()),
+                (AB::Expr::one() - is_inequality_visited.clone()) * (a_bit.clone() - b_bit.clone()),
             );
         }
 

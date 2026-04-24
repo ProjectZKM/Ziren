@@ -113,9 +113,7 @@ impl CpuChip {
         builder.when(local.is_real).assert_bool(local.is_sequential);
 
         // Halting instructions are not sequential.
-        builder
-            .when(local.is_real)
-            .assert_zero(local.is_halt * local.is_sequential);
+        builder.when(local.is_real).assert_zero(local.is_halt * local.is_sequential);
     }
 
     /// Constraints related to the shard and clk.

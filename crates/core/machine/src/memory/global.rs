@@ -424,30 +424,13 @@ where
 
         // Constrain the is_prev_addr_zero operation only in the first row.
         let is_first_row = builder.is_first_row();
-        // Use the exact is-zero constraints inline instead of the summarized helper.
-        // This keeps the first-row witness (`is_prev_addr_zero.inverse`) fully pinned
-        // in extracted single-row Picus modules.
-        let is_prev_zero = AB::Expr::one()
-            - local.is_prev_addr_zero.inverse.into() * prev_addr.clone();
-        builder
-            .when(is_first_row.clone())
-            .assert_eq(is_prev_zero, local.is_prev_addr_zero.result);
-        builder
-            .when(is_first_row.clone())
-            .assert_bool(local.is_prev_addr_zero.result);
-        builder
-            .when(is_first_row)
-            .when(local.is_prev_addr_zero.result)
-            .assert_zero(prev_addr.clone());
+        IsZeroOperation::<AB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
+
         // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
         // its default trace value. Constrain this through transition `next` columns so the single
         // row case does not accidentally force first-row helpers to zero in boundary extraction.
-        builder
-            .when_transition()
-            .assert_zero(next.is_prev_addr_zero.inverse);
-        builder
-            .when_transition()
-            .assert_zero(next.is_prev_addr_zero.result);
+        builder.when_transition().assert_zero(next.is_prev_addr_zero.inverse);
+        builder.when_transition().assert_zero(next.is_prev_addr_zero.result);
 
         // When prev_addr == 0 in the first row, canonicalize the helper witness to match trace
         // population (inverse = 0).
@@ -476,15 +459,9 @@ where
         builder.when_transition().assert_zero(next.is_first_comp);
         // For all non-first real rows (`is_next_comp = 1` in this trace), first-row-only helper
         // columns must be zero.
-        builder
-            .when(local.is_next_comp)
-            .assert_zero(local.is_prev_addr_zero.inverse);
-        builder
-            .when(local.is_next_comp)
-            .assert_zero(local.is_prev_addr_zero.result);
-        builder
-            .when(local.is_next_comp)
-            .assert_zero(local.is_first_comp);
+        builder.when(local.is_next_comp).assert_zero(local.is_prev_addr_zero.inverse);
+        builder.when(local.is_next_comp).assert_zero(local.is_prev_addr_zero.result);
+        builder.when(local.is_next_comp).assert_zero(local.is_first_comp);
 
         // Canonicalize local less-than helper flags when no local comparison is requested.
         // This is exactly the case `is_first_comp = 0` and `is_next_comp = 0`.

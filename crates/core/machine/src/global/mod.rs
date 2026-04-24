@@ -243,10 +243,7 @@ where
         // - real rows choose exactly one direction; padded rows choose none.
         builder.assert_bool(local.is_receive);
         builder.assert_bool(local.is_send);
-        builder.assert_eq(
-            local.is_receive + local.is_send,
-            local.is_real.into(),
-        );
+        builder.assert_eq(local.is_receive + local.is_send, local.is_real.into());
 
         builder.receive(
             AirLookup::new(
