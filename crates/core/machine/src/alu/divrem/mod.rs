@@ -353,6 +353,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
                 // Range check.
                 {
+                    output.add_u8_range_checks(&event.b.to_le_bytes());
+                    output.add_u8_range_checks(&event.c.to_le_bytes());
                     output.add_u8_range_checks(&quotient.to_le_bytes());
                     output.add_u8_range_checks(&remainder.to_le_bytes());
                     output.add_u8_range_checks(&c_times_quotient);
