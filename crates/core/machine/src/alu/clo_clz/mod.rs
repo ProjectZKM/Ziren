@@ -81,6 +81,10 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         "CloClz".to_string()
     }
 
+    fn local_only(&self) -> bool {
+        true
+    }
+
     fn picus_info(&self) -> PicusInfo {
         CloClzCols::<u8>::picus_info()
     }
@@ -171,10 +175,6 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         } else {
             !shard.cloclz_events.is_empty()
         }
-    }
-
-    fn local_only(&self) -> bool {
-        true
     }
 }
 

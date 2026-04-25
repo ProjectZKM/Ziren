@@ -9,8 +9,8 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_machine::MipsAir;
 use zkm_picus::{
     pcl::{
-        initialize_fresh_var_ctr, partial_evaluate_expr, set_field_modulus, set_picus_names, Felt,
-        PicusAtom, PicusConstraint, PicusExpr, PicusModule, PicusProgram,
+        begin_expr_reify_scope, initialize_fresh_var_ctr, partial_evaluate_expr, set_field_modulus,
+        set_picus_names, Felt, PicusAtom, PicusConstraint, PicusExpr, PicusModule, PicusProgram,
     },
     picus_builder::{
         ColumnOutputMode, ExtractionPhase, PicusBuilder, ShrCarrySummaryMode, SubmoduleMode,
@@ -133,7 +133,10 @@ where
             None,
         )
     };
-    chip.air.eval(builder);
+    {
+        let _expr_reify_scope = begin_expr_reify_scope(None);
+        chip.air.eval(builder);
+    }
     run_shifted_air_eval(chip, builder);
 
     // Process deferred tasks recursively
@@ -251,6 +254,7 @@ fn run_shifted_air_eval<'chips, A>(
         std::mem::replace(&mut builder.main, RowMajorMatrix::new(shifted_rows, width));
     let original_phase = std::mem::replace(&mut builder.phase, shifted_phase);
     let original_capture_interface = std::mem::replace(&mut builder.capture_interface, false);
+    let _expr_reify_scope = begin_expr_reify_scope(None);
     chip.air.eval(builder);
     builder.capture_interface = original_capture_interface;
     builder.phase = original_phase;
@@ -861,11 +865,17 @@ fn format_env(env: &BTreeMap<usize, u64>) -> String {
 fn build_selector_env(
     picus_info: &PicusInfo,
     selected_selector_col: Option<usize>,
+    phase: Option<ExtractionPhase>,
 ) -> BTreeMap<usize, u64> {
     let mut env = BTreeMap::new();
-    // Specialize to real rows for chips that carry an `is_real` column.
+    // Most extraction phases model an active computation row, so specializing `is_real = 1`
+    // removes vacuous gating. `LastRow` is the exception: some chips, such as `ShaCompress`,
+    // require the final trace row to be padding, so the AIR must be free to decide whether the
+    // last row is real.
     if let Some(id) = picus_info.is_real_index {
-        env.insert(id, 1);
+        if !matches!(phase, Some(ExtractionPhase::LastRow)) {
+            env.insert(id, 1);
+        }
     }
     // One-hot selector assignment for this extraction pass.
     if let Some(selected_col) = selected_selector_col {
@@ -958,7 +968,7 @@ fn main() {
     if picus_info.selector_indices.is_empty() {
         // No selector columns: still run one extraction pass (is_real specialized if present).
         for phase in &phases {
-            let env = build_selector_env(&picus_info, None);
+            let env = build_selector_env(&picus_info, None, Some(*phase));
             initialize_fresh_var_ctr(fresh_var_ctr_base);
             let (base_module, mut aux_modules) = analyze_chip(
                 chip,
@@ -977,7 +987,7 @@ fn main() {
     } else {
         for phase in &phases {
             for (selector_col, _) in &picus_info.selector_indices {
-                let env = build_selector_env(&picus_info, Some(*selector_col));
+                let env = build_selector_env(&picus_info, Some(*selector_col), Some(*phase));
                 initialize_fresh_var_ctr(fresh_var_ctr_base);
                 let (base_module, mut aux_modules) = analyze_chip(
                     chip,
@@ -1006,7 +1016,7 @@ fn main() {
     // since there is no single unspecialized phase that represents the whole AIR.
     if !picus_info.selector_indices.is_empty() {
         if phases.len() == 1 {
-            let top_env = build_selector_env(&picus_info, None);
+            let top_env = build_selector_env(&picus_info, None, None);
             initialize_fresh_var_ctr(fresh_var_ctr_base);
             let (top_base_module, mut top_aux_modules) = analyze_chip(
                 chip,

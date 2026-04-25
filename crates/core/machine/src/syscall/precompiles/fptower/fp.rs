@@ -20,8 +20,9 @@ use zkm_curves::{
     params::{Limbs, NumLimbs},
     weierstrass::{FieldType, FpOpField},
 };
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_stark::PicusInfo;
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -38,14 +39,17 @@ pub struct FpOpChip<P> {
 }
 
 /// A set of columns for the FpAdd operation.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct FpOpCols<T, P: FpOpField> {
     pub is_real: T,
     pub shard: T,
     pub clk: T,
+    #[picus(selector)]
     pub is_add: T,
+    #[picus(selector)]
     pub is_sub: T,
+    #[picus(selector)]
     pub is_mul: T,
     pub x_ptr: T,
     pub y_ptr: T,
@@ -85,6 +89,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
             FieldType::Bn254 => "Bn254FpOpAssign".to_string(),
             FieldType::Bls12381 => "Bls12381FpOpAssign".to_string(),
         }
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        FpOpCols::<u8, P>::picus_info()
     }
 
     fn generate_trace(
