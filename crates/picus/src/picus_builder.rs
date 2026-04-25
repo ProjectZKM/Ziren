@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use crate::{
     opcode_spec::{spec_for, IndexSlice},
     pcl::{
-        fresh_picus_expr, fresh_picus_var, fresh_picus_var_id, partial_evaluate_expr, Felt,
-        PicusAtom, PicusCall, PicusConstraint, PicusExpr, PicusModule,
+        drain_pending_expr_bindings, fresh_picus_expr, fresh_picus_var, fresh_picus_var_id,
+        partial_evaluate_expr, Felt, PicusAtom, PicusCall, PicusConstraint, PicusExpr, PicusModule,
     },
     syscall_spec::spec_for_sender,
 };
@@ -68,13 +68,19 @@ impl ExtractionPhase {
     ///
     /// `local_only` chips that also ignore absolute row position only need
     /// `SingleRow`. Row-sensitive local-only chips still need the first/interior/last
-    /// split, but never the true cross-row `Boundary` phase.
+    /// split, but never the true cross-row `Boundary` phase. Non-local chips do
+    /// not get `SingleRow` by default: for them, that phase would mean "first
+    /// and last simultaneously", which is only meaningful for chips that truly
+    /// admit a one-real-row trace.
     pub fn all(local_only: bool, local_only_row_sensitive: bool) -> Vec<Self> {
         if local_only && !local_only_row_sensitive {
             return vec![Self::SingleRow];
         }
 
-        let mut phases = vec![Self::SingleRow, Self::FirstRow, Self::Transition, Self::LastRow];
+        let mut phases = vec![Self::FirstRow, Self::Transition, Self::LastRow];
+        if local_only {
+            phases.insert(0, Self::SingleRow);
+        }
         if !local_only {
             phases.insert(3, Self::Boundary);
         }
@@ -313,28 +319,66 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
 
     fn push_input_port(&mut self, expr: PicusExpr) {
         if self.capture_interface {
+            self.flush_pending_expr_bindings();
             self.picus_module.inputs.push(expr);
         }
     }
 
     fn push_output_port(&mut self, expr: PicusExpr) {
         if self.capture_interface {
+            self.flush_pending_expr_bindings();
             self.picus_module.outputs.push(expr);
         }
     }
 
     fn push_global_output_port(&mut self, expr: PicusExpr) {
         if self.capture_interface {
+            self.flush_pending_expr_bindings();
             self.picus_module.outputs.push(expr.clone());
             self.global_send_outputs.push(expr);
         }
     }
 
+    /// Emits any queued `fresh = expr` bindings produced by oversized-expression
+    /// reification before appending the next real module item.
+    ///
+    /// This keeps the thresholding logic in `PicusExpr` arithmetic small and
+    /// local while still making the resulting fresh variables explicit in the
+    /// extracted module. We flush eagerly at builder sinks so pending bindings do
+    /// not drift across unrelated constraints or module calls.
+    fn flush_pending_expr_bindings(&mut self) {
+        Self::flush_pending_expr_bindings_into(&mut self.picus_module);
+    }
+
+    fn flush_pending_expr_bindings_into(module: &mut PicusModule) {
+        for (fresh, expr) in drain_pending_expr_bindings() {
+            module.constraints.push(PicusConstraint::Eq(Box::new(PicusExpr::Sub(
+                Box::new(PicusExpr::Var(fresh)),
+                Box::new(expr),
+            ))));
+        }
+    }
+
+    fn push_constraint(&mut self, constraint: PicusConstraint) {
+        self.flush_pending_expr_bindings();
+        self.picus_module.constraints.push(constraint);
+    }
+
+    fn push_constraint_into(module: &mut PicusModule, constraint: PicusConstraint) {
+        Self::flush_pending_expr_bindings_into(module);
+        module.constraints.push(constraint);
+    }
+
+    fn push_call(&mut self, call: PicusCall) {
+        self.flush_pending_expr_bindings();
+        self.picus_module.calls.push(call);
+    }
+
     fn add_guarded_constraint(&mut self, is_real: PicusExpr, constraint: PicusConstraint) {
         match is_real {
             PicusExpr::Const(0) => {}
-            PicusExpr::Const(1) => self.picus_module.constraints.push(constraint),
-            _ => self.picus_module.constraints.push(constraint.apply_multiplier(is_real)),
+            PicusExpr::Const(1) => self.push_constraint(constraint),
+            _ => self.push_constraint(constraint.apply_multiplier(is_real)),
         }
     }
 
@@ -352,6 +396,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         if !self.capture_interface {
             return;
         }
+        self.flush_pending_expr_bindings();
         let width = self.main.width();
         let row = self.main.row_slice(row_idx);
         for (start, end, _) in ranges {
@@ -369,6 +414,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         if !self.capture_interface {
             return;
         }
+        self.flush_pending_expr_bindings();
         let width = self.main.width();
         let row = self.main.row_slice(row_idx);
         for (start, end, _) in ranges {
@@ -423,6 +469,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         &mut self,
         input_ranges: &[(usize, usize, String)],
     ) {
+        self.flush_pending_expr_bindings();
         let width = self.main.width();
         let mut is_input = vec![false; width];
         for (start, end, _) in input_ranges {
@@ -451,6 +498,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         if self.local_only || !self.phase.exposes_next_row_outputs(self.local_only) {
             return;
         }
+        self.flush_pending_expr_bindings();
         for atom in self.main.row_slice(1).iter() {
             let expr: PicusExpr = (*atom).into();
             if !self.picus_module.outputs.contains(&expr) {
@@ -479,19 +527,19 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let num_bits_to_shift = values[4].clone();
 
         // Base range constraints.
-        self.picus_module.constraints.push(PicusConstraint::new_leq(
+        self.push_constraint(PicusConstraint::new_leq(
             out.clone() * multiplicity.clone(),
             PicusExpr::Const(255),
         ));
-        self.picus_module.constraints.push(PicusConstraint::new_leq(
+        self.push_constraint(PicusConstraint::new_leq(
             input.clone() * multiplicity.clone(),
             PicusExpr::Const(255),
         ));
-        self.picus_module.constraints.push(PicusConstraint::new_leq(
+        self.push_constraint(PicusConstraint::new_leq(
             carry.clone() * multiplicity.clone(),
             PicusExpr::Const(255),
         ));
-        self.picus_module.constraints.push(PicusConstraint::new_leq(
+        self.push_constraint(PicusConstraint::new_leq(
             num_bits_to_shift.clone() * multiplicity.clone(),
             PicusExpr::Const(7),
         ));
@@ -518,9 +566,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                     )),
                 )
             };
-            self.picus_module
-                .constraints
-                .push(PicusConstraint::Implies(Box::new(cond), Box::new(consequence)));
+            self.push_constraint(PicusConstraint::Implies(Box::new(cond), Box::new(consequence)));
         }
     }
 
@@ -546,12 +592,15 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 byte_mod.inputs[1].clone(),
                 byte_mod.outputs[0].clone(),
             ] {
-                byte_mod.constraints.push(PicusConstraint::new_leq(expr, PicusExpr::Const(255)));
+                Self::push_constraint_into(
+                    &mut byte_mod,
+                    PicusConstraint::new_leq(expr, PicusExpr::Const(255)),
+                );
             }
             self.aux_modules.insert(byte_mod_name.clone(), byte_mod);
         }
         assert!(values.len() == 5);
-        self.picus_module.calls.push(PicusCall::new(byte_mod_name, &values[1..2], &values[3..5]));
+        self.push_call(PicusCall::new(byte_mod_name, &values[1..2], &values[3..5]));
     }
 
     fn try_add_and_127_optimization(&mut self, values: &[PicusExpr]) -> bool {
@@ -563,9 +612,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         }
 
         let var_hi = fresh_picus_expr();
-        self.picus_module.constraints.push(PicusConstraint::new_lt(values[1].clone(), 128.into()));
-        self.picus_module.constraints.push(PicusConstraint::new_bit(var_hi.clone()));
-        self.picus_module.constraints.push(PicusConstraint::new_equality(
+        self.push_constraint(PicusConstraint::new_lt(values[1].clone(), 128.into()));
+        self.push_constraint(PicusConstraint::new_bit(var_hi.clone()));
+        self.push_constraint(PicusConstraint::new_equality(
             values[3].clone(),
             var_hi * 128 + values[1].clone(),
         ));
@@ -594,7 +643,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             assert!(*v < 256);
                             continue;
                         } else {
-                            self.picus_module.constraints.push(PicusConstraint::new_leq(
+                            self.push_constraint(PicusConstraint::new_leq(
                                 val.clone() * multiplicity.clone(),
                                 255.into(),
                             ))
@@ -606,7 +655,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             assert!(*v < 65536);
                             continue;
                         } else {
-                            self.picus_module.constraints.push(PicusConstraint::new_leq(
+                            self.push_constraint(PicusConstraint::new_leq(
                                 val.clone() * multiplicity.clone(),
                                 65535.into(),
                             ))
@@ -621,20 +670,20 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             continue;
                         }
                         let fresh_picus_var: PicusExpr = fresh_picus_expr();
-                        self.picus_module.constraints.push(PicusConstraint::new_leq(
+                        self.push_constraint(PicusConstraint::new_leq(
                             fresh_picus_var.clone() * multiplicity.clone(),
                             picus127_const.clone(),
                         ));
-                        self.picus_module.constraints.push(PicusConstraint::Eq(Box::new(
+                        self.push_constraint(PicusConstraint::Eq(Box::new(
                             multiplicity.clone()
                                 * msb.clone()
                                 * (msb.clone() - PicusExpr::Const(1)),
                         )));
                         let decomp =
                             byte.clone() - (msb.clone() * PicusExpr::Const(128) + fresh_picus_var);
-                        self.picus_module
-                            .constraints
-                            .push(PicusConstraint::Eq(Box::new(multiplicity.clone() * decomp)));
+                        self.push_constraint(PicusConstraint::Eq(Box::new(
+                            multiplicity.clone() * decomp,
+                        )));
                     }
                 } else if v == (ByteOpcode::ShrCarry as u64) {
                     match self.shr_carry_summary_mode {
@@ -642,23 +691,26 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                             if !self.aux_modules.contains_key("ShrCarry") {
                                 let mut carry_module =
                                     PicusModule::build_empty("ShrCarry".to_string(), 2, 2);
+                                let first_input = carry_module.inputs[0].clone();
+                                let second_input = carry_module.inputs[1].clone();
+                                let output_exprs = carry_module.outputs.clone();
                                 // Keep the abstract helper byte-shaped even when we do not inline
                                 // the precise `shr_carry` semantics. The first operand and both
                                 // returned limbs are bytes, while the rotation amount is always in
                                 // [0, 7].
-                                carry_module.constraints.push(PicusConstraint::new_leq(
-                                    carry_module.inputs[0].clone(),
-                                    PicusExpr::Const(255),
-                                ));
-                                carry_module.constraints.push(PicusConstraint::new_leq(
-                                    carry_module.inputs[1].clone(),
-                                    PicusExpr::Const(7),
-                                ));
-                                for expr in carry_module.outputs.iter().cloned() {
-                                    carry_module.constraints.push(PicusConstraint::new_leq(
-                                        expr,
-                                        PicusExpr::Const(255),
-                                    ));
+                                Self::push_constraint_into(
+                                    &mut carry_module,
+                                    PicusConstraint::new_leq(first_input, PicusExpr::Const(255)),
+                                );
+                                Self::push_constraint_into(
+                                    &mut carry_module,
+                                    PicusConstraint::new_leq(second_input, PicusExpr::Const(7)),
+                                );
+                                for expr in output_exprs {
+                                    Self::push_constraint_into(
+                                        &mut carry_module,
+                                        PicusConstraint::new_leq(expr, PicusExpr::Const(255)),
+                                    );
                                 }
                                 self.aux_modules.insert("ShrCarry".to_string(), carry_module);
                             }
@@ -667,7 +719,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                                 &[values[1].clone(), values[2].clone()],
                                 &[values[3].clone(), values[4].clone()],
                             );
-                            self.picus_module.calls.push(shrcarry);
+                            self.push_call(shrcarry);
                         }
                         ShrCarrySummaryMode::Precise => {
                             self.summarize_shr_carry_precise(multiplicity.clone(), values);
@@ -676,14 +728,15 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                 } else if v == (ByteOpcode::LTU as u64) {
                     let lt_const = PicusConstraint::new_lt(values[2].clone(), values[3].clone());
                     if let PicusExpr::Const(1) = values[1] {
-                        self.picus_module.constraints.push(lt_const);
+                        self.push_constraint(lt_const);
                     } else {
                         let bit_const = PicusConstraint::new_bit(values[1].clone());
                         let eq_one = PicusConstraint::new_equality(values[1].clone(), 1.into());
-                        self.picus_module.constraints.extend_from_slice(&[
-                            PicusConstraint::Iff(Box::new(eq_one), Box::new(lt_const)),
-                            bit_const,
-                        ]);
+                        self.push_constraint(PicusConstraint::Iff(
+                            Box::new(eq_one),
+                            Box::new(lt_const),
+                        ));
+                        self.push_constraint(bit_const);
                     }
                 } else if Self::is_default_bitwise_byte_opcode(v)
                     && !self.try_add_and_127_optimization(values)
@@ -745,10 +798,10 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             // mark it as an output
             self.push_output_port(next_pc_out.clone());
             // assign it conditionally to the corresponding element in the value array
-            self.picus_module.constraints.push(eq_mul(&multiplicity, &values[3], &next_pc_out));
+            self.push_constraint(eq_mul(&multiplicity, &values[3], &next_pc_out));
             // the cpu table should constrain next_pc = pc + 4 always due to delay-slot semantics of MIPS
             // so we add that constraint here
-            self.picus_module.constraints.push(PicusConstraint::new_equality(
+            self.push_constraint(PicusConstraint::new_equality(
                 values[3].clone(),
                 pc_val.clone() + PicusExpr::Const(4),
             ));
@@ -772,7 +825,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         // Always expose `next_next_pc` as an output; it is often zero but still part of the
         // instruction interface.
         let next_next_pc_out = fresh_picus_expr();
-        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[4], &next_next_pc_out));
+        self.push_constraint(eq_mul(&multiplicity, &values[4], &next_next_pc_out));
         self.push_output_port(next_next_pc_out);
         // We need to mark some of the register values as inputs and other values as outputs.
         // In particular, the parameters `b` and `c` to `receive_instruction` are inputs and
@@ -786,20 +839,20 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             } else {
                 self.push_output_port(a_var.clone());
             }
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &a_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &a_var));
             // Mirrors CPU's limb range check: crates/core/machine/src/cpu/air/register.rs
             // (`builder.slice_range_check_u8(&local.op_a_access.access.value.0, local.is_real)`).
-            self.picus_module.constraints.push(u8_range(&a_var));
+            self.push_constraint(u8_range(&a_var));
         }
         for value in values.iter().take(15).skip(11) {
             let b_var = fresh_picus_expr();
             self.push_input_port(b_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &b_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &b_var));
         }
         for value in values.iter().take(19).skip(15) {
             let c_var = fresh_picus_expr();
             self.push_input_port(c_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &c_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &c_var));
         }
         // Route HI values by is_rw_a.
         for value in values.iter().take(23).skip(19) {
@@ -809,7 +862,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
             } else {
                 self.push_output_port(hi_var.clone());
             }
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &hi_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &hi_var));
         }
     }
 
@@ -838,19 +891,20 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         } else {
             self.push_output_port(addr_var.clone());
         }
-        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[2], &addr_var));
+        self.push_constraint(eq_mul(&multiplicity, &values[2], &addr_var));
 
         for value in values.iter().skip(3) {
             let value_var = fresh_picus_expr();
             if is_send {
                 self.push_input_port(value_var.clone());
-                self.picus_module
-                    .constraints
-                    .push(PicusConstraint::new_lt(value_var.clone(), PicusExpr::Const(255)));
+                self.push_constraint(PicusConstraint::new_lt(
+                    value_var.clone(),
+                    PicusExpr::Const(255),
+                ));
             } else {
                 self.push_output_port(value_var.clone());
             }
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &value_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &value_var));
         }
     }
 
@@ -875,7 +929,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         for value in values {
             let input_var = fresh_picus_expr();
             self.push_input_port(input_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &input_var));
         }
     }
 
@@ -917,13 +971,13 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let bind_input = |builder: &mut Self, value: &PicusExpr| -> PicusExpr {
             let input_var = fresh_picus_expr();
             builder.push_input_port(input_var.clone());
-            builder.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+            builder.push_constraint(eq_mul(&multiplicity, value, &input_var));
             input_var
         };
         let bind_output = |builder: &mut Self, value: &PicusExpr| -> PicusExpr {
             let output_var = fresh_picus_expr();
             builder.push_output_port(output_var.clone());
-            builder.picus_module.constraints.push(eq_mul(&multiplicity, value, &output_var));
+            builder.push_constraint(eq_mul(&multiplicity, value, &output_var));
             output_var
         };
 
@@ -944,7 +998,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let is_sequential_in = bind_input(self, &values[IS_SEQUENTIAL_IDX]);
 
         self.picus_module.assume_deterministic.push(opcode_in);
-        self.picus_module.constraints.push(PicusConstraint::Implies(
+        self.push_constraint(PicusConstraint::Implies(
             Box::new(PicusConstraint::Eq(Box::new(is_sequential_in))),
             Box::new(PicusConstraint::Det(Box::new(next_next_pc_out))),
         ));
@@ -962,12 +1016,12 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
 
         let syscall_id_var = fresh_picus_expr();
         self.push_input_port(syscall_id_var.clone());
-        self.picus_module.constraints.push(eq_mul(&multiplicity, &values[2], &syscall_id_var));
+        self.push_constraint(eq_mul(&multiplicity, &values[2], &syscall_id_var));
 
         for value in values.iter().skip(3) {
             let input_var = fresh_picus_expr();
             self.push_input_port(input_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &input_var));
         }
     }
 
@@ -1004,7 +1058,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         for result_half in [&values[RESULT_LO_IDX], &values[RESULT_HI_IDX]] {
             let output_var = fresh_picus_expr();
             self.push_output_port(output_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, result_half, &output_var));
+            self.push_constraint(eq_mul(&multiplicity, result_half, &output_var));
         }
 
         for halfword in
@@ -1012,8 +1066,8 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         {
             let input_var = fresh_picus_expr();
             self.push_input_port(input_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, halfword, &input_var));
-            self.picus_module.constraints.push(u16_bound(input_var));
+            self.push_constraint(eq_mul(&multiplicity, halfword, &input_var));
+            self.push_constraint(u16_bound(input_var));
         }
     }
 
@@ -1029,7 +1083,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         for value in values {
             let input_var = fresh_picus_expr();
             self.push_input_port(input_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &input_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &input_var));
         }
     }
 
@@ -1045,7 +1099,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         for value in values {
             let output_var = fresh_picus_expr();
             self.push_global_output_port(output_var.clone());
-            self.picus_module.constraints.push(eq_mul(&multiplicity, value, &output_var));
+            self.push_constraint(eq_mul(&multiplicity, value, &output_var));
         }
     }
 
@@ -1060,7 +1114,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let inputs =
             values.iter().map(|value| value.clone() * multiplicity.clone()).collect::<Vec<_>>();
         let dummy_output = fresh_picus_expr();
-        self.picus_module.calls.push(PicusCall::new(module_name, &[dummy_output], &inputs));
+        self.push_call(PicusCall::new(module_name, &[dummy_output], &inputs));
     }
 
     fn get_main_vars_for_named_call(
@@ -1087,7 +1141,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                         } else {
                             let id = fresh_picus_var_id();
                             let fresh_var = PicusAtom::Var(id);
-                            self.picus_module.constraints.push(PicusConstraint::new_equality(
+                            self.push_constraint(PicusConstraint::new_equality(
                                 PicusExpr::Var(id),
                                 message_values[i].clone(),
                             ));
@@ -1103,7 +1157,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                         target_main_vals[colrange.0] = PicusAtom::Const(c);
                     } else {
                         let fresh_var = fresh_picus_var_id();
-                        self.picus_module.constraints.push(PicusConstraint::new_equality(
+                        self.push_constraint(PicusConstraint::new_equality(
                             PicusExpr::Var(fresh_var),
                             message_values[col].clone(),
                         ));
@@ -1412,6 +1466,6 @@ impl<'chips, A: MachineAir<Felt>> AirBuilder for PicusBuilder<'chips, A> {
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.picus_module.constraints.push(PicusConstraint::Eq(Box::new(x.into())))
+        self.push_constraint(PicusConstraint::Eq(Box::new(x.into())))
     }
 }

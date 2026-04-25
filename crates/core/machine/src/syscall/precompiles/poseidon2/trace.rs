@@ -27,6 +27,14 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         "Poseidon2Permute".to_string()
     }
 
+    fn picus_info(&self) -> zkm_stark::PicusInfo {
+        Poseidon2MemCols::<u8>::picus_info()
+    }
+
+    fn local_only(&self) -> bool {
+        true
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
