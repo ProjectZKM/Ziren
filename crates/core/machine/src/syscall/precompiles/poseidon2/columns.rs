@@ -23,7 +23,6 @@ pub(crate) struct Poseidon2MemCols<T: Copy> {
     pub pre_state_range_check_cols: [KoalaBearWordRangeChecker<T>; WIDTH],
     pub post_state_range_check_cols: [KoalaBearWordRangeChecker<T>; WIDTH],
 
-    #[picus(selector)]
     pub is_real: T,
 }
 

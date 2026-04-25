@@ -17,19 +17,26 @@ use zkm_stark::{PicusInfo, Word};
 pub(crate) struct KeccakSpongeCols<T> {
     pub keccak: KeccakCols<T>,
     pub block_mem: [MemoryReadCols<T>; KECCAK_GENERAL_RATE_U32S],
+    #[picus(transition_input)]
     pub shard: T,
+    #[picus(transition_input)]
     pub clk: T,
     pub is_real: T,
     pub read_block: T,
+    #[picus(transition_input)]
     pub input_address: T,
+    #[picus(transition_input)]
     pub output_address: T,
+    #[picus(transition_input)]
     pub input_len: T,
+    #[picus(transition_input)]
     pub already_absorbed_u32s: T,
     pub is_absorbed: T,
     pub receive_syscall: T,
     pub write_output: T,
     pub is_first_input_block: T,
     pub is_final_input_block: T,
+    #[picus(transition_input)]
     pub original_state: [Word<T>; KECCAK_STATE_U32S],
     pub xored_general_rate: [XorOperation<T>; KECCAK_GENERAL_RATE_U32S],
     pub input_length_mem: MemoryReadCols<T>,

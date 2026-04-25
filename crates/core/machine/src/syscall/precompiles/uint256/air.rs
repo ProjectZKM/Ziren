@@ -87,7 +87,6 @@ pub struct Uint256MulCols<T> {
 
     pub output_range_check: FieldLtCols<T, U256Field>,
 
-    #[picus(selector)]
     pub is_real: T,
 }
 
