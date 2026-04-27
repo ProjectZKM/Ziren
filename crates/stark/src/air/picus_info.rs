@@ -46,3 +46,45 @@ pub struct PicusInfo {
     /// Indices of columns marked as `is_real`
     pub is_real_index: Option<usize>,
 }
+
+/// Information about a semantic projection over a larger Picus-annotated witness layout.
+///
+/// Unlike [`PicusInfo`], which describes whole storage fields in a concrete trace column
+/// struct, a projection describes only the semantically relevant slices that should appear
+/// on an operation/module boundary. This is intended for operation-level submodules where
+/// most witness columns are internal and should remain existential.
+#[derive(Debug, Clone, Default)]
+pub struct PicusProjectionInfo {
+    /// Column to projected-name mapping for every byte covered by the projection.
+    pub col_to_name: HashMap<usize, String>,
+    /// Projected field names to concrete column ranges in the source layout.
+    pub name_to_colrange: HashMap<String, (usize, usize)>,
+    /// Projected ranges that should be treated as module inputs.
+    pub input_ranges: Vec<(usize, usize, String)>,
+    /// Projected ranges that should be treated as module outputs.
+    pub output_ranges: Vec<(usize, usize, String)>,
+}
+
+/// Helper trait for projection metadata: recover the first concrete source
+/// column from either a scalar column id or a nested array of column ids.
+///
+/// Projection annotations should be able to point at the semantic slice they
+/// mean, for example `state.external_rounds_state[0]` rather than
+/// `state.external_rounds_state[0][0]`. The derive computes the projected width
+/// from the destination field type, and this trait supplies the starting source
+/// column by recursively taking the first element of nested arrays.
+pub trait PicusProjectionStart {
+    fn projection_start(&self) -> usize;
+}
+
+impl PicusProjectionStart for usize {
+    fn projection_start(&self) -> usize {
+        *self
+    }
+}
+
+impl<T: PicusProjectionStart, const N: usize> PicusProjectionStart for [T; N] {
+    fn projection_start(&self) -> usize {
+        self[0].projection_start()
+    }
+}

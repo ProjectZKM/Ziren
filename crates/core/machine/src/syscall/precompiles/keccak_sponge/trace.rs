@@ -29,6 +29,10 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         "KeccakSponge".to_string()
     }
 
+    fn picus_info(&self) -> zkm_stark::PicusInfo {
+        KeccakSpongeCols::<u8>::picus_info()
+    }
+
     fn generate_dependencies(
         &self,
         input: &Self::Record,

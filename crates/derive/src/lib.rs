@@ -401,6 +401,11 @@ fn find_eval_trait_bound(attrs: &[syn::Attribute]) -> Option<String> {
     None
 }
 
+#[proc_macro_derive(PicusProjection, attributes(picus, picus_projection))]
+pub fn picus_projection_derive(input: TokenStream) -> TokenStream {
+    picus_annotations::picus_projection_derive(input)
+}
+
 #[proc_macro_derive(PicusAnnotations, attributes(picus))]
 pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
     picus_annotations::picus_annotations_derive(input)
