@@ -29,7 +29,7 @@ pub struct ExecutionRecord<F> {
     pub fri_fold_events: Vec<FriFoldEvent<F>>,
     pub batch_fri_events: Vec<BatchFRIEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
-    /// Events for `SumcheckVerifyChip` (Phase 2c+ recursion WHIR
+    /// Events for `SumcheckVerifyChip` (Phase 2c+ recursion BaseFold
     /// verifier).  One event per sumcheck round.  Empty in pure-FRI
     /// recursion (no SumcheckVerify instructions emitted).
     pub sumcheck_verify_events: Vec<SumcheckVerifyEvent<F>>,

@@ -680,7 +680,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     ) -> Result<(), MachineVerificationError<SC>>
     where
         SC::Challenger: Clone,
-        A: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+        A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
+            + for<'b> Air<
+                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                    'b,
+                    Val<SC>,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            >,
     {
         // Observe the preprocessed commitment.
         vk.observe_into(challenger);

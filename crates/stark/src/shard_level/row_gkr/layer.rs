@@ -82,6 +82,40 @@ impl<F: Clone> RowMajorTable<F> {
         }
     }
 
+    /// Same shape as `filled_raw` but skips the per-cell init.  Caller
+    /// MUST write every cell of `cells[0..total]` before any read.
+    /// Used by hot-path constructors (e.g. `layer_transition`) that
+    /// would otherwise spend most of their time in `vec![fill; total]`
+    /// before unconditionally overwriting every slot.
+    ///
+    /// # Safety
+    ///
+    /// Caller is responsible for initializing all `cells[0..total]`
+    /// slots before any read.  `F: Copy` is sufficient because Copy
+    /// types have no Drop semantics, so leaking uninitialized memory
+    /// on panic is sound.
+    #[must_use]
+    pub unsafe fn filled_raw_uninit(
+        num_row_variables: usize,
+        num_interactions: usize,
+    ) -> Self
+    where
+        F: Copy + p3_field::PrimeCharacteristicRing,
+    {
+        let total = (1usize << num_row_variables) * num_interactions;
+        let num_interaction_variables =
+            num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
+        // FLAKE FIX: see round.rs note. Init to ZERO instead of leaking
+        // uninit u32 — KoalaBear serde rejects out-of-range bit patterns.
+        let cells: Vec<F> = vec![F::ZERO; total];
+        Self {
+            cells,
+            num_row_variables,
+            num_interaction_variables,
+            num_interactions,
+        }
+    }
+
     /// Build a table where storage width equals the virtual padded
     /// width (`num_interactions = 1 << num_interaction_variables`).
     /// Compatibility constructor for callers that previously used the

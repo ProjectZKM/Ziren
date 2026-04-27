@@ -13,6 +13,10 @@ categories = { workspace = true }
 zkm-primitives = { workspace = true }
 zkm-curves = { workspace = true }
 zkm-stark = { workspace = true }
+# JIT — Linux x86_64 only. The crate compiles to a no-op skeleton on
+# other platforms so this dep is portable. Activated via the
+# `zkm_use_native_executor` cfg flag emitted by build.rs.
+zkm-core-jit = { path = "../jit" }
 
 rayon-scan = "0.1.1"
 

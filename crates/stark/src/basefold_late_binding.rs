@@ -358,34 +358,50 @@ pub mod jagged {
         };
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
-        let mut y_per_chip: Vec<Vec<InnerChallenge>> = Vec::with_capacity(chip_traces.len());
-        for ((_name, trace), r_row_c) in chip_traces.iter().zip(r_row_per_chip.iter()) {
-            let h = trace.values.len() / trace.width.max(1);
-            let w = trace.width;
-            let h_padded = h.next_power_of_two();
-            assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
+        //
+        // Phase 4 perf fix (Apr 25 2026): parallelize across chips
+        // AND across columns within each chip. The triple-nested loop
+        // (chip × col × row) is O(N_chips · max_w · max_h) which for
+        // a 22-chip MIPS shard padded to 2^19 rows hits ~10M+ EF
+        // multiply-adds. Each chip × column reduction is independent.
+        use p3_maybe_rayon::prelude::*;
+        let y_per_chip: Vec<Vec<InnerChallenge>> = chip_traces
+            .par_iter()
+            .zip(r_row_per_chip.par_iter())
+            .map(|((_name, trace), r_row_c)| {
+                let h = trace.values.len() / trace.width.max(1);
+                let w = trace.width;
+                let h_padded = h.next_power_of_two();
+                assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
-            let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
-            let mut chip_ys = Vec::with_capacity(w);
-            for col in 0..w {
-                let mut acc = InnerChallenge::ZERO;
-                for row in 0..h {
-                    acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
-                }
-                chip_ys.push(acc);
-            }
-            y_per_chip.push(chip_ys);
-        }
+                let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                (0..w)
+                    .into_par_iter()
+                    .map(|col| {
+                        let mut acc = InnerChallenge::ZERO;
+                        for row in 0..h {
+                            acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
+                        }
+                        acc
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
 
         // (4) Re-materialize dense_q for the sumcheck reduction, then
         // drop it immediately after.  This is the counterpart of the
         // move-into-commit optimization in step (2): the two 4N
         // buffers never coexist.
+        //
+        // Use the `_owned` variant so the inner loop can drop dense_q
+        // after round 0 (releasing the 4N base-field buffer before the
+        // EF tables for rounds 1..n are built).  Saves one full N-element
+        // clone vs the &[InnerVal] entry point.
         let reduction = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
-            prove_jagged_reduction(
-                &dense_q,
+            crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                dense_q,
                 &packing,
                 r_row_per_chip,
                 &y_per_chip,

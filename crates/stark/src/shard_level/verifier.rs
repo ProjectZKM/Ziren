@@ -22,12 +22,18 @@
 
 use alloc::vec::Vec;
 
+use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
 
+use super::basefold_constraint_folder::{
+    compute_padded_row_adjustment_basefold_host, eval_constraints_basefold_host,
+    BasefoldConstraintFolder,
+};
 use super::shard_proof::BasefoldShardProof;
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
+use crate::types::{AirOpenedValues, ChipOpenedValues};
 use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
 /// Errors emitted by the host-side shard-level BaseFold verifier.
@@ -91,11 +97,15 @@ pub struct BasefoldShardVerifier {
 }
 
 impl BasefoldShardVerifier {
-    /// Production default (max_log_row_count = 22, matching Ziren's
-    /// shard padding).
+    /// Production default (max_log_row_count = 20 — KoalaBear's
+    /// TWO_ADICITY is 24 and BaseFold log_blowup is 4, so
+    /// num_variables ≤ 20 is required for `log_codeword_size ≤ 24`
+    /// in the recursion-circuit basefold verifier. Was 22; the 22
+    /// value panics at `two_adic_generator` during
+    /// `build_normalize_basefold_program`.
     #[must_use]
     pub const fn production_default() -> Self {
-        Self { max_log_row_count: 22 }
+        Self { max_log_row_count: 20 }
     }
 
     /// Construct with explicit parameters.  Use when writing tests
@@ -129,7 +139,8 @@ impl BasefoldShardVerifier {
     ) -> Result<(), BasefoldVerifyError>
     where
         SC: StarkGenericConfig,
-        A: MachineAir<Val<SC>>,
+        A: MachineAir<Val<SC>>
+            + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
     {
@@ -231,6 +242,7 @@ impl BasefoldShardVerifier {
             chips,
             &proof.zerocheck_proof,
             &proof.logup_gkr_proof.logup_evaluations,
+            &proof.public_values,
             self.max_log_row_count,
             challenger,
         )?;
@@ -330,18 +342,34 @@ where
         .collect();
 
     // Patch row_count from bundle.packing.offsets.
+    //
+    // Important: `offsets` has ONE ENTRY PER COLUMN (prover's
+    // compute_jagged_metadata pushes `chip.width` offsets per chip),
+    // not per chip.  Within a single chip's run of columns, consecutive
+    // offsets differ by exactly that chip's row_count (all columns
+    // have the same height).  So we walk offsets with a column-index
+    // cursor and read `offsets[col_idx + 1] - offsets[col_idx]` to get
+    // the height.
     let mut chip_infos = chip_infos;
-    for (i, info) in chip_infos.iter_mut().enumerate() {
-        let start = bundle.packing.offsets.get(i).copied().unwrap_or(0);
-        let end = bundle
-            .packing
-            .offsets
-            .get(i + 1)
-            .copied()
-            .unwrap_or(bundle.packing.total_values);
-        let span = end.saturating_sub(start);
-        if info.column_count > 0 {
-            info.row_count = span / info.column_count;
+    {
+        let mut col_idx = 0usize;
+        for info in chip_infos.iter_mut() {
+            if info.column_count == 0 {
+                continue;
+            }
+            let h = if col_idx + 1 < bundle.packing.offsets.len() {
+                bundle.packing.offsets[col_idx + 1]
+                    .saturating_sub(bundle.packing.offsets[col_idx])
+            } else if col_idx < bundle.packing.offsets.len() {
+                bundle
+                    .packing
+                    .total_values
+                    .saturating_sub(bundle.packing.offsets[col_idx])
+            } else {
+                0
+            };
+            info.row_count = h;
+            col_idx += info.column_count;
         }
     }
 
@@ -386,31 +414,131 @@ where
     Ok(())
 }
 
-/// Host-side zerocheck verification (partial port, see phase 3
-/// comments in verify_shard).  Validates:
+/// Host-side `full_geq`: padded-row mask used by the zerocheck
+/// verifier to subtract constraint contributions from out-of-range
+/// padded rows.  Computes the indicator
 ///
-///   1. Point dimension == `max_log_row_count`
-///   2. Point dimension == gkr_evaluations.point dimension
-///   3. Inner sumcheck proof via verify_sumcheck_host (degree 3,
-///      `max_log_row_count` rounds)
-///   4. Transcript observations matching the prover's ordering
+/// ```text
+///   full_geq(threshold, eval_point)
+///       = Σ_{bit b}  (bit >= threshold at big-endian comparison)
+/// ```
+///
+/// via the same recurrence as the in-circuit [`crate::zerocheck::full_geq`]
+/// but on concrete extension-field values.
+fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
+    debug_assert_eq!(
+        threshold.len(),
+        eval_point.len(),
+        "full_geq_host: threshold and eval_point must have equal dimension"
+    );
+    let one = EF::ONE;
+    threshold
+        .iter()
+        .rev()
+        .zip(eval_point.iter().rev())
+        .fold(one, |acc, (x, y)| {
+            ((one - *y) * (one - *x) + *y * *x) * acc + *y * (one - *x)
+        })
+}
+
+/// Produce the per-chip `degree` point used by [`full_geq_host`].
+///
+/// Matches the in-circuit witness stub at
+/// [`crate::recursion::circuit::shard_proof_variable_lift::empty_chip_height_bits`]
+/// — returns a zero-filled vector of length `max_log_row_count + 1`.
+/// With all-zero threshold the padded-row mask collapses to a constant
+/// (no-op) so this preserves the current recursion-circuit behaviour;
+/// a later iteration can thread real per-chip height bits through once
+/// the prover populates them.
+fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
+    vec![EF::ZERO; max_log_row_count + 1]
+}
+
+/// Build a [`ChipOpenedValues`] record from a [`super::types::ChipEvaluation`]
+/// emitted by the LogUp-GKR phase.  Used by [`verify_zerocheck_host`] to
+/// drive the [`BasefoldConstraintFolder`] on host.
+///
+/// The LogUp-GKR output carries the main-trace and preprocessed-trace
+/// evaluations at the sumcheck point; the remaining
+/// [`ChipOpenedValues`] fields (permutation, quotient, cumulative sums,
+/// log_degree) aren't consumed by [`BasefoldConstraintFolder`] beyond
+/// what's directly plumbed, so placeholder zeros are adequate.
+fn chip_opening_from_gkr_evaluation<F, EF>(
+    evaluation: &super::types::ChipEvaluation<EF>,
+    log_degree: usize,
+) -> ChipOpenedValues<F, EF>
+where
+    F: Field + PrimeCharacteristicRing,
+    EF: ExtensionField<F> + Copy,
+{
+    use crate::septic_curve::SepticCurve;
+    use crate::septic_digest::SepticDigest;
+    use crate::septic_extension::SepticExtension;
+
+    let preprocessed_local = evaluation
+        .preprocessed_trace_evaluations
+        .clone()
+        .unwrap_or_default();
+    let main_local = evaluation.main_trace_evaluations.clone();
+    ChipOpenedValues {
+        preprocessed: AirOpenedValues { local: preprocessed_local, next: vec![] },
+        main: AirOpenedValues { local: main_local, next: vec![] },
+        permutation: AirOpenedValues { local: vec![], next: vec![] },
+        quotient: vec![],
+        global_cumulative_sum: SepticDigest(SepticCurve {
+            x: SepticExtension::<F>([F::ZERO; 7]),
+            y: SepticExtension::<F>([F::ZERO; 7]),
+        }),
+        local_cumulative_sum: EF::ZERO,
+        log_degree,
+    }
+}
+
+/// Host-side zerocheck verification.
+///
+/// # Validates
+///
+///   1. Challenge sampling order (`alpha`, `gkr_batch_open`, `lambda`)
+///      — transcript kept in sync with the prover even when the full
+///      cryptographic identity check is skipped.
+///   2. Point dimension == `max_log_row_count`.
+///   3. Point dimension == `gkr_evaluations.point` dimension.
+///   4. Inner sumcheck proof via [`verify_sumcheck_host`] (degree 3,
+///      `max_log_row_count` rounds).
+///   5. Per-chip opening transcript observations matching the prover's
+///      ordering.
+///
+/// # Cryptographic identity
+///
+/// The full cross-chip RLC identity + GKR sum-modification identity
+/// (in-circuit equivalent at
+/// [`crate::recursion_circuit::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`])
+/// is exposed separately via [`verify_zerocheck_cryptographic_identity_host`].
+/// It is not wired in here because Ziren's current shard-level zerocheck
+/// prover ([`crate::shard_level::zerocheck_prover::prove_shard_zerocheck`])
+/// produces a direct `Σ_b C(b) == 0` sumcheck with `claimed_sum = 0`,
+/// which does not satisfy the SP1-shape identity the cryptographic
+/// check enforces.  Callers with an SP1-shape zerocheck proof may
+/// invoke the cryptographic helper independently.
 fn verify_zerocheck_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
     gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
     SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-    // (1) Sample the per-phase challenges.  We don't use alpha /
-    // gkr_batch_open / lambda in the partial port (they drive the
-    // constraint-folder-dependent RLC), but sampling keeps the
-    // transcript in sync with the prover's ordering.
+    // (1) Sample the per-phase challenges to keep the transcript in
+    // sync with the prover.  They would drive the cryptographic
+    // identity check if wired — see the doc comment for the current
+    // split between structural and cryptographic verification.
     let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let _gkr_batch_open: Challenge<SC> =
         challenger.sample_algebra_element::<Challenge<SC>>();
@@ -424,8 +552,7 @@ where
         )));
     }
 
-    // (3) gkr_point dim must match zerocheck point dim (verified by
-    // the eq_eval identity in the full port; here we just shape-check).
+    // (3) gkr_point dim must match zerocheck point dim.
     if gkr_evaluations.point.len() != point_dim {
         return Err(BasefoldVerifyError::Zerocheck(format!(
             "gkr_evaluations.point dim {} != zerocheck point dim {}",
@@ -434,10 +561,13 @@ where
         )));
     }
 
+    // `public_values` and `chips` with BasefoldConstraintFolder bound
+    // are threaded so callers can reach
+    // [`verify_zerocheck_cryptographic_identity_host`] without
+    // duplicating plumbing.
+    let _ = (chips, public_values);
+
     // (4) Inner sumcheck: degree 3, max_log_row_count rounds.
-    // The zerocheck sumcheck proves the constraint identity; the
-    // coefficient-level verifier we already have handles the
-    // round-poly consistency.
     verify_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
         zerocheck_proof,
         challenger,
@@ -475,9 +605,169 @@ where
         }
     }
 
-    // Full constraint-folder identity check is deferred.  The
-    // partial port above catches all structural failures; full
-    // soundness requires the BasefoldConstraintFolder host port.
+    Ok(())
+}
+
+/// Full cryptographic identity check for the BaseFold zerocheck phase
+/// — host port of the in-circuit
+/// [`crate::recursion_circuit::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`]'s
+/// steps (4)-(5):
+///
+///   (a) Cross-chip constraint RLC:
+///       ```text
+///       Σ_chip λ^k · eq(gkr_point, zerocheck_point) ·
+///           ( constraint_eval(chip, α)
+///             - full_geq(degree, zerocheck_point ++ 0) · padded_row_adjustment(chip, α)
+///             + batch_openings(chip.openings, gkr_batch_open) )
+///           == zerocheck_proof.point_and_eval.1
+///       ```
+///
+///   (b) GKR sum-modification:
+///       ```text
+///       Σ_chip λ^k · batch_openings(chip's GKR evals, gkr_batch_open)
+///           == zerocheck_proof.claimed_sum
+///       ```
+///
+/// # Protocol compatibility
+///
+/// Callers must supply an SP1-shape zerocheck proof where
+/// `claimed_sum` and `point_and_eval.1` are the reduction of chip
+/// constraint tables under `α, λ, gkr_batch_open` — Ziren's current
+/// direct `Σ_b C(b) == 0` zerocheck does NOT satisfy these identities.
+///
+/// The `alpha`, `gkr_batch_open`, `lambda` parameters are the exact
+/// values the caller already sampled from the transcript in
+/// [`verify_zerocheck_host`] — pass them through rather than
+/// re-sampling to avoid transcript desync.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_zerocheck_cryptographic_identity_host<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
+    gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    public_values: &[Val<SC>],
+    max_log_row_count: usize,
+    alpha: Challenge<SC>,
+    gkr_batch_open: Challenge<SC>,
+    lambda: Challenge<SC>,
+) -> Result<(), BasefoldVerifyError>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
+{
+    use p3_air::BaseAir;
+
+    // Shared factors computed once outside the per-chip loop.
+    let zerocheck_eq_val = eq_eval_host(&gkr_evaluations.point, &zerocheck_proof.point_and_eval.0);
+
+    let max_elements = chips
+        .iter()
+        .map(|chip| {
+            <_ as BaseAir<Val<SC>>>::width(*chip)
+                + <A as MachineAir<Val<SC>>>::preprocessed_width(&chip.air)
+        })
+        .max()
+        .unwrap_or(0);
+    let gkr_batch_open_powers: Vec<Challenge<SC>> = {
+        let mut v = Vec::with_capacity(max_elements);
+        let mut acc: Challenge<SC> = Challenge::<SC>::ONE;
+        for _ in 0..max_elements {
+            acc = acc * gkr_batch_open;
+            v.push(acc);
+        }
+        v
+    };
+
+    // Per-chip degree point (zero-filled stub — matches the in-circuit
+    // witness stub at `shard_proof_variable_lift::empty_chip_height_bits`).
+    let degree_stub: Vec<Challenge<SC>> = degree_stub_host::<Challenge<SC>>(max_log_row_count);
+
+    // Extended sumcheck point (one extra zero coord) for full_geq.
+    let mut proof_point_extended: Vec<Challenge<SC>> =
+        zerocheck_proof.point_and_eval.0.clone();
+    proof_point_extended.push(Challenge::<SC>::ZERO);
+
+    // (a) Cross-chip constraint-RLC identity.
+    let mut rlc_eval: Challenge<SC> = Challenge::<SC>::ZERO;
+    for chip in chips.iter() {
+        let name = chip.name().to_string();
+        let opening_ref = gkr_evaluations.chip_openings.get(&name).ok_or_else(|| {
+            BasefoldVerifyError::Zerocheck(format!(
+                "chip {name} missing from gkr_evaluations.chip_openings"
+            ))
+        })?;
+        let chip_opening: ChipOpenedValues<Val<SC>, Challenge<SC>> =
+            chip_opening_from_gkr_evaluation::<Val<SC>, Challenge<SC>>(opening_ref, 0);
+
+        let geq_val = full_geq_host(&degree_stub, &proof_point_extended);
+        let constraint_acc = eval_constraints_basefold_host::<Val<SC>, Challenge<SC>, A>(
+            chip,
+            &chip_opening,
+            alpha,
+            public_values,
+        );
+        let padded_row_adj = compute_padded_row_adjustment_basefold_host::<
+            Val<SC>,
+            Challenge<SC>,
+            A,
+        >(chip, &chip_opening, alpha, public_values);
+        let constraint_eval = constraint_acc - padded_row_adj * geq_val;
+
+        let combined_len = chip_opening.main.local.len() + chip_opening.preprocessed.local.len();
+        let openings_batch: Challenge<SC> = chip_opening
+            .main
+            .local
+            .iter()
+            .copied()
+            .chain(chip_opening.preprocessed.local.iter().copied())
+            .zip(gkr_batch_open_powers.iter().take(combined_len).copied())
+            .fold(Challenge::<SC>::ZERO, |acc, (opening, power)| acc + opening * power);
+
+        rlc_eval = rlc_eval * lambda
+            + zerocheck_eq_val * (constraint_eval + openings_batch);
+    }
+
+    if rlc_eval != zerocheck_proof.point_and_eval.1 {
+        return Err(BasefoldVerifyError::Zerocheck(
+            "cross-chip constraint-RLC identity failed".into(),
+        ));
+    }
+
+    // (b) GKR sum-modification identity.
+    let gkr_batches: Vec<Challenge<SC>> = gkr_evaluations
+        .chip_openings
+        .values()
+        .map(|chip_evaluation| {
+            chip_evaluation
+                .main_trace_evaluations
+                .iter()
+                .copied()
+                .chain(
+                    chip_evaluation
+                        .preprocessed_trace_evaluations
+                        .as_ref()
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[])
+                        .iter()
+                        .copied(),
+                )
+                .zip(gkr_batch_open_powers.iter().copied())
+                .fold(Challenge::<SC>::ZERO, |acc, (opening, power)| acc + opening * power)
+        })
+        .collect();
+
+    let zerocheck_sum_mod: Challenge<SC> = gkr_batches
+        .iter()
+        .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + *m);
+
+    if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
+        return Err(BasefoldVerifyError::Zerocheck(
+            "GKR sum-modification identity failed".into(),
+        ));
+    }
+
     Ok(())
 }
 
@@ -746,6 +1036,7 @@ where
     // Initial numerator/denominator evals at the sampled point.
     let mut numerator_eval: Challenge<SC> = evaluate_mle_host(numerator, &eval_point);
     let mut denominator_eval: Challenge<SC> = evaluate_mle_host(denominator, &eval_point);
+    let _ = (numerator_eval, denominator_eval);
 
     // (4) Walk round_proofs.  For each round:
     //   - sample lambda
@@ -858,6 +1149,76 @@ mod tests {
         let s = format!("{e}");
         assert!(s.contains("10"));
         assert!(s.contains("7"));
+    }
+
+    /// `full_geq_host` with all-zero threshold is identically 1 — the
+    /// fold `acc_new = (1-y)*acc + y` starting from 1 collapses to 1
+    /// at every step regardless of `y` (the in-circuit stub uses this
+    /// invariant, so the host port must match).
+    #[test]
+    fn full_geq_host_zero_threshold_is_one() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        let threshold = vec![EF::ZERO; 4];
+        let eval_point = vec![
+            EF::from_u32(3),
+            EF::from_u32(7),
+            EF::from_u32(11),
+            EF::from_u32(13),
+        ];
+        let result = full_geq_host(&threshold, &eval_point);
+        assert_eq!(result, EF::ONE);
+    }
+
+    /// `full_geq_host` on boolean inputs where `threshold == eval_point`
+    /// equals 1 — the "step-up" term `y*(1-x)` is 0 at every bit, so
+    /// the recurrence stays at the identity.
+    #[test]
+    fn full_geq_host_equal_boolean_threshold_is_one() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        // Boolean point.
+        let point = vec![EF::ONE, EF::ZERO, EF::ONE];
+        let result = full_geq_host(&point, &point);
+        assert_eq!(result, EF::ONE);
+    }
+
+    /// `full_geq_host` on boolean inputs with `eval_point > threshold`
+    /// in big-endian comparison fires the step-up term.  Specifically
+    /// threshold = [0,0], eval_point = [1,0] → at bit 0 (MSB), y=1,
+    /// x=0 contributes step-up=1, yielding result = 1.
+    #[test]
+    fn full_geq_host_boolean_strict_greater() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        let threshold = vec![EF::ZERO, EF::ZERO];
+        let eval_point = vec![EF::ONE, EF::ZERO];
+        let result = full_geq_host(&threshold, &eval_point);
+        // At MSB bit: eq_factor=(1-0)(1-1)+0·1=0, step=1·(1-0)=1. acc=1·0+1=1.
+        // At LSB bit: eq_factor=(1-0)(1-0)+0·0=1, step=0·1=0.  acc=1·1+0=1.
+        assert_eq!(result, EF::ONE);
+    }
+
+    /// `degree_stub_host` returns a vector of exactly
+    /// `max_log_row_count + 1` zero entries, matching the witness
+    /// stub at `shard_proof_variable_lift::empty_chip_height_bits`.
+    #[test]
+    fn degree_stub_host_is_zero_filled_with_extra_bit() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_koala_bear::KoalaBear;
+        type EF = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        for max_log in [0usize, 1, 5, 22] {
+            let v: Vec<EF> = degree_stub_host(max_log);
+            assert_eq!(v.len(), max_log + 1);
+            assert!(v.iter().all(|x| *x == EF::ZERO));
+        }
     }
 
     /// eq_eval on identical points = 1; on differing = not-1.

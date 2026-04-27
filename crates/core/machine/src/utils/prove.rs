@@ -356,6 +356,23 @@ where
                                         }
                                     }
                                 }
+                                if std::env::var("DUMP_SHARD_SHAPES").is_ok() && fixed_shape {
+                                    use std::io::Write;
+                                    let mut f = std::fs::OpenOptions::new()
+                                        .create(true).append(true)
+                                        .open("/tmp/shard_shapes.log")
+                                        .expect("open shape dump");
+                                    for record in records_clone.iter() {
+                                        let mut shape_entries: Vec<(String, usize)> = record
+                                            .shape
+                                            .as_ref()
+                                            .map(|s| s.iter().map(|(k, v)| (format!("{k:?}"), *v)).collect())
+                                            .unwrap_or_default();
+                                        shape_entries.sort();
+                                        writeln!(f, "[A] shard {} shape: {:?}", record.public_values.shard, shape_entries).unwrap();
+                                    }
+                                    eprintln!("[DUMP_SHARD_SHAPES][A] wrote {} shapes", records_clone.len());
+                                }
                                 fixed_shape.then_some(records_clone)
                             } else {
                                 None
@@ -414,6 +431,32 @@ where
                                     for record in records.iter_mut() {
                                         shape_config.fix_shape(record).unwrap();
                                     }
+                                }
+                                // Diagnostic: dump per-shard shape to /tmp for diff'ing
+                                // across runs to find non-determinism in shape selection.
+                                if std::env::var("DUMP_SHARD_SHAPES").is_ok() {
+                                    use std::io::Write;
+                                    let path = "/tmp/shard_shapes.log";
+                                    let mut f = std::fs::OpenOptions::new()
+                                        .create(true).append(true)
+                                        .open(path)
+                                        .expect("open shape dump file");
+                                    for record in records.iter() {
+                                        let mut shape_entries: Vec<(String, usize)> = record
+                                            .shape
+                                            .as_ref()
+                                            .map(|s| s.iter().map(|(k, v)| (format!("{k:?}"), *v)).collect())
+                                            .unwrap_or_default();
+                                        shape_entries.sort();
+                                        writeln!(
+                                            f,
+                                            "shard {} shape: {:?}",
+                                            record.public_values.shard,
+                                            shape_entries
+                                        ).expect("write shape line");
+                                    }
+                                    f.flush().expect("flush");
+                                    eprintln!("[DUMP_SHARD_SHAPES] wrote {} shard shapes", records.len());
                                 }
                                 shape_fixed_records = Some(records);
                             }
@@ -676,6 +719,11 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
+        + for<'b> Air<zkm_stark::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            'b,
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
+        >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig,
@@ -718,6 +766,11 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
+        + for<'b> Air<zkm_stark::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            'b,
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
+        >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig,

@@ -17,7 +17,7 @@ pub enum Instruction<F> {
     HintAddCurve(HintAddCurveInstr<F>),
     FriFold(Box<FriFoldInstr<F>>),
     BatchFRI(Box<BatchFRIInstr<F>>),
-    /// WHIR sumcheck round verification instruction.
+    /// BaseFold sumcheck round verification instruction.
     SumcheckVerify(Box<SumcheckVerifyInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
@@ -63,7 +63,7 @@ pub struct HintExt2FeltsInstr<F> {
     pub input_addr: Address<F>,
 }
 
-/// Instruction for verifying one sumcheck round in a WHIR proof.
+/// Instruction for verifying one sumcheck round in a BaseFold proof.
 ///
 /// Each instruction verifies:
 ///   p(0) + p(1) = claimed_sum

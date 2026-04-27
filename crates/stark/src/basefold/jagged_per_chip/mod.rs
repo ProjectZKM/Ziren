@@ -148,10 +148,10 @@ pub fn commit_multilinears_per_chip<F, EF, MT, D>(
     challenger: &mut impl CanObserve<MT::Commitment>,
 ) -> (MT::Commitment, JaggedProverData<F, MT>)
 where
-    F: TwoAdicField,
+    F: TwoAdicField + Send + Sync,
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F, Commitment: Clone>,
-    D: TwoAdicSubgroupDft<F>,
+    D: TwoAdicSubgroupDft<F> + Send + Sync,
 {
     // Collect per-chip row + column counts before the commit consumes
     // the Mle vec.  `num_non_zero_entries` returns the "real" row
@@ -221,10 +221,10 @@ pub fn commit_multilinears_per_chip_hashed<F, EF, MT, D, H, C, Digest>(
     challenger: &mut impl CanObserve<MT::Commitment>,
 ) -> (MT::Commitment, JaggedProverData<F, MT>)
 where
-    F: TwoAdicField + PrimeCharacteristicRing,
+    F: TwoAdicField + PrimeCharacteristicRing + Send + Sync,
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F, Commitment: Clone>,
-    D: TwoAdicSubgroupDft<F>,
+    D: TwoAdicSubgroupDft<F> + Send + Sync,
     H: CryptographicHasher<F, Digest>,
     C: PseudoCompressionFunction<Digest, 2>,
     Digest: Clone,

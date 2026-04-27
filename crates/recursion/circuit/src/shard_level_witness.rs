@@ -14,11 +14,43 @@
 use std::collections::BTreeMap;
 
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
+use zkm_stark::septic_curve::SepticCurve;
+use zkm_stark::septic_digest::SepticDigest;
+use zkm_stark::septic_extension::SepticExtension;
+use zkm_stark::shard_level::shard_proof::ChipCumulativeSums;
 use zkm_stark::shard_level::types as st;
 
 use crate::witness::{Witnessable, WitnessWriter};
 use crate::CircuitConfig;
 use zkm_stark::{InnerChallenge, InnerVal};
+
+// ── Per-chip cumulative sums (META #59 swap 1+2) ────────────────
+
+impl<C> Witnessable<C> for ChipCumulativeSums<InnerVal, InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable = ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        let local = self.local.read(builder);
+        let global_x = self.global.0.x.0.read(builder);
+        let global_y = self.global.0.y.0.read(builder);
+        ChipCumulativeSums {
+            local,
+            global: SepticDigest(SepticCurve {
+                x: SepticExtension(global_x),
+                y: SepticExtension(global_y),
+            }),
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.local.write(witness);
+        self.global.0.x.0.write(witness);
+        self.global.0.y.0.write(witness);
+    }
+}
 
 // ── Univariate + sumcheck types ──────────────────────────────────
 
@@ -117,6 +149,7 @@ where
                 .preprocessed_trace_evaluations
                 .as_ref()
                 .map(|v| v.read(builder)),
+            log_degree: self.log_degree,
         }
     }
 

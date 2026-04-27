@@ -24,6 +24,7 @@ use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use p3_commit::Mmcs;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 
@@ -79,21 +80,49 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         // hypercube-major; Ziren stores row-major with rows =
         // hypercube points and cols = polys, so transposing is the
         // same conversion: walk `(poly, hypercube)` in raster order.
+        //
+        // Phase 4 perf fix (Apr 25 2026): parallelize the column-major
+        // transpose. For a 2^27-cell jagged dense polynomial this
+        // single inner loop dominates the BaseFold commit path
+        // (~30s/40s pre-fix). Each output column is independent, so
+        // chunk the output by column and fan out across cores.
         let width = mle.guts.width;
         let height = mle.guts.values.len() / width.max(1);
-        let mut data: Vec<F> = Vec::with_capacity(width * height);
-        for col in 0..width {
-            for row in 0..height {
-                data.push(mle.guts.values[row * width + col]);
-            }
+        use p3_maybe_rayon::prelude::*;
+        // Allocator opt: skip the F::ZERO init; every slot is written
+        // by the column-major transpose loop below.  For 134M cells
+        // this avoids ~500 MiB of redundant writes on the commit path.
+        let total = width * height;
+        // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
+        let mut data: Vec<F> = vec![F::ZERO; total];
+        if width > 0 {
+            data.par_chunks_mut(height).enumerate().for_each(|(col, dst)| {
+                for row in 0..height {
+                    dst[row] = mle.guts.values[row * width + col];
+                }
+            });
         }
 
+        // Phase 4 perf fix (Apr 25 2026): the SP1-port `data.split_off(needed)`
+        // pattern has O(N²) cost when N = 134M and needed = 16384 (each
+        // split_off COPIES the entire remaining suffix, ~134M elements,
+        // and we do that 8192 times — measured ~30s on hello_world).
+        // Replace with an in-place CURSOR walk: track an index into
+        // `data` and slice without copying until we're ready to push the
+        // final chunk into `overflow`.
+        let data_len = data.len();
+        let mut data_pos: usize = 0;
         let mut needed = stripe_capacity - overflow.len();
-        while data.len() > needed {
-            let remaining = data.split_off(needed);
+        while data_len - data_pos > needed {
+            let chunk = &data[data_pos..data_pos + needed];
+            data_pos += needed;
+
+            // Stitch overflow + chunk into a single stripe-sized buffer.
+            // overflow is short (< stripe_capacity); the dominant work
+            // is the chunk read which is already a contiguous slice.
             let mut elements = Vec::with_capacity(stripe_capacity);
             elements.append(&mut overflow);
-            elements.append(&mut data);
+            elements.extend_from_slice(chunk);
             debug_assert_eq!(elements.len(), stripe_capacity);
 
             // Reshape to [batch_size, stack_height] then transpose so
@@ -103,10 +132,10 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
             let mat = transpose_row_major(&elements, batch_size, stack_height);
             batch_multilinears.push(Arc::new(Mle::new(mat)));
 
-            data = remaining;
             needed = stripe_capacity;
         }
-        overflow.append(&mut data);
+        // Append the leftover (< stripe_capacity) to the overflow buffer.
+        overflow.extend_from_slice(&data[data_pos..]);
     }
 
     // Final stripe: pad with zeros up to the next full stripe.
@@ -126,18 +155,30 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
 /// `[rows = batch_size, cols = stack_height]` row-major slice
 /// transposed into a `RowMajorMatrix` with shape
 /// `[height = stack_height, width = batch_size]`.
+///
+/// Phase 4 perf fix (Apr 25 2026): parallelize the transpose. For
+/// stripe sizes of 2^14 = 16384 elements per stripe and 8K stripes
+/// (134M total cells across the jagged dense polynomial), the serial
+/// transpose was a hot loop in the BaseFold commit path. Parallelizing
+/// across destination chunks (one per output row of the transposed
+/// matrix) gives near-linear speedup on N-core machines.
 fn transpose_row_major<F: Field>(
     src: &[F],
     rows: usize,
     cols: usize,
 ) -> RowMajorMatrix<F> {
     debug_assert_eq!(src.len(), rows * cols);
-    let mut out = vec![F::ZERO; rows * cols];
-    for r in 0..rows {
-        for c in 0..cols {
-            out[c * rows + r] = src[r * cols + c];
+    use p3_maybe_rayon::prelude::*;
+    // Allocator opt: skip F::ZERO init; every slot is unconditionally
+    // written by the column-chunk transpose below.
+    let total = rows * cols;
+    // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
+    let mut out: Vec<F> = vec![F::ZERO; total];
+    out.par_chunks_mut(rows).enumerate().for_each(|(c, dst_row)| {
+        for r in 0..rows {
+            dst_row[r] = src[r * cols + c];
         }
-    }
+    });
     RowMajorMatrix::new(out, rows)
 }
 
@@ -188,7 +229,11 @@ where
     pub fn commit_multilinears(
         &self,
         multilinears: Vec<Arc<Mle<F>>>,
-    ) -> (MT::Commitment, StackedBasefoldProverData<F, MT>) {
+    ) -> (MT::Commitment, StackedBasefoldProverData<F, MT>)
+    where
+        F: Send + Sync,
+        D: Send + Sync,
+    {
         let interleaved_mles = interleave_multilinears_with_fixed_rate(
             self.batch_size,
             multilinears,

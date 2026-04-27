@@ -14,10 +14,11 @@ members = [
     "crates/core/executor",
     "crates/core/instruction-test-defs",
     "crates/core/machine",
+    "crates/core/jit",
     "crates/cuda",
     "crates/curves",
     "crates/derive",
-    "crates/picus",
+   # "crates/picus",
     "crates/primitives",
     "crates/prover",
     "crates/recursion/circuit",
@@ -120,7 +121,7 @@ zkm-build = { path = "crates/build" }
 zkm-sdk = { path = "crates/sdk" }
 zkm-cuda = { path = "crates/cuda" }
 zkm-verifier = { path = "crates/verifier" }
-zkm-picus = {path = "crates/picus"}
+#zkm-picus = {path = "crates/picus"}
 
 zkm-lib = { path = "crates/zkvm/lib", default-features = false }
 zkm-zkvm = { path = "crates/zkvm/entrypoint", default-features = false }

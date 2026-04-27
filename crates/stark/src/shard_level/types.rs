@@ -94,6 +94,18 @@ pub struct LogupGkrRoundProof<EF> {
 pub struct ChipEvaluation<EF> {
     pub main_trace_evaluations: Vec<EF>,
     pub preprocessed_trace_evaluations: Option<Vec<EF>>,
+    /// `log2(main_trace.height())` for this chip in this shard.
+    /// Drives the recursion verifier's `degree_bits` (zerocheck-reduced
+    /// padded-row mask). Defaults to 0 when serde-loaded from older
+    /// proof bytes — verifier treats 0 as "uniform max_log_row_count
+    /// padding" (legacy placeholder behavior).
+    ///
+    /// META #59 swap 4 plumbing — populated by `prove_shard_to_basefold`
+    /// from the host trace heights; consumed by the recursion verifier
+    /// once `build_opened_values_from_chip_openings_with_heights`
+    /// becomes the default code path.
+    #[serde(default)]
+    pub log_degree: u8,
 }
 
 /// Data passed from the LogUp-GKR prover to the zerocheck prover.
@@ -171,6 +183,7 @@ mod tests {
                     ChipEvaluation {
                         main_trace_evaluations: vec![v(14)],
                         preprocessed_trace_evaluations: Some(vec![v(15)]),
+                        log_degree: 0,
                     },
                 )]),
             },

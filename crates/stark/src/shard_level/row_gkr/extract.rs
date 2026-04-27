@@ -90,30 +90,66 @@ where
         "extract_outputs requires terminal layer (num_row_variables == 1)"
     );
 
-    let total_len = 1usize << (layer.num_interaction_variables + 1);
+    // Output MLE layout MUST match the bit-ordering `flatten_layer`
+    // uses for the round 0 sumcheck: variable 0 (LSB of index) = col
+    // LSB, remaining cols-variables are higher-order bits, and the
+    // single row-bit is the highest-order bit (MSB).  Layout:
+    //
+    //   output_idx = row_bit * cols + offset + col
+    //              = row_bit * 2^num_int_vars + chip_offset + chip_col
+    //
+    // where the col dimension (2^num_int_vars) is the global aggregate.
+    //
+    // Per chip: row 0's cols go in the first half of the global axis at
+    // the chip's running `offset`; row 1's cols go in the second half at
+    // the same `offset`.  Padded cells (chip contribution ends before
+    // next chip's offset, and cells beyond sum-of-raw) get ZERO
+    // (numerator) / ONE (denominator).
+    let cols = 1usize << layer.num_interaction_variables;
+    let total_len = 2 * cols;
 
-    // Numerator sub-MLEs: pad with ZERO.
-    let mut n0_int: Vec<EF> = layer.numerator_0.iter().flat_map(interleave_chip).collect();
-    n0_int.resize(total_len, EF::ZERO);
-    let mut n1_int: Vec<EF> = layer.numerator_1.iter().flat_map(interleave_chip).collect();
-    n1_int.resize(total_len, EF::ZERO);
+    let mut n0_flat = vec![EF::ZERO; total_len];
+    let mut d0_flat = vec![EF::ONE; total_len];
+    let mut n1_flat = vec![EF::ZERO; total_len];
+    let mut d1_flat = vec![EF::ONE; total_len];
 
-    // Denominator sub-MLEs: pad with ONE.  Identity fraction (0, 1)
-    // preserves the sum-of-fractions invariant.
-    let mut d0_int: Vec<EF> = layer.denominator_0.iter().flat_map(interleave_chip).collect();
-    d0_int.resize(total_len, EF::ONE);
-    let mut d1_int: Vec<EF> = layer.denominator_1.iter().flat_map(interleave_chip).collect();
-    d1_int.resize(total_len, EF::ONE);
+    let mut offset = 0usize;
+    for (((n0_chip, d0_chip), n1_chip), d1_chip) in layer
+        .numerator_0
+        .iter()
+        .zip(layer.denominator_0.iter())
+        .zip(layer.numerator_1.iter())
+        .zip(layer.denominator_1.iter())
+    {
+        let chip_cols = n0_chip.num_interactions;
+        debug_assert_eq!(d0_chip.num_interactions, chip_cols);
+        debug_assert_eq!(n1_chip.num_interactions, chip_cols);
+        debug_assert_eq!(d1_chip.num_interactions, chip_cols);
+        debug_assert_eq!(n0_chip.num_row_variables, 1);
+        debug_assert!(offset + chip_cols <= cols);
+
+        // Terminal layer has num_row_vars=1 → 2 rows.  Row 0 = get(0, c),
+        // row 1 = get(1, c).  Place row 0 in the low half of the global
+        // index (row_bit=0) and row 1 in the high half (row_bit=1).
+        for c in 0..chip_cols {
+            n0_flat[offset + c] = *n0_chip.get(0, c);
+            d0_flat[offset + c] = *d0_chip.get(0, c);
+            n1_flat[offset + c] = *n1_chip.get(0, c);
+            d1_flat[offset + c] = *d1_chip.get(0, c);
+
+            n0_flat[cols + offset + c] = *n0_chip.get(1, c);
+            d0_flat[cols + offset + c] = *d0_chip.get(1, c);
+            n1_flat[cols + offset + c] = *n1_chip.get(1, c);
+            d1_flat[cols + offset + c] = *d1_chip.get(1, c);
+        }
+        offset += chip_cols;
+    }
 
     let mut numerator = Vec::with_capacity(total_len);
     let mut denominator = Vec::with_capacity(total_len);
     for i in 0..total_len {
-        let n_0 = n0_int[i];
-        let n_1 = n1_int[i];
-        let d_0 = d0_int[i];
-        let d_1 = d1_int[i];
-        numerator.push(n_0 * d_1 + n_1 * d_0);
-        denominator.push(d_0 * d_1);
+        numerator.push(n0_flat[i] * d1_flat[i] + n1_flat[i] * d0_flat[i]);
+        denominator.push(d0_flat[i] * d1_flat[i]);
     }
 
     LogUpGkrOutput { numerator, denominator }
@@ -209,11 +245,14 @@ mod tests {
         assert_eq!(output.numerator.len(), 8);
         assert_eq!(output.denominator.len(), 8);
 
-        // Padded entries (indices 2..8) get n_0=n_1=0 and d_0=d_1=1
+        // New row-major layout (matches flatten_layer):
+        //   row 0 at index 0..1, row 1 at index 4..5
+        //   padding: indices 1, 2, 3 (row 0 padding) and 5, 6, 7 (row 1).
+        // Padded entries get n_0=n_1=0, d_0=d_1=1
         // → numerator = 0*1 + 0*1 = 0; denominator = 1*1 = 1.
-        for i in 2..8 {
-            assert_eq!(output.numerator[i], EF::ZERO);
-            assert_eq!(output.denominator[i], EF::ONE);
+        for i in [1usize, 2, 3, 5, 6, 7] {
+            assert_eq!(output.numerator[i], EF::ZERO, "numerator at idx {i}");
+            assert_eq!(output.denominator[i], EF::ONE, "denominator at idx {i}");
         }
     }
 

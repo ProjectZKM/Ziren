@@ -320,6 +320,17 @@ where
 
         // Observe the public values and the main commitment.
         challenger.observe_slice(&data.public_values[0..self.num_pv_elts()]);
+
+        // Snapshot the challenger at the state the BaseFold verifier will
+        // see at entry to `BasefoldShardVerifier::verify_shard`:
+        // `machine::verify_shard` observes `public_values[0..num_pv_elts]`
+        // before calling `Verifier::verify_shard`, which dispatches to
+        // `BasefoldShardVerifier::verify_shard` WITHOUT doing any further
+        // ops on the challenger.  Capture that state here so the
+        // shard-level prover's Phase 1 sees an aligned transcript
+        // (otherwise round 0's claimed_sum check desyncs).
+        let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
+
         challenger.observe(data.main_commit.clone());
 
         // Obtain the challenges used for the local permutation argument.
@@ -333,22 +344,29 @@ where
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
-        // === WHIR FAST PATH (default) ===
-        // WHIR + jagged late-binding + zerocheck + LogUp-GKR is now the
-        // default proof system.  Set `ZIREN_USE_FRI=1` to opt out and
-        // use the legacy FRI + permutation + quotient path.  The FRI
-        // path is kept as a fallback / debugging tool only; production
-        // deployments should leave it disabled.
+        // === BASEFOLD FAST PATH (default) ===
+        // BaseFold + jagged late-binding + zerocheck + LogUp-GKR is now
+        // the default proof system.  Set `ZIREN_USE_FRI=1` to opt out
+        // and use the legacy FRI + permutation + quotient path.  The
+        // FRI path is kept as a fallback / debugging tool only;
+        // production deployments should leave it disabled.
+        //
+        // (Historical note: this path was originally named "WHIR fast
+        // path" while the WHIR PCS was the planned soundness pillar.
+        // The Apr 2026 BaseFold migration replaced WHIR PCS with
+        // BaseFold; the path itself still uses `TwoAdicFriPcs` for the
+        // prep + main commit/open, with soundness now carried by the
+        // BaseFold per-shard proof generated below.)
         //
         // The CPU-chip presence check guards against shards (e.g. some
         // recursion-only shards) that don't declare the Cpu chip and
-        // therefore lack the Fiat--Shamir constants the WHIR path
-        // assumes; those still take the FRI path.
+        // therefore lack the Fiat--Shamir constants this path assumes;
+        // those still take the FRI path.
         let force_fri = std::env::var("ZIREN_USE_FRI").unwrap_or_default() == "1";
-        let use_whir = !force_fri && data.chip_ordering.contains_key("Cpu");
+        let use_basefold_path = !force_fri && data.chip_ordering.contains_key("Cpu");
 
-        if use_whir {
-            let t_whir = std::time::Instant::now();
+        if use_basefold_path {
+            let t_basefold_path = std::time::Instant::now();
 
             // Skip permutation traces and quotient evaluation entirely.
             // NOTE: public_values + main_commit already observed at lines 322-323,
@@ -379,19 +397,21 @@ where
             let _alpha: SC::Challenge = challenger.sample_algebra_element();
 
             // No quotient commit to observe (skipped).
-            // Sample zeta (evaluation point) so the WHIR-mode FRI
+            // Sample zeta (evaluation point) so the BaseFold-mode FRI
             // skip below has a value in scope.  Ignored at verify
-            // time when the WHIR short-circuit fires.
+            // time when the verifier's `legacy_quotient_skipped`
+            // short-circuit fires.
             let _zeta: SC::Challenge = challenger.sample_algebra_element();
 
-            // === Phase 3: skip FRI open in WHIR mode ===
+            // === Phase 3: skip FRI open of perm/quotient in BaseFold mode ===
             //
-            // In the WHIR fast path the zeta-point FRI opening is
-            // FRI open at zeta.  The empty-FriProof short-circuit that
-            // used to live here (paired with `verifier.rs::whir_mode`'s
-            // legacy short-circuit) retired with #13 — KoalaBear MIPS
-            // shards now produce a `BasefoldShardProof` instead, and
-            // the WHIR shortcut in the legacy verifier is gone.
+            // In the BaseFold fast path the zeta-point FRI opening is
+            // restricted to prep + main; perm + quotient are not
+            // committed.  The empty-FriProof short-circuit that used
+            // to live here (paired with the verifier's legacy
+            // short-circuit) retired with #13 — KoalaBear MIPS shards
+            // now produce a `BasefoldShardProof` instead, and the
+            // legacy verifier shortcut is gone.
             let main_trace_opening_points: Vec<Vec<SC::Challenge>> = trace_domains
                 .iter()
                 .zip(chips.iter())
@@ -423,7 +443,7 @@ where
                 challenger,
             );
 
-            let whir_ms = t_whir.elapsed().as_millis();
+            let basefold_path_ms = t_basefold_path.elapsed().as_millis();
 
             // Log timing.
             {
@@ -431,7 +451,7 @@ where
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
                 {
-                    let _ = writeln!(f, "WHIR_PATH total={}ms (no perm, no quotient)", whir_ms);
+                    let _ = writeln!(f, "BASEFOLD_PATH total={}ms (no perm, no quotient)", basefold_path_ms);
                 }
             }
 
@@ -502,9 +522,11 @@ where
                 })
                 .collect::<Vec<_>>();
 
-            // Phase 2c late-binding: per-chip per-column WHIR proofs
+            // Phase 2c late-binding: per-chip per-column BaseFold proofs
             // that bind `logup_row_openings.main_at_r_row` to a
-            // (separate) WHIR commitment of the main trace.
+            // (separate) BaseFold commitment of the main trace.
+            // (Originally written for WHIR; the pcs migration in Apr
+            // 2026 swapped WHIR → BaseFold but kept the same shape.)
             //
             // Dispatched via TypeId match on `SC` so this generic
             // function can call into the KoalaBear-specific
@@ -526,7 +548,7 @@ where
                 &traces,
                 &data.main_commit,
                 data.public_values.clone(),
-                &*challenger,
+                &basefold_challenger_snapshot,
             );
 
             return Ok(ShardProof::<SC> {
@@ -879,6 +901,30 @@ where
             )
             .collect::<Vec<_>>();
 
+        // META #59 Phase 2 (v2): populate basefold_shard_proof ALSO
+        // in the FRI path for MIPS shards without Cpu (e.g. memory-only
+        // finalize shards).  Gate on "Program" chip (MIPS-specific
+        // preprocessed trace) to distinguish MIPS shards from recursion
+        // shards — recursion programs (BaseAlu / ExtAlu / Poseidon2
+        // chips) do NOT carry "Program" and must keep basefold=None.
+        //
+        // v1 attempt used no gate and regressed Test::Compress because
+        // recursion programs were also producing basefold proofs that
+        // the verifier rejected.
+        let basefold_shard_proof = if data.chip_ordering.contains_key("Program") {
+            try_prove_shard_to_basefold_boxed::<SC, A>(
+                &chips,
+                &pk.traces,
+                &pk.chip_ordering,
+                &traces,
+                &data.main_commit,
+                data.public_values.clone(),
+                &basefold_challenger_snapshot,
+            )
+        } else {
+            None
+        };
+
         Ok(ShardProof::<SC> {
             commitment: ShardCommitment {
                 main_commit: data.main_commit.clone(),
@@ -888,8 +934,7 @@ where
             opening_proof,
             chip_ordering: data.chip_ordering,
             public_values: data.public_values,
-            // FRI path — no shard-level basefold proof.
-            basefold_shard_proof: None,
+            basefold_shard_proof,
         })
     }
 
@@ -1006,7 +1051,7 @@ impl Error for CpuProverError {}
 /// `None` otherwise.
 ///
 /// Invoked unconditionally from `StarkMachine::open` for KoalaBear
-/// MIPS shards (#13).  Bridges between the per-chip WHIR path's
+/// MIPS shards (#13).  Bridges between the per-chip BaseFold path's
 /// in-scope values and the shard-level prover's monomorphic
 /// KoalaBear API.
 #[allow(clippy::too_many_arguments)]
@@ -1039,6 +1084,24 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
+    // Phase 4 perf escape hatch (Apr 25 2026): `ZIREN_SKIP_BASEFOLD=1`
+    // forces this helper to return None, skipping the
+    // ~30s LogUp-GKR + jagged-PCS proof generation entirely.  The
+    // verifier then dispatches to the legacy STARK path (because
+    // `basefold_shard_proof.is_none()`).  Use for dev/test workloads
+    // where soundness from the basefold pillar isn't required —
+    // e.g. `mips::tests::test_*_prove_simple` micro-benchmarks that
+    // exercise the recursion plumbing rather than the production
+    // soundness chain.  Production deployments MUST leave this unset
+    // (or set to `0`) so the basefold proof is generated and the
+    // BasefoldShardVerifier dispatches.
+    if std::env::var("ZIREN_SKIP_BASEFOLD")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
     // Gate on SC == KoalaBearPoseidon2 (monomorphic dispatch).
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
@@ -1065,19 +1128,50 @@ where
     // (the gated config) `Com<SC>` is `Hash<Val, Val, 8>`, a
     // transparent wrapper around `[Val; 8]`.  Use Any-downcast on a
     // cloned value to avoid any layout assumptions.
+    // Extract the 8-felt digest from the commitment.
+    //
+    // BUG FIX: previously this used `core::ptr::read(ptr as *const [Val; 8])`
+    // assuming Com<SC> was `Hash<Val, Val, 8>` (a #[repr(transparent)]
+    // wrapper around [Val; 8]).  But for `KoalaBearPoseidon2`'s
+    // `TwoAdicFriPcs` setup, `Com<SC>` is actually
+    // `MerkleCap<Val, [Val; 8]>` — a Vec header (24 bytes) whose first
+    // element holds the real digest on the heap.  Reading 32 bytes
+    // from a 24-byte struct read past the end into adjacent stack
+    // slots, producing a garbage digest that didn't match the OUTER
+    // stark prover's challenger observation (which uses the proper
+    // `IntoIterator` impl).  The mismatch propagated into
+    // `BasefoldShardProof.main_commitment` and caused the verifier's
+    // Phase 1 challenger state to diverge after the 6th commit felt
+    // observation, breaking the GKR round-0 claimed_sum check.
+    //
+    // Fix: downcast via Any to the concrete `MerkleCap` type, then
+    // pull the first root (which is the [Val; 8] digest).  The
+    // upstream TypeId gate guarantees Val<SC> = InnerVal = KoalaBear,
+    // so the downcast is sound.
     let mut digest = [Val::<SC>::ZERO; 8];
     {
+        use core::any::Any;
+        use p3_symmetric::MerkleCap;
         let main_commit_cloned: Com<SC> = main_commit.clone();
-        let (ptr, _len, _cap) = {
-            let mut v = core::mem::ManuallyDrop::new(vec![main_commit_cloned]);
-            (v.as_mut_ptr(), v.len(), v.capacity())
-        };
-        // SAFETY: Com<SC> is Hash<Val, Val, 8> under the TypeId gate
-        // above — a #[repr(transparent)] wrapper around [Val; 8].
-        // Reading `*ptr as [Val; 8]` is valid.  Leak the Vec (don't
-        // free) since we've consumed the single element.
-        let hash_arr: [Val<SC>; 8] = unsafe { core::ptr::read(ptr as *const [Val<SC>; 8]) };
-        digest = hash_arr;
+        let any_commit: &dyn Any = &main_commit_cloned;
+        if let Some(cap) = any_commit
+            .downcast_ref::<MerkleCap<crate::InnerVal, [crate::InnerVal; 8]>>()
+        {
+            let roots = cap.roots();
+            assert!(!roots.is_empty(), "MerkleCap must have at least one root");
+            let inner_digest: [crate::InnerVal; 8] = roots[0];
+            // Transmute back to [Val<SC>; 8] — sound under the TypeId
+            // gate above (Val<SC> == InnerVal).
+            digest = unsafe {
+                core::ptr::read(&inner_digest as *const _ as *const [Val<SC>; 8])
+            };
+        } else {
+            panic!(
+                "basefold path expected Com<SC> = MerkleCap<InnerVal, [InnerVal; 8]>, \
+                 got something else (size_of = {})",
+                std::mem::size_of::<Com<SC>>(),
+            );
+        }
     }
 
     // Clone the outer challenger so our shard-level run doesn't
@@ -1096,6 +1190,11 @@ where
     // the legacy shard-proof envelope still completes; the
     // basefold proof is dropped and the verifier dispatches to the
     // legacy code path.
+    // Pin max_log_row_count to the BasefoldShardVerifier production
+    // default (22) so the prover's sumchecks run over exactly the
+    // variable count the verifier expects at zerocheck_point dim check.
+    let max_log_row_count = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+        .max_log_row_count;
     let proof_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
             &chips_reborrow,
@@ -1103,6 +1202,7 @@ where
             main_traces,
             digest,
             public_values,
+            max_log_row_count,
             &mut shard_challenger,
         )
     }));

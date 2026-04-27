@@ -104,12 +104,12 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub commitment: ShardCommitment<Com<SC>>,
     pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    /// FRI opening proof.  In WHIR mode (default), the prover emits
+    /// FRI opening proof.  In BaseFold mode (default), the prover emits
     /// an empty `FriProof` placeholder via
     /// `LateBindingCapable::empty_opening_proof()` and the verifier
     /// short-circuits before `pcs.verify` (see verifier.rs
-    /// `whir_mode` branch).  Phase 3 cleanup target: change to
-    /// `Option<OpeningProof<SC>>` once the WHIR-default proof shape
+    /// `basefold_mode` branch).  Phase 3 cleanup target: change to
+    /// `Option<OpeningProof<SC>>` once the BaseFold-default proof shape
     /// stabilizes.
     pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,

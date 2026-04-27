@@ -88,7 +88,7 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
 /// `height × num_interactions`.  `height` must equal the chip's main
 /// trace height (rows-stored count).  When `preprocessed_trace` is
 /// `None`, the per-row preprocessed slice is treated as empty.
-pub fn build_chip_interaction_tables<F: PrimeField, EF: ExtensionField<F>>(
+pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionField<F> + Send + Sync>(
     interactions: &[(&Lookup<F>, bool)],
     main_trace: &RowMajorMatrix<F>,
     preprocessed_trace: Option<&RowMajorMatrix<F>>,
@@ -98,23 +98,41 @@ pub fn build_chip_interaction_tables<F: PrimeField, EF: ExtensionField<F>>(
     let height = if main_trace.width == 0 { 0 } else { main_trace.values.len() / main_trace.width };
     let num_interactions = interactions.len();
 
-    let mut numer_evals = vec![F::ZERO; height * num_interactions];
-    let mut denom_evals = vec![EF::ONE; height * num_interactions];
+    // FLAKE FIX: see round.rs::flatten_layer note about KoalaBear
+    // serde rejecting out-of-range u32s leaked from set_len uninit.
+    let total = height * num_interactions;
+    let mut numer_evals: Vec<F> = vec![F::ZERO; total];
+    let mut denom_evals: Vec<EF> = vec![EF::ZERO; total];
 
-    for row_idx in 0..height {
-        let main_row =
-            &main_trace.values[row_idx * main_trace.width..(row_idx + 1) * main_trace.width];
-        let prep_row: &[F] = match preprocessed_trace {
-            Some(pt) if pt.width > 0 => &pt.values[row_idx * pt.width..(row_idx + 1) * pt.width],
-            _ => &[],
-        };
-
-        for (col_idx, (interaction, is_send)) in interactions.iter().enumerate() {
-            let (numer, denom) =
-                generate_interaction_vals::<F, EF>(interaction, prep_row, main_row, *is_send, alpha, betas);
-            numer_evals[row_idx * num_interactions + col_idx] = numer;
-            denom_evals[row_idx * num_interactions + col_idx] = denom;
-        }
+    // Phase 4 perf fix (Apr 25 2026): parallelize per-row interaction
+    // computation. Mirrors SP1's `numer_evals.par_chunks_exact_mut(num_interactions)`
+    // pattern at `crates/hypercube/src/logup_gkr/execution.rs:144-217`.
+    // For chips with hundreds of thousands of rows (Cpu at 131K, Program
+    // at 524K), per-row parallelism is the right granularity — chip-level
+    // alone leaves a single core doing the work for the largest chip.
+    if height > 0 && num_interactions > 0 {
+        use p3_maybe_rayon::prelude::*;
+        let main_w = main_trace.width;
+        let prep_w = preprocessed_trace.map(|pt| pt.width).unwrap_or(0);
+        let prep_values: Option<&[F]> = preprocessed_trace.map(|pt| pt.values.as_slice());
+        numer_evals
+            .par_chunks_exact_mut(num_interactions)
+            .zip(denom_evals.par_chunks_exact_mut(num_interactions))
+            .enumerate()
+            .for_each(|(row_idx, (numer_row, denom_row))| {
+                let main_row = &main_trace.values[row_idx * main_w..(row_idx + 1) * main_w];
+                let prep_row: &[F] = match prep_values {
+                    Some(pv) if prep_w > 0 => &pv[row_idx * prep_w..(row_idx + 1) * prep_w],
+                    _ => &[],
+                };
+                for (col_idx, (interaction, is_send)) in interactions.iter().enumerate() {
+                    let (numer, denom) = generate_interaction_vals::<F, EF>(
+                        interaction, prep_row, main_row, *is_send, alpha, betas,
+                    );
+                    numer_row[col_idx] = numer;
+                    denom_row[col_idx] = denom;
+                }
+            });
     }
 
     (
@@ -207,7 +225,15 @@ where
     let mut denominator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
     let mut numerator_1: Vec<RowMajorTable<F>> = Vec::with_capacity(chips.len());
     let mut denominator_1: Vec<RowMajorTable<EF>> = Vec::with_capacity(chips.len());
-    let mut total_interactions: usize = 0;
+    // Global `num_interaction_variables` is log2 of the sum of *per-chip*
+    // padded widths (each chip pads its raw interaction count to the next
+    // power of two), so `flatten_layer`'s running offset across chips
+    // never overflows the global axis.  Using the sum of *raw* counts
+    // (SP1's choice) under-counts and trips
+    // `round.rs:99 "layer interaction axis too narrow for chip
+    //  contributions: offset {} + chip_cols {} > global {}"`
+    // when chips have padded widths > raw widths.
+    let mut total_padded_interactions: usize = 0;
 
     for ((chip, main_trace), prep_trace) in
         chips.iter().zip(main_traces.iter()).zip(preprocessed_traces.iter())
@@ -219,7 +245,6 @@ where
             .chain(chip.receives().iter().map(|r| (r, false)))
             .collect();
         let num_interactions = interactions.len();
-        total_interactions += num_interactions;
 
         let (numer_mat, denom_mat) = build_chip_interaction_tables::<F, EF>(
             &interactions,
@@ -245,6 +270,7 @@ where
         // `num_interaction_variables` is computed below from
         // `total_interactions` (sum of per-chip raw counts).
         let log_int_padded = num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
+        total_padded_interactions += 1usize << log_int_padded;
         let make_table = |cells: Vec<F>| -> RowMajorTable<F> {
             RowMajorTable {
                 cells,
@@ -269,7 +295,7 @@ where
     }
 
     let num_interaction_variables =
-        total_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
+        total_padded_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
 
     LogUpGkrCpuLayer {
         numerator_0,

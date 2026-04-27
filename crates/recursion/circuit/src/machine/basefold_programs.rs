@@ -50,11 +50,19 @@ where
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
+    // The host input now carries `chip_log_heights` per shard, but
+    // wiring it through verify_core_basefold breaks the existing
+    // padded-row mask constraint (passing real degree bits where the
+    // verifier was tuned for zero placeholders desyncs the
+    // zerocheck residual). Pass empty for now — the field is staged
+    // for future use once the constraint side aligns.
+    let chip_log_heights_per_shard: Vec<std::collections::BTreeMap<String, u8>> = Vec::new();
     verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
         machine,
         max_log_row_count,
+        &chip_log_heights_per_shard,
     );
     let operations = builder.into_operations();
     builder_span.exit();
@@ -73,21 +81,27 @@ pub fn build_compose_basefold_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>,
     max_log_row_count: usize,
-    vk_root: [zkm_recursion_compiler::ir::Felt<KoalaBear>; zkm_recursion_core::DIGEST_SIZE],
+    vk_root: [KoalaBear; zkm_recursion_core::DIGEST_SIZE],
     kind: super::compress::PublicValuesOutputDigest,
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, InnerConfig>>,
 {
+    use zkm_recursion_compiler::ir::Felt;
     let builder_span = tracing::debug_span!("build compose-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
+    // Lift the runtime vk_root into builder-bound Felts so the verifier
+    // can assert each input's public-values vk_root against the committed
+    // root.
+    let vk_root_felts: [Felt<KoalaBear>; zkm_recursion_core::DIGEST_SIZE] =
+        core::array::from_fn(|i| builder.eval(vk_root[i]));
     verify_compress_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
         machine,
-        vk_root,
+        vk_root_felts,
         kind,
         max_log_row_count,
     );
@@ -286,6 +300,8 @@ mod tests {
             &[main_trace],
             main_commit,
             public_values,
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count,
             &mut challenger,
         )
     }

@@ -260,6 +260,20 @@ where
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
         let early_exit_ts = std::env::var("RECURSION_EARLY_EXIT_TS")
             .map_or(usize::MAX, |ts: String| ts.parse().unwrap());
+        // `ZIREN_DUMP_PROGRAM=<path>` dumps the instruction list to
+        // `<path>` at runtime entry — used to map PCs surfaced by
+        // `ZIREN_DEBUG_READ_SHAPES` to their concrete instructions
+        // for debugging.  Each shard's run() rewrites the same path,
+        // so set the env var in a shard-isolated test (e.g. Test::Compress
+        // for compress shard, Test::All to capture wrap shard last).
+        if let Ok(path) = std::env::var("ZIREN_DUMP_PROGRAM") {
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::File::create(&path) {
+                for (pc, instr) in self.program.instructions.iter().enumerate() {
+                    let _ = writeln!(f, "{:5} {}", pc, instr_short(instr));
+                }
+            }
+        }
         self.preallocate_record();
         while self.pc < F::from_u32(self.program.instructions.len() as u32) {
             let idx = self.pc.as_canonical_u32() as usize;
@@ -270,6 +284,27 @@ where
             match instruction {
                 Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
                     self.nb_base_ops += 1;
+                    // `ZIREN_DEBUG_READ_SHAPES=1`: log when BaseAlu reads an
+                    // address that holds an Ext-shaped Block (non-zero v1/v2/v3).
+                    // Those reads cause the wrap cumsum mismatch.
+                    let debug_shapes = std::env::var("ZIREN_DEBUG_READ_SHAPES").is_ok();
+                    if debug_shapes {
+                        let pc = self.pc.as_canonical_u32();
+                        let e1 = self.memory.mr_mult(addrs.in1, F::ZERO).val;
+                        if !e1.0[1].is_zero() || !e1.0[2].is_zero() || !e1.0[3].is_zero() {
+                            eprintln!(
+                                "[read shape] pc={} chip=BaseAlu op={:?} addr={} out_addr={} ext=true",
+                                pc, opcode, addrs.in1.as_usize(), addrs.out.as_usize()
+                            );
+                        }
+                        let e2 = self.memory.mr_mult(addrs.in2, F::ZERO).val;
+                        if !e2.0[1].is_zero() || !e2.0[2].is_zero() || !e2.0[3].is_zero() {
+                            eprintln!(
+                                "[read shape] pc={} chip=BaseAlu op={:?} addr={} out_addr={} ext=true",
+                                pc, opcode, addrs.in2.as_usize(), addrs.out.as_usize()
+                            );
+                        }
+                    }
                     let in1 = self.memory.mr(addrs.in1).val[0];
                     let in2 = self.memory.mr(addrs.in2).val[0];
                     let out = match opcode {
@@ -356,6 +391,20 @@ where
                 Instruction::Poseidon2(instr) => {
                     let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
                     self.nb_poseidons += 1;
+                    // `ZIREN_DEBUG_READ_SHAPES=1`: log Poseidon2 inputs at
+                    // Ext-shaped addresses.
+                    if std::env::var("ZIREN_DEBUG_READ_SHAPES").is_ok() {
+                        let pc = self.pc.as_canonical_u32();
+                        for (i, &addr) in input.iter().enumerate() {
+                            let e = self.memory.mr_mult(addr, F::ZERO).val;
+                            if !e.0[1].is_zero() || !e.0[2].is_zero() || !e.0[3].is_zero() {
+                                eprintln!(
+                                    "[read shape] pc={} chip=Poseidon2 slot={} addr={} ext=true",
+                                    pc, i, addr.as_usize()
+                                );
+                            }
+                        }
+                    }
                     let in_vals = std::array::from_fn(|i| self.memory.mr(input[i]).val[0]);
                     let perm_output = self.perm.as_ref().unwrap().permute(in_vals);
 
@@ -617,7 +666,22 @@ where
                         return Err(RuntimeError::EmptyWitnessStream);
                     }
                     let witness = self.witness_stream.drain(0..output_addrs_mults.len());
+                    let debug_hint = std::env::var("ZIREN_DEBUG_HINT_BLOCKS").is_ok();
                     for ((addr, mult), val) in zip(output_addrs_mults, witness) {
+                        if debug_hint {
+                            // Print addresses whose written Block has non-zero
+                            // v1/v2/v3 — these are Ext values whose later
+                            // Felt-typed reads would logup-mismatch.
+                            let is_ext_shape = !val.0[1].is_zero()
+                                || !val.0[2].is_zero()
+                                || !val.0[3].is_zero();
+                            if is_ext_shape {
+                                eprintln!(
+                                    "[hint block] addr={} ext=true val=({:?}, {:?}, {:?}, {:?}) mult={:?}",
+                                    addr.as_usize(), val.0[0], val.0[1], val.0[2], val.0[3], mult
+                                );
+                            }
+                        }
                         // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
                         self.memory.mw(addr, val, mult);
                         self.record.mem_var_events.push(MemEvent { inner: val });
@@ -682,4 +746,11 @@ where
         self.record.exp_reverse_bits_len_events.reserve(event_counts.exp_reverse_bits_len_events);
         self.record.select_events.reserve(event_counts.select_events);
     }
+}
+
+/// Short textual form of an instruction for the `ZIREN_DUMP_PROGRAM`
+/// debug dump — just uses Rust's Debug on the variant, which is enough
+/// to grep for addresses.
+fn instr_short<F: std::fmt::Debug>(instr: &Instruction<F>) -> String {
+    format!("{:?}", instr)
 }

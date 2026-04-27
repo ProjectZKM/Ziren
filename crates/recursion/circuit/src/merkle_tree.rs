@@ -48,10 +48,25 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let new_len = leaves.len().next_power_of_two();
         let height = log2_strict_usize(new_len);
 
+        // Single-leaf edge case: pad up to 2 leaves so the height-≥1
+        // invariants below (the `0..height-1` loop, the `[last_layer[0],
+        // last_layer[1]]` final compress, and the `2 * new_len - 2`
+        // digest-layer capacity calculation) all hold.  Without this
+        // pad the `0..height-1` range underflows usize when `height == 0`,
+        // hanging the prover constructor in an effectively-infinite loop.
+        // Smallest-possible map (e.g. when `regen_basefold_vks_for_tests`
+        // produces only one unique compress VK hash) hits this.
+        let (new_len, height) = if new_len < 2 {
+            (2, 1)
+        } else {
+            (new_len, height)
+        };
+
         // Pre-allocate the vector.
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
 
-        // If `leaves.len()` is not a power of 2, we pad the leaves with default values.
+        // If `leaves.len()` is not a power of 2 (or fewer than 2), pad
+        // with default digests.
         let mut last_layer = leaves;
         let old_len = last_layer.len();
         for _ in old_len..new_len {

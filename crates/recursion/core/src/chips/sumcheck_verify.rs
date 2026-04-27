@@ -1,7 +1,7 @@
-//! Sumcheck verifier chip for WHIR recursion.
+//! Sumcheck verifier chip for BaseFold recursion.
 //!
 //! Verifies sumcheck rounds inside the recursion circuit, replacing
-//! the FriFold chip for WHIR-based proof compression.
+//! the FriFold chip for BaseFold-based proof compression.
 //!
 //! # Protocol (Lund-Fortnow-Karloff-Nisan, 1992)
 //!
@@ -19,15 +19,14 @@
 //!
 //! After m rounds: verifier checks f(r_1, ..., r_m) = s_{m+1}
 //!
-//! # WHIR integration
+//! # BaseFold integration
 //!
-//! In WHIR, the sumcheck is used per folding round to reduce the
+//! In BaseFold, the sumcheck is used per folding round to reduce the
 //! constraint claim. The degree of p_i is determined by the constraint
 //! degree (typically 2 for linear constraints).
 //!
-//! For WHIR with folding_factor=4, each WHIR round runs 4 sumcheck
-//! rounds, producing 4 challenges (r_1, r_2, r_3, r_4) that fold
-//! the polynomial.
+//! Each BaseFold round runs one univariate sumcheck round, producing
+//! one challenge that folds the polynomial.
 //!
 //! # Chip design
 //!

@@ -17,7 +17,6 @@
 //! components in row-major storage.  All folding happens in EF; the
 //! `RsCodeWord<F>` storage is a view convenience.
 
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use itertools::Itertools;
@@ -42,7 +41,6 @@ pub struct CommitPhaseRound<F: Field, EF: ExtensionField<F>, MT: Mmcs<F>> {
     pub folded_mle: Mle<EF>,
     pub folded_codeword: RsCodeWord<F>,
     pub commitment: MT::Commitment,
-    pub leaves: Arc<RowMajorMatrix<F>>,
     pub prover_data: MT::ProverData<RowMajorMatrix<F>>,
 }
 
@@ -70,14 +68,14 @@ where
 
     // (1) Reshape into Merkle leaves: pair adjacent rows.  Each leaf
     // is now 2 * EF::D base elements, i.e. one pair of EF values.
-    let leaves_mat = RowMajorMatrix::new(current_codeword.data.values.clone(), 2 * width);
-    let leaves = Arc::new(leaves_mat);
+    // Move (don't clone) the codeword storage into the leaves matrix —
+    // we re-materialize the EF view from a fresh chunked slice below.
+    let codeword_storage = current_codeword.data.values;
+    let codeword_storage_for_ef: Vec<F> = codeword_storage.clone();
+    let leaves_mat = RowMajorMatrix::new(codeword_storage, 2 * width);
 
-    // (2) Commit leaves via the MMCS.  Note: Mmcs takes ownership of
-    // a Vec<RowMajorMatrix<F>>; we pass a single-element vec so that
-    // the leaves Arc above remains the prover's own copy for query
-    // openings.
-    let (commitment, prover_data) = mmcs.commit(vec![(*leaves).clone()]);
+    // (2) Commit leaves via the MMCS — moves into commit, no extra copy.
+    let (commitment, prover_data) = mmcs.commit(vec![leaves_mat]);
     challenger.observe(commitment.clone());
 
     // (3) Sample fold randomness.
@@ -85,10 +83,8 @@ where
 
     // (4) Fold codeword: F-storage view -> Vec<EF> -> fold -> back to
     // F storage with halved height.
-    let codeword_ef: Vec<EF> = current_codeword
-        .data
-        .values
-        .chunks_exact(EF::DIMENSION)
+    let codeword_ef: Vec<EF> = codeword_storage_for_ef
+        .par_chunks_exact(EF::DIMENSION)
         .map(|chunk| EF::from_basis_coefficients_iter(chunk.iter().copied()).unwrap())
         .collect();
     debug_assert_eq!(codeword_ef.len(), height);
@@ -100,7 +96,7 @@ where
     // (5) Fold the running MLE algebraically.
     let folded_mle = current_mle.fold(beta);
 
-    CommitPhaseRound { beta, folded_mle, folded_codeword, commitment, leaves, prover_data }
+    CommitPhaseRound { beta, folded_mle, folded_codeword, commitment, prover_data }
 }
 
 /// Read off the constant codeword left at the end of the commit

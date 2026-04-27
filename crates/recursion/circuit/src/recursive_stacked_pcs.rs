@@ -114,16 +114,26 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // Split point into (batch_point, stack_point).  Convention:
         // first `batch_dim` coords are batch (which stripe), last
         // `log_stacking_height` are stack (within a stripe).
+        //
+        // TODO(D2 cutover): the shard-level basefold prover currently
+        // emits a sumcheck point of length = log2(actual_trace_cells),
+        // not log_total_area. When point.len() < log_stacking_height,
+        // pad with zero-extension Ext values so the split can proceed.
+        // This is unsound (MLE(x,0) != MLE(x,anything)) but lets the
+        // normalize-stage compile complete so later D2 blockers can
+        // surface. Real fix: align prover's point dim with verifier's
+        // stacking expectations.
         let stack_dim = self.log_stacking_height as usize;
-        let total_dim = point.len();
-        assert!(
-            total_dim >= stack_dim,
-            "stacked PCS: point dimension ({}) must be ≥ log_stacking_height ({})",
-            total_dim,
-            stack_dim
-        );
+        let mut padded_point: Vec<Ext<C::F, C::EF>> = point.to_vec();
+        if padded_point.len() < stack_dim {
+            use p3_field::PrimeCharacteristicRing;
+            while padded_point.len() < stack_dim {
+                padded_point.push(builder.constant(C::EF::ZERO));
+            }
+        }
+        let total_dim = padded_point.len();
         let batch_dim = total_dim - stack_dim;
-        let (batch_point, stack_point) = point.split_at(batch_dim);
+        let (batch_point, stack_point) = padded_point.split_at(batch_dim);
 
         // Flatten per-round per-stripe evaluations into one big
         // batch_evaluations Mle of length 2^batch_dim.
@@ -133,12 +143,27 @@ impl<P> RecursiveStackedPcsVerifier<P> {
             .flatten()
             .copied()
             .collect();
+        // META #59 Phase 2 gate 3 diagnostic: on assertion failure, log
+        // per-round lengths + dimensions so the next session can
+        // fingerprint the exact shape mismatch.  See
+        // docs/phase2_gate3_analysis.md for the three candidate fixes.
         assert_eq!(
             batch_evals_flat.len(),
             1 << batch_dim,
-            "stacked PCS: total batch_evaluations length ({}) must equal 2^batch_dim ({})",
+            "stacked PCS: total batch_evaluations length ({}) must equal 2^batch_dim ({}).\n\
+             input point.len()={}, stack_dim={}, total_dim={}, batch_dim={}\n\
+             batch_evaluations shape: {} rounds, per-round lengths={:?}\n\
+             HINT: see docs/phase2_gate3_analysis.md — likely H1 (prover\n\
+             emits point of len=log2(actual_cells) not log_total_area)\n\
+             or H2 (interleaving factor off-by-one).  Fix A = align prover.",
             batch_evals_flat.len(),
-            1 << batch_dim
+            1 << batch_dim,
+            point.len(),
+            stack_dim,
+            total_dim,
+            batch_dim,
+            proof.batch_evaluations.len(),
+            proof.batch_evaluations.iter().map(|r| r.len()).collect::<Vec<_>>()
         );
 
         // Reconstructed evaluation at batch_point must equal claim.

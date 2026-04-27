@@ -94,15 +94,38 @@ where
     };
 
     // Compute the padded column count from the actual per-round
-    // shape.  This is the total number of columns (summed across
-    // chips, per round) plus 1 artificial zero per round, then
-    // rounded up to a power of two.  Matches the padding logic in
-    // RecursiveJaggedPcsVerifier::verify_trusted_evaluations.
+    // shape.  This must match the column_claims construction in
+    // [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`]
+    // (recursive_jagged_pcs.rs:190-223, mirror of
+    // SP1 `/tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:77-118`):
+    //
+    //   column_claims.len() = Σ_r (sum(cc[r]))  // flattened claims
+    //                       + Σ_r (cc[r][len-2] + 1)  // artificial zero insertions
+    // then resize-to-next_power_of_two.
+    //
+    // The lift's `col_prefix_sums_len = padded_cols + 1` controls
+    // `num_col_variables = log2(padded_cols)`; the MLE assertion at
+    // recursive_jagged_pcs.rs:227 requires
+    // `column_claims.len() == 2 ^ num_col_variables`, so these
+    // formulas MUST agree.
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
-        .map(|cc| cc.iter().sum::<usize>() + 1) // +1 artificial zero per round
+        .map(|cc| {
+            let flattened = cc.iter().sum::<usize>();
+            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+            flattened + added
+        })
         .sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
+    if std::env::var("ZIREN_DEBUG_GATE3").is_ok() {
+        eprintln!(
+            "[gate3 lift] rounds={} cc_per_round={:?} total_before_pad={} padded_cols={}",
+            column_counts_by_round.len(),
+            column_counts_by_round.iter().map(|cc| cc.len()).collect::<Vec<_>>(),
+            total_cols_before_pad,
+            padded_cols,
+        );
+    }
     // col_prefix_sums must satisfy `col_prefix_sums.len() - 1 == num_cols`
     // where `num_cols` is the padded column count the MLE is taken over.
     let col_prefix_sums_len = padded_cols + 1;

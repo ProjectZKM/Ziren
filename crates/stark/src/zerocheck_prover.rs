@@ -60,22 +60,38 @@ use crate::{Challenge, StarkGenericConfig, Val};
 /// the Boolean hypercube `{0,1}^m`, returning the dense evaluation table.
 ///
 /// The algorithm runs in `O(2^m)` time using the standard tensor product.
-pub fn eq_mle_table<EF: Field>(r: &[EF]) -> Vec<EF> {
+pub fn eq_mle_table<EF: Field + Send + Sync>(r: &[EF]) -> Vec<EF> {
     let m = r.len();
-    let mut table = vec![EF::ONE; 1 << m];
-    let mut size = 1;
-    for &ri in r {
-        // For each variable, split and fold in the factor.
-        // Before: table[0..size] holds eq over the first j variables.
-        // After: table[0..2*size] holds eq over j+1 variables.
-        for i in (0..size).rev() {
-            let v = table[i];
-            table[2 * i] = v * (EF::ONE - ri);
-            table[2 * i + 1] = v * ri;
-        }
-        size *= 2;
+    // Build via fresh Vec each iter (avoids in-place reverse-iter
+    // ordering constraint, lets us parallelize the doubling step).
+    // Skip zero/one init since every slot is overwritten.
+    let final_len = 1usize << m;
+    if final_len == 0 {
+        return Vec::new();
     }
-    debug_assert_eq!(size, 1 << m);
+    if m == 0 {
+        return vec![EF::ONE];
+    }
+    use p3_maybe_rayon::prelude::*;
+    let mut table: Vec<EF> = vec![EF::ONE];
+    for &ri in r {
+        let old_len = table.len();
+        let new_len = old_len * 2;
+        // FLAKE FIX: KoalaBear u32 serde rejects out-of-range values
+        // from uninit memory; switch to safe vec! init.
+        let mut next: Vec<EF> = vec![EF::ZERO; new_len];
+        let one_minus_ri = EF::ONE - ri;
+        let (lo, hi) = next.split_at_mut(old_len);
+        lo.par_iter_mut()
+            .zip(hi.par_iter_mut())
+            .zip(table.par_iter())
+            .for_each(|((lo_j, hi_j), &v)| {
+                *lo_j = v * one_minus_ri;
+                *hi_j = v * ri;
+            });
+        table = next;
+    }
+    debug_assert_eq!(table.len(), final_len);
     table
 }
 
@@ -236,14 +252,30 @@ fn fold_round_evals<EF: Field + Send + Sync>(
 }
 
 /// Fold the first variable of a multilinear table at a challenge value.
+///
+/// Uses the algebraically-equivalent form `lo + r * (hi - lo)` instead of
+/// `(1 - r) * lo + r * hi`.  Both compute `(1-r)·lo + r·hi`, but the
+/// `lo + r·(hi-lo)` form costs ONE EF mul + ONE EF sub + ONE EF add per pair
+/// (vs TWO EF muls + ONE EF add) — a ~33% reduction in extension-field
+/// multiplications.  For the GKR sumcheck this is called ~5× per round on
+/// tables up to 2^26 elements, so the savings compound.
+///
+/// Allocator opt: skip the zero-init of the output Vec — every slot is
+/// unconditionally written by the parallel for_each below.  For a 2^25
+/// pair table that's 512 MiB of redundant writes saved per call (×5 per
+/// GKR round, ×26 rounds for the largest layer).
 pub fn fold_table_first<EF: Field + Send + Sync>(table: &[EF], r: EF) -> Vec<EF> {
     use p3_maybe_rayon::prelude::*;
     let half = table.len() / 2;
-    let one_minus_r = EF::ONE - r;
-    (0..half)
-        .into_par_iter()
-        .map(|i| table[2 * i] * one_minus_r + table[2 * i + 1] * r)
-        .collect()
+    // FLAKE FIX: KoalaBear u32 serde rejects out-of-range values
+    // from uninit memory; switch to safe vec! init.
+    let mut out: Vec<EF> = vec![EF::ZERO; half];
+    out.par_iter_mut().enumerate().for_each(|(i, dst)| {
+        let lo = table[2 * i];
+        let hi = table[2 * i + 1];
+        *dst = lo + r * (hi - lo);
+    });
+    out
 }
 
 /// Evaluate a round polynomial given as `[p(0), p(1), p(2)]` at a field point
@@ -317,6 +349,39 @@ where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
+    eval_constraints_on_hypercube_with_cumsums::<SC, A>(
+        chip,
+        num_vars,
+        main,
+        preprocessed,
+        public_values,
+        alpha,
+        Challenge::<SC>::ZERO,
+        SepticDigest::<Val<SC>>::zero(),
+    )
+}
+
+/// META #59 Phase C: version of [`eval_constraints_on_hypercube`] that
+/// accepts real per-chip `local_cumulative_sum` + `global_cumulative_sum`
+/// instead of zero placeholders.  The recursion verifier's
+/// `build_opened_values_from_chip_openings_with_cumsums` must pass
+/// MATCHING values (from `BasefoldShardProof.chip_cumulative_sums`) or
+/// the zerocheck sumcheck balance will not close.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_constraints_on_hypercube_with_cumsums<SC, A>(
+    chip: &Chip<Val<SC>, A>,
+    num_vars: usize,
+    main: &RowMajorMatrix<Val<SC>>,
+    preprocessed: &RowMajorMatrix<Val<SC>>,
+    public_values: &[Val<SC>],
+    alpha: Challenge<SC>,
+    local_cumulative_sum: Challenge<SC>,
+    global_cumulative_sum: SepticDigest<Val<SC>>,
+) -> Vec<Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+{
     let n = 1usize << num_vars;
     assert_eq!(main.height(), n, "main trace height must equal 2^num_vars");
     let main_width = main.width();
@@ -360,11 +425,12 @@ where
         v
     };
 
-    // Empty permutation / cumulative-sum placeholders (WHIR mode skips
-    // permutation; lookup integrity is handled by Logup-GKR in phase 2b).
+    // Empty permutation placeholder (WHIR mode skips permutation;
+    // lookup integrity is handled by Logup-GKR in phase 2b).
+    // Cumulative sums now come from the caller (META #59 Phase C).
     let empty_perm_ext: Vec<Challenge<SC>> = Vec::new();
-    let zero_challenge: Challenge<SC> = Challenge::<SC>::ZERO;
-    let global_sum: SepticDigest<Val<SC>> = SepticDigest::zero();
+    let zero_challenge: Challenge<SC> = local_cumulative_sum;
+    let global_sum: SepticDigest<Val<SC>> = global_cumulative_sum;
 
     let mut out = Vec::with_capacity(n);
     for i in 0..n {

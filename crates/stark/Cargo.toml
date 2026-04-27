@@ -53,5 +53,12 @@ sysinfo = "0.30.13"
 [features]
 default = ["basefold"]
 basefold = ["p3-multilinear-util", "rmp-serde"]
+# META #59 Phase 5 (#60) prep: gpu feature flag reserved for GPU basefold
+# prover integration (ziren-gpu/core/src/basefold/ on ant-5090-2).  When
+# enabled, the stark prover will select BasefoldProverGpu instead of the
+# host BasefoldProver.  No-op until the GPU port lands; adding the flag
+# here ensures downstream crates can plumb through "--features gpu"
+# without a cascading Cargo.toml change later.
+gpu = []
 
 [dev-dependencies]

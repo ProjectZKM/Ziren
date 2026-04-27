@@ -35,7 +35,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         proof: &ShardProof<SC>,
     ) -> Result<(), VerificationError<SC>>
     where
-        A: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+        A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
+            + for<'b> Air<
+                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                    'b,
+                    Val<SC>,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            >,
     {
         use itertools::izip;
 
@@ -296,6 +303,15 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 local_cumulative_sum,
                 SC::Challenge::ZERO
             );
+            if std::env::var("ZIREN_DEBUG_CUMSUM").is_ok() {
+                for (name, idx) in proof.chip_ordering.iter() {
+                    let c = &proof.opened_values.chips[*idx];
+                    eprintln!(
+                        "[cumsum] chip={} local_cum={:?}",
+                        name, c.local_cumulative_sum
+                    );
+                }
+            }
             return Err(VerificationError::CumulativeSumsError("local cumulative sum is not zero"));
         }
 
@@ -552,7 +568,7 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     /// claim mismatch).
     LogUpGkrFailed,
     /// Jagged late-binding bundle verification failed (sumcheck reduction
-    /// mismatch or WHIR open rejection).
+    /// mismatch or BaseFold open rejection).
     JaggedLateBindingFailed,
     /// Zerocheck proofs attached but number does not match number of chips.
     InvalidProofShape,

@@ -1,6 +1,6 @@
 //! Shard-level prover assembly entry point.
 //!
-//! Mirror of the `ShardProver::prove_shard_with_data` at
+//! Mirror of SP1's `ShardProver::prove_shard_with_data` at
 //! `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792` —
 //! orchestrates the LogUp-GKR + zerocheck + jagged-PCS phases
 //! into a single host-side [`super::shard_proof::BasefoldShardProof`].
@@ -40,7 +40,7 @@
 //! shard-level jagged-PCS dispatch port.  Phase (5) assembles
 //! the new struct.  The `opened_values` field is built from the
 //! per-chip evaluations the LogUp-GKR phase emits — this is
-//! cheaper than reconstructing them and matches the pattern
+//! cheaper than reconstructing them and matches SP1's pattern
 //! of carrying the openings forward through the pipeline.
 
 use p3_air::Air;
@@ -80,6 +80,7 @@ pub fn prove_shard_to_basefold<SC, A>(
     main_traces: &[RowMajorMatrix<Val<SC>>],
     main_commitment: [Val<SC>; 8],
     public_values: Vec<Val<SC>>,
+    max_log_row_count: usize,
     challenger: &mut SC::Challenger,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
@@ -113,13 +114,14 @@ where
     }
 
     // ── Phase 2: LogUp-GKR ─────────────────────────────────
-    // Row-only reduction: emits circuit_output of length
+    // SP1-style row-only reduction: emits circuit_output of length
     // 2^(num_interaction_variables + 1) matching the recursion verifier.
     // See docs/task_23_blocker.md for the protocol mismatch this fixes.
     let logup_gkr_proof = prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
         chips,
         preprocessed_traces,
         main_traces,
+        max_log_row_count,
         challenger,
     );
 
@@ -127,7 +129,7 @@ where
     //
     // Pass the LogUp-GKR-emitted per-chip evaluations through
     // so the zerocheck prover can build its initial sumcheck
-    // claims from them (matches the wiring at
+    // claims from them (matches SP1's wiring at
     // `prover/shard.rs:560-572`).
     let zerocheck_proof = prove_shard_zerocheck::<SC, A>(
         chips,
@@ -135,8 +137,42 @@ where
         main_traces,
         &logup_gkr_proof.logup_evaluations,
         &public_values,
+        max_log_row_count,
         challenger,
     );
+
+    // Phase 3 → 4 bridge: observe per-chip opening count + openings
+    // into the challenger — mirrors
+    // [`super::verifier::verify_zerocheck_host`] step (5) / step (7)
+    // so the Phase 4 (jagged-PCS) challenger state is identical on
+    // prover and verifier sides.  Order MUST match verifier: num_chips
+    // (felt), then for each chip in `chips` order: preprocessed local
+    // basis coefficients, then main local basis coefficients.
+    {
+        use p3_field::BasedVectorSpace;
+        let num_chips_felt = Val::<SC>::from_u64(chips.len() as u64);
+        challenger.observe(num_chips_felt);
+        for chip in chips.iter() {
+            let name = chip.name().to_string();
+            let opening = logup_gkr_proof
+                .logup_evaluations
+                .chip_openings
+                .get(&name)
+                .expect("chip missing from logup_evaluations.chip_openings");
+            if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
+                for c in prep.iter() {
+                    for basis in c.as_basis_coefficients_slice() {
+                        challenger.observe(*basis);
+                    }
+                }
+            }
+            for c in opening.main_trace_evaluations.iter() {
+                for basis in c.as_basis_coefficients_slice() {
+                    challenger.observe(*basis);
+                }
+            }
+        }
+    }
 
     // ── Phase 4: Jagged-PCS opening ────────────────────────
     //
@@ -144,7 +180,7 @@ where
     // with:
     //   - per-chip (name, main trace)
     //   - per-chip `r_row` = trailing log(chip_height) coords of the
-    //     LogUp-GKR final eval_point (matches the convention of
+    //     LogUp-GKR final eval_point (matches SP1's convention of
     //     opening the trace MLE at that sub-point)
     //   - the outer `SC::Challenger` downcast to `&mut LbChallenger`
     //     when SC is KoalaBearPoseidon2 (full transcript binding).
@@ -162,13 +198,76 @@ where
     // Build per-chip opened_values from the LogUp-GKR phase's
     // chip_openings (`logup_evaluations.chip_openings`).  The
     // existing per-chip ChipOpenedValues type carries more
-    // fields than the shape uses; for now we leave the
+    // fields than the SP1 shape uses; for now we leave the
     // unused fields empty (preprocessed/permutation/quotient
     // become Vec::new(), cumulative sums become ZERO).  The
     // SP1-shape ShardOpenedValues port lands in the next
     // iteration alongside the recursion-side
     // BasefoldShardOpenedValuesVariable Witnessable impl.
     let opened_values = ShardOpenedValues { chips: Vec::new() };
+
+    // Compute per-chip log_height from the main trace dimensions —
+    // each main_traces[i] corresponds to chips[i] (zip-aligned input).
+    // Stored under chip name so the verifier can look up by the
+    // BTreeMap key set in `logup_evaluations.chip_openings`.
+    use p3_matrix::Matrix;
+    let mut chip_log_heights = std::collections::BTreeMap::new();
+    for (chip, trace) in chips.iter().zip(main_traces.iter()) {
+        let h = trace.height().max(1);
+        // ceil_log2 — h is power of two for committed traces.
+        let log_h = if h.is_power_of_two() {
+            h.trailing_zeros() as u8
+        } else {
+            (usize::BITS - h.leading_zeros()) as u8
+        };
+        let name = MachineAir::<Val<SC>>::name(*chip);
+        chip_log_heights.insert(name, log_h);
+    }
+
+    // META #59 swap 1+2: populate per-chip cumulative_sums.
+    //
+    // Mirrors the legacy stark prover at `crates/stark/src/prover.rs:492-502`:
+    //   - `global_cumulative_sum`: derived from the main trace's last 14
+    //     elements (x: first 7, y: next 7) when the chip's `commit_scope()`
+    //     is NOT `LookupScope::Local`.  Local-scope chips get
+    //     `SepticDigest::zero()`.
+    //   - `local_cumulative_sum`: ZERO (matches legacy line 510 — the
+    //     real per-chip permutation sum requires materializing the
+    //     permutation trace, which the basefold path doesn't do; future
+    //     work to extract from the LogUp-GKR layer 0 output).
+    //
+    // Verifier still uses zero placeholders unconditionally (Swap 1+2
+    // verifier-side change is the next META #59 step).  Until then,
+    // populating this map is a no-op for verification, but exercises the
+    // wire-format / serde path.
+    let chip_cumulative_sums: std::collections::BTreeMap<
+        String,
+        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
+    > = chips
+        .iter()
+        .zip(main_traces.iter())
+        .map(|(chip, main_trace)| {
+            let name = MachineAir::<Val<SC>>::name(*chip);
+            let global = if chip.commit_scope() == crate::air::LookupScope::Local {
+                crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+            } else {
+                let main_trace_size = main_trace.values.len();
+                if main_trace_size >= 14 {
+                    let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
+                    let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j]);
+                    let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j + 7]);
+                    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+                } else {
+                    crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+                }
+            };
+            let local = Challenge::<SC>::ZERO;
+            (
+                name,
+                crate::shard_level::shard_proof::ChipCumulativeSums { local, global },
+            )
+        })
+        .collect();
 
     // Materialize the proofs as bytes via bincode.  The
     // `BasefoldShardProof::{logup_gkr_proof, zerocheck_proof}`
@@ -180,6 +279,8 @@ where
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
+        chip_log_heights,
+        chip_cumulative_sums,
         evaluation_proof,
     }
 }
@@ -306,4 +407,5 @@ where
         prove_jagged_basefold_dispatch(&chip_traces, &r_row_per_chip, lb_challenger);
     bundle.to_bytes()
 }
+
 

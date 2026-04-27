@@ -159,17 +159,77 @@ pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
     log_dense_size: usize,
 ) -> Vec<F> {
+    // Phase 4 perf fix (Apr 25 2026): pre-allocate the full output
+    // and write into per-chip slices in parallel. The serial
+    // implementation pushed 134M elements one-at-a-time (called twice
+    // per shard for commit + reduction), totaling ~150ms × 2 calls.
+    // The parallel version writes in independent column slots.
     let padded_size = 1usize << log_dense_size;
-    let mut dense_values = Vec::with_capacity(padded_size);
+
+    // Pre-compute per-chip offset = sum of (height × width) for prior chips.
+    let mut chip_offsets: Vec<usize> = Vec::with_capacity(traces.len());
+    let mut total: usize = 0;
     for (_name, trace) in traces {
-        let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
-        let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
-        for col in 0..width {
-            for row in 0..height {
-                dense_values.push(trace.values[row * width + col]);
-            }
-        }
+        let h = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
+        let w = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+        chip_offsets.push(total);
+        total += h * w;
     }
+    debug_assert!(total <= padded_size);
+
+    // Allocator opt: only the `[total..padded_size]` padding tail
+    // needs zero-init.  The `[0..total]` active portion is fully
+    // overwritten by the per-chip parallel scatter below.  For 134M
+    // total cells with negligible padding this saves ~500 MiB of
+    // redundant writes per call (and this is called twice per shard:
+    // once for commit, once for reduction).
+    // FLAKE FIX: KoalaBear u32 serde rejects out-of-range values
+    // from uninit memory; switch to safe vec! init.
+    let mut dense_values: Vec<F> = vec![F::ZERO; total];
+
+    if total > 0 {
+        use p3_maybe_rayon::prelude::*;
+        let active: &mut [F] = &mut dense_values[..total];
+        // Iterate per-chip in PARALLEL, each writes into its own
+        // contiguous chunk of `active`.  Inside each chip, columns
+        // are written column-major (chip's row-major data is
+        // transposed to column-major in the output).
+        let chip_chunks = traces
+            .iter()
+            .zip(chip_offsets.iter())
+            .collect::<Vec<_>>();
+        // Split the `active` slice by chip offsets so each chip writes
+        // into a non-overlapping `&mut [F]`.
+        let mut slot_starts: Vec<usize> = chip_offsets.clone();
+        slot_starts.push(total);
+        let mut remaining: &mut [F] = active;
+        let mut chip_slots: Vec<&mut [F]> = Vec::with_capacity(traces.len());
+        for i in 0..traces.len() {
+            let len = slot_starts[i + 1] - slot_starts[i];
+            let (head, tail) = remaining.split_at_mut(len);
+            chip_slots.push(head);
+            remaining = tail;
+        }
+
+        chip_slots
+            .into_par_iter()
+            .zip(chip_chunks.into_par_iter())
+            .for_each(|(slot, ((_name, trace), _))| {
+                let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
+                let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+                if width == 0 || height == 0 {
+                    return;
+                }
+                // Per-column parallel: each column writes into its own
+                // [col*height..(col+1)*height] slice.
+                slot.par_chunks_exact_mut(height).enumerate().for_each(|(col, dst)| {
+                    for row in 0..height {
+                        dst[row] = trace.values[row * width + col];
+                    }
+                });
+            });
+    }
+    // Extend with zeros to fill the padded power-of-two size.
     dense_values.resize(padded_size, F::ZERO);
     dense_values
 }
@@ -337,7 +397,7 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Hierarchical PCS: Table-Local Column Folding + Global WHIR
+//  Hierarchical PCS: Table-Local Column Folding + Global BaseFold
 // ═══════════════════════════════════════════════════════════════════
 //
 // The naive approach (pack_traces_jagged above) treats all columns from

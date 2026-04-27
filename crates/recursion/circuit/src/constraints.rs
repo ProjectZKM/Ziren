@@ -376,14 +376,16 @@ where
             ));
         }
 
-        // In WHIR mode the proof omits permutation traces and quotient values
+        // In BaseFold mode the proof omits permutation traces and quotient values
         // (both are empty). Skip width checks in that case.
-        let whir_mode = opening.permutation.local.is_empty()
+        // (Originally named `whir_mode` when WHIR was the planned PCS;
+        // renamed during the BaseFold migration.)
+        let basefold_mode = opening.permutation.local.is_empty()
             && opening.permutation.next.is_empty()
             && opening.quotient.is_empty();
 
         // Verify that the permutation width matches the expected value for the chip.
-        if !whir_mode
+        if !basefold_mode
             && opening.permutation.local.len()
                 != chip.permutation_width() * <SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION
         {
@@ -392,7 +394,7 @@ where
                 opening.permutation.local.len(),
             ));
         }
-        if !whir_mode
+        if !basefold_mode
             && opening.permutation.next.len()
                 != chip.permutation_width() * <SC::Challenge as BasedVectorSpace<C::F>>::DIMENSION
         {
@@ -402,8 +404,8 @@ where
             ));
         }
 
-        // In WHIR mode skip quotient checks too.
-        if whir_mode {
+        // In BaseFold mode skip quotient checks too.
+        if basefold_mode {
             return Ok(());
         }
 

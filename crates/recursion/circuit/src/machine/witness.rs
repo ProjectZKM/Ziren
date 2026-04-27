@@ -308,12 +308,25 @@ mod basefold_witness {
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
             let shard_proof_tuples = self.shard_proofs.read(builder);
+            // META #59 swap 1+2: read per-shard chip_cumulative_sums.
+            // Order: outer = shard_proofs iteration (Vec); inner = BTreeMap iter (sorted by key).
+            let chip_cumulative_sums_per_shard: Vec<_> = self
+                .shard_proofs
+                .iter()
+                .map(|sp| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
             let vk_root = self.vk_root.read(builder);
             ZKMCoreBasefoldWitnessVariable {
                 vk,
                 shard_proof_tuples,
+                chip_cumulative_sums_per_shard,
                 is_complete,
                 is_first_shard,
                 vk_root,
@@ -323,6 +336,12 @@ mod basefold_witness {
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vk.write(witness);
             self.shard_proofs.write(witness);
+            // META #59 swap 1+2: write per-shard chip_cumulative_sums in matching order.
+            for sp in self.shard_proofs.iter() {
+                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                    sums.write(witness);
+                }
+            }
             InnerVal::from_bool(self.is_complete).write(witness);
             InnerVal::from_bool(self.is_first_shard).write(witness);
             self.vk_root.write(witness);
@@ -342,12 +361,33 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
+            // META #59 Phase D: witness chip_cumulative_sums per input.
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-            ZKMCompressBasefoldWitnessVariable { vks_and_proofs, is_complete }
+            ZKMCompressBasefoldWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                is_complete,
+            }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
+            // META #59 Phase D: write chip_cumulative_sums per input.
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                    sums.write(witness);
+                }
+            }
             InnerVal::from_bool(self.is_complete).write(witness);
         }
     }
@@ -360,8 +400,21 @@ mod basefold_witness {
             ZKMDeferredBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            // META #59 Phase D: witness chip_cumulative_sums per input.
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
             ZKMDeferredBasefoldWitnessVariable {
-                vks_and_proofs: self.vks_and_proofs.read(builder),
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
                 vk_merkle_data: self.vk_merkle_data.read(builder),
                 start_reconstruct_deferred_digest: self
                     .start_reconstruct_deferred_digest
@@ -380,6 +433,12 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
+            // META #59 Phase D: write chip_cumulative_sums per input.
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                    sums.write(witness);
+                }
+            }
             self.vk_merkle_data.write(witness);
             self.start_reconstruct_deferred_digest.write(witness);
             self.zkm_vk_digest.write(witness);
@@ -401,13 +460,32 @@ mod basefold_witness {
         type WitnessVariable = ZKMWrapBasefoldWitnessVariable<C, KoalaBearPoseidon2>;
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            // META #59 Phase D: witness chip_cumulative_sums per input.
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
             ZKMWrapBasefoldWitnessVariable {
-                vks_and_proofs: self.vks_and_proofs.read(builder),
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
             }
         }
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
+            // META #59 Phase D: write chip_cumulative_sums per input.
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                    sums.write(witness);
+                }
+            }
         }
     }
 }

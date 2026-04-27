@@ -168,34 +168,32 @@ pub fn build_mips_machine_shape() -> MachineShape {
     MachineShape::new(clusters)
 }
 
-/// Representative size-class bands used in tactic (b).  Each band
-/// defines an upper-bound `(preprocessed_area, main_area)` tuple that
-/// any concrete shard fitting under the band can use.  The verifier
-/// accepts any trace ≤ the band's upper bound.
+/// Area multiples used to enumerate `(preprocessed_multiple,
+/// main_multiple)` combinations.  Areas are measured in
+/// stacking-height multiples (`2^LOG_STACKING_HEIGHT = 2^21 = ~2.1M
+/// cells` per unit).
 ///
-/// Areas are measured in stacking-height multiples
-/// (`2^LOG_STACKING_HEIGHT = 2^21 = ~2.1M cells` per unit).
+/// The full free cartesian over this list × itself matches
+/// [`sp1_prover::shapes::create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580),
+/// replacing the previous hand-picked `size_class_bands` which
+/// dropped real-program (prep_area, main_area) points and produced
+/// vk_maps missing fibonacci-style compress shapes.
+pub fn area_multiples() -> Vec<usize> {
+    vec![1, 2, 4, 8, 16, 32]
+}
+
+/// Free cartesian of `(preprocessed_multiple, main_multiple)` —
+/// matches SP1's enumeration shape rather than Ziren's old banded
+/// diagonal.
 pub fn size_class_bands() -> Vec<(usize, usize)> {
-    // (preprocessed_multiple, main_multiple).  Tuned to cover
-    // real Ziren workloads — the bands are multiplicative so a
-    // small number of bands covers a large range of shard sizes.
-    vec![
-        (1, 1),   // tiny — short programs
-        (1, 2),
-        (1, 4),
-        (2, 2),
-        (2, 4),
-        (2, 8),
-        (4, 4),
-        (4, 8),
-        (4, 16),  // typical mid-size
-        (8, 8),
-        (8, 16),
-        (8, 32),
-        (16, 16),
-        (16, 32), // large
-        (32, 32),
-    ]
+    let m = area_multiples();
+    let mut out = Vec::with_capacity(m.len() * m.len());
+    for p in &m {
+        for a in &m {
+            out.push((*p, *a));
+        }
+    }
+    out
 }
 
 /// Padding column variants to enumerate.  In the upstream pipeline the
@@ -283,12 +281,11 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // Upper-bound sanity: 13 clusters × 15 bands × 5 × 5 padding = 4875.
-        // Concretely should land ≤ 5000, massively fewer than the
-        // ~1.25M legacy cartesian.
+        // Upper-bound sanity: 13 clusters × 36 (6×6 area cartesian)
+        // × 5 × 5 padding = 11,700. Leave headroom.
         assert!(
-            shapes.len() <= 5000,
-            "shape count {} exceeds 5000 — tune clusters/bands/paddings",
+            shapes.len() <= 20_000,
+            "shape count {} exceeds 20000 — tune clusters/multiples/paddings",
             shapes.len()
         );
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());

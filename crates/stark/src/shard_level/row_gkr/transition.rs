@@ -9,17 +9,30 @@
 //!
 //! For each chip's `(numerator_0, denominator_0, numerator_1, denominator_1)`
 //! tables (each of shape `2^R × num_interactions`):
-//!   - Chunk rows in pairs `(2k, 2k+1)`.
-//!   - Combine the four per-pair sub-fractions into the next layer's
-//!     two output fractions per pair, per interaction column:
+//!   - Split rows into an **upper half** (`k ∈ 0..2^{R-1}`) and a
+//!     **lower half** (`k + 2^{R-1}`).  Fuse each source cell's two
+//!     fractions into one, then pack:
 //!     ```text
 //!       next_n0[k, i] = d_01[i] * n_00[i] + d_00[i] * n_01[i]
 //!       next_d0[k, i] = d_00[i] * d_01[i]
 //!       next_n1[k, i] = d_11[i] * n_10[i] + d_10[i] * n_11[i]
 //!       next_d1[k, i] = d_10[i] * d_11[i]
 //!     ```
-//!     where `n_{a,b}[i]` reads as "row `2k+a` of the layer's
-//!     numerator_b table, column `i`".
+//!     where `n_{a,b}[i]` reads as "row `k + a·2^{R-1}` of the layer's
+//!     numerator_b table, column `i`".  The even-row pair lives in
+//!     `next_n0/d0`, the odd-row pair (upper half) in `next_n1/d1`.
+//!
+//! ## Why halves-split, not even/odd pairs
+//!
+//! The GKR "line challenge" appended to `reduced_point` gets bound to
+//! the MLE's HIGHEST variable (via `eval_point.push(line)`).  In the
+//! LSB-first flatten layout (bit 0 of flat_idx = col LSB, ..., bit
+//! `num_int_vars` = row LSB, ..., bit `num_int_vars + log_rows - 1` =
+//! row MSB), the line challenge therefore binds to the row MSB of the
+//! PREVIOUS (larger) layer.  Packing `next_n0 = upper half`,
+//! `next_n1 = lower half` makes the line bit = prev row MSB; even/odd
+//! pairing would make line bit = prev row LSB, desyncing the combined
+//! MLE from `prev_layer.flatten` at round N > 0.
 //!
 //! The output layer has `num_row_variables - 1` and the same
 //! `num_interaction_variables`.  Numerator type promotes from `NumF`
@@ -42,8 +55,8 @@ pub fn layer_transition<NumF, EF>(
     layer: &LogUpGkrCpuLayer<NumF, EF>,
 ) -> LogUpGkrCpuLayer<EF, EF>
 where
-    NumF: Field + Into<EF> + Copy,
-    EF: ExtensionField<NumF>,
+    NumF: Field + Into<EF> + Copy + Sync,
+    EF: ExtensionField<NumF> + Send + Sync,
 {
     assert!(
         layer.num_row_variables >= 1,
@@ -58,68 +71,92 @@ where
 
     let next_num_row_variables = layer.num_row_variables - 1;
 
+    // Phase 4 perf fix (Apr 25 2026 v2): NESTED parallelism. The
+    // outer chip loop is parallel (each chip is independent), AND
+    // within each chip, the per-row work is parallel (rows are
+    // independent). Mirrors SP1's
+    // `crates/hypercube/src/logup_gkr/execution.rs:286-348` pattern.
+    //
+    // For single-large-chip workloads (e.g. Program at 2^19 rows),
+    // chip-level parallelism alone leaves one core doing all the
+    // work — per-row parallelism inside the chip is the right
+    // granularity.
+    use p3_maybe_rayon::prelude::*;
+    let per_chip: Vec<(RowMajorTable<EF>, RowMajorTable<EF>, RowMajorTable<EF>, RowMajorTable<EF>)> = (0..num_chips)
+        .into_par_iter()
+        .map(|chip_idx| {
+            let n0 = &layer.numerator_0[chip_idx];
+            let d0 = &layer.denominator_0[chip_idx];
+            let n1 = &layer.numerator_1[chip_idx];
+            let d1 = &layer.denominator_1[chip_idx];
+
+            let chip_num_interactions = n0.num_interactions;
+            debug_assert_eq!(n0.num_row_variables, layer.num_row_variables);
+            debug_assert_eq!(d0.num_row_variables, layer.num_row_variables);
+            debug_assert_eq!(d0.num_interactions, chip_num_interactions);
+            debug_assert_eq!(n1.num_row_variables, layer.num_row_variables);
+            debug_assert_eq!(n1.num_interactions, chip_num_interactions);
+            debug_assert_eq!(d1.num_row_variables, layer.num_row_variables);
+            debug_assert_eq!(d1.num_interactions, chip_num_interactions);
+
+            let next_rows = 1usize << next_num_row_variables;
+            let int_count = chip_num_interactions;
+
+            // SAFETY: when int_count > 0 the par_chunks_exact_mut loop
+            // unconditionally writes every cell.  When int_count == 0
+            // total = 0 and set_len(0) is trivially safe.
+            let (mut next_n0, mut next_d0, mut next_n1, mut next_d1) = unsafe {
+                (
+                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
+                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
+                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
+                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
+                )
+            };
+
+            // Per-row parallelism: each k iteration is independent,
+            // so split next_n0/next_d0/next_n1/next_d1 by row chunks
+            // (each chunk = `int_count` cells = one row's work).
+            if int_count > 0 {
+                next_n0.cells.par_chunks_exact_mut(int_count)
+                    .zip(next_d0.cells.par_chunks_exact_mut(int_count))
+                    .zip(next_n1.cells.par_chunks_exact_mut(int_count))
+                    .zip(next_d1.cells.par_chunks_exact_mut(int_count))
+                    .enumerate()
+                    .for_each(|(k, (((n0_row, d0_row), n1_row), d1_row))| {
+                        let row_upper = k;
+                        let row_lower = k + next_rows;
+                        for i in 0..int_count {
+                            let n_00: EF = (*n0.get(row_upper, i)).into();
+                            let d_00: EF = *d0.get(row_upper, i);
+                            let n_01: EF = (*n1.get(row_upper, i)).into();
+                            let d_01: EF = *d1.get(row_upper, i);
+                            n0_row[i] = d_01 * n_00 + d_00 * n_01;
+                            d0_row[i] = d_00 * d_01;
+
+                            let n_10: EF = (*n0.get(row_lower, i)).into();
+                            let d_10: EF = *d0.get(row_lower, i);
+                            let n_11: EF = (*n1.get(row_lower, i)).into();
+                            let d_11: EF = *d1.get(row_lower, i);
+                            n1_row[i] = d_11 * n_10 + d_10 * n_11;
+                            d1_row[i] = d_10 * d_11;
+                        }
+                    });
+            }
+
+            (next_n0, next_d0, next_n1, next_d1)
+        })
+        .collect();
+
     let mut numerator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(num_chips);
     let mut denominator_0: Vec<RowMajorTable<EF>> = Vec::with_capacity(num_chips);
     let mut numerator_1: Vec<RowMajorTable<EF>> = Vec::with_capacity(num_chips);
     let mut denominator_1: Vec<RowMajorTable<EF>> = Vec::with_capacity(num_chips);
-
-    for chip_idx in 0..num_chips {
-        let n0 = &layer.numerator_0[chip_idx];
-        let d0 = &layer.denominator_0[chip_idx];
-        let n1 = &layer.numerator_1[chip_idx];
-        let d1 = &layer.denominator_1[chip_idx];
-
-        // Per-chip shape consistency: all four tables for this chip
-        // share the same per-chip dimensions.  The chip's
-        // `num_interactions` is per-chip (raw count) — it does NOT
-        // need to match the layer-wide aggregate.
-        let chip_num_interactions = n0.num_interactions;
-        debug_assert_eq!(n0.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(d0.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(d0.num_interactions, chip_num_interactions);
-        debug_assert_eq!(n1.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(n1.num_interactions, chip_num_interactions);
-        debug_assert_eq!(d1.num_row_variables, layer.num_row_variables);
-        debug_assert_eq!(d1.num_interactions, chip_num_interactions);
-
-        let next_rows = 1usize << next_num_row_variables;
-        let int_count = chip_num_interactions;
-
-        let mut next_n0 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ZERO);
-        let mut next_d0 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ONE);
-        let mut next_n1 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ZERO);
-        let mut next_d1 = RowMajorTable::filled_raw(next_num_row_variables, chip_num_interactions, EF::ONE);
-
-        for k in 0..next_rows {
-            let row_even = 2 * k;
-            let row_odd = 2 * k + 1;
-            for i in 0..int_count {
-                // Even-row pair: combine n0[2k, i]/d0[2k, i] with n1[2k, i]/d1[2k, i].
-                let n_00: EF = (*n0.get(row_even, i)).into();
-                let d_00: EF = *d0.get(row_even, i);
-                let n_01: EF = (*n1.get(row_even, i)).into();
-                let d_01: EF = *d1.get(row_even, i);
-                let n0_new = d_01 * n_00 + d_00 * n_01;
-                let d0_new = d_00 * d_01;
-                next_n0.set(k, i, n0_new);
-                next_d0.set(k, i, d0_new);
-
-                // Odd-row pair.
-                let n_10: EF = (*n0.get(row_odd, i)).into();
-                let d_10: EF = *d0.get(row_odd, i);
-                let n_11: EF = (*n1.get(row_odd, i)).into();
-                let d_11: EF = *d1.get(row_odd, i);
-                let n1_new = d_11 * n_10 + d_10 * n_11;
-                let d1_new = d_10 * d_11;
-                next_n1.set(k, i, n1_new);
-                next_d1.set(k, i, d1_new);
-            }
-        }
-
-        numerator_0.push(next_n0);
-        denominator_0.push(next_d0);
-        numerator_1.push(next_n1);
-        denominator_1.push(next_d1);
+    for (n0, d0, n1, d1) in per_chip {
+        numerator_0.push(n0);
+        denominator_0.push(d0);
+        numerator_1.push(n1);
+        denominator_1.push(d1);
     }
 
     LogUpGkrCpuLayer {

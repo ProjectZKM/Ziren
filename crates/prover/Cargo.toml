@@ -58,6 +58,22 @@ name = "build_compress_vks"
 path = "scripts/build_compress_vks.rs"
 
 [[bin]]
+name = "collect_basefold_vks"
+path = "scripts/collect_basefold_vks.rs"
+
+[[bin]]
+name = "regen_basefold_vks_for_tests"
+path = "scripts/regen_basefold_vks_for_tests.rs"
+
+[[bin]]
+name = "time_prover_new"
+path = "scripts/time_prover_new.rs"
+
+[[bin]]
+name = "write_basefold_vk_map"
+path = "scripts/write_basefold_vk_map.rs"
+
+[[bin]]
 name = "post_trusted_setup"
 path = "scripts/post_trusted_setup.rs"
 

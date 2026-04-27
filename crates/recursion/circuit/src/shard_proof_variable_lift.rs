@@ -285,6 +285,84 @@ where
     crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
+/// META #59 swap 1+2: variant of [`build_opened_values_from_chip_openings`]
+/// that consumes a per-chip `chip_cumulative_sums` map (witnessed from
+/// the host BasefoldShardProof) and uses real values for
+/// `local_cumulative_sum` and `global_cumulative_sum` per chip.
+///
+/// When the map is missing an entry for a given chip name, falls back to
+/// zero placeholders (preserves legacy behavior for chips without
+/// populated sums).  `degree` bits remain zero placeholders pending
+/// Swap 4.
+pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
+    builder: &mut Builder<C>,
+    chip_openings: &std::collections::BTreeMap<
+        String,
+        zkm_stark::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
+    >,
+    chip_cumulative_sums: &std::collections::BTreeMap<
+        String,
+        zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+        >,
+    >,
+    max_log_row_count: usize,
+) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_stark::septic_curve::SepticCurve;
+    use zkm_stark::septic_digest::SepticDigest;
+    use zkm_stark::septic_extension::SepticExtension;
+
+    let chips = chip_openings
+        .iter()
+        .map(|(name, opening)| {
+            let preprocessed_evals = opening
+                .preprocessed_trace_evaluations
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+            let main_evals = opening.main_trace_evaluations.clone();
+            let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+            let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
+            let degree_bits: Vec<Ext<C::F, C::EF>> = (0..max_log_row_count + 1)
+                .map(|_| builder.constant(C::EF::ZERO))
+                .collect();
+
+            // Use real cumulative sums when present; fall back to zero
+            // placeholders when chip is missing from the map.
+            let (local_cumulative_sum, global_cumulative_sum) =
+                if let Some(sums) = chip_cumulative_sums.get(name) {
+                    (sums.local, sums.global.clone())
+                } else {
+                    (
+                        zero_ext,
+                        SepticDigest(SepticCurve {
+                            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
+                            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
+                        }),
+                    )
+                };
+
+            crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
+                preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+                    local: preprocessed_evals,
+                },
+                main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+                    local: main_evals,
+                },
+                degree: degree_bits,
+                local_cumulative_sum,
+                global_cumulative_sum,
+            }
+        })
+        .collect();
+    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
+}
+
 /// Build empty `chip_height_bits` placeholder of the given size.
 /// Used while the opened_values-based derivation is being wired.
 pub fn empty_chip_height_bits<C>(
@@ -348,6 +426,7 @@ mod tests {
             zkm_stark::shard_level::types::ChipEvaluation {
                 main_trace_evaluations: vec![zero, zero, zero],
                 preprocessed_trace_evaluations: Some(vec![zero]),
+                log_degree: 0,
             },
         );
         chip_openings.insert(
@@ -355,6 +434,7 @@ mod tests {
             zkm_stark::shard_level::types::ChipEvaluation {
                 main_trace_evaluations: vec![zero, zero],
                 preprocessed_trace_evaluations: None,
+                log_degree: 0,
             },
         );
         let opened = build_opened_values_from_chip_openings::<InnerConfig>(
@@ -412,6 +492,7 @@ mod tests {
                     zkm_stark::shard_level::types::ChipEvaluation {
                         main_trace_evaluations: vec![v(200), v(201)],
                         preprocessed_trace_evaluations: Some(vec![v(202)]),
+                        log_degree: 0,
                     },
                 )]),
             },

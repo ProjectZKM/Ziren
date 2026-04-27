@@ -36,8 +36,25 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::septic_digest::SepticDigest;
 use crate::shard_level::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::ShardOpenedValues;
+
+/// Per-chip cumulative-sum exposures emitted by the LogUp-GKR prover.
+/// Stored sibling to [`BasefoldShardProof::opened_values`] (rather than
+/// inside [`crate::shard_level::types::ChipEvaluation`]) to avoid
+/// propagating an `F` generic into the LogUp-GKR proof types.
+///
+/// META #59 swap 1+2 plumbing — populated by `prove_shard_to_basefold`
+/// from the per-chip permutation prover output; consumed by the
+/// recursion verifier once `build_opened_values_from_chip_openings`
+/// reads from this map instead of zero placeholders.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>")]
+pub struct ChipCumulativeSums<F, EF> {
+    pub local: EF,
+    pub global: SepticDigest<F>,
+}
 
 /// Host-side BaseFold-pipeline shard proof.
 ///
@@ -65,6 +82,19 @@ pub struct BasefoldShardProof<F, EF> {
     /// per-chip openings) once Ziren's switches to BTreeMap
     /// ordering.
     pub opened_values: ShardOpenedValues<F, EF>,
+    /// Per-chip log_height (= `log2(main_trace.height())`), keyed by
+    /// chip name — same key set as `logup_gkr_proof.logup_evaluations.chip_openings`.
+    /// Drives the recursion verifier's `degree_bits` (zerocheck-reduced
+    /// padded-row mask) without needing to derive heights from the AIR
+    /// at verify time. Empty when serde-loaded from older proof bytes
+    /// (treat empty as "no per-chip heights — fall back to 0 placeholders").
+    #[serde(default = "std::collections::BTreeMap::new")]
+    pub chip_log_heights: std::collections::BTreeMap<String, u8>,
+    /// Per-chip (local, global) cumulative sums.  Empty when serde-loaded
+    /// from older proof bytes — recursion verifier falls back to zero
+    /// placeholders in that case.  META #59 swap 1+2 plumbing.
+    #[serde(default = "std::collections::BTreeMap::new")]
+    pub chip_cumulative_sums: std::collections::BTreeMap<String, ChipCumulativeSums<F, EF>>,
     /// Jagged-PCS opening proof bytes.
     ///
     /// Wire format: serialized [`crate::basefold_late_binding::jagged::JaggedBasefoldBundle`]
@@ -89,6 +119,8 @@ where
             logup_gkr_proof: LogupGkrProof::dummy(),
             zerocheck_proof: PartialSumcheckProof::dummy(),
             opened_values: ShardOpenedValues { chips: Default::default() },
+            chip_log_heights: std::collections::BTreeMap::new(),
+            chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: Vec::new(),
         }
     }

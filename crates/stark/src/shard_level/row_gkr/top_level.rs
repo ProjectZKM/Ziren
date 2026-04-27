@@ -36,11 +36,10 @@ use alloc::vec::Vec;
 use std::collections::BTreeMap;
 
 use p3_challenger::{CanObserve, FieldChallenger};
-use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::build::build_gkr_circuit;
-use super::layer::GkrCircuitLayer;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
@@ -72,6 +71,7 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
     main_traces: &[RowMajorMatrix<F>],
+    max_log_row_count: usize,
     challenger: &mut Challenger,
 ) -> LogupGkrProof<F, EF>
 where
@@ -128,7 +128,6 @@ where
     // 722-731 — without this the prover's transcript skips the
     // observation step the verifier performs, and round 0's
     // claimed_sum check fails.
-    use p3_field::BasedVectorSpace;
     for &n in output.numerator.iter() {
         for basis in n.as_basis_coefficients_slice() {
             challenger.observe(*basis);
@@ -201,9 +200,12 @@ where
         );
 
         // Observe the 4 openings into the challenger (as extension elements).
+        // Order MUST match verifier (verifier.rs:812): n0, n1, d0, d1.
+        // Mismatched order desyncs the transcript at the line_challenge
+        // sample and cascades into round i+1's claimed_sum check.
         observe_ext::<F, EF, _>(challenger, round_proof.numerator_0);
-        observe_ext::<F, EF, _>(challenger, round_proof.denominator_0);
         observe_ext::<F, EF, _>(challenger, round_proof.numerator_1);
+        observe_ext::<F, EF, _>(challenger, round_proof.denominator_0);
         observe_ext::<F, EF, _>(challenger, round_proof.denominator_1);
 
         // Take the reduced point from the sumcheck as the base for the
@@ -229,10 +231,15 @@ where
     // after all the line-challenge extensions.  The trace evaluation
     // point is the last `log(chip_height)` coords of eval_point (the
     // row axis trailing bits), matching the slop-side shape.
+    //
+    // Phase 4 perf fix (Apr 25 2026): parallelize per-chip evaluation.
+    // Each chip's trace_evaluations is independent; parallelism here
+    // mirrors the per-chip pattern used elsewhere in the basefold path.
+    use p3_maybe_rayon::prelude::*;
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
-        .iter()
-        .zip(main_traces.iter())
-        .zip(preprocessed_traces.iter())
+        .par_iter()
+        .zip(main_traces.par_iter())
+        .zip(preprocessed_traces.par_iter())
         .map(|((chip, main_trace), prep_trace)| {
             let main_height = if main_trace.width == 0 {
                 1
@@ -275,6 +282,7 @@ where
                 ChipEvaluation {
                     main_trace_evaluations: main_evals,
                     preprocessed_trace_evaluations: prep_evals,
+                    log_degree: u8::try_from(log_main_height).unwrap_or(0),
                 },
             )
         })
@@ -284,14 +292,23 @@ where
     // The LogUpEvaluations.point is the trace-dimension slice of the
     // full eval_point — the last `num_row_variables` coordinates.
     // This matches the convention (prover.rs:183 — last_k of the
-    // full GKR eval_point) and satisfies the recursion verifier's
-    // `zerocheck_point.dim == gkr_point.dim == pcs_max_log_row_count`
-    // invariant at `zerocheck.rs:488`.
-    let trace_dim_point = if eval_point.len() >= num_row_variables {
+    // full GKR eval_point).
+    //
+    // The recursion verifier's shape invariant requires
+    // `zerocheck_point.dim == gkr_point.dim == pcs_max_log_row_count`.
+    // When this shard's `num_row_variables` < `max_log_row_count`,
+    // left-pad the point with EF::ZERO to reach the target dim — the
+    // padding coords bind to low-order (LSB) row variables which never
+    // exceed the actual chip heights, so chip trace MLE evaluations
+    // (which use the TRAILING coords) are unaffected.
+    let mut trace_dim_point = if eval_point.len() >= num_row_variables {
         eval_point[eval_point.len() - num_row_variables..].to_vec()
     } else {
         eval_point.clone()
     };
+    while trace_dim_point.len() < max_log_row_count {
+        trace_dim_point.insert(0, EF::ZERO);
+    }
 
     LogupGkrProof {
         circuit_output: LogUpGkrOutput {

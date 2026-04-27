@@ -296,7 +296,7 @@ pub enum DslIr<C: Config> {
     CircuitV2BatchFRI(
         Box<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>, Vec<Ext<C::F, C::EF>>, Vec<Felt<C::F>>)>,
     ),
-    /// WHIR sumcheck round verification (Phase 2c+ recursion verifier).
+    /// BaseFold sumcheck round verification (Phase 2c+ recursion verifier).
     /// Tuple is (challenge, claimed_sum, c0, c1, c2, new_claim).  The
     /// runtime emits a SumcheckVerifyEvent that the
     /// SumcheckVerifyChip's AIR re-checks (p(0)+p(1)=claimed_sum and

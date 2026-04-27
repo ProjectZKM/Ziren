@@ -535,6 +535,34 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
         }
     }
+
+    // TODO(#52): basefold companion to program_from_shape, used by
+    // `build_compress_vks` to regenerate vk_map.bin against basefold
+    // programs.  Construction requires `ZKM*BasefoldWitnessValues::dummy(machine, shape)`
+    // helpers that don't yet exist; the prover witness types only
+    // expose runtime constructors today.  Sketch:
+    //
+    //   ZKMCompressProgramShape::Recursion(shape) =>
+    //       let input = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+    //       self.recursion_program_basefold(&input)
+    //   ZKMCompressProgramShape::Deferred(shape) =>
+    //       let input = ZKMDeferredBasefoldWitnessValues::dummy(machine, &shape);
+    //       self.deferred_program_basefold(&input)
+    //   ZKMCompressProgramShape::Compress(shape) =>
+    //       let input = ZKMCompressBasefoldWitnessValues::dummy(machine, &shape);
+    //       self.compose_program_basefold(&input)
+    //   ZKMCompressProgramShape::Shrink(shape) =>
+    //       let input = ZKMWrapBasefoldWitnessValues::dummy(machine, &shape);
+    //       self.shrink_program_basefold(&input)
+    //
+    // Each dummy() needs a structurally-valid `BasefoldShardProof` —
+    // `BasefoldShardProof::empty(main_commit, num_pv)` already exists at
+    // `crates/stark/src/shard_level/shard_proof.rs:85` for this purpose.
+    //
+    // Blocked: adding dummy constructors to the basefold witness types
+    // touches the AST-fragile basefold-recursion area; per #59 (load-bearing
+    // placeholder pattern), even the additions trigger regressions in the
+    // green Test::Compress baseline.  Land this once #59 is resolved.
 }
 
 #[cfg(test)]

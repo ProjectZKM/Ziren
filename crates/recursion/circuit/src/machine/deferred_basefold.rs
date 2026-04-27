@@ -87,6 +87,16 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
             Vec<u8>,
         ),
     )>,
+    /// META #59 Phase D: per-input per-chip cumulative sums.
+    pub chip_cumulative_sums_per_input: Vec<
+        std::collections::BTreeMap<
+            String,
+            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+                Felt<C::F>,
+                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
+            >,
+        >,
+    >,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE],
@@ -138,6 +148,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
 {
     let ZKMDeferredBasefoldWitnessVariable {
         vks_and_proofs,
+        chip_cumulative_sums_per_input,
         vk_merkle_data,
         start_reconstruct_deferred_digest,
         zkm_vk_digest,
@@ -170,7 +181,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         max_log_row_count as u32,
     );
 
-    for (vk_legacy, proof_tuple) in vks_and_proofs {
+    for (_deferred_i, (vk_legacy, proof_tuple)) in vks_and_proofs.into_iter().enumerate() {
         let basefold_vk =
             crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
                 builder,
@@ -194,11 +205,16 @@ pub fn verify_deferred_basefold<C, SC, A>(
             &chip_names,
             max_log_row_count,
         );
-        let shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+        let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
             .chips()
             .iter()
             .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
             .collect();
+        // Sort by name to match BTreeMap-ordered opened_values.
+        shard_chips.sort_by(|a, b| {
+            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
+                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+        });
         use p3_air::BaseAir;
         let preprocessed_widths: Vec<usize> = shard_chips
             .iter()
@@ -224,10 +240,16 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 evaluation_proof_var,
                 chip_height_bits,
             );
+        // META #59 Phase D: consume real per-chip cumulative_sums.
+        let empty_cumsums_deferred = std::collections::BTreeMap::new();
+        let cumsums_for_input = chip_cumulative_sums_per_input
+            .get(_deferred_i)
+            .unwrap_or(&empty_cumsums_deferred);
         let opened_values =
-            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings::<C>(
+            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
                 builder,
                 &logup_gkr_proof.logup_evaluations.chip_openings,
+                cumsums_for_input,
                 max_log_row_count,
             );
         let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();

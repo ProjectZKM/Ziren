@@ -60,6 +60,16 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             Vec<u8>,
         ),
     )>,
+    /// META #59 Phase D: per-input per-chip cumulative sums.
+    pub chip_cumulative_sums_per_input: Vec<
+        std::collections::BTreeMap<
+            String,
+            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+                Felt<C::F>,
+                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
+            >,
+        >,
+    >,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -87,7 +97,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
-    let ZKMWrapBasefoldWitnessVariable { vks_and_proofs } = input;
+    let ZKMWrapBasefoldWitnessVariable { vks_and_proofs, chip_cumulative_sums_per_input } = input;
 
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
 
@@ -113,11 +123,16 @@ pub fn verify_wrap_basefold<C, SC, A>(
         &chip_names,
         max_log_row_count,
     );
-    let shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+    let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
         .chips()
         .iter()
         .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
         .collect();
+    // Sort by name to match BTreeMap-ordered opened_values.
+    shard_chips.sort_by(|a, b| {
+        MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
+            .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+    });
     use p3_air::BaseAir;
     let preprocessed_widths: Vec<usize> = shard_chips
         .iter()
@@ -143,10 +158,16 @@ pub fn verify_wrap_basefold<C, SC, A>(
             evaluation_proof_var,
             chip_height_bits,
         );
+    // META #59 Phase D: consume real per-chip cumulative_sums for wrap input.
+    let empty_cumsums_wrap = std::collections::BTreeMap::new();
+    let cumsums_for_input = chip_cumulative_sums_per_input
+        .first()
+        .unwrap_or(&empty_cumsums_wrap);
     let opened_values =
-        crate::shard_proof_variable_lift::build_opened_values_from_chip_openings::<C>(
+        crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
             builder,
             &logup_gkr_proof.logup_evaluations.chip_openings,
+            cumsums_for_input,
             max_log_row_count,
         );
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();

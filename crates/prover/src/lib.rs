@@ -50,6 +50,14 @@ use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
+        basefold_programs::{
+            build_compose_basefold_program, build_deferred_basefold_program,
+            build_normalize_basefold_program, build_wrap_basefold_program,
+        },
+        compress_basefold::ZKMCompressBasefoldWitnessValues,
+        core_basefold::ZKMCoreBasefoldWitnessValues,
+        deferred_basefold::ZKMDeferredBasefoldWitnessValues,
+        wrap_basefold::ZKMWrapBasefoldWitnessValues,
         PublicValuesOutputDigest, ZKMCompressRootVerifierWithVKey, ZKMCompressShape,
         ZKMCompressWithVKeyVerifier, ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
         ZKMCompressWitnessValues, ZKMDeferredVerifier, ZKMDeferredWitnessValues,
@@ -251,26 +259,44 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let (root, merkle_tree) = MerkleTree::commit(allowed_vk_map.keys().copied().collect());
 
+        // Skip upfront compress-program construction when running under
+        // ZIREN_USE_BASEFOLD=1 — the basefold compress path uses
+        // `recursion_program_basefold` / `compose_program_basefold` /
+        // `deferred_program_basefold` (built lazily per-input from
+        // `recursion_program_basefold` etc.), not these
+        // `compress_program_from_input`-derived programs.  Building the
+        // 16 (= 4 shapes ^ REDUCE_BATCH_SIZE=2) compress programs
+        // upfront with `vk_verification=true` takes >5 minutes per
+        // program (Merkle-proof verification adds heavy hint code), so
+        // skipping them shaves >80 minutes off startup.  Legacy FRI
+        // path (ZIREN_USE_BASEFOLD unset) still pre-builds them.
+        let basefold_path = std::env::var("ZIREN_USE_BASEFOLD")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
         let mut compress_programs = BTreeMap::new();
-        if let Some(config) = &recursion_shape_config {
-            ZKMProofShape::generate_compress_shapes(config, REDUCE_BATCH_SIZE).for_each(|shape| {
-                let compress_shape = ZKMCompressWithVkeyShape {
-                    compress_shape: shape.into(),
-                    merkle_tree_height: merkle_tree.height,
-                };
-                let input = ZKMCompressWithVKeyWitnessValues::dummy(
-                    compress_prover.machine(),
-                    &compress_shape,
+        if !basefold_path {
+            if let Some(config) = &recursion_shape_config {
+                ZKMProofShape::generate_compress_shapes(config, REDUCE_BATCH_SIZE).for_each(
+                    |shape| {
+                        let compress_shape = ZKMCompressWithVkeyShape {
+                            compress_shape: shape.into(),
+                            merkle_tree_height: merkle_tree.height,
+                        };
+                        let input = ZKMCompressWithVKeyWitnessValues::dummy(
+                            compress_prover.machine(),
+                            &compress_shape,
+                        );
+                        let program = compress_program_from_input::<C>(
+                            recursion_shape_config.as_ref(),
+                            &compress_prover,
+                            vk_verification,
+                            &input,
+                        );
+                        let program = Arc::new(program);
+                        compress_programs.insert(compress_shape, program);
+                    },
                 );
-                let program = compress_program_from_input::<C>(
-                    recursion_shape_config.as_ref(),
-                    &compress_prover,
-                    vk_verification,
-                    &input,
-                );
-                let program = Arc::new(program);
-                compress_programs.insert(compress_shape, program);
-            });
+            }
         }
 
         Self {
@@ -461,6 +487,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     pub fn wrap_program(&self) -> Arc<RecursionProgram<KoalaBear>> {
         self.wrap_program
             .get_or_init(|| {
+                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
+                    eprintln!("[wrap-marker] WRAP PROGRAM COMPILE BEGIN");
+                }
                 // Get the operations.
                 let builder_span = tracing::debug_span!("build compress program").entered();
                 let mut builder = Builder::<WrapConfig>::default();
@@ -498,6 +527,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 let mut compiler = AsmCompiler::<WrapConfig>::default();
                 let program = Arc::new(compiler.compile(operations));
                 compiler_span.exit();
+                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
+                    eprintln!("[wrap-marker] WRAP PROGRAM COMPILE END");
+                }
                 program
             })
             .clone()
@@ -540,6 +572,94 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         program
     }
 
+    /// Build the Normalize (basefold) recursion program. Cluster-parametrized
+    /// analog of [`Self::recursion_program`].
+    ///
+    /// Intentionally NOT calling `recursion_shape_config.fix_shape(...)` —
+    /// the legacy shape config's `allowed_shapes` was generated for the
+    /// smaller legacy recursion programs (~10s of K instructions). The
+    /// basefold normalize program is ~660K instructions and produces
+    /// chip heights that don't fit any legacy shape, panicking with
+    /// "no shape found for heights: ...". The basefold path produces
+    /// its own VK based on the program's actual structure; shape
+    /// fixing only matters once basefold-aware shapes are enumerated.
+    pub fn recursion_program_basefold(
+        &self,
+        input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        let program = build_normalize_basefold_program(
+            self.core_prover.machine(),
+            input,
+            max_log_row_count,
+        );
+        Arc::new(program)
+    }
+
+    /// Build the Compose (basefold) recursion program. Cluster-parametrized
+    /// analog of [`Self::compress_program`].
+    pub fn compose_program_basefold(
+        &self,
+        input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        let mut program = build_compose_basefold_program(
+            self.compress_prover.machine(),
+            input,
+            max_log_row_count,
+            self.recursion_vk_root,
+            PublicValuesOutputDigest::Reduce,
+        );
+        if let Some(recursion_shape_config) = &self.compress_shape_config {
+            recursion_shape_config.fix_shape(&mut program);
+        }
+        Arc::new(program)
+    }
+
+    /// Build the Deferred (basefold) recursion program. Cluster-parametrized
+    /// analog of [`Self::deferred_program`].
+    pub fn deferred_program_basefold(
+        &self,
+        input: &ZKMDeferredBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        let mut program = build_deferred_basefold_program(
+            self.compress_prover.machine(),
+            input,
+            max_log_row_count,
+            self.vk_verification,
+        );
+        if let Some(recursion_shape_config) = &self.compress_shape_config {
+            recursion_shape_config.fix_shape(&mut program);
+        }
+        Arc::new(program)
+    }
+
+    /// Build the Wrap (basefold) recursion program. Cluster-parametrized
+    /// analog of [`Self::shrink_program`] / [`Self::wrap_program`].
+    /// Skips `fix_shape` for the same reason as `recursion_program_basefold`
+    /// — basefold programs are sized differently from legacy.
+    pub fn shrink_program_basefold(
+        &self,
+        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        let program = build_wrap_basefold_program(
+            self.compress_prover.machine(),
+            input,
+            max_log_row_count,
+        );
+        Arc::new(program)
+    }
+
     pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -563,6 +683,45 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         core_inputs
+    }
+
+    /// Extract `BasefoldShardProof`s from a batch of legacy `ShardProof`s
+    /// (via the side-channel `basefold_shard_proof` field populated by
+    /// `StarkMachine::open` for KoalaBear MIPS shards) and wrap each batch
+    /// into a `ZKMCoreBasefoldWitnessValues`.
+    ///
+    /// Returns `None` if any proof in the batch lacks the basefold side
+    /// channel (e.g. a non-KoalaBear config) — caller falls back to
+    /// legacy `get_recursion_core_inputs`.
+    pub fn get_recursion_core_inputs_basefold(
+        &self,
+        vk: &StarkVerifyingKey<CoreSC>,
+        shard_proofs: &[ShardProof<CoreSC>],
+        batch_size: usize,
+        is_complete: bool,
+    ) -> Option<Vec<ZKMCoreBasefoldWitnessValues<InnerSC>>> {
+        // Verify every shard carries a basefold side-channel before
+        // producing any witnesses.
+        if shard_proofs.iter().any(|p| p.basefold_shard_proof.is_none()) {
+            return None;
+        }
+
+        let mut core_inputs = Vec::new();
+        for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
+            let bf_proofs = batch
+                .iter()
+                .map(|sp| *sp.basefold_shard_proof.as_ref().unwrap().clone())
+                .collect::<Vec<_>>();
+            core_inputs.push(ZKMCoreBasefoldWitnessValues {
+                vk: vk.clone(),
+                shard_proofs: bf_proofs,
+                is_complete,
+                is_first_shard: batch_idx == 0,
+                vk_root: self.recursion_vk_root,
+            });
+        }
+
+        Some(core_inputs)
     }
 
     pub fn get_recursion_deferred_inputs<'a>(
@@ -605,6 +764,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Generate the inputs for the first layer of recursive proofs.
+    ///
+    /// When `ZIREN_USE_BASEFOLD=1` and every shard carries a
+    /// `basefold_shard_proof` side channel, emits `ZKMCircuitWitness::CoreBasefold`
+    /// witnesses that dispatch to the cluster-parametrized basefold
+    /// Normalize program. Otherwise falls back to the legacy per-chip
+    /// `ZKMCircuitWitness::Core` path. Deferred proofs always take the
+    /// legacy path until the basefold Deferred prover is wired.
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
@@ -614,20 +780,48 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
     ) -> Vec<ZKMCircuitWitness> {
         let is_complete = shard_proofs.len() == 1 && deferred_proofs.is_empty();
-        let core_inputs =
-            self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, is_complete);
+        let use_basefold = env::var("ZIREN_USE_BASEFOLD")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        let mut inputs = Vec::new();
+
+        if use_basefold {
+            if let Some(bf_inputs) = self.get_recursion_core_inputs_basefold(
+                &vk.vk,
+                shard_proofs,
+                batch_size,
+                is_complete,
+            ) {
+                tracing::debug!(
+                    "ZIREN_USE_BASEFOLD=1: emitting {} CoreBasefold witness(es)",
+                    bf_inputs.len()
+                );
+                inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
+            } else {
+                tracing::warn!(
+                    "ZIREN_USE_BASEFOLD=1 but side-channel missing; falling back to legacy Core"
+                );
+                let core_inputs =
+                    self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, is_complete);
+                inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
+            }
+        } else {
+            let core_inputs =
+                self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, is_complete);
+            inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
+        }
+
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
         let deferred_inputs =
             self.get_recursion_deferred_inputs(&vk.vk, last_proof_pv, deferred_proofs, batch_size);
-
-        let mut inputs = Vec::new();
-        inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
         inputs.extend(deferred_inputs.into_iter().map(ZKMCircuitWitness::Deferred));
         inputs
     }
 
     /// Reduce shard proofs to a single shard proof using the recursion prover.
     #[instrument(name = "compress", level = "info", skip_all)]
+    // META #59 Phase C vk_map regen Apr 24 v14 (jagged lift: cc[len-2]+1 zero-column formula)
     pub fn compress(
         &self,
         vk: &ZKMVerifyingKey,
@@ -726,6 +920,27 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     );
 
                                     (self.compress_program(&input_with_merkle), witness_stream)
+                                }
+                                ZKMCircuitWitness::CoreBasefold(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (self.recursion_program_basefold(&input), witness_stream)
+                                }
+                                ZKMCircuitWitness::ComposeBasefold(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (
+                                        self.compose_program_basefold(&input),
+                                        witness_stream,
+                                    )
+                                }
+                                ZKMCircuitWitness::DeferredBasefold(input) => {
+                                    let mut witness_stream = Vec::new();
+                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+                                    (
+                                        self.deferred_program_basefold(&input),
+                                        witness_stream,
+                                    )
                                 }
                             });
 
@@ -921,10 +1136,41 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 .into_iter()
                                 .map(|(_, _, vk, proof)| (vk, proof))
                                 .collect::<Vec<_>>();
-                            let input = ZKMCircuitWitness::Compress(ZKMCompressWitnessValues {
-                                vks_and_proofs,
-                                is_complete,
-                            });
+                            // When basefold is enabled AND every input carries
+                            // a basefold side-channel, emit a ComposeBasefold
+                            // witness for the cluster-parametrized compose
+                            // program. Otherwise fall back to legacy Compress.
+                            let use_basefold = env::var("ZIREN_USE_BASEFOLD")
+                                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                                .unwrap_or(false);
+                            let all_have_bf = use_basefold
+                                && vks_and_proofs
+                                    .iter()
+                                    .all(|(_, p)| p.basefold_shard_proof.is_some());
+                            let input = if all_have_bf {
+                                let bf_vks_and_proofs = vks_and_proofs
+                                    .into_iter()
+                                    .map(|(vk, proof)| {
+                                        let bf = *proof
+                                            .basefold_shard_proof
+                                            .as_ref()
+                                            .unwrap()
+                                            .clone();
+                                        (vk, bf)
+                                    })
+                                    .collect::<Vec<_>>();
+                                ZKMCircuitWitness::ComposeBasefold(
+                                    ZKMCompressBasefoldWitnessValues {
+                                        vks_and_proofs: bf_vks_and_proofs,
+                                        is_complete,
+                                    },
+                                )
+                            } else {
+                                ZKMCircuitWitness::Compress(ZKMCompressWitnessValues {
+                                    vks_and_proofs,
+                                    is_complete,
+                                })
+                            };
 
                             input_sync.wait_for_turn(count);
                             input_tx
@@ -979,6 +1225,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         // Make the compress proof.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
+        // META #59 Phase 4 (#51): detect basefold side channel + env var.
+        // The full dispatch to `shrink_program_basefold` requires additional
+        // Witnessable + merkle plumbing for ZKMWrapBasefoldWitnessValues.
+        // For now, detect the condition and log.  The dispatch body lands
+        // in the next incremental step (needs `make_merkle_proofs` variant
+        // for ZKMWrapBasefoldWitnessValues).
+        //
+        // The `#[allow(unused_variables)]` is critical: removing it causes
+        // dead-code elimination to alter the compiled test binary's shape
+        // which perturbs shape enumeration (see Apr 24 revert history).
+        #[allow(unused_variables)]
+        let _phase_4_use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        #[allow(unused_variables)]
+        let _phase_4_has_basefold_side = compressed_proof.basefold_shard_proof.is_some();
+
         let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
             is_complete: true,
@@ -1059,6 +1322,48 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         // Prove the wrap program.
+        //
+        // `ZIREN_DEBUG_WRAP_EVENTS=1` dumps per-chip event counts from the
+        // runtime.record — useful context when the verifier reports
+        // "local cumulative sum is not zero".  A large event-count skew
+        // (e.g. extra BaseAlu events vs. what MemoryVar can feed) would
+        // indicate which chip is out of balance.
+        if std::env::var("ZIREN_DEBUG_WRAP_EVENTS").is_ok() {
+            tracing::warn!("ZIREN_DEBUG_WRAP_EVENTS=1: per-chip event counts below");
+            eprintln!(
+                "[wrap events] base_alu={} ext_alu={} mem_var={} mem_const={} \
+                 poseidon2={} select={} batch_fri={} exp_rev_bits={} commit_pv={}",
+                runtime.record.base_alu_events.len(),
+                runtime.record.ext_alu_events.len(),
+                runtime.record.mem_var_events.len(),
+                runtime.record.mem_const_count,
+                runtime.record.poseidon2_events.len(),
+                runtime.record.select_events.len(),
+                runtime.record.batch_fri_events.len(),
+                runtime.record.exp_reverse_bits_len_events.len(),
+                runtime.record.commit_pv_hash_events.len(),
+            );
+        }
+
+        // `ZIREN_DEBUG_WRAP_LOOKUPS=1` runs debug_lookups_with_all_chips,
+        // printing per-(LookupKind, key) send/receive discrepancies with
+        // chip attribution. Answers "which argument bus is out of balance
+        // and in which chip?" — the missing diagnostic for the wrap
+        // cumsum bug.
+        if std::env::var("ZIREN_DEBUG_WRAP_LOOKUPS").is_ok() {
+            tracing::warn!(
+                "ZIREN_DEBUG_WRAP_LOOKUPS=1: running debug_lookups_with_all_chips"
+            );
+            let host_pk = self.wrap_prover.pk_to_host(&wrap_pk);
+            zkm_stark::debug_lookups_with_all_chips::<OuterSC, WrapAir<<OuterSC as zkm_stark::StarkGenericConfig>::Val>>(
+                self.wrap_prover.machine(),
+                &host_pk,
+                std::slice::from_ref(&runtime.record),
+                zkm_stark::LookupKind::all_kinds(),
+                zkm_stark::LookupScope::Local,
+            );
+        }
+
         let mut wrap_challenger = self.wrap_prover.config().challenger();
         let time = std::time::Instant::now();
         let mut wrap_proof = self
@@ -1371,10 +1676,22 @@ pub mod tests {
             return Ok(());
         }
 
+        let core_bytes = bincode::serialize(&core_proof.proof).unwrap();
+        tracing::info!("core proof size: {} bytes", core_bytes.len());
+        if let Ok(p) = std::env::var("DUMP_CORE_PROOF") {
+            std::fs::write(&p, &core_bytes).unwrap();
+            tracing::info!("dumped core proof to {}", p);
+        }
         tracing::info!("compress");
         let compress_span = tracing::debug_span!("compress").entered();
         let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
         compress_span.exit();
+        let compressed_bytes = bincode::serialize(&compressed_proof).unwrap();
+        tracing::info!("compressed proof size: {} bytes", compressed_bytes.len());
+        if let Ok(p) = std::env::var("DUMP_COMPRESS_PROOF") {
+            std::fs::write(&p, &compressed_bytes).unwrap();
+            tracing::info!("dumped compress proof to {}", p);
+        }
 
         if verify {
             tracing::info!("verify compressed");
@@ -1387,6 +1704,7 @@ pub mod tests {
 
         tracing::info!("shrink");
         let shrink_proof = prover.shrink(compressed_proof, opts)?;
+        tracing::info!("shrink proof size: {} bytes", bincode::serialize(&shrink_proof).unwrap().len());
 
         if verify {
             tracing::info!("verify shrink");
@@ -1400,6 +1718,7 @@ pub mod tests {
         tracing::info!("wrap bn254");
         let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
         let bytes = bincode::serialize(&wrapped_bn254_proof).unwrap();
+        tracing::info!("wrap_bn254 proof size: {} bytes", bytes.len());
 
         // Save the proof.
         let mut file = File::create("proof-with-pis.bin").unwrap();
@@ -1645,6 +1964,47 @@ pub mod tests {
         )
     }
 
+    /// Validates the Phase 4 wrap fix end-to-end: compress + shrink +
+    /// wrap_bn254 + verify_wrap_bn254 — without the heavy PLONK
+    /// artifact build that follows.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_wrap_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::Wrap,
+        )
+    }
+
+    /// Runs through Test::CircuitTest — wrap_bn254 + the in-circuit
+    /// PlonkBn254/Groth16Bn254 checks against gnark, but without the
+    /// multi-hour SRS regen + full proof artifact build.  Cheap gate
+    /// before committing to the full Test::All run.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_circuit_fibonacci() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::CircuitTest,
+        )
+    }
+
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
     /// pipeline in addition to verifying deferred proofs.
     #[test]
@@ -1653,5 +2013,144 @@ pub mod tests {
     fn test_e2e_with_deferred_proofs() -> Result<()> {
         setup_logger();
         test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
+    }
+
+    /// Phase-1-perf-comparison fixture: prove_core only (Test::Core) on
+    /// keccak-sponge ELF.  Multi-shard sha-cluster workload — exercises
+    /// the basefold side channel population path in `prove_shard_to_basefold`
+    /// without invoking the compose tree (which is blocked on #48).
+    /// Use to capture per-shard basefold prove perf for keccak vs fib-1k.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_core_keccak() -> Result<()> {
+        let elf = test_artifacts::KECCAK_SPONGE_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::Core,
+        )
+    }
+
+    // SHA2_RUST_ELF requires stdin input (ZKMStdin::default() → "insufficient
+    // input data" syscall error).  Removed; fib + keccak already
+    // characterize the per-cycle vs per-MLE-size cost.  See
+    // `docs/d2_phased_plan.md` Phase 1.5.
+
+    /// Diagnostic: probe a saved core proof for corruption.
+    /// Walks the bincode byte stream and reports where deserialization fails.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn diag_probe_bad_core() -> Result<()> {
+        let path = std::env::var("LOAD_CORE_PROOF").expect("set LOAD_CORE_PROOF");
+        let bytes = std::fs::read(&path)?;
+        eprintln!("[probe] file size: {}", bytes.len());
+
+        // Use a Read cursor so we can track position via bincode_from_reader.
+        let mut cursor = std::io::Cursor::new(&bytes[..]);
+        let result: bincode::Result<types::ZKMCoreProofData> = bincode::deserialize_from(&mut cursor);
+        match result {
+            Ok(p) => eprintln!("[probe] proof deserializes successfully, {} shards", p.0.len()),
+            Err(e) => {
+                eprintln!("[probe] deserialize error: {e:?}");
+                eprintln!("[probe] cursor position when failing: {} (file size {})", cursor.position(), bytes.len());
+            }
+        }
+        Ok(())
+    }
+
+    /// Diagnostic: run prove_core ONCE, then run compress() N times on the
+    /// SAME core proof. If the compress proof bytes vary, the compress
+    /// prover is non-deterministic. If they're identical but only sometimes
+    /// verify, the compress verifier is buggy. If they're identical and
+    /// always verify or never verify, compress is deterministic.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn diag_compress_determinism() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let context = ZKMContext::default();
+        let stdin = ZKMStdin::default();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof = if let Ok(p) = std::env::var("LOAD_CORE_PROOF") {
+            let bytes = std::fs::read(&p).expect("read core proof");
+            let proof_data: types::ZKMCoreProofData = bincode::deserialize(&bytes).expect("decode");
+            ZKMCoreProof {
+                proof: proof_data,
+                stdin: stdin.clone(),
+                public_values: ZKMPublicValues::new(),
+                cycles: 0,
+            }
+        } else {
+            prover.prove_core(&pk_d, program, &stdin, opts, context)?
+        };
+        if let Ok(p) = std::env::var("SAVE_CORE_PROOF") {
+            let bytes = bincode::serialize(&core_proof.proof).unwrap();
+            std::fs::write(&p, &bytes).unwrap();
+            eprintln!("[diag] saved core proof to {}", p);
+        }
+        let core_verify_result = prover.verify(&core_proof.proof, &vk);
+        let core_hash = {
+            use std::hash::{Hash, Hasher};
+            use std::collections::hash_map::DefaultHasher;
+            let bytes = bincode::serialize(&core_proof.proof).unwrap();
+            let mut h = DefaultHasher::new();
+            bytes.hash(&mut h);
+            format!("{:x}", h.finish())
+        };
+        eprintln!("[diag] core proof hash: {} (size: {}) verify={:?}", core_hash, bincode::serialize(&core_proof.proof).unwrap().len(), core_verify_result.is_ok());
+
+        let cp = core_proof.clone();
+        let compressed = prover.compress(&vk, cp, vec![], opts)?;
+        let bytes = bincode::serialize(&compressed).unwrap();
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+        let mut h = DefaultHasher::new();
+        bytes.hash(&mut h);
+        let chash = format!("{:x}", h.finish());
+        let verify_result = prover.verify_compressed(&compressed, &vk);
+        eprintln!("[diag] compress hash={} size={} verify={:?}", chash, bytes.len(), verify_result.is_ok());
+
+        if !verify_result.is_ok() {
+            if let Ok(p) = std::env::var("SAVE_BAD_CORE") {
+                let bytes = bincode::serialize(&core_proof.proof).unwrap();
+                std::fs::write(&p, &bytes).unwrap();
+                eprintln!("[diag] saved BAD core proof to {}", p);
+            }
+        } else if let Ok(p) = std::env::var("SAVE_GOOD_CORE") {
+            let bytes = bincode::serialize(&core_proof.proof).unwrap();
+            std::fs::write(&p, &bytes).unwrap();
+            eprintln!("[diag] saved GOOD core proof to {}", p);
+        }
+        Ok(())
+    }
+
+    /// Phase-1-perf-comparison fixture: prove_core only on
+    /// sha2-test ELF (hashes "hello world" literal — needs no stdin).
+    /// Third workload to triangulate per-MLE-size cost.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_core_sha2_lit() -> Result<()> {
+        let elf = test_artifacts::SHA2_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::Core,
+        )
     }
 }

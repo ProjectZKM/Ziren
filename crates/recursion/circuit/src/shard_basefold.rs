@@ -229,16 +229,32 @@ impl<P> BasefoldShardVerifier<P> {
             .map(|interaction| interaction.values.len() + 1)
             .max()
             .unwrap_or(1);
-        let total_interactions: usize = chips
+        // BUG FIX: the host's `first_layer::generate_first_layer`
+        // computes `total_padded_interactions = Σ chip.interactions.next_power_of_two()`
+        // and uses `log2(total_padded.next_power_of_two())` as the
+        // global `num_interaction_variables`.  This verifier
+        // previously summed RAW per-chip counts and took log2_ceil of
+        // that, which under-counts when chip widths aren't already
+        // powers of two — e.g. chips = [3, 5, 7] gives raw_sum=15
+        // → log2_ceil=4 (16 cols), but host pads to 4+8+8=20
+        // → 32 cols.  The shape mismatch panicked the in-circuit
+        // verifier at `evaluate_mle_ext: left=1024 right=512` for
+        // fibonacci.  Mirror the host's per-chip-padded calculation
+        // exactly to keep `circuit_output.numerator.len()` aligned
+        // with the verifier's expected dimension.
+        let total_padded_interactions: usize = chips
             .iter()
-            .map(|chip| chip.sends().len() + chip.receives().len())
+            .map(|chip| {
+                let raw = chip.sends().len() + chip.receives().len();
+                raw.max(1).next_power_of_two()
+            })
             .sum();
         let log2_ceil = |x: usize| -> usize {
             if x <= 1 { 0 } else { (x - 1).ilog2() as usize + 1 }
         };
         LogupGkrShardChipMetadata {
             beta_seed_dim: log2_ceil(max_arity),
-            log_num_interactions: log2_ceil(total_interactions.max(1)),
+            log_num_interactions: log2_ceil(total_padded_interactions.max(1)),
         }
     }
 

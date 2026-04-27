@@ -72,8 +72,8 @@ pub fn evaluate_trace_columns_at_point<F, EF>(
     eval_point: &[EF],
 ) -> Vec<EF>
 where
-    F: PrimeField,
-    EF: ExtensionField<F>,
+    F: PrimeField + Sync,
+    EF: ExtensionField<F> + Send + Sync,
 {
     if width == 0 {
         return Vec::new();
@@ -83,7 +83,12 @@ where
     let eq = eq_mle_table::<EF>(eval_point);
     debug_assert_eq!(eq.len(), height);
 
+    // Phase 4 perf fix (Apr 25 2026): parallelize the per-column
+    // MLE evaluation. Each column is an independent dot product
+    // over the eq-table; collect-into-Vec is rayon-friendly.
+    use p3_maybe_rayon::prelude::*;
     (0..width)
+        .into_par_iter()
         .map(|col| {
             let mut acc = EF::ZERO;
             for row in 0..height {
@@ -278,6 +283,7 @@ where
                 ChipEvaluation {
                     main_trace_evaluations: main_evals,
                     preprocessed_trace_evaluations: prep_evals,
+                    log_degree: u8::try_from(log_main_height).unwrap_or(0),
                 },
             )
         })

@@ -13,6 +13,9 @@ use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 use zkm_recursion_circuit::machine::{
     ZKMCompressWitnessValues, ZKMDeferredWitnessValues, ZKMRecursionWitnessValues,
 };
+use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::compress_basefold::ZKMCompressBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnessValues;
 
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
@@ -234,4 +237,14 @@ pub enum ZKMCircuitWitness {
     Core(ZKMRecursionWitnessValues<CoreSC>),
     Deferred(ZKMDeferredWitnessValues<InnerSC>),
     Compress(ZKMCompressWitnessValues<InnerSC>),
+    /// Basefold-shape normalize input — consumes `BasefoldShardProof`s from
+    /// the core prover (carried on `ShardProof.basefold_shard_proof`).
+    /// Dispatches to `build_normalize_basefold_program` during compress.
+    CoreBasefold(ZKMCoreBasefoldWitnessValues<InnerSC>),
+    /// Basefold-shape compose input — tree-reduction layer.
+    /// Dispatches to `build_compose_basefold_program`.
+    ComposeBasefold(ZKMCompressBasefoldWitnessValues<InnerSC>),
+    /// Basefold-shape deferred input — verifies already-recursed deferred
+    /// branches. Dispatches to `build_deferred_basefold_program`.
+    DeferredBasefold(ZKMDeferredBasefoldWitnessValues<InnerSC>),
 }

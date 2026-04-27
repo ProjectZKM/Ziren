@@ -389,8 +389,8 @@ where
     }
 
     /// Emit a `SumcheckVerify` instruction that verifies one
-    /// sumcheck round (used by the Phase 2c+ recursion-circuit WHIR
-    /// verifier, mirrors `fri_fold` but for the WHIR sumcheck path).
+    /// sumcheck round (used by the Phase 2c+ recursion-circuit BaseFold
+    /// verifier, mirrors `fri_fold` but for the BaseFold sumcheck path).
     ///
     /// `challenge`, `claimed_sum`: prior round's verifier challenge
     /// and the previous claim.
@@ -597,8 +597,32 @@ where
             DslIr::PrintV(dst) => f(self.print_f(dst)),
             DslIr::PrintF(dst) => f(self.print_f(dst)),
             DslIr::PrintE(dst) => f(self.print_e(dst)),
-            DslIr::CircuitV2HintFelts(output) => f(self.hint(&output)),
-            DslIr::CircuitV2HintExts(output) => f(self.hint(&output)),
+            DslIr::CircuitV2HintFelts(output) => {
+                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
+                    let instr = self.hint(&output);
+                    if let Instruction::Hint(HintInstr { output_addrs_mults }) = &instr {
+                        for (a, _m) in output_addrs_mults {
+                            eprintln!("[read alloc] addr={} type=felt", a.as_usize());
+                        }
+                    }
+                    f(instr)
+                } else {
+                    f(self.hint(&output))
+                }
+            }
+            DslIr::CircuitV2HintExts(output) => {
+                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
+                    let instr = self.hint(&output);
+                    if let Instruction::Hint(HintInstr { output_addrs_mults }) = &instr {
+                        for (a, _m) in output_addrs_mults {
+                            eprintln!("[read alloc] addr={} type=ext", a.as_usize());
+                        }
+                    }
+                    f(instr)
+                } else {
+                    f(self.hint(&output))
+                }
+            }
             DslIr::CircuitExt2Felt(felts, ext) => f(self.ext2felts(felts, ext)),
             DslIr::CycleTrackerV2Enter(name) => {
                 consumer(Err(CompileOneErr::CycleTrackerEnter(name)))
@@ -762,7 +786,7 @@ where
                     Instruction::Mem(MemInstr { kind: MemAccessKind::Read, .. })
                     | Instruction::CommitPublicValues(_)
                     | Instruction::Print(_) => (),
-                    // WHIR sumcheck verify: output mult is in the instruction.
+                    // BaseFold sumcheck verify: output mult is in the instruction.
                     Instruction::SumcheckVerify(_) => (),
                 }
             }

@@ -71,7 +71,10 @@ impl ZKMProverOpts {
         opts.core_opts.split_opts.boolean_circuit_garble /= divisor;
         opts.core_opts.split_opts.memory /= divisor;
 
-        opts.recursion_opts.shard_batch_size = 2;
+        opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(2);
         opts.recursion_opts.records_and_traces_channel_capacity = 1;
         opts.recursion_opts.trace_gen_workers = 1;
 

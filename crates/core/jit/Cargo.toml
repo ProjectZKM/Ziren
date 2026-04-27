@@ -1,0 +1,40 @@
+[package]
+name = "zkm-core-jit"
+version = "1.2.5"
+edition = "2021"
+description = "JIT compiler for the Ziren MIPS guest executor (Linux x86_64)."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Field / arithmetic — kept for compatibility with existing dependents.
+p3-koala-bear = { workspace = true }
+p3-field = { workspace = true }
+
+# Tracing / diagnostics.
+tracing = { workspace = true }
+hashbrown = { workspace = true }
+thiserror = "1.0"
+serde = { workspace = true, features = ["derive"] }
+
+# JIT backend — dynasm-rt (runtime macro-assembler) on Linux x86_64.
+# Modeled on SP1's sp1-jit which uses the same dependency stack.
+[target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
+dynasmrt = "2.0"
+memfd = "0.6"
+memmap2 = "0.9"
+libc = "0.2"
+
+[dev-dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[features]
+default = []
+profiling = []
+
+[lib]
+path = "src/lib.rs"
+
+[[bench]]
+name = "transpile_bench"
+path = "benches/transpile_bench.rs"
+harness = false

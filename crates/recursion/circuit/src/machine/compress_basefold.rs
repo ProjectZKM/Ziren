@@ -105,6 +105,18 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             Vec<u8>,
         ),
     )>,
+    /// META #59 Phase D: per-input per-chip cumulative sums (witnessed
+    /// from each input's `BasefoldShardProof.chip_cumulative_sums`).
+    /// Same length and order as `vks_and_proofs`.
+    pub chip_cumulative_sums_per_input: Vec<
+        std::collections::BTreeMap<
+            String,
+            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+                Felt<C::F>,
+                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
+            >,
+        >,
+    >,
     pub is_complete: Felt<C::F>,
 }
 
@@ -160,7 +172,11 @@ pub fn verify_compress_basefold<C, SC, A>(
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
     use std::borrow::BorrowMut;
-    let ZKMCompressBasefoldWitnessVariable { vks_and_proofs, is_complete } = input;
+    let ZKMCompressBasefoldWitnessVariable {
+        vks_and_proofs,
+        chip_cumulative_sums_per_input,
+        is_complete,
+    } = input;
 
     // Step 6 (pre-loop): initialize aggregated public-output
     // accumulators.  Verbatim copy from
@@ -216,29 +232,45 @@ pub fn verify_compress_basefold<C, SC, A>(
             evaluation_proof_bytes,
         ) = proof_tuple;
 
-        // Step 2: lift evaluation_proof bytes into the in-circuit
-        // JaggedPcsProofVariable.  Currently returns a
-        // structurally-valid placeholder; real bundle
-        // deserialization lands in subsequent iterations.
-        // Placeholder column_counts — compress doesn't yet drive the
-        // smoke test; the real wiring lands alongside the core shape
-        // when the compress-stage test comes online.
-        let column_counts_by_round_placeholder: Vec<Vec<usize>> = Vec::new();
+        // Step 2: derive chip names + per-round column counts from the
+        // shard's logup_gkr_proof.chip_openings (same pattern as
+        // verify_core_basefold at core_basefold.rs:270-287). This
+        // replaces the previous empty-placeholder that broke the jagged-PCS
+        // metadata shape — compose now matches normalize's handling.
+        //
+        // Sort shard_chips by name to match BTreeMap ordering of
+        // chip_openings/opened_values — see verify_core_basefold for
+        // the "Main width mismatch" motivation.
+        let chip_names: Vec<String> =
+            logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
+        let mut shard_chips_pre: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+            .chips()
+            .iter()
+            .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
+            .collect();
+        shard_chips_pre.sort_by(|a, b| {
+            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
+                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+        });
+        use p3_air::BaseAir as _Base1;
+        let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
+            .iter()
+            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .collect();
+        let main_widths_pre: Vec<usize> = shard_chips_pre
+            .iter()
+            .map(|c| _Base1::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+            .collect();
+        let column_counts_by_round_pre: Vec<Vec<usize>> =
+            vec![preprocessed_widths_pre, main_widths_pre];
+
         let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
             builder,
             &evaluation_proof_bytes,
             max_log_row_count,
-            &column_counts_by_round_placeholder,
+            &column_counts_by_round_pre,
         );
 
-        // Step 3: assemble BasefoldShardProofVariable from the
-        // per-piece tuple + lifted evaluation_proof.
-        // chip_height_bits is currently empty (placeholder until
-        // the opened_values-driven derivation lands); the names
-        // come from the `logup_gkr_proof.logup_evaluations.chip_openings`
-        // BTreeMap which carries chip identity through the pipeline.
-        let chip_names: Vec<String> =
-            logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
         let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
             builder,
             &chip_names,
@@ -250,11 +282,15 @@ pub fn verify_compress_basefold<C, SC, A>(
         // in this shard (per logup_gkr_proof.chip_openings names).
         // SP1's `chip_metadata_from_chips` consumes this slice to
         // compute beta_seed_dim + log_num_interactions.
-        let _shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+        let mut _shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
             .chips()
             .iter()
             .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
             .collect();
+        _shard_chips.sort_by(|a, b| {
+            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
+                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+        });
         let _chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::chip_metadata_from_chips::<SC, A>(&_shard_chips);
@@ -321,15 +357,18 @@ pub fn verify_compress_basefold<C, SC, A>(
             real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(builder);
 
         // Step 5d: opened_values built from the LogUp-GKR
-        // chip_openings via the shared adapter.  Per-chip
-        // preprocessed/main MLE evals are derived directly; the
-        // degree + cumulative sums fields use placeholder zeros
-        // pending the per-chip log_height + GKR layer-output
-        // wiring.
+        // chip_openings via the shared adapter.  META #59 Phase D:
+        // consume real per-chip cumulative_sums from witnessed
+        // BasefoldShardProof.chip_cumulative_sums (per-input).
+        let empty_cumsums_compress = std::collections::BTreeMap::new();
+        let cumsums_for_input = chip_cumulative_sums_per_input
+            .get(_i)
+            .unwrap_or(&empty_cumsums_compress);
         let _opened_values =
-            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings::<C>(
+            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
                 builder,
                 &logup_gkr_proof.logup_evaluations.chip_openings,
+                cumsums_for_input,
                 max_log_row_count,
             );
 

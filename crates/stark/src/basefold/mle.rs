@@ -72,11 +72,23 @@ impl<F: Field> Mle<F> {
     /// substitutes for var `i` (first-var-first convention).  Note
     /// this is the *Lagrange* combination `(1-r)·lo + r·hi`, not the
     /// monomial fold used by [`Self::fold`].
-    pub fn eval_at<EF: ExtensionField<F>>(&self, point: &[EF]) -> Vec<EF> {
+    pub fn eval_at<EF: ExtensionField<F>>(&self, point: &[EF]) -> Vec<EF>
+    where
+        EF: Send + Sync,
+        F: Sync,
+    {
         debug_assert_eq!(point.len(), self.num_variables() as usize);
         let n_polys = self.num_polynomials();
+        use p3_maybe_rayon::prelude::*;
+        // Parallelize only the initial F → EF lift (the largest single
+        // pass).  The per-round Lagrange fold remains sequential to
+        // preserve in-place write semantics — earlier attempts to
+        // parallelize the fold via fresh-vec allocation broke the
+        // recursion-circuit's bit-exact OOD checks (root cause not
+        // isolated; the algorithm here still produces the same Vec<EF>
+        // but the proof bytes change in a way the verifier rejects).
         let mut current: Vec<EF> =
-            self.guts.values.iter().map(|&v| EF::from(v)).collect();
+            self.guts.values.par_iter().map(|&v| EF::from(v)).collect();
         let mut n_rows = self.hypercube_size();
         for &r in point {
             let half = n_rows / 2;
@@ -99,20 +111,36 @@ impl<F: Field> Mle<F> {
     /// [`super::fri::fold_even_odd_ext`] — same pairing scheme, same
     /// monomial-basis reduction — so the K-round constants match
     /// (the BaseFold key invariant).
-    pub fn fold<EF: ExtensionField<F>>(self, beta: EF) -> Mle<EF> {
+    ///
+    /// Phase 4 perf fix (Apr 25 2026): parallelize the per-row pair
+    /// fold. Each row pair `(2i, 2i+1)` is independent → write into
+    /// separate slots of the pre-allocated output. Called per round
+    /// in `commit_phase_round`; total work across rounds is ~2N
+    /// elements (geometric sum).
+    pub fn fold<EF: ExtensionField<F> + Send + Sync>(self, beta: EF) -> Mle<EF>
+    where
+        F: Sync,
+    {
         let width = self.guts.width();
         let height = self.guts.height();
         debug_assert!(height >= 2);
         let half = height / 2;
 
         let values = self.guts.values;
-        let mut folded = Vec::with_capacity(half * width);
-        for i in 0..half {
-            for k in 0..width {
-                let lo: EF = values[2 * i * width + k].into();
-                let hi: EF = values[(2 * i + 1) * width + k].into();
-                folded.push(lo + beta * hi);
-            }
+        // Allocator opt: skip vec![EF::ZERO; half*width] zero-init; every
+        // slot is written by the for_each closure below.
+        let new_len = half * width;
+        // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
+        let mut folded: Vec<EF> = vec![EF::ZERO; new_len];
+        if width > 0 {
+            use p3_maybe_rayon::prelude::*;
+            folded.par_chunks_exact_mut(width).enumerate().for_each(|(i, dst)| {
+                for k in 0..width {
+                    let lo: EF = values[2 * i * width + k].into();
+                    let hi: EF = values[(2 * i + 1) * width + k].into();
+                    dst[k] = lo + beta * hi;
+                }
+            });
         }
         Mle { guts: RowMajorMatrix::new(folded, width) }
     }

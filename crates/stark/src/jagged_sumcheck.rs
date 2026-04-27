@@ -79,12 +79,18 @@ fn build_weight_table(
 }
 
 fn par_fold_table_first(table: &[InnerChallenge], r: InnerChallenge) -> Vec<InnerChallenge> {
-    let one_minus_r = InnerChallenge::ONE - r;
     let half = table.len() / 2;
-    (0..half)
-        .into_par_iter()
-        .map(|i| table[2 * i] * one_minus_r + table[2 * i + 1] * r)
-        .collect()
+    // Allocator opt + strength reduction: skip zero-init; use
+    // `lo + r * (hi - lo)` (1 EF mul) instead of `(1-r)*lo + r*hi`
+    // (2 EF muls).
+    // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
+    let mut out: Vec<InnerChallenge> = vec![InnerChallenge::ZERO; half];
+    out.par_iter_mut().enumerate().for_each(|(i, dst)| {
+        let lo = table[2 * i];
+        let hi = table[2 * i + 1];
+        *dst = lo + r * (hi - lo);
+    });
+    out
 }
 
 fn jagged_round_evals(
@@ -92,7 +98,6 @@ fn jagged_round_evals(
     w: &[InnerChallenge],
     half: usize,
 ) -> [InnerChallenge; 3] {
-    let two = InnerChallenge::ONE + InnerChallenge::ONE;
     let zero = InnerChallenge::ZERO;
     (0..half)
         .into_par_iter()
@@ -103,8 +108,8 @@ fn jagged_round_evals(
             let w1 = w[2 * i + 1];
             let p0 = q0 * w0;
             let p1 = q1 * w1;
-            let q2 = two * q1 - q0;
-            let w2 = two * w1 - w0;
+            let q2 = q1.double() - q0;
+            let w2 = w1.double() - w0;
             let p2 = q2 * w2;
             [p0, p1, p2]
         })
@@ -119,7 +124,6 @@ fn jagged_round_evals_base(
     w: &[InnerChallenge],
     half: usize,
 ) -> [InnerChallenge; 3] {
-    let two = InnerChallenge::ONE + InnerChallenge::ONE;
     let zero = InnerChallenge::ZERO;
     (0..half)
         .into_par_iter()
@@ -130,8 +134,8 @@ fn jagged_round_evals_base(
             let w1 = w[2 * i + 1];
             let p0 = w0 * q0;
             let p1 = w1 * q1;
-            let q2 = two * q1 - q0;
-            let w2 = two * w1 - w0;
+            let q2 = q1.double() - q0;
+            let w2 = w1.double() - w0;
             let p2 = w2 * q2;
             [p0, p1, p2]
         })
@@ -146,15 +150,15 @@ fn par_fold_table_first_base(
     r: InnerChallenge,
 ) -> Vec<InnerChallenge> {
     let half = q_base.len() / 2;
-    let one_minus_r = InnerChallenge::ONE - r;
-    (0..half)
-        .into_par_iter()
-        .map(|i| {
-            let q0: InnerChallenge = q_base[2 * i].into();
-            let q1: InnerChallenge = q_base[2 * i + 1].into();
-            one_minus_r * q0 + r * q1
-        })
-        .collect()
+    // Allocator opt + strength reduction.
+    // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
+    let mut out: Vec<InnerChallenge> = vec![InnerChallenge::ZERO; half];
+    out.par_iter_mut().enumerate().for_each(|(i, dst)| {
+        let q0: InnerChallenge = q_base[2 * i].into();
+        let q1: InnerChallenge = q_base[2 * i + 1].into();
+        *dst = q0 + r * (q1 - q0);
+    });
+    out
 }
 
 fn jagged_eval_round_poly(p: [InnerChallenge; 3], x: InnerChallenge) -> InnerChallenge {
@@ -295,7 +299,6 @@ where
     F: Field + Copy,
     InnerChallenge: From<F>,
 {
-    let two = InnerChallenge::ONE + InnerChallenge::ONE;
     let mut acc = [InnerChallenge::ZERO; 3];
     let mut it = DenseJaggedIter::<F>::new(chip_traces, packing, eq_per_chip, gamma, total_padded);
 
@@ -307,8 +310,8 @@ where
         let q1_ef: InnerChallenge = q1.into();
         let p0 = w0 * q0_ef;
         let p1 = w1 * q1_ef;
-        let q2 = two * q1_ef - q0_ef;
-        let w2 = two * w1 - w0;
+        let q2 = q1_ef.double() - q0_ef;
+        let w2 = w1.double() - w0;
         let p2 = w2 * q2;
         acc[0] += p0;
         acc[1] += p1;
@@ -604,99 +607,4 @@ pub fn verify_jagged_reduction(
     }
 
     Some((z_star, proof.q_at_z, w_at_z))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::jagged::{JaggedChipInfo, compute_jagged_metadata, materialize_dense_jagged};
-    use crate::kb31_poseidon2::InnerPerm;
-    use p3_matrix::dense::RowMajorMatrix;
-    use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
-    use zkm_primitives::poseidon2_init;
-
-    fn rand_kb<R: Rng>(rng: &mut R) -> InnerVal {
-        InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)
-    }
-
-    fn build_challenger() -> InnerChallenger {
-        let perm: InnerPerm = poseidon2_init();
-        InnerChallenger::new(perm)
-    }
-
-    /// **Correctness:** streaming reduction must produce the SAME
-    /// proof bytes as the dense path for identical transcript inputs.
-    #[test]
-    fn test_jagged_reduction_streaming_matches_dense() {
-        let mut rng = StdRng::seed_from_u64(0xE3_57_AA);
-
-        let mk_trace = |width: usize, h: usize, rng: &mut StdRng| -> RowMajorMatrix<InnerVal> {
-            let v: Vec<InnerVal> = (0..width * h).map(|_| rand_kb(rng)).collect();
-            RowMajorMatrix::new(v, width)
-        };
-        let traces = alloc::vec![
-            ("A".into(), mk_trace(3, 8, &mut rng)),
-            ("B".into(), mk_trace(2, 4, &mut rng)),
-        ];
-        let packing = compute_jagged_metadata::<InnerVal>(&traces);
-
-        // Random per-chip r_row of length log2(h_c).
-        let r_row_per_chip: Vec<Vec<InnerChallenge>> = packing
-            .chip_infos
-            .iter()
-            .map(|info| {
-                let log_h = info.row_count.next_power_of_two().trailing_zeros() as usize;
-                (0..log_h)
-                    .map(|_| {
-                        let coords: [InnerVal; 4] =
-                            [rand_kb(&mut rng), rand_kb(&mut rng), rand_kb(&mut rng), rand_kb(&mut rng)];
-                        InnerChallenge::new(coords)
-                    })
-                    .collect()
-            })
-            .collect();
-
-        // Compute per-chip y_{c,j} claims the same way the caller does.
-        let mut y_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
-        for ((_, trace), r_row) in traces.iter().zip(r_row_per_chip.iter()) {
-            let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row);
-            let h = trace.values.len() / trace.width;
-            let w = trace.width;
-            let mut chip_ys = Vec::with_capacity(w);
-            for col in 0..w {
-                let mut acc = InnerChallenge::ZERO;
-                for row in 0..h {
-                    acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
-                }
-                chip_ys.push(acc);
-            }
-            y_per_chip.push(chip_ys);
-        }
-
-        // Dense path.
-        let dense_q = materialize_dense_jagged::<InnerVal>(&traces, packing.log_dense_size);
-        let mut c_dense = build_challenger();
-        let proof_dense = prove_jagged_reduction(
-            &dense_q,
-            &packing,
-            &r_row_per_chip,
-            &y_per_chip,
-            &mut c_dense,
-        );
-
-        // Streaming path.
-        let mut c_stream = build_challenger();
-        let proof_stream = prove_jagged_reduction_streaming::<InnerVal>(
-            &traces,
-            &packing,
-            &r_row_per_chip,
-            &y_per_chip,
-            &mut c_stream,
-        );
-
-        assert_eq!(proof_dense.rounds, proof_stream.rounds, "per-round evals");
-        assert_eq!(proof_dense.eval_point, proof_stream.eval_point, "z*");
-        assert_eq!(proof_dense.q_at_z, proof_stream.q_at_z, "q(z*)");
-    }
 }

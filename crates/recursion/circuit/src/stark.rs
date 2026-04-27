@@ -73,21 +73,24 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
-    // Make a dummy commitment matching the real BaseFold prover's
-    // shape: `permutation_commit = None`, `quotient_commit = None`
-    // (see `crates/stark/src/prover.rs:783-784`).  The soundness
-    // work replaced permutation-phase opening with sumcheck-based
-    // binding (zerocheck + LogUp-GKR) and folded quotient terms into
-    // the FRI commit; neither commitment appears on the wire.
+    // Phase 4 fix (Apr 25 2026): dummy must match the LEGACY FRI
+    // pipeline that the prover uses for recursion shards.  The
+    // `use_basefold_path = ... && data.chip_ordering.contains_key("Cpu")`
+    // gate at `crates/stark/src/prover.rs` ensures recursion shards
+    // (no Cpu chip — shrink/wrap inputs) take the LEGACY FRI path
+    // which emits 2 auxiliary commits (`[permutation_commit,
+    // quotient_commit]`) plus populated `permutation` + `quotient`
+    // opened values.
     //
-    // The legacy 4-commit shape (Some, Some) is kept-compatible by
-    // the existing `if permutation_commit.is_some()` / `if
-    // quotient_commit.is_some()` guards inside `verify_shard`, which
-    // gracefully skip the corresponding PCS-mat construction +
-    // verification when None.
+    // The earlier dummy assumed BaseFold-shape (empty aux, empty
+    // perm/quotient) which created a structural mismatch with the
+    // real proof, causing the wrap-program to read fewer hint
+    // blocks than the writer produced — Block-shape misalignment
+    // in MemoryVar/BaseAlu/Poseidon2 lookups, propagating to
+    // local_cumulative_sum != 0 in wrap_bn254 verification.
     let commitment = ShardCommitment {
         main_commit: dummy_commit(),
-        auxiliary_commits: Vec::new(),
+        auxiliary_commits: vec![dummy_commit(), dummy_commit()],
     };
 
     // Get dummy opened values by reading the chip ordering from the shape.
@@ -146,19 +149,19 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
         }
     }
 
-    // Build the batch_shapes list including only non-empty batches
-    // (matches the BaseFold-prover commit ordering: only commits to
-    // batches the wire actually carries).  After the BaseFold
-    // migration the permutation + quotient batches are empty on the
-    // wire — including them would crash `dummy_pcs_proof` at its
-    // `max().unwrap()` over the empty shapes vec.
+    // Phase 4 fix (Apr 25 2026): match the LEGACY FRI prover's
+    // batch list — 4 batches in the canonical [preprocessed, main,
+    // permutation, quotient] order.  Always include perm + quotient
+    // batches now that dummy populates them (dummy_opened_values
+    // sets `permutation.local.len() = chip.permutation_width() * D`
+    // and `quotient = vec![vec![EF::ZERO; D]; quotient_width]` for
+    // every chip).
     //
-    // Permutation entries with `width = 0` add no PCS rows even if
-    // the batch itself is non-empty (single-chip case where the
-    // chip happens to have permutation_width 0); drop them so the
-    // batch-vs-real-shape comparison stays consistent.
-    let permutation_batch_shape: Vec<_> =
-        permutation_batch_shape.into_iter().filter(|s| s.width > 0).collect();
+    // Drop the width-0 filter from the BaseFold-shaped dummy: real
+    // prover commits permutation traces for ALL chips (including
+    // ones with `permutation_width = 0`), so dummy must too —
+    // mismatched shape breaks the wrap_program's compile-time hint
+    // sequence (Witnessable::write/read iterate the same fields).
     let mut batch_shapes = Vec::with_capacity(4);
     if !preprocessed_batch_shape.is_empty() {
         batch_shapes.push(PolynomialBatchShape { shapes: preprocessed_batch_shape });
@@ -232,16 +235,32 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
     let main =
         AirOpenedValues { local: vec![EF::ZERO; main_width], next: vec![EF::ZERO; main_width] };
 
-    // Match the BaseFold-pipeline real prover: empty permutation +
-    // quotient opened values at the proof level (see
-    // `crates/stark/src/prover.rs:715-716`).  `chip.permutation_width()`
-    // / `chip.quotient_width()` still report nonzero values (those
-    // dimensions live inside the AIR for sumcheck constraint
-    // evaluation), but they're not on the proof wire.  This pairs
-    // with the `permutation_commit = None` / `quotient_commit = None`
-    // dummy commitment above.
-    let permutation = AirOpenedValues { local: vec![], next: vec![] };
-    let quotient: Vec<Vec<EF>> = vec![];
+    // Phase 4 fix (Apr 25 2026): match the LEGACY FRI prover's
+    // ChipOpenedValues — `permutation` and `quotient` populated.
+    // Recursion shards (no Cpu chip) take the legacy FRI path in
+    // `crates/stark/src/prover.rs::open` which writes both
+    // `permutation_opened_values` and `quotient_opened_values` for
+    // every chip.
+    //
+    // Permutation opened values are the FLATTENED ext columns —
+    // `chip.permutation_width()` ext columns × `D = 4` felts per
+    // ext (see `verify_opening_shape` in
+    // `crates/stark/src/verifier.rs:354`: expected length is
+    // `chip.permutation_width() * <SC::Challenge as
+    // BasedVectorSpace<Val<SC>>>::DIMENSION`).  D for KoalaBear's
+    // BinomialExtensionField<KoalaBear, 4> is 4.
+    //
+    // Each quotient chunk holds `D = 4` extension-field basis
+    // values per `slice.map(|mut op| op.pop().unwrap())` followed
+    // by `quotient: Vec<Vec<EF>>` assignment in prover.rs.
+    const D: usize = 4;
+    let permutation_width_flattened = chip.permutation_width() * D;
+    let permutation = AirOpenedValues {
+        local: vec![EF::ZERO; permutation_width_flattened],
+        next: vec![EF::ZERO; permutation_width_flattened],
+    };
+    let quotient_chunks = chip.quotient_width();
+    let quotient: Vec<Vec<EF>> = vec![vec![EF::ZERO; D]; quotient_chunks];
 
     ChipOpenedValues {
         preprocessed,
@@ -523,9 +542,11 @@ where
         // PCS).  Soundness in this branch is now provided by the
         // three per-chip pillars (LogUp-GKR + zerocheck + jagged-
         // PCS fingerprint) emitted below — the legacy 4-batch
-        // FRI verification (constraint folding + PCS opening) is
-        // dead code under whir_mode and gets short-circuited.
-        let whir_mode = quotient_commit.is_none();
+        // STARK verification (constraint folding + PCS opening) is
+        // dead code under `legacy_quotient_skipped` and gets
+        // short-circuited.  (Originally named `whir_mode` when WHIR
+        // was the planned PCS; renamed during the BaseFold migration.)
+        let legacy_quotient_skipped = quotient_commit.is_none();
 
         // BaseFold-pipeline soundness bindings (LogUp-GKR +
         // zerocheck per-chip verifiers + jagged-PCS fingerprint
@@ -561,7 +582,7 @@ where
         {
             // Verify the shape of the opening arguments matches the expected values.
             Self::verify_opening_shape(chip, values).unwrap();
-            if !whir_mode {
+            if !legacy_quotient_skipped {
                 // Verify the constraint evaluation.
                 Self::verify_constraints(
                     builder,

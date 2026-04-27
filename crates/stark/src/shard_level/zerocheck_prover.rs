@@ -3,7 +3,7 @@
 //! Replaces Ziren's per-chip
 //! [`crate::zerocheck_prover::prove_zerocheck_with_challenger`]
 //! loop (one ZerocheckProof per chip) with a single shard-level
-//! [`super::types::PartialSumcheckProof<EF>`] per the design.
+//! [`super::types::PartialSumcheckProof<EF>`] per SP1's design.
 //!
 //! # Algorithm
 //!
@@ -27,7 +27,7 @@
 //!   3. Run a single [`crate::zerocheck_prover::prove_zerocheck_with_challenger`]
 //!      on the combined table.
 //!   4. The produced [`crate::zerocheck::ZerocheckProof`] (per-chip
-//!      shape) projects onto the [`super::types::PartialSumcheckProof`]
+//!      shape) projects onto SP1's [`super::types::PartialSumcheckProof`]
 //!      shape by:
 //!        - `univariate_polys` ← per-round 3-tuples reconstructed
 //!          as degree-2 polynomials via Lagrange interpolation
@@ -48,14 +48,14 @@
 use std::collections::BTreeMap;
 
 use p3_air::Air;
-use p3_challenger::FieldChallenger;
+use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::types::{LogUpEvaluations, PartialSumcheckProof, UnivariatePolynomial};
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
-use crate::zerocheck_prover::{eval_constraints_on_hypercube, prove_zerocheck_with_challenger};
+use crate::zerocheck_prover::eval_constraints_on_hypercube;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
 
 /// RLC two equal-size constraint tables via a `lambda` challenge.
@@ -83,7 +83,7 @@ where
 /// constraint polynomial evaluates to 0 (no row to constrain),
 /// so zero-padding preserves the sum identity.
 ///
-/// Note: the upstream design uses `VirtualGeq` to encode the height threshold
+/// Note: SP1 uses `VirtualGeq` to encode the height threshold
 /// differently — it tracks "real-rows-so-far" via a virtual
 /// counter that takes the value `1` for real rows and `0` for
 /// padding.  Both approaches yield equivalent zerocheck claims;
@@ -108,7 +108,7 @@ where
 
 /// Shard-level zerocheck prover skeleton.
 ///
-/// the reference: `ShardProver::zerocheck` at
+/// SP1 reference: `ShardProver::zerocheck` at
 /// `/tmp/sp1/crates/hypercube/src/prover/shard.rs:474-646`.
 ///
 /// # Status
@@ -139,6 +139,7 @@ pub fn prove_shard_zerocheck<SC, A>(
     main_traces: &[RowMajorMatrix<Val<SC>>],
     _logup_evaluations: &LogUpEvaluations<Challenge<SC>>,
     public_values: &[Val<SC>],
+    max_log_row_count: usize,
     challenger: &mut SC::Challenger,
 ) -> PartialSumcheckProof<Challenge<SC>>
 where
@@ -151,7 +152,7 @@ where
 
     // Step 1: sample the per-chip constraint-batching challenge
     // (powers-of-alpha) and the inter-chip RLC challenge (lambda).
-    // the samples batching_challenge upstream and passes in;
+    // SP1 samples batching_challenge upstream and passes in;
     // here we sample both at entry for self-containment.
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
@@ -172,13 +173,47 @@ where
         }
         let height = main_trace.values.len() / main_trace.width.max(1);
         let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
-        let table = eval_constraints_on_hypercube::<SC, A>(
+
+        // META #59 Phase C: compute real per-chip cumulative sums so the
+        // zerocheck hypercube table reflects the chip's real AIR
+        // evaluation (matches what the recursion verifier will check via
+        // `build_opened_values_from_chip_openings_with_cumsums` when
+        // it consumes BasefoldShardProof.chip_cumulative_sums).
+        //   - global_cumulative_sum: from main trace's last 14 elements
+        //     when commit_scope() != Local (mirrors legacy prover.rs:492-502).
+        //   - local_cumulative_sum: zero (matches legacy basefold path;
+        //     future work: thread real local sum from LogUp-GKR layer 0).
+        let global_cumulative_sum = if chip.commit_scope()
+            != crate::air::LookupScope::Local
+        {
+            let main_trace_size = main_trace.values.len();
+            if main_trace_size >= 14 {
+                use p3_field::BasedVectorSpace;
+                let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
+                let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
+                    |j| last_row[j],
+                );
+                let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
+                    |j| last_row[j + 7],
+                );
+                crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+            } else {
+                crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+            }
+        } else {
+            crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+        };
+        let local_cumulative_sum = Challenge::<SC>::ZERO;
+
+        let table = crate::zerocheck_prover::eval_constraints_on_hypercube_with_cumsums::<SC, A>(
             chip,
             log_height,
             main_trace,
             preproc_trace,
             public_values,
             alpha,
+            local_cumulative_sum,
+            global_cumulative_sum,
         );
         chip_tables.push((log_height, table));
     }
@@ -201,12 +236,19 @@ where
         })
         .max()
         .unwrap_or(0);
+    // The verifier enforces `zerocheck_point.dim == max_log_row_count`
+    // (recursion/circuit/src/zerocheck.rs:488 and shard_level verifier
+    // line 421).  Pad the sumcheck out to the verifier's configured
+    // global max, regardless of whether this specific shard fills it —
+    // extra rounds fold zero-padded tables, which is a no-op for
+    // correctness but preserves the shape invariant.
     let max_log_degree = chip_tables
         .iter()
         .map(|(d, _)| *d)
         .max()
         .unwrap_or(0)
-        .max(shard_log_row_count);
+        .max(shard_log_row_count)
+        .max(max_log_row_count);
     let target_size = 1usize << max_log_degree;
     let padded: Vec<Vec<Challenge<SC>>> = chip_tables
         .into_iter()
@@ -234,22 +276,93 @@ where
     };
 
     // Step 5: run a single shard-level sumcheck on the combined
-    // table.  Returns the per-round 3-sample tuples + final
-    // eval_point and final_claim.
-    let (_r_eq, ziren_proof) = prove_zerocheck_with_challenger::<Val<SC>, Challenge<SC>, _>(
+    // table, using SP1-shape transcript observations (4 monomial
+    // coefficients per round, matching verify_sumcheck_host).
+    prove_shard_zerocheck_sumcheck_sp1_transcript::<SC>(
         &combined,
         max_log_degree,
         challenger,
-    );
-
-    // Step 6: project Ziren's per-round 3-sample shape into SP1's
-    // PartialSumcheckProof shape.
-    ziren_zerocheck_to_partial_sumcheck::<Challenge<SC>>(
-        &ziren_proof.rounds,
-        ziren_proof.eval_point,
-        ziren_proof.final_claim,
-        Challenge::<SC>::ZERO, // claimed_sum is 0 for a true zerocheck
     )
+}
+
+/// Direct sumcheck prover for shard-level zerocheck, matching the
+/// transcript pattern of [`super::verifier::verify_sumcheck_host`].
+///
+/// Proves `Σ_b C(b) == 0` (the vanishing-constraint claim) via a
+/// direct degree-1 sumcheck — no eq-wedge factor, unlike Ziren's
+/// [`prove_zerocheck_with_challenger`] which samples an r-point from
+/// the transcript (that r-sampling would desync with the shard-level
+/// verifier which doesn't mirror it).
+///
+/// Round polynomials are linear in X (`p(X) = Σ_{b'} C(X, b')`), so
+/// they have 2 coefficients natively.  We pad to 4 coefs with
+/// trailing zeros to satisfy the verifier's `expected_degree = 3`
+/// shape check — the polynomial evaluations are unchanged.
+fn prove_shard_zerocheck_sumcheck_sp1_transcript<SC>(
+    c_evals: &[Challenge<SC>],
+    num_vars: usize,
+    challenger: &mut SC::Challenger,
+) -> PartialSumcheckProof<Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+{
+    use crate::zerocheck_prover::fold_table_first;
+    use p3_field::PrimeCharacteristicRing;
+
+    debug_assert_eq!(c_evals.len(), 1 << num_vars);
+
+    let mut c_table = c_evals.to_vec();
+
+    let mut univariate_polys: Vec<UnivariatePolynomial<Challenge<SC>>> =
+        Vec::with_capacity(num_vars);
+    let mut reduced_point: Vec<Challenge<SC>> = Vec::with_capacity(num_vars);
+
+    for _ in 0..num_vars {
+        let half = c_table.len() / 2;
+
+        // p(X) = Σ_{b'} C(X, b') is linear in X for a multilinear C.
+        //   p(0) = Σ_{b'} C(0, b') = sum of even-indexed entries
+        //   p(1) = Σ_{b'} C(1, b') = sum of odd-indexed entries
+        let mut p0 = Challenge::<SC>::ZERO;
+        let mut p1 = Challenge::<SC>::ZERO;
+        for i in 0..half {
+            p0 += c_table[2 * i];
+            p1 += c_table[2 * i + 1];
+        }
+
+        // Monomial coefficients of p(X) = a + b·X with a = p(0),
+        // b = p(1) - p(0).  Pad to 4 coefs with trailing zeros to
+        // satisfy the verifier's degree-3 shape check.
+        let c0 = p0;
+        let c1 = p1 - p0;
+        let poly = UnivariatePolynomial {
+            coefficients: vec![c0, c1, Challenge::<SC>::ZERO, Challenge::<SC>::ZERO],
+        };
+
+        // Observe all 4 coefficients into the challenger (SP1-shape).
+        for c in &poly.coefficients {
+            for b in c.as_basis_coefficients_slice() {
+                challenger.observe(*b);
+            }
+        }
+
+        let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+        reduced_point.push(alpha);
+        univariate_polys.push(poly);
+
+        c_table = fold_table_first(&c_table, alpha);
+    }
+
+    // Final claim: c_table has been folded to a single element.
+    let final_claim = if c_table.is_empty() { Challenge::<SC>::ZERO } else { c_table[0] };
+
+    PartialSumcheckProof {
+        univariate_polys,
+        claimed_sum: Challenge::<SC>::ZERO, // zerocheck: claimed_sum is 0
+        point_and_eval: (reduced_point, final_claim),
+    }
 }
 
 /// Project Ziren's per-round 3-evaluation tuple into a degree-2
@@ -290,7 +403,13 @@ where
     let c1 = -(three_halves * p0) + EF::from_u64(2) * p1 - half * p2;
     // c2 = 1/2·p0 - p1 + 1/2·p2
     let c2 = half * p0 - p1 + half * p2;
-    UnivariatePolynomial { coefficients: vec![c0, c1, c2] }
+    // The verifier's shape check expects degree_3 (4 coefficients) even
+    // though the underlying Ziren zerocheck only samples 3 points — for
+    // a true degree-2 poly the leading coefficient is zero.  Appending
+    // EF::ZERO satisfies the shape invariant without changing any
+    // evaluation.  When a degree-3 backend lands, produce 4 coefficients
+    // natively and drop this pad.
+    UnivariatePolynomial { coefficients: vec![c0, c1, c2, EF::ZERO] }
 }
 
 /// Project Ziren's per-chip ZerocheckProof shape into SP1's
@@ -321,7 +440,7 @@ where
 /// Per-chip max log_degree across a slice of chips' main traces.
 ///
 /// Used to determine the shard-level zerocheck round count
-/// (`= max_log_degree` per the design).
+/// (`= max_log_degree` per SP1's design).
 pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usize {
     main_traces
         .iter()

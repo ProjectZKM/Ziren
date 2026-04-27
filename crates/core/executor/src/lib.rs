@@ -7,6 +7,18 @@ mod executor;
 pub mod hook;
 mod instruction;
 mod io;
+/// JIT runner — bridges the executor's [`Instruction`] stream and
+/// runtime state to the [`zkm_core_jit`] driver and `JitFunction`
+/// execution.
+///
+/// On Linux x86_64 the module exposes `build_jit_function`,
+/// `build_context`, and `run_jit` so a caller can transpile a program
+/// once and re-execute it many times.  On other platforms only the
+/// portable surface (`to_driver_instruction`,
+/// `instructions_to_driver_stream`, and `jit_unavailable`) remains —
+/// the JIT itself isn't available and callers should fall back to
+/// [`Executor::run`].
+pub mod jit_runner;
 pub mod memory;
 mod opcode;
 mod program;

@@ -82,7 +82,11 @@ where
     pub fn commit_mles(
         &self,
         mles: Vec<Arc<Mle<F>>>,
-    ) -> (MT::Commitment, BasefoldProverData<F, MT>) {
+    ) -> (MT::Commitment, BasefoldProverData<F, MT>)
+    where
+        F: Send + Sync,
+        D: Send + Sync,
+    {
         let codewords = self.encoder.encode_batch(mles);
 
         // For commitment: stack each codeword as one matrix in the
@@ -143,48 +147,47 @@ where
         let mut batched_eval = EF::ZERO;
         let mut coeff_idx = 0usize;
 
+        // Parallelize the per-row inner products across both the MLE
+        // and codeword loops.  For codeword_height = 2^{N + log_blowup}
+        // (e.g. N=22, log_blowup=4 → 2^26 ≈ 67M sequential row mul-adds
+        // per (mle, codeword) pair) the codeword loop dominates.  Each
+        // row writes into a distinct accumulator slot, so par_iter_mut
+        // is safe.
+        use p3_maybe_rayon::prelude::*;
         for ((mles, codewords), evals) in mle_rounds
             .iter()
             .zip(codeword_rounds.iter())
             .zip(evaluation_claims_rounds.iter())
         {
-            // `evals` is the per-round flat list of EF claims, one
-            // entry per polynomial across all MLEs in this round.
             let mut eval_in_round = 0usize;
             for (mle, codeword) in mles.iter().zip(codewords.iter()) {
                 let n_polys = mle.num_polynomials();
                 let coeffs = &batching_coefficients[coeff_idx..coeff_idx + n_polys];
 
-                // MLE: per-row inner product over polynomials.
                 debug_assert_eq!(mle.hypercube_size(), hyp_size);
                 let mle_vals = &mle.guts.values;
-                for row in 0..hyp_size {
+                batched_mle.par_iter_mut().enumerate().for_each(|(row, acc)| {
                     let row_start = row * n_polys;
                     let mut row_sum = EF::ZERO;
                     for k in 0..n_polys {
                         row_sum += coeffs[k] * mle_vals[row_start + k];
                     }
-                    batched_mle[row] += row_sum;
-                }
+                    *acc += row_sum;
+                });
 
-                // Codeword: per-MLE the codeword is stored as F with
-                // `width = n_polys` — the i-th row holds one F value
-                // per polynomial.  Batching is just an inner product
-                // with the EF coefficients, accumulating to EF.
                 let cw_row_width = codeword.data.width();
                 let cw_vals = &codeword.data.values;
                 debug_assert_eq!(cw_row_width, n_polys);
                 debug_assert_eq!(codeword.data.height(), codeword_height);
-                for row in 0..codeword_height {
+                batched_codeword_ef.par_iter_mut().enumerate().for_each(|(row, acc)| {
                     let row_start = row * cw_row_width;
                     let mut row_sum = EF::ZERO;
                     for k in 0..n_polys {
                         row_sum += coeffs[k] * cw_vals[row_start + k];
                     }
-                    batched_codeword_ef[row] += row_sum;
-                }
+                    *acc += row_sum;
+                });
 
-                // Evaluation claim: dot the per-poly evals with coeffs.
                 for k in 0..n_polys {
                     batched_eval += coeffs[k] * evals[eval_in_round + k];
                 }
@@ -261,9 +264,6 @@ where
         let mut fri_commitments: Vec<MT::Commitment> = Vec::with_capacity(num_variables);
         let mut commit_phase_data: Vec<<MT as Mmcs<F>>::ProverData<RowMajorMatrix<F>>> =
             Vec::with_capacity(num_variables);
-        let mut commit_phase_leaves: Vec<Arc<RowMajorMatrix<F>>> =
-            Vec::with_capacity(num_variables);
-
         let mut current_eval = batched_eval;
         for round in 0..num_variables {
             // Sumcheck round on the *first* remaining variable
@@ -305,7 +305,6 @@ where
             );
             fri_commitments.push(round.commitment);
             commit_phase_data.push(round.prover_data);
-            commit_phase_leaves.push(round.leaves);
 
             current_mle = round.folded_mle;
             current_codeword = round.folded_codeword;
@@ -354,7 +353,7 @@ where
         // (9) Open commit-phase round commitments at the (shifted) indices.
         let mut query_phase_openings_and_proofs = Vec::with_capacity(num_variables);
         let mut indices = query_indices;
-        for (round_leaves, data) in commit_phase_leaves.iter().zip(commit_phase_data.iter()) {
+        for data in commit_phase_data.iter() {
             for ix in indices.iter_mut() {
                 *ix >>= 1;
             }
@@ -365,7 +364,6 @@ where
                     values: opening.opened_values,
                     proof: opening.opening_proof,
                 });
-                let _ = round_leaves;
             }
             query_phase_openings_and_proofs.push(MerkleOpening { leaves });
         }
