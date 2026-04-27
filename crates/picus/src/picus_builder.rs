@@ -1690,6 +1690,13 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
     where
         F: FnOnce(&mut Self),
     {
+        // Hidden summaries are currently sound only for local-only sub-AIRs.
+        // Non-local sub-AIRs rely on cross-row constraints; those must stay in
+        // the exact inlined path until multi-row summary interfaces are exposed.
+        if !source_local_only {
+            return false;
+        }
+
         let projected_input_len: usize =
             projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
         let projected_output_len: usize =
