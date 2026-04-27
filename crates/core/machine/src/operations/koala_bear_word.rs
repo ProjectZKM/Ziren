@@ -48,7 +48,7 @@ impl<F: Field> KoalaBearWordRangeChecker<F> {
             self.and_most_sig_byte_decomp_0_to_6 * self.most_sig_byte_decomp[6];
     }
 
-    pub fn range_check<AB: ZKMAirBuilder>(
+    fn range_check_exact<AB: ZKMAirBuilder>(
         builder: &mut AB,
         value: Word<AB::Var>,
         cols: KoalaBearWordRangeChecker<AB::Var>,
@@ -102,5 +102,21 @@ impl<F: Field> KoalaBearWordRangeChecker<F> {
             .when(is_real)
             .when(cols.and_most_sig_byte_decomp_0_to_7)
             .assert_zero(value[0] + value[1] + value[2]);
+    }
+
+    pub fn range_check<AB: ZKMAirBuilder>(
+        builder: &mut AB,
+        value: Word<AB::Var>,
+        cols: KoalaBearWordRangeChecker<AB::Var>,
+        is_real: AB::Expr,
+    ) {
+        if builder.try_emit_koala_bear_word_range_summary(
+            value.map(|limb| AB::Expr::zero() + limb),
+            is_real.clone(),
+        ) {
+            return;
+        }
+
+        Self::range_check_exact(builder, value, cols, is_real);
     }
 }

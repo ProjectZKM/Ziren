@@ -374,6 +374,34 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         self.picus_module.calls.push(call);
     }
 
+    fn flatten_projection_ranges(
+        source_row: &[PicusAtom],
+        ranges: &[(usize, usize, String)],
+    ) -> Vec<PicusExpr> {
+        let mut exprs = Vec::new();
+        for (start, end, _) in ranges {
+            assert!(*start <= *end && *end <= source_row.len());
+            for col_idx in *start..*end {
+                exprs.push(source_row[col_idx].into());
+            }
+        }
+        exprs
+    }
+
+    fn bind_projection_ports(
+        module: &mut PicusModule,
+        ports: &[PicusExpr],
+        source_exprs: &[PicusExpr],
+    ) {
+        assert_eq!(ports.len(), source_exprs.len());
+        for (port, source_expr) in ports.iter().zip(source_exprs) {
+            Self::push_constraint_into(
+                module,
+                PicusConstraint::new_equality(port.clone(), source_expr.clone()),
+            );
+        }
+    }
+
     fn add_guarded_constraint(&mut self, is_real: PicusExpr, constraint: PicusConstraint) {
         match is_real {
             PicusExpr::Const(0) => {}
@@ -1436,6 +1464,302 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
             is_real,
             PicusConstraint::new_equality(result, is_lower_half_zero * is_upper_half_zero),
         );
+        true
+    }
+
+    fn try_emit_koala_bear_word_range_summary(
+        &mut self,
+        input: Word<Self::Expr>,
+        is_real: Self::Expr,
+    ) -> bool {
+        // This is the exact semantic collapse of the current AIR in
+        // `KoalaBearWordRangeChecker`:
+        // - the most-significant byte must be < 128
+        // - if that byte is exactly 127, the lower three limbs must sum to 0
+        //
+        // Intentionally, this does not add byte constraints for the lower
+        // three limbs because the exact AIR does not prove them here.
+        self.add_guarded_constraint(
+            is_real.clone(),
+            PicusConstraint::new_leq(input[3].clone(), 127.into()),
+        );
+        self.add_guarded_constraint(
+            is_real,
+            PicusConstraint::Implies(
+                Box::new(PicusConstraint::new_equality(input[3].clone(), PicusExpr::Const(127))),
+                Box::new(PicusConstraint::new_equality(
+                    input[0].clone() + input[1].clone() + input[2].clone(),
+                    PicusExpr::Const(0),
+                )),
+            ),
+        );
+        true
+    }
+
+    fn try_emit_memory_timestamp_summary(
+        &mut self,
+        do_check: Self::Expr,
+        shard: Self::Expr,
+        clk: Self::Expr,
+        prev_shard: Self::Expr,
+        prev_clk: Self::Expr,
+        compare_clk: Self::Expr,
+        diff_16bit_limb: Self::Expr,
+        diff_8bit_limb: Self::Expr,
+    ) -> bool {
+        let module_name = "MemoryTimestampCheck".to_string();
+        if !self.aux_modules.contains_key(&module_name) {
+            // Picus currently requires every helper module to expose at least
+            // one output. This checker is semantically output-free, so we add a
+            // single dummy result and constrain it to the constant 0.
+            let mut timestamp_module = PicusModule::build_empty(module_name.clone(), 8, 1);
+            let do_check = timestamp_module.inputs[0].clone();
+            let shard = timestamp_module.inputs[1].clone();
+            let clk = timestamp_module.inputs[2].clone();
+            let prev_shard = timestamp_module.inputs[3].clone();
+            let prev_clk = timestamp_module.inputs[4].clone();
+            let compare_clk = timestamp_module.inputs[5].clone();
+            let diff_16bit_limb = timestamp_module.inputs[6].clone();
+            let diff_8bit_limb = timestamp_module.inputs[7].clone();
+            let dummy_output = timestamp_module.outputs[0].clone();
+
+            // Keep the synthetic output fixed so the helper remains a pure
+            // checker module from the caller's perspective.
+            Self::push_constraint_into(
+                &mut timestamp_module,
+                PicusConstraint::new_equality(dummy_output, PicusExpr::Const(0)),
+            );
+
+            // Exact `eval_memory_access_timestamp` semantics:
+            // - compare_clk is a guarded bit
+            // - if compare_clk = 1, we compare clks within the same shard
+            // - otherwise we compare shard indices
+            // - diff limbs form a guarded 24-bit decomposition of
+            //   current_comp - prev_comp - 1
+            Self::push_constraint_into(
+                &mut timestamp_module,
+                PicusConstraint::new_bit(compare_clk.clone()).apply_multiplier(do_check.clone()),
+            );
+            Self::push_constraint_into(
+                &mut timestamp_module,
+                PicusConstraint::new_equality(shard.clone(), prev_shard.clone())
+                    .apply_multiplier(do_check.clone() * compare_clk.clone()),
+            );
+
+            let prev_comp_value = compare_clk.clone() * prev_clk.clone()
+                + (PicusExpr::Const(1) - compare_clk.clone()) * prev_shard.clone();
+            let current_comp_value = compare_clk.clone() * clk.clone()
+                + (PicusExpr::Const(1) - compare_clk.clone()) * shard.clone();
+            let diff_minus_one = current_comp_value - prev_comp_value - PicusExpr::Const(1);
+
+            Self::push_constraint_into(
+                &mut timestamp_module,
+                PicusConstraint::new_equality(
+                    diff_minus_one,
+                    diff_16bit_limb.clone() + diff_8bit_limb.clone() * PicusExpr::Const(1 << 16),
+                )
+                .apply_multiplier(do_check.clone()),
+            );
+            Self::push_constraint_into(
+                &mut timestamp_module,
+                PicusConstraint::new_leq(diff_16bit_limb, PicusExpr::Const(65535))
+                    .apply_multiplier(do_check.clone()),
+            );
+            Self::push_constraint_into(
+                &mut timestamp_module,
+                PicusConstraint::new_leq(diff_8bit_limb, PicusExpr::Const(255))
+                    .apply_multiplier(do_check.clone()),
+            );
+
+            self.aux_modules.insert(module_name.clone(), timestamp_module);
+        }
+
+        let dummy_output = fresh_picus_expr();
+        self.push_call(PicusCall::new(
+            module_name,
+            &[dummy_output],
+            &[
+                do_check,
+                shard,
+                clk,
+                prev_shard,
+                prev_clk,
+                compare_clk,
+                diff_16bit_limb,
+                diff_8bit_limb,
+            ],
+        ));
+        true
+    }
+
+    fn try_emit_projected_summary<F>(
+        &mut self,
+        module_name: &str,
+        projection_info: &zkm_stark::PicusProjectionInfo,
+        current_inputs: &[Self::Expr],
+        current_outputs: &[Self::Expr],
+        source_width: usize,
+        build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self, &[Self::Var]),
+    {
+        let projected_input_len: usize =
+            projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
+        let projected_output_len: usize =
+            projection_info.output_ranges.iter().map(|(start, end, _)| end - start).sum();
+        assert_eq!(current_inputs.len(), projected_input_len);
+        assert_eq!(current_outputs.len(), projected_output_len);
+
+        if !self.aux_modules.contains_key(module_name) {
+            let mut hidden_source_row = Vec::with_capacity(source_width);
+            for _ in 0..source_width {
+                hidden_source_row.push(fresh_picus_var());
+            }
+
+            let mut nested_module = PicusModule::build_empty(
+                module_name.to_string(),
+                current_inputs.len(),
+                current_outputs.len(),
+            );
+            let projected_source_inputs =
+                Self::flatten_projection_ranges(&hidden_source_row, &projection_info.input_ranges);
+            let projected_source_outputs =
+                Self::flatten_projection_ranges(&hidden_source_row, &projection_info.output_ranges);
+            let formal_inputs = nested_module.inputs.clone();
+            let formal_outputs = nested_module.outputs.clone();
+            Self::bind_projection_ports(
+                &mut nested_module,
+                &formal_inputs,
+                &projected_source_inputs,
+            );
+            Self::bind_projection_ports(
+                &mut nested_module,
+                &formal_outputs,
+                &projected_source_outputs,
+            );
+
+            let mut nested_builder = PicusBuilder {
+                preprocessed: self.preprocessed.clone(),
+                main: self.main.clone(),
+                public_values: self.public_values.clone(),
+                picus_module: nested_module,
+                global_send_outputs: Vec::new(),
+                aux_modules: BTreeMap::new(),
+                chips: self.chips,
+                extract_modularly: self.extract_modularly,
+                submodule_mode: self.submodule_mode,
+                shr_carry_summary_mode: self.shr_carry_summary_mode,
+                phase: self.phase,
+                local_only: self.local_only,
+                capture_interface: false,
+                specialization_env: BTreeMap::new(),
+                concrete_pending_tasks: Vec::new(),
+                symbolic_pending_tasks: Vec::new(),
+            };
+
+            build_exact(&mut nested_builder, &hidden_source_row);
+
+            for (name, module) in nested_builder.aux_modules {
+                self.aux_modules.entry(name).or_insert(module);
+            }
+            self.aux_modules.entry(module_name.to_string()).or_insert(nested_builder.picus_module);
+        }
+
+        self.push_call(PicusCall::new(module_name.to_string(), current_outputs, current_inputs));
+        true
+    }
+
+    /// Emit an auxiliary module for an exact sub-AIR whose internal witness
+    /// spans multiple phase rows.
+    ///
+    /// This mirrors `try_emit_projected_summary`, but instead of hiding a
+    /// single source row it hides a full phase-shaped trace matrix. The caller
+    /// still sees only the projected semantic boundary from the hidden local
+    /// row; all other hidden rows remain existential to the nested module.
+    fn try_emit_hidden_subair_summary<F>(
+        &mut self,
+        module_name: &str,
+        projection_info: &zkm_stark::PicusProjectionInfo,
+        current_inputs: &[Self::Expr],
+        current_outputs: &[Self::Expr],
+        source_width: usize,
+        source_local_only: bool,
+        build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self),
+    {
+        let projected_input_len: usize =
+            projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
+        let projected_output_len: usize =
+            projection_info.output_ranges.iter().map(|(start, end, _)| end - start).sum();
+        assert_eq!(current_inputs.len(), projected_input_len);
+        assert_eq!(current_outputs.len(), projected_output_len);
+
+        if !self.aux_modules.contains_key(module_name) {
+            let row_count = self.phase.row_count(source_local_only);
+            let mut hidden_main = Vec::with_capacity(source_width * row_count);
+            for _ in 0..(source_width * row_count) {
+                hidden_main.push(fresh_picus_var());
+            }
+            // Projections are interpreted against the hidden local row. Any
+            // successor rows exist solely so the nested exact AIR can witness
+            // its own `next`-row constraints.
+            let hidden_local_row = hidden_main[..source_width].to_vec();
+
+            let mut nested_module = PicusModule::build_empty(
+                module_name.to_string(),
+                current_inputs.len(),
+                current_outputs.len(),
+            );
+            let projected_source_inputs =
+                Self::flatten_projection_ranges(&hidden_local_row, &projection_info.input_ranges);
+            let projected_source_outputs =
+                Self::flatten_projection_ranges(&hidden_local_row, &projection_info.output_ranges);
+            let formal_inputs = nested_module.inputs.clone();
+            let formal_outputs = nested_module.outputs.clone();
+            Self::bind_projection_ports(
+                &mut nested_module,
+                &formal_inputs,
+                &projected_source_inputs,
+            );
+            Self::bind_projection_ports(
+                &mut nested_module,
+                &formal_outputs,
+                &projected_source_outputs,
+            );
+
+            let mut nested_builder = PicusBuilder {
+                preprocessed: self.preprocessed.clone(),
+                main: RowMajorMatrix::new(hidden_main, source_width),
+                public_values: self.public_values.clone(),
+                picus_module: nested_module,
+                global_send_outputs: Vec::new(),
+                aux_modules: BTreeMap::new(),
+                chips: self.chips,
+                extract_modularly: self.extract_modularly,
+                submodule_mode: self.submodule_mode,
+                shr_carry_summary_mode: self.shr_carry_summary_mode,
+                phase: self.phase,
+                local_only: source_local_only,
+                capture_interface: false,
+                specialization_env: BTreeMap::new(),
+                concrete_pending_tasks: Vec::new(),
+                symbolic_pending_tasks: Vec::new(),
+            };
+
+            // Populate the nested module with the original exact sub-AIR over
+            // the hidden phase-shaped witness matrix.
+            build_exact(&mut nested_builder);
+
+            for (name, module) in nested_builder.aux_modules {
+                self.aux_modules.entry(name).or_insert(module);
+            }
+            self.aux_modules.entry(module_name.to_string()).or_insert(nested_builder.picus_module);
+        }
+
+        self.push_call(PicusCall::new(module_name.to_string(), current_outputs, current_inputs));
         true
     }
 }

@@ -10,13 +10,14 @@ use syn::{
     GenericArgument, Path, PathArguments, Result, Token, Type, TypeArray, TypeReference, TypeSlice,
 };
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Clone)]
 struct PicusArgs {
     input: bool,
     output: bool,
     transition_input: bool,
     transition_output: bool,
     selector: bool,
+    path: Option<syn::Expr>,
 }
 
 enum Arg {
@@ -25,6 +26,7 @@ enum Arg {
     TransitionInput,
     TransitionOutput,
     Selector,
+    Path(syn::Expr),
 }
 
 impl Parse for Arg {
@@ -49,6 +51,10 @@ impl Parse for Arg {
         if is("selector") {
             return Ok(Arg::Selector);
         }
+        if is("path") {
+            input.parse::<Token![=]>()?;
+            return Ok(Arg::Path(input.parse()?));
+        }
 
         Err(syn::Error::new_spanned(key, "unknown key in #[picus(...)]"))
     }
@@ -69,9 +75,75 @@ fn parse_picus_attr(attr: &syn::Attribute) -> syn::Result<Option<PicusArgs>> {
             Arg::TransitionInput => out.transition_input = true,
             Arg::TransitionOutput => out.transition_output = true,
             Arg::Selector => out.selector = true,
+            Arg::Path(expr) => out.path = Some(expr),
         }
     }
     Ok(Some(out))
+}
+
+#[derive(Clone)]
+struct ProjectionStructArgs {
+    source: Type,
+    col_map: syn::Expr,
+}
+
+enum ProjectionStructArg {
+    Source(Type),
+    ColMap(syn::Expr),
+}
+
+impl Parse for ProjectionStructArg {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let key: Path = input.parse()?;
+        if key.is_ident("source") {
+            input.parse::<Token![=]>()?;
+            return Ok(Self::Source(input.parse()?));
+        }
+        if key.is_ident("col_map") {
+            input.parse::<Token![=]>()?;
+            return Ok(Self::ColMap(input.parse()?));
+        }
+        Err(syn::Error::new_spanned(key, "unknown key in #[picus_projection(...)]"))
+    }
+}
+
+fn parse_picus_projection_attr(
+    attrs: &[syn::Attribute],
+) -> syn::Result<Option<ProjectionStructArgs>> {
+    let mut source: Option<Type> = None;
+    let mut col_map: Option<syn::Expr> = None;
+    let mut found = false;
+    for attr in attrs {
+        if !attr.path.is_ident("picus_projection") {
+            continue;
+        }
+        found = true;
+        let items =
+            attr.parse_args_with(Punctuated::<ProjectionStructArg, Token![,]>::parse_terminated)?;
+        for it in items {
+            match it {
+                ProjectionStructArg::Source(ty) => source = Some(ty),
+                ProjectionStructArg::ColMap(expr) => col_map = Some(expr),
+            }
+        }
+    }
+
+    if !found {
+        return Ok(None);
+    }
+    let source = source.ok_or_else(|| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "missing `source = ...` in #[picus_projection(...)]",
+        )
+    })?;
+    let col_map = col_map.ok_or_else(|| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "missing `col_map = ...` in #[picus_projection(...)]",
+        )
+    })?;
+    Ok(Some(ProjectionStructArgs { source, col_map }))
 }
 
 // ---------- type substitution: replace the primary column element type with `u8` ----------
@@ -309,6 +381,135 @@ pub fn picus_annotations_derive(input: TokenStream) -> TokenStream {
             pub fn picus_info() -> PicusInfo {
                 let mut info = PicusInfo::default();
                 let mut cur: usize = 0; // 1 column == 1 byte
+                #(#steps)*
+                info
+            }
+        }
+    };
+    expanded.into()
+}
+
+pub fn picus_projection_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let ident = input.ident.clone();
+    let generics = input.generics.clone();
+    let where_clause = &generics.where_clause;
+    let (impl_generics, ty_generics, _) = generics.split_for_impl();
+
+    let struct_args = match parse_picus_projection_attr(&input.attrs) {
+        Ok(Some(args)) => args,
+        Ok(None) => {
+            return syn::Error::new_spanned(
+                &input,
+                "PicusProjection requires #[picus_projection(source = ..., col_map = ...)]",
+            )
+            .to_compile_error()
+            .into()
+        }
+        Err(e) => return e.to_compile_error().into(),
+    };
+
+    let data = match &input.data {
+        syn::Data::Struct(s) => s,
+        _ => {
+            return syn::Error::new_spanned(&input, "PicusProjection only supports structs")
+                .to_compile_error()
+                .into()
+        }
+    };
+    let fields = match &data.fields {
+        syn::Fields::Named(f) => &f.named,
+        _ => {
+            return syn::Error::new_spanned(&input, "PicusProjection requires named fields")
+                .to_compile_error()
+                .into()
+        }
+    };
+
+    let source_ty = struct_args.source;
+    let col_map = struct_args.col_map;
+
+    let mut steps = Vec::new();
+    for field in fields.iter() {
+        let f_ident = field.ident.as_ref().unwrap();
+        let f_name = f_ident.to_string();
+
+        let mut flags = PicusArgs::default();
+        for attr in &field.attrs {
+            if attr.path.is_ident("picus") {
+                match parse_picus_attr(attr) {
+                    Ok(Some(a)) => {
+                        flags.input |= a.input;
+                        flags.output |= a.output;
+                        flags.transition_input |= a.transition_input;
+                        flags.transition_output |= a.transition_output;
+                        flags.selector |= a.selector;
+                        if let Some(path) = a.path {
+                            flags.path = Some(path);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => return e.to_compile_error().into(),
+                }
+            }
+        }
+
+        if flags.transition_input || flags.transition_output || flags.selector {
+            return syn::Error::new_spanned(
+                field,
+                "PicusProjection fields currently support only #[picus(input, ...)] and #[picus(output, ...)]",
+            )
+            .to_compile_error()
+            .into();
+        }
+        if !flags.input && !flags.output {
+            return syn::Error::new_spanned(
+                field,
+                "PicusProjection fields must be marked with #[picus(input, path = ...)] or #[picus(output, path = ...)]",
+            )
+            .to_compile_error()
+            .into();
+        }
+        let Some(path_expr) = flags.path.clone() else {
+            return syn::Error::new_spanned(
+                field,
+                "PicusProjection fields require `path = ...` to identify the source slice",
+            )
+            .to_compile_error()
+            .into();
+        };
+
+        let field_ty = &field.ty;
+        let push_in = if flags.input {
+            quote! { info.input_ranges.push((start, end, #f_name.to_string())); }
+        } else {
+            quote!()
+        };
+        let push_out = if flags.output {
+            quote! { info.output_ranges.push((start, end, #f_name.to_string())); }
+        } else {
+            quote!()
+        };
+
+        steps.push(quote! {{
+            let start: usize =
+                zkm_stark::PicusProjectionStart::projection_start(&((#col_map).#path_expr));
+            let width: usize = ::core::mem::size_of::<#field_ty>();
+            let end = start + width;
+            info.name_to_colrange.insert(#f_name.to_string(), (start, end));
+            for x in start..end {
+                info.col_to_name.insert(x, format!("{}_{}", #f_name, x));
+            }
+            #push_in
+            #push_out
+        }});
+    }
+
+    let expanded = quote! {
+        impl #impl_generics #ident #ty_generics #where_clause {
+            pub fn picus_projection_info() -> zkm_stark::PicusProjectionInfo {
+                let mut info = zkm_stark::PicusProjectionInfo::default();
+                let _ = ::core::mem::size_of::<#source_ty>();
                 #(#steps)*
                 info
             }
