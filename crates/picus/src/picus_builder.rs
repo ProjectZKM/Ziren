@@ -1690,40 +1690,88 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
     where
         F: FnOnce(&mut Self),
     {
-        // Hidden summaries are currently sound only for local-only sub-AIRs.
-        // Non-local sub-AIRs rely on cross-row constraints; those must stay in
-        // the exact inlined path until multi-row summary interfaces are exposed.
-        if !source_local_only {
+        // Legacy single-row projection for hidden sub-AIR summaries.
+        self.try_emit_hidden_subair_summary_with_row_offsets(
+            module_name,
+            projection_info,
+            current_inputs,
+            current_outputs,
+            source_width,
+            source_local_only,
+            &[0],
+            &[0],
+            build_exact,
+        )
+    }
+
+    fn try_emit_hidden_subair_summary_with_row_offsets<F>(
+        &mut self,
+        module_name: &str,
+        projection_info: &zkm_stark::PicusProjectionInfo,
+        current_inputs: &[Self::Expr],
+        current_outputs: &[Self::Expr],
+        source_width: usize,
+        source_local_only: bool,
+        input_row_offsets: &[usize],
+        output_row_offsets: &[usize],
+        build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self),
+    {
+        if input_row_offsets.is_empty() && output_row_offsets.is_empty() {
             return false;
         }
 
-        let projected_input_len: usize =
+        // Keep legacy behavior safe by requiring cross-row interfaces for
+        // non-local sub-AIRs.
+        if !source_local_only && input_row_offsets == [0] && output_row_offsets == [0] {
+            return false;
+        }
+
+        let base_projected_input_len: usize =
             projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
-        let projected_output_len: usize =
+        let base_projected_output_len: usize =
             projection_info.output_ranges.iter().map(|(start, end, _)| end - start).sum();
+        let projected_input_len = base_projected_input_len * input_row_offsets.len();
+        let projected_output_len = base_projected_output_len * output_row_offsets.len();
         assert_eq!(current_inputs.len(), projected_input_len);
         assert_eq!(current_outputs.len(), projected_output_len);
 
         if !self.aux_modules.contains_key(module_name) {
             let row_count = self.phase.row_count(source_local_only);
+            if input_row_offsets.iter().any(|offset| *offset >= row_count)
+                || output_row_offsets.iter().any(|offset| *offset >= row_count)
+            {
+                return false;
+            }
+
             let mut hidden_main = Vec::with_capacity(source_width * row_count);
             for _ in 0..(source_width * row_count) {
                 hidden_main.push(fresh_picus_var());
             }
-            // Projections are interpreted against the hidden local row. Any
-            // successor rows exist solely so the nested exact AIR can witness
-            // its own `next`-row constraints.
-            let hidden_local_row = hidden_main[..source_width].to_vec();
 
             let mut nested_module = PicusModule::build_empty(
                 module_name.to_string(),
                 current_inputs.len(),
                 current_outputs.len(),
             );
-            let projected_source_inputs =
-                Self::flatten_projection_ranges(&hidden_local_row, &projection_info.input_ranges);
-            let projected_source_outputs =
-                Self::flatten_projection_ranges(&hidden_local_row, &projection_info.output_ranges);
+
+            let mut projected_source_inputs = Vec::with_capacity(projected_input_len);
+            for offset in input_row_offsets {
+                let row_start = *offset * source_width;
+                let row = &hidden_main[row_start..row_start + source_width];
+                projected_source_inputs
+                    .extend(Self::flatten_projection_ranges(row, &projection_info.input_ranges));
+            }
+            let mut projected_source_outputs = Vec::with_capacity(projected_output_len);
+            for offset in output_row_offsets {
+                let row_start = *offset * source_width;
+                let row = &hidden_main[row_start..row_start + source_width];
+                projected_source_outputs
+                    .extend(Self::flatten_projection_ranges(row, &projection_info.output_ranges));
+            }
+
             let formal_inputs = nested_module.inputs.clone();
             let formal_outputs = nested_module.outputs.clone();
             Self::bind_projection_ports(

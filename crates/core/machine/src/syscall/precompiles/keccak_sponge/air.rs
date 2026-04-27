@@ -107,15 +107,18 @@ where
         // Eval the plonky3 keccak air. Picus can hide the full sub-AIR behind a
         // semantic boundary; other builders continue to inline the exact
         // `SubAirBuilder` path.
-        let current_inputs = self.keccak_summary_inputs::<AB>(local);
+        let mut current_inputs = self.keccak_summary_inputs::<AB>(local);
+        current_inputs.extend(self.keccak_summary_inputs::<AB>(next));
         let current_outputs = self.keccak_summary_outputs::<AB>(local);
-        if !builder.try_emit_hidden_subair_summary(
+        if !builder.try_emit_hidden_subair_summary_with_row_offsets(
             "KeccakAir",
             &KeccakPermutationProjection::picus_projection_info(),
             &current_inputs,
             &current_outputs,
             NUM_KECCAK_COLS,
             false,
+            &[0, 1],
+            &[0],
             |nested_builder| self.p3_keccak.eval(nested_builder),
         ) {
             let mut sub_builder =

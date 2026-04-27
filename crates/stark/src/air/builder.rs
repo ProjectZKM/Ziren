@@ -311,6 +311,32 @@ pub trait OperationSummaryAirBuilder: AirBuilder {
     {
         false
     }
+
+    /// Optional hook for replacing an embedded exact sub-AIR with a semantic
+    /// module call whose projected boundary may include multiple hidden rows.
+    ///
+    /// `input_row_offsets` / `output_row_offsets` are row indices (relative to
+    /// the hidden sub-trace) on which `projection_info` should be flattened and
+    /// concatenated to form the module interface.
+    ///
+    /// Returning `false` leaves the caller responsible for inline lowering.
+    fn try_emit_hidden_subair_summary_with_row_offsets<F>(
+        &mut self,
+        _module_name: &str,
+        _projection_info: &crate::air::PicusProjectionInfo,
+        _current_inputs: &[Self::Expr],
+        _current_outputs: &[Self::Expr],
+        _source_width: usize,
+        _source_local_only: bool,
+        _input_row_offsets: &[usize],
+        _output_row_offsets: &[usize],
+        _build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self),
+    {
+        false
+    }
 }
 
 /// A trait which contains methods related to ALU lookups in an AIR.
