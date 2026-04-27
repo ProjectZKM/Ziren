@@ -21,8 +21,11 @@ use zkm_curves::{
     params::{Limbs, NumLimbs},
     weierstrass::{FieldType, FpOpField},
 };
-use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{
+    air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
+    PicusInfo,
+};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -35,7 +38,7 @@ pub const fn num_fp2_addsub_cols<P: FpOpField>() -> usize {
 }
 
 /// A set of columns for the Fp2AddSub operation.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct Fp2AddSubAssignCols<T, P: FpOpField> {
     pub is_real: T,
@@ -88,6 +91,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
             FieldType::Bn254 => "Bn254Fp2AddSubAssign".to_string(),
             FieldType::Bls12381 => "Bls12831Fp2AddSubAssign".to_string(),
         }
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        Fp2AddSubAssignCols::<u8, P>::picus_info()
     }
 
     fn generate_trace(

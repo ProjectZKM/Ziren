@@ -21,8 +21,11 @@ use zkm_curves::{
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
     weierstrass::{FieldType, FpOpField},
 };
-use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_stark::{
+    air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
+    PicusInfo,
+};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -35,7 +38,7 @@ pub const fn num_fp2_mul_cols<P: FieldParameters + NumWords>() -> usize {
 }
 
 /// A set of columns for the Fp2Mul operation.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
 #[repr(C)]
 pub struct Fp2MulAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -131,6 +134,10 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2MulAssignChip<P> {
             FieldType::Bn254 => "Bn254Fp2MulAssign".to_string(),
             FieldType::Bls12381 => "Bls12831Fp2MulAssign".to_string(),
         }
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        Fp2MulAssignCols::<u8, P>::picus_info()
     }
 
     fn generate_trace(

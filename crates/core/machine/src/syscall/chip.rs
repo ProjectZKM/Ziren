@@ -111,6 +111,10 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         SyscallCols::<u8>::picus_info()
     }
 
+    fn local_only(&self) -> bool {
+        true
+    }
+
     fn generate_dependencies(
         &self,
         input: &ExecutionRecord,
