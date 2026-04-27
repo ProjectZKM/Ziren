@@ -2,7 +2,7 @@ use crate::air::{MemoryAirBuilder, WordAirBuilder};
 use crate::memory::MemoryCols;
 use crate::operations::XorOperation;
 use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakPermutationProjection, KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::{
     KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
@@ -104,81 +104,14 @@ where
             next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
-        // Eval the plonky3 keccak air. Picus can hide the full sub-AIR behind a
-        // semantic boundary; other builders continue to inline the exact
-        // `SubAirBuilder` path.
-        let current_inputs = self.keccak_summary_inputs::<AB>(local);
-        let current_outputs = self.keccak_summary_outputs::<AB>(local);
-        if !builder.try_emit_hidden_subair_summary(
-            "KeccakAir",
-            &KeccakPermutationProjection::picus_projection_info(),
-            &current_inputs,
-            &current_outputs,
-            NUM_KECCAK_COLS,
-            false,
-            |nested_builder| self.p3_keccak.eval(nested_builder),
-        ) {
-            let mut sub_builder =
-                SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
-            self.p3_keccak.eval(&mut sub_builder);
-        }
+        // Eval the plonky3 keccak air
+        let mut sub_builder =
+            SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
+        self.p3_keccak.eval(&mut sub_builder);
     }
 }
 
 impl KeccakSpongeChip {
-    /// Flatten the visible Keccak-f input state from the embedded sub-AIR.
-    ///
-    /// The surrounding sponge AIR ties these lanes to memory/original-state
-    /// data, so they must remain visible caller inputs even when the full
-    /// Keccak round system is summarized as a hidden submodule.
-    fn keccak_summary_inputs<AB: ZKMAirBuilder>(
-        &self,
-        local: &KeccakSpongeCols<AB::Var>,
-    ) -> Vec<AB::Expr> {
-        let mut inputs = Vec::with_capacity(25 * U64_LIMBS);
-        for y in 0..5 {
-            for x in 0..5 {
-                for limb in 0..U64_LIMBS {
-                    inputs.push(local.keccak.a[y][x][limb].into());
-                }
-            }
-        }
-        inputs
-    }
-
-    /// Flatten the caller-visible outputs of the embedded Keccak-f sub-AIR.
-    ///
-    /// The sponge AIR depends on the round-position flags as well as the
-    /// post-round `A'''` state. The `(0, 0)` lane is stored separately from the
-    /// remaining 24 lanes, so the flattened order mirrors the projection
-    /// metadata exactly:
-    /// 1. `first_step`
-    /// 2. `final_step`
-    /// 3. `A'''[0, 0]`
-    /// 4. the remaining 24 `A'''` lanes in witness layout order
-    fn keccak_summary_outputs<AB: ZKMAirBuilder>(
-        &self,
-        local: &KeccakSpongeCols<AB::Var>,
-    ) -> Vec<AB::Expr> {
-        let mut outputs = Vec::with_capacity(2 + 25 * U64_LIMBS);
-        outputs.push(local.keccak.step_flags[0].into());
-        outputs.push(local.keccak.step_flags[NUM_ROUNDS - 1].into());
-        for limb in 0..U64_LIMBS {
-            outputs.push(local.keccak.a_prime_prime_prime(0, 0, limb).into());
-        }
-        for y in 0..5 {
-            for x in 0..5 {
-                if y == 0 && x == 0 {
-                    continue;
-                }
-                for limb in 0..U64_LIMBS {
-                    outputs.push(local.keccak.a_prime_prime_prime(y, x, limb).into());
-                }
-            }
-        }
-        outputs
-    }
-
     fn eval_flags<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &KeccakSpongeCols<AB::Var>) {
         let first_block = local.is_first_input_block;
         let final_block = local.is_final_input_block;
