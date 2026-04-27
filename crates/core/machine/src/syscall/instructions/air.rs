@@ -196,28 +196,15 @@ impl SyscallInstrsChip {
             LookupScope::Local,
         );
 
-        // Compute whether this syscall is HINT_LEN.
-        let is_hint_len = {
-            IsZeroOperation::<AB::F>::eval(
-                builder,
-                syscall_id.clone()
-                    - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
-                local.is_hint_len,
-                local.is_real.into(),
-            );
-            local.is_hint_len.result
-        };
-
         // Send full Word bytes for linux syscalls to link op_a (result), op_b (a0), op_c (a1)
         // with SysLinuxChip via SyscallChip bridge.
-        // SYSHINTLEN also returns op_a and is linked through SyscallChip(Core).
         builder.send_syscall_result(
             local.shard,
             local.clk,
             local.op_a_value,
             local.op_b_value,
             local.op_c_value,
-            local.is_sys_linux + is_hint_len.clone(),
+            local.is_sys_linux,
             LookupScope::Local,
         );
 
@@ -243,6 +230,18 @@ impl SyscallInstrsChip {
             local.syscall_id,
             AB::Expr::from_canonical_u32(SyscallCode::EXIT_UNCONSTRAINED.syscall_id()),
         );
+
+        // Compute whether this syscall is HINT_LEN.
+        let is_hint_len = {
+            IsZeroOperation::<AB::F>::eval(
+                builder,
+                syscall_id.clone()
+                    - AB::Expr::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
+                local.is_hint_len,
+                local.is_real.into(),
+            );
+            local.is_hint_len.result
+        };
 
         // `op_a_val` is constrained.
 
