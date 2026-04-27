@@ -4,7 +4,7 @@ use p3_air::AirBuilder;
 use p3_field::FieldAlgebra;
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::{
-    air::{AirLookup, BaseAirBuilder, ByteAirBuilder, LookupScope},
+    air::{AirLookup, BaseAirBuilder, ByteAirBuilder, LookupScope, OperationSummaryAirBuilder},
     LookupKind,
 };
 
@@ -22,7 +22,9 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         addr: impl Into<Self::Expr>,
         memory_access: &impl MemoryCols<E>,
         do_check: impl Into<Self::Expr>,
-    ) {
+    ) where
+        Self: OperationSummaryAirBuilder,
+    {
         let do_check: Self::Expr = do_check.into();
         let shard: Self::Expr = shard.into();
         let clk: Self::Expr = clk.into();
@@ -69,7 +71,9 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         initial_addr: impl Into<Self::Expr> + Clone,
         memory_access_slice: &[impl MemoryCols<E>],
         verify_memory_access: impl Into<Self::Expr> + Copy,
-    ) {
+    ) where
+        Self: OperationSummaryAirBuilder,
+    {
         for (i, access_slice) in memory_access_slice.iter().enumerate() {
             self.eval_memory_access(
                 shard,
@@ -93,24 +97,40 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         do_check: impl Into<Self::Expr>,
         shard: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr>,
-    ) {
+    ) where
+        Self: OperationSummaryAirBuilder,
+    {
         let do_check: Self::Expr = do_check.into();
         let compare_clk: Self::Expr = mem_access.compare_clk.clone().into();
         let shard: Self::Expr = shard.clone().into();
         let prev_shard: Self::Expr = mem_access.prev_shard.clone().into();
+        let prev_clk: Self::Expr = mem_access.prev_clk.clone().into();
+        let clk: Self::Expr = clk.into();
+        let diff_16bit_limb: Self::Expr = mem_access.diff_16bit_limb.clone().into();
+        let diff_8bit_limb: Self::Expr = mem_access.diff_8bit_limb.clone().into();
+
+        if self.try_emit_memory_timestamp_summary(
+            do_check.clone(),
+            shard.clone(),
+            clk.clone(),
+            prev_shard.clone(),
+            prev_clk.clone(),
+            compare_clk.clone(),
+            diff_16bit_limb.clone(),
+            diff_8bit_limb.clone(),
+        ) {
+            return;
+        }
 
         // First verify that compare_clk's value is correct.
         self.when(do_check.clone()).assert_bool(compare_clk.clone());
         self.when(do_check.clone()).when(compare_clk.clone()).assert_eq(shard.clone(), prev_shard);
 
         // Get the comparison timestamp values for the current and previous memory access.
-        let prev_comp_value = self.if_else(
-            mem_access.compare_clk.clone(),
-            mem_access.prev_clk.clone(),
-            mem_access.prev_shard.clone(),
-        );
+        let prev_comp_value =
+            self.if_else(mem_access.compare_clk.clone(), prev_clk, mem_access.prev_shard.clone());
 
-        let current_comp_val = self.if_else(compare_clk.clone(), clk.into(), shard.clone());
+        let current_comp_val = self.if_else(compare_clk.clone(), clk, shard.clone());
 
         // Assert `current_comp_val > prev_comp_val`. We check this by asserting that
         // `0 <= current_comp_val-prev_comp_val-1 < 2^24`.
@@ -125,12 +145,7 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_8bit_limb * 2^16.
-        self.eval_range_check_24bits(
-            diff_minus_one,
-            mem_access.diff_16bit_limb.clone(),
-            mem_access.diff_8bit_limb.clone(),
-            do_check,
-        );
+        self.eval_range_check_24bits(diff_minus_one, diff_16bit_limb, diff_8bit_limb, do_check);
     }
 
     /// Verifies the inputted value is within 24 bits.

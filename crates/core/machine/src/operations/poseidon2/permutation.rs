@@ -4,7 +4,7 @@ use std::{
     mem::size_of,
 };
 
-use zkm_derive::AlignedBorrow;
+use zkm_derive::{AlignedBorrow, PicusProjection};
 
 use crate::operations::poseidon2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 use crate::utils::indices_arr;
@@ -43,6 +43,28 @@ const fn make_col_map_degree9() -> Poseidon2Degree9Cols<usize> {
 pub struct Poseidon2Degree3Cols<T: Copy> {
     pub state: Poseidon2StateCols<T>,
     pub sbox_state: Poseidon2SBoxCols<T>,
+}
+
+/// Semantic Picus projection for the observable input/output contract of the
+/// degree-3 Poseidon2 permutation witness.
+///
+/// The full witness layout contains many intermediate round columns that are
+/// internal to the permutation and should remain existential when Poseidon2 is
+/// eventually emitted as an operation-level submodule. This projection keeps
+/// only the caller-visible boundary:
+/// - `state_in`: the first external-round state
+/// - `state_out`: the final permutation output
+///
+/// Projection `path = ...` points at the semantic source slice. The projected
+/// field type determines the width, while the derive recursively takes the
+/// first source column from the path.
+#[derive(PicusProjection)]
+#[picus_projection(source = Poseidon2Degree3Cols<u8>, col_map = POSEIDON2_DEGREE3_COL_MAP)]
+pub struct Poseidon2Degree3Projection {
+    #[picus(input, path = state.external_rounds_state[0])]
+    pub state_in: [u8; WIDTH],
+    #[picus(output, path = state.output_state)]
+    pub state_out: [u8; WIDTH],
 }
 
 /// A column layout for a poseidon2 permutation with degree 9 constraints.

@@ -1,13 +1,16 @@
-use std::array;
+use std::{array, mem::size_of};
 
 use p3_air::PairBuilder;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_poseidon2::matmul_internal;
 use zkm_primitives::RC_16_30_U32;
-use zkm_stark::air::MachineAirBuilder;
+use zkm_stark::air::{MachineAirBuilder, OperationSummaryAirBuilder};
 
-use super::{permutation::Poseidon2Cols, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
+use super::{
+    permutation::{permutation, Poseidon2Cols, Poseidon2Degree3Cols, Poseidon2Degree3Projection},
+    NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH,
+};
 
 const INTERNAL_DIAG_MONTY_16: [KoalaBear; 16] = KoalaBear::new_array([
     KoalaBear::ORDER_U32 - 2,
@@ -155,4 +158,46 @@ where
     for i in 0..WIDTH {
         builder.assert_eq(external_state[i], state[i].clone())
     }
+}
+
+/// Evaluate the degree-3 Poseidon2 permutation, optionally replacing the exact
+/// inlined constraints with a semantic projected submodule.
+///
+/// The projected interface exposes only the caller-visible permutation
+/// boundary:
+/// - input: the first external-round state
+/// - output: the final permutation state
+///
+/// All intermediate round-state and S-box witness columns remain existential
+/// inside the submodule.
+pub fn eval_degree3<AB>(builder: &mut AB, local_row: &dyn Poseidon2Cols<AB::Var>)
+where
+    AB: MachineAirBuilder + PairBuilder + OperationSummaryAirBuilder,
+{
+    let current_inputs: Vec<AB::Expr> =
+        local_row.external_rounds_state()[0].iter().map(|value| (*value).into()).collect();
+    let current_outputs: Vec<AB::Expr> =
+        local_row.perm_output().iter().map(|value| (*value).into()).collect();
+
+    if builder.try_emit_projected_summary(
+        "Poseidon2Degree3Permutation",
+        &Poseidon2Degree3Projection::picus_projection_info(),
+        &current_inputs,
+        &current_outputs,
+        size_of::<Poseidon2Degree3Cols<u8>>(),
+        |builder, source_row| {
+            let projected = permutation::<_, 3>(source_row);
+            for r in 0..NUM_EXTERNAL_ROUNDS {
+                eval_external_round(builder, projected.as_ref(), r);
+            }
+            eval_internal_rounds(builder, projected.as_ref());
+        },
+    ) {
+        return;
+    }
+
+    for r in 0..NUM_EXTERNAL_ROUNDS {
+        eval_external_round(builder, local_row, r);
+    }
+    eval_internal_rounds(builder, local_row);
 }
