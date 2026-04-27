@@ -83,9 +83,9 @@ const fn make_keccak_picus_col_map() -> KeccakCols<usize> {
 pub struct KeccakPermutationProjection {
     #[picus(input, path = a)]
     pub state_in: [[[u8; U64_LIMBS]; 5]; 5],
-    #[picus(output, path = step_flags[0])]
+    #[picus(input, path = step_flags[0])]
     pub first_step: u8,
-    #[picus(output, path = step_flags[23])]
+    #[picus(input, path = step_flags[23])]
     pub final_step: u8,
     #[picus(output, path = a_prime_prime_prime_0_0_limbs)]
     pub state_out_0_0: [u8; U64_LIMBS],

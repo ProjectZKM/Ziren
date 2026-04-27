@@ -126,16 +126,17 @@ where
 }
 
 impl KeccakSpongeChip {
-    /// Flatten the visible Keccak-f input state from the embedded sub-AIR.
+    /// Flatten the caller-visible inputs of the embedded Keccak-f sub-AIR.
     ///
-    /// The surrounding sponge AIR ties these lanes to memory/original-state
-    /// data, so they must remain visible caller inputs even when the full
-    /// Keccak round system is summarized as a hidden submodule.
+    /// The projection includes both round-position flags and the 25-lane
+    /// permutation input state.
     fn keccak_summary_inputs<AB: ZKMAirBuilder>(
         &self,
         local: &KeccakSpongeCols<AB::Var>,
     ) -> Vec<AB::Expr> {
-        let mut inputs = Vec::with_capacity(25 * U64_LIMBS);
+        let mut inputs = Vec::with_capacity(2 + 25 * U64_LIMBS);
+        inputs.push(local.keccak.step_flags[0].into());
+        inputs.push(local.keccak.step_flags[NUM_ROUNDS - 1].into());
         for y in 0..5 {
             for x in 0..5 {
                 for limb in 0..U64_LIMBS {
@@ -148,21 +149,16 @@ impl KeccakSpongeChip {
 
     /// Flatten the caller-visible outputs of the embedded Keccak-f sub-AIR.
     ///
-    /// The sponge AIR depends on the round-position flags as well as the
-    /// post-round `A'''` state. The `(0, 0)` lane is stored separately from the
-    /// remaining 24 lanes, so the flattened order mirrors the projection
-    /// metadata exactly:
-    /// 1. `first_step`
-    /// 2. `final_step`
-    /// 3. `A'''[0, 0]`
-    /// 4. the remaining 24 `A'''` lanes in witness layout order
+    /// The projection exposes only the post-round `A'''` state. The `(0, 0)`
+    /// lane is stored separately from the remaining 24 lanes, so the flattened
+    /// order mirrors the projection metadata exactly:
+    /// 1. `A'''[0, 0]`
+    /// 2. the remaining 24 `A'''` lanes in witness layout order
     fn keccak_summary_outputs<AB: ZKMAirBuilder>(
         &self,
         local: &KeccakSpongeCols<AB::Var>,
     ) -> Vec<AB::Expr> {
-        let mut outputs = Vec::with_capacity(2 + 25 * U64_LIMBS);
-        outputs.push(local.keccak.step_flags[0].into());
-        outputs.push(local.keccak.step_flags[NUM_ROUNDS - 1].into());
+        let mut outputs = Vec::with_capacity(25 * U64_LIMBS);
         for limb in 0..U64_LIMBS {
             outputs.push(local.keccak.a_prime_prime_prime(0, 0, limb).into());
         }
@@ -186,6 +182,12 @@ impl KeccakSpongeChip {
 
         let first_step = local.keccak.step_flags[0];
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
+
+        // Boolean and round-position consistency for sponge-level control flags.
+        builder.assert_bool(first_block);
+        builder.assert_bool(final_block);
+        builder.assert_bool(local.read_block);
+        builder.assert_eq(local.read_block, first_step * local.is_real);
 
         // receive syscall
         builder.assert_eq(first_block * first_step * local.is_real, local.receive_syscall);
