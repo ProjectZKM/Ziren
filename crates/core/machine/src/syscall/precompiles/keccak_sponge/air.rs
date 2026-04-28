@@ -151,8 +151,9 @@ impl KeccakSpongeChip {
     /// Flatten the caller-visible outputs of the embedded Keccak-f sub-AIR.
     ///
     /// The projection exposes only the post-round `A'''` state. The `(0, 0)`
-    /// lane is stored separately from the remaining 24 lanes, so the flattened
-    /// order mirrors the projection metadata exactly:
+    /// lane is stored separately from the remaining 24 lanes (which come from
+    /// `a_prime_prime`), so the flattened order mirrors the projection metadata
+    /// exactly:
     /// 1. `A'''[0, 0]`
     /// 2. the remaining 24 `A'''` lanes in witness layout order
     fn keccak_summary_outputs<AB: ZKMAirBuilder>(
@@ -161,7 +162,7 @@ impl KeccakSpongeChip {
     ) -> Vec<AB::Expr> {
         let mut outputs = Vec::with_capacity(25 * U64_LIMBS);
         for limb in 0..U64_LIMBS {
-            outputs.push(local.keccak.a_prime_prime_prime(0, 0, limb).into());
+            outputs.push(local.keccak.a_prime_prime_prime_0_0_limbs[limb].into());
         }
         for y in 0..5 {
             for x in 0..5 {
@@ -169,7 +170,7 @@ impl KeccakSpongeChip {
                     continue;
                 }
                 for limb in 0..U64_LIMBS {
-                    outputs.push(local.keccak.a_prime_prime_prime(y, x, limb).into());
+                    outputs.push(local.keccak.a_prime_prime[y][x][limb].into());
                 }
             }
         }
