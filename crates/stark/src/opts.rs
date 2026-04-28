@@ -107,7 +107,21 @@ impl ZKMProverOpts {
         }
 
         // Set the recursion options.
-        opts.recursion_opts.shard_batch_size = 1;
+        // shard_batch_size controls the number of concurrent prover-submit
+        // threads in compress_multi_gpu (one shard per thread at a time).
+        // With shard_batch_size = 1 only one shard is in flight to the GPU
+        // pool, so additional GPUs go idle. Defaults to 4 to match the
+        // typical 1-to-4 GPU configurations and yields measurable
+        // multi-GPU scaling on reth (1->2 GPU 1.49x, 1->4 GPU 1.62x).
+        // Override via RECURSION_SHARD_BATCH_SIZE.
+        opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(4);
+        opts.recursion_opts.records_and_traces_channel_capacity =
+            opts.recursion_opts.shard_batch_size.max(2);
+        opts.recursion_opts.trace_gen_workers =
+            opts.recursion_opts.shard_batch_size.max(opts.recursion_opts.trace_gen_workers);
 
         opts
     }
