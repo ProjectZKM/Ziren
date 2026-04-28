@@ -99,6 +99,29 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     fn picus_info(&self) -> PicusInfo {
         PicusInfo::default()
     }
+
+    /// Specifies whether the chip's Picus selectors partition the set of real rows.
+    ///
+    /// When this returns `true`, Picus may emit a stronger selector-shape top module asserting
+    /// that the sum of all selector columns is exactly `is_real`, rather than merely proving the
+    /// selectors are boolean and mutually exclusive. This is opt-in so existing chips keep their
+    /// current selector semantics unless they explicitly declare the stronger invariant.
+    fn selectors_partition_real_rows(&self) -> bool {
+        false
+    }
+
+    /// Specifies whether Picus should generate a selector-specialized module for this
+    /// `(phase, selector)` pair.
+    ///
+    /// `phase` is the stable Picus extraction phase suffix, such as `first_row`, `transition`,
+    /// `boundary`, or `last_row`. `selector_name` is the user-facing selector annotation name
+    /// from `PicusInfo`.
+    ///
+    /// Most chips can keep the default `true`. Override this only when some phase/selector pairs
+    /// are impossible by trace construction and would therefore produce contradictory modules.
+    fn picus_selector_specialization_allowed(&self, _phase: &str, _selector_name: &str) -> bool {
+        true
+    }
 }
 
 /// A program that defines the control flow of a machine through a program counter.

@@ -51,6 +51,8 @@ pub enum ColumnOutputMode {
 /// Selects which trace shape the extracted module is meant to model.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExtractionPhase {
+    /// Selector-proof extraction with all row-position predicates disabled.
+    Top,
     /// Trace of length 1.
     SingleRow,
     /// First row of a multi-row trace.
@@ -90,6 +92,7 @@ impl ExtractionPhase {
     /// Returns the stable suffix used in generated module names for this phase.
     pub fn module_suffix(self) -> &'static str {
         match self {
+            Self::Top => "top",
             Self::SingleRow => "single_row",
             Self::FirstRow => "first_row",
             Self::Transition => "transition",
@@ -119,6 +122,8 @@ impl ExtractionPhase {
     pub fn row_count(self, local_only: bool) -> usize {
         if local_only {
             1
+        } else if matches!(self, Self::Top) {
+            2
         } else if self.requires_shifted_eval(local_only) {
             3
         } else {
@@ -159,6 +164,7 @@ impl ExtractionPhase {
     /// already determines whether that row is real.
     fn next_is_real(self) -> Option<u64> {
         match self {
+            Self::Top => None,
             Self::FirstRow | Self::Transition => Some(1),
             Self::Boundary => Some(0),
             Self::SingleRow | Self::LastRow => None,
@@ -754,9 +760,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                         }
                     }
                 } else if v == (ByteOpcode::LTU as u64) {
-                    // Byte lookup values are laid out as: [opcode, a1, a2, b, c].
-                    // For LTU, a1 should encode (b < c), so compare values[3] and values[4].
-                    let lt_const = PicusConstraint::new_lt(values[3].clone(), values[4].clone());
+                    let lt_const = PicusConstraint::new_lt(values[2].clone(), values[3].clone());
                     if let PicusExpr::Const(1) = values[1] {
                         self.push_constraint(lt_const);
                     } else {
@@ -1376,12 +1380,19 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
 }
 
 impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'chips, A> {
+    fn is_known_one(&self, expr: &Self::Expr) -> bool {
+        matches!(self.specialize_expr(expr), PicusExpr::Const(1))
+    }
+
     fn try_emit_is_zero_summary(
         &mut self,
         input: Self::Expr,
         result: Self::Expr,
         is_real: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         self.add_guarded_constraint(is_real.clone(), PicusConstraint::new_bit(result.clone()));
         self.add_guarded_constraint(
             is_real.clone(),
@@ -1405,6 +1416,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
         result: Self::Expr,
         is_real: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         for flag in [is_lower_half_zero.clone(), is_upper_half_zero.clone(), result.clone()] {
             self.add_guarded_constraint(is_real.clone(), PicusConstraint::new_bit(flag));
         }
@@ -1472,6 +1486,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
         input: Word<Self::Expr>,
         is_real: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         // This is the exact semantic collapse of the current AIR in
         // `KoalaBearWordRangeChecker`:
         // - the most-significant byte must be < 128
@@ -1507,6 +1524,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
         diff_16bit_limb: Self::Expr,
         diff_8bit_limb: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         let module_name = "MemoryTimestampCheck".to_string();
         if !self.aux_modules.contains_key(&module_name) {
             // Picus currently requires every helper module to expose at least
@@ -1604,6 +1624,33 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
     where
         F: FnOnce(&mut Self, &[Self::Var]),
     {
+        self.try_emit_projected_summary_with_hidden_consts(
+            module_name,
+            projection_info,
+            current_inputs,
+            current_outputs,
+            source_width,
+            &[],
+            build_exact,
+        )
+    }
+
+    fn try_emit_projected_summary_with_hidden_consts<F>(
+        &mut self,
+        module_name: &str,
+        projection_info: &zkm_stark::PicusProjectionInfo,
+        current_inputs: &[Self::Expr],
+        current_outputs: &[Self::Expr],
+        source_width: usize,
+        hidden_consts: &[(usize, u64)],
+        build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self, &[Self::Var]),
+    {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         let projected_input_len: usize =
             projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
         let projected_output_len: usize =
@@ -1615,6 +1662,10 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
             let mut hidden_source_row = Vec::with_capacity(source_width);
             for _ in 0..source_width {
                 hidden_source_row.push(fresh_picus_var());
+            }
+            for (col_idx, value) in hidden_consts {
+                assert!(*col_idx < source_width);
+                hidden_source_row[*col_idx] = PicusAtom::Const(*value);
             }
 
             let mut nested_module = PicusModule::build_empty(
@@ -1690,88 +1741,36 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
     where
         F: FnOnce(&mut Self),
     {
-        // Legacy single-row projection for hidden sub-AIR summaries.
-        self.try_emit_hidden_subair_summary_with_row_offsets(
-            module_name,
-            projection_info,
-            current_inputs,
-            current_outputs,
-            source_width,
-            source_local_only,
-            &[0],
-            &[0],
-            build_exact,
-        )
-    }
-
-    fn try_emit_hidden_subair_summary_with_row_offsets<F>(
-        &mut self,
-        module_name: &str,
-        projection_info: &zkm_stark::PicusProjectionInfo,
-        current_inputs: &[Self::Expr],
-        current_outputs: &[Self::Expr],
-        source_width: usize,
-        source_local_only: bool,
-        input_row_offsets: &[usize],
-        output_row_offsets: &[usize],
-        build_exact: F,
-    ) -> bool
-    where
-        F: FnOnce(&mut Self),
-    {
-        if input_row_offsets.is_empty() && output_row_offsets.is_empty() {
+        if self.is_selector_module_builder() {
             return false;
         }
-
-        // Keep legacy behavior safe by requiring cross-row interfaces for
-        // non-local sub-AIRs.
-        if !source_local_only && input_row_offsets == [0] && output_row_offsets == [0] {
-            return false;
-        }
-
-        let base_projected_input_len: usize =
+        let projected_input_len: usize =
             projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
-        let base_projected_output_len: usize =
+        let projected_output_len: usize =
             projection_info.output_ranges.iter().map(|(start, end, _)| end - start).sum();
-        let projected_input_len = base_projected_input_len * input_row_offsets.len();
-        let projected_output_len = base_projected_output_len * output_row_offsets.len();
         assert_eq!(current_inputs.len(), projected_input_len);
         assert_eq!(current_outputs.len(), projected_output_len);
 
         if !self.aux_modules.contains_key(module_name) {
             let row_count = self.phase.row_count(source_local_only);
-            if input_row_offsets.iter().any(|offset| *offset >= row_count)
-                || output_row_offsets.iter().any(|offset| *offset >= row_count)
-            {
-                return false;
-            }
-
             let mut hidden_main = Vec::with_capacity(source_width * row_count);
             for _ in 0..(source_width * row_count) {
                 hidden_main.push(fresh_picus_var());
             }
+            // Projections are interpreted against the hidden local row. Any
+            // successor rows exist solely so the nested exact AIR can witness
+            // its own `next`-row constraints.
+            let hidden_local_row = hidden_main[..source_width].to_vec();
 
             let mut nested_module = PicusModule::build_empty(
                 module_name.to_string(),
                 current_inputs.len(),
                 current_outputs.len(),
             );
-
-            let mut projected_source_inputs = Vec::with_capacity(projected_input_len);
-            for offset in input_row_offsets {
-                let row_start = *offset * source_width;
-                let row = &hidden_main[row_start..row_start + source_width];
-                projected_source_inputs
-                    .extend(Self::flatten_projection_ranges(row, &projection_info.input_ranges));
-            }
-            let mut projected_source_outputs = Vec::with_capacity(projected_output_len);
-            for offset in output_row_offsets {
-                let row_start = *offset * source_width;
-                let row = &hidden_main[row_start..row_start + source_width];
-                projected_source_outputs
-                    .extend(Self::flatten_projection_ranges(row, &projection_info.output_ranges));
-            }
-
+            let projected_source_inputs =
+                Self::flatten_projection_ranges(&hidden_local_row, &projection_info.input_ranges);
+            let projected_source_outputs =
+                Self::flatten_projection_ranges(&hidden_local_row, &projection_info.output_ranges);
             let formal_inputs = nested_module.inputs.clone();
             let formal_outputs = nested_module.outputs.clone();
             Self::bind_projection_ports(

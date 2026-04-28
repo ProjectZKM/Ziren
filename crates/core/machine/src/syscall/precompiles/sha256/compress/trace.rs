@@ -33,6 +33,19 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
         ShaCompressCols::<u8>::picus_info()
     }
 
+    fn selectors_partition_real_rows(&self) -> bool {
+        true
+    }
+
+    fn picus_selector_specialization_allowed(&self, phase: &str, selector_name: &str) -> bool {
+        match phase {
+            "first_row" => selector_name == "is_initialize",
+            "boundary" => selector_name == "is_finalize",
+            "last_row" => false,
+            _ => true,
+        }
+    }
+
     fn generate_trace(
         &self,
         input: &ExecutionRecord,
