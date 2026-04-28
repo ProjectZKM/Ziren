@@ -137,7 +137,7 @@ impl KeccakSpongeChip {
         &self,
         local: &KeccakSpongeCols<AB::Var>,
     ) -> Vec<AB::Expr> {
-        let mut inputs = Vec::with_capacity(2 + 25 * U64_LIMBS);
+        let mut inputs = Vec::with_capacity(NUM_ROUNDS + 25 * U64_LIMBS);
         for y in 0..5 {
             for x in 0..5 {
                 for limb in 0..U64_LIMBS {
@@ -145,8 +145,9 @@ impl KeccakSpongeChip {
                 }
             }
         }
-        inputs.push(local.keccak.step_flags[0].into());
-        inputs.push(local.keccak.step_flags[NUM_ROUNDS - 1].into());
+        for round in 0..NUM_ROUNDS {
+            inputs.push(local.keccak.step_flags[round].into());
+        }
         inputs
     }
 

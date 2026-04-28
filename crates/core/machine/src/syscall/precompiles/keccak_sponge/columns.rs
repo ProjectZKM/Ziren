@@ -7,7 +7,7 @@ use crate::syscall::precompiles::keccak_sponge::{
 };
 use crate::utils::indices_arr;
 
-use p3_keccak_air::{KeccakCols, NUM_KECCAK_COLS, U64_LIMBS};
+use p3_keccak_air::{KeccakCols, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use zkm_derive::{AlignedBorrow, PicusAnnotations, PicusProjection};
 use zkm_stark::{PicusInfo, Word};
 
@@ -70,7 +70,7 @@ const fn make_keccak_picus_col_map() -> KeccakCols<usize> {
 /// The full witness stores many intermediate round columns that should remain
 /// internal to any future Keccak operation submodule. The semantic boundary is:
 /// - `state_in`: the full 25-lane permutation input state
-/// - `first_step` / `final_step`: the caller-visible round-position flags
+/// - `step_flags`: the caller-visible round-position vector for the local row
 /// - `state_out_0_0`: the `(0, 0)` output lane after iota
 /// - `state_out_rest`: the remaining 24 output lanes
 ///
@@ -83,10 +83,8 @@ const fn make_keccak_picus_col_map() -> KeccakCols<usize> {
 pub struct KeccakPermutationProjection {
     #[picus(input, path = a)]
     pub state_in: [[[u8; U64_LIMBS]; 5]; 5],
-    #[picus(input, path = step_flags[0])]
-    pub first_step: u8,
-    #[picus(input, path = step_flags[23])]
-    pub final_step: u8,
+    #[picus(input, path = step_flags)]
+    pub step_flags: [u8; NUM_ROUNDS],
     #[picus(output, path = a_prime_prime_prime_0_0_limbs)]
     pub state_out_0_0: [u8; U64_LIMBS],
     #[picus(output, path = a_prime_prime[0][1])]
