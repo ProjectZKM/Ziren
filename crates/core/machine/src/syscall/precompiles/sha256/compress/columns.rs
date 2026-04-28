@@ -24,9 +24,13 @@ pub const NUM_SHA_COMPRESS_COLS: usize = size_of::<ShaCompressCols<u8>>();
 #[repr(C)]
 pub struct ShaCompressCols<T> {
     /// Inputs.
+    #[picus(transition_input, transition_output)]
     pub shard: T,
+    #[picus(transition_input, transition_output)]
     pub clk: T,
+    #[picus(transition_input, transition_output)]
     pub w_ptr: T,
+    #[picus(transition_input, transition_output)]
     pub h_ptr: T,
 
     pub start: T,
@@ -47,13 +51,21 @@ pub struct ShaCompressCols<T> {
     /// compression, this is w[i] being read only.
     pub mem_addr: T,
 
+    #[picus(transition_input, transition_output)]
     pub a: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub b: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub c: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub d: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub e: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub f: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub g: Word<T>,
+    #[picus(transition_input, transition_output)]
     pub h: Word<T>,
 
     /// Current value of K[i]. This is a constant array that loops around every 64 iterations.
@@ -101,8 +113,11 @@ pub struct ShaCompressCols<T> {
     pub finalized_operand: Word<T>,
     pub finalize_add: AddOperation<T>,
 
+    #[picus(selector)]
     pub is_initialize: T,
+    #[picus(selector)]
     pub is_compression: T,
+    #[picus(selector)]
     pub is_finalize: T,
     pub is_last_row: T,
 
