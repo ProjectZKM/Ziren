@@ -216,10 +216,9 @@ impl KeccakSpongeChip {
             local.receive_syscall,
         );
         // Verify the input length read is consistent when this row performs the read.
-        builder.when(local.receive_syscall).assert_word_eq(
-            *local.input_length_mem.value(),
-            *local.input_length_mem.prev_value(),
-        );
+        builder
+            .when(local.receive_syscall)
+            .assert_word_eq(*local.input_length_mem.value(), *local.input_length_mem.prev_value());
 
         // Read the input block
         for i in 0..KECCAK_GENERAL_RATE_U32S as u32 {
