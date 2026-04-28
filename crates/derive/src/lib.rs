@@ -214,6 +214,21 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
+            let selectors_partition_real_rows_arms = variants.iter().map(|(variant_name, field)| {
+                let field_ty = &field.ty;
+                quote! {
+                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::selectors_partition_real_rows(x)
+                }
+            });
+
+            let picus_selector_specialization_allowed_arms =
+                variants.iter().map(|(variant_name, field)| {
+                    let field_ty = &field.ty;
+                    quote! {
+                        #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::picus_selector_specialization_allowed(x, phase, selector_name)
+                    }
+                });
+
             let machine_air = quote! {
                 impl #impl_generics zkm_stark::air::MachineAir<F> for #name #ty_generics #where_clause {
                     type Record = #execution_record_path;
@@ -284,6 +299,22 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                     fn picus_info(&self) -> PicusInfo {
                         match self {
                             #(#picus_info_arms,)*
+                        }
+                    }
+
+                    fn selectors_partition_real_rows(&self) -> bool {
+                        match self {
+                            #(#selectors_partition_real_rows_arms,)*
+                        }
+                    }
+
+                    fn picus_selector_specialization_allowed(
+                        &self,
+                        phase: &str,
+                        selector_name: &str,
+                    ) -> bool {
+                        match self {
+                            #(#picus_selector_specialization_allowed_arms,)*
                         }
                     }
                 }

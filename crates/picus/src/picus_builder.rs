@@ -51,6 +51,8 @@ pub enum ColumnOutputMode {
 /// Selects which trace shape the extracted module is meant to model.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExtractionPhase {
+    /// Selector-proof extraction with all row-position predicates disabled.
+    Top,
     /// Trace of length 1.
     SingleRow,
     /// First row of a multi-row trace.
@@ -90,6 +92,7 @@ impl ExtractionPhase {
     /// Returns the stable suffix used in generated module names for this phase.
     pub fn module_suffix(self) -> &'static str {
         match self {
+            Self::Top => "top",
             Self::SingleRow => "single_row",
             Self::FirstRow => "first_row",
             Self::Transition => "transition",
@@ -119,6 +122,8 @@ impl ExtractionPhase {
     pub fn row_count(self, local_only: bool) -> usize {
         if local_only {
             1
+        } else if matches!(self, Self::Top) {
+            2
         } else if self.requires_shifted_eval(local_only) {
             3
         } else {
@@ -159,6 +164,7 @@ impl ExtractionPhase {
     /// already determines whether that row is real.
     fn next_is_real(self) -> Option<u64> {
         match self {
+            Self::Top => None,
             Self::FirstRow | Self::Transition => Some(1),
             Self::Boundary => Some(0),
             Self::SingleRow | Self::LastRow => None,
@@ -1376,12 +1382,19 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
 }
 
 impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'chips, A> {
+    fn is_known_one(&self, expr: &Self::Expr) -> bool {
+        matches!(self.specialize_expr(expr), PicusExpr::Const(1))
+    }
+
     fn try_emit_is_zero_summary(
         &mut self,
         input: Self::Expr,
         result: Self::Expr,
         is_real: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         self.add_guarded_constraint(is_real.clone(), PicusConstraint::new_bit(result.clone()));
         self.add_guarded_constraint(
             is_real.clone(),
@@ -1405,6 +1418,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
         result: Self::Expr,
         is_real: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         for flag in [is_lower_half_zero.clone(), is_upper_half_zero.clone(), result.clone()] {
             self.add_guarded_constraint(is_real.clone(), PicusConstraint::new_bit(flag));
         }
@@ -1472,6 +1488,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
         input: Word<Self::Expr>,
         is_real: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         // This is the exact semantic collapse of the current AIR in
         // `KoalaBearWordRangeChecker`:
         // - the most-significant byte must be < 128
@@ -1507,6 +1526,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
         diff_16bit_limb: Self::Expr,
         diff_8bit_limb: Self::Expr,
     ) -> bool {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         let module_name = "MemoryTimestampCheck".to_string();
         if !self.aux_modules.contains_key(&module_name) {
             // Picus currently requires every helper module to expose at least
@@ -1604,6 +1626,33 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
     where
         F: FnOnce(&mut Self, &[Self::Var]),
     {
+        self.try_emit_projected_summary_with_hidden_consts(
+            module_name,
+            projection_info,
+            current_inputs,
+            current_outputs,
+            source_width,
+            &[],
+            build_exact,
+        )
+    }
+
+    fn try_emit_projected_summary_with_hidden_consts<F>(
+        &mut self,
+        module_name: &str,
+        projection_info: &zkm_stark::PicusProjectionInfo,
+        current_inputs: &[Self::Expr],
+        current_outputs: &[Self::Expr],
+        source_width: usize,
+        hidden_consts: &[(usize, u64)],
+        build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self, &[Self::Var]),
+    {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         let projected_input_len: usize =
             projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
         let projected_output_len: usize =
@@ -1615,6 +1664,10 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
             let mut hidden_source_row = Vec::with_capacity(source_width);
             for _ in 0..source_width {
                 hidden_source_row.push(fresh_picus_var());
+            }
+            for (col_idx, value) in hidden_consts {
+                assert!(*col_idx < source_width);
+                hidden_source_row[*col_idx] = PicusAtom::Const(*value);
             }
 
             let mut nested_module = PicusModule::build_empty(
@@ -1690,6 +1743,9 @@ impl<'chips, A: MachineAir<Felt>> OperationSummaryAirBuilder for PicusBuilder<'c
     where
         F: FnOnce(&mut Self),
     {
+        if self.is_selector_module_builder() {
+            return false;
+        }
         let projected_input_len: usize =
             projection_info.input_ranges.iter().map(|(start, end, _)| end - start).sum();
         let projected_output_len: usize =
