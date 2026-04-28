@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+
+use crate::Word;
 /// Information about Picus annotations on AIR columns.
 #[derive(Debug, Clone, Default)]
 pub struct PicusInfo {
@@ -86,5 +88,11 @@ impl PicusProjectionStart for usize {
 impl<T: PicusProjectionStart, const N: usize> PicusProjectionStart for [T; N] {
     fn projection_start(&self) -> usize {
         self[0].projection_start()
+    }
+}
+
+impl<T: PicusProjectionStart> PicusProjectionStart for Word<T> {
+    fn projection_start(&self) -> usize {
+        self.0[0].projection_start()
     }
 }

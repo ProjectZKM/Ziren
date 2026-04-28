@@ -2,7 +2,7 @@ use core::iter::once;
 use p3_air::{AirBuilder, AirBuilderWithPublicValues};
 use p3_field::FieldAlgebra;
 use zkm_stark::{
-    air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},
+    air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder, OperationSummaryAirBuilder},
     LookupKind,
 };
 
@@ -13,11 +13,17 @@ use super::{
 
 /// A trait which contains all helper methods for building Ziren recursion machine AIRs.
 pub trait ZKMRecursionAirBuilder:
-    MachineAirBuilder + RecursionMemoryAirBuilder + RecursionLookupAirBuilder
+    MachineAirBuilder
+    + RecursionMemoryAirBuilder
+    + RecursionLookupAirBuilder
+    + OperationSummaryAirBuilder
 {
 }
 
-impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder> ZKMRecursionAirBuilder for AB {}
+impl<AB: AirBuilderWithPublicValues + RecursionMemoryAirBuilder + OperationSummaryAirBuilder>
+    ZKMRecursionAirBuilder for AB
+{
+}
 impl<AB: BaseAirBuilder> RecursionMemoryAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionLookupAirBuilder for AB {}
 

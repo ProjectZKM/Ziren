@@ -189,6 +189,17 @@ pub trait ByteAirBuilder: BaseAirBuilder {
 /// Builders should return `true` only when they have emitted a semantically sound replacement for
 /// the exact constraints. Returning `false` tells the caller to proceed with exact lowering.
 pub trait OperationSummaryAirBuilder: AirBuilder {
+    /// Returns whether `expr` is known to be the constant one in the current
+    /// extraction context.
+    ///
+    /// This is useful for guarded local operations whose exact AIR is only
+    /// functional when their enable flag is active. Builders can use this to
+    /// decide whether an exact operation is safe to outline as a submodule, or
+    /// whether it must remain inlined under its original guard.
+    fn is_known_one(&self, _expr: &Self::Expr) -> bool {
+        false
+    }
+
     fn try_emit_is_zero_summary(
         &mut self,
         _input: Self::Expr,
@@ -269,6 +280,30 @@ pub trait OperationSummaryAirBuilder: AirBuilder {
         _current_inputs: &[Self::Expr],
         _current_outputs: &[Self::Expr],
         _source_width: usize,
+        _build_exact: F,
+    ) -> bool
+    where
+        F: FnOnce(&mut Self, &[Self::Var]),
+    {
+        false
+    }
+
+    /// Variant of [`Self::try_emit_projected_summary`] that lets the caller
+    /// pin selected hidden witness columns to constants inside the outlined
+    /// module.
+    ///
+    /// This is useful for guarded operations that are only outlined when their
+    /// enable flag is known to be one. In that case, the hidden witness should
+    /// reflect the specialized value directly rather than carrying an
+    /// additional symbolic guard through the nested module.
+    fn try_emit_projected_summary_with_hidden_consts<F>(
+        &mut self,
+        _module_name: &str,
+        _projection_info: &crate::air::PicusProjectionInfo,
+        _current_inputs: &[Self::Expr],
+        _current_outputs: &[Self::Expr],
+        _source_width: usize,
+        _hidden_consts: &[(usize, u64)],
         _build_exact: F,
     ) -> bool
     where
