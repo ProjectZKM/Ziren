@@ -24,13 +24,13 @@ pub const NUM_SHA_COMPRESS_COLS: usize = size_of::<ShaCompressCols<u8>>();
 #[repr(C)]
 pub struct ShaCompressCols<T> {
     /// Inputs.
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub shard: T,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub clk: T,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub w_ptr: T,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub h_ptr: T,
 
     pub start: T,
@@ -51,21 +51,21 @@ pub struct ShaCompressCols<T> {
     /// compression, this is w[i] being read only.
     pub mem_addr: T,
 
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub a: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub b: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub c: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub d: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub e: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub f: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub g: Word<T>,
-    #[picus(transition_input, transition_output)]
+    #[picus(transition_input)]
     pub h: Word<T>,
 
     /// Current value of K[i]. This is a constant array that loops around every 64 iterations.
