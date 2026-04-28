@@ -889,15 +889,30 @@ fn build_selector_env(
     env
 }
 
+fn selector_specialization_allowed<A>(
+    chip: &Chip<Felt, A>,
+    phase: ExtractionPhase,
+    selector_name: &str,
+) -> bool
+where
+    A: MachineAir<Felt>,
+{
+    chip.picus_selector_specialization_allowed(phase.module_suffix(), selector_name)
+}
+
 fn add_selector_shape_postconditions(
     top_module: &mut PicusModule,
     picus_info: &PicusInfo,
     assume_selectors_deterministic: bool,
+    selectors_partition_real_rows: bool,
+    real_row_only: bool,
 ) -> bool {
     if picus_info.selector_indices.is_empty() {
         return false;
     }
 
+    // These are emitted as postconditions rather than ordinary assertions so the selector
+    // contract remains visible even for shape-only top modules that do not carry an AIR body.
     let mut one_hot_sum = PicusExpr::Const(0);
     for (selector_col, _) in &picus_info.selector_indices {
         let selector_var = PicusExpr::Var(*selector_col);
@@ -908,8 +923,87 @@ fn add_selector_shape_postconditions(
             top_module.assume_deterministic.push(selector_var);
         }
     }
-    top_module.postconditions.push(PicusConstraint::new_lt(one_hot_sum, 2.into()));
+    if selectors_partition_real_rows {
+        if real_row_only {
+            top_module.postconditions.push(PicusConstraint::new_equality(one_hot_sum, 1.into()));
+        } else {
+            let Some(is_real_index) = picus_info.is_real_index else {
+                panic!("selector partition requires is_real to be annotated");
+            };
+            let is_real_var = PicusExpr::Var(is_real_index);
+            top_module.outputs.push(is_real_var.clone());
+            top_module.postconditions.push(PicusConstraint::new_bit(is_real_var.clone()));
+            top_module.postconditions.push(PicusConstraint::new_equality(one_hot_sum, is_real_var));
+        }
+    } else {
+        top_module.postconditions.push(PicusConstraint::new_lt(one_hot_sum, 2.into()));
+    }
     true
+}
+
+/// Builds the program's `top` module and any auxiliary modules needed by it.
+///
+/// `top` is not meant to model one concrete trace row. Its job is narrower: prove that the
+/// selector columns satisfy the polynomial relationships that make them real selectors.
+///
+/// To avoid phase-specific obligations like `when_first_row()` / `when_last_row()` and to keep
+/// interactions out of the contract, we analyze the chip once under a dedicated neutral phase
+/// with interaction lowering disabled. The resulting hidden witness still has to satisfy the AIR's
+/// unconditional selector equations, but `top` is no longer over-constrained by row-position or
+/// routing semantics.
+///
+/// For chips whose selectors partition real rows, `top` is intentionally a real-row-only proof:
+/// we specialize `is_real = 1` and ask Picus to prove that the selectors form a partition of one.
+/// Padding-row behavior stays out of `top`.
+fn build_top_module<'chips, A>(
+    chip: &'chips Chip<Felt, A>,
+    chips: &'chips [Chip<Felt, A>],
+    picus_info: &PicusInfo,
+    fresh_var_ctr_base: usize,
+    shr_carry_summary_mode: ShrCarrySummaryMode,
+    column_output_mode: ColumnOutputMode,
+    assume_selectors_deterministic: bool,
+) -> Option<(PicusModule, BTreeMap<String, PicusModule>)>
+where
+    A: MachineAir<Felt> + BaseAir<Felt> + Air<PicusBuilder<'chips, A>>,
+{
+    if picus_info.selector_indices.is_empty() {
+        return None;
+    }
+
+    let mut top_env = BTreeMap::new();
+    let real_row_only = chip.selectors_partition_real_rows() && picus_info.is_real_index.is_some();
+    if real_row_only {
+        top_env.insert(picus_info.is_real_index.unwrap(), 1);
+    }
+
+    initialize_fresh_var_ctr(fresh_var_ctr_base);
+    let (top_base_module, top_aux_modules) = analyze_chip(
+        chip,
+        chips,
+        None,
+        Some(top_env.clone()),
+        ExtractionPhase::Top,
+        SubmoduleMode::Ignore,
+        shr_carry_summary_mode,
+        column_output_mode,
+    );
+    let mut top_module = top_base_module.partial_eval(&top_env);
+    top_module.inputs.clear();
+    top_module.outputs.clear();
+    // `top` should prove selector structure from constraints alone; any interaction-derived
+    // determinism assumptions belong to the specialized row modules instead.
+    top_module.assume_deterministic.clear();
+
+    top_module.name = "top".to_string();
+    add_selector_shape_postconditions(
+        &mut top_module,
+        picus_info,
+        assume_selectors_deterministic,
+        chip.selectors_partition_real_rows(),
+        real_row_only,
+    );
+    Some((top_module, top_aux_modules))
 }
 
 fn main() {
@@ -986,7 +1080,33 @@ fn main() {
         }
     } else {
         for phase in &phases {
-            for (selector_col, _) in &picus_info.selector_indices {
+            let allowed_selectors = picus_info
+                .selector_indices
+                .iter()
+                .filter(|(_, selector_name)| {
+                    selector_specialization_allowed(chip, *phase, selector_name)
+                })
+                .collect::<Vec<_>>();
+
+            if allowed_selectors.is_empty() {
+                let env = build_selector_env(&picus_info, None, Some(*phase));
+                initialize_fresh_var_ctr(fresh_var_ctr_base);
+                let (base_module, mut aux_modules) = analyze_chip(
+                    chip,
+                    &chips,
+                    None,
+                    Some(env.clone()),
+                    *phase,
+                    SubmoduleMode::Inline,
+                    shr_carry_summary_mode,
+                    column_output_mode,
+                );
+                all_aux_modules.append(&mut aux_modules);
+                let updated_module = base_module.partial_eval(&env);
+                selector_modules.insert(updated_module.name.clone(), updated_module);
+                continue;
+            }
+            for (selector_col, _) in allowed_selectors {
                 let env = build_selector_env(&picus_info, Some(*selector_col), Some(*phase));
                 initialize_fresh_var_ctr(fresh_var_ctr_base);
                 let (base_module, mut aux_modules) = analyze_chip(
@@ -1010,48 +1130,17 @@ fn main() {
     picus_program.add_modules(&mut all_aux_modules);
     picus_program.add_modules(&mut selector_modules);
 
-    // For chips with a single extraction phase, keep the older AIR-backed top
-    // module so selector constraints remain visible without selector specialization.
-    // Multi-phase chips currently fall back to a selector-shape-only top module,
-    // since there is no single unspecialized phase that represents the whole AIR.
-    if !picus_info.selector_indices.is_empty() {
-        if phases.len() == 1 {
-            let top_env = build_selector_env(&picus_info, None, None);
-            initialize_fresh_var_ctr(fresh_var_ctr_base);
-            let (top_base_module, mut top_aux_modules) = analyze_chip(
-                chip,
-                &chips,
-                None,
-                Some(top_env.clone()),
-                phases[0],
-                SubmoduleMode::Ignore,
-                shr_carry_summary_mode,
-                column_output_mode,
-            );
-            picus_program.add_modules(&mut top_aux_modules);
-            let mut top_module = top_base_module.partial_eval(&top_env);
-            top_module.name = "top".to_string();
-            top_module.outputs.clear();
-            // Partial evaluation can collapse some top-level determinism assumptions
-            // into constants (for example selector-specialized `0/1` values). Drop
-            // only those tautological assumptions so AIR-derived symbolic ones, such
-            // as receive-instruction opcode determinism, remain visible in `top`.
-            top_module.assume_deterministic.retain(|expr| !matches!(expr, PicusExpr::Const(_)));
-            add_selector_shape_postconditions(
-                &mut top_module,
-                &picus_info,
-                args.assume_selectors_deterministic,
-            );
-            picus_program.add_module("top", top_module);
-        } else {
-            let mut top_module = PicusModule::new("top".to_string());
-            add_selector_shape_postconditions(
-                &mut top_module,
-                &picus_info,
-                args.assume_selectors_deterministic,
-            );
-            picus_program.add_module("top", top_module);
-        }
+    if let Some((top_module, mut top_aux_modules)) = build_top_module(
+        chip,
+        &chips,
+        &picus_info,
+        fresh_var_ctr_base,
+        shr_carry_summary_mode,
+        column_output_mode,
+        args.assume_selectors_deterministic,
+    ) {
+        picus_program.add_modules(&mut top_aux_modules);
+        picus_program.add_module("top", top_module);
     }
     let res =
         picus_program.write_to_path(args.picus_out_dir.join(format!("{}.picus", chip.name())));

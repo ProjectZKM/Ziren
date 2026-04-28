@@ -753,7 +753,7 @@ impl<AB: BaseAirBuilder> InstructionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> ExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> SepticExtensionAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues> MachineAirBuilder for AB {}
-impl<AB: EmptyMessageBuilder + AirBuilderWithPublicValues> OperationSummaryAirBuilder for AB {}
+impl<AB: AirBuilderWithPublicValues> OperationSummaryAirBuilder for AB {}
 impl<AB: BaseAirBuilder + AirBuilderWithPublicValues + OperationSummaryAirBuilder> ZKMAirBuilder
     for AB
 {
