@@ -120,6 +120,7 @@ impl<F: Field> AirBuilderWithPublicValues for LookupBuilder<F> {
     }
 }
 
+impl<F: Field> OperationSummaryAirBuilder for LookupBuilder<F> {}
 
 fn symbolic_to_virtual_pair<F: Field>(expression: &SymbolicExpression<F>) -> VirtualPairCol<F> {
     if expression.degree_multiple() > 1 {
