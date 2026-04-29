@@ -63,12 +63,15 @@ impl SyscallChip {
 #[repr(C)]
 pub struct SyscallCols<T: Copy> {
     /// The shard number of the syscall.
+    #[picus(input)]
     pub shard: T,
 
     /// The clk of the syscall.
+    #[picus(input)]
     pub clk: T,
 
     /// The syscall_id of the syscall.
+    #[picus(input)]
     pub syscall_id: T,
 
     /// Half-word packed arg1: low 16 bits (byte0 + byte1 * 256).
@@ -77,20 +80,27 @@ pub struct SyscallCols<T: Copy> {
     /// arg1/arg2 through receive_syscall and don't use the half-words.
     /// If a new precompile needs byte-level argument access, it should use
     /// receive_syscall_result_packed to get these half-words.
+    #[picus(input)]
     pub arg1_lo: T,
     /// Half-word packed arg1: high 16 bits (byte2 + byte3 * 256).
+    #[picus(input)]
     pub arg1_hi: T,
 
     /// Half-word packed arg2: low 16 bits.
+    #[picus(input)]
     pub arg2_lo: T,
     /// Half-word packed arg2: high 16 bits.
+    #[picus(input)]
     pub arg2_hi: T,
 
     /// Half-word packed result (lo = byte0 + byte1*256, hi = byte2 + byte3*256).
+    #[picus(output)]
     pub result_lo: T,
+    #[picus(output)]
     pub result_hi: T,
 
     /// Whether the syscall is a linux syscall.
+    #[picus(input)]
     pub is_linux: T,
 
     pub is_real: T,
