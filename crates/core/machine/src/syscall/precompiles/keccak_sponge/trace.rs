@@ -151,6 +151,11 @@ impl KeccakSpongeChip {
                 // Keep `input_len` consistent with the dedicated memory read
                 // (`input_length_record`) used by the AIR constraints.
                 cols.input_len = F::from_canonical_u32(event.input_len_u32s);
+                // Keep `input_length_mem` populated on every real row so AIR
+                // constraints that bind `input_len`/range-check these bytes on
+                // all real rows are satisfied consistently.
+                cols.input_length_mem.access.value = Word::from(event.input_length_record.value);
+                blu.add_u8_range_checks(&event.input_length_record.value.to_le_bytes());
                 cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
                 cols.is_absorbed =
                     F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
@@ -196,7 +201,6 @@ impl KeccakSpongeChip {
                 // if this is the first round of the first block, populate reading input length
                 if i == 0 && round == 0 {
                     cols.input_length_mem.populate(event.input_length_record, blu);
-                    blu.add_u8_range_checks(&event.input_length_record.value.to_le_bytes());
                 }
 
                 // if this is the last row of the last block, populate writing output

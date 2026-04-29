@@ -103,14 +103,15 @@ where
         builder.slice_range_check_u8(&original_state_bytes, local.is_real);
 
         // Range-constrain memory words that are interpreted as byte-packed u16/u64 limbs.
-        // `input_length_mem` is only read on `receive_syscall`,
+        // `input_length_mem` is constrained against `input_len` on all real rows,
+        // so keep it byte-range constrained on all real rows as well.
         // `block_mem` is only read on `read_block`,
         // and `output_mem` is only used on `write_output`.
         let mut input_len_bytes = Vec::with_capacity(4);
         for j in 0..4 {
             input_len_bytes.push(local.input_length_mem.value()[j]);
         }
-        builder.slice_range_check_u8(&input_len_bytes, local.receive_syscall);
+        builder.slice_range_check_u8(&input_len_bytes, local.is_real);
 
         let mut block_mem_bytes = Vec::with_capacity(KECCAK_GENERAL_RATE_U32S * 4);
         for i in 0..KECCAK_GENERAL_RATE_U32S {
