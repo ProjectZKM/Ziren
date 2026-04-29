@@ -178,6 +178,9 @@ impl KeccakSpongeChip {
                 // original state
                 for j in 0..KECCAK_STATE_U32S {
                     cols.original_state[j] = Word::from(state_u32s[j]);
+                    // Match AIR-side `slice_range_check_u8` constraints on
+                    // `original_state` bytes for each real row.
+                    blu.add_u8_range_checks(&state_u32s[j].to_le_bytes());
                 }
 
                 // xor

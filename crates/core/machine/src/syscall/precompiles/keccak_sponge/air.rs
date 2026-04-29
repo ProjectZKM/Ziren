@@ -88,6 +88,20 @@ where
             }
         }
 
+        // Range-constrain the sponge state bytes.
+        //
+        // `original_state` is interpreted as bytes when building u16/u64 limbs
+        // (including for `next.original_state` in absorbed-state transitions).
+        // Enforce each byte is in [0, 255] to prevent unconstrained field limbs
+        // from satisfying packed equalities spuriously.
+        let mut original_state_bytes = Vec::with_capacity(KECCAK_STATE_U32S * 4);
+        for i in 0..KECCAK_STATE_U32S {
+            for j in 0..4 {
+                original_state_bytes.push(local.original_state[i][j]);
+            }
+        }
+        builder.slice_range_check_u8(&original_state_bytes, local.is_real);
+
         // Constrain the absorbed bytes
         builder
             .when_transition()
