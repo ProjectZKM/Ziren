@@ -131,6 +131,16 @@ where
             next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
+        // Outside the absorbed-edge transition, keep `original_state` stable
+        // across rows. Exclude the final output row because its successor is a
+        // padding row.
+        let keep_original_state = (AB::Expr::one() - local.is_absorbed) * (AB::Expr::one() - local.write_output);
+        let mut keep_transition_builder = builder.when_transition();
+        let mut keep_state_builder = keep_transition_builder.when(keep_original_state);
+        for i in 0..KECCAK_STATE_U32S {
+            keep_state_builder.assert_word_eq(local.original_state[i], next.original_state[i]);
+        }
+
         // Eval the plonky3 keccak air. Picus can hide the full sub-AIR behind a
         // semantic boundary; other builders continue to inline the exact
         // `SubAirBuilder` path.
