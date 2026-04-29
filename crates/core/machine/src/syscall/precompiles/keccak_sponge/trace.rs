@@ -168,10 +168,9 @@ impl KeccakSpongeChip {
                 // read the input
                 if round == 0 {
                     for j in 0..KECCAK_GENERAL_RATE_U32S {
-                        cols.block_mem[j].populate(
-                            event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j],
-                            blu,
-                        );
+                        let record = event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j];
+                        cols.block_mem[j].populate(record, blu);
+                        blu.add_u8_range_checks(&record.value.to_le_bytes());
                     }
                 }
 
@@ -197,12 +196,15 @@ impl KeccakSpongeChip {
                 // if this is the first round of the first block, populate reading input length
                 if i == 0 && round == 0 {
                     cols.input_length_mem.populate(event.input_length_record, blu);
+                    blu.add_u8_range_checks(&event.input_length_record.value.to_le_bytes());
                 }
 
                 // if this is the last row of the last block, populate writing output
                 if i == (block_num - 1) && round == (NUM_ROUNDS - 1) {
                     for j in 0..KECCAK_GENERAL_OUTPUT_U32S {
-                        cols.output_mem[j].populate(event.output_write_records[j], blu);
+                        let record = event.output_write_records[j];
+                        cols.output_mem[j].populate(record, blu);
+                        blu.add_u8_range_checks(&record.value.to_le_bytes());
                     }
                 }
 
