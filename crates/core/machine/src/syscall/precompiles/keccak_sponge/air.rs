@@ -69,6 +69,7 @@ where
         builder.when_last_row().assert_zero(local.is_real);
 
         // Xor
+        let not_read_block = AB::Expr::one() - local.read_block;
         for i in 0..KECCAK_GENERAL_RATE_U32S {
             XorOperation::<AB::F>::eval(
                 builder,
@@ -77,6 +78,14 @@ where
                 local.xored_general_rate[i],
                 local.read_block,
             );
+            for j in 0..4 {
+                builder
+                    .when(not_read_block.clone())
+                    .assert_zero(local.xored_general_rate[i].value[j]);
+                builder
+                    .when(not_read_block.clone())
+                    .assert_zero(local.block_mem[i].access.value[j]);
+            }
         }
 
         // Constrain the absorbed bytes
