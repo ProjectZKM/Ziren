@@ -148,7 +148,9 @@ impl KeccakSpongeChip {
                 cols.shard = F::from_canonical_u32(event.shard);
                 cols.clk = F::from_canonical_u32(event.clk);
                 cols.is_real = F::ONE;
-                cols.input_len = F::from_canonical_u32(event.input.len() as u32);
+                // Keep `input_len` consistent with the dedicated memory read
+                // (`input_length_record`) used by the AIR constraints.
+                cols.input_len = F::from_canonical_u32(event.input_len_u32s);
                 cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
                 cols.is_absorbed =
                     F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
