@@ -82,8 +82,12 @@ where
         // Constrain the absorbed bytes
         builder
             .when_transition()
-            .when(not_final_step)
+            .when(not_final_step.clone())
             .assert_eq(local.already_absorbed_u32s, next.already_absorbed_u32s);
+        builder
+            .when_transition()
+            .when(not_final_step)
+            .assert_eq(local.input_address, next.input_address);
         // If this is the first block, absorbed bytes should be 0
         builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::zero());
         // If this is the final block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
