@@ -1,5 +1,5 @@
 use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+    KeccakPermutationProjection, KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
@@ -30,7 +30,20 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     }
 
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        KeccakSpongeCols::<u8>::picus_info()
+        let mut info = KeccakSpongeCols::<u8>::picus_info();
+        let projection = KeccakPermutationProjection::picus_projection_info();
+
+        // Expose the embedded Keccak permutation input state on the parent
+        // module interface so Picus cannot vary it existentially when checking
+        // boundary/transition phases.
+        info.transition_input_ranges.extend(
+            projection
+                .input_ranges
+                .into_iter()
+                .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
+        );
+
+        info
     }
 
     fn generate_dependencies(
