@@ -190,6 +190,9 @@ impl KeccakSpongeChip {
         // receive syscall
         builder.assert_eq(first_block * first_step * local.is_real, local.receive_syscall);
 
+        // Input block memory is only read on the first Keccak round of a real row.
+        builder.assert_eq(local.read_block, first_step * local.is_real);
+
         // write output flag
         builder.assert_eq(final_block * final_step * local.is_real, local.write_output);
 
