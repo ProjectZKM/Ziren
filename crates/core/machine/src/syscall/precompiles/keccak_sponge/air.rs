@@ -286,6 +286,11 @@ impl KeccakSpongeChip {
             &local.input_length_mem,
             local.receive_syscall,
         );
+        // Bind the scalar `input_len` to the memory-provided 4-byte word on
+        // the syscall row.
+        builder
+            .when(local.receive_syscall)
+            .assert_eq(local.input_len, local.input_length_mem.value().reduce::<AB>());
         // Verify the input length has not changed
         builder
             .when(local.is_real)
