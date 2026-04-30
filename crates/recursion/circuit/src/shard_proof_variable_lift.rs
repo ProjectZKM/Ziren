@@ -155,28 +155,30 @@ where
 /// Build a [`crate::shard_basefold::BasefoldVerifyingKeyVariable`]
 /// from a legacy [`crate::VerifyingKeyVariable`].
 ///
-/// Currently produces a structurally-correct placeholder:
-/// - `pc_start`: `[vk.pc_start, ZERO, ZERO]` (legacy is a single
-///   Felt; the new shape is 3-felt for low/mid/high words —
-///   placeholder pads with zeros, awaits real word decomposition).
-/// - `preprocessed_commit`: `[ZERO; 8]` placeholder until the
-///   `SC::DigestVariable → [Felt; 8]` extraction surface is
-///   exposed.
-/// - `enable_untrusted_programs`: `ZERO` placeholder (legacy
-///   verifying key doesn't carry this flag).
+/// - `pc_start`: `[vk.pc_start, ZERO, ZERO]` — KoalaBear is 31-bit so
+///   the program counter fits in a single Felt; the new shape is
+///   3-felt low/mid/high, mid+high stay zero.
+/// - `preprocessed_commit`: extracted directly from `vk.commitment`
+///   via the `DigestVariable = [Felt<KoalaBear>; 8]` trait bound.
+/// - `enable_untrusted_programs`: `ZERO` (legacy verifying keys are
+///   trusted programs by default; the legacy vk doesn't carry this
+///   flag, so trusted-mode is the only correct lift).
 pub fn build_basefold_verifying_key_variable<C, SC>(
     builder: &mut Builder<C>,
     vk: &crate::VerifyingKeyVariable<C, SC>,
 ) -> crate::shard_basefold::BasefoldVerifyingKeyVariable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    SC: crate::KoalaBearFriParametersVariable<C, Val = InnerVal>,
+    SC: crate::KoalaBearFriParametersVariable<
+        C,
+        Val = InnerVal,
+        DigestVariable = [Felt<InnerVal>; 8],
+    >,
 {
     use p3_field::PrimeCharacteristicRing;
     let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
     let pc_start: [Felt<C::F>; 3] = [vk.pc_start, zero_felt, zero_felt];
-    let preprocessed_commit: [Felt<C::F>; 8] =
-        std::array::from_fn(|_| builder.constant(C::F::ZERO));
+    let preprocessed_commit: [Felt<C::F>; 8] = vk.commitment;
     let enable_untrusted = builder.constant(C::F::ZERO);
     crate::shard_basefold::BasefoldVerifyingKeyVariable::<C>::new(
         pc_start,

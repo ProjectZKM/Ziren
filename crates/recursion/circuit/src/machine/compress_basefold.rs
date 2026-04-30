@@ -166,7 +166,11 @@ pub fn verify_compress_basefold<C, SC, A>(
     kind: super::compress::PublicValuesOutputDigest,
     max_log_row_count: usize,
 ) where
-    SC: KoalaBearFriParametersVariable<C, Val = zkm_stark::InnerVal>,
+    SC: KoalaBearFriParametersVariable<
+        C,
+        Val = zkm_stark::InnerVal,
+        DigestVariable = [Felt<zkm_stark::InnerVal>; 8],
+    >,
     C: CircuitConfig<F = zkm_stark::InnerVal, EF = zkm_stark::InnerChallenge>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
