@@ -1,11 +1,9 @@
 extern crate alloc;
 
 use core::borrow::Borrow;
-use core::convert::AsRef;
 use itertools::Itertools;
 
 use p3_commit::Pcs;
-use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_field::TwoAdicField;
@@ -16,7 +14,7 @@ use zkm_core_executor::ZKMReduceProof;
 use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 use zkm_stark::ShardProof;
 use zkm_stark::{
-    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
+    air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2,
     StarkVerifyingKey, Word, DIGEST_SIZE,
 };
 
