@@ -110,14 +110,28 @@ impl ZKMProverOpts {
         // shard_batch_size controls the number of concurrent prover-submit
         // threads in compress_multi_gpu (one shard per thread at a time).
         // With shard_batch_size = 1 only one shard is in flight to the GPU
-        // pool, so additional GPUs go idle. Defaults to 4 to match the
-        // typical 1-to-4 GPU configurations and yields measurable
-        // multi-GPU scaling on reth (1->2 GPU 1.49x, 1->4 GPU 1.62x).
-        // Override via RECURSION_SHARD_BATCH_SIZE.
+        // pool, so additional GPUs go idle. Default scales as
+        // `(gpu_count * 2).clamp(4, 8)` from ZKM_GPU_DEVICES:
+        // - 1-2 GPU -> 4: oversubscribing 1 GPU 8x OOMs on reth shards,
+        //   4 keeps the single GPU's memory budget safe.
+        // - 4 GPU -> 8: 2x oversubscribe lets per-shard CPU prep
+        //   (recursion-program build, setup, generate_dependencies)
+        //   overlap with the next shard's GPU work. Compress 42s -> 32s,
+        //   total 101.9s -> 97.1s on reth.
+        // - 8 GPU -> 8: 1:1 mapping fully saturates the pool. Compress
+        //   42s -> 33s, total 99.9s -> 94.4s on reth. SBS=12 plateaus
+        //   then regresses (Core 56.4s -> 62.8s from contention).
+        // Override via RECURSION_SHARD_BATCH_SIZE for >8-GPU boxes,
+        // memory-constrained machines, or experimentation.
+        let gpu_count = env::var("ZKM_GPU_DEVICES")
+            .ok()
+            .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
+            .filter(|&n| n > 0)
+            .unwrap_or(1);
         opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(4);
+            .unwrap_or_else(|| (gpu_count * 2).clamp(4, 8));
         opts.recursion_opts.records_and_traces_channel_capacity =
             opts.recursion_opts.shard_batch_size.max(2);
         opts.recursion_opts.trace_gen_workers =
