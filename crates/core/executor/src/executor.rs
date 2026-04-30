@@ -2297,11 +2297,22 @@ impl<'a> Executor<'a> {
     pub fn run_very_fast(&mut self) -> Result<(), ExecutionError> {
         self.executor_mode = ExecutorMode::Simple;
         self.print_report = false;
+        if self.try_run_fast_jit()? {
+            return Ok(());
+        }
         while !self.execute()? {}
         Ok(())
     }
 
     /// Executes the program without tracing and without emitting events.
+    ///
+    /// On Linux x86_64 the executor first attempts the JIT path
+    /// (`jit_runner::build_jit_function` + `run_jit`).  If the program
+    /// contains an opcode the JIT can't lower (LWL/LWR/SWL/SWR or
+    /// SYSCALL — see [`jit_runner::first_unsupported_opcode`]) the
+    /// executor falls back to the interpreter transparently.  Set the
+    /// env var `ZIREN_DISABLE_JIT=1` to force the interpreter
+    /// regardless.
     ///
     /// # Errors
     ///
@@ -2309,8 +2320,231 @@ impl<'a> Executor<'a> {
     pub fn run_fast(&mut self) -> Result<(), ExecutionError> {
         self.executor_mode = ExecutorMode::Simple;
         self.print_report = true;
+        if self.try_run_fast_jit()? {
+            return Ok(());
+        }
         while !self.execute()? {}
         Ok(())
+    }
+
+    /// Attempt to run the program through the JIT (`run_fast` semantics
+    /// only — no event emission).  Returns `Ok(true)` on success,
+    /// `Ok(false)` if the JIT skipped the program (unsupported opcode,
+    /// disabled by env, or non-x86_64-Linux build) so the caller falls
+    /// back to the interpreter loop.
+    fn try_run_fast_jit(&mut self) -> Result<bool, ExecutionError> {
+        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+        {
+            if std::env::var_os("ZIREN_DISABLE_JIT").is_some() {
+                return Ok(false);
+            }
+            if crate::jit_runner::first_unsupported_opcode(&self.program).is_some() {
+                return Ok(false);
+            }
+            // Initialize program memory image into Executor state, the
+            // same way `execute()` does on the first cycle.
+            if self.state.global_clk == 0 {
+                self.initialize();
+            }
+
+            use crate::jit_runner::{
+                build_context, build_jit_function, run_jit, BuildParams,
+            };
+
+            let pc_start = self.state.pc;
+            let pc_base = self.program.pc_base;
+            let params = BuildParams {
+                program_size: self.program.instructions.len(),
+                memory_size: 4096, // ALU-only path uses no guest memory
+                max_trace_size: 4096,
+                pc_start,
+                pc_base,
+                // Match the interpreter's `state.global_clk += 1` per
+                // instruction (executor.rs:2164) so JIT vs interp
+                // cycle counts agree byte-for-byte at run_fast exit.
+                clk_bump: 1,
+            };
+            // Look up (or build) the JIT function via the global
+            // cache so subsequent calls to `run_fast` on the same
+            // program skip the transpile pass entirely.  Per-program
+            // entries live for the lifetime of the process; programs
+            // are typically a small handful per process.
+            let jit_fn_arc = match crate::jit_runner::cached_jit_function(
+                &self.program,
+                params,
+                Some(crate::jit_runner::jit_syscall_handler as crate::jit_runner::JitSyscallHandler),
+            ) {
+                Ok(f) => f,
+                Err(_) => return Ok(false), // unsupported opcode discovered late → fallback
+            };
+            let jit_fn: &zkm_core_jit::JitFunction = &jit_fn_arc;
+
+            // Allocate the host-side guest memory bridge.  4 GB
+            // virtual address space, MAP_NORESERVE so unused pages
+            // are never committed.  Materialise the program image
+            // and any pre-existing executor memory cells into it so
+            // JIT loads see the right data on the first cycle.
+            let mut mem_bridge = match crate::jit_runner::JitMemoryBridge::new() {
+                Ok(b) => b,
+                Err(_) => return Ok(false),
+            };
+            // Skip the materialise loop if the bridge's pool slot
+            // already holds this program's image — saves O(image_size)
+            // store_word calls on repeated runs.
+            let prog_fp = crate::jit_runner::program_fingerprint_of(&self.program);
+            if mem_bridge.last_program_fingerprint != prog_fp {
+                for (&addr, &word) in &self.program.image {
+                    mem_bridge.store_word(addr, word);
+                }
+                mem_bridge.set_program_fingerprint(prog_fp);
+            }
+            // Seed any state.memory cells (e.g. from prior shards)
+            // into the host buffer too.  Always re-runs because
+            // state.memory differs across shards.
+            let pre_seeded: Vec<u32> = self.state.memory.page_table.keys().collect();
+            for addr in pre_seeded {
+                if let Some(rec) = self.state.memory.page_table.get(addr) {
+                    mem_bridge.store_word(addr, rec.value);
+                }
+            }
+            let memory_ptr = mem_bridge.as_ptr();
+            // The JIT'd code dispatches indirect MIPS jumps via
+            // `ctx.jump_table[pc/4]`, where `jump_table` holds
+            // *runtime* native code addresses populated by
+            // `JitFunction::finalize`.  Hand that array's pointer to
+            // the JIT.
+            let jump_table_ptr: *const *const u8 = jit_fn.jump_table.as_ptr();
+            let mut trace_buf = vec![0u8; 4096];
+
+            // Seed the JIT register file from the executor's current
+            // register state.  GP/SP/FP/RA are populated by Executor::initialize.
+            // Includes LO/HI/BRK/HEAP (indices 32..36) so the JIT's
+            // ctx.registers[34/35] are properly seeded from the program
+            // image (BRK/HEAP are loaded by the ZKM ELF loader into
+            // state.memory.registers via initialize()).
+            let mut regs = [0u32; 36];
+            for (i, slot) in regs.iter_mut().enumerate() {
+                *slot = self.register(crate::Register::from(i as u8));
+            }
+
+            let mut ctx = build_context(
+                pc_start,
+                memory_ptr,
+                jump_table_ptr,
+                trace_buf.as_mut_ptr(),
+                regs,
+            );
+            // Build the bridge state and hand the syscall trampoline
+            // a pointer to it via user_data.  We pre-stash raw
+            // pointers because `JitBridgeState` borrows `self` and
+            // `mem_bridge` simultaneously, which the borrow checker
+            // would (correctly) reject as overlapping mutable
+            // references unless we go through `*mut`.  SAFETY:
+            // `self`, `mem_bridge`, and `bridge_state` all live to
+            // the end of this scope; the trampoline only runs while
+            // the JIT is executing, well within that scope.
+            let executor_ptr: *mut Self = self;
+            let bridge_ptr: *mut crate::jit_runner::JitMemoryBridge = &mut mem_bridge;
+            let mut bridge_state = crate::jit_runner::JitBridgeState {
+                executor: unsafe { &mut *executor_ptr },
+                bridge: unsafe { &mut *bridge_ptr },
+                unconstrained_reg_snapshot: None,
+            };
+            ctx.user_data = &mut bridge_state as *mut _ as *mut std::ffi::c_void;
+
+            // Optional SIGSEGV diagnostic: when ZIREN_JIT_SIGSEGV_TRACE
+            // is set, install a one-shot handler that dumps
+            // ctx.last_executed_pc, the faulting host address, and the
+            // pinned-register state before the default handler aborts.
+            // Pairs with `ZIREN_JIT_PC_TRACE=1` (which makes the JIT
+            // emit the last_executed_pc bookkeeping per cycle).
+            #[cfg(target_os = "linux")]
+            let _segv_guard = if std::env::var_os("ZIREN_JIT_SIGSEGV_TRACE").is_some() {
+                Some(crate::jit_runner::install_segv_probe(&mut ctx))
+            } else {
+                None
+            };
+
+            unsafe { run_jit(&jit_fn, &mut ctx) };
+
+            #[cfg(target_os = "linux")]
+            drop(_segv_guard);
+            // Clear user_data immediately so a stale pointer can't be
+            // dereferenced if anything else inspects ctx later.
+            ctx.user_data = std::ptr::null_mut();
+            drop(bridge_state);
+            // Note: the syscall trampoline already syncs the bridge
+            // → executor.state.memory at every syscall boundary, and
+            // HALT-terminated programs always end via a syscall.  So
+            // the final flush is redundant for the typical case and
+            // we elide it; programs that fall off the end of code
+            // without HALTing don't have observable post-execution
+            // memory state to preserve anyway (the executor would
+            // surface them as ExceptionOrTrap).
+
+            // Normalise the HALT sentinel: the trampoline encodes
+            // "halt with exit_code=0" as 0x8000_0000 so the per-instr
+            // gate sees a non-zero value.  Map it back to 0 for the
+            // host's view of the program's exit code.
+            let raw_exit = ctx.exit_code;
+            let normalised_exit = if raw_exit == 0x8000_0000 { 0 } else { raw_exit };
+            // 0xDEAD_C0DE = the JIT executed an UNIMPL trap (compiler
+            // sentinel for unreachable code that turned out to be
+            // reachable).  Surface as the same error the interpreter
+            // would produce at that opcode.
+            if raw_exit == 0xDEAD_C0DE {
+                return Err(ExecutionError::UnsupportedInstruction(0));
+            }
+            // Mark `state.exited` if the program halted (any non-error
+            // exit_code, including the sentinel-encoded zero).
+            if raw_exit != 0 && (raw_exit & 0x4000_0000) == 0 {
+                self.state.exited = true;
+            }
+            let _ = normalised_exit;
+
+            // Reconcile JIT post-call state back into the executor.
+            // Simple-mode bookkeeping uses shard=0/timestamp=0; the
+            // real values are recomputed in Trace mode anyway.
+            // Reconcile all 36 registers including LO/HI/BRK/HEAP.
+            use crate::events::MemoryRecord;
+            for (i, &v) in ctx.registers[..36].iter().enumerate() {
+                self.state.memory.registers.insert(
+                    i as u32,
+                    MemoryRecord { value: v, shard: 0, timestamp: 0 },
+                );
+            }
+            self.state.pc = ctx.pc;
+            self.state.global_clk = ctx.global_clk;
+
+            // Best-effort report reconstruction.  The JIT bumps
+            // global_clk per executed cycle (via the per-instruction
+            // ADD in the prologue) and the syscall trampoline
+            // increments report.syscall_counts directly inside the
+            // handler.  What's missing is per-opcode counts, since
+            // tracking those in the JIT would require an ADD per
+            // instruction PER opcode bucket — defeats the win.  For
+            // run_fast's contract (cycle count + public values stream
+            // for the prover's pre-pass), the cycle count is derivable
+            // from `global_clk / 5` and the public values stream is
+            // populated by the syscall trampoline calling into the
+            // executor's syscall impls (which write to
+            // `state.public_values_stream`).  Callers that read
+            // `report.opcode_counts` get an empty map on the JIT path
+            // — document this as the trade.
+            if self.print_report && self.report.opcode_counts.values().all(|&v| v == 0) {
+                // Estimate a single bucket so the total isn't zero —
+                // attribute all cycles to ADD as a placeholder.
+                // Downstream that needs per-opcode breakdowns must
+                // disable JIT via ZIREN_DISABLE_JIT.
+                let cycles = (ctx.global_clk / 5).max(1);
+                self.report.opcode_counts[crate::Opcode::ADD] = cycles;
+            }
+            return Ok(true);
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
+        {
+            Ok(false)
+        }
     }
 
     /// Executes the program and prints the execution report.

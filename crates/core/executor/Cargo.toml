@@ -54,6 +54,9 @@ tracing-subscriber = "0.3.19"
 env_logger = "0.11.6"
 num_enum = "0.7.5"
 
+[target.'cfg(all(target_arch = "x86_64", target_os = "linux"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 test-artifacts = { path = "../../test-artifacts" }
 zkm-instruction-test-defs = { workspace = true }
@@ -61,3 +64,8 @@ zkm-instruction-test-defs = { workspace = true }
 [features]
 bigint-rug = ["zkm-curves/bigint-rug"]
 pre-alloc = []
+
+[[bench]]
+name = "jit_vs_interp"
+path = "benches/jit_vs_interp.rs"
+harness = false

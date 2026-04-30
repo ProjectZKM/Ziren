@@ -35,14 +35,22 @@ pub enum MipsRegister {
     Fp,
     /// Return address.
     Ra,
-    /// Multiply / divide HI half (R32 in ZKM extension).
-    Hi,
-    /// Multiply / divide LO half (R33 in ZKM extension).
+    /// Multiply / divide LO half (quotient).  Match the executor's
+    /// `Register::LO = 32` to keep the index encoding consistent so
+    /// instructions that name register 32 directly read LO on both
+    /// paths.  (Earlier this enum had Hi/Lo swapped, which caused
+    /// fib(N) to commit `[N, 0, 0]` once the loop ran enough
+    /// iterations to surface a HI-read after a DIV.)
     Lo,
-    /// Reserved (R34).
-    Rsv34,
-    /// Reserved (R35).
-    Rsv35,
+    /// Multiply / divide HI half (remainder).  Matches `Register::HI = 33`.
+    Hi,
+    /// Brk / sbrk pointer (R34, matches `Register::BRK = 34`).
+    /// Used by the syscall path; we keep it backed by ctx.registers[34]
+    /// rather than packed into XMM (no slots left after Hi/Lo).
+    Brk,
+    /// Heap pointer (R35, matches `Register::HEAP = 35`).  Same backing
+    /// as Brk — through ctx.registers, not XMM.
+    Heap,
 }
 
 impl MipsRegister {
@@ -52,7 +60,7 @@ impl MipsRegister {
     pub const fn from_u8(idx: u8) -> Self {
         // SAFETY: u8 -> 6-bit enum, callers must keep idx < 36.
         // For out-of-range values we saturate at Zero to avoid UB.
-        if idx > Self::Rsv35 as u8 {
+        if idx > Self::Heap as u8 {
             Self::Zero
         } else {
             unsafe { std::mem::transmute(idx) }

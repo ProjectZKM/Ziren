@@ -77,6 +77,9 @@ pub trait ComputeInstructions {
     /// Right-rotate by `shamt` bits.
     fn ror(&mut self, rd: MipsRegister, rt: MipsRegister, shamt: u8);
 
+    /// Right-rotate by `rs[4:0]` bits (variable rotate, MIPS RORV).
+    fn rorv(&mut self, rd: MipsRegister, rt: MipsRegister, rs: MipsRegister);
+
     /// `(HI:LO) += rs * rt` signed (MADD).
     fn madd(&mut self, rs: MipsRegister, rt: MipsRegister);
     /// `(HI:LO) += rs * rt` unsigned (MADDU).
@@ -181,8 +184,19 @@ pub trait ControlFlowInstructions {
 
 /// System / trap / move-co-processor instructions.
 pub trait SystemInstructions {
-    /// SYSCALL — call the registered Rust handler.
-    fn syscall(&mut self);
+    /// SYSCALL — call the registered Rust handler.  `pc` is the guest
+    /// PC of the SYSCALL instruction itself; the backend stashes it in
+    /// the JIT context so the host's handler can recover it (used by
+    /// ENTER_UNCONSTRAINED to snapshot `state.pc` for later rollback).
+    fn syscall(&mut self, pc: u32);
+
+    /// UNIMPL trap — set a sentinel exit_code so the next per-instr
+    /// prologue gates the JIT short-circuits.  Lowered via
+    /// `emit_unimpl_trap` on the x86 backend.  Compiler-emitted
+    /// UNIMPL bytes typically sit in unreachable code and never
+    /// execute; if reached, the host translates the sentinel into
+    /// `ExecutionError::UnsupportedInstruction`.
+    fn unimpl_trap(&mut self);
 
     /// `rd = HI`.
     fn mfhi(&mut self, rd: MipsRegister);
@@ -199,6 +213,12 @@ pub trait SystemInstructions {
     /// Trap if equal — emit a guard that jumps to a registered trap
     /// handler if `rs == rt`.
     fn teq(&mut self, rs: MipsRegister, rt: MipsRegister);
+
+    /// TEQ-with-immediate variant: trap if `rs == imm`.  Real Ziren
+    /// ELFs commonly emit `TEQ $rt, 0` after a DIV (div-by-zero
+    /// check); the driver routes those through here so the JIT
+    /// doesn't ignore the immediate operand and silently miscompare.
+    fn teq_imm(&mut self, rs: MipsRegister, imm: i32);
 
     /// Conditional move on zero / non-zero.
     fn movz(&mut self, rd: MipsRegister, rs: MipsRegister, rt: MipsRegister);

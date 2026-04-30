@@ -106,6 +106,19 @@ pub struct JitFunction {
     pub pc_start: u32,
 }
 
+// SAFETY: `JitFunction` is immutable post-finalize. The
+// `ExecutableBuffer` is mmap'd PROT_READ|PROT_EXEC and never
+// modified; `jump_table` holds pointers INTO that buffer (also
+// immutable). It's safe to share `&JitFunction` (or `Arc<JitFunction>`)
+// across threads — concurrent `call()`s are fine because each call
+// only reads the code pages and operates on the caller-supplied
+// `JitContext`. We DO need explicit impls because `Vec<*const u8>`
+// is neither Send nor Sync by default.
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+unsafe impl Send for JitFunction {}
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+unsafe impl Sync for JitFunction {}
+
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 impl JitFunction {
     /// Address of the entry point — always the buffer start so the
@@ -150,7 +163,10 @@ impl backends::TranspilerBackend {
     /// # Errors
     ///
     /// Returns `Err` if dynasm-rt fails to commit the buffer.
-    pub fn finalize(self, pc_start: u32) -> JitResult<JitFunction> {
+    pub fn finalize(mut self, pc_start: u32) -> JitResult<JitFunction> {
+        // Auto-bind the shared exit label if the caller didn't (smoke
+        // tests that drive the assembler directly).  Idempotent.
+        self.bind_exit_label();
         let buf_offsets = self.jump_table.clone();
         let assembler = self.assembler;
         let buf = assembler.finalize().map_err(|_| JitError::CodeTooLarge)?;

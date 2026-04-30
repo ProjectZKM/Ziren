@@ -8,7 +8,7 @@
 
 use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
 
-use super::{TranspilerBackend, CONTEXT, JUMP_TABLE, NEXT_NEXT_PC_OFFSET, TEMP_A, TEMP_B};
+use super::{TranspilerBackend, CONTEXT, JUMP_TABLE, DELAYED_JUMP_TARGET_OFFSET, TEMP_A, TEMP_B};
 use crate::instructions::{
     ComputeInstructions, ControlFlowInstructions, MemoryInstructions, SystemInstructions,
 };
@@ -31,30 +31,34 @@ impl ComputeInstructions for TranspilerBackend {
     }
 
     fn mult(&mut self, rs: MipsRegister, rt: MipsRegister) {
-        // Signed 32x32 -> 64.  EAX = rs (sign-ext), IMUL rt → EDX:EAX.
+        // Signed 32x32 -> 64.  We need x86's `imul r/m32` form which
+        // computes EAX * r/m32 → EDX:EAX (low/high 32 each).  Earlier
+        // we used the 64-bit form (`imul Rq`) which after sign-extending
+        // to 64 bits stored the FULL 64-bit product in RAX with RDX=0
+        // (or sign-extension of RAX).  That left HI = sign-bit instead
+        // of the high 32 bits of the product, so format-machinery's
+        // digit conversion (which divides by 10 = MULTU + remainder)
+        // got HI=0 always.
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
-            ; movsxd rax, eax
-            ; movsxd Rq(TEMP_B), Rd(TEMP_B)
-            ; imul Rq(TEMP_B)
-            // RDX:RAX now holds the 64-bit product (sign-extended).
+            ; imul Rd(TEMP_B)
+            // EDX:EAX now hold the signed 32x32 → 64-bit product.
         );
-        // LO = low 32 bits (RAX), HI = bits 32..63 (RDX).
         self.emit_register_store(MipsRegister::Lo, dynasmrt::x64::Rq::RAX as u8);
-        // Move RDX into a temp first since emit_register_store clobbers RAX.
         dynasm!(self.assembler ; .arch x64 ; mov Rd(TEMP_A), edx);
         self.emit_register_store(MipsRegister::Hi, TEMP_A);
     }
 
     fn multu(&mut self, rs: MipsRegister, rt: MipsRegister) {
-        // Unsigned 32x32 -> 64.
+        // Unsigned 32x32 -> 64 via `mul r/m32` (EDX:EAX = EAX * r/m32).
+        // Same fix as `mult` above — the previous `mul Rq(TEMP_B)`
+        // produced a 128-bit result (RDX:RAX) of which only RAX held
+        // anything useful and RDX was always 0.
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
-            ; mov eax, eax            // zero-extend
-            ; mov Rd(TEMP_B), Rd(TEMP_B)
-            ; mul Rq(TEMP_B)
+            ; mul Rd(TEMP_B)
         );
         self.emit_register_store(MipsRegister::Lo, dynasmrt::x64::Rq::RAX as u8);
         dynasm!(self.assembler ; .arch x64 ; mov Rd(TEMP_A), edx);
@@ -279,25 +283,44 @@ impl ComputeInstructions for TranspilerBackend {
         self.emit_register_store(rd, TEMP_A);
     }
 
+    fn rorv(&mut self, rd: MipsRegister, rt: MipsRegister, rs: MipsRegister) {
+        // Variable rotate.  x86 ROR-by-CL form takes count from CL and
+        // masks to 5 bits per MIPS spec.
+        self.emit_register_load(rs, dynasmrt::x64::Rq::RCX as u8);
+        self.emit_register_load(rt, TEMP_A);
+        dynasm!(self.assembler ; .arch x64
+            ; and cl, 0x1F
+            ; ror Rd(TEMP_A), cl
+        );
+        self.emit_register_store(rd, TEMP_A);
+    }
+
     fn madd(&mut self, rs: MipsRegister, rt: MipsRegister) {
-        // (HI:LO) += rs * rt (signed).
+        // (HI:LO) += rs * rt (signed).  Use 32-bit `imul r/m32` to get
+        // EDX:EAX as the 64-bit product (NOT 64-bit imul which puts a
+        // 128-bit product in RDX:RAX with RDX always 0).
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
-            ; movsxd rax, eax
-            ; movsxd Rq(TEMP_B), Rd(TEMP_B)
-            ; imul Rq(TEMP_B)
-            // RDX:RAX = rs*rt
+            ; imul Rd(TEMP_B)
+            // EDX:EAX = signed rs*rt (32x32 -> 64)
         );
-        // Add (HI:LO) — load LO into RCX, HI into TEMP_B, then 64-bit add.
+        // Sign-extend EDX:EAX into RAX (64-bit) for the add.
+        // RAX = (EDX as i64) << 32 | (EAX as u32 zero-ext).  Easiest:
+        // shl rdx, 32; mov eax, eax (zero-ext); or rax, rdx.
+        dynasm!(self.assembler ; .arch x64
+            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
+            ; mov eax, eax
+            ; or  Rq(dynasmrt::x64::Rq::RAX as u8), Rq(dynasmrt::x64::Rq::RDX as u8)
+        );
+        // Pack (HI:LO) into TEMP_B.
         self.emit_register_load(MipsRegister::Lo, dynasmrt::x64::Rq::RCX as u8);
         self.emit_register_load(MipsRegister::Hi, TEMP_B);
         dynasm!(self.assembler ; .arch x64
             ; shl Rq(TEMP_B), 32
+            ; mov ecx, ecx
             ; or  Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RCX as u8)
-            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
-            ; or  Rq(dynasmrt::x64::Rq::RDX as u8), Rq(dynasmrt::x64::Rq::RAX as u8)
-            ; add Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RDX as u8)
+            ; add Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RAX as u8)
             ; mov Rq(dynasmrt::x64::Rq::RAX as u8), Rq(TEMP_B)
             ; mov Rq(dynasmrt::x64::Rq::RDX as u8), Rq(TEMP_B)
             ; shr Rq(dynasmrt::x64::Rq::RDX as u8), 32
@@ -311,18 +334,20 @@ impl ComputeInstructions for TranspilerBackend {
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
+            ; mul Rd(TEMP_B)
+        );
+        dynasm!(self.assembler ; .arch x64
+            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
             ; mov eax, eax
-            ; mov Rd(TEMP_B), Rd(TEMP_B)
-            ; mul Rq(TEMP_B)
+            ; or  Rq(dynasmrt::x64::Rq::RAX as u8), Rq(dynasmrt::x64::Rq::RDX as u8)
         );
         self.emit_register_load(MipsRegister::Lo, dynasmrt::x64::Rq::RCX as u8);
         self.emit_register_load(MipsRegister::Hi, TEMP_B);
         dynasm!(self.assembler ; .arch x64
             ; shl Rq(TEMP_B), 32
+            ; mov ecx, ecx
             ; or  Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RCX as u8)
-            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
-            ; or  Rq(dynasmrt::x64::Rq::RDX as u8), Rq(dynasmrt::x64::Rq::RAX as u8)
-            ; add Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RDX as u8)
+            ; add Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RAX as u8)
             ; mov Rq(dynasmrt::x64::Rq::RAX as u8), Rq(TEMP_B)
             ; mov Rq(dynasmrt::x64::Rq::RDX as u8), Rq(TEMP_B)
             ; shr Rq(dynasmrt::x64::Rq::RDX as u8), 32
@@ -337,18 +362,20 @@ impl ComputeInstructions for TranspilerBackend {
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
-            ; movsxd rax, eax
-            ; movsxd Rq(TEMP_B), Rd(TEMP_B)
-            ; imul Rq(TEMP_B)
+            ; imul Rd(TEMP_B)
+        );
+        dynasm!(self.assembler ; .arch x64
+            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
+            ; mov eax, eax
+            ; or  Rq(dynasmrt::x64::Rq::RAX as u8), Rq(dynasmrt::x64::Rq::RDX as u8)
         );
         self.emit_register_load(MipsRegister::Lo, dynasmrt::x64::Rq::RCX as u8);
         self.emit_register_load(MipsRegister::Hi, TEMP_B);
         dynasm!(self.assembler ; .arch x64
             ; shl Rq(TEMP_B), 32
+            ; mov ecx, ecx
             ; or  Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RCX as u8)
-            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
-            ; or  Rq(dynasmrt::x64::Rq::RDX as u8), Rq(dynasmrt::x64::Rq::RAX as u8)
-            ; sub Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RDX as u8)
+            ; sub Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RAX as u8)
             ; mov Rq(dynasmrt::x64::Rq::RAX as u8), Rq(TEMP_B)
             ; mov Rq(dynasmrt::x64::Rq::RDX as u8), Rq(TEMP_B)
             ; shr Rq(dynasmrt::x64::Rq::RDX as u8), 32
@@ -362,18 +389,20 @@ impl ComputeInstructions for TranspilerBackend {
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
+            ; mul Rd(TEMP_B)
+        );
+        dynasm!(self.assembler ; .arch x64
+            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
             ; mov eax, eax
-            ; mov Rd(TEMP_B), Rd(TEMP_B)
-            ; mul Rq(TEMP_B)
+            ; or  Rq(dynasmrt::x64::Rq::RAX as u8), Rq(dynasmrt::x64::Rq::RDX as u8)
         );
         self.emit_register_load(MipsRegister::Lo, dynasmrt::x64::Rq::RCX as u8);
         self.emit_register_load(MipsRegister::Hi, TEMP_B);
         dynasm!(self.assembler ; .arch x64
             ; shl Rq(TEMP_B), 32
+            ; mov ecx, ecx
             ; or  Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RCX as u8)
-            ; shl Rq(dynasmrt::x64::Rq::RDX as u8), 32
-            ; or  Rq(dynasmrt::x64::Rq::RDX as u8), Rq(dynasmrt::x64::Rq::RAX as u8)
-            ; sub Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RDX as u8)
+            ; sub Rq(TEMP_B), Rq(dynasmrt::x64::Rq::RAX as u8)
             ; mov Rq(dynasmrt::x64::Rq::RAX as u8), Rq(TEMP_B)
             ; mov Rq(dynasmrt::x64::Rq::RDX as u8), Rq(TEMP_B)
             ; shr Rq(dynasmrt::x64::Rq::RDX as u8), 32
@@ -489,14 +518,70 @@ impl MemoryInstructions for TranspilerBackend {
         self.emit_register_store(rd, TEMP_A);
     }
 
-    fn lwl(&mut self, _rd: MipsRegister, _rs1: MipsRegister, _imm: i32) {
-        // Unaligned word load — defer to interpreter via syscall-style
-        // callback in v1; LWL/LWR are rare in optimized binaries.
-        unimplemented!("P3.5: LWL via callback");
+    fn lwl(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
+        // MIPS LWL semantics, mirroring `executor.rs::execute_load`'s
+        // Opcode::LWL arm:
+        //
+        //   vaddr   = rs + imm
+        //   aligned = vaddr & !3
+        //   mem     = *aligned         (4-byte word)
+        //   i       = vaddr & 3
+        //   shift   = 24 - i*8         (i=0:24, i=1:16, i=2:8, i=3:0)
+        //   val     = mem << shift
+        //   mask    = 0xFFFFFFFF << shift
+        //   rd      = (rt & !mask) | val
+        //
+        // Inline expansion: ~16 native ops; CL is the variable-shift
+        // count (only x86 register that works for shift-by-reg).
+        self.may_early_exit = true;
+        self.emit_lwl_lwr_load_mem(rs1, imm);
+        // After emit_lwl_lwr_load_mem:
+        //   eax = mem (loaded word)
+        //   edx = i (vaddr & 3)
+        // Compute shift = 24 - i*8 in CL.
+        dynasm!(self.assembler ; .arch x64
+            ; mov ecx, edx
+            ; shl ecx, 3
+            ; neg ecx
+            ; add ecx, 24
+            ; shl eax, cl
+            ; mov edx, -1
+            ; shl edx, cl
+            ; not edx
+        );
+        // Merge with rt's current value: (rt & !mask) | val.
+        // !mask is in edx; val is in eax.
+        self.emit_register_load(rd, TEMP_B);
+        dynasm!(self.assembler ; .arch x64
+            ; and Rd(TEMP_B), edx
+            ; or eax, Rd(TEMP_B)
+            ; mov Rd(TEMP_A), eax
+        );
+        self.emit_register_store(rd, TEMP_A);
     }
 
-    fn lwr(&mut self, _rd: MipsRegister, _rs1: MipsRegister, _imm: i32) {
-        unimplemented!("P3.5: LWR via callback");
+    fn lwr(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
+        // MIPS LWR (mirrors executor.rs Opcode::LWR):
+        //   shift = i*8;   val = mem >> shift;   mask = 0xFFFFFFFF >> shift
+        //   rd    = (rt & !mask) | val
+        self.may_early_exit = true;
+        self.emit_lwl_lwr_load_mem(rs1, imm);
+        // eax = mem, edx = i.  Compute shift = i*8 in CL.
+        dynasm!(self.assembler ; .arch x64
+            ; mov ecx, edx
+            ; shl ecx, 3
+            ; shr eax, cl
+            ; mov edx, -1
+            ; shr edx, cl
+            ; not edx
+        );
+        self.emit_register_load(rd, TEMP_B);
+        dynasm!(self.assembler ; .arch x64
+            ; and Rd(TEMP_B), edx
+            ; or eax, Rd(TEMP_B)
+            ; mov Rd(TEMP_A), eax
+        );
+        self.emit_register_store(rd, TEMP_A);
     }
 
     fn ll(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
@@ -533,12 +618,71 @@ impl MemoryInstructions for TranspilerBackend {
         );
     }
 
-    fn swl(&mut self, _rs2: MipsRegister, _rs1: MipsRegister, _imm: i32) {
-        unimplemented!("P3.5: SWL via callback");
+    fn swl(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32) {
+        // MIPS SWL (mirrors executor.rs Opcode::SWL):
+        //   shift = 24 - i*8
+        //   val   = rt >> shift
+        //   mask  = 0xFFFFFFFF >> shift
+        //   *aligned = (mem & !mask) | val
+        self.may_early_exit = true;
+        self.emit_lwl_lwr_load_mem(rs1, imm);
+        // eax = mem, edx = i, [Rq(TEMP_A)] still points at the host
+        // address of the aligned word (we'll need to write back to it).
+        // Save host-address & mem on the stack — emit_register_load
+        // for rs2 below clobbers TEMP_A (RBX).
+        dynasm!(self.assembler ; .arch x64
+            ; push Rq(TEMP_A)              // save host addr
+            ; push rax                     // save mem
+        );
+        // Load rt into TEMP_B.
+        self.emit_register_load(rs2, TEMP_B);
+        dynasm!(self.assembler ; .arch x64
+            ; pop rax                      // restore mem
+            // shift = 24 - i*8 in CL
+            ; mov ecx, edx
+            ; shl ecx, 3
+            ; neg ecx
+            ; add ecx, 24
+            // val = rt >> shift  →  shr Rd(TEMP_B), cl
+            ; shr Rd(TEMP_B), cl
+            // mask = 0xFFFFFFFF >> shift  →  in edx; then !mask
+            ; mov edx, -1
+            ; shr edx, cl
+            ; not edx
+            // (mem & !mask) | val  →  eax
+            ; and eax, edx
+            ; or eax, Rd(TEMP_B)
+            ; pop Rq(TEMP_A)               // restore host addr
+            ; mov DWORD [Rq(TEMP_A)], eax
+        );
     }
 
-    fn swr(&mut self, _rs2: MipsRegister, _rs1: MipsRegister, _imm: i32) {
-        unimplemented!("P3.5: SWR via callback");
+    fn swr(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32) {
+        // MIPS SWR (mirrors executor.rs Opcode::SWR):
+        //   shift = i*8
+        //   val   = rt << shift
+        //   mask  = 0xFFFFFFFF << shift
+        //   *aligned = (mem & !mask) | val
+        self.may_early_exit = true;
+        self.emit_lwl_lwr_load_mem(rs1, imm);
+        dynasm!(self.assembler ; .arch x64
+            ; push Rq(TEMP_A)
+            ; push rax
+        );
+        self.emit_register_load(rs2, TEMP_B);
+        dynasm!(self.assembler ; .arch x64
+            ; pop rax
+            ; mov ecx, edx
+            ; shl ecx, 3
+            ; shl Rd(TEMP_B), cl
+            ; mov edx, -1
+            ; shl edx, cl
+            ; not edx
+            ; and eax, edx
+            ; or eax, Rd(TEMP_B)
+            ; pop Rq(TEMP_A)
+            ; mov DWORD [Rq(TEMP_A)], eax
+        );
     }
 
     fn sc(&mut self, rs2: MipsRegister, rs1: MipsRegister, imm: i32) {
@@ -556,7 +700,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         // emits the delay slot's code immediately after this call so
         // it executes before the next instruction is fetched.
         dynasm!(self.assembler ; .arch x64
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD target_pc as i32
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD target_pc as i32
         );
     }
 
@@ -566,7 +710,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         // ra immediate via the Reg API.  Here we just set
         // next_next_pc; ra is written by the driver via add(...).
         dynasm!(self.assembler ; .arch x64
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD target_pc as i32
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD target_pc as i32
         );
         // Driver responsibility: also emit a write to $ra.
     }
@@ -574,7 +718,7 @@ impl ControlFlowInstructions for TranspilerBackend {
     fn jr(&mut self, rs: MipsRegister) {
         self.emit_register_load(rs, TEMP_A);
         dynasm!(self.assembler ; .arch x64
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], Rd(TEMP_A)
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], Rd(TEMP_A)
         );
     }
 
@@ -582,7 +726,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         // Same as jr; the rd write happens in the driver.
         self.emit_register_load(rs, TEMP_A);
         dynasm!(self.assembler ; .arch x64
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], Rd(TEMP_A)
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], Rd(TEMP_A)
         );
     }
 
@@ -595,7 +739,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; cmp Rd(TEMP_A), Rd(TEMP_B)
             ; jne >no_branch
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD offset
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD offset
             ; no_branch:
         );
     }
@@ -606,7 +750,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; cmp Rd(TEMP_A), Rd(TEMP_B)
             ; je >no_branch
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD offset
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD offset
             ; no_branch:
         );
     }
@@ -616,7 +760,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; test Rd(TEMP_A), Rd(TEMP_A)
             ; jg >no_branch
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD offset
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD offset
             ; no_branch:
         );
     }
@@ -626,7 +770,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; test Rd(TEMP_A), Rd(TEMP_A)
             ; jle >no_branch
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD offset
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD offset
             ; no_branch:
         );
     }
@@ -636,7 +780,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; test Rd(TEMP_A), Rd(TEMP_A)
             ; jge >no_branch
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD offset
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD offset
             ; no_branch:
         );
     }
@@ -646,7 +790,7 @@ impl ControlFlowInstructions for TranspilerBackend {
         dynasm!(self.assembler ; .arch x64
             ; test Rd(TEMP_A), Rd(TEMP_A)
             ; jl >no_branch
-            ; mov DWORD [Rq(CONTEXT) + NEXT_NEXT_PC_OFFSET], DWORD offset
+            ; mov DWORD [Rq(CONTEXT) + DELAYED_JUMP_TARGET_OFFSET], DWORD offset
             ; no_branch:
         );
     }
@@ -672,12 +816,29 @@ impl ControlFlowInstructions for TranspilerBackend {
 }
 
 impl SystemInstructions for TranspilerBackend {
-    fn syscall(&mut self) {
-        // Call the registered Rust handler with rdi = *mut JitContext.
-        // Save callee-clobbered state (memory ptr, scratch) around the
-        // call by spilling onto the stack via push/pop.  The handler
+    fn unimpl_trap(&mut self) {
+        self.emit_unimpl_trap();
+    }
+
+    fn syscall(&mut self, pc: u32) {
+        // Spill all 36 MIPS registers from their XMM/GPR home locations
+        // into ctx.registers[..] BEFORE the handler runs, then reload
+        // them AFTER it returns.  Without this the handler reads stale
+        // values for V0/A0/A1 (the syscall id + args) and any register
+        // the handler mutates would be lost on resume.  The handler
         // itself follows the SysV C ABI.
-        let handler = self.syscall_handler.expect("SYSCALL invoked without registered handler");
+        self.emit_spill_all_registers();
+        // Stash the SYSCALL's guest PC in `last_executed_pc` so the
+        // host's handler can recover it.  ENTER_UNCONSTRAINED needs
+        // this to snapshot `state.pc` accurately — the executor's own
+        // `state.pc` is stale during JIT execution since the JIT
+        // doesn't write through it on every cycle.
+        dynasm!(self.assembler ; .arch x64
+            ; mov DWORD [Rq(CONTEXT) + super::LAST_EXECUTED_PC_OFFSET], DWORD pc as i32
+        );
+        let handler = self
+            .syscall_handler
+            .expect("SYSCALL invoked without registered handler");
         let target = handler as usize;
         dynasm!(self.assembler ; .arch x64
             // SysV-ABI prologue: 16-byte stack alignment.
@@ -686,7 +847,18 @@ impl SystemInstructions for TranspilerBackend {
             ; mov rax, QWORD target as i64
             ; call rax
             ; pop rcx               // restore alignment
+            // The handler may have clobbered the JUMP_TABLE pointer
+            // since it isn't preserved across SysV calls (R13 is
+            // callee-saved, but only by *callees* — extern Rust code
+            // saves it but our JIT entry already loaded it from ctx
+            // and we re-load to be safe in case future handlers
+            // wrap with their own non-preserving code).
+            ; mov Rq(super::JUMP_TABLE), [Rq(super::CONTEXT) + super::JUMP_TABLE_OFFSET]
+            // R10 (MEMORY_PTR) is caller-saved on SysV — the handler
+            // call clobbers it.  Reload from ctx.memory.
+            ; mov Rq(super::MEMORY_PTR), [Rq(super::CONTEXT) + super::MEMORY_OFFSET]
         );
+        self.emit_load_all_registers();
     }
     fn mfhi(&mut self, rd: MipsRegister) {
         // HI lives at MipsRegister::Hi (R34) — XMM15 lo half per LOCATION.
@@ -707,17 +879,28 @@ impl SystemInstructions for TranspilerBackend {
         self.emit_register_store(MipsRegister::Lo, TEMP_A);
     }
     fn teq(&mut self, rs: MipsRegister, rt: MipsRegister) {
-        // If rs == rt: trip a trap by writing pc=0 + setting exit_code,
-        // and ud2 (illegal instruction) — the parent process catches
-        // SIGILL via the crash-isolation harness in P6.  In v1 we just
-        // emit a no-op fall-through; the host-side AIR will record the
-        // trap event from the trace ring.
+        // If rs == rt: trap.  Rather than `ud2` (which SIGILLs the
+        // host), set ctx.exit_code to a sentinel so the next
+        // per-instruction prologue gate jumps to the shared exit
+        // label.  Host translates the sentinel via post-call code.
         self.emit_register_load(rs, TEMP_A);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64
             ; cmp Rd(TEMP_A), Rd(TEMP_B)
             ; jne >no_trap
-            ; ud2
+            ; mov DWORD [Rq(CONTEXT) + super::EXIT_CODE_OFFSET], DWORD 0xDEAD_C0E0u32 as i32
+            ; no_trap:
+        );
+    }
+
+    fn teq_imm(&mut self, rs: MipsRegister, imm: i32) {
+        // See `teq` for the trap-via-exit-code rationale.  imm form
+        // skips the second emit_register_load and uses cmp-with-imm.
+        self.emit_register_load(rs, TEMP_A);
+        dynasm!(self.assembler ; .arch x64
+            ; cmp Rd(TEMP_A), DWORD imm
+            ; jne >no_trap
+            ; mov DWORD [Rq(CONTEXT) + super::EXIT_CODE_OFFSET], DWORD 0xDEAD_C0E1u32 as i32
             ; no_trap:
         );
     }

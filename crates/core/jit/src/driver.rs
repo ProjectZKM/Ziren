@@ -278,7 +278,11 @@ pub enum DriverError {
 /// The caller is expected to wrap this with `start_instr()` /
 /// `end_instr()` brackets — see [`drive_instructions`] for the
 /// canonical loop.
-fn lower_one<T: MipsTranspiler>(t: &mut T, ins: DriverInstruction) -> Result<(), DriverError> {
+fn lower_one<T: MipsTranspiler>(
+    t: &mut T,
+    ins: DriverInstruction,
+    current_pc: u32,
+) -> Result<(), DriverError> {
     let op = JitOpcode::from_u8(ins.opcode);
     let rd = MipsRegister::from_u8(ins.op_a);
     let rs = MipsRegister::from_u8(ins.op_b as u8);
@@ -295,6 +299,15 @@ fn lower_one<T: MipsTranspiler>(t: &mut T, ins: DriverInstruction) -> Result<(),
         MipsOperand::Reg(rt)
     };
     let imm32 = ins.op_c as i32;
+    // For branches, the executor encodes `op_c` as a *byte offset
+    // relative to next_pc* (= current_pc + 4); see
+    // crates/core/executor/src/executor.rs:execute_branch where
+    // `next_next_pc = offset.wrapping_add(next_pc)`.  The transpiler
+    // lowering expects an *absolute* target PC (per the existing
+    // comment on beq/bne in instruction_impl.rs), so we resolve it
+    // here once and pass the absolute value down.
+    let branch_target_pc =
+        (current_pc.wrapping_add(4).wrapping_add(ins.op_c as u32)) as i32;
 
     match op {
         // ── ALU ─────────────────────────────────────────────
@@ -303,48 +316,229 @@ fn lower_one<T: MipsTranspiler>(t: &mut T, ins: DriverInstruction) -> Result<(),
         JitOpcode::And => t.and(rd, op_b, op_c),
         JitOpcode::Or => t.or(rd, op_b, op_c),
         JitOpcode::Xor => t.xor(rd, op_b, op_c),
-        JitOpcode::Nor => t.nor(rd, rs, rt),
+        JitOpcode::Nor => {
+            // NOR's raw signature takes two registers; honour imm
+            // by constant-folding (mirrors the SLL/SRL/.. fix in #73).
+            if ins.imm_b || ins.imm_c {
+                let b = if ins.imm_b { ins.op_b } else { 0 };
+                let c = if ins.imm_c { ins.op_c } else { 0 };
+                let val = !(b | c);
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else {
+                t.nor(rd, rs, rt);
+            }
+        }
         JitOpcode::Slt => t.slt(rd, op_b, op_c),
         JitOpcode::Sltu => t.sltu(rd, op_b, op_c),
         JitOpcode::Sll => {
-            // shamt is the low 5 bits of op_c
-            t.sll(rd, rs, (ins.op_c & 0x1f) as u8);
+            // Ziren's SLL doubles as MIPS LUI when `imm_b` is set:
+            // e.g. `SLL $sp, 0x7f00, 16` means `$sp = 0x7f00 << 16`.
+            // The interpreter handles this via `b << (c & 0x1f)` where
+            // both b and c may come from registers OR immediates.
+            // imm_c controls whether op_c is the literal shamt (true)
+            // or a register holding the shamt (false → use SLLV).
+            if ins.imm_b && ins.imm_c {
+                let shamt = (ins.op_c & 0x1f) as u8;
+                let val = (ins.op_b as i32).wrapping_shl(shamt as u32) as u32;
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else if ins.imm_c {
+                t.sll(rd, rs, (ins.op_c & 0x1f) as u8);
+            } else {
+                t.sllv(rd, rs, rt);
+            }
         }
-        JitOpcode::Srl => t.srl(rd, rs, (ins.op_c & 0x1f) as u8),
-        JitOpcode::Sra => t.sra(rd, rs, (ins.op_c & 0x1f) as u8),
-        JitOpcode::Ror => t.ror(rd, rs, (ins.op_c & 0x1f) as u8),
-        JitOpcode::Clz => t.clz(rd, rs),
-        JitOpcode::Clo => t.clo(rd, rs),
+        JitOpcode::Srl => {
+            if ins.imm_b && ins.imm_c {
+                let shamt = (ins.op_c & 0x1f) as u8;
+                let val = (ins.op_b as u32).wrapping_shr(shamt as u32);
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else if ins.imm_c {
+                t.srl(rd, rs, (ins.op_c & 0x1f) as u8);
+            } else {
+                t.srlv(rd, rs, rt);
+            }
+        }
+        JitOpcode::Sra => {
+            if ins.imm_b && ins.imm_c {
+                let shamt = (ins.op_c & 0x1f) as u8;
+                let val = (ins.op_b as i32).wrapping_shr(shamt as u32) as u32;
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else if ins.imm_c {
+                t.sra(rd, rs, (ins.op_c & 0x1f) as u8);
+            } else {
+                t.srav(rd, rs, rt);
+            }
+        }
+        JitOpcode::Ror => {
+            if ins.imm_b && ins.imm_c {
+                let shamt = (ins.op_c & 0x1f) as u8;
+                let val = (ins.op_b as u32).rotate_right(shamt as u32);
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else if ins.imm_c {
+                t.ror(rd, rs, (ins.op_c & 0x1f) as u8);
+            } else {
+                t.rorv(rd, rs, rt);
+            }
+        }
+        JitOpcode::Clz => {
+            if ins.imm_b {
+                let val = (ins.op_b as u32).leading_zeros();
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else {
+                t.clz(rd, rs);
+            }
+        }
+        JitOpcode::Clo => {
+            if ins.imm_b {
+                let val = (ins.op_b as u32).leading_ones();
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else {
+                t.clo(rd, rs);
+            }
+        }
 
         // ── Multiply / divide ───────────────────────────────
-        JitOpcode::Mul => t.mul3(rd, rs, rt),
-        JitOpcode::Mult => t.mult(rs, rt),
-        JitOpcode::Multu => t.multu(rs, rt),
-        JitOpcode::Div => t.div(rs, rt),
-        JitOpcode::Divu => t.divu(rs, rt),
-        JitOpcode::Mod => t.mod_op(rd, rs, rt),
-        JitOpcode::Modu => t.modu(rd, rs, rt),
-        JitOpcode::Madd => t.madd(rs, rt),
-        JitOpcode::Maddu => t.maddu(rs, rt),
-        JitOpcode::Msub => t.msub(rs, rt),
-        JitOpcode::Msubu => t.msubu(rs, rt),
+        // These all take two register source operands.  Ziren's
+        // instruction format allows op_b/op_c to be immediates too,
+        // but the JIT lowerings only accept registers — so when imm
+        // is set we constant-fold to the result and synthesize a
+        // single-operand register write.  Same pattern as the
+        // SLL/SRL/SRA/ROR/CLZ/CLO fix in #73.
+        JitOpcode::Mul => {
+            if ins.imm_b || ins.imm_c {
+                let b = if ins.imm_b { ins.op_b } else { 0 };
+                let c = if ins.imm_c { ins.op_c } else { 0 };
+                let val = (b as i32).wrapping_mul(c as i32) as u32;
+                t.add(rd, MipsOperand::Imm(val as i64), MipsOperand::Imm(0));
+            } else {
+                t.mul3(rd, rs, rt);
+            }
+        }
+        // Dual-source ops: when imm_b/imm_c is set, the lowerings
+        // would silently use $zero (#73 root cause).  Real compilers
+        // never emit "MULT $rs, imm", but Ziren's instruction format
+        // allows it.  Return UnsupportedOpcode so try_run_fast_jit
+        // falls back to the interpreter for that program.
+        JitOpcode::Mult => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.mult(rs, rt);
+        }
+        JitOpcode::Multu => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.multu(rs, rt);
+        }
+        JitOpcode::Div => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.div(rs, rt);
+        }
+        JitOpcode::Divu => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.divu(rs, rt);
+        }
+        JitOpcode::Mod => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.mod_op(rd, rs, rt);
+        }
+        JitOpcode::Modu => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.modu(rd, rs, rt);
+        }
+        JitOpcode::Madd => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.madd(rs, rt);
+        }
+        JitOpcode::Maddu => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.maddu(rs, rt);
+        }
+        JitOpcode::Msub => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.msub(rs, rt);
+        }
+        JitOpcode::Msubu => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.msubu(rs, rt);
+        }
 
         // ── ZKM extension ALU ───────────────────────────────
-        JitOpcode::Wsbh => t.wsbh(rd, rs),
+        JitOpcode::Wsbh => {
+            if ins.imm_b {
+                let v = ins.op_b;
+                let folded = ((v & 0xFF00FF00) >> 8) | ((v & 0x00FF00FF) << 8);
+                t.add(rd, MipsOperand::Imm(folded as i64), MipsOperand::Imm(0));
+            } else {
+                t.wsbh(rd, rs);
+            }
+        }
         JitOpcode::Ext => {
-            // Ziren encoding: lo 5 bits of op_c = pos, next 5 bits = size.
+            // Ziren encoding mirrors the executor (`execute_ext` in
+            // executor.rs): low 5 bits of op_c = lsb (pos), high 5 bits
+            // = msbd (= size − 1).  So the actual extract width is
+            // `msbd + 1`, NOT msbd.  Earlier the driver passed `msbd`
+            // directly, which extracted one bit too few — the format
+            // machinery's UTF-8 byte-length lookup got mangled and
+            // tendermint's panic strings showed garbled bytes.
             let pos = (ins.op_c & 0x1f) as u8;
-            let size = ((ins.op_c >> 5) & 0x1f) as u8;
-            t.ext(rd, rs, pos, size);
+            let msbd = ((ins.op_c >> 5) & 0x1f) as u8;
+            let size = msbd.saturating_add(1).min(32);
+            if ins.imm_b {
+                let mask: u32 = if size == 32 { u32::MAX } else { (1u32 << size) - 1 };
+                let folded = (ins.op_b >> pos) & mask;
+                t.add(rd, MipsOperand::Imm(folded as i64), MipsOperand::Imm(0));
+            } else {
+                t.ext(rd, rs, pos, size);
+            }
         }
         JitOpcode::Ins => {
-            let pos = (ins.op_c & 0x1f) as u8;
-            let size = ((ins.op_c >> 5) & 0x1f) as u8;
-            t.ins(rd, rs, pos, size);
+            // INS encoding: low 5 bits of op_c = lsb (pos), high 5 bits
+            // = msb.  Width = msb − lsb + 1 (mirrors `execute_ins`).
+            let lsb = (ins.op_c & 0x1f) as u8;
+            let msb = ((ins.op_c >> 5) & 0x1f) as u8;
+            let size = msb.saturating_sub(lsb).saturating_add(1).min(32);
+            if ins.imm_b {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.ins(rd, rs, lsb, size);
         }
         JitOpcode::Sext => {
-            // op_c selects byte (8) vs half (16).
-            if ins.op_c == 8 {
+            // Mirror executor's `execute_sext` semantics (executor.rs):
+            //   if c > 0 { (b & 0xffff) as i16 as i32 as u32 }   // half
+            //   else      { (b & 0xff)   as i8  as i32 as u32 }  // byte
+            // i.e. `op_c == 0` is byte mode, anything else is half mode.
+            // Earlier the driver used `op_c == 8` for byte, which made
+            // every SEXT $rd, $rs, 0 fall to the half path and skipped
+            // the high-byte sign-extension — tendermint's SEXT after a
+            // signed-byte LBU returned 0xc0 instead of 0xffffffc0.
+            let is_byte = ins.op_c == 0;
+            if ins.imm_b {
+                let v = ins.op_b;
+                let folded: u32 = if is_byte {
+                    ((v as i8) as i32) as u32
+                } else {
+                    ((v as i16) as i32) as u32
+                };
+                t.add(rd, MipsOperand::Imm(folded as i64), MipsOperand::Imm(0));
+            } else if is_byte {
                 t.sext_b(rd, rs);
             } else {
                 t.sext_h(rd, rs);
@@ -357,6 +551,8 @@ fn lower_one<T: MipsTranspiler>(t: &mut T, ins: DriverInstruction) -> Result<(),
         JitOpcode::Lh => t.lh(rd, rs, imm32),
         JitOpcode::Lhu => t.lhu(rd, rs, imm32),
         JitOpcode::Lw => t.lw(rd, rs, imm32),
+        // Unaligned loads/stores — inline dynasm in the x86 backend
+        // (mirrors executor.rs::execute_load/store semantics).
         JitOpcode::Lwl => t.lwl(rd, rs, imm32),
         JitOpcode::Lwr => t.lwr(rd, rs, imm32),
         JitOpcode::Ll => t.ll(rd, rs, imm32),
@@ -368,12 +564,22 @@ fn lower_one<T: MipsTranspiler>(t: &mut T, ins: DriverInstruction) -> Result<(),
         JitOpcode::Sc => t.sc(rd, rs, imm32),
 
         // ── Control flow ────────────────────────────────────
-        JitOpcode::Beq => t.beq(rd, rs, imm32),
-        JitOpcode::Bne => t.bne(rd, rs, imm32),
-        JitOpcode::Bgez => t.bgez(rs, imm32),
-        JitOpcode::Bgtz => t.bgtz(rs, imm32),
-        JitOpcode::Blez => t.blez(rs, imm32),
-        JitOpcode::Bltz => t.bltz(rs, imm32),
+        // Source register encoding (mirrors `execute_branch` in
+        // executor.rs which reads `src1 = op_a` for ALL branches):
+        // - Two-source (BEQ/BNE): src1=op_a, src2=op_b  → t.beq(rd, rs, ...)
+        // - Single-source (BGEZ/BGTZ/BLEZ/BLTZ/BLTZAL/BGEZAL):
+        //     src1=op_a → must pass `rd` (= MipsRegister::from_u8(op_a)),
+        //     NOT `rs` (= MipsRegister::from_u8(op_b)).
+        //   Earlier the driver passed `rs`, which on tendermint's
+        //   `BLTZ $at, ...` (encoded with op_a=$at, op_b=0) tested
+        //   $zero instead of $at — never branched, control flow
+        //   diverged from the interpreter.
+        JitOpcode::Beq => t.beq(rd, rs, branch_target_pc),
+        JitOpcode::Bne => t.bne(rd, rs, branch_target_pc),
+        JitOpcode::Bgez => t.bgez(rd, branch_target_pc),
+        JitOpcode::Bgtz => t.bgtz(rd, branch_target_pc),
+        JitOpcode::Blez => t.blez(rd, branch_target_pc),
+        JitOpcode::Bltz => t.bltz(rd, branch_target_pc),
         JitOpcode::Jump => {
             // Two encodings on this opcode in the executor:
             //   - register-mode (`imm_b == false`): JR rs / JALR rd, rs
@@ -381,32 +587,97 @@ fn lower_one<T: MipsTranspiler>(t: &mut T, ins: DriverInstruction) -> Result<(),
             // The executor signals JAL/JALR by writing back to a non-zero
             // register in `op_a`.  The transpiler trait splits these into
             // `j` / `jal` / `jr` / `jalr` so we dispatch on (imm_b, rd).
+            //
+            // CRITICAL (#73): for JAL/JALR the executor writes
+            // `rd = next_pc + 4 = current_pc + 8` as the return
+            // address.  The trait `jal`/`jalr` lowerings only set
+            // delayed_jump_target; the comment on `jal` says "Driver
+            // responsibility: also emit a write to $ra" — we now do
+            // that here.  Without it, every function call returns
+            // through JR $ra to garbage (typically 0), which falls
+            // through to the next static instruction creating an
+            // unbounded recursion.
+            let return_pc = current_pc.wrapping_add(8);
             if ins.imm_b {
                 let target = ins.op_b;
                 if rd == MipsRegister::Zero {
                     t.j(target);
                 } else {
                     t.jal(target);
+                    t.add(rd, MipsOperand::Imm(return_pc as i64), MipsOperand::Imm(0));
                 }
             } else if rd == MipsRegister::Zero {
                 t.jr(rs);
             } else {
                 t.jalr(rd, rs);
+                t.add(rd, MipsOperand::Imm(return_pc as i64), MipsOperand::Imm(0));
             }
         }
-        JitOpcode::Jumpi => t.jumpi(ins.op_b),
-        JitOpcode::JumpDirect => t.jump_direct(ins.op_b),
+        JitOpcode::Jumpi => {
+            // Per executor::execute_jumpi: link = op_a, target = op_b.
+            // ALWAYS writes link = next_pc + 4 = current_pc + 8.
+            // Skip the link write only when op_a is $zero (which the
+            // executor's rw_cpu silently drops anyway).
+            t.jumpi(ins.op_b);
+            if rd != MipsRegister::Zero {
+                let return_pc = current_pc.wrapping_add(8);
+                t.add(rd, MipsOperand::Imm(return_pc as i64), MipsOperand::Imm(0));
+            }
+        }
+        JitOpcode::JumpDirect => {
+            // Per executor::execute_jump_direct: link = op_a,
+            // target_pc = op_b + next_pc.  Same link write as Jumpi.
+            t.jump_direct(ins.op_b);
+            if rd != MipsRegister::Zero {
+                let return_pc = current_pc.wrapping_add(8);
+                t.add(rd, MipsOperand::Imm(return_pc as i64), MipsOperand::Imm(0));
+            }
+        }
 
         // ── System ──────────────────────────────────────────
-        JitOpcode::Syscall => t.syscall(),
-        JitOpcode::Teq => t.teq(rs, rt),
+        JitOpcode::Syscall => t.syscall(current_pc),
+        JitOpcode::Teq => {
+            // Source register mapping (mirrors `execute_teq` in
+            // executor.rs which reads `src1 = op_a, src2 = op_b`):
+            // - `rd` (= MipsRegister::from_u8(op_a)) is src1
+            // - `rs` (= MipsRegister::from_u8(op_b)) is src2
+            // - `op_c` is the MIPS trap-code field, NOT a comparison operand
+            //
+            // Earlier the driver passed `rs`/`rt` (= op_b/op_c) which
+            // tested the WRONG register, causing tendermint to spuriously
+            // trap at instr ~931K when op_a held a value matching op_c.
+            if ins.imm_b {
+                // op_b is an immediate ("teq $rs, imm"-style encoding).
+                t.teq_imm(rd, ins.op_b as i32);
+            } else {
+                // op_b is a register — teq $op_a, $op_b.
+                t.teq(rd, rs);
+            }
+        }
 
         // ── Move-on-condition (Ziren extension) ─────────────
-        JitOpcode::Meq => t.meq(rd, rs, rt),
-        JitOpcode::Mne => t.mne(rd, rs, rt),
+        JitOpcode::Meq => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.meq(rd, rs, rt);
+        }
+        JitOpcode::Mne => {
+            if ins.imm_b || ins.imm_c {
+                return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            }
+            t.mne(rd, rs, rt);
+        }
 
         JitOpcode::Unimpl => {
-            return Err(DriverError::UnsupportedOpcode { opcode: ins.opcode });
+            // UNIMPL = compiler-emitted unreachable sentinel.  Lower
+            // as a trap stub so the JIT can be built; the host-level
+            // pre-screen `first_unsupported_opcode` still gates real
+            // ELFs to the interpreter until #73's `$sp`-corruption
+            // root cause is fixed.  This combo lets the jit_probe
+            // example exercise the full path with PC trace + halt-
+            // after-N bisection on.
+            t.unimpl_trap();
         }
     }
 
@@ -436,10 +707,28 @@ pub fn drive_instructions<T: MipsTranspiler, I>(
 where
     I: IntoIterator<Item = DriverInstruction>,
 {
+    drive_instructions_at(t, instructions, 0)
+}
+
+/// Variant that lets the caller supply `pc_base` so branch targets
+/// (which the executor encodes as `op_c = byte offset relative to
+/// next_pc`) can be resolved into the absolute target PC the
+/// transpiler lowering expects.  `pc_base` matches the program's
+/// `Program.pc_base` and is the PC of the first instruction.
+pub fn drive_instructions_at<T: MipsTranspiler, I>(
+    t: &mut T,
+    instructions: I,
+    pc_base: u32,
+) -> Result<(), DriverError>
+where
+    I: IntoIterator<Item = DriverInstruction>,
+{
+    let mut pc = pc_base;
     for ins in instructions {
         t.start_instr();
-        lower_one(t, ins)?;
+        lower_one(t, ins, pc)?;
         t.end_instr();
+        pc = pc.wrapping_add(4);
     }
     Ok(())
 }
@@ -478,7 +767,7 @@ where
     if let Some(handler) = syscall_handler {
         t.register_syscall_handler(handler);
     }
-    drive_instructions(&mut t, instructions)?;
+    drive_instructions_at(&mut t, instructions, pc_base)?;
     finalize(t, pc_start).map_err(DriverError::Jit)
 }
 
@@ -579,6 +868,9 @@ mod tests {
         }
         fn ror(&mut self, rd: MipsRegister, rt: MipsRegister, shamt: u8) {
             self.log.push(format!("ror {rd:?} {rt:?} {shamt}"));
+        }
+        fn rorv(&mut self, rd: MipsRegister, rt: MipsRegister, rs: MipsRegister) {
+            self.log.push(format!("rorv {rd:?} {rt:?} {rs:?}"));
         }
         fn madd(&mut self, rs: MipsRegister, rt: MipsRegister) {
             self.log.push(format!("madd {rs:?} {rt:?}"));
@@ -700,8 +992,9 @@ mod tests {
     }
 
     impl crate::SystemInstructions for LogTranspiler {
-        fn syscall(&mut self) {
-            self.log.push("syscall".to_string());
+        fn unimpl_trap(&mut self) { self.log.push("unimpl_trap".to_string()); }
+        fn syscall(&mut self, pc: u32) {
+            self.log.push(format!("syscall {pc:#x}"));
         }
         fn mfhi(&mut self, rd: MipsRegister) {
             self.log.push(format!("mfhi {rd:?}"));
@@ -717,6 +1010,9 @@ mod tests {
         }
         fn teq(&mut self, rs: MipsRegister, rt: MipsRegister) {
             self.log.push(format!("teq {rs:?} {rt:?}"));
+        }
+        fn teq_imm(&mut self, rs: MipsRegister, imm: i32) {
+            self.log.push(format!("teq_imm {rs:?} {imm}"));
         }
         fn movz(&mut self, rd: MipsRegister, rs: MipsRegister, rt: MipsRegister) {
             self.log.push(format!("movz {rd:?} {rs:?} {rt:?}"));
@@ -815,7 +1111,13 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_unsupported_opcode_returns_error() {
+    fn dispatch_unsupported_opcode_emits_trap_stub() {
+        // Compiler-emitted UNIMPL bytes (opcode 0xff and any other
+        // unmapped value) lower to an `unimpl_trap` stub rather than
+        // failing the build.  This lets JIT'd programs contain dead
+        // UNIMPL slots without aborting transpilation; the per-program
+        // pre-screen `first_unsupported_opcode` is what actually keeps
+        // unsupported-opcode programs off the JIT fast path.
         let mut t = LogTranspiler::default();
         let bad = DriverInstruction {
             opcode: 0xff,
@@ -825,8 +1127,12 @@ mod tests {
             imm_b: false,
             imm_c: false,
         };
-        let err = drive_instructions(&mut t, [bad]).unwrap_err();
-        assert!(matches!(err, DriverError::UnsupportedOpcode { opcode: 0xff }));
+        drive_instructions(&mut t, [bad]).expect("Unimpl lowers to a trap stub, not an error");
+        assert!(
+            t.log.iter().any(|s| s == "unimpl_trap"),
+            "expected unimpl_trap in log; got {:?}",
+            t.log,
+        );
     }
 
     #[test]
