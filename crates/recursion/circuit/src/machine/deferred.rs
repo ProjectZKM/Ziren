@@ -46,8 +46,8 @@ pub struct ZKMDeferredVerifier<C, SC, A> {
 
 #[derive(Debug, Clone, Hash)]
 pub struct ZKMDeferredShape {
-    inner: ZKMCompressShape,
-    height: usize,
+    pub(crate) inner: ZKMCompressShape,
+    pub(crate) height: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

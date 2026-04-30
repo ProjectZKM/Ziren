@@ -69,7 +69,7 @@ pub struct ZKMCompressWitnessValues<SC: StarkGenericConfig> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ZKMCompressShape {
-    proof_shapes: Vec<OrderedShape>,
+    pub(crate) proof_shapes: Vec<OrderedShape>,
 }
 
 impl<C, SC, A> ZKMCompressVerifier<C, SC, A>

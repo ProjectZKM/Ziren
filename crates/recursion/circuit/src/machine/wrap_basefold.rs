@@ -214,3 +214,34 @@ pub fn verify_wrap_basefold<C, SC, A>(
     // Silence unused-zero-felt lint (kept for transcript-ordering parity).
     let _zero: Felt<_> = builder.eval(C::F::ZERO);
 }
+
+impl ZKMWrapBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+    /// Construct a dummy wrap witness for a given compress shape.
+    /// Wrap takes a single `(vk, root-proof)` pair, so the input
+    /// shape's first proof_shape drives the dummy proof construction.
+    pub fn dummy<A>(
+        machine: &zkm_stark::StarkMachine<
+            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            A,
+        >,
+        shape: &super::compress::ZKMCompressShape,
+    ) -> Self
+    where
+        A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
+            + for<'b> p3_air::Air<
+                zkm_stark::folder::VerifierConstraintFolder<
+                    'b,
+                    zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                >,
+            >,
+    {
+        let vks_and_proofs = shape
+            .proof_shapes
+            .iter()
+            .map(|proof_shape| {
+                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape)
+            })
+            .collect();
+        Self { vks_and_proofs }
+    }
+}

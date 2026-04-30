@@ -326,3 +326,58 @@ pub fn verify_deferred_basefold<C, SC, A>(
 
     SC::commit_recursion_public_values(builder, *deferred_public_values);
 }
+
+impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+    /// Construct a dummy deferred witness for a given deferred shape.
+    /// Mirror of [`super::deferred::ZKMDeferredWitnessValues::dummy`]
+    /// for the basefold pipeline. Wraps a basefold compress dummy +
+    /// the existing legacy `ZKMMerkleProofWitnessValues::dummy`.
+    pub fn dummy<A>(
+        machine: &zkm_stark::StarkMachine<
+            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            A,
+        >,
+        shape: &super::deferred::ZKMDeferredShape,
+    ) -> Self
+    where
+        A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
+            + for<'b> p3_air::Air<
+                zkm_stark::folder::VerifierConstraintFolder<
+                    'b,
+                    zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                >,
+            >,
+    {
+        use p3_field::PrimeCharacteristicRing;
+        let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<
+            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        >::dummy::<A>(machine, &shape.inner);
+        let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
+            inner.vks_and_proofs.len(),
+            shape.height,
+        );
+        Self {
+            vks_and_proofs: inner.vks_and_proofs,
+            vk_merkle_data,
+            is_complete: true,
+            zkm_vk_digest: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
+            start_reconstruct_deferred_digest: [
+                p3_koala_bear::KoalaBear::ZERO;
+                zkm_stark::air::POSEIDON_NUM_WORDS
+            ],
+            committed_value_digest: [
+                zkm_stark::Word::default();
+                zkm_stark::air::PV_DIGEST_NUM_WORDS
+            ],
+            deferred_proofs_digest: [
+                p3_koala_bear::KoalaBear::ZERO;
+                zkm_stark::air::POSEIDON_NUM_WORDS
+            ],
+            end_pc: p3_koala_bear::KoalaBear::ZERO,
+            end_shard: p3_koala_bear::KoalaBear::ZERO,
+            end_execution_shard: p3_koala_bear::KoalaBear::ZERO,
+            init_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
+            finalize_addr_bits: [p3_koala_bear::KoalaBear::ZERO; 32],
+        }
+    }
+}
