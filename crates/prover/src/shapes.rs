@@ -513,15 +513,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shape: ZKMCompressProgramShape,
         shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // META #59 (#52): when ZIREN_USE_BASEFOLD=1, dispatch to the
-        // basefold program builders so cached shapes regenerate against
-        // the basefold pipeline. The basefold dummys produce structurally
-        // matching witnesses (chip_cumulative_sums.len() == chips.len()
-        // per shard) — see `dummy_basefold_vk_and_shard_proof` in
+        // META #59 (#52): dispatch to the basefold program builders
+        // so cached shapes regenerate against the basefold pipeline.
+        // The basefold dummys produce structurally matching witnesses
+        // (chip_cumulative_sums.len() == chips.len() per shard) — see
+        // `dummy_basefold_vk_and_shard_proof` in
         // crates/recursion/circuit/src/stark.rs.
+        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
+        // Set ZIREN_USE_BASEFOLD=0 to opt out and use the legacy FRI
+        // path (kept available during the migration window).
         let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
         if use_basefold {
             return self.program_from_shape_basefold(shape);
         }

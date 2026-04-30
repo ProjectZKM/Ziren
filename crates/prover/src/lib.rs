@@ -269,10 +269,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // upfront with `vk_verification=true` takes >5 minutes per
         // program (Merkle-proof verification adds heavy hint code), so
         // skipping them shaves >80 minutes off startup.  Legacy FRI
-        // path (ZIREN_USE_BASEFOLD unset) still pre-builds them.
+        // path (ZIREN_USE_BASEFOLD=0) still pre-builds them.
+        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
         let basefold_path = std::env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
         let mut compress_programs = BTreeMap::new();
         if !basefold_path {
             if let Some(config) = &recursion_shape_config {
@@ -848,9 +849,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
     ) -> Vec<ZKMCircuitWitness> {
         let is_complete = shard_proofs.len() == 1 && deferred_proofs.is_empty();
+        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
         let use_basefold = env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
 
         let mut inputs = Vec::new();
 
@@ -1225,9 +1227,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             // a basefold side-channel, emit a ComposeBasefold
                             // witness for the cluster-parametrized compose
                             // program. Otherwise fall back to legacy Compress.
+                            // Cutover (#35, Apr 30): default opt-out.
                             let use_basefold = env::var("ZIREN_USE_BASEFOLD")
-                                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                                .unwrap_or(false);
+                                .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+                                .unwrap_or(true);
                             let all_have_bf = use_basefold
                                 && vks_and_proofs
                                     .iter()
@@ -1317,9 +1320,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // legacy ZKMCompressWithVKeyWitnessValues) — vk binding is
         // enforced via the basefold verifier's chip_ordering plumbing
         // rather than a vk-merkle index.
+        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
         let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
         if use_basefold && compressed_proof.basefold_shard_proof.is_some() {
             let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
             let input = ZKMWrapBasefoldWitnessValues {
