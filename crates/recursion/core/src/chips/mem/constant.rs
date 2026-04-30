@@ -2,7 +2,7 @@ use core::borrow::Borrow;
 use itertools::Itertools;
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;

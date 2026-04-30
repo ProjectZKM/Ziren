@@ -1,7 +1,7 @@
 use p3_air::AirBuilder;
 use p3_field::Field;
 use p3_field::PrimeCharacteristicRing;
-use p3_field::{ExtensionField, BasedVectorSpace};
+use p3_field::BasedVectorSpace;
 use p3_field::PrimeField32;
 use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;

@@ -40,19 +40,17 @@
 //! than FriFold's degree-3 constraints.
 
 use core::borrow::Borrow;
-use std::borrow::BorrowMut;
 
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_matrix::Matrix;
 
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir};
+use zkm_stark::air::{ExtensionAirBuilder, MachineAir};
 
 use crate::air::Block;
 use crate::builder::ZKMRecursionAirBuilder;
-use crate::runtime::{Instruction, RecursionProgram};
+use crate::runtime::RecursionProgram;
 use crate::ExecutionRecord;
 
 use super::mem::MemoryAccessColsChips;

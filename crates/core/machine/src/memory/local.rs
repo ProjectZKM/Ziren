@@ -6,7 +6,7 @@ use std::{
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };

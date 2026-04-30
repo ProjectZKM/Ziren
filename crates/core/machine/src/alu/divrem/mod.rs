@@ -68,7 +68,7 @@ use core::{
 
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemoryAccessPosition, MemoryRecordEnum},
     get_msb, get_quotient_and_remainder, is_signed_operation, ByteOpcode, ExecutionRecord, Opcode,

@@ -22,15 +22,13 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_matrix::Matrix;
-use p3_util::log2_ceil_usize;
 
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir};
+use zkm_stark::air::MachineAir;
 
 use crate::air::Block;
 use crate::builder::ZKMRecursionAirBuilder;
-use crate::runtime::{Instruction, RecursionProgram};
+use crate::runtime::RecursionProgram;
 use crate::ExecutionRecord;
 
 use super::mem::MemoryAccessColsChips;

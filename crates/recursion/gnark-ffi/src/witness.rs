@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write};
 
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, ExtensionField, PrimeField};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField};
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Config, Witness};
 

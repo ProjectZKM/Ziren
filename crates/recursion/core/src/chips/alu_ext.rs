@@ -7,7 +7,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use zkm_core_machine::utils::next_power_of_two;
 use zkm_derive::AlignedBorrow;

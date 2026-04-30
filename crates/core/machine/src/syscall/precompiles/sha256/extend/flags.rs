@@ -2,7 +2,6 @@ use core::borrow::Borrow;
 use p3_air::{AirBuilder, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
-use p3_matrix::Matrix;
 use zkm_stark::air::{BaseAirBuilder, ZKMAirBuilder};
 
 use crate::operations::IsZeroOperation;

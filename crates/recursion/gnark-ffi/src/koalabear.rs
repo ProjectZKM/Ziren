@@ -1,6 +1,6 @@
 use p3_field::{
     extension::{BinomialExtensionField, QuinticTrinomialExtensionField},
-    BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField32,
+    BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32,
 };
 use p3_koala_bear::KoalaBear;
 

@@ -8,7 +8,6 @@ use crate::syscall::precompiles::boolean_circuit_garble::{
 };
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 use std::borrow::Borrow;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_stark::{LookupScope, ZKMAirBuilder};

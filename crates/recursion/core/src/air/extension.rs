@@ -1,6 +1,6 @@
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    BasedVectorSpace, Field, ExtensionField,
+    BasedVectorSpace, Field,
 };
 use zkm_stark::air::BinomialExtension;
 

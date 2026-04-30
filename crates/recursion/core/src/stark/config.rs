@@ -2,7 +2,7 @@ use p3_bn254_fr::{Bn254, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::{BinomialExtensionField, QuinticTrinomialExtensionField}, PrimeCharacteristicRing};
+use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_commit::BatchOpening;
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;

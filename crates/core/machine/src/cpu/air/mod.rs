@@ -3,7 +3,6 @@ pub mod register;
 use core::borrow::Borrow;
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::{
     air::{BaseAirBuilder, PublicValues, ZKMAirBuilder, ZKM_PROOF_NUM_PV_ELTS},

@@ -1,5 +1,4 @@
-use p3_air::{WindowAccess, 
-    AirBuilder, ExtensionBuilder, FilteredAirBuilder,
+use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder,
     PermutationAirBuilder,
 };
 use zkm_stark::air::{LookupScope, MessageBuilder};

@@ -10,7 +10,7 @@ use num::{BigUint, One};
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use std::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,

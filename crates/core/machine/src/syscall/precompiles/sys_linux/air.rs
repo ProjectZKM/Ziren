@@ -2,7 +2,6 @@ use core::borrow::Borrow;
 
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 use zkm_core_executor::{syscalls::SyscallCode, Register};
 use zkm_stark::{
     air::{LookupScope, ZKMAirBuilder},

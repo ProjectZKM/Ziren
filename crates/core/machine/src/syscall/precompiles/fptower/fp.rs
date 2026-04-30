@@ -10,7 +10,7 @@ use itertools::Itertools;
 use num::BigUint;
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, FieldOperation, PrecompileEvent},
     syscalls::SyscallCode,

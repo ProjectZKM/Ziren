@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 use itertools::{izip, Itertools};
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},

@@ -1,6 +1,5 @@
 use std::ops::{Add, AddAssign};
 
-use hashbrown::HashMap;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use zkm_stark::{
     air::{LookupScope, MachineAir, PicusInfo},

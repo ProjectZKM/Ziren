@@ -13,7 +13,7 @@ use generic_array::GenericArray;
 use num::{BigUint, One};
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use std::marker::PhantomData;
 use typenum::Unsigned;
 use zkm_core_executor::{

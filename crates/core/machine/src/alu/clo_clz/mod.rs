@@ -17,7 +17,7 @@ use core::{
 use itertools::Itertools;
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,

@@ -2,7 +2,6 @@ use std::borrow::Borrow;
 
 use p3_air::{WindowAccess, Air, AirBuilder};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use crate::{

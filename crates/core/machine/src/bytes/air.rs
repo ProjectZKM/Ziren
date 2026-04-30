@@ -2,7 +2,6 @@ use core::borrow::Borrow;
 
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
-use p3_matrix::Matrix;
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::air::ZKMAirBuilder;
 

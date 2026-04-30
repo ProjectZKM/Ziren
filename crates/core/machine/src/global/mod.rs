@@ -2,7 +2,7 @@ use std::{borrow::Borrow, mem::transmute};
 
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge,
     ParallelIterator,

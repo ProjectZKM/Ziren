@@ -4,7 +4,6 @@ use std::{array, borrow::Borrow};
 
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 
 use crate::{builder::ZKMRecursionAirBuilder, chips::poseidon2_skinny::columns::Poseidon2};
 

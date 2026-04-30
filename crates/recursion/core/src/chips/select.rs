@@ -3,7 +3,7 @@ use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use std::borrow::BorrowMut;
 use zkm_core_machine::utils::next_power_of_two;

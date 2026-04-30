@@ -2,7 +2,6 @@ use std::borrow::Borrow;
 
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
 
 use crate::operations::poseidon2::air::{eval_external_round, eval_internal_rounds};
 use crate::operations::poseidon2::permutation::Poseidon2Cols;
