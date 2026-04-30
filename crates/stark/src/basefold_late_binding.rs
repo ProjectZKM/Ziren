@@ -271,16 +271,16 @@ pub mod jagged {
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
-    use crate::basefold::{Mle, StackedBasefoldProof};
+    use crate::basefold::StackedBasefoldProof;
     use crate::jagged::{JaggedChipInfo, JaggedPacking, compute_jagged_metadata, materialize_dense_jagged};
     use crate::jagged_sumcheck::{
-        JaggedReductionProof, prove_jagged_reduction, prove_jagged_reduction_streaming,
+        JaggedReductionProof, prove_jagged_reduction_streaming,
         verify_jagged_reduction,
     };
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
     use super::{
-        BasefoldLateBindingCommit, BasefoldLateBindingProverData, DEFAULT_LOG_STACKING_HEIGHT,
+        BasefoldLateBindingCommit,
         commit_basefold_late_binding, open_basefold_late_binding,
         verify_basefold_late_binding,
     };

@@ -43,7 +43,7 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use p3_air::Air;
-use p3_challenger::{CanObserve, FieldChallenger};
+use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing};
 use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 use p3_matrix::stack::VerticalPair;
@@ -53,7 +53,7 @@ use crate::air::MachineAir;
 use crate::chip::Chip;
 use crate::folder::{PairWindow, VerifierConstraintFolder};
 use crate::septic_digest::SepticDigest;
-use crate::zerocheck::{eq_eval, ZerocheckProof};
+use crate::zerocheck::ZerocheckProof;
 use crate::{Challenge, StarkGenericConfig, Val};
 
 /// Evaluate the equality multilinear extension `eq(r, -)` at every point of

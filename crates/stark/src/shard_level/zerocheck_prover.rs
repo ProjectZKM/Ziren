@@ -55,7 +55,6 @@ use p3_matrix::dense::RowMajorMatrix;
 use super::types::{LogUpEvaluations, PartialSumcheckProof, UnivariatePolynomial};
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
-use crate::zerocheck_prover::eval_constraints_on_hypercube;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
 
 /// RLC two equal-size constraint tables via a `lambda` challenge.

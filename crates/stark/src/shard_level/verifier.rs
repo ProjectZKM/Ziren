@@ -984,7 +984,7 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-    use p3_field::PrimeCharacteristicRing;
+    
 
     // Note: we derive log_num_interactions from the output MLE length
     // rather than taking chip_metadata as an extra parameter, since

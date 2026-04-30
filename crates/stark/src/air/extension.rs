@@ -2,7 +2,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField,
+    BasedVectorSpace, Field, PrimeCharacteristicRing,
 };
 use zkm_derive::AlignedBorrow;
 

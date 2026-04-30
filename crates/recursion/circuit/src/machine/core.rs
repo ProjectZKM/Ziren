@@ -9,7 +9,6 @@ use itertools::Itertools;
 use p3_commit::Mmcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_core_machine::{

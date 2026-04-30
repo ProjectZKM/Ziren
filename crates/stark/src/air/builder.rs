@@ -10,7 +10,7 @@ use strum_macros::{Display, EnumIter};
 use super::{lookup::AirLookup, BinomialExtension};
 use crate::{
     lookup::LookupKind, septic_digest::SepticDigest, septic_extension::SepticExtension, Word,
-    ProverConstraintFolder, VerifierConstraintFolder, StarkGenericConfig,
+    ProverConstraintFolder, StarkGenericConfig,
 };
 
 /// The default increment for the program counter.  Is used for all instructions except

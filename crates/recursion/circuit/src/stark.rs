@@ -8,7 +8,7 @@ use p3_commit::{Mmcs, Pcs, PolynomialSpace};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_koala_bear::KoalaBear;
-use p3_matrix::{dense::RowMajorMatrix, Dimensions};
+use p3_matrix::dense::RowMajorMatrix;
 
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -25,7 +25,7 @@ use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyin
 
 use crate::{
     challenger::CanObserveVariable,
-    fri::{dummy_commit, dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+    fri::{dummy_commit, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
     CircuitConfig, FriProofVariable, KoalaBearFriParameters, TwoAdicPcsMatsVariable,
 };

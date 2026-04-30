@@ -1,4 +1,4 @@
-use p3_air::{AirBuilder, BaseEntry, PairCol, VirtualPairCol, WindowAccess};
+use p3_air::{AirBuilder, BaseEntry, PairCol, VirtualPairCol};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{SymbolicExpression, SymbolicVariable};

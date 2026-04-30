@@ -1,7 +1,7 @@
 //! Elliptic Curve digests with a starting point to avoid weierstrass addition exceptions.
 use crate::septic_curve::SepticCurve;
 use crate::septic_extension::SepticExtension;
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 use std::iter::Sum;
 

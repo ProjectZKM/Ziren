@@ -6,7 +6,7 @@ use std::{
 
 use p3_air::{
     Air, AirBuilder, ExtensionBuilder,
-    PermutationAirBuilder, WindowAccess,
+    PermutationAirBuilder,
 };
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{
@@ -19,7 +19,7 @@ use p3_maybe_rayon::prelude::ParallelIterator;
 
 use super::{MachineChip, StarkGenericConfig, Val};
 use crate::{
-    air::{EmptyMessageBuilder, MachineAir, MultiTableAirBuilder},
+    air::{MachineAir, MultiTableAirBuilder},
     folder::PairWindow,
     septic_digest::SepticDigest,
 };

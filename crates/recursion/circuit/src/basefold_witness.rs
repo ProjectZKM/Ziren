@@ -41,8 +41,7 @@ use crate::basefold_verifier::{
     RecursiveBasefoldRound,
 };
 use crate::jagged_circuit::{
-    JaggedDimensionMetadata, JaggedPcsProofVariable, JaggedSumcheckEvalProof,
-    RecursiveStackedPcsProof,
+    JaggedDimensionMetadata, JaggedSumcheckEvalProof,
 };
 use crate::logup_proof::{
     ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,

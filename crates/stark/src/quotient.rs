@@ -1,6 +1,6 @@
 use p3_air::Air;
 use p3_commit::PolynomialSpace;
-use p3_field::{PrimeCharacteristicRing, ExtensionField, PackedValue, BasedVectorSpace};
+use p3_field::{PrimeCharacteristicRing, PackedValue, BasedVectorSpace};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;

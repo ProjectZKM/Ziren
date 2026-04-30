@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_field::{PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
+use p3_field::{PrimeCharacteristicRing, BasedVectorSpace};
 use p3_fri::{CommitPhaseProofStep, QueryProof};
 use p3_koala_bear::KoalaBear;
 

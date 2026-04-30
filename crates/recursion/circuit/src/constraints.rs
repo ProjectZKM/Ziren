@@ -1,16 +1,13 @@
-use std::marker::PhantomData;
-use std::ops::MulAssign;
 
 use p3_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, WindowAccess, Air, BaseAir};
-use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace};
+use p3_commit::{LagrangeSelectors, PolynomialSpace};
 use p3_field::{Algebra, BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, TwoAdicField};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
+use p3_matrix::dense::RowMajorMatrixView;
 use p3_matrix::stack::VerticalPair;
 
 use zkm_recursion_compiler::ir::{
-    Builder, Config, Ext, ExtConst, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
+    Builder, Config, Ext, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
 };
 use zkm_stark::{
     air::{MachineAir, MultiTableAirBuilder, EmptyMessageBuilder},

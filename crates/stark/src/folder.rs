@@ -6,7 +6,7 @@ use std::{
 use p3_air::{
     AirBuilder, ExtensionBuilder, PermutationAirBuilder, WindowAccess,
 };
-use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{Algebra, ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
 use super::{Challenge, PackedChallenge, PackedVal, StarkGenericConfig, Val};

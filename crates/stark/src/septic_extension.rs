@@ -2,7 +2,7 @@
 use num_bigint::BigUint;
 use num_traits::One;
 use p3_field::PrimeField32;
-use p3_field::{Algebra, BasedVectorSpace, ExtensionField, Field, PackedFieldExtension, Packable, PrimeCharacteristicRing, PrimeField};
+use p3_field::{Algebra, BasedVectorSpace, ExtensionField, Field, PackedFieldExtension, Packable, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 use std::array;
 use std::fmt::Display;

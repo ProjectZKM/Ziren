@@ -51,7 +51,6 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing,
 
 use super::layer::{GkrCircuitLayer, LogUpGkrCpuLayer};
 use crate::shard_level::types::{LogupGkrRoundProof, PartialSumcheckProof, UnivariatePolynomial};
-use crate::zerocheck_prover::{eq_mle_table, fold_table_first};
 
 /// Flatten a per-chip `LogUpGkrCpuLayer` into four layer-wide flat
 /// MLEs each of length `2^(num_row_variables + num_interaction_variables)`.

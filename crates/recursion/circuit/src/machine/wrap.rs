@@ -3,8 +3,6 @@ use std::{borrow::Borrow, marker::PhantomData};
 use p3_air::Air;
 use p3_commit::Mmcs;
 use p3_field::PrimeCharacteristicRing;
-use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
 use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
 use zkm_stark::{air::MachineAir, StarkMachine};

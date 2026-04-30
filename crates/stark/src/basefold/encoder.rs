@@ -18,7 +18,6 @@
 //! [`super::fri::commit_phase_round`].
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use p3_dft::TwoAdicSubgroupDft;

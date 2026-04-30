@@ -1,10 +1,8 @@
 use std::marker::PhantomData;
 
 use p3_air::Air;
-use p3_commit::Mmcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
 use zkm_recursion_core::DIGEST_SIZE;

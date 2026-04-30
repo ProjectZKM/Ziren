@@ -324,7 +324,7 @@ where
         // (7) Sample query indices.
         let log_codeword_size = num_variables + self.config().log_blowup();
         let num_queries = self.config().num_queries;
-        let mut query_indices: Vec<usize> = (0..num_queries)
+        let query_indices: Vec<usize> = (0..num_queries)
             .map(|_| challenger.sample_bits(log_codeword_size))
             .collect();
 

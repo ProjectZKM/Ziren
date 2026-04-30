@@ -53,8 +53,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::{ExtensionField, Field};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_field::Field;
 
 /// Result of a zerocheck proof.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

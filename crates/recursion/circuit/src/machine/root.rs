@@ -1,10 +1,8 @@
 use std::marker::PhantomData;
 
 use p3_air::Air;
-use p3_commit::Mmcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 
 use super::{
     PublicValuesOutputDigest, ZKMCompressVerifier, ZKMCompressWithVKeyVerifier,

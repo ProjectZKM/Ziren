@@ -6,10 +6,8 @@ use std::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use p3_air::Air;
-use p3_commit::Mmcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};

@@ -1,6 +1,6 @@
 //! Elliptic Curve `y^2 = x^3 + 3z*x - 3` over the `F_{p^7} = F_p[z]/(z^7 + 2z - 8)` extension field.
 use crate::septic_extension::SepticExtension;
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, PrimeField32};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 

@@ -6,11 +6,10 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{AirBuilder, ExtensionBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
-use p3_field::{ExtensionField, BasedVectorSpace, Field, PrimeField};
+use p3_field::{ExtensionField, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
-use std::borrow::Borrow;
 
 /// Computes the width of the local permutation trace in terms of extension field elements.
 #[must_use]
