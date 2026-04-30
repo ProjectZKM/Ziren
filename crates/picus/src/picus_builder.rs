@@ -868,14 +868,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         // parameter `a` is an output when `is_sequential` is 1. `b` and `c` are at indexes 11-14 and 15-18 in `values` whereas
         // `a` is at indexes 7-10. As in the code above, we need to create variables for the outputs since
         // Picus requires the inputs and outputs to be variables.
-        // SyscallInstrs leaves op_a unconstrained for some syscall branches (notably HINT_LEN).
-        // To avoid exporting branch-dependent unconstrained bytes as deterministic outputs in Picus,
-        // treat op_a as interface inputs for SyscallInstrs modules.
-        let force_op_a_as_input_for_syscall_instrs =
-            self.picus_module.name.starts_with("SyscallInstrs");
         for value in values.iter().take(11).skip(7) {
             let a_var = fresh_picus_expr();
-            if op_a_immutable || force_op_a_as_input_for_syscall_instrs {
+            if op_a_immutable {
                 self.push_input_port(a_var.clone());
             } else {
                 self.push_output_port(a_var.clone());
