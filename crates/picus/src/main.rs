@@ -96,6 +96,7 @@ impl From<ColumnOutputModeArg> for ColumnOutputMode {
 ///
 /// This replaces direct recursion in `MessageBuilder::send()` so extraction can
 /// keep one explicit worklist of deferred sub-chip analyses.
+#[allow(clippy::too_many_arguments)]
 fn analyze_chip<'chips, A>(
     chip: &'chips Chip<Felt, A>,
     chips: &'chips [Chip<Felt, A>],

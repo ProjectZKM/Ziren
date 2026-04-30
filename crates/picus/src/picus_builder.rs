@@ -235,6 +235,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     /// The builder materializes the trace rows needed by `phase`, optionally
     /// specializes selected columns to constants, and records whether this pass
     /// should contribute interface ports or only additional constraints.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chip_to_analyze: &'chips Chip<Felt, A>,
         picus_module: PicusModule,
@@ -387,6 +388,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let mut exprs = Vec::new();
         for (start, end, _) in ranges {
             assert!(*start <= *end && *end <= source_row.len());
+            #[allow(clippy::needless_range_loop)]
             for col_idx in *start..*end {
                 exprs.push(source_row[col_idx].into());
             }
@@ -506,6 +508,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         self.flush_pending_expr_bindings();
         let width = self.main.width();
         let mut is_input = vec![false; width];
+        #[allow(clippy::needless_range_loop)]
         for (start, end, _) in input_ranges {
             assert!(*start <= *end && *end <= width);
             for idx in *start..*end {

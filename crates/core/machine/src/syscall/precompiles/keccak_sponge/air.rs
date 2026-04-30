@@ -161,7 +161,8 @@ where
         // Outside the absorbed-edge transition, keep `original_state` stable
         // across rows. Exclude the final output row because its successor is a
         // padding row.
-        let keep_original_state = (AB::Expr::one() - local.is_absorbed) * (AB::Expr::one() - local.write_output);
+        let keep_original_state =
+            (AB::Expr::one() - local.is_absorbed) * (AB::Expr::one() - local.write_output);
         let mut keep_transition_builder = builder.when_transition();
         let mut keep_state_builder = keep_transition_builder.when(keep_original_state);
         for i in 0..KECCAK_STATE_U32S {
@@ -257,9 +258,7 @@ impl KeccakSpongeChip {
         // first-round and final-round when summary internals are hidden.
         builder.when(local.is_real).assert_bool(first_step);
         builder.when(local.is_real).assert_bool(final_step);
-        builder
-            .when(local.is_real)
-            .assert_zero(first_step * final_step);
+        builder.when(local.is_real).assert_zero(first_step * final_step);
 
         // receive syscall
         builder.assert_eq(first_block * first_step * local.is_real, local.receive_syscall);

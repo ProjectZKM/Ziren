@@ -17,7 +17,7 @@ struct PicusArgs {
     transition_input: bool,
     transition_output: bool,
     selector: bool,
-    path: Option<syn::Expr>,
+    path: Option<Box<syn::Expr>>,
 }
 
 enum Arg {
@@ -26,7 +26,7 @@ enum Arg {
     TransitionInput,
     TransitionOutput,
     Selector,
-    Path(syn::Expr),
+    Path(Box<syn::Expr>),
 }
 
 impl Parse for Arg {
@@ -75,7 +75,7 @@ fn parse_picus_attr(attr: &syn::Attribute) -> syn::Result<Option<PicusArgs>> {
             Arg::TransitionInput => out.transition_input = true,
             Arg::TransitionOutput => out.transition_output = true,
             Arg::Selector => out.selector = true,
-            Arg::Path(expr) => out.path = Some(expr),
+            Arg::Path(expr) => out.path = Some(Box::new(*expr)),
         }
     }
     Ok(Some(out))
