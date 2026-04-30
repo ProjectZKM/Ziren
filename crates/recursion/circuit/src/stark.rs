@@ -222,6 +222,111 @@ pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
     (vk, shard_proof)
 }
 
+/// Make a dummy basefold-pipeline shard proof for a given proof shape.
+///
+/// Drives the host-side `prove_shard_to_basefold` with zero-filled
+/// traces for every chip in `shape`. The resulting proof is
+/// structurally correct (all inner sumcheck/jagged-PCS shapes match
+/// the prover's wire format and the recursion-circuit's shape
+/// asserts) but does NOT satisfy AIR constraints — the zero traces
+/// can't pass the chip's per-row constraints. That's adequate for
+/// `program_from_shape`-style consumers that only care about the
+/// program SHAPE (number of witness reads), not soundness.
+///
+/// Returned `chip_cumulative_sums` has one entry per chip in
+/// `shape.inner` — matching real proofs, so the recursion program's
+/// witness-stream `read()` count is shape-stable across dummy and
+/// real proofs.
+///
+/// META #59 Phase 4 — unblocks `program_from_shape` basefold
+/// dispatch (#52) and downstream `dummy()` constructors for
+/// `ZKMCoreBasefoldWitnessValues` etc.
+pub fn dummy_basefold_vk_and_shard_proof<A>(
+    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+    shape: &OrderedShape,
+) -> (
+    StarkVerifyingKey<KoalaBearPoseidon2>,
+    zkm_stark::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
+)
+where
+    A: MachineAir<KoalaBear>
+        + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+{
+    use zkm_stark::shard_level::prove_shard_to_basefold;
+    use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
+
+    // Resolve each chip in the shape to a concrete &Chip from the
+    // machine. Skip names that don't exist (defensive — real shapes
+    // shouldn't include unknown chips).
+    let chips: Vec<&Chip<KoalaBear, A>> = shape
+        .inner
+        .iter()
+        .filter_map(|(name, _log_height)| {
+            machine.chips().iter().find(|c| c.name() == name.as_str())
+        })
+        .collect();
+
+    // Use the chip's actual widths — width=0 RowMajorMatrix with
+    // empty values is the convention prove_shard_to_basefold's
+    // row_gkr expects when a chip has no preprocessed trace
+    // (matches existing produce_real_basefold_shard_proof in
+    // basefold_programs.rs).
+    let preprocessed_traces: Vec<RowMajorMatrix<KoalaBear>> = chips
+        .iter()
+        .zip(shape.inner.iter())
+        .map(|(chip, (_, log_height))| {
+            let height = 1usize << log_height;
+            let prep_width = MachineAir::<KoalaBear>::preprocessed_width(*chip);
+            RowMajorMatrix::new(vec![KoalaBear::ZERO; prep_width * height], prep_width)
+        })
+        .collect();
+    let main_traces: Vec<RowMajorMatrix<KoalaBear>> = chips
+        .iter()
+        .zip(shape.inner.iter())
+        .map(|(chip, (_, log_height))| {
+            let height = 1usize << log_height;
+            let main_width = <_ as BaseAir<KoalaBear>>::width(*chip);
+            RowMajorMatrix::new(vec![KoalaBear::ZERO; main_width * height], main_width)
+        })
+        .collect();
+
+    let main_commit = std::array::from_fn(|_| KoalaBear::ZERO);
+    let public_values = vec![KoalaBear::ZERO; PROOF_MAX_NUM_PVS];
+    let mut challenger = machine.config().challenger();
+
+    let proof = prove_shard_to_basefold::<KoalaBearPoseidon2, A>(
+        &chips,
+        &preprocessed_traces,
+        &main_traces,
+        main_commit,
+        public_values,
+        BasefoldShardVerifier::production_default().max_log_row_count,
+        &mut challenger,
+    );
+
+    // Build a minimal-but-shape-correct VK matching the legacy
+    // dummy: empty chip_information (preprocessed-keyed), name-keyed
+    // chip_ordering. Recursion-side reads chip_ordering when fixing
+    // the witness-stream order; chip_information is only consumed
+    // by the legacy FRI vk-commit path which the basefold pipeline
+    // doesn't exercise on the dummy fixture.
+    let chip_ordering = shape
+        .inner
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| (name.to_owned(), i))
+        .collect::<HashMap<_, _>>();
+    let vk = StarkVerifyingKey {
+        commit: dummy_commit(),
+        pc_start: KoalaBear::ZERO,
+        initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
+        chip_information: Vec::new(),
+        chip_ordering,
+    };
+
+    (vk, proof)
+}
+
 fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
     chip: &Chip<F, A>,
     log_degree: usize,
@@ -809,5 +914,44 @@ pub mod tests {
                 Some(2),
             );
         run_test_recursion_with_prover::<CpuProver<_, _>>(operations, stream);
+    }
+
+    /// Verifies `dummy_basefold_vk_and_shard_proof` produces a
+    /// proof whose `chip_cumulative_sums` map cardinality matches
+    /// the input shape's chip count — the shape-stability invariant
+    /// the recursion-program builder depends on.
+    #[test]
+    fn dummy_basefold_vk_and_shard_proof_shape_stable() {
+        let machine = MipsAir::<KoalaBear>::machine(KoalaBearPoseidon2::default());
+        // Pick two real chips with deterministic widths.  AddSub +
+        // Bitwise both exist in MipsAir and have small preprocessed
+        // widths — keeps the dummy proof inexpensive.
+        let shape = OrderedShape::from_log2_heights(&[
+            ("AddSub".to_string(), 3),
+            ("Bitwise".to_string(), 3),
+        ]);
+        let (vk, proof) = super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(
+            &machine, &shape,
+        );
+        assert_eq!(
+            vk.chip_ordering.len(),
+            shape.inner.len(),
+            "vk chip_ordering must match shape chip count",
+        );
+        assert_eq!(
+            proof.chip_cumulative_sums.len(),
+            shape.inner.len(),
+            "chip_cumulative_sums must have one entry per chip in the shape \
+             — this is the shape-stability invariant for program_from_shape",
+        );
+        assert_eq!(
+            proof.chip_log_heights.len(),
+            shape.inner.len(),
+            "chip_log_heights must have one entry per chip in the shape",
+        );
+        // opened_values.chips is intentionally empty in the basefold
+        // pipeline — the recursion verifier builds per-chip openings
+        // from LogUp-GKR's chip_openings instead (see prover.rs:207
+        // and shard_basefold.rs's BasefoldShardOpenedValuesVariable).
     }
 }
