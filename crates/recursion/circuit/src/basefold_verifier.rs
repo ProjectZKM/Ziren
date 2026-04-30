@@ -71,12 +71,18 @@ pub struct BasefoldVerifierParams {
 }
 
 impl BasefoldVerifierParams {
-    /// Production default — matches the stark-side
-    /// [`crates/stark/src/basefold/config.rs`](crate::basefold::FriConfig::default_fri_config).
+    /// Production default — matches `crates/stark/src/basefold/config.rs::production_default`:
+    /// `log_blowup = 1` (rate-1/2) and `num_queries = 94` per SP1's
+    /// Gruen-Diamond analysis. Was `log_blowup=4, num_queries=100`,
+    /// which mismatched the prover's rate-1/2 LDEs and would have
+    /// the recursion-circuit verifier reading 16× more bytes per
+    /// stripe than the prover produced — structural divergence.
+    /// Closes #54 (stark log_blowup=1 vs recursion log_blowup=4
+    /// reconciliation).
     pub const fn production_default(num_variables: usize) -> Self {
         Self {
-            log_blowup: 4,
-            num_queries: 100,
+            log_blowup: 1,
+            num_queries: 94,
             pow_bits: 16,
             batch_grinding_bits: 16,
             num_variables,

@@ -634,8 +634,8 @@ mod tests {
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 4);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 100);
+        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 1);
+        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 94);
     }
 
     /// Verify build_basefold_shard_verifier with mismatched
