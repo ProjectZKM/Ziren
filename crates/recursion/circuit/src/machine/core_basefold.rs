@@ -602,3 +602,47 @@ pub fn verify_core_basefold<C, SC, A>(
 
     SC::commit_recursion_public_values(builder, *recursion_public_values);
 }
+
+impl ZKMCoreBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+    /// Construct a dummy witness for a given recursion shape.
+    /// Drives the multi-chip basefold dummy helper for each shard
+    /// in `shape.proof_shapes`, producing a witness whose
+    /// `chip_cumulative_sums` cardinality matches a real proof
+    /// shard-by-shard.
+    ///
+    /// Counterpart to [`crate::machine::core::ZKMRecursionWitnessValues::dummy`]
+    /// for the legacy FRI pipeline. Used by `program_from_shape`
+    /// (#52) to build basefold recursion programs from cached shapes.
+    pub fn dummy(
+        machine: &zkm_stark::StarkMachine<
+            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
+        >,
+        shape: &super::core::ZKMRecursionShape,
+    ) -> Self {
+        let (mut vks, shard_proofs): (Vec<_>, Vec<_>) = shape
+            .proof_shapes
+            .iter()
+            .map(|s| {
+                crate::stark::dummy_basefold_vk_and_shard_proof::<
+                    zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
+                >(machine, s)
+            })
+            .unzip();
+        let vk = vks.pop().unwrap_or_else(|| StarkVerifyingKey {
+            commit: crate::fri::dummy_commit(),
+            pc_start: p3_koala_bear::KoalaBear::ZERO,
+            initial_global_cumulative_sum:
+                zkm_stark::septic_digest::SepticDigest::<p3_koala_bear::KoalaBear>::zero(),
+            chip_information: Vec::new(),
+            chip_ordering: Default::default(),
+        });
+        Self {
+            vk,
+            shard_proofs,
+            is_complete: shape.is_complete,
+            is_first_shard: false,
+            vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
+        }
+    }
+}

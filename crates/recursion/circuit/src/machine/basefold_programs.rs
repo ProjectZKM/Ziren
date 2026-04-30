@@ -407,6 +407,38 @@ mod tests {
         let _ = program;
     }
 
+    /// Verifies `ZKMCoreBasefoldWitnessValues::dummy` produces a
+    /// witness whose per-shard `chip_cumulative_sums` cardinality
+    /// matches a real shard's chip count — the shape-stability
+    /// invariant for `program_from_shape` (#52) basefold dispatch.
+    #[test]
+    fn dummy_core_basefold_witness_shape_stable() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+        use zkm_stark::shape::OrderedShape;
+
+        let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
+        // Two-shard shape — first shard has 2 chips, second has 1.
+        let shape = super::super::core::ZKMRecursionShape {
+            proof_shapes: vec![
+                OrderedShape::from_log2_heights(&[
+                    ("AddSub".to_string(), 3),
+                    ("Bitwise".to_string(), 3),
+                ]),
+                OrderedShape::from_log2_heights(&[("AddSub".to_string(), 4)]),
+            ],
+            is_complete: false,
+        };
+        let witness =
+            super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
+        assert_eq!(witness.shard_proofs.len(), 2);
+        assert_eq!(witness.shard_proofs[0].chip_cumulative_sums.len(), 2);
+        assert_eq!(witness.shard_proofs[1].chip_cumulative_sums.len(), 1);
+        assert_eq!(witness.shard_proofs[0].chip_log_heights.len(), 2);
+        assert_eq!(witness.shard_proofs[1].chip_log_heights.len(), 1);
+        assert!(!witness.is_complete);
+    }
+
     #[test]
     fn program_builders_have_expected_signatures() {
         // Take each builder as a `fn` pointer.  If the signature
