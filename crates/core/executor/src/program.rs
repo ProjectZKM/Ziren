@@ -8,7 +8,7 @@ use elf::{endian::LittleEndian, file::Class, ElfBytes};
 use std::str::FromStr;
 
 use p3_field::Field;
-use p3_field::{ExtensionField, BasedVectorSpace};
+use p3_field::BasedVectorSpace;
 use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::IntoParallelIterator;
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;

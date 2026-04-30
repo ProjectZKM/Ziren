@@ -2348,7 +2348,7 @@ impl<'a> Executor<'a> {
             }
 
             use crate::jit_runner::{
-                build_context, build_jit_function, run_jit, BuildParams,
+                build_context, run_jit, BuildParams,
             };
 
             let pc_start = self.state.pc;

@@ -8,7 +8,7 @@
 
 use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
 
-use super::{TranspilerBackend, CONTEXT, JUMP_TABLE, DELAYED_JUMP_TARGET_OFFSET, TEMP_A, TEMP_B};
+use super::{TranspilerBackend, CONTEXT, DELAYED_JUMP_TARGET_OFFSET, TEMP_A, TEMP_B};
 use crate::instructions::{
     ComputeInstructions, ControlFlowInstructions, MemoryInstructions, SystemInstructions,
 };
@@ -908,7 +908,7 @@ impl SystemInstructions for TranspilerBackend {
         // if rt == 0: rd = rs   (else: leave rd unchanged)
         self.emit_register_load(rt, TEMP_B);
         self.emit_register_load(rs, TEMP_A);
-        let mut keep_rd = TEMP_A; // start with rs
+        let keep_rd = TEMP_A; // start with rs
         // Load current rd into TEMP_B if we need a fallback.
         // x86 cmovne: dst = (cmp_zf == 0) ? src : dst.  We want
         // rd_new = (rt == 0) ? rs : rd_old.  Load rd_old into RAX,

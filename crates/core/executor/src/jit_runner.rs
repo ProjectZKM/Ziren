@@ -1469,7 +1469,7 @@ mod platform {
     /// or `None` if the program is fully JIT-eligible.  Used by
     /// `Executor::run_fast` to skip the JIT path cheaply rather than
     /// spending transpile time only to hit `Err(Driver)`.
-    #[must_use]
+    
     /// Below this many *static* instructions the JIT transpile cost
     /// can outweigh the execution saving for straight-line programs.
     /// For looped programs the JIT'd code is re-executed many times,
@@ -1488,7 +1488,7 @@ mod platform {
         if program.instructions.len() < JIT_MIN_INSTR_COUNT {
             return Some(0xff);
         }
-        use crate::opcode::Opcode;
+        
         for ins in &program.instructions {
             match ins.opcode {
                 // UNIMPL trap-stub lowering exists; real ELFs run

@@ -304,7 +304,7 @@ impl TranspilerBackend {
     /// Emit code that loads MIPS register `reg` into x86 `dst_gpr`,
     /// always as a 32-bit zero-extended value.
     pub(crate) fn emit_register_load(&mut self, reg: crate::risc::MipsRegister, dst_gpr: u8) {
-        use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
+        use dynasmrt::{dynasm, DynasmApi};
         let loc = LOCATION[reg.index() as usize];
         match loc {
             Location::Zero => {
@@ -334,7 +334,7 @@ impl TranspilerBackend {
     /// Emit code that stores x86 `src_gpr` (low 32 bits) into MIPS
     /// register `reg`.  Writes to `$zero` are silently dropped.
     pub(crate) fn emit_register_store(&mut self, reg: crate::risc::MipsRegister, src_gpr: u8) {
-        use dynasmrt::{dynasm, DynasmApi, DynasmLabelApi};
+        use dynasmrt::{dynasm, DynasmApi};
         let loc = LOCATION[reg.index() as usize];
         match loc {
             Location::Zero => { /* writes to $zero are dropped */ }
