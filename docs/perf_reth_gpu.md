@@ -42,8 +42,18 @@ with GPU count: `(gpu_count * 2).clamp(4, 8)` — see
 |------|-----|----------|--------------|------------|----------|---------------|----------|----------|
 | 1    | 4   | 109.3    | 48.4         | 0.41       | 1.14     | **159.2**     | 3,841    | −1.7 s   |
 | 2    | 4   | 73.3     | 35.3         | 0.45       | 1.09     | **110.1**     | 5,731    | −2.3 s   |
-| 4    | 8   | 64.4     | **30.3**     | 0.44       | 1.21     | **96.4**      | 6,517    | **−5.5 s** |
+| 4    | 8   | 62.3     | **29.3**     | 0.47       | 1.11     | **93.1**      | 6,744    | **−8.8 s** |
 | 8    | 8   | 62.7     | **29.8**     | 0.47       | 1.07     | **94.1**      | 6,695    | **−5.8 s** |
+
+### pk-cache hit rate (4 GPU, 191-shard reth)
+
+`compress_pk_cache_summary { hits: 240, misses: 143, hit_rate: 62.7% }`
+— 191 shards × ~2 first-layer-input + recursion-tree calls each
+yielded 383 compress submissions. ~143 unique program shapes × per
+shape ≈ shapes-cardinality of the `lift_programs_lru` /
+`join_programs_map` snapshots. Setup() per shard is ~15-25 ms host +
+GPU upload, so 240 cache hits saved roughly 3-6 s of compress wall
+time. The gap from 96.4 s → 93.1 s tracks that.
 
 ### Sweep around the 4/8-GPU sweet spots (SBS=8, RMTPD=1 unless noted)
 
