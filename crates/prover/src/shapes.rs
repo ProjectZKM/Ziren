@@ -18,8 +18,10 @@ use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
 use zkm_recursion_circuit::machine::{
-    ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape, ZKMDeferredShape,
+    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
+    ZKMCoreBasefoldWitnessValues, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape,
     ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
+    ZKMWrapBasefoldWitnessValues,
 };
 use zkm_recursion_core::{
     shape::{RecursionShape, RecursionShapeConfig},
@@ -511,6 +513,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shape: ZKMCompressProgramShape,
         shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
+        // META #59 (#52): when ZIREN_USE_BASEFOLD=1, dispatch to the
+        // basefold program builders so cached shapes regenerate against
+        // the basefold pipeline. The basefold dummys produce structurally
+        // matching witnesses (chip_cumulative_sums.len() == chips.len()
+        // per shard) — see `dummy_basefold_vk_and_shard_proof` in
+        // crates/recursion/circuit/src/stark.rs.
+        let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if use_basefold {
+            return self.program_from_shape_basefold(shape);
+        }
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
                 let input = ZKMRecursionWitnessValues::dummy(self.core_prover.machine(), &shape);
@@ -536,33 +550,48 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
     }
 
-    // TODO(#52): basefold companion to program_from_shape, used by
-    // `build_compress_vks` to regenerate vk_map.bin against basefold
-    // programs.  Construction requires `ZKM*BasefoldWitnessValues::dummy(machine, shape)`
-    // helpers that don't yet exist; the prover witness types only
-    // expose runtime constructors today.  Sketch:
-    //
-    //   ZKMCompressProgramShape::Recursion(shape) =>
-    //       let input = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
-    //       self.recursion_program_basefold(&input)
-    //   ZKMCompressProgramShape::Deferred(shape) =>
-    //       let input = ZKMDeferredBasefoldWitnessValues::dummy(machine, &shape);
-    //       self.deferred_program_basefold(&input)
-    //   ZKMCompressProgramShape::Compress(shape) =>
-    //       let input = ZKMCompressBasefoldWitnessValues::dummy(machine, &shape);
-    //       self.compose_program_basefold(&input)
-    //   ZKMCompressProgramShape::Shrink(shape) =>
-    //       let input = ZKMWrapBasefoldWitnessValues::dummy(machine, &shape);
-    //       self.shrink_program_basefold(&input)
-    //
-    // Each dummy() needs a structurally-valid `BasefoldShardProof` —
-    // `BasefoldShardProof::empty(main_commit, num_pv)` already exists at
-    // `crates/stark/src/shard_level/shard_proof.rs:85` for this purpose.
-    //
-    // Blocked: adding dummy constructors to the basefold witness types
-    // touches the AST-fragile basefold-recursion area; per #59 (load-bearing
-    // placeholder pattern), even the additions trigger regressions in the
-    // green Test::Compress baseline.  Land this once #59 is resolved.
+    /// Basefold companion to [`Self::program_from_shape`]. Builds a
+    /// recursion program from a cached shape using the basefold-pipeline
+    /// program builders (`recursion_program_basefold`,
+    /// `compose_program_basefold`, etc.) instead of the legacy FRI ones.
+    ///
+    /// META #59 step 4 (#52). Used by `build_compress_vks` to regenerate
+    /// `vk_map.bin` against basefold programs when `ZIREN_USE_BASEFOLD=1`.
+    pub fn program_from_shape_basefold(
+        &self,
+        shape: ZKMCompressProgramShape,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        match shape {
+            ZKMCompressProgramShape::Recursion(shape) => {
+                let input = ZKMCoreBasefoldWitnessValues::dummy(
+                    self.core_prover.machine(),
+                    &shape,
+                );
+                self.recursion_program_basefold(&input)
+            }
+            ZKMCompressProgramShape::Deferred(shape) => {
+                let input = ZKMDeferredBasefoldWitnessValues::dummy(
+                    self.compress_prover.machine(),
+                    &shape,
+                );
+                self.deferred_program_basefold(&input)
+            }
+            ZKMCompressProgramShape::Compress(shape) => {
+                let input = ZKMCompressBasefoldWitnessValues::dummy(
+                    self.compress_prover.machine(),
+                    &shape.compress_shape,
+                );
+                self.compose_program_basefold(&input)
+            }
+            ZKMCompressProgramShape::Shrink(shape) => {
+                let input = ZKMWrapBasefoldWitnessValues::dummy(
+                    self.compress_prover.machine(),
+                    &shape.compress_shape,
+                );
+                self.shrink_program_basefold(&input)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
