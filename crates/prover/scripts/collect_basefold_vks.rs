@@ -53,6 +53,33 @@ fn read_file(p: &PathBuf) -> Vec<u8> {
 
 fn main() {
     tracing_subscriber::fmt::init();
+
+    // Install a panic hook that flushes location + message to stderr
+    // before unwinding. Without this, panics inside the rayon/thread
+    // pools that prove_core/compress spawn can be swallowed by Rust's
+    // default abort-on-panic behaviour and the binary exits silently
+    // — task #57 "diagnose collect_basefold_vks silent crash on
+    // multi-shard workloads". With this hook, every panicking thread
+    // logs `[PANIC] thread=... at file:line: msg` so the source is
+    // visible without a debugger.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "<no location>".to_string());
+        let msg = info
+            .payload()
+            .downcast_ref::<&'static str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        eprintln!("[PANIC] thread={} at {}: {}", name, location, msg);
+        default_hook(info);
+    }));
+
     let args = Args::parse();
 
     assert!(
@@ -89,18 +116,46 @@ fn main() {
         let (_, pk_d, program, vk) = prover.setup(&elf);
 
         eprintln!("[collect] prove_core start");
-        let core_proof = prover
-            .prove_core(&pk_d, program, &stdin, opts, context)
-            .unwrap_or_else(|e| panic!("prove_core failed for {}: {:?}", workload, e));
+        // Wrap prove_core in catch_unwind so an inner-thread panic
+        // (e.g. on a multi-shard workload like reth that triggers a
+        // shape-bin lookup miss inside the trace_gen worker pool)
+        // surfaces as a logged failure instead of silently aborting
+        // the whole process. Without this wrapper, the binary
+        // historically exited with no error message between
+        // "prove_core start" and the next workload, leaving the
+        // diagnostician guessing at which shard / which thread.
+        let core_proof = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prover.prove_core(&pk_d, program.clone(), &stdin, opts, context.clone())
+        })) {
+            Ok(Ok(p)) => p,
+            Ok(Err(e)) => {
+                eprintln!("[collect] prove_core ERROR for {}: {:?}", workload, e);
+                continue;
+            }
+            Err(_) => {
+                eprintln!("[collect] prove_core PANIC for {} (see [PANIC] above)", workload);
+                continue;
+            }
+        };
         eprintln!(
             "[collect] prove_core ok: {} shard proofs",
             core_proof.proof.0.len()
         );
 
         eprintln!("[collect] compress start");
-        let compressed = prover
-            .compress(&vk, core_proof, vec![], opts)
-            .unwrap_or_else(|e| panic!("compress failed for {}: {:?}", workload, e));
+        let compressed = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prover.compress(&vk, core_proof, vec![], opts)
+        })) {
+            Ok(Ok(c)) => c,
+            Ok(Err(e)) => {
+                eprintln!("[collect] compress ERROR for {}: {:?}", workload, e);
+                continue;
+            }
+            Err(_) => {
+                eprintln!("[collect] compress PANIC for {} (see [PANIC] above)", workload);
+                continue;
+            }
+        };
 
         let h = compressed.vk.hash_koalabear();
         let new = !hashes.contains_key(&h);
