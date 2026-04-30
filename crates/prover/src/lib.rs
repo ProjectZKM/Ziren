@@ -1225,22 +1225,48 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         // Make the compress proof.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
-        // META #59 Phase 4 (#51): detect basefold side channel + env var.
-        // The full dispatch to `shrink_program_basefold` requires additional
-        // Witnessable + merkle plumbing for ZKMWrapBasefoldWitnessValues.
-        // For now, detect the condition and log.  The dispatch body lands
-        // in the next incremental step (needs `make_merkle_proofs` variant
-        // for ZKMWrapBasefoldWitnessValues).
-        //
-        // The `#[allow(unused_variables)]` is critical: removing it causes
-        // dead-code elimination to alter the compiled test binary's shape
-        // which perturbs shape enumeration (see Apr 24 revert history).
-        #[allow(unused_variables)]
-        let _phase_4_use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
+        // META #59 Phase 4 (#51): when ZIREN_USE_BASEFOLD=1 AND the
+        // input proof carries a basefold side channel, dispatch to
+        // `shrink_program_basefold` instead of the legacy FRI path.
+        // ZKMWrapBasefoldWitnessValues has no merkle wrapper (unlike
+        // legacy ZKMCompressWithVKeyWitnessValues) — vk binding is
+        // enforced via the basefold verifier's chip_ordering plumbing
+        // rather than a vk-merkle index.
+        let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-        #[allow(unused_variables)]
-        let _phase_4_has_basefold_side = compressed_proof.basefold_shard_proof.is_some();
+        if use_basefold && compressed_proof.basefold_shard_proof.is_some() {
+            let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
+            let input = ZKMWrapBasefoldWitnessValues {
+                vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            };
+            let program = self.shrink_program_basefold(&input);
+
+            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                program.clone(),
+                self.shrink_prover.config().perm.clone(),
+            );
+            let mut witness_stream = Vec::new();
+            Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+            runtime.witness_stream = witness_stream.into();
+            runtime
+                .run()
+                .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+            runtime.print_stats();
+            tracing::debug!("Shrink basefold program executed successfully");
+
+            let (shrink_pk, shrink_vk) = tracing::debug_span!("setup shrink basefold")
+                .in_scope(|| self.shrink_prover.setup(&program));
+            let mut challenger = self.shrink_prover.config().challenger();
+            let mut compress_proof = self
+                .shrink_prover
+                .prove(&shrink_pk, vec![runtime.record], &mut challenger, opts.recursion_opts)
+                .unwrap();
+            return Ok(ZKMReduceProof {
+                vk: shrink_vk,
+                proof: compress_proof.shard_proofs.pop().unwrap(),
+            });
+        }
 
         let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
