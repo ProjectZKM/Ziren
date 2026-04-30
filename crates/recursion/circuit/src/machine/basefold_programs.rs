@@ -387,13 +387,19 @@ mod tests {
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
         let witness = dummy_core_basefold_witness(&machine);
-        // Use max_log_row_count = 3 to match the dummy trace's actual
-        // log_height (see produce_real_basefold_shard_proof).  Real
-        // shards use 22; the test's small fixture avoids heavy padding.
+        // Pass production_default().max_log_row_count — the prover
+        // pads zerocheck sumcheck out to this value regardless of the
+        // dummy trace's actual log_height (per shard_level/zerocheck_prover.rs:251).
+        // The verifier-side assertion at zerocheck.rs:488 enforces
+        // `zerocheck_proof.point.dim == pcs_max_log_row_count`, so
+        // both sides must agree on this number.
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
         let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
             &witness,
-            3,
+            max_log_row_count,
         );
         // Bare-minimum sanity: program produced, has at least one
         // instruction.  Tighter bounds + RecursionExecutor::run land
