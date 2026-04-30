@@ -33,7 +33,14 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
     }
 
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        MiscInstrColumns::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            MiscInstrColumns::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn local_only(&self) -> bool {

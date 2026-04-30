@@ -1,16 +1,21 @@
 use std::mem::size_of;
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+use zkm_stark::Word;
 
 use crate::{
     memory::MemoryReadWriteCols,
     operations::{IsZeroOperation, KoalaBearWordRangeChecker},
 };
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 
 pub const NUM_MEMORY_INSTRUCTIONS_COLUMNS: usize = size_of::<MemoryInstructionsColumns<u8>>();
 
 /// The column layout for memory.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct MemoryInstructionsColumns<T> {
     /// The current/next program counter of the instruction.
@@ -30,46 +35,46 @@ pub struct MemoryInstructionsColumns<T> {
     pub op_c_value: Word<T>,
 
     /// Whether this is a load byte instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lb: T,
     /// Whether this is a load byte unsigned instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lbu: T,
     /// Whether this is a load half instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lh: T,
     /// Whether this is a load half unsigned instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lhu: T,
     /// Whether this is a load word instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lw: T,
     /// Whether this is a lwl instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lwl: T,
     /// Whether this is a lwr instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_lwr: T,
     /// Whether this is a ll instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_ll: T,
     /// Whether this is a store byte instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sb: T,
     /// Whether this is a store half instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sh: T,
     /// Whether this is a store word instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sw: T,
     /// Whether this is a swl instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_swl: T,
     /// Whether this is a swr instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_swr: T,
     /// Whether this is a sc instruction.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sc: T,
 
     /// The relationships among addr_word, addr_aligned, and addr_offset is as follows:

@@ -81,6 +81,7 @@ glob = { version = "0.3.1", optional = true }
 
 [features]
 default = []
+picus = []
 debug = []
 bigint-rug = ["zkm-curves/bigint-rug", "zkm-core-executor/bigint-rug"]
 pre-alloc = ["zkm-core-executor/pre-alloc"]

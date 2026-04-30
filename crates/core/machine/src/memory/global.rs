@@ -10,13 +10,17 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 use zkm_stark::{
     air::{
         AirLookup, BaseAirBuilder, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
         ZKM_PROOF_NUM_PV_ELTS,
     },
-    LookupKind, PicusInfo, Word,
+    LookupKind, Word,
 };
 
 use crate::{
@@ -60,7 +64,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
     }
 
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        MemoryInitCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            MemoryInitCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_dependencies(
@@ -211,19 +222,20 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
     }
 }
 
-#[derive(AlignedBorrow, PicusAnnotations, Clone, Copy)]
+#[derive(AlignedBorrow, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct MemoryInitCols<T: Copy> {
     /// The shard number of the memory access.
-    #[picus(input, transition_input)]
+    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub shard: T,
 
     /// The timestamp of the memory access.
-    #[picus(input, transition_input)]
+    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub timestamp: T,
 
     /// The address of the memory access.
-    #[picus(input, transition_input)]
+    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub addr: T,
 
     /// Comparison assertions for address to be strictly increasing.
@@ -233,7 +245,7 @@ pub struct MemoryInitCols<T: Copy> {
     pub addr_bits: KoalaBearBitDecomposition<T>,
 
     /// The value of the memory access.
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub value: [T; 32],
 
     /// Whether the memory access is a real access.

@@ -8,38 +8,45 @@ use crate::syscall::precompiles::keccak_sponge::{
 use crate::utils::indices_arr;
 
 use p3_keccak_air::{KeccakCols, NUM_KECCAK_COLS, U64_LIMBS};
-use zkm_derive::{AlignedBorrow, PicusAnnotations, PicusProjection};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusProjection;
+use zkm_stark::Word;
 
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 /// KeccakSpongeCols is the column layout for the keccak sponge.
 /// The number of rows equal to the number of block.
-#[derive(AlignedBorrow, PicusAnnotations)]
+#[derive(AlignedBorrow)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub(crate) struct KeccakSpongeCols<T> {
     pub keccak: KeccakCols<T>,
     pub block_mem: [MemoryReadCols<T>; KECCAK_GENERAL_RATE_U32S],
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub shard: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub clk: T,
     pub is_real: T,
     pub read_block: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub input_address: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub output_address: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub input_len: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub already_absorbed_u32s: T,
     pub is_absorbed: T,
     pub receive_syscall: T,
     pub write_output: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub is_first_input_block: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub is_final_input_block: T,
-    #[picus(transition_input)]
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub original_state: [Word<T>; KECCAK_STATE_U32S],
     pub xored_general_rate: [XorOperation<T>; KECCAK_GENERAL_RATE_U32S],
     pub input_length_mem: MemoryReadCols<T>,
@@ -80,17 +87,17 @@ const fn make_keccak_picus_col_map() -> KeccakCols<usize> {
 /// `a_prime_prime_prime_0_0_limbs`, while the other 24 lanes remain in
 /// `a_prime_prime`.
 #[allow(dead_code)]
-#[derive(PicusProjection)]
-#[picus_projection(source = KeccakCols<u8>, col_map = KECCAK_PICUS_COL_MAP)]
+#[cfg_attr(feature = "picus", derive(PicusProjection))]
+#[cfg_attr(feature = "picus", picus_projection(source = KeccakCols<u8>, col_map = KECCAK_PICUS_COL_MAP))]
 pub struct KeccakPermutationProjection {
-    #[picus(input, path = a)]
+    #[cfg_attr(feature = "picus", picus(input, path = a))]
     pub state_in: [[[u8; U64_LIMBS]; 5]; 5],
-    #[picus(output, path = step_flags[0])]
+    #[cfg_attr(feature = "picus", picus(output, path = step_flags[0]))]
     pub first_step: u8,
-    #[picus(output, path = step_flags[23])]
+    #[cfg_attr(feature = "picus", picus(output, path = step_flags[23]))]
     pub final_step: u8,
-    #[picus(output, path = a_prime_prime_prime_0_0_limbs)]
+    #[cfg_attr(feature = "picus", picus(output, path = a_prime_prime_prime_0_0_limbs))]
     pub state_out_0_0: [u8; U64_LIMBS],
-    #[picus(output, path = a_prime_prime[0][1])]
+    #[cfg_attr(feature = "picus", picus(output, path = a_prime_prime[0][1]))]
     pub state_out_rest: [u8; KECCAK_STATE_TAIL_LIMBS],
 }

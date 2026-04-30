@@ -1,12 +1,17 @@
 use std::mem::size_of;
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+use zkm_stark::Word;
 
 use crate::operations::KoalaBearWordRangeChecker;
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 
 pub const NUM_JUMP_COLS: usize = size_of::<JumpColumns<u8>>();
 
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct JumpColumns<T> {
     /// The current program counter.
@@ -28,11 +33,11 @@ pub struct JumpColumns<T> {
     pub op_c_value: Word<T>,
 
     /// Jump Instructions Selectors.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_jump: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_jumpi: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_jumpdirect: T,
 
     // A range checker for `op_a` which may contain `next_pc + 4`.

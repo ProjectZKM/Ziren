@@ -30,7 +30,14 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
     }
 
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        SysLinuxCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            SysLinuxCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_trace(

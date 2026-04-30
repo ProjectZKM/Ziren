@@ -22,7 +22,9 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
@@ -42,7 +44,8 @@ pub struct CloClzChip;
 ///
 /// Optimized: `sr1` removed (hardcoded as 1 in SRL lookup since we always verify sr1 == 1),
 /// `is_clo` removed (derived as `is_real - is_clz`).
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct CloClzCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -63,7 +66,7 @@ pub struct CloClzCols<T> {
     pub is_bb_zero: T,
 
     /// Flag to indicate whether the opcode is CLZ.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_clz: T,
 
     /// Selector to know whether this row is enabled.
@@ -86,7 +89,14 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        CloClzCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            CloClzCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

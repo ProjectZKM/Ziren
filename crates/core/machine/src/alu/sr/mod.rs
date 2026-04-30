@@ -57,7 +57,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
@@ -83,7 +85,8 @@ const BYTE_SIZE: usize = 8;
 pub struct ShiftRightChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct ShiftRightCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -121,15 +124,15 @@ pub struct ShiftRightCols<T> {
     pub c_least_sig_byte: [T; BYTE_SIZE],
 
     /// If the opcode is SRL.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_srl: T,
 
     /// If the opcode is ROR.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_ror: T,
 
     /// If the opcode is SRA.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sra: T,
 
     /// Selector to know whether this row is enabled.
@@ -148,7 +151,14 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        ShiftRightCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            ShiftRightCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

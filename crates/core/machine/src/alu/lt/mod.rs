@@ -13,7 +13,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_stark::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
     PicusInfo, Word,
@@ -32,7 +34,8 @@ pub const NUM_LT_COLS: usize = size_of::<LtCols<u8>>();
 pub struct LtChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct LtCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -40,11 +43,11 @@ pub struct LtCols<T> {
     pub next_pc: T,
 
     /// If the opcode is SLT.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_slt: T,
 
     /// If the opcode is SLTU.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sltu: T,
 
     /// The output operand.
@@ -114,7 +117,14 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        LtCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            LtCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_trace(

@@ -1,8 +1,10 @@
 use crate::air::{MemoryAirBuilder, WordAirBuilder};
 use crate::memory::MemoryCols;
 use crate::operations::XorOperation;
+#[cfg(feature = "picus")]
+use crate::syscall::precompiles::keccak_sponge::columns::KeccakPermutationProjection;
 use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakPermutationProjection, KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::{
     KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
@@ -172,8 +174,11 @@ where
         // Eval the plonky3 keccak air. Picus can hide the full sub-AIR behind a
         // semantic boundary; other builders continue to inline the exact
         // `SubAirBuilder` path.
+        #[cfg(feature = "picus")]
         let current_inputs = self.keccak_summary_inputs::<AB>(local);
+        #[cfg(feature = "picus")]
         let current_outputs = self.keccak_summary_outputs::<AB>(local);
+        #[cfg(feature = "picus")]
         if !builder.try_emit_hidden_subair_summary(
             "KeccakAir",
             &KeccakPermutationProjection::picus_projection_info(),
@@ -187,6 +192,12 @@ where
                 SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
             self.p3_keccak.eval(&mut sub_builder);
         }
+        #[cfg(not(feature = "picus"))]
+        {
+            let mut sub_builder =
+                SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
+            self.p3_keccak.eval(&mut sub_builder);
+        }
     }
 }
 
@@ -196,6 +207,7 @@ impl KeccakSpongeChip {
     /// The surrounding sponge AIR ties these lanes to memory/original-state
     /// data, so they must remain visible caller inputs even when the full
     /// Keccak round system is summarized as a hidden submodule.
+    #[cfg(feature = "picus")]
     fn keccak_summary_inputs<AB: ZKMAirBuilder>(
         &self,
         local: &KeccakSpongeCols<AB::Var>,
@@ -221,6 +233,7 @@ impl KeccakSpongeChip {
     /// 2. `final_step`
     /// 3. `A'''[0, 0]`
     /// 4. the remaining 24 `A'''` lanes in witness layout order
+    #[cfg(feature = "picus")]
     fn keccak_summary_outputs<AB: ZKMAirBuilder>(
         &self,
         local: &KeccakSpongeCols<AB::Var>,

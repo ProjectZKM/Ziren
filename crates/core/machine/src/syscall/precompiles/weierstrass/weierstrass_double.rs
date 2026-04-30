@@ -24,7 +24,9 @@ use zkm_curves::{
     weierstrass::WeierstrassParameters,
     AffinePoint, CurveType, EllipticCurve,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_stark::{
     air::{LookupScope, MachineAir, ZKMAirBuilder},
     PicusInfo,
@@ -44,7 +46,8 @@ pub const fn num_weierstrass_double_cols<P: FieldParameters + NumWords>() -> usi
 ///
 /// Right now the number of limbs is assumed to be a constant, although this could be macro-ed or
 /// made generic in the future.
-#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
+#[derive(Debug, Clone, AlignedBorrow)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -160,7 +163,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
     }
 
     fn picus_info(&self) -> PicusInfo {
-        WeierstrassDoubleAssignCols::<u8, E::BaseField>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            WeierstrassDoubleAssignCols::<u8, E::BaseField>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_dependencies(

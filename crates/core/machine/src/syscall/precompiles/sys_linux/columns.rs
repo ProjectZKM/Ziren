@@ -1,17 +1,22 @@
 use std::mem::size_of;
 
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+use zkm_stark::Word;
 
 use crate::{
     memory::MemoryReadWriteCols,
     operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 
 pub const NUM_SYS_LINUX_COLS: usize = size_of::<SysLinuxCols<u8>>();
 
 /// A set of columns needed to compute the Linux Syscall.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct SysLinuxCols<T> {
     // ── Common inputs (15 cols) ────────────────────────────────────────

@@ -13,7 +13,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_stark::{
     air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
@@ -38,7 +40,8 @@ pub const NUM_ADD_SUB_COLS: usize = size_of::<AddSubCols<u8>>();
 pub struct AddSubChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct AddSubCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -56,11 +59,11 @@ pub struct AddSubCols<T> {
     pub operand_2: Word<T>,
 
     /// Flag indicating whether the opcode is `ADD`.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_add: T,
 
     /// Flag indicating whether the opcode is `SUB`.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sub: T,
 }
 
@@ -85,7 +88,14 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        AddSubCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            AddSubCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_trace(

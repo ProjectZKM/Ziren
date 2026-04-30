@@ -3,11 +3,15 @@ use core::mem::size_of;
 use crate::memory::MemoryWriteCols;
 use crate::operations::poseidon2::{Poseidon2Operation, WIDTH};
 use crate::operations::KoalaBearWordRangeChecker;
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+#[cfg(feature = "picus")]
 use zkm_stark::PicusInfo;
 
 /// Poseidon2MemCols is the column layout for the poseidon2 permutation.
-#[derive(Debug, Clone, AlignedBorrow, PicusAnnotations)]
+#[derive(Debug, Clone, AlignedBorrow)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub(crate) struct Poseidon2MemCols<T: Copy> {
     pub poseidon2: Poseidon2Operation<T>,

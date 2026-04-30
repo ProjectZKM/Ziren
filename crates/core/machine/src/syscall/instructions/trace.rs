@@ -34,7 +34,14 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        SyscallInstrColumns::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            SyscallInstrColumns::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

@@ -45,7 +45,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::MachineAir, PicusInfo, Word};
 
@@ -66,7 +68,8 @@ pub const BYTE_SIZE: usize = 8;
 pub struct ShiftLeft;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct ShiftLeftCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -115,7 +118,14 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        ShiftLeftCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            ShiftLeftCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

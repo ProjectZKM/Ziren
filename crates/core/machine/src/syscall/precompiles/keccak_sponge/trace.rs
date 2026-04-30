@@ -1,5 +1,7 @@
+#[cfg(feature = "picus")]
+use crate::syscall::precompiles::keccak_sponge::columns::KeccakPermutationProjection;
 use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakPermutationProjection, KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
@@ -30,20 +32,30 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     }
 
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        let mut info = KeccakSpongeCols::<u8>::picus_info();
-        let projection = KeccakPermutationProjection::picus_projection_info();
+        #[cfg(feature = "picus")]
+        {
+            let mut info = KeccakSpongeCols::<u8>::picus_info();
+            #[cfg(feature = "picus")]
+            {
+                let projection = KeccakPermutationProjection::picus_projection_info();
 
-        // Expose the embedded Keccak permutation input state on the parent
-        // module interface so Picus cannot vary it existentially when checking
-        // boundary/transition phases.
-        info.transition_input_ranges.extend(
-            projection
-                .input_ranges
-                .into_iter()
-                .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
-        );
+                // Expose the embedded Keccak permutation input state on the parent
+                // module interface so Picus cannot vary it existentially when checking
+                // boundary/transition phases.
+                info.transition_input_ranges.extend(
+                    projection
+                        .input_ranges
+                        .into_iter()
+                        .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
+                );
+            }
 
-        info
+            info
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_dependencies(

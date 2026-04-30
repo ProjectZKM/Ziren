@@ -26,7 +26,9 @@ use crate::{
     utils::{indices_arr, next_power_of_two, zeroed_f_vec},
     CoreChipError,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 
 const NUM_GLOBAL_COLS: usize = size_of::<GlobalCols<u8>>();
 
@@ -50,11 +52,12 @@ pub struct Ghost {
 #[derive(Default)]
 pub struct GlobalChip;
 
-#[derive(AlignedBorrow, PicusAnnotations)]
+#[derive(AlignedBorrow)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct GlobalCols<T: Copy> {
     pub message: [T; 7],
-    #[picus(output)]
+    #[cfg_attr(feature = "picus", picus(output))]
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
     pub is_receive: T,
@@ -76,7 +79,14 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        GlobalCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            GlobalCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 
     fn generate_dependencies(

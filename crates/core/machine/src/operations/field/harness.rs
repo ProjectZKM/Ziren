@@ -6,7 +6,9 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use zkm_core_executor::{events::FieldOperation, ExecutionRecord, Program};
 use zkm_curves::{edwards::ed25519::Ed25519BaseField, params::Limbs};
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_stark::{
     air::{MachineAir, ZKMAirBuilder},
     PicusInfo,
@@ -19,39 +21,42 @@ use crate::{
     CoreChipError,
 };
 
-#[derive(AlignedBorrow, PicusAnnotations, Debug, Clone)]
+#[derive(AlignedBorrow, Debug, Clone)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct FieldOpHarnessCols<T> {
     pub is_real: T,
-    #[picus(input)]
+    #[cfg_attr(feature = "picus", picus(input))]
     pub a: Limbs<T, <Ed25519BaseField as zkm_curves::params::NumLimbs>::Limbs>,
-    #[picus(input)]
+    #[cfg_attr(feature = "picus", picus(input))]
     pub b: Limbs<T, <Ed25519BaseField as zkm_curves::params::NumLimbs>::Limbs>,
-    #[picus(output)]
+    #[cfg_attr(feature = "picus", picus(output))]
     pub op: FieldOpCols<T, Ed25519BaseField>,
 }
 
-#[derive(AlignedBorrow, PicusAnnotations, Debug, Clone)]
+#[derive(AlignedBorrow, Debug, Clone)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct FieldDenHarnessCols<T> {
     pub is_real: T,
-    #[picus(input)]
+    #[cfg_attr(feature = "picus", picus(input))]
     pub a: Limbs<T, <Ed25519BaseField as zkm_curves::params::NumLimbs>::Limbs>,
-    #[picus(input)]
+    #[cfg_attr(feature = "picus", picus(input))]
     pub b: Limbs<T, <Ed25519BaseField as zkm_curves::params::NumLimbs>::Limbs>,
-    #[picus(output)]
+    #[cfg_attr(feature = "picus", picus(output))]
     pub den: FieldDenCols<T, Ed25519BaseField>,
 }
 
-#[derive(AlignedBorrow, PicusAnnotations, Debug, Clone)]
+#[derive(AlignedBorrow, Debug, Clone)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct FieldInnerProductHarnessCols<T> {
     pub is_real: T,
-    #[picus(input)]
+    #[cfg_attr(feature = "picus", picus(input))]
     pub a: [Limbs<T, <Ed25519BaseField as zkm_curves::params::NumLimbs>::Limbs>; 2],
-    #[picus(input)]
+    #[cfg_attr(feature = "picus", picus(input))]
     pub b: [Limbs<T, <Ed25519BaseField as zkm_curves::params::NumLimbs>::Limbs>; 2],
-    #[picus(output)]
+    #[cfg_attr(feature = "picus", picus(output))]
     pub inner_product: FieldInnerProductCols<T, Ed25519BaseField>,
 }
 
@@ -97,7 +102,14 @@ impl<F: PrimeField32> MachineAir<F> for FieldOpHarnessChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        FieldOpHarnessCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            FieldOpHarnessCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 }
 
@@ -161,7 +173,14 @@ impl<F: PrimeField32> MachineAir<F> for FieldDenHarnessChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        FieldDenHarnessCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            FieldDenHarnessCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 }
 
@@ -224,7 +243,14 @@ impl<F: PrimeField32> MachineAir<F> for FieldInnerProductHarnessChip {
     }
 
     fn picus_info(&self) -> PicusInfo {
-        FieldInnerProductHarnessCols::<u8>::picus_info()
+        #[cfg(feature = "picus")]
+        {
+            FieldInnerProductHarnessCols::<u8>::picus_info()
+        }
+        #[cfg(not(feature = "picus"))]
+        {
+            zkm_stark::PicusInfo::default()
+        }
     }
 }
 
