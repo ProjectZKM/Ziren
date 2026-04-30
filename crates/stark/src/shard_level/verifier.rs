@@ -97,15 +97,16 @@ pub struct BasefoldShardVerifier {
 }
 
 impl BasefoldShardVerifier {
-    /// Production default (max_log_row_count = 20 — KoalaBear's
-    /// TWO_ADICITY is 24 and BaseFold log_blowup is 4, so
-    /// num_variables ≤ 20 is required for `log_codeword_size ≤ 24`
-    /// in the recursion-circuit basefold verifier. Was 22; the 22
-    /// value panics at `two_adic_generator` during
-    /// `build_normalize_basefold_program`.
+    /// Production default (max_log_row_count = 22 — KoalaBear's
+    /// TWO_ADICITY is 24 and BaseFold log_blowup is 1 since
+    /// `basefold/config.rs::production_default`, so
+    /// `log_max_height = num_variables + log_blowup = 22 + 1 = 23 ≤ 24`
+    /// is satisfied and the recursion-circuit basefold verifier's
+    /// `two_adic_generator(log_codeword_size)` no longer panics.
+    /// Previous cap of 20 was tied to the legacy `log_blowup = 4`.
     #[must_use]
     pub const fn production_default() -> Self {
-        Self { max_log_row_count: 20 }
+        Self { max_log_row_count: 22 }
     }
 
     /// Construct with explicit parameters.  Use when writing tests
