@@ -1001,7 +1001,9 @@ mod tests {
         let p = BasefoldVerifierParams::production_default(20);
         assert_eq!(p.total_sumcheck_rounds(), 20);
         assert_eq!(p.total_merkle_commits(), 21);
-        assert_eq!(p.log_codeword_size(), 24);
+        // log_codeword_size = num_variables + log_blowup = 20 + 1
+        // (post-#54: log_blowup aligned to 1 with stark prover).
+        assert_eq!(p.log_codeword_size(), 21);
         assert!(p.estimated_recursion_constraints() > 0);
     }
 

@@ -316,11 +316,13 @@ mod tests {
     #[test]
     fn lift_metadata_scales_with_max_log_row_count() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        // 2 rounds × 2 chips each with 3 cols = 6 per round + 1 pad
-        // = 7 → padded to 8.  col_prefix_sums.len() == 9.
+        // 2 rounds × 2 chips each with 3 cols.  Per-round formula
+        // (post-Phase 2 gate 3 fix): flattened = 3+3 = 6,
+        // added = cc[len-2]+1 = 3+1 = 4, total per round = 10.
+        // 2 rounds = 20 → padded to 32 → col_prefix_sums.len() = 33.
         let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];
         let var = lift_evaluation_proof_bytes::<C>(&mut builder, &[], 8, &cols);
-        assert_eq!(var.params.col_prefix_sums.len(), 17); // 2*(6+1) = 14 → padded to 16 → +1 = 17
+        assert_eq!(var.params.col_prefix_sums.len(), 33);
         assert_eq!(var.params.col_prefix_sums[0].len(), 9); // max_log_row_count + 1
     }
 }
