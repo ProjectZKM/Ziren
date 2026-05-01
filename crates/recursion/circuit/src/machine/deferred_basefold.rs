@@ -193,18 +193,16 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-        let column_counts_by_round_placeholder: Vec<Vec<usize>> = Vec::new();
-        let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-            builder,
-            &evaluation_proof_bytes,
-            max_log_row_count,
-            &column_counts_by_round_placeholder,
-        );
-        let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
-            builder,
-            &chip_names,
-            max_log_row_count,
-        );
+        // #83 fix: compute column_counts_by_round BEFORE the
+        // lift_evaluation_proof_bytes call. Previously the lift was
+        // passed an empty placeholder, which made the JaggedPcsParams
+        // see num_cols = 1 (post-padding) → num_col_variables = 0 →
+        // z_col empty. But column_claims (built downstream from real
+        // evaluation_claims) is sized to the REAL padded column count
+        // (~1024 for chip-heavy Deferred shapes), so the MLE
+        // evaluation `evaluate_mle_ext(column_claims, z_col)` panicked
+        // on `column_claims.len() != 2^z_col.len()` (1024 vs 1).
+        // Mirrors the compress_basefold flow at compress_basefold.rs:268-275.
         let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
             .chips()
             .iter()
@@ -225,6 +223,18 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
+
+        let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+            builder,
+            &evaluation_proof_bytes,
+            max_log_row_count,
+            &column_counts_by_round,
+        );
+        let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
+            builder,
+            &chip_names,
+            max_log_row_count,
+        );
         let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::chip_metadata_from_chips::<SC, A>(&shard_chips);

@@ -111,18 +111,12 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let chip_names: Vec<String> =
         logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-    let column_counts_by_round_placeholder: Vec<Vec<usize>> = Vec::new();
-    let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-        builder,
-        &evaluation_proof_bytes,
-        max_log_row_count,
-        &column_counts_by_round_placeholder,
-    );
-    let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
-        builder,
-        &chip_names,
-        max_log_row_count,
-    );
+    // #83 fix: build column_counts_by_round BEFORE the lift call,
+    // matching compress_basefold.rs:268-275. Empty placeholder
+    // caused JaggedPcsParams to see num_cols=1 → z_col empty →
+    // evaluate_mle_ext panic at logup_gkr.rs:105 with column_claims
+    // sized to the real ~1024-entry padded width. Same fix as
+    // deferred_basefold.rs in the same commit.
     let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
         .chips()
         .iter()
@@ -143,6 +137,18 @@ pub fn verify_wrap_basefold<C, SC, A>(
         .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
         .collect();
     let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
+
+    let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+        builder,
+        &evaluation_proof_bytes,
+        max_log_row_count,
+        &column_counts_by_round,
+    );
+    let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
+        builder,
+        &chip_names,
+        max_log_row_count,
+    );
     let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
         crate::basefold_verifier::RecursiveBasefoldVerifier,
     >::chip_metadata_from_chips::<SC, A>(&shard_chips);
