@@ -161,7 +161,8 @@ where
 }
 
 /// Compute the four round-polynomial evaluations `p(0), p(1), p(2), p(3)`
-/// for one sumcheck round.
+/// for one sumcheck round, using the **factored eq layout**
+/// (`eq_int`, `eq_row`).
 ///
 /// `p(X) = Σ_{b ∈ {0,1}^{m-1}} eq_X(b) · [λ · (n0_X(b) · d1_X(b) + n1_X(b) · d0_X(b)) + d0_X(b) · d1_X(b)]`
 ///
@@ -173,8 +174,34 @@ where
 ///   - `t_{X=1}(i) = t[2i+1]`
 ///   - `t_{X=2}(i) = 2·t[2i+1] - t[2i]`
 ///   - `t_{X=3}(i) = 3·t[2i+1] - 2·t[2i]`
+///
+/// ## Factored eq decomposition (Tier 1 Phase 1)
+///
+/// Instead of materializing a global `eq` table of length
+/// `2^total_vars × 16 B`, we keep two factored slices:
+///   - `eq_int` of length `cols_r = 2^remaining_int_vars`
+///   - `eq_row` of length `rows_r = 2^remaining_row_vars`
+/// and reconstruct the per-index weight on the fly:
+///   `eq_full[idx] = eq_int[idx & (cols_r - 1)] * eq_row[idx >> lc]`
+/// where `lc = log2(cols_r)`.  When `cols_r == 1` (interaction
+/// fully bound), the mask is `0`, `eq_int[0]` becomes a constant
+/// scalar, and `eq_full[idx] = eq_int[0] * eq_row[idx]`.
+///
+/// ### Proof of correctness for the per-pair lookup
+/// 1. `flatten_layer` writes `flat[row * cols + col] = chip_value(row, col)`
+///    so bits `[0, lc)` of the flat index are the col coordinate and
+///    bits `[lc, lc + log2(rows_r))` are the row coordinate.
+/// 2. The eq builder is LSB-first: `eq_full[idx] = ∏_k r_k^{bit_k(idx)} · (1-r_k)^{1-bit_k(idx)}`.
+/// 3. `eval_point[0..num_int_vars]` are the interaction coords (col)
+///    and `eval_point[num_int_vars..]` are the row coords, so the
+///    product factors cleanly into `eq_int[col] · eq_row[row]`.
+/// 4. Folding bit 0 first (LSB-first) shrinks `eq_int` for the
+///    first `num_int_vars` rounds and `eq_row` afterwards; the
+///    `cols_r = eq_int.len()` invariant therefore tracks the
+///    interaction half automatically.
 fn round_poly_evaluations<EF: Field + Send + Sync>(
-    eq: &[EF],
+    eq_int: &[EF],
+    eq_row: &[EF],
     n0: &[EF],
     d0: &[EF],
     n1: &[EF],
@@ -182,12 +209,22 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     lambda: EF,
     current_claim: EF,
 ) -> [EF; 4] {
-    debug_assert_eq!(eq.len(), n0.len());
-    debug_assert_eq!(eq.len(), d0.len());
-    debug_assert_eq!(eq.len(), n1.len());
-    debug_assert_eq!(eq.len(), d1.len());
-    debug_assert!(eq.len() >= 2, "round_poly requires at least 1 variable remaining");
-    let half = eq.len() / 2;
+    debug_assert_eq!(n0.len(), d0.len());
+    debug_assert_eq!(n0.len(), d0.len());
+    debug_assert_eq!(n0.len(), n1.len());
+    debug_assert_eq!(n0.len(), d1.len());
+    debug_assert!(n0.len() >= 2, "round_poly requires at least 1 variable remaining");
+    debug_assert!(eq_int.len().is_power_of_two());
+    debug_assert!(eq_row.len().is_power_of_two());
+    debug_assert_eq!(
+        eq_int.len() * eq_row.len(),
+        n0.len(),
+        "factored eq cardinality must match the flat tables"
+    );
+    let half = n0.len() / 2;
+    let cols_r = eq_int.len();
+    let lc = cols_r.trailing_zeros() as usize;
+    let col_mask = cols_r - 1; // 0 when cols_r == 1, else the col-bit mask
 
     // EF arithmetic optimizations:
     //   - `x.double()` (4 base adds) instead of `two * x` (16 base muls)
@@ -208,10 +245,19 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
             let j0 = 2 * i;
             let j1 = 2 * i + 1;
 
+            // Factored eq lookup. When lc >= 1 (interaction-binding
+            // phase) the pair shares the row factor; when lc == 0
+            // (row-binding phase) the pair shares the (scalar) col
+            // factor `eq_int[0]`.  Both cases collapse to two muls.
+            let row0 = j0 >> lc;
+            let row1 = j1 >> lc;
+            let e0 = eq_int[j0 & col_mask] * eq_row[row0];
+            let e1 = eq_int[j1 & col_mask] * eq_row[row1];
+
             // X = 0 linearizations (only n00..d10 needed for X=2/X=3 derivations)
-            let (e0, n00, d00, n10, d10) = (eq[j0], n0[j0], d0[j0], n1[j0], d1[j0]);
+            let (n00, d00, n10, d10) = (n0[j0], d0[j0], n1[j0], d1[j0]);
             // X = 1
-            let (e1, n01, d01, n11, d11) = (eq[j1], n0[j1], d0[j1], n1[j1], d1[j1]);
+            let (n01, d01, n11, d11) = (n0[j1], d0[j1], n1[j1], d1[j1]);
             // X = 2 → 2·t[2i+1] - t[2i]
             let two_e1 = e1.double();
             let two_n01 = n01.double();
@@ -334,10 +380,11 @@ where
         GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
     };
 
-    let total_vars = match circuit {
-        GkrCircuitLayer::Layer(l) => l.num_row_variables + l.num_interaction_variables,
-        GkrCircuitLayer::FirstLayer(l) => l.num_row_variables + l.num_interaction_variables,
+    let (num_row_variables, num_interaction_variables) = match circuit {
+        GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
+        GkrCircuitLayer::FirstLayer(l) => (l.num_row_variables, l.num_interaction_variables),
     };
+    let total_vars = num_row_variables + num_interaction_variables;
     assert_eq!(
         eval_point.len(),
         total_vars,
@@ -347,24 +394,31 @@ where
     );
     assert_eq!(n0_flat.len(), 1usize << total_vars);
 
-    // Initial eq table over the full eval_point, LSB-first convention
-    // (variable k at bit k of idx) — matches `flatten_layer`'s storage
-    // layout and `evaluate_mle_host`'s MLE convention.  `eq_mle_table`
-    // in `zerocheck_prover` uses MSB-first which does NOT align with
-    // the row-major flatten we use here.
-    let mut eq_flat: Vec<EF> = {
+    // Tier 1 Phase 1 — factored eq tables.
+    //
+    // `flatten_layer` lays out the flat MLE as `flat[row*cols+col]`,
+    // so bits `[0, num_int_vars)` of the flat index are the col
+    // (interaction) coordinate and bits `[num_int_vars, total_vars)`
+    // are the row coordinate.  The eq builder is LSB-first
+    // (variable k at bit k of idx), so the first `num_int_vars`
+    // entries of `eval_point` are the interaction coords and the
+    // remaining `num_row_variables` entries are the row coords.
+    //
+    // Storing two factored tables drops eq memory from
+    // `2^total_vars × |EF|` (≈ 2 GiB on a production-shape MIPS
+    // shard with total_vars=27) to `2^num_int_vars + 2^num_row_vars`
+    // (≈ 64 MiB), and the per-round fold only halves whichever
+    // factor is being bound.
+    let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
+    let build_eq = |coords: &[EF]| -> Vec<EF> {
         use p3_maybe_rayon::prelude::*;
         let mut weights: Vec<EF> = vec![EF::ONE];
-        for &r in eval_point {
+        for &r in coords {
             let old_len = weights.len();
-            // Skip the `vec![EF::ZERO; 2*old_len]` zero-init: every slot is
-            // unconditionally overwritten below.  For a 2^26 EF table that's
-            // 1 GiB of redundant writes per round.  We pre-allocate the
-            // capacity, set the length via set_len (safe — we initialize
-            // every slot before reading), and write in parallel.
-            let new_len = old_len * 2;
-            // FLAKE FIX: see flatten_layer note above.
-            let mut next: Vec<EF> = vec![EF::ZERO; new_len];
+            // FLAKE FIX (preserved from previous eq_flat build): KoalaBear's
+            // serde rejects values >= PRIME, so use vec! init rather than
+            // unsafe set_len to avoid leaking uninit u32 garbage.
+            let mut next: Vec<EF> = vec![EF::ZERO; old_len * 2];
             let (lo, hi) = next.split_at_mut(old_len);
             lo.par_iter_mut()
                 .zip(hi.par_iter_mut())
@@ -378,6 +432,10 @@ where
         }
         weights
     };
+    let mut eq_int: Vec<EF> = build_eq(interaction_point);
+    let mut eq_row: Vec<EF> = build_eq(row_point);
+    debug_assert_eq!(eq_int.len(), 1usize << num_interaction_variables);
+    debug_assert_eq!(eq_row.len(), 1usize << num_row_variables);
 
     // Initial claim.
     let claimed_sum = lambda * numerator_eval + denominator_eval;
@@ -392,9 +450,9 @@ where
     let mut reduced_point: Vec<EF> = Vec::with_capacity(total_vars);
     let mut current_claim = claimed_sum;
 
-    for _round in 0..total_vars {
+    for round in 0..total_vars {
         let evals = round_poly_evaluations(
-            &eq_flat, &n0_flat, &d0_flat, &n1_flat, &d1_flat, lambda, current_claim,
+            &eq_int, &eq_row, &n0_flat, &d0_flat, &n1_flat, &d1_flat, lambda, current_claim,
         );
         let coeffs = poly_coefficients_from_evals(evals);
 
@@ -410,45 +468,38 @@ where
         // Update current_claim = p(alpha) for next round's 3-point trick.
         current_claim = poly_eval(&coeffs, alpha);
 
-        // Fused 5-table fold: process all 5 tables in ONE parallel pass.
-        // Per chunk, each thread reads pairs from all 5 input tables
-        // and writes 5 output values — cutting rayon dispatch overhead
-        // from 5 to 1 per round, and keeping the 5 input streams
-        // hot-in-cache through the whole chunk's worth of work.
-        let half = eq_flat.len() / 2;
-        // FLAKE FIX: same as above — uninit EF Vec via set_len leaks
+        // Fused 4-table fold for the flat n0/d0/n1/d1 vectors PLUS a
+        // separate fold of whichever eq factor is being bound this
+        // round.  Rounds `0..num_interaction_variables` bind LSB
+        // (interaction) variables and shrink `eq_int`; subsequent
+        // rounds bind row variables and shrink `eq_row`.  The flat
+        // tables are always halved (one bound variable per round).
+        let half = n0_flat.len() / 2;
+        // FLAKE FIX (preserved): uninit EF Vec via set_len leaks
         // garbage u32s that fail KoalaBear deserialization.
-        let mut eq_n: Vec<EF> = vec![EF::ZERO; half];
         let mut n0_n: Vec<EF> = vec![EF::ZERO; half];
         let mut d0_n: Vec<EF> = vec![EF::ZERO; half];
         let mut n1_n: Vec<EF> = vec![EF::ZERO; half];
         let mut d1_n: Vec<EF> = vec![EF::ZERO; half];
         {
             use p3_maybe_rayon::prelude::*;
-            // Use index-based parallel iterator to avoid 5-way zip
-            // overhead.  Process pairs in a single chunked loop.
-            let eq_in = &eq_flat;
             let n0_in = &n0_flat;
             let d0_in = &d0_flat;
             let n1_in = &n1_flat;
             let d1_in = &d1_flat;
             // Pick a chunk size that balances rayon overhead with
-            // cache pressure.  Each iteration touches 5 input pairs +
-            // 5 outputs = 160 bytes/pair (5 × 16 read + 5 × 16 write).
-            // L2 cache per core ~256 KiB → fit ~1.5K pairs in cache.
+            // cache pressure.  Each iteration touches 4 input pairs +
+            // 4 outputs = 128 bytes/pair (4 × 16 read + 4 × 16 write).
             let chunk_size = 4096.min(half).max(1);
-            eq_n.par_chunks_mut(chunk_size)
-                .zip(n0_n.par_chunks_mut(chunk_size))
+            n0_n.par_chunks_mut(chunk_size)
                 .zip(d0_n.par_chunks_mut(chunk_size))
                 .zip(n1_n.par_chunks_mut(chunk_size))
                 .zip(d1_n.par_chunks_mut(chunk_size))
                 .enumerate()
-                .for_each(|(chunk_idx, ((((eq_o, n0_o), d0_o), n1_o), d1_o))| {
+                .for_each(|(chunk_idx, (((n0_o, d0_o), n1_o), d1_o))| {
                     let base = chunk_idx * chunk_size;
-                    for i in 0..eq_o.len() {
+                    for i in 0..n0_o.len() {
                         let g = base + i;
-                        let lo_eq = eq_in[2 * g];
-                        let hi_eq = eq_in[2 * g + 1];
                         let lo_n0 = n0_in[2 * g];
                         let hi_n0 = n0_in[2 * g + 1];
                         let lo_d0 = d0_in[2 * g];
@@ -457,7 +508,6 @@ where
                         let hi_n1 = n1_in[2 * g + 1];
                         let lo_d1 = d1_in[2 * g];
                         let hi_d1 = d1_in[2 * g + 1];
-                        eq_o[i] = lo_eq + alpha * (hi_eq - lo_eq);
                         n0_o[i] = lo_n0 + alpha * (hi_n0 - lo_n0);
                         d0_o[i] = lo_d0 + alpha * (hi_d0 - lo_d0);
                         n1_o[i] = lo_n1 + alpha * (hi_n1 - lo_n1);
@@ -465,11 +515,40 @@ where
                     }
                 });
         }
-        eq_flat = eq_n;
         n0_flat = n0_n;
         d0_flat = d0_n;
         n1_flat = n1_n;
         d1_flat = d1_n;
+
+        // Fold whichever eq factor corresponds to the variable bound
+        // this round.  LSB-first ⇒ interaction first, then row.
+        if round < num_interaction_variables {
+            let half = eq_int.len() / 2;
+            let mut eq_int_n: Vec<EF> = vec![EF::ZERO; half];
+            {
+                use p3_maybe_rayon::prelude::*;
+                let src = &eq_int;
+                eq_int_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
+                    let lo = src[2 * g];
+                    let hi = src[2 * g + 1];
+                    *slot = lo + alpha * (hi - lo);
+                });
+            }
+            eq_int = eq_int_n;
+        } else {
+            let half = eq_row.len() / 2;
+            let mut eq_row_n: Vec<EF> = vec![EF::ZERO; half];
+            {
+                use p3_maybe_rayon::prelude::*;
+                let src = &eq_row;
+                eq_row_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
+                    let lo = src[2 * g];
+                    let hi = src[2 * g + 1];
+                    *slot = lo + alpha * (hi - lo);
+                });
+            }
+            eq_row = eq_row_n;
+        }
 
         univariate_polys.push(UnivariatePolynomial::new(coeffs.to_vec()));
     }
@@ -481,7 +560,11 @@ where
     let denominator_1 = d1_flat[0];
 
     // Final eval = eq(reduced_point) · [λ · (n0·d1 + n1·d0) + d0·d1].
-    let eq_final = eq_flat[0];
+    // After all `total_vars` rounds both factored tables collapse to
+    // length 1 and `eq_full = eq_int[0] · eq_row[0]`.
+    debug_assert_eq!(eq_int.len(), 1);
+    debug_assert_eq!(eq_row.len(), 1);
+    let eq_final = eq_int[0] * eq_row[0];
     let final_eval = eq_final
         * (lambda * (numerator_0 * denominator_1 + numerator_1 * denominator_0)
             + denominator_0 * denominator_1);
@@ -677,7 +760,12 @@ mod tests {
         //
         // So p(0) = 174, p(1) = 174 - 77 - 87 - 10 = 0,
         //    p(2) = 174 - 154 - 348 - 80 = -408, p(3) = 174 - 231 - 783 - 270 = -1110.
-        let eq = vec![EF::ONE, EF::ZERO];
+        // Factored eq: 1 variable along the interaction axis, no row
+        // variables.  eq_int = [1, 0] (= [(1-r), r] with r=0),
+        // eq_row = [1].  Combined: eq_full[idx] = eq_int[idx]*eq_row[0]
+        // = [1, 0], matching the original single-slice test.
+        let eq_int = vec![EF::ONE, EF::ZERO];
+        let eq_row = vec![EF::ONE];
         let n0 = vec![EF::from_u32(2), EF::from_u32(3)];
         let d0 = vec![EF::from_u32(5), EF::from_u32(7)];
         let n1 = vec![EF::from_u32(11), EF::from_u32(13)];
@@ -686,8 +774,9 @@ mod tests {
         // current_claim = p(0) + p(1) = 174 + 0 = 174 (sumcheck invariant
         // exploited by the 3-point trick where p(0) is recovered as
         // current_claim - p(1)).
-        let evals =
-            round_poly_evaluations(&eq, &n0, &d0, &n1, &d1, EF::ONE, EF::from_u32(174));
+        let evals = round_poly_evaluations(
+            &eq_int, &eq_row, &n0, &d0, &n1, &d1, EF::ONE, EF::from_u32(174),
+        );
         assert_eq!(evals[0], EF::from_u32(174));
         assert_eq!(evals[1], EF::ZERO);
         // p(2), p(3) involve signed values which EF handles via field arithmetic.

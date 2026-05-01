@@ -654,6 +654,7 @@ pub fn verify_zerocheck_rounds<EF: Field>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::zerocheck::eq_eval;
     use p3_field::extension::BinomialExtensionField;
     use p3_koala_bear::KoalaBear;
 
