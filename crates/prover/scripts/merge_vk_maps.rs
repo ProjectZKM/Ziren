@@ -26,11 +26,17 @@ type KB = p3_koala_bear::KoalaBear;
 #[clap(author, version, about = "Merge partial vk_map.bin files")]
 struct Args {
     /// One or more partial vk_map.bin files to merge.
-    #[clap(long = "input", required = true)]
+    #[clap(long = "input")]
     inputs: Vec<PathBuf>,
     /// Output path for the merged vk_map.bin.
     #[clap(long)]
     output: PathBuf,
+    /// Add a raw hash literal as an extra entry. Format: "v0,v1,...,v7"
+    /// (8 comma-separated u32 values, the canonical KoalaBear repr).
+    /// Used when capturing a specific compress/shrink VK from a test
+    /// run via diagnostic eprintln rather than via collect_basefold_vks.
+    #[clap(long = "add-hash")]
+    add_hashes: Vec<String>,
 }
 
 fn main() {
@@ -50,6 +56,19 @@ fn main() {
             // Insertion order on BTreeMap doesn't matter; we re-enumerate below.
             union.entry(k).or_insert(0);
         }
+    }
+    // Inject raw --add-hash entries.
+    use p3_field::PrimeCharacteristicRing;
+    for raw in &args.add_hashes {
+        let parts: Vec<u32> = raw
+            .split(',')
+            .map(|s| s.trim().parse().unwrap_or_else(|e| panic!("parse {}: {}", s, e)))
+            .collect();
+        assert_eq!(parts.len(), DIGEST_SIZE, "--add-hash needs exactly 8 u32 values");
+        let h: [KB; DIGEST_SIZE] = std::array::from_fn(|i| KB::from_u32(parts[i]));
+        eprintln!("[merge] --add-hash: {:?}", h);
+        total_input += 1;
+        union.entry(h).or_insert(0);
     }
 
     eprintln!(

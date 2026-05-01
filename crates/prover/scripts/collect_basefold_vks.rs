@@ -164,6 +164,33 @@ fn main() {
             "[collect] {} compress_vk hash = {:?} (new={})",
             workload, h, new
         );
+
+        // Also capture the shrink VK hash, since verify_shrink (verify.rs:367)
+        // checks the SHRINK proof's vk against the same recursion_vk_map.
+        // Without this, a workload that needed VERIFY_VK=true would pass
+        // compress but fail shrink, requiring a follow-up regen.
+        eprintln!("[collect] shrink start");
+        let shrink_compressed = compressed.clone();
+        let shrink_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prover.shrink(shrink_compressed, opts)
+        }));
+        match shrink_result {
+            Ok(Ok(shrunk)) => {
+                let sh = shrunk.vk.hash_koalabear();
+                let snew = !hashes.contains_key(&sh);
+                hashes.insert(sh, hashes.len());
+                eprintln!(
+                    "[collect] {} shrink_vk hash = {:?} (new={})",
+                    workload, sh, snew
+                );
+            }
+            Ok(Err(e)) => {
+                eprintln!("[collect] shrink ERROR for {}: {:?}", workload, e);
+            }
+            Err(_) => {
+                eprintln!("[collect] shrink PANIC for {} (see [PANIC] above)", workload);
+            }
+        }
     }
 
     eprintln!(
