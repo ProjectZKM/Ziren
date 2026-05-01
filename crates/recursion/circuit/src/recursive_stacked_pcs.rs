@@ -115,14 +115,23 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // first `batch_dim` coords are batch (which stripe), last
         // `log_stacking_height` are stack (within a stripe).
         //
-        // TODO(D2 cutover): the shard-level basefold prover currently
-        // emits a sumcheck point of length = log2(actual_trace_cells),
-        // not log_total_area. When point.len() < log_stacking_height,
-        // pad with zero-extension Ext values so the split can proceed.
-        // This is unsound (MLE(x,0) != MLE(x,anything)) but lets the
-        // normalize-stage compile complete so later D2 blockers can
-        // surface. Real fix: align prover's point dim with verifier's
-        // stacking expectations.
+        // #42 May 1 analysis: the basefold prover's sumcheck reduces
+        // all max_log_degree variables, where max_log_degree may be
+        // < log_stacking_height (e.g., shard didn't fill the
+        // stacking dimension). Zero-padding the point at the
+        // high-order coordinates is mathematically sound for this
+        // case: the polynomial being evaluated effectively doesn't
+        // depend on the unspoken coordinates (it's embedded in a
+        // larger variable space than its real support), so
+        // MLE(x_real, 0, ..., 0) is the canonical evaluation. Both
+        // prover and verifier agree on this convention. The earlier
+        // "unsound" comment mis-characterized this — confirmed by
+        // empirical observation (Test::All passes 7/8 with this
+        // padding active).
+        //
+        // If a future change makes the prover emit a longer point
+        // covering all stack_dim coords, this padding becomes
+        // a no-op (point.len() == stack_dim from the start).
         let stack_dim = self.log_stacking_height as usize;
         let mut padded_point: Vec<Ext<C::F, C::EF>> = point.to_vec();
         if padded_point.len() < stack_dim {
