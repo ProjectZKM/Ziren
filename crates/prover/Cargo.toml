@@ -62,6 +62,10 @@ name = "collect_basefold_vks"
 path = "scripts/collect_basefold_vks.rs"
 
 [[bin]]
+name = "merge_vk_maps"
+path = "scripts/merge_vk_maps.rs"
+
+[[bin]]
 name = "regen_basefold_vks_for_tests"
 path = "scripts/regen_basefold_vks_for_tests.rs"
 
