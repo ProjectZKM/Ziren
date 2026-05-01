@@ -276,6 +276,31 @@ where
             .map(|d| (d.pcs_batch_data, d.interleaved_mles))
             .unzip();
 
+        // #76 dispatch hook: when ZIREN_GPU_BASEFOLD=1 is set, route to
+        // a GPU-accelerated path (zkm-gpu-basefold's FriCudaProver::prove,
+        // proven cryptographically equivalent via #60 round-trip test).
+        // Currently a no-op fallback that warns and returns the host
+        // implementation — the GPU integration body (host MLE upload +
+        // GPU prove call + BasefoldProveOutput → BasefoldProof assembly)
+        // requires a CUDA-capable build environment and is the next
+        // increment of #76. Mirror of the existing ZIREN_E3_PER_CHIP
+        // env-flag pattern in basefold_late_binding.rs:565.
+        if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+            // Detect-once warn so log spam stays bounded for benchmarks
+            // that touch this site many times.
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "ZIREN_GPU_BASEFOLD=1 set but GPU dispatch body not yet wired \
+                     in stacked.rs:prove_trusted_evaluation; falling back to host \
+                     BasefoldProver. Next increment: build the gpu_prove wrapper \
+                     in zkm-stark and feature-gate the dependency on \
+                     zkm-gpu-basefold. See #76."
+                );
+            });
+        }
+
         let basefold_proof = self.basefold_prover.prove_trusted_mle_evaluations(
             stack_point,
             mle_rounds,
