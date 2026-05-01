@@ -80,9 +80,14 @@ pub fn verify_sumcheck<C, FC>(
     let mut previous_poly = first_poly_symbolic;
 
     // Rounds 1 .. n-1.
+    //
+    // Sumcheck convention (SP1-aligned): the prover runs an MSB fold
+    // and `insert(0, α)`s each freshly-sampled challenge at the front
+    // of `reduced_point`.  We mirror the prover here so the per-coord
+    // equality check below (verifier α[i] == prover point[i]) holds.
     for round_poly in proof.univariate_polys.iter().skip(1) {
         let alpha = challenger.sample_ext(builder);
-        accumulated_point.push(alpha);
+        accumulated_point.insert(0, alpha);
 
         let round_poly_symbolic = lift_to_symbolic::<C>(round_poly);
         let expected_eval = previous_poly.eval_at_point(alpha.into());
@@ -98,12 +103,12 @@ pub fn verify_sumcheck<C, FC>(
         previous_poly = round_poly_symbolic;
     }
 
-    // Final round: sample the last α, accumulate, then close the
-    // transcript by checking that the verifier's challenge point
-    // matches the prover's claimed point and that
+    // Final round: sample the last α, accumulate (insert-at-front),
+    // then close the transcript by checking that the verifier's
+    // challenge point matches the prover's claimed point and that
     // p_{n-1}(α_n) == point_and_eval.1.
     let alpha = challenger.sample_ext(builder);
-    accumulated_point.push(alpha);
+    accumulated_point.insert(0, alpha);
 
     for (i, (verifier_alpha, prover_point_coord)) in
         accumulated_point.iter().zip(proof.point_and_eval.0.iter()).enumerate()

@@ -307,7 +307,6 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
-    use crate::zerocheck_prover::fold_table_first;
     use p3_field::PrimeCharacteristicRing;
 
     debug_assert_eq!(c_evals.len(), 1 << num_vars);
@@ -321,14 +320,15 @@ where
     for _ in 0..num_vars {
         let half = c_table.len() / 2;
 
-        // p(X) = Σ_{b'} C(X, b') is linear in X for a multilinear C.
-        //   p(0) = Σ_{b'} C(0, b') = sum of even-indexed entries
-        //   p(1) = Σ_{b'} C(1, b') = sum of odd-indexed entries
+        // p(X) = Σ_{b'} C(b', X) is linear in X for a multilinear C
+        // when binding the **highest** remaining variable (MSB fold).
+        //   p(0) = Σ_{b'} C(b', 0) = sum of low-half entries (b < half)
+        //   p(1) = Σ_{b'} C(b', 1) = sum of high-half entries (b >= half)
         let mut p0 = Challenge::<SC>::ZERO;
         let mut p1 = Challenge::<SC>::ZERO;
         for i in 0..half {
-            p0 += c_table[2 * i];
-            p1 += c_table[2 * i + 1];
+            p0 += c_table[i];
+            p1 += c_table[i + half];
         }
 
         // Monomial coefficients of p(X) = a + b·X with a = p(0),
@@ -348,10 +348,20 @@ where
         }
 
         let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-        reduced_point.push(alpha);
+        // MSB fold + insert-at-front: keep the LSB-first MLE
+        // invariant `reduced_point[k] = challenge for var k`.
+        reduced_point.insert(0, alpha);
         univariate_polys.push(poly);
 
-        c_table = fold_table_first(&c_table, alpha);
+        // MSB fold of the constraint table: out[g] = lo + α·(hi - lo)
+        // with lo = c_table[g], hi = c_table[g + half].
+        let mut next: Vec<Challenge<SC>> = vec![Challenge::<SC>::ZERO; half];
+        for g in 0..half {
+            let lo = c_table[g];
+            let hi = c_table[g + half];
+            next[g] = lo + alpha * (hi - lo);
+        }
+        c_table = next;
     }
 
     // Final claim: c_table has been folded to a single element.

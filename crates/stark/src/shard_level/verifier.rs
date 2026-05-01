@@ -902,11 +902,16 @@ where
     }
 
     // Walk rounds 1..n.
+    //
+    // Sumcheck convention (SP1-aligned): the prover runs an MSB fold
+    // and `insert(0, α)`s each freshly-sampled challenge at the front
+    // of `reduced_point`.  We mirror the prover's construction here so
+    // the equality check below sees the same Vec.
     let mut alphas: Vec<EF> = Vec::with_capacity(n);
     let mut prev_poly = p0;
     for i in 1..n {
         let alpha: EF = challenger.sample_algebra_element::<EF>();
-        alphas.push(alpha);
+        alphas.insert(0, alpha);
         let curr = &proof.univariate_polys[i];
         if curr.coefficients.len() != expected_degree + 1 {
             return Err(BasefoldVerifyError::LogupGkr(format!(
@@ -931,9 +936,9 @@ where
         prev_poly = curr;
     }
 
-    // Sample the terminal challenge.
+    // Sample the terminal challenge.  Same insert-at-front rule.
     let alpha_last: EF = challenger.sample_algebra_element::<EF>();
-    alphas.push(alpha_last);
+    alphas.insert(0, alpha_last);
 
     // Point must match the sampled challenges.
     if alphas != proof.point_and_eval.0 {

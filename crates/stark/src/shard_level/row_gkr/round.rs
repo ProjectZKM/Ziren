@@ -38,11 +38,28 @@
 //!
 //! ## Variable ordering
 //!
-//! Ziren's LSB-first convention: `eq(point, b)` where `point[i]` and
-//! `b` bit `i` correspond — the **first** sumcheck round folds
-//! variable 0 (the LSB of the table index).  Matches
-//! [`crate::zerocheck_prover::eq_mle_table`] and
-//! [`crate::zerocheck_prover::fold_table_first`].
+//! Ziren's MLE convention is LSB-first — `eq(point, b)` where
+//! `point[k]` and bit `k` of the flat index correspond, so consumers
+//! (e.g. `top_level.rs` taking the last `log_h` coords as the row
+//! coords, `verifier.rs` calling `eq_eval(reduced_point, eval_point)`)
+//! all assume `reduced_point[k] = challenge for variable k`.
+//!
+//! The **sumcheck fold** itself runs **MSB-first** to match SP1
+//! (`/tmp/sp1/slop/crates/sumcheck/src/prover.rs:13-96`): round 0
+//! binds the highest remaining variable via the pair `(g, g+half)`,
+//! and the freshly-sampled challenge is `insert(0, alpha)`-ed at the
+//! front of `reduced_point`.  After all `n` rounds the per-coord
+//! semantics become `reduced_point[k] = challenge that bound variable
+//! k of the flat index` (round 0's α winds up at index `n-1`, ...,
+//! round `n-1`'s α winds up at index 0).  This combination — MSB
+//! fold + insert-at-front — keeps the LSB-first MLE invariant intact
+//! for downstream `eq_eval` consumers.
+//!
+//! Halving order for the factored eq tables follows the same MSB-
+//! first cadence: rounds `0..num_row_variables` bind row variables
+//! and shrink `eq_row`; subsequent rounds bind interaction variables
+//! and shrink `eq_int`.  This is the OPPOSITE of an LSB-first
+//! sumcheck (which would bind interaction first).
 
 use alloc::vec::Vec;
 
@@ -162,18 +179,19 @@ where
 
 /// Compute the four round-polynomial evaluations `p(0), p(1), p(2), p(3)`
 /// for one sumcheck round, using the **factored eq layout**
-/// (`eq_int`, `eq_row`).
+/// (`eq_int`, `eq_row`) and the SP1-aligned **MSB fold** convention.
 ///
 /// `p(X) = Σ_{b ∈ {0,1}^{m-1}} eq_X(b) · [λ · (n0_X(b) · d1_X(b) + n1_X(b) · d0_X(b)) + d0_X(b) · d1_X(b)]`
 ///
-/// where `*_X(b)` denotes the linear interpolation of each table in
-/// the first variable at value `X`: for a table `t` of length `2^m`
-/// with `t[2i]` = "var 0 = 0", `t[2i+1]` = "var 0 = 1":
-///   - `t_X(i) = (1-X) · t[2i] + X · t[2i+1]`
-///   - `t_{X=0}(i) = t[2i]`
-///   - `t_{X=1}(i) = t[2i+1]`
-///   - `t_{X=2}(i) = 2·t[2i+1] - t[2i]`
-///   - `t_{X=3}(i) = 3·t[2i+1] - 2·t[2i]`
+/// where `*_X(i)` denotes the linear interpolation of each table in
+/// the highest remaining variable at value `X`: for a table `t` of
+/// length `2^m`, half = 2^(m-1), with `t[i]` = "var = 0",
+/// `t[i+half]` = "var = 1":
+///   - `t_X(i) = (1-X) · t[i] + X · t[i+half]`
+///   - `t_{X=0}(i) = t[i]`
+///   - `t_{X=1}(i) = t[i+half]`
+///   - `t_{X=2}(i) = 2·t[i+half] - t[i]`
+///   - `t_{X=3}(i) = 3·t[i+half] - 2·t[i]`
 ///
 /// ## Factored eq decomposition (Tier 1 Phase 1)
 ///
@@ -181,24 +199,40 @@ where
 /// `2^total_vars × 16 B`, we keep two factored slices:
 ///   - `eq_int` of length `cols_r = 2^remaining_int_vars`
 ///   - `eq_row` of length `rows_r = 2^remaining_row_vars`
-/// and reconstruct the per-index weight on the fly:
+/// and reconstruct the per-index weight on the fly using the layout
+/// `flat[row * cols + col]`:
 ///   `eq_full[idx] = eq_int[idx & (cols_r - 1)] * eq_row[idx >> lc]`
 /// where `lc = log2(cols_r)`.  When `cols_r == 1` (interaction
 /// fully bound), the mask is `0`, `eq_int[0]` becomes a constant
 /// scalar, and `eq_full[idx] = eq_int[0] * eq_row[idx]`.
 ///
-/// ### Proof of correctness for the per-pair lookup
-/// 1. `flatten_layer` writes `flat[row * cols + col] = chip_value(row, col)`
-///    so bits `[0, lc)` of the flat index are the col coordinate and
-///    bits `[lc, lc + log2(rows_r))` are the row coordinate.
-/// 2. The eq builder is LSB-first: `eq_full[idx] = ∏_k r_k^{bit_k(idx)} · (1-r_k)^{1-bit_k(idx)}`.
-/// 3. `eval_point[0..num_int_vars]` are the interaction coords (col)
-///    and `eval_point[num_int_vars..]` are the row coords, so the
-///    product factors cleanly into `eq_int[col] · eq_row[row]`.
-/// 4. Folding bit 0 first (LSB-first) shrinks `eq_int` for the
-///    first `num_int_vars` rounds and `eq_row` afterwards; the
-///    `cols_r = eq_int.len()` invariant therefore tracks the
-///    interaction half automatically.
+/// ## Per-pair eq lookup under MSB fold
+///
+/// MSB fold pairs index `i` with `i + half` where `half = n0.len()/2`.
+/// The bit that differs between the two members is the highest
+/// remaining bit (binding the highest remaining variable).
+///
+/// * `eq_row.len() > 1` ⇒ binding a row variable.  `j0 = i, j1 = i+half`.
+///   `j0 % cols_r == j1 % cols_r` (col bits are unchanged), so the
+///   pair shares the col factor:
+///   `e0 = eq_int[i % cols_r] * eq_row[i / cols_r]`
+///   `e1 = eq_int[i % cols_r] * eq_row[(i / cols_r) + (rows_r/2)]`
+/// * `eq_row.len() == 1` ⇒ binding an interaction variable.  Layout
+///   collapses to `flat[col]` with `cols_r == n0.len()`, half = cols_r/2:
+///   `e0 = eq_int[i] * eq_row[0]`
+///   `e1 = eq_int[i + cols_r/2] * eq_row[0]`
+///
+/// ### Why MSB fold preserves the LSB-first MLE invariant
+/// The LSB-first MLE invariant is `eq_full[idx] = ∏_k r_k^{bit_k(idx)} · (1-r_k)^{1-bit_k(idx)}`,
+/// where `r_k = eval_point[k]` and `bit_k(idx)` is the k-th bit of
+/// the flat index.  Per-round MSB fold consumes the highest remaining
+/// variable at each step; combined with `reduced_point.insert(0, α)`
+/// at the call site, the round-0 challenge α₀ winds up at `point[n-1]`
+/// (= bound the top var) and round-(n-1)'s α winds up at `point[0]`
+/// (= bound var 0).  Thus `reduced_point[k] = challenge for var k` of
+/// the original flat index — matching the LSB-first MLE convention
+/// downstream consumers rely on (`eq_eval`, trace evaluation at the
+/// "last log_h coords", etc.).
 fn round_poly_evaluations<EF: Field + Send + Sync>(
     eq_int: &[EF],
     eq_row: &[EF],
@@ -223,8 +257,13 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     );
     let half = n0.len() / 2;
     let cols_r = eq_int.len();
-    let lc = cols_r.trailing_zeros() as usize;
-    let col_mask = cols_r - 1; // 0 when cols_r == 1, else the col-bit mask
+    let rows_r = eq_row.len();
+    // For MSB fold + factored eq, the pair (i, i+half) shares either
+    // the row factor (when row var is being bound, rows_r > 1) or the
+    // col factor (when interaction var is being bound, rows_r == 1).
+    let folding_row = rows_r > 1;
+    let row_half = rows_r / 2;
+    let col_half = cols_r / 2; // only meaningful when folding interaction
 
     // EF arithmetic optimizations:
     //   - `x.double()` (4 base adds) instead of `two * x` (16 base muls)
@@ -242,17 +281,32 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
         .into_par_iter()
         .with_min_len(chunk_size)
         .map(|i| {
-            let j0 = 2 * i;
-            let j1 = 2 * i + 1;
+            // MSB-fold pairing: (i, i+half).
+            let j0 = i;
+            let j1 = i + half;
 
-            // Factored eq lookup. When lc >= 1 (interaction-binding
-            // phase) the pair shares the row factor; when lc == 0
-            // (row-binding phase) the pair shares the (scalar) col
-            // factor `eq_int[0]`.  Both cases collapse to two muls.
-            let row0 = j0 >> lc;
-            let row1 = j1 >> lc;
-            let e0 = eq_int[j0 & col_mask] * eq_row[row0];
-            let e1 = eq_int[j1 & col_mask] * eq_row[row1];
+            // Factored eq lookup under MSB fold.
+            //
+            // Folding row (rows_r > 1, half = (rows_r/2) * cols_r):
+            //   col_bits unchanged across the pair; row factor differs
+            //   by row_half.
+            // Folding interaction (rows_r == 1, half = cols_r/2):
+            //   row factor is the constant eq_row[0]; col factor differs
+            //   by col_half.
+            let (e0, e1) = if folding_row {
+                let col0 = i % cols_r;
+                let row0 = i / cols_r;
+                let row1 = row0 + row_half;
+                let row_factor0 = eq_row[row0];
+                let row_factor1 = eq_row[row1];
+                let col_factor = eq_int[col0];
+                (col_factor * row_factor0, col_factor * row_factor1)
+            } else {
+                let row_factor = eq_row[0];
+                let col_factor0 = eq_int[i];
+                let col_factor1 = eq_int[i + col_half];
+                (col_factor0 * row_factor, col_factor1 * row_factor)
+            };
 
             // X = 0 linearizations (only n00..d10 needed for X=2/X=3 derivations)
             let (n00, d00, n10, d10) = (n0[j0], d0[j0], n1[j0], d1[j0]);
@@ -463,17 +517,23 @@ where
 
         // Sample this round's challenge.
         let alpha: EF = challenger.sample_algebra_element::<EF>();
-        reduced_point.push(alpha);
+        // MSB fold + insert-at-front: round 0 binds the highest var
+        // and the freshly-sampled α winds up at index `n-1` after all
+        // rounds finish — preserves the LSB-first MLE invariant
+        // `reduced_point[k] = challenge for var k of the flat index`.
+        reduced_point.insert(0, alpha);
 
         // Update current_claim = p(alpha) for next round's 3-point trick.
         current_claim = poly_eval(&coeffs, alpha);
 
         // Fused 4-table fold for the flat n0/d0/n1/d1 vectors PLUS a
         // separate fold of whichever eq factor is being bound this
-        // round.  Rounds `0..num_interaction_variables` bind LSB
-        // (interaction) variables and shrink `eq_int`; subsequent
-        // rounds bind row variables and shrink `eq_row`.  The flat
-        // tables are always halved (one bound variable per round).
+        // round.  MSB fold ⇒ binds the highest remaining variable
+        // first.  With layout `flat[row * cols + col]`, the highest
+        // bit is a row bit until rows collapse, then a col bit; so
+        // rounds `0..num_row_variables` shrink `eq_row` and
+        // subsequent rounds shrink `eq_int`.  The flat tables are
+        // always halved (one bound variable per round).
         let half = n0_flat.len() / 2;
         // FLAKE FIX (preserved): uninit EF Vec via set_len leaks
         // garbage u32s that fail KoalaBear deserialization.
@@ -500,14 +560,15 @@ where
                     let base = chunk_idx * chunk_size;
                     for i in 0..n0_o.len() {
                         let g = base + i;
-                        let lo_n0 = n0_in[2 * g];
-                        let hi_n0 = n0_in[2 * g + 1];
-                        let lo_d0 = d0_in[2 * g];
-                        let hi_d0 = d0_in[2 * g + 1];
-                        let lo_n1 = n1_in[2 * g];
-                        let hi_n1 = n1_in[2 * g + 1];
-                        let lo_d1 = d1_in[2 * g];
-                        let hi_d1 = d1_in[2 * g + 1];
+                        // MSB fold: pair (g, g+half).
+                        let lo_n0 = n0_in[g];
+                        let hi_n0 = n0_in[g + half];
+                        let lo_d0 = d0_in[g];
+                        let hi_d0 = d0_in[g + half];
+                        let lo_n1 = n1_in[g];
+                        let hi_n1 = n1_in[g + half];
+                        let lo_d1 = d1_in[g];
+                        let hi_d1 = d1_in[g + half];
                         n0_o[i] = lo_n0 + alpha * (hi_n0 - lo_n0);
                         d0_o[i] = lo_d0 + alpha * (hi_d0 - lo_d0);
                         n1_o[i] = lo_n1 + alpha * (hi_n1 - lo_n1);
@@ -521,33 +582,37 @@ where
         d1_flat = d1_n;
 
         // Fold whichever eq factor corresponds to the variable bound
-        // this round.  LSB-first ⇒ interaction first, then row.
-        if round < num_interaction_variables {
-            let half = eq_int.len() / 2;
-            let mut eq_int_n: Vec<EF> = vec![EF::ZERO; half];
-            {
-                use p3_maybe_rayon::prelude::*;
-                let src = &eq_int;
-                eq_int_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
-                    let lo = src[2 * g];
-                    let hi = src[2 * g + 1];
-                    *slot = lo + alpha * (hi - lo);
-                });
-            }
-            eq_int = eq_int_n;
-        } else {
+        // this round.  MSB-first ⇒ row first (until eq_row collapses
+        // to length 1), then interaction.
+        let _ = round;
+        if eq_row.len() > 1 {
             let half = eq_row.len() / 2;
             let mut eq_row_n: Vec<EF> = vec![EF::ZERO; half];
             {
                 use p3_maybe_rayon::prelude::*;
                 let src = &eq_row;
                 eq_row_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
-                    let lo = src[2 * g];
-                    let hi = src[2 * g + 1];
+                    // MSB fold: pair (g, g+half).
+                    let lo = src[g];
+                    let hi = src[g + half];
                     *slot = lo + alpha * (hi - lo);
                 });
             }
             eq_row = eq_row_n;
+        } else {
+            let half = eq_int.len() / 2;
+            let mut eq_int_n: Vec<EF> = vec![EF::ZERO; half];
+            {
+                use p3_maybe_rayon::prelude::*;
+                let src = &eq_int;
+                eq_int_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
+                    // MSB fold: pair (g, g+half).
+                    let lo = src[g];
+                    let hi = src[g + half];
+                    *slot = lo + alpha * (hi - lo);
+                });
+            }
+            eq_int = eq_int_n;
         }
 
         univariate_polys.push(UnivariatePolynomial::new(coeffs.to_vec()));
@@ -938,11 +1003,18 @@ mod tests {
         assert_eq!(p_at_zero + p_at_one, proof.sumcheck_proof.claimed_sum);
 
         // Subsequent rounds: prev_poly(alpha) == next_poly(0) + next_poly(1).
+        //
+        // Round-i's α was inserted at position 0 (MSB-fold + insert-
+        // at-front), so after `n` total rounds `reduced[0] = α_{n-1}`,
+        // ..., `reduced[n-1] = α_0`.  Round `i`'s α (the prover's
+        // challenge after emitting round-i's univariate poly) lives
+        // at `reduced[n - 1 - i]`.
         let reduced = &proof.sumcheck_proof.point_and_eval.0;
-        for i in 1..proof.sumcheck_proof.univariate_polys.len() {
+        let n_rounds = proof.sumcheck_proof.univariate_polys.len();
+        for i in 1..n_rounds {
             let prev = &proof.sumcheck_proof.univariate_polys[i - 1];
             let curr = &proof.sumcheck_proof.univariate_polys[i];
-            let alpha_prev = reduced[i - 1];
+            let alpha_prev = reduced[n_rounds - 1 - (i - 1)];
             let prev_at_alpha = poly_eval(&prev.coefficients, alpha_prev);
             let curr_at_zero = poly_eval(&curr.coefficients, EF::ZERO);
             let curr_at_one = poly_eval(&curr.coefficients, EF::ONE);
