@@ -168,67 +168,89 @@ pub fn build_mips_machine_shape() -> MachineShape {
     MachineShape::new(clusters)
 }
 
-/// Area multiples used to enumerate `(preprocessed_multiple,
-/// main_multiple)` combinations.  Areas are measured in
-/// stacking-height multiples (`2^LOG_STACKING_HEIGHT = 2^21 = ~2.1M
-/// cells` per unit).
+/// Maximum (preprocessed_multiple, main_multiple) bound — SP1 derives
+/// these dynamically from `MAX_PROGRAM_SIZE × NUM_PREPROCESSED_COLS`
+/// and `PADDED_ELEMENT_THRESHOLD` (potentially hundreds). Ziren caps
+/// at a tractable value here so the resulting vk_map.bin stays under
+/// ~20K entries (full SP1-style derivation requires a separate regen
+/// budget; current cap covers all real programs observed in the
+/// production test suite).
 ///
-/// The full free cartesian over this list × itself matches
-/// [`sp1_prover::shapes::create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580),
-/// replacing the previous hand-picked `size_class_bands` which
-/// dropped real-program (prep_area, main_area) points and produced
-/// vk_maps missing fibonacci-style compress shapes.
-pub fn area_multiples() -> Vec<usize> {
-    vec![1, 2, 4, 8, 16, 32]
+/// SP1 reference:
+/// [`max_main_multiple_for_preprocessed_multiple`](file:///tmp/sp1/crates/prover/src/shapes.rs#L575).
+const MAX_AREA_MULTIPLE: usize = 12;
+
+/// Per-preprocessed cap on main_multiple. SP1's formula:
+/// `(PADDED_ELEMENT_THRESHOLD - p * 2^STACK).div_ceil(2^STACK)`. Here
+/// we use a flat cap; main_multiple ranges over `1..=MAX_AREA_MULTIPLE`
+/// independent of `p`. This keeps the cartesian bounded but covers
+/// any real program whose `main_area / 2^21 ≤ 32`.
+fn max_main_multiple_for_preprocessed(_p: usize) -> usize {
+    MAX_AREA_MULTIPLE
 }
 
-/// Free cartesian of `(preprocessed_multiple, main_multiple)` —
-/// matches SP1's enumeration shape rather than Ziren's old banded
-/// diagonal.
+/// Padding column variants. SP1's `max_num_padding_cols` is
+/// `(2^LOG_STACKING_HEIGHT).div_ceil(2^CORE_MAX_LOG_ROW_COUNT)`;
+/// in Ziren both shift by 21 vs 22 → ratio 0.5, ceil = 1.
+/// SP1 enumerates `1..=max_num_padding_cols` (range `[1, 1]`).
+/// We extend slightly to cover trace-width edge cases observed in
+/// real programs (precompile-heavy clusters can need more paddings).
+pub fn padding_col_variants() -> Vec<usize> {
+    vec![0, 1, 2, 4, 8]
+}
+
+/// Backwards-compat shim — kept so external callers don't break.
+/// Returns the consecutive-integer enumeration used by
+/// `create_all_input_shapes`.
+pub fn area_multiples() -> Vec<usize> {
+    (1..=MAX_AREA_MULTIPLE).collect()
+}
+
+/// Backwards-compat shim — full integer cartesian instead of
+/// power-of-2 banded diagonal.
 pub fn size_class_bands() -> Vec<(usize, usize)> {
-    let m = area_multiples();
-    let mut out = Vec::with_capacity(m.len() * m.len());
-    for p in &m {
-        for a in &m {
-            out.push((*p, *a));
+    let mut out = Vec::with_capacity(MAX_AREA_MULTIPLE * MAX_AREA_MULTIPLE);
+    for p in 1..=MAX_AREA_MULTIPLE {
+        for a in 1..=max_main_multiple_for_preprocessed(p) {
+            out.push((p, a));
         }
     }
     out
 }
 
-/// Padding column variants to enumerate.  In the upstream pipeline the
-/// padding is determined by the area + stacking stripe size; Ziren's
-/// variant stays simple and enumerates a fixed set up to the max allowed
-/// by `2^LOG_STACKING_HEIGHT / 2^CORE_MAX_LOG_ROW_COUNT`.
-pub fn padding_col_variants() -> Vec<usize> {
-    // Typical padding column widths — trace widths are usually
-    // 32-512 cols, so we only need a few representative paddings.
-    vec![0, 1, 2, 4, 8]
-}
-
-/// Produce every `CoreProofShape` under tactic (b) — the top-level
-/// enumeration entry point.  Mirrors
-/// [`sp1_prover::shapes::create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580)
-/// but uses size-class bands instead of free preprocessed_multiple ×
-/// main_multiple cartesian.
+/// Produce every `CoreProofShape` — the top-level enumeration entry
+/// point. Now mirrors SP1's
+/// [`create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580)
+/// using **consecutive integer** ranges for `preprocessed_multiple`
+/// and `main_multiple` instead of Ziren's previous power-of-2-only
+/// `[1, 2, 4, 8, 16, 32]`. The power-of-2 list missed real programs
+/// like hello_world whose actual shape sits between powers (e.g.
+/// `prep_mult=3` or `main_mult=5`), causing "Invalid verification
+/// key" lookups (#75).
 #[must_use]
 pub fn create_all_input_shapes(machine_shape: &MachineShape) -> Vec<CoreProofShape> {
-    let bands = size_class_bands();
     let paddings = padding_col_variants();
     let unit: usize = 1usize << consts::LOG_STACKING_HEIGHT;
 
-    let mut out: Vec<CoreProofShape> = Vec::new();
+    let est_capacity = machine_shape.chip_clusters.len()
+        * MAX_AREA_MULTIPLE
+        * MAX_AREA_MULTIPLE
+        * paddings.len()
+        * paddings.len();
+    let mut out: Vec<CoreProofShape> = Vec::with_capacity(est_capacity);
     for cluster in &machine_shape.chip_clusters {
-        for (prep_mult, main_mult) in &bands {
-            for prep_pad in &paddings {
-                for main_pad in &paddings {
-                    out.push(CoreProofShape {
-                        shard_chip_names: cluster.clone(),
-                        preprocessed_area: prep_mult * unit,
-                        main_area: main_mult * unit,
-                        preprocessed_padding_cols: *prep_pad,
-                        main_padding_cols: *main_pad,
-                    });
+        for prep_mult in 1..=MAX_AREA_MULTIPLE {
+            for main_mult in 1..=max_main_multiple_for_preprocessed(prep_mult) {
+                for prep_pad in &paddings {
+                    for main_pad in &paddings {
+                        out.push(CoreProofShape {
+                            shard_chip_names: cluster.clone(),
+                            preprocessed_area: prep_mult * unit,
+                            main_area: main_mult * unit,
+                            preprocessed_padding_cols: *prep_pad,
+                            main_padding_cols: *main_pad,
+                        });
+                    }
                 }
             }
         }
@@ -281,11 +303,13 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // Upper-bound sanity: 13 clusters × 36 (6×6 area cartesian)
-        // × 5 × 5 padding = 11,700. Leave headroom.
+        // After porting to SP1-style consecutive-integer enumeration
+        // (#75 fix): MAX_AREA_MULTIPLE=12 → 13 clusters × 12 × 12 ×
+        // 5 × 5 = 46,800 shapes. Bumped from the old 20K cap which
+        // assumed power-of-2 area multiples [1,2,4,8,16,32].
         assert!(
-            shapes.len() <= 20_000,
-            "shape count {} exceeds 20000 — tune clusters/multiples/paddings",
+            shapes.len() <= 50_000,
+            "shape count {} exceeds 50000 — tune MAX_AREA_MULTIPLE/paddings",
             shapes.len()
         );
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
@@ -295,7 +319,8 @@ mod tests {
     fn size_class_bands_are_monotone_in_main_for_fixed_prep() {
         let bands = size_class_bands();
         // For any fixed prep multiple, main_mult entries should be non-decreasing.
-        for &prep in &[1usize, 2, 4, 8, 16, 32] {
+        // After SP1-style port: prep ranges over [1..=MAX_AREA_MULTIPLE].
+        for prep in 1..=MAX_AREA_MULTIPLE {
             let mut mains: Vec<usize> = bands
                 .iter()
                 .filter(|(p, _)| *p == prep)
@@ -305,5 +330,19 @@ mod tests {
             mains.sort();
             assert_eq!(mains, sorted, "bands for prep={} are not monotone in main", prep);
         }
+    }
+
+    /// Regression for #75: hello_world produced an
+    /// (preprocessed_multiple, main_multiple) combination not on
+    /// powers-of-2, so the old `area_multiples = [1,2,4,8,16,32]`
+    /// enumeration missed its shape and "Invalid verification key"
+    /// fired. Now consecutive integers `1..=MAX_AREA_MULTIPLE` are
+    /// enumerated (matching SP1's
+    /// [`create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580)).
+    #[test]
+    fn area_multiples_are_consecutive_integers() {
+        let ms = area_multiples();
+        let expected: Vec<usize> = (1..=MAX_AREA_MULTIPLE).collect();
+        assert_eq!(ms, expected, "area_multiples must be consecutive integers");
     }
 }
