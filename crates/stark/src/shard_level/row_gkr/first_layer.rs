@@ -38,7 +38,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
+use p3_field::{ExtensionField, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::layer::{LogUpGkrCpuLayer, RowMajorTable};
@@ -310,6 +310,9 @@ where
 /// Pad a row-major `(rows × num_cols)` table to
 /// `(rows × 2^target_log_cols)` by zero-extending each row's column
 /// slots.  Used to align per-chip interaction width to a power of two.
+// TODO: currently unused; retained for upcoming non-power-of-two
+// interaction-width support in the LogUp-GKR first-layer port.
+#[allow(dead_code)]
 fn pad_row_cols<F: Clone>(
     values: Vec<F>,
     num_cols: usize,

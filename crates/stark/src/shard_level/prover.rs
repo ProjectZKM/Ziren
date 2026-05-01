@@ -44,7 +44,7 @@
 //! of carrying the openings forward through the pipeline.
 
 use p3_air::Air;
-use p3_challenger::{CanObserve, FieldChallenger};
+use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 

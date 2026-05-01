@@ -89,8 +89,8 @@ pub fn debug_constraints<SC, A>(
         );
 
         let prep_width = preprocessed_local.len();
-        let main_width = main_local.len();
-        let perm_width = perm_local.len();
+        let _main_width = main_local.len();
+        let _perm_width = perm_local.len();
 
         let mut builder = DebugConstraintBuilder {
             preprocessed: preprocessed_pair,
@@ -145,6 +145,11 @@ pub fn debug_cumulative_sums<F: Field, EF: ExtensionField<F>>(perms: &[RowMajorM
 
 /// A builder for debugging constraints.
 pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
+    // TODO: read by the legacy windowed builder; the new
+    // `preprocessed_window` field is what eval() actually consumes.
+    // Keep this field for backwards-compat with downstream callers
+    // that still construct the builder with a populated VerticalPair.
+    #[allow(dead_code)]
     pub(crate) preprocessed: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
     pub(crate) preprocessed_window: PairWindow<'a, F>,
     pub(crate) main: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,

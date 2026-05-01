@@ -59,6 +59,9 @@ pub struct LogUpGkrOutput<EF> {
 /// Equivalent to slop's
 /// `fix_last_variable(0).interleave(fix_last_variable(1))` on the
 /// chip's MLE.
+// TODO: only exercised by row-GKR unit tests today; keep until the
+// terminal-layer interleave path is wired into the production prover.
+#[allow(dead_code)]
 fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
     debug_assert_eq!(
         table.num_row_variables, 1,

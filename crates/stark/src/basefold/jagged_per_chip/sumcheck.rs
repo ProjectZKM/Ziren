@@ -30,8 +30,8 @@
 
 use alloc::vec::Vec;
 
-use p3_challenger::{CanObserve, FieldChallenger};
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use p3_challenger::FieldChallenger;
+use p3_field::{ExtensionField, Field};
 
 use super::hadamard::{self, HadamardProduct};
 use crate::basefold::mle::Mle;

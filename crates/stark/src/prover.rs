@@ -1148,6 +1148,7 @@ where
     // pull the first root (which is the [Val; 8] digest).  The
     // upstream TypeId gate guarantees Val<SC> = InnerVal = KoalaBear,
     // so the downcast is sound.
+    #[allow(unused_assignments)]
     let mut digest = [Val::<SC>::ZERO; 8];
     {
         use core::any::Any;

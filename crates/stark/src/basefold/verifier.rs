@@ -25,7 +25,7 @@ use itertools::Itertools;
 use p3_challenger::{CanObserve, FieldChallenger, GrindingChallenger};
 use p3_commit::{BatchOpeningRef, Mmcs};
 use p3_field::{
-    ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField,
+    ExtensionField, Field, TwoAdicField,
 };
 use p3_matrix::Dimensions;
 use p3_util::reverse_bits_len;

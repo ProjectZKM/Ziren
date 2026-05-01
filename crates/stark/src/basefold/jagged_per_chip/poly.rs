@@ -46,7 +46,7 @@
 
 use alloc::vec::Vec;
 
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{ExtensionField, Field};
 
 /// Prover-side jagged polynomial parameters.
 ///
