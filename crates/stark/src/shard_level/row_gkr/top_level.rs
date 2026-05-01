@@ -253,11 +253,25 @@ where
             } else {
                 &eval_point[..]
             };
-            let main_evals = evaluate_trace_columns_at_point::<F, EF>(
-                &main_trace.values,
-                main_trace.width,
-                main_eval_point,
-            );
+            // When `main_trace.width == 0` (chip not exercised in this
+            // shard, e.g. precompile that didn't fire) but the chip
+            // declares a non-zero `chip.width()`, produce a zero
+            // evaluation vector of the chip's declared width.  The
+            // in-circuit verifier (see verify_opening_shape_basefold in
+            // crates/recursion/circuit/src/zerocheck.rs:178) hard-checks
+            // `opening.main.local.len() == chip.width()`, and an empty
+            // vector violates that even when the chip's contribution is
+            // zero by construction.
+            let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
+            let main_evals = if main_trace.width == 0 && chip_main_width > 0 {
+                vec![EF::ZERO; chip_main_width]
+            } else {
+                evaluate_trace_columns_at_point::<F, EF>(
+                    &main_trace.values,
+                    main_trace.width,
+                    main_eval_point,
+                )
+            };
 
             let prep_evals = if prep_trace.width > 0 {
                 let prep_height = prep_trace.values.len() / prep_trace.width.max(1);
