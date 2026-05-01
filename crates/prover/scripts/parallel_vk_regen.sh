@@ -56,7 +56,17 @@ for i in $(seq 0 $(($WORKERS - 1))); do
     LOG="$OUT_DIR/worker_$i.log"
     mkdir -p "$PARTIAL_DIR"
     echo "[parallel] worker $i: --start $START --end $END -> $PARTIAL_DIR (log: $LOG)"
-    cargo run --release --bin build_compress_vks -- \
+    # Use the prebuilt binary directly — running `cargo run` per worker
+    # would force N parallel compiles racing for the cargo lock and
+    # serializing on one another. Caller is expected to run
+    # `cargo build --release --bin build_compress_vks --bin merge_vk_maps`
+    # before invoking this script.
+    BIN="${ZIREN_BUILD_VKS_BIN:-./target/release/build_compress_vks}"
+    if [ ! -x "$BIN" ]; then
+        echo "[parallel] error: binary not found at $BIN — run \`cargo build --release --bin build_compress_vks\` first (or set ZIREN_BUILD_VKS_BIN)" >&2
+        exit 1
+    fi
+    RUST_LOG="${RUST_LOG:-info}" "$BIN" \
         --build-dir "$PARTIAL_DIR" \
         --start "$START" \
         --end "$END" \
@@ -103,7 +113,12 @@ fi
 # Merge into the final output.
 MERGED="$OUT_DIR/vk_map.bin"
 echo "[parallel] merging into $MERGED"
-cargo run --release --bin merge_vk_maps -- "${INPUTS[@]}" --output "$MERGED"
+MERGE_BIN="${ZIREN_MERGE_VKS_BIN:-./target/release/merge_vk_maps}"
+if [ ! -x "$MERGE_BIN" ]; then
+    echo "[parallel] error: merge binary not found at $MERGE_BIN — run \`cargo build --release --bin merge_vk_maps\` first" >&2
+    exit 1
+fi
+"$MERGE_BIN" "${INPUTS[@]}" --output "$MERGED"
 MERGE_EXIT=$?
 
 TOTAL_END=$(date +%s)
