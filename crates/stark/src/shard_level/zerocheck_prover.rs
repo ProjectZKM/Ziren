@@ -51,6 +51,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
+use p3_maybe_rayon::prelude::*;
 
 use super::types::{LogUpEvaluations, PartialSumcheckProof, UnivariatePolynomial};
 use crate::air::MachineAir;
@@ -161,61 +162,77 @@ where
     // in the permutation trace which the hypercube evaluator
     // cannot synthesize without a LogUp-GKR opening (matches the
     // pattern at `crates/stark/src/prover.rs:407-444`).
-    let mut chip_tables: Vec<(usize, Vec<Challenge<SC>>)> = Vec::new();
-    for ((chip, main_trace), preproc_trace) in
-        chips.iter().zip(main_traces.iter()).zip(preprocessed_traces.iter())
-    {
-        if chip.permutation_width() > 0 {
-            // Empty placeholder — chip's contribution to the
-            // shard zerocheck is the zero polynomial.
-            continue;
-        }
-        let height = main_trace.values.len() / main_trace.width.max(1);
-        let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
+    //
+    // Per-chip parallelism: dispatch one rayon task per chip
+    // (mirroring SP1's `chips.par_iter()` pattern at
+    // `/tmp/sp1/crates/hypercube/src/prover/shard.rs`).  Each
+    // task runs a long contiguous sequential body — building
+    // and evaluating the chip's constraint table over its
+    // hypercube — so the per-shard rayon dispatch overhead is
+    // amortized over the full chip workload, and the chip's
+    // MLE / trace data stays hot in L2 across rounds rather
+    // than being pulled into many short-lived inner-loop tasks.
+    //
+    // `IndexedParallelIterator::collect()` preserves source
+    // order, so `chip_tables` is byte-identical to the
+    // sequential equivalent — proof output is unchanged.
+    let chip_tables: Vec<(usize, Vec<Challenge<SC>>)> = chips
+        .par_iter()
+        .zip(main_traces.par_iter())
+        .zip(preprocessed_traces.par_iter())
+        .filter_map(|((chip, main_trace), preproc_trace)| {
+            if chip.permutation_width() > 0 {
+                // Empty placeholder — chip's contribution to the
+                // shard zerocheck is the zero polynomial.
+                return None;
+            }
+            let height = main_trace.values.len() / main_trace.width.max(1);
+            let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
 
-        // META #59 Phase C: compute real per-chip cumulative sums so the
-        // zerocheck hypercube table reflects the chip's real AIR
-        // evaluation (matches what the recursion verifier will check via
-        // `build_opened_values_from_chip_openings_with_cumsums` when
-        // it consumes BasefoldShardProof.chip_cumulative_sums).
-        //   - global_cumulative_sum: from main trace's last 14 elements
-        //     when commit_scope() != Local (mirrors legacy prover.rs:492-502).
-        //   - local_cumulative_sum: zero (matches legacy basefold path;
-        //     future work: thread real local sum from LogUp-GKR layer 0).
-        let global_cumulative_sum = if chip.commit_scope()
-            != crate::air::LookupScope::Local
-        {
-            let main_trace_size = main_trace.values.len();
-            if main_trace_size >= 14 {
-                use p3_field::BasedVectorSpace;
-                let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
-                    |j| last_row[j],
-                );
-                let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
-                    |j| last_row[j + 7],
-                );
-                crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+            // META #59 Phase C: compute real per-chip cumulative sums so the
+            // zerocheck hypercube table reflects the chip's real AIR
+            // evaluation (matches what the recursion verifier will check via
+            // `build_opened_values_from_chip_openings_with_cumsums` when
+            // it consumes BasefoldShardProof.chip_cumulative_sums).
+            //   - global_cumulative_sum: from main trace's last 14 elements
+            //     when commit_scope() != Local (mirrors legacy prover.rs:492-502).
+            //   - local_cumulative_sum: zero (matches legacy basefold path;
+            //     future work: thread real local sum from LogUp-GKR layer 0).
+            let global_cumulative_sum = if chip.commit_scope()
+                != crate::air::LookupScope::Local
+            {
+                let main_trace_size = main_trace.values.len();
+                if main_trace_size >= 14 {
+                    use p3_field::BasedVectorSpace;
+                    let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
+                    let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
+                        |j| last_row[j],
+                    );
+                    let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
+                        |j| last_row[j + 7],
+                    );
+                    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+                } else {
+                    crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+                }
             } else {
                 crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-            }
-        } else {
-            crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-        };
-        let local_cumulative_sum = Challenge::<SC>::ZERO;
+            };
+            let local_cumulative_sum = Challenge::<SC>::ZERO;
 
-        let table = crate::zerocheck_prover::eval_constraints_on_hypercube_with_cumsums::<SC, A>(
-            chip,
-            log_height,
-            main_trace,
-            preproc_trace,
-            public_values,
-            alpha,
-            local_cumulative_sum,
-            global_cumulative_sum,
-        );
-        chip_tables.push((log_height, table));
-    }
+            let table = crate::zerocheck_prover::eval_constraints_on_hypercube_with_cumsums::<SC, A>(
+                chip,
+                log_height,
+                main_trace,
+                preproc_trace,
+                public_values,
+                alpha,
+                local_cumulative_sum,
+                global_cumulative_sum,
+            );
+            Some((log_height, table))
+        })
+        .collect();
 
     // Step 3: determine the shard's max log_degree (== sumcheck
     // round count) and pad each chip table up to that size.
@@ -455,8 +472,7 @@ pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usiz
         .iter()
         .map(|t| {
             let h = t.values.len() / t.width.max(1);
-            (h.max(1) - 1).leading_zeros();
-            // Use trailing_zeros after rounding up to the next pow2.
+            // log2 via trailing_zeros after rounding up to the next pow2.
             let pad = h.max(1).next_power_of_two();
             pad.trailing_zeros() as usize
         })
