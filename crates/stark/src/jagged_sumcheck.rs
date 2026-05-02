@@ -76,13 +76,17 @@ fn build_weight_table(
             // here with chip name + offsets context.  The W2
             // emit_jagged_pcs_bytes width-pad fix is what should keep
             // this from firing in production.
-            debug_assert!(
+            // Release-mode bounds guard for #95 — keep until W2 perf
+            // green to avoid silent OOBs.
+            assert!(
                 off.saturating_add(h_c) <= n,
                 "build_weight_table OOB: chip #{c_idx} '{}' col_k={k} off={off} \
-                 h_c={h_c} (off+h_c={}) > n={n}.  Prover and verifier disagree \
-                 on chip column count.  Likely cause: trace.width < chip.width() \
+                 h_c={h_c} (off+h_c={}) > n={n}. \
+                 chip_infos.len={}, offsets.len={}, total_values={}.  Prover/verifier \
+                 disagree on chip column count.  Likely cause: trace.width < chip.width() \
                  in emit_jagged_pcs_bytes; pad to chip.width().",
                 info.name, off + h_c,
+                packing.chip_infos.len(), packing.offsets.len(), packing.total_values,
             );
             for row in 0..h_c {
                 w[off + row] = gamma_pow * eq_c[row];

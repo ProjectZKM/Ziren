@@ -364,6 +364,14 @@ where
             // the unexercised semantics.
             use p3_air::BaseAir;
             let chip_width = <_ as BaseAir<Val<SC>>>::width(&chip.air);
+            // Diag for #95 root-cause: verify pad is actually applied
+            // for chips with width-mismatch.
+            if std::env::var("ZIREN_JAGGED_DIAG").is_ok() && trace.width != chip_width {
+                eprintln!(
+                    "[jagged-pad] chip='{}' trace.width={} chip.width()={} (will pad)",
+                    chip.name(), trace.width, chip_width,
+                );
+            }
             let padded_trace: RowMajorMatrix<Val<SC>> = if trace.width == chip_width {
                 trace.clone()
             } else if trace.width == 0 {
