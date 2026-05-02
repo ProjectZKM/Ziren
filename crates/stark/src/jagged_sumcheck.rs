@@ -68,6 +68,21 @@ fn build_weight_table(
         let eq_c = &eq_per_chip[c_idx];
         for _j in 0..info.column_count {
             let off = packing.offsets[k];
+            // Bounds-check guard: if off + h_c > n, the chip's row_count
+            // exceeds the slot allotted by offsets.  Surface a precise
+            // diagnostic instead of an opaque "index out of bounds".
+            assert!(
+                off.saturating_add(h_c) <= n,
+                "build_weight_table OOB: chip #{c_idx} '{}' col_k={k} off={off} \
+                 h_c={h_c} (off+h_c={}) > n={n} (= 1<<log_dense_size={}). \
+                 chip_infos.len={}, total_offsets={}, total_values={}.",
+                info.name,
+                off + h_c,
+                packing.log_dense_size,
+                packing.chip_infos.len(),
+                packing.offsets.len(),
+                packing.total_values,
+            );
             for row in 0..h_c {
                 w[off + row] = gamma_pow * eq_c[row];
             }
