@@ -65,14 +65,18 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 ///
 /// # Soundness note
 ///
-/// Phase 4 (jagged-PCS opening) is a placeholder.  The proof
-/// returned by this entry point has a structurally-correct
-/// LogUp-GKR + zerocheck soundness chain, but the main-trace
-/// MLE openings claimed by the LogUp-GKR phase are NOT
-/// cryptographically bound to the `main_commitment` digest
-/// until the jagged-PCS bytes are produced and the verifier
-/// checks them.  Production-shippable soundness lands when
-/// phase 4 is wired.
+/// Phase 4 (jagged-PCS opening) is wired end-to-end on KoalaBear
+/// (`emit_jagged_pcs_bytes` calls `prove_jagged_basefold`); the
+/// host-side `BasefoldShardVerifier::verify_shard` consumes the
+/// bundle bytes via `verify_jagged_pcs_host`.  Non-KoalaBear
+/// configurations short-circuit through the TypeId gate to empty
+/// bytes (the verifier accepts empty as a no-op).
+///
+/// For the W2 GPU compress flow, the per-chip main_traces handed to
+/// `emit_jagged_pcs_bytes` must include device-only RecursionAir
+/// chips (BaseAlu, ExtAlu, Poseidon2{Skinny,Wide}, Select, FriFold,
+/// BatchFRI) — see `ziren-gpu/prover/src/compress_multi_gpu.rs`'s
+/// device-trace rehydrate hook for the May 2 fix.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_to_basefold<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
