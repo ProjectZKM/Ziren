@@ -569,6 +569,53 @@ pub fn get_gpu_constraint_eval_hook() -> Option<GpuConstraintEvalFn> {
     GPU_CONSTRAINT_EVAL_HOOK.get().copied()
 }
 
+// ────────────────────────────────────────────────────────────────────
+// MULTI-CHIP BATCHED variant of GpuConstraintEvalFn.
+// ────────────────────────────────────────────────────────────────────
+//
+// Same per-chip semantics as `GpuConstraintEvalFn` (above), but accepts
+// the entire shard's chip list in one call.  The batched implementation
+// can build per-chip device descriptors and submit a single grid-2D
+// kernel launch covering all chips, instead of N kernel launches.  Per
+// `ZIREN_GPU_BATCHED_CONSTRAINT_EVAL=1` opt-in.
+//
+// Returns `Vec<Option<Vec<Ef4>>>` of length == `chip_names.len()`.  Index
+// `i` is `Some(c_table)` for chips the GPU accepted, `None` for chips
+// the GPU rejected (cache miss / size mismatch / dispatch failure).
+// Callers MUST fall back to per-chip GPU or host CPU for `None` slots.
+
+/// Batched per-shard BaseFold constraint-table builder.  See module
+/// comment above for invariants.
+pub type GpuConstraintEvalBatchedFn = fn(
+    chip_names: &[&str],
+    main_row_majors: &[&[p3_koala_bear::KoalaBear]],
+    main_widths: &[usize],
+    preprocessed_row_majors: &[&[p3_koala_bear::KoalaBear]],
+    preprocessed_widths: &[usize],
+    public_values: &[p3_koala_bear::KoalaBear],
+    alphas: &[Ef4],
+    local_cumulative_sums: &[Ef4],
+    global_cumulative_sums_xy: &[[p3_koala_bear::KoalaBear; 14]],
+    num_vars_list: &[usize],
+) -> Vec<Option<Vec<Ef4>>>;
+
+static GPU_CONSTRAINT_EVAL_BATCHED_HOOK:
+    std::sync::OnceLock<GpuConstraintEvalBatchedFn> = std::sync::OnceLock::new();
+
+/// Register the batched GPU constraint-eval driver.  Idempotent;
+/// returns `Err` when a hook was already registered.
+pub fn register_gpu_constraint_eval_batched_hook(
+    f: GpuConstraintEvalBatchedFn,
+) -> Result<(), GpuConstraintEvalBatchedFn> {
+    GPU_CONSTRAINT_EVAL_BATCHED_HOOK.set(f)
+}
+
+/// Read the registered batched GPU constraint-eval hook, if any.
+#[must_use]
+pub fn get_gpu_constraint_eval_batched_hook() -> Option<GpuConstraintEvalBatchedFn> {
+    GPU_CONSTRAINT_EVAL_BATCHED_HOOK.get().copied()
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // #112 — GPU per-chip LogUp-GKR phase-2 interaction-eval hook.
 //

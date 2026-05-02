@@ -187,11 +187,41 @@ where
     // `IndexedParallelIterator::collect()` preserves source
     // order, so `chip_tables` is byte-identical to the
     // sequential equivalent — proof output is unchanged.
+    //
+    // ── BATCHED-GPU PRE-PASS (opt-in) ──
+    // When `ZIREN_GPU_BATCHED_CONSTRAINT_EVAL=1` AND a batched hook is
+    // registered AND `(Val,Challenge)=(Kb,Ef4)`, compute ALL eligible
+    // chips' C-tables in a single multi-chip kernel-launch bucket
+    // pass, replacing N per-chip launches with ~3 (one per MEMORY_SIZE
+    // bucket).  Output is byte-identical to per-chip dispatch.  Per-
+    // chip slots that come back as `None` (cache miss, dispatch
+    // failure, etc.) fall through to the per-chip GPU/CPU path inside
+    // the par_iter — each chip's `gpu_batched_results[idx]` is checked
+    // at the top of the per-chip body.
+    let gpu_batched_results: Option<Vec<Option<Vec<Challenge<SC>>>>> =
+        compute_gpu_batched_pre_pass::<SC, A>(
+            chips,
+            preprocessed_traces,
+            main_traces,
+            public_values,
+            alpha,
+        );
     let chip_tables: Vec<(usize, Vec<Challenge<SC>>)> = chips
         .par_iter()
         .zip(main_traces.par_iter())
         .zip(preprocessed_traces.par_iter())
-        .filter_map(|((chip, main_trace), preproc_trace)| {
+        .enumerate()
+        .filter_map(|(chip_idx, ((chip, main_trace), preproc_trace))| {
+            // Batched-GPU pre-pass hit: skip both GPU per-chip and host
+            // fallback below — the table is already computed.
+            if let Some(ref batched) = gpu_batched_results {
+                if let Some(Some(table)) = batched.get(chip_idx) {
+                    let height = main_trace.values.len() / main_trace.width.max(1);
+                    let log_height =
+                        height.max(1).next_power_of_two().trailing_zeros() as usize;
+                    return Some((log_height, table.clone()));
+                }
+            }
             if chip.permutation_width() > 0 {
                 // Empty placeholder — chip's contribution to the
                 // shard zerocheck is the zero polynomial.
@@ -468,6 +498,154 @@ where
 ///   equals `poly_eval(last_round_poly, alpha_last)` (the driver
 ///   computes the latter; both equal because `Σ c_table_new == p(α)`
 ///   under MSB fold).
+///
+/// Multi-chip batched constraint-eval pre-pass — see top-of-step-2 comment.
+/// Returns `Some(per_chip_results)` where `[i]` is `Some(c_table)` for
+/// chips the batched GPU produced or `None` (caller falls back to per-
+/// chip GPU/host); returns outer `None` when batched mode is disabled or
+/// `(Val,Challenge) != (Kb,Ef4)`.
+#[allow(clippy::type_complexity, clippy::needless_pass_by_value)]
+fn compute_gpu_batched_pre_pass<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    main_traces: &[RowMajorMatrix<Val<SC>>],
+    public_values: &[Val<SC>],
+    alpha: Challenge<SC>,
+) -> Option<Vec<Option<Vec<Challenge<SC>>>>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+{
+    use core::any::TypeId;
+    use p3_field::PrimeCharacteristicRing;
+    use std::sync::OnceLock;
+
+    if !std::env::var("ZIREN_GPU_BATCHED_CONSTRAINT_EVAL")
+        .map(|v| v == "1").unwrap_or(false)
+    {
+        return None;
+    }
+    let Some(batched_hook) =
+        crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_batched_hook()
+    else {
+        static WARN_ONCE: OnceLock<()> = OnceLock::new();
+        WARN_ONCE.get_or_init(|| tracing::warn!(
+            "ZIREN_GPU_BATCHED_CONSTRAINT_EVAL=1 but no batched hook registered; \
+             ziren-gpu must call register_gpu_constraint_eval_batched_hook at \
+             startup. Falling back to per-chip dispatch."
+        ));
+        return None;
+    };
+    type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+    type Kb = p3_koala_bear::KoalaBear;
+    if TypeId::of::<Challenge<SC>>() != TypeId::of::<Ef4>()
+        || TypeId::of::<Val<SC>>() != TypeId::of::<Kb>()
+    {
+        return None;
+    }
+
+    let n = chips.len();
+    let mut chip_names: Vec<String> = Vec::with_capacity(n);
+    let mut keep_idx: Vec<usize> = Vec::with_capacity(n);
+    let mut main_row_majors: Vec<&[Kb]> = Vec::with_capacity(n);
+    let mut main_widths: Vec<usize> = Vec::with_capacity(n);
+    let mut prep_row_majors: Vec<&[Kb]> = Vec::with_capacity(n);
+    let mut prep_widths: Vec<usize> = Vec::with_capacity(n);
+    let mut alphas: Vec<Ef4> = Vec::with_capacity(n);
+    let mut local_cumulative_sums: Vec<Ef4> = Vec::with_capacity(n);
+    let mut global_cumulative_sums_xy: Vec<[Kb; 14]> = Vec::with_capacity(n);
+    let mut num_vars_list: Vec<usize> = Vec::with_capacity(n);
+
+    let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&alpha) };
+    let public_values_kb: &[Kb] = unsafe {
+        core::slice::from_raw_parts(public_values.as_ptr().cast::<Kb>(), public_values.len())
+    };
+    for (i, chip) in chips.iter().enumerate() {
+        if chip.permutation_width() > 0 { continue; }
+        let main_trace = &main_traces[i];
+        let preproc_trace = &preprocessed_traces[i];
+        let height = main_trace.values.len() / main_trace.width.max(1);
+        let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
+        // Mirror per-chip path's gcs/lcs computation (zerocheck_prover.rs Step 2).
+        let global_cumulative_sum = if chip.commit_scope() != crate::air::LookupScope::Local {
+            let sz = main_trace.values.len();
+            if sz >= 14 {
+                let last = &main_trace.values[sz - 14..sz];
+                let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last[j]);
+                let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last[j + 7]);
+                crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+            } else {
+                crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+            }
+        } else {
+            crate::septic_digest::SepticDigest::<Val<SC>>::zero()
+        };
+        let local_cumulative_sum = Challenge::<SC>::ZERO;
+        let mut gcs_xy: [Kb; 14] = [Kb::default(); 14];
+        for j in 0..7 {
+            unsafe {
+                gcs_xy[j] = core::mem::transmute_copy(&global_cumulative_sum.0.x.0[j]);
+                gcs_xy[j + 7] = core::mem::transmute_copy(&global_cumulative_sum.0.y.0[j]);
+            }
+        }
+        let main_kb: &[Kb] = unsafe {
+            core::slice::from_raw_parts(main_trace.values.as_ptr().cast::<Kb>(), main_trace.values.len())
+        };
+        let preproc_kb: &[Kb] = unsafe {
+            core::slice::from_raw_parts(preproc_trace.values.as_ptr().cast::<Kb>(), preproc_trace.values.len())
+        };
+        chip_names.push(chip.name().to_string());
+        keep_idx.push(i);
+        main_row_majors.push(main_kb);
+        main_widths.push(main_trace.width);
+        prep_row_majors.push(preproc_kb);
+        prep_widths.push(preproc_trace.width);
+        alphas.push(alpha_ef4);
+        let lcs_ef4: Ef4 = unsafe { core::mem::transmute_copy(&local_cumulative_sum) };
+        local_cumulative_sums.push(lcs_ef4);
+        global_cumulative_sums_xy.push(gcs_xy);
+        num_vars_list.push(log_height);
+    }
+
+    if chip_names.is_empty() { return Some(vec![None; chips.len()]); }
+
+    let chip_names_refs: Vec<&str> = chip_names.iter().map(String::as_str).collect();
+    let batched_out: Vec<Option<Vec<Ef4>>> = batched_hook(
+        &chip_names_refs, &main_row_majors, &main_widths, &prep_row_majors, &prep_widths,
+        public_values_kb, &alphas, &local_cumulative_sums, &global_cumulative_sums_xy,
+        &num_vars_list,
+    );
+    debug_assert_eq!(batched_out.len(), keep_idx.len());
+
+    let mut result: Vec<Option<Vec<Challenge<SC>>>> = (0..chips.len()).map(|_| None).collect();
+    let mut any_kept = false;
+    let mut any_rejected = false;
+    for (kept_pos, table_opt) in batched_out.into_iter().enumerate() {
+        let chip_idx = keep_idx[kept_pos];
+        if let Some(t) = table_opt {
+            let table_ch: Vec<Challenge<SC>> = unsafe {
+                let mut me = std::mem::ManuallyDrop::new(t);
+                Vec::from_raw_parts(me.as_mut_ptr().cast::<Challenge<SC>>(), me.len(), me.capacity())
+            };
+            result[chip_idx] = Some(table_ch);
+            any_kept = true;
+        } else {
+            any_rejected = true;
+        }
+    }
+    if any_rejected {
+        static REJECT_ONCE: OnceLock<()> = OnceLock::new();
+        REJECT_ONCE.get_or_init(|| tracing::warn!(
+            "ZIREN_GPU_BATCHED_CONSTRAINT_EVAL: batched hook returned None for one or \
+             more chips; per-chip GPU or host fallback will run for those chips this shard"
+        ));
+    }
+    if !any_kept { return None; }
+    Some(result)
+}
+
 fn prove_shard_zerocheck_via_trait<SC>(
     c_table: Vec<Challenge<SC>>,
     num_vars: usize,
