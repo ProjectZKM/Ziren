@@ -151,10 +151,21 @@ where
     use p3_field::PrimeCharacteristicRing;
 
     // Step 1: sample the per-chip constraint-batching challenge
-    // (powers-of-alpha) and the inter-chip RLC challenge (lambda).
-    // SP1 samples batching_challenge upstream and passes in;
-    // here we sample both at entry for self-containment.
+    // (powers-of-alpha), the gkr_batch_open challenge (transcript
+    // alignment with verify_zerocheck_host — see verifier.rs:544),
+    // and the inter-chip RLC challenge (lambda).  SP1 samples
+    // batching_challenge upstream and passes in; here we sample all
+    // three at entry for self-containment.
+    //
+    // The gkr_batch_open sample is required for transcript alignment:
+    // verify_zerocheck_host samples three EF elements in this order
+    // (alpha, gkr_batch_open, lambda).  Without sampling
+    // gkr_batch_open here, every subsequent challenge is shifted by
+    // one EF squeeze and downstream sumcheck/jagged-PCS round 0
+    // checks will desync (audit D1, May 1 2026).
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let _gkr_batch_open: Challenge<SC> =
+        challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
     // Step 2: compute per-chip C-tables.  Skip chips that
