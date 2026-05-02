@@ -280,7 +280,15 @@ where
         let chip_ordering =
             named_traces.iter().enumerate().map(|(i, (name, _))| (name.to_owned(), i)).collect();
 
-        let traces = named_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
+        // Wrap each trace in `Arc::new` so post-`open()` consumers
+        // (e.g. the basefold side channel) can clone refcounted
+        // handles instead of cloning the underlying matrix.  See
+        // `ShardMainData` doc-comment in `types.rs` for the W2
+        // device-residency motivation.
+        let traces = named_traces
+            .into_iter()
+            .map(|(_, trace)| std::sync::Arc::new(trace))
+            .collect::<Vec<_>>();
 
         ShardMainData {
             traces,
@@ -1059,7 +1067,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],
     pk_traces: &[RowMajorMatrix<Val<SC>>],
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
-    main_traces: &[RowMajorMatrix<Val<SC>>],
+    main_traces: &[std::sync::Arc<RowMajorMatrix<Val<SC>>>],
     main_commit: &Com<SC>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
@@ -1196,11 +1204,20 @@ where
     // variable count the verifier expects at zerocheck_point dim check.
     let max_log_row_count = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
         .max_log_row_count;
+    // Materialize the Arc-wrapped main traces into a contiguous
+    // `Vec<RowMajorMatrix>` for the legacy shard-level prover API.
+    // The clone cost matches the pre-Vec<Arc<M>> refactor (the
+    // shard_level prover already cloned preprocessed_traces and
+    // received owned-by-borrow main_traces).  Once
+    // `prove_shard_to_basefold` itself is migrated to accept
+    // `&[Arc<RowMajorMatrix>]`, drop this materialization step.
+    let main_traces_owned: Vec<RowMajorMatrix<Val<SC>>> =
+        main_traces.iter().map(|arc| (**arc).clone()).collect();
     let proof_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
             &chips_reborrow,
             &preprocessed_traces,
-            main_traces,
+            &main_traces_owned,
             digest,
             public_values,
             max_log_row_count,

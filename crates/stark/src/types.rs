@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -13,8 +14,18 @@ use crate::shape::OrderedShape;
 
 pub type QuotientOpenedValues<T> = Vec<T>;
 
+/// Per-shard main-trace metadata produced by `MachineProver::commit`.
+///
+/// `traces` is `Vec<Arc<M>>` so post-`open()` consumers (the W2
+/// `prove_shard_to_basefold_gpu` device-residency hook) can capture
+/// the per-chip device-side trace matrices via cheap pointer-bump
+/// `Arc::clone` instead of (a) re-uploading from host or (b) cloning
+/// device buffers (impossible — `ColMajorMatrixDevice` /
+/// `DeviceBuffer` are not `Clone`).  Producer in `commit()` wraps each
+/// matrix in `Arc::new`; `open()` and the basefold side-channel both
+/// hold refcounted handles to the same allocation.
 pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
-    pub traces: Vec<M>,
+    pub traces: Vec<Arc<M>>,
     pub main_commit: Com<SC>,
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
@@ -23,7 +34,7 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
 
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
     pub const fn new(
-        traces: Vec<M>,
+        traces: Vec<Arc<M>>,
         main_commit: Com<SC>,
         main_data: P,
         chip_ordering: HashMap<String, usize>,
