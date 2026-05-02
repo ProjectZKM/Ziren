@@ -159,12 +159,19 @@ where
                 let d0_chip = &layer.denominator_0[chip_idx];
                 let n1_chip = &layer.numerator_1[chip_idx];
                 let d1_chip = &layer.denominator_1[chip_idx];
+                // PaddedMle (task #88): rows beyond per-quadrant
+                // num_real_rows take the identity-fraction value
+                // (0 for numerators, 1 for denominators).
+                let n0_real = row < n0_chip.num_real_rows;
+                let d0_real = row < d0_chip.num_real_rows;
+                let n1_real = row < n1_chip.num_real_rows;
+                let d1_real = row < d1_chip.num_real_rows;
                 for col in 0..chip_cols {
                     let flat_col = chip_off + col;
-                    n0_row[flat_col] = (*n0_chip.get(row, col)).into();
-                    d0_row[flat_col] = *d0_chip.get(row, col);
-                    n1_row[flat_col] = (*n1_chip.get(row, col)).into();
-                    d1_row[flat_col] = *d1_chip.get(row, col);
+                    n0_row[flat_col] = if n0_real { (*n0_chip.get(row, col)).into() } else { EF::ZERO };
+                    d0_row[flat_col] = if d0_real { *d0_chip.get(row, col) } else { EF::ONE };
+                    n1_row[flat_col] = if n1_real { (*n1_chip.get(row, col)).into() } else { EF::ZERO };
+                    d1_row[flat_col] = if d1_real { *d1_chip.get(row, col) } else { EF::ONE };
                 }
             }
             // Pad trailing columns with identity-fraction (n=0, d=1).
@@ -407,17 +414,39 @@ fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
 /// Per-chip MLE state used during the row-binding rounds of
 /// `prove_gkr_round_chip_structured`.
 ///
-/// Each `Vec<EF>` holds one chip's `chip_rows × chip_cols` row-major
-/// table.  `chip_offsets[c]` is the running sum of chip widths and
-/// matches `flatten_layer`'s column placement.
+/// Each `Vec<EF>` holds one chip's `num_real_rows[c] × chip_cols[c]`
+/// row-major table.  `chip_offsets[c]` is the running sum of chip
+/// widths and matches `flatten_layer`'s column placement.
+///
+/// ## PaddedMle row optimisation (task #88)
+///
+/// Mirrors SP1's `PaddedMle::Constant` shape
+/// (`/tmp/sp1/slop/crates/multilinear/src/padded.rs`): each chip's
+/// data array stores ONLY the real prefix of `num_real_rows` rows,
+/// even though the LOGICAL row count is `chip_rows = 1 << remaining_row_variables`.
+/// Virtual rows in `[num_real_rows[c], chip_rows)` carry the per-
+/// quadrant identity-fraction value:
+///   * `n0`, `n1` → `EF::ZERO` (numerator pad).
+///   * `d0`, `d1` → `EF::ONE`  (denominator pad).
+///
+/// Per-round fold and round-poly evaluation handle (real, real),
+/// (real, pad), and (pad, pad) row-pair cases analytically — the
+/// (pad, pad) chip-pair contribution gets absorbed into a single
+/// scalar add (no per-cell work for fully-padded chips).
 struct ChipLayerState<EF> {
+    /// Per-chip n0 storage of length `num_real_rows[c] * chip_cols[c]`.
+    /// Indexable via `cells[r * cols + c]` for `r < num_real_rows[c]`.
     n0: Vec<Vec<EF>>,
     d0: Vec<Vec<EF>>,
     n1: Vec<Vec<EF>>,
     d1: Vec<Vec<EF>>,
     chip_offsets: Vec<usize>,
     chip_cols: Vec<usize>,
-    /// Remaining row count = `1 << remaining_row_variables`.
+    /// Per-chip number of materialised rows (= `num_real_rows`).  Always
+    /// `<= chip_rows`.
+    num_real_rows: Vec<usize>,
+    /// Logical / virtual row count, shared across chips.
+    /// `1 << remaining_row_variables`.
     chip_rows: usize,
 }
 
@@ -425,6 +454,16 @@ struct ChipLayerState<EF> {
 /// numerators to `EF` (denominators are already `EF`) and copying the
 /// row-major cells.  Mirrors SP1's `LogUpGkrCpuLayer` but expressed
 /// directly as `Vec<Vec<EF>>` to keep the round body simple.
+///
+/// **PaddedMle row optimisation (task #88)**: each chip's per-quadrant
+/// `cells` buffer is taken AS-IS from the `RowMajorTable` — when the
+/// upstream `first_layer` / `transition` produced real-only storage
+/// (`num_real_rows < 1 << num_row_variables`), the chip table here is
+/// likewise sized to its real prefix only.  The shared logical
+/// `chip_rows` stays `1 << layer.num_row_variables`; per-chip
+/// `num_real_rows` records each chip's materialised row count.  The
+/// fold and round-poly evaluation paths handle the
+/// (real, real) / (real, pad) / (pad, pad) cases analytically.
 fn build_chip_state<NumF, EF>(layer: &LogUpGkrCpuLayer<NumF, EF>) -> ChipLayerState<EF>
 where
     NumF: Field + Into<EF> + Copy + Sync,
@@ -449,20 +488,102 @@ where
         );
     }
 
-    let n0: Vec<Vec<EF>> = layer
-        .numerator_0
-        .par_iter()
-        .map(|t| t.cells.iter().map(|&v| v.into()).collect())
+    // Per-chip num_real_rows (PaddedMle pattern, task #88).  All four
+    // quadrants of a given chip share the same logical row count, but
+    // n*/d* may differ in `num_real_rows` if the source `transition`
+    // produced empty lower halves (e.g. when src_real <= next_rows the
+    // n1/d1 quadrant is fully padding and storage is empty).  We
+    // collapse to a single per-chip num_real_rows = max of the four,
+    // and at access time short-circuit reads on quadrants whose own
+    // num_real_rows is smaller.  In practice the per-quadrant counts
+    // for n0/d0 always agree, n1/d1 always agree; n0/n1 agree when the
+    // src layer was halved with src_real spanning both halves.
+    //
+    // To keep the round-poly + fold logic uniform, we record each
+    // quadrant's num_real_rows separately and use the MAX as the
+    // chip's overall "real rows" marker — pad-only rows in either
+    // quadrant resolve to 0 / 1 respectively when read.
+    //
+    // For simplicity and to mirror SP1's `LogUpGkrCpuLayer` (which
+    // tracks one num_real_rows per chip via the underlying inner Mle
+    // bound), we ALIGN the four quadrants by setting each chip's
+    // num_real_rows to the max across its quadrants and zero-padding
+    // the shorter quadrants up to that max with the appropriate pad
+    // constant.  This keeps the per-quadrant storage layout uniform
+    // for the fold + round-poly hot paths.
+    let num_chips = layer.numerator_0.len();
+    let aligned_real: Vec<usize> = (0..num_chips)
+        .map(|c| {
+            layer.numerator_0[c]
+                .num_real_rows
+                .max(layer.denominator_0[c].num_real_rows)
+                .max(layer.numerator_1[c].num_real_rows)
+                .max(layer.denominator_1[c].num_real_rows)
+        })
         .collect();
-    let n1: Vec<Vec<EF>> = layer
-        .numerator_1
-        .par_iter()
-        .map(|t| t.cells.iter().map(|&v| v.into()).collect())
-        .collect();
-    let d0: Vec<Vec<EF>> = layer.denominator_0.par_iter().map(|t| t.cells.clone()).collect();
-    let d1: Vec<Vec<EF>> = layer.denominator_1.par_iter().map(|t| t.cells.clone()).collect();
 
-    ChipLayerState { n0, d0, n1, d1, chip_offsets, chip_cols, chip_rows }
+    let n0: Vec<Vec<EF>> = (0..num_chips)
+        .into_par_iter()
+        .map(|c| {
+            let t = &layer.numerator_0[c];
+            let target = aligned_real[c];
+            let cols = t.num_interactions;
+            let mut out: Vec<EF> = Vec::with_capacity(target * cols);
+            for &v in &t.cells {
+                out.push(v.into());
+            }
+            // Pad up to aligned_real with EF::ZERO (numerator pad).
+            out.resize(target * cols, EF::ZERO);
+            out
+        })
+        .collect();
+    let n1: Vec<Vec<EF>> = (0..num_chips)
+        .into_par_iter()
+        .map(|c| {
+            let t = &layer.numerator_1[c];
+            let target = aligned_real[c];
+            let cols = t.num_interactions;
+            let mut out: Vec<EF> = Vec::with_capacity(target * cols);
+            for &v in &t.cells {
+                out.push(v.into());
+            }
+            out.resize(target * cols, EF::ZERO);
+            out
+        })
+        .collect();
+    let d0: Vec<Vec<EF>> = (0..num_chips)
+        .into_par_iter()
+        .map(|c| {
+            let t = &layer.denominator_0[c];
+            let target = aligned_real[c];
+            let cols = t.num_interactions;
+            let mut out: Vec<EF> = t.cells.clone();
+            out.resize(target * cols, EF::ONE);
+            out
+        })
+        .collect();
+    let d1: Vec<Vec<EF>> = (0..num_chips)
+        .into_par_iter()
+        .map(|c| {
+            let t = &layer.denominator_1[c];
+            let target = aligned_real[c];
+            let cols = t.num_interactions;
+            let mut out: Vec<EF> = t.cells.clone();
+            out.resize(target * cols, EF::ONE);
+            out
+        })
+        .collect();
+
+    ChipLayerState {
+        n0,
+        d0,
+        n1,
+        d1,
+        chip_offsets,
+        chip_cols,
+        num_real_rows: aligned_real,
+        chip_rows,
+    }
 }
 
 /// Compute the round-poly evaluations `(p(1), p(2), p(3))` while the
@@ -476,6 +597,20 @@ where
 /// the identity fraction `(0, 1)` — is handled analytically: each cell
 /// in the tail contributes `eq * 1` to the round poly, so we add
 /// `pad_eq_int_sum * eq_row_pair_X * 1` for X ∈ {1, 2, 3}.
+///
+/// **PaddedMle row optimisation (task #88)**: each chip carries its own
+/// `num_real_rows[c]` (the materialised-row prefix); rows ≥ this index
+/// are virtual and resolve to `(0, 1, 0, 1)`.  The per-row branching
+/// inside each chip distinguishes:
+///   * `(real, real)` — both halves real — full per-cell bracket.
+///   * `(real, pad)`  — lo real, hi = identity fraction — per-cell
+///     bracket using the pad constants for `n01/d01/n11/d11`.
+///   * `(pad, pad)`   — both halves pad — bracket = 1 per cell, so
+///     the row's contribution collapses to
+///     `chip_eq_int_sum × eq_row_X(row)`.
+/// Fully-padding chips (`num_real_rows[c] == 0`) take a fast path that
+/// adds `chip_eq_int_sum × Σ_row eq_row_X(row)` once and skips the
+/// per-row loop entirely.
 ///
 /// Returns the four-point evaluation array used by the caller's
 /// 3-point sumcheck trick (`p(0) = current_claim - p(1)`).
@@ -494,49 +629,117 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     debug_assert!(eq_row.len() == state.chip_rows);
     let row_half = state.chip_rows / 2;
 
+    // Pre-compute the row sums Σ eq_row_X(row) for X ∈ {1, 2, 3} —
+    // used by the "fully-padding chip" fast path AND by the per-chip
+    // pad-pad row collapse for partial chips.
+    let mut sum_lo = EF::ZERO;
+    let mut sum_hi = EF::ZERO;
+    for row in 0..row_half {
+        sum_lo += eq_row[row];
+        sum_hi += eq_row[row + row_half];
+    }
+    let two = EF::ONE.double();
+    let er_sum1 = sum_hi;
+    let er_sum2 = two * sum_hi - sum_lo;
+    let er_sum3 = (two * sum_hi - sum_lo).double() - sum_hi; // = 3*sum_hi - 2*sum_lo
+
+    // Pre-compute per-chip eq_int row sums (`Σ eq_int[chip_off..chip_off+cols]`).
+    // Used for the pad-pad analytic collapse on both fully and partially
+    // padded chips.
+    let chip_eq_int_sums: Vec<EF> = state
+        .chip_offsets
+        .iter()
+        .zip(state.chip_cols.iter())
+        .map(|(&off, &cols)| {
+            let mut s = EF::ZERO;
+            for col in 0..cols {
+                s += eq_int[off + col];
+            }
+            s
+        })
+        .collect();
+
+    let num_chips = state.n0.len();
     // Per-chip parallel reduce.  Each chip walks its `row_half` rows in
     // parallel, accumulating contributions to (p(1), p(2), p(3)).
-    let (p1, p2, p3) = state
-        .n0
-        .par_iter()
-        .zip(state.d0.par_iter())
-        .zip(state.n1.par_iter())
-        .zip(state.d1.par_iter())
-        .zip(state.chip_offsets.par_iter())
-        .zip(state.chip_cols.par_iter())
-        .map(|(((((n0_chip, d0_chip), n1_chip), d1_chip), &chip_off), &cols)| {
-            // For each row pair, walk all cols.  Row-stride = cols.
+    let (p1, p2, p3) = (0..num_chips)
+        .into_par_iter()
+        .map(|c| {
+            let n0_chip = &state.n0[c];
+            let d0_chip = &state.d0[c];
+            let n1_chip = &state.n1[c];
+            let d1_chip = &state.d1[c];
+            let chip_off = state.chip_offsets[c];
+            let cols = state.chip_cols[c];
+            let real = state.num_real_rows[c];
+            let chip_eq_int_sum = chip_eq_int_sums[c];
+
+            // Fully-padding chip fast path: every cell is identity-
+            // fraction → bracket = 1, contribution =
+            // chip_eq_int_sum × Σ eq_row_X(row).
+            if real == 0 {
+                return (
+                    chip_eq_int_sum * er_sum1,
+                    chip_eq_int_sum * er_sum2,
+                    chip_eq_int_sum * er_sum3,
+                );
+            }
+
+            // Otherwise iterate the row pairs with per-row branching.
+            // The row partition wrt `real` is determined as follows:
+            //   * `real >= row_half`: lower half [0, row_half) is fully
+            //     real; upper half [row_half, real) is real for indices
+            //     [row_half, real), rest is pad.  Per output index r:
+            //       r < real - row_half: (real, real)
+            //       r >= real - row_half: (real, pad)
+            //     No (pad, pad) rows in this branch.
+            //   * `real < row_half`: r < real → (real, pad);
+            //     r >= real → (pad, pad).
+            //
+            // In both branches, the (real, pad) rows materialise the lo
+            // cell from storage; in the `real >= row_half` branch the
+            // (real, real) rows materialise both lo and hi cells.
+            //
+            // Storage indexing: `n0_chip[r * cols + col]` for r < real.
             (0..row_half)
                 .into_par_iter()
                 .with_min_len(64)
                 .map(|row| {
-                    let lo_base = row * cols;
-                    let hi_base = (row + row_half) * cols;
                     let er0 = eq_row[row];
                     let er1 = eq_row[row + row_half];
-
-                    // Linear extrapolation of eq_row at X = 1, 2, 3.
-                    // We fold ROW factor alongside each cell: the
-                    // bracket per cell is column-local; the eq factor
-                    // splits as eq_int[chip_off+col] * eq_row_X(row).
-                    let two = EF::ONE.double();
                     let er2 = two * er1 - er0;
-                    let er3 = (two * er1 - er0).double() - er1; // 3*er1 - 2*er0
-                    // Equivalently: er3 = 3*er1 - 2*er0; check:
-                    //   (2er1 - er0).double() = 4er1 - 2er0; - er1 = 3er1 - 2er0 ✓
+                    let er3 = (two * er1 - er0).double() - er1;
+
+                    // Determine pair shape.
+                    let lo_real = row < real;
+                    let hi_real = row + row_half < real;
+
+                    if !lo_real && !hi_real {
+                        // (pad, pad): bracket = 1 for every column.
+                        return (
+                            chip_eq_int_sum * er1,
+                            chip_eq_int_sum * er2,
+                            chip_eq_int_sum * er3,
+                        );
+                    }
+
+                    let lo_base = row * cols;
+                    let hi_base = (row + row_half) * cols;
 
                     let mut chip_p1 = EF::ZERO;
                     let mut chip_p2 = EF::ZERO;
                     let mut chip_p3 = EF::ZERO;
                     for col in 0..cols {
-                        let n00 = n0_chip[lo_base + col];
-                        let d00 = d0_chip[lo_base + col];
-                        let n10 = n1_chip[lo_base + col];
-                        let d10 = d1_chip[lo_base + col];
-                        let n01 = n0_chip[hi_base + col];
-                        let d01 = d0_chip[hi_base + col];
-                        let n11 = n1_chip[hi_base + col];
-                        let d11 = d1_chip[hi_base + col];
+                        // Read lo / hi values, substituting pad constants
+                        // when the source row is virtual.
+                        let n00 = if lo_real { n0_chip[lo_base + col] } else { EF::ZERO };
+                        let d00 = if lo_real { d0_chip[lo_base + col] } else { EF::ONE };
+                        let n10 = if lo_real { n1_chip[lo_base + col] } else { EF::ZERO };
+                        let d10 = if lo_real { d1_chip[lo_base + col] } else { EF::ONE };
+                        let n01 = if hi_real { n0_chip[hi_base + col] } else { EF::ZERO };
+                        let d01 = if hi_real { d0_chip[hi_base + col] } else { EF::ONE };
+                        let n11 = if hi_real { n1_chip[hi_base + col] } else { EF::ZERO };
+                        let d11 = if hi_real { d1_chip[hi_base + col] } else { EF::ONE };
 
                         // X = 2 → 2t1 - t0.
                         let two_n01 = n01.double();
@@ -578,23 +781,15 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
             |(a1, a2, a3), (b1, b2, b3)| (a1 + b1, a2 + b2, a3 + b3),
         );
 
-    // Padding-tail contribution.  For columns in the "padding tail"
-    // (global columns >= sum(chip_cols)), the n/d cells are (0, 1, 0, 1)
-    // identity-fraction values regardless of row.  Per-cell bracket =
-    // lambda*0 + 1 = 1.  Sum over (rows × pad_cols) at fold value X:
+    // Global pad-tail contribution.  For columns in the padding tail
+    // (global columns >= sum(chip_cols)), the n/d cells are
+    // (0, 1, 0, 1) identity-fraction values regardless of row.
+    // Per-cell bracket = lambda*0 + 1 = 1.  Sum over
+    // (rows × pad_cols) at fold value X:
     //   pad_eq_int_sum × Σ_row eq_row_X(row)
-    // where eq_row_X(row) = (1-X)*eq_row[row] + X*eq_row[row+row_half].
-    let mut sum_lo = EF::ZERO;
-    let mut sum_hi = EF::ZERO;
-    for row in 0..row_half {
-        sum_lo += eq_row[row];
-        sum_hi += eq_row[row + row_half];
-    }
-    // er_X_sum at X=1 → sum_hi; X=2 → 2*sum_hi - sum_lo; X=3 → 3*sum_hi - 2*sum_lo.
-    let two = EF::ONE.double();
-    let pad1 = pad_eq_int_sum * sum_hi;
-    let pad2 = pad_eq_int_sum * (two * sum_hi - sum_lo);
-    let pad3 = pad_eq_int_sum * ((two * sum_hi - sum_lo).double() - sum_hi);
+    let pad1 = pad_eq_int_sum * er_sum1;
+    let pad2 = pad_eq_int_sum * er_sum2;
+    let pad3 = pad_eq_int_sum * er_sum3;
 
     let p1 = p1 + pad1;
     let p2 = p2 + pad2;
@@ -604,24 +799,121 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
 }
 
 /// Fold all per-chip tables in-place along the row axis at challenge
-/// `alpha`.  After the fold each chip's table shrinks from
-/// `chip_rows × cols` to `(chip_rows/2) × cols`.
+/// `alpha`.  After the fold each chip's logical row count shrinks from
+/// `chip_rows` to `chip_rows / 2`; each chip's `num_real_rows` updates
+/// according to the PaddedMle fold rule:
+///
+///   * `real == 0`            → fold collapses to all pad → `new_real = 0`.
+///   * `real >= row_half`     → every output row reads at least one
+///     real cell → `new_real = row_half` (chip becomes fully real).
+///   * `0 < real < row_half`  → only outputs `r ∈ [0, real)` read from
+///     real input → `new_real = real`.
+///
+/// (Mirrors `crate::basefold::padded::PaddedMle::fold_row_msb`.)
 fn fold_chip_state_row<EF: Field + Send + Sync>(state: &mut ChipLayerState<EF>, alpha: EF) {
     use p3_maybe_rayon::prelude::*;
 
     debug_assert!(state.chip_rows >= 2);
     let row_half = state.chip_rows / 2;
 
-    let fold_one = |table: &mut Vec<EF>, cols: usize| {
-        let half_len = row_half * cols;
-        let (lo, hi) = table.split_at_mut(half_len);
-        lo.par_iter_mut().zip(hi.par_iter()).for_each(|(lo_v, hi_v)| {
-            *lo_v = *lo_v + alpha * (*hi_v - *lo_v);
-        });
-        table.truncate(half_len);
-    };
+    // Determine new num_real_rows per chip ahead of time.
+    let new_real: Vec<usize> = state
+        .num_real_rows
+        .iter()
+        .map(|&r| {
+            if r == 0 {
+                0
+            } else if r >= row_half {
+                row_half
+            } else {
+                r
+            }
+        })
+        .collect();
+
+    /// Fold one quadrant table for a chip with the given pad constant.
+    /// `old_real` rows materialised pre-fold; `new_real` rows post-fold.
+    /// `pad` is the per-quadrant identity-fraction value
+    /// (`EF::ZERO` for numerators, `EF::ONE` for denominators).
+    fn fold_one<EF: Field + Send + Sync>(
+        table: &mut Vec<EF>,
+        cols: usize,
+        old_real: usize,
+        new_real: usize,
+        row_half: usize,
+        alpha: EF,
+        pad: EF,
+    ) {
+        if cols == 0 {
+            return;
+        }
+        if old_real == 0 {
+            // Pure padding chip — output is also pure padding.  Empty
+            // storage carries the pad invariant.  Sanity:
+            debug_assert_eq!(new_real, 0);
+            debug_assert!(table.is_empty());
+            return;
+        }
+
+        if old_real >= row_half {
+            // Lower half [0, row_half) is fully real; upper half
+            // [row_half, old_real) is real for indices [row_half, old_real),
+            // virtual for indices [old_real, 2*row_half).  After fold
+            // every output row r ∈ [0, row_half) reads:
+            //   r < old_real - row_half: (lo real, hi real)
+            //   r >= old_real - row_half: (lo real, hi pad)
+            let upper_real = old_real - row_half;
+            // Compute output IN-PLACE in the lower-half buffer.  We
+            // allocate a fresh output vec to avoid aliasing issues with
+            // the &mut[lo] / &[hi] split when both are needed for parallel
+            // writes.
+            let mut out: Vec<EF> = vec![EF::ZERO; row_half * cols];
+            // r ∈ [0, upper_real): both halves real.
+            out.par_chunks_exact_mut(cols)
+                .enumerate()
+                .for_each(|(r, dst)| {
+                    let lo_base = r * cols;
+                    if r < upper_real {
+                        let hi_base = (r + row_half) * cols;
+                        for col in 0..cols {
+                            let lo = table[lo_base + col];
+                            let hi = table[hi_base + col];
+                            dst[col] = lo + alpha * (hi - lo);
+                        }
+                    } else {
+                        // (real, pad): hi value = pad constant.
+                        for col in 0..cols {
+                            let lo = table[lo_base + col];
+                            dst[col] = lo + alpha * (pad - lo);
+                        }
+                    }
+                });
+            *table = out;
+            debug_assert_eq!(new_real, row_half);
+            return;
+        }
+
+        // old_real ∈ (0, row_half): upper half is fully padding.  Only
+        // output rows r ∈ [0, old_real) read from real input — the rest
+        // are pad-pad and analytically equal pad.  Materialise only
+        // the real prefix.
+        let mut out: Vec<EF> = vec![EF::ZERO; new_real * cols];
+        out.par_chunks_exact_mut(cols)
+            .enumerate()
+            .for_each(|(r, dst)| {
+                let lo_base = r * cols;
+                for col in 0..cols {
+                    let lo = table[lo_base + col];
+                    dst[col] = lo + alpha * (pad - lo);
+                }
+            });
+        *table = out;
+        debug_assert_eq!(new_real, old_real);
+    }
 
     let chip_cols = state.chip_cols.clone();
+    let old_real = state.num_real_rows.clone();
+    let new_real_clone = new_real.clone();
     state
         .n0
         .par_iter_mut()
@@ -629,12 +921,15 @@ fn fold_chip_state_row<EF: Field + Send + Sync>(state: &mut ChipLayerState<EF>, 
         .zip(state.n1.par_iter_mut())
         .zip(state.d1.par_iter_mut())
         .zip(chip_cols.par_iter())
-        .for_each(|((((n0, d0), n1), d1), &cols)| {
-            fold_one(n0, cols);
-            fold_one(d0, cols);
-            fold_one(n1, cols);
-            fold_one(d1, cols);
+        .zip(old_real.par_iter())
+        .zip(new_real_clone.par_iter())
+        .for_each(|((((((n0, d0), n1), d1), &cols), &or), &nr)| {
+            fold_one(n0, cols, or, nr, row_half, alpha, EF::ZERO);
+            fold_one(d0, cols, or, nr, row_half, alpha, EF::ONE);
+            fold_one(n1, cols, or, nr, row_half, alpha, EF::ZERO);
+            fold_one(d1, cols, or, nr, row_half, alpha, EF::ONE);
         });
+    state.num_real_rows = new_real;
     state.chip_rows = row_half;
 }
 
@@ -646,6 +941,12 @@ fn fold_chip_state_row<EF: Field + Send + Sync>(state: &mut ChipLayerState<EF>, 
 /// vectors each have length `1 << num_interaction_variables` and match
 /// the layout `flatten_layer` would have produced after the same number
 /// of row-binding folds — see Phase 2A `flatten_layer` for the layout.
+///
+/// **PaddedMle pattern (task #88)**: chips with `num_real_rows == 0`
+/// were fully-padding and contributed nothing materialised — their
+/// global slots stay at the initial `(0, 1)` identity fraction.  Chips
+/// with `num_real_rows == 1` (i.e., real after folding) blit their
+/// single-row storage into the global slots.
 fn pack_into_global<EF: Field>(
     state: &ChipLayerState<EF>,
     num_interaction_variables: usize,
@@ -658,6 +959,12 @@ fn pack_into_global<EF: Field>(
     let mut d1 = vec![EF::ONE; global_cols];
     for (chip_idx, &offset) in state.chip_offsets.iter().enumerate() {
         let cols = state.chip_cols[chip_idx];
+        let real = state.num_real_rows[chip_idx];
+        if real == 0 {
+            // Pure-padding chip: identity fraction already initialised.
+            continue;
+        }
+        debug_assert_eq!(real, 1, "pack_into_global expects num_real_rows ∈ {{0, 1}}");
         n0[offset..offset + cols].copy_from_slice(&state.n0[chip_idx]);
         d0[offset..offset + cols].copy_from_slice(&state.d0[chip_idx]);
         n1[offset..offset + cols].copy_from_slice(&state.n1[chip_idx]);
@@ -1407,6 +1714,7 @@ mod tests {
                 num_row_variables: 1,
                 num_interaction_variables: 0,
                 num_interactions: 1,
+                num_real_rows: 2,
             }
         };
         let layer = LogUpGkrCpuLayer {

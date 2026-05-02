@@ -68,6 +68,9 @@ fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
         "interleave_chip expects terminal-layer table (num_row_variables == 1)"
     );
     let cols = table.num_interactions;
+    // PaddedMle (task #88): test helper assumes the table is fully real
+    // (num_real_rows == 2).  Only used by row-GKR unit tests today.
+    debug_assert_eq!(table.num_real_rows, 2);
     debug_assert_eq!(table.cells.len(), 2 * cols);
     let row_0 = &table.cells[..cols];
     let row_1 = &table.cells[cols..2 * cols];
@@ -131,19 +134,30 @@ where
         debug_assert_eq!(n0_chip.num_row_variables, 1);
         debug_assert!(offset + chip_cols <= cols);
 
-        // Terminal layer has num_row_vars=1 → 2 rows.  Row 0 = get(0, c),
-        // row 1 = get(1, c).  Place row 0 in the low half of the global
-        // index (row_bit=0) and row 1 in the high half (row_bit=1).
+        // Terminal layer has num_row_vars=1 → 2 logical rows.  PaddedMle
+        // (task #88): each quadrant's `num_real_rows` is independently
+        // 0/1/2; rows beyond it carry the per-quadrant pad value
+        // (n* → 0, d* → 1).
         for c in 0..chip_cols {
-            n0_flat[offset + c] = *n0_chip.get(0, c);
-            d0_flat[offset + c] = *d0_chip.get(0, c);
-            n1_flat[offset + c] = *n1_chip.get(0, c);
-            d1_flat[offset + c] = *d1_chip.get(0, c);
+            // Row 0 (low half).
+            n0_flat[offset + c] =
+                if n0_chip.num_real_rows >= 1 { *n0_chip.get(0, c) } else { EF::ZERO };
+            d0_flat[offset + c] =
+                if d0_chip.num_real_rows >= 1 { *d0_chip.get(0, c) } else { EF::ONE };
+            n1_flat[offset + c] =
+                if n1_chip.num_real_rows >= 1 { *n1_chip.get(0, c) } else { EF::ZERO };
+            d1_flat[offset + c] =
+                if d1_chip.num_real_rows >= 1 { *d1_chip.get(0, c) } else { EF::ONE };
 
-            n0_flat[cols + offset + c] = *n0_chip.get(1, c);
-            d0_flat[cols + offset + c] = *d0_chip.get(1, c);
-            n1_flat[cols + offset + c] = *n1_chip.get(1, c);
-            d1_flat[cols + offset + c] = *d1_chip.get(1, c);
+            // Row 1 (high half).
+            n0_flat[cols + offset + c] =
+                if n0_chip.num_real_rows >= 2 { *n0_chip.get(1, c) } else { EF::ZERO };
+            d0_flat[cols + offset + c] =
+                if d0_chip.num_real_rows >= 2 { *d0_chip.get(1, c) } else { EF::ONE };
+            n1_flat[cols + offset + c] =
+                if n1_chip.num_real_rows >= 2 { *n1_chip.get(1, c) } else { EF::ZERO };
+            d1_flat[cols + offset + c] =
+                if d1_chip.num_real_rows >= 2 { *d1_chip.get(1, c) } else { EF::ONE };
         }
         offset += chip_cols;
     }
@@ -176,6 +190,7 @@ mod tests {
             num_row_variables: 1,
             num_interaction_variables: num_int_vars,
             num_interactions: cols,
+            num_real_rows: 2,
         }
     }
 
@@ -289,6 +304,7 @@ mod tests {
             num_row_variables: 2,
             num_interaction_variables: 0,
             num_interactions: 1,
+            num_real_rows: 4,
         };
         let layer = LogUpGkrCpuLayer {
             numerator_0: vec![n0.clone()],

@@ -102,47 +102,89 @@ where
             let next_rows = 1usize << next_num_row_variables;
             let int_count = chip_num_interactions;
 
-            // SAFETY: when int_count > 0 the par_chunks_exact_mut loop
-            // unconditionally writes every cell.  When int_count == 0
-            // total = 0 and set_len(0) is trivially safe.
-            let (mut next_n0, mut next_d0, mut next_n1, mut next_d1) = unsafe {
-                (
-                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
-                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
-                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
-                    RowMajorTable::<EF>::filled_raw_uninit(next_num_row_variables, chip_num_interactions),
-                )
-            };
+            // PaddedMle row optimisation (task #88): only materialise
+            // rows that pull from at least one real input cell.
+            //   next_n0/d0 reads row k (upper half, indices [0, next_rows))
+            //   → real iff k < src_real_rows.
+            //   next_n1/d1 reads row k + next_rows (lower half, indices
+            //   [next_rows, 2*next_rows))
+            //   → real iff k + next_rows < src_real_rows.
+            // The src real-row count is the same across all four
+            // quadrants (they share an underlying logical row count).
+            let src_real = n0.num_real_rows;
+            debug_assert_eq!(src_real, d0.num_real_rows);
+            debug_assert_eq!(src_real, n1.num_real_rows);
+            debug_assert_eq!(src_real, d1.num_real_rows);
 
-            // Per-row parallelism: each k iteration is independent,
-            // so split next_n0/next_d0/next_n1/next_d1 by row chunks
-            // (each chunk = `int_count` cells = one row's work).
+            let next_n0_real = src_real.min(next_rows);
+            let next_d0_real = next_n0_real;
+            let next_n1_real = src_real.saturating_sub(next_rows).min(next_rows);
+            let next_d1_real = next_n1_real;
+
+            // Allocate ZEROed buffers sized to the real-only prefix of
+            // each output quadrant.  Pad rows are not materialised.
+            let mut next_n0_cells: Vec<EF> = vec![EF::ZERO; next_n0_real * int_count];
+            let mut next_d0_cells: Vec<EF> = vec![EF::ZERO; next_d0_real * int_count];
+            let mut next_n1_cells: Vec<EF> = vec![EF::ZERO; next_n1_real * int_count];
+            let mut next_d1_cells: Vec<EF> = vec![EF::ZERO; next_d1_real * int_count];
+
             if int_count > 0 {
-                next_n0.cells.par_chunks_exact_mut(int_count)
-                    .zip(next_d0.cells.par_chunks_exact_mut(int_count))
-                    .zip(next_n1.cells.par_chunks_exact_mut(int_count))
-                    .zip(next_d1.cells.par_chunks_exact_mut(int_count))
-                    .enumerate()
-                    .for_each(|(k, (((n0_row, d0_row), n1_row), d1_row))| {
-                        let row_upper = k;
-                        let row_lower = k + next_rows;
-                        for i in 0..int_count {
-                            let n_00: EF = (*n0.get(row_upper, i)).into();
-                            let d_00: EF = *d0.get(row_upper, i);
-                            let n_01: EF = (*n1.get(row_upper, i)).into();
-                            let d_01: EF = *d1.get(row_upper, i);
-                            n0_row[i] = d_01 * n_00 + d_00 * n_01;
-                            d0_row[i] = d_00 * d_01;
+                // Compute the upper-half outputs (next_n0, next_d0).  Reads
+                // row_upper = k from src; pad value applies for
+                // k ∈ [src_real, next_rows) but we only materialise
+                // k ∈ [0, next_n0_real = min(src_real, next_rows)).
+                if next_n0_real > 0 {
+                    next_n0_cells
+                        .par_chunks_exact_mut(int_count)
+                        .zip(next_d0_cells.par_chunks_exact_mut(int_count))
+                        .enumerate()
+                        .for_each(|(k, (n0_row, d0_row))| {
+                            let row_upper = k;
+                            for i in 0..int_count {
+                                let n_00: EF = (*n0.get(row_upper, i)).into();
+                                let d_00: EF = *d0.get(row_upper, i);
+                                let n_01: EF = (*n1.get(row_upper, i)).into();
+                                let d_01: EF = *d1.get(row_upper, i);
+                                n0_row[i] = d_01 * n_00 + d_00 * n_01;
+                                d0_row[i] = d_00 * d_01;
+                            }
+                        });
+                }
 
-                            let n_10: EF = (*n0.get(row_lower, i)).into();
-                            let d_10: EF = *d0.get(row_lower, i);
-                            let n_11: EF = (*n1.get(row_lower, i)).into();
-                            let d_11: EF = *d1.get(row_lower, i);
-                            n1_row[i] = d_11 * n_10 + d_10 * n_11;
-                            d1_row[i] = d_10 * d_11;
-                        }
-                    });
+                // Lower-half outputs (next_n1, next_d1).  Reads
+                // row_lower = k + next_rows from src; row_lower is real
+                // iff k + next_rows < src_real, i.e. k < next_n1_real.
+                if next_n1_real > 0 {
+                    next_n1_cells
+                        .par_chunks_exact_mut(int_count)
+                        .zip(next_d1_cells.par_chunks_exact_mut(int_count))
+                        .enumerate()
+                        .for_each(|(k, (n1_row, d1_row))| {
+                            let row_lower = k + next_rows;
+                            for i in 0..int_count {
+                                let n_10: EF = (*n0.get(row_lower, i)).into();
+                                let d_10: EF = *d0.get(row_lower, i);
+                                let n_11: EF = (*n1.get(row_lower, i)).into();
+                                let d_11: EF = *d1.get(row_lower, i);
+                                n1_row[i] = d_11 * n_10 + d_10 * n_11;
+                                d1_row[i] = d_10 * d_11;
+                            }
+                        });
+                }
             }
+
+            let next_n0 = RowMajorTable::<EF>::from_padded_cells(
+                next_n0_cells, next_num_row_variables, chip_num_interactions, next_n0_real,
+            );
+            let next_d0 = RowMajorTable::<EF>::from_padded_cells(
+                next_d0_cells, next_num_row_variables, chip_num_interactions, next_d0_real,
+            );
+            let next_n1 = RowMajorTable::<EF>::from_padded_cells(
+                next_n1_cells, next_num_row_variables, chip_num_interactions, next_n1_real,
+            );
+            let next_d1 = RowMajorTable::<EF>::from_padded_cells(
+                next_d1_cells, next_num_row_variables, chip_num_interactions, next_d1_real,
+            );
 
             (next_n0, next_d0, next_n1, next_d1)
         })

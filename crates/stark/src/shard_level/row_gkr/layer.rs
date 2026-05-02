@@ -50,8 +50,17 @@ use p3_field::{ExtensionField, Field};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowMajorTable<F> {
     /// Cells in row-major layout: `cells[row * num_interactions + col]`.
+    /// When `num_real_rows < (1 << num_row_variables)` the storage holds
+    /// only the **real** prefix (= `num_real_rows * num_interactions`
+    /// cells).  Virtual rows in `[num_real_rows, 1 << num_row_variables)`
+    /// are NOT materialized — readers consult the per-call padding tag
+    /// (LogUp-GKR uses `F::ZERO` for numerators, `F::ONE` for
+    /// denominators).  This mirrors SP1's `PaddedMle::Constant` pattern
+    /// (`/tmp/sp1/slop/crates/multilinear/src/padded.rs`) — see
+    /// `crate::basefold::padded::PaddedMle` for the standalone version.
     pub cells: Vec<F>,
-    /// log₂ of row count.
+    /// log₂ of LOGICAL row count.  The actual allocated storage may be
+    /// smaller — see `num_real_rows` for the materialized prefix.
     pub num_row_variables: usize,
     /// log₂ of `num_interactions.next_power_of_two()` — virtual padded
     /// column dimension for sumcheck purposes.
@@ -59,6 +68,14 @@ pub struct RowMajorTable<F> {
     /// Raw per-chip column count (= number of interactions in this
     /// chip's lookup set).  Storage stride.  Always ≤ `1 << num_interaction_variables`.
     pub num_interactions: usize,
+    /// Number of materialized rows in `cells`.  Always
+    /// `<= 1 << num_row_variables`.  When equal, the table is "fully
+    /// real" — virtual rows in `[num_real_rows, 1 << num_row_variables)`
+    /// would carry the per-quadrant identity-fraction value (0 for
+    /// numerators, 1 for denominators).  This skips materializing
+    /// padding cells for chips whose real height is far below the
+    /// shard-wide row dimension.
+    pub num_real_rows: usize,
 }
 
 impl<F: Clone> RowMajorTable<F> {
@@ -79,6 +96,7 @@ impl<F: Clone> RowMajorTable<F> {
             num_row_variables,
             num_interaction_variables,
             num_interactions,
+            num_real_rows: 1usize << num_row_variables,
         }
     }
 
@@ -113,6 +131,7 @@ impl<F: Clone> RowMajorTable<F> {
             num_row_variables,
             num_interaction_variables,
             num_interactions,
+            num_real_rows: 1usize << num_row_variables,
         }
     }
 
@@ -133,28 +152,70 @@ impl<F: Clone> RowMajorTable<F> {
             num_row_variables,
             num_interaction_variables,
             num_interactions,
+            num_real_rows: 1usize << num_row_variables,
+        }
+    }
+
+    /// PaddedMle constructor: build a table whose `cells` array is sized
+    /// for `num_real_rows × num_interactions` only — the remaining
+    /// `(1 << num_row_variables) - num_real_rows` rows are virtual and
+    /// resolve to a per-quadrant identity-fraction value at access time
+    /// (`F::ZERO` for numerators, `F::ONE` for denominators).  Mirrors
+    /// SP1's `PaddedMle::padded` (see `crate::basefold::padded::PaddedMle`).
+    ///
+    /// Caller must satisfy:
+    ///   * `cells.len() == num_real_rows * num_interactions`
+    ///   * `num_real_rows <= (1 << num_row_variables)`
+    #[must_use]
+    pub fn from_padded_cells(
+        cells: Vec<F>,
+        num_row_variables: usize,
+        num_interactions: usize,
+        num_real_rows: usize,
+    ) -> Self {
+        let num_interaction_variables =
+            num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
+        debug_assert!(
+            num_interactions == 0 || cells.len() == num_real_rows * num_interactions,
+            "from_padded_cells: cells.len() {} != num_real_rows {} * num_interactions {}",
+            cells.len(),
+            num_real_rows,
+            num_interactions,
+        );
+        debug_assert!(num_real_rows <= (1usize << num_row_variables));
+        Self {
+            cells,
+            num_row_variables,
+            num_interaction_variables,
+            num_interactions,
+            num_real_rows,
         }
     }
 
     /// Linear `[row, interaction] -> idx` mapping for row-major storage.
-    /// Raw indexing — `interaction` must be `< num_interactions`.
+    /// Raw indexing — `interaction` must be `< num_interactions`, AND
+    /// `row` must address a **materialized** cell (`< num_real_rows`).
+    /// Reading virtual rows in `[num_real_rows, 1 << num_row_variables)`
+    /// is the caller's responsibility to handle (PaddedMle pattern;
+    /// see `crate::basefold::padded::PaddedMle`).
     #[inline]
     #[must_use]
     pub fn idx(&self, row: usize, interaction: usize) -> usize {
-        debug_assert!(row < (1 << self.num_row_variables));
+        debug_assert!(row < self.num_real_rows, "RowMajorTable::idx: row {} >= num_real_rows {}", row, self.num_real_rows);
         debug_assert!(interaction < self.num_interactions);
         row * self.num_interactions + interaction
     }
 
     /// Read a cell at `[row, interaction]` — raw indexing
-    /// (no virtual padding).
+    /// (no virtual padding).  Caller must ensure `row < num_real_rows`.
     #[inline]
     #[must_use]
     pub fn get(&self, row: usize, interaction: usize) -> &F {
         &self.cells[self.idx(row, interaction)]
     }
 
-    /// Mutable cell access — raw indexing.
+    /// Mutable cell access — raw indexing.  Caller must ensure
+    /// `row < num_real_rows`.
     #[inline]
     pub fn set(&mut self, row: usize, interaction: usize, value: F) {
         let i = self.idx(row, interaction);

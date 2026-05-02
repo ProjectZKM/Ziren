@@ -144,6 +144,11 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
 /// Pad a row-major `(height × num_cols)` table up to
 /// `(2^target_log_rows) × num_cols`, using `pad_value` for the new
 /// rows.  Returns the padded `Vec<F>` (still row-major).
+///
+/// **Status (task #88)**: no longer called by `generate_first_layer`
+/// — the PaddedMle path skips materialised row padding entirely.
+/// Retained for tests and as a reference implementation.
+#[allow(dead_code)]
 fn pad_rows<F: Clone>(values: Vec<F>, num_cols: usize, target_log_rows: usize, pad_value: F) -> Vec<F> {
     if num_cols == 0 {
         return values;
@@ -158,6 +163,46 @@ fn pad_rows<F: Clone>(values: Vec<F>, num_cols: usize, target_log_rows: usize, p
     padded
 }
 
+/// PaddedMle-aware MSB split (task #88).  Split a row-major
+/// `(real_rows × num_cols)` buffer at the logical row MSB
+/// (`half_logical = 2^(log_rows - 1)`) and return the **real-only**
+/// prefix of each half:
+///   * upper half = rows `[0, real_upper) ⊂ [0, half_logical)`.
+///   * lower half = rows `[half_logical, half_logical + real_lower)`
+///     of the original buffer, returned as the prefix `[0, real_lower)`
+///     of the lower output.
+///
+/// Caller must precompute:
+///   * `real_upper = min(real_rows, half_logical)`
+///   * `real_lower = saturating_sub(real_rows, half_logical).min(half_logical)`
+///
+/// This is the SP1 `PaddedMle::padded` shape: virtual rows beyond
+/// `real_*` are NOT materialized; consumers (`ChipLayerState`)
+/// resolve them via the per-quadrant pad constant.
+fn split_real_msb<F: Clone>(
+    values: Vec<F>,
+    num_cols: usize,
+    half_logical: usize,
+    real_upper: usize,
+    real_lower: usize,
+) -> (Vec<F>, Vec<F>) {
+    if num_cols == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let upper_len = real_upper * num_cols;
+    let lower_off = half_logical * num_cols;
+    let lower_len = real_lower * num_cols;
+    debug_assert!(upper_len <= values.len());
+    let upper = values[..upper_len].to_vec();
+    let lower = if real_lower == 0 {
+        Vec::new()
+    } else {
+        debug_assert!(lower_off + lower_len <= values.len());
+        values[lower_off..lower_off + lower_len].to_vec()
+    };
+    (upper, lower)
+}
+
 /// Split a row-major table along its row MSB.  Returns
 /// `(upper_half, lower_half)` each of shape
 /// `(2^(log_rows-1)) × num_cols`.  Mirrors slop's
@@ -165,6 +210,7 @@ fn pad_rows<F: Clone>(values: Vec<F>, num_cols: usize, target_log_rows: usize, p
 ///
 /// Requires `values.len() == (1 << log_rows) * num_cols` and
 /// `log_rows >= 1`.
+#[allow(dead_code)]  // retained for tests + as a reference reading
 fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (Vec<F>, Vec<F>) {
     debug_assert!(log_rows >= 1, "split_row_msb requires log_rows >= 1");
     if num_cols == 0 {
@@ -254,14 +300,24 @@ where
             betas,
         );
 
-        // Pad row dimension up to `2^num_row_variables`.
-        let numer_padded = pad_rows(numer_mat.values, num_interactions, num_row_variables, F::ZERO);
-        let denom_padded = pad_rows(denom_mat.values, num_interactions, num_row_variables, EF::ONE);
+        // PaddedMle row optimisation (task #88):  do NOT materialise
+        // the row padding here.  Compute the per-chip real row count,
+        // then split the real prefix into the upper/lower halves
+        // without expanding to `2^num_row_variables`.  Virtual rows
+        // beyond `num_real_rows` are resolved at access time inside
+        // `ChipLayerState` using each quadrant's identity-fraction
+        // pad value (n* → 0, d* → 1).
+        let chip_height: usize = if num_interactions == 0 {
+            0
+        } else {
+            numer_mat.values.len() / num_interactions
+        };
+        let half_logical = 1usize << (num_row_variables - 1);
+        let real_upper = chip_height.min(half_logical);
+        let real_lower = chip_height.saturating_sub(half_logical).min(half_logical);
 
-        // Split row MSB → (upper, lower) halves.  Each half has
-        // `2^(num_row_variables - 1)` rows × `num_interactions` cols.
-        let (n_upper, n_lower) = split_row_msb(&numer_padded, num_interactions, num_row_variables);
-        let (d_upper, d_lower) = split_row_msb(&denom_padded, num_interactions, num_row_variables);
+        let (n_upper, n_lower) = split_real_msb(numer_mat.values, num_interactions, half_logical, real_upper, real_lower);
+        let (d_upper, d_lower) = split_real_msb(denom_mat.values, num_interactions, half_logical, real_upper, real_lower);
 
         // Encode each half as a `RowMajorTable` with raw per-chip
         // `num_interactions` storage (no per-chip column padding —
@@ -271,27 +327,17 @@ where
         // `total_interactions` (sum of per-chip raw counts).
         let log_int_padded = num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
         total_padded_interactions += 1usize << log_int_padded;
-        let make_table = |cells: Vec<F>| -> RowMajorTable<F> {
-            RowMajorTable {
-                cells,
-                num_row_variables: num_row_variables - 1,
-                num_interaction_variables: log_int_padded,
-                num_interactions,
-            }
+        let make_table = |cells: Vec<F>, real_rows: usize| -> RowMajorTable<F> {
+            RowMajorTable::from_padded_cells(cells, num_row_variables - 1, num_interactions, real_rows)
         };
-        let make_table_ef = |cells: Vec<EF>| -> RowMajorTable<EF> {
-            RowMajorTable {
-                cells,
-                num_row_variables: num_row_variables - 1,
-                num_interaction_variables: log_int_padded,
-                num_interactions,
-            }
+        let make_table_ef = |cells: Vec<EF>, real_rows: usize| -> RowMajorTable<EF> {
+            RowMajorTable::from_padded_cells(cells, num_row_variables - 1, num_interactions, real_rows)
         };
 
-        numerator_0.push(make_table(n_upper));
-        numerator_1.push(make_table(n_lower));
-        denominator_0.push(make_table_ef(d_upper));
-        denominator_1.push(make_table_ef(d_lower));
+        numerator_0.push(make_table(n_upper, real_upper));
+        numerator_1.push(make_table(n_lower, real_lower));
+        denominator_0.push(make_table_ef(d_upper, real_upper));
+        denominator_1.push(make_table_ef(d_lower, real_lower));
     }
 
     let num_interaction_variables =

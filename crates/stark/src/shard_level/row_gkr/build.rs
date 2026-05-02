@@ -168,6 +168,7 @@ where
             num_row_variables: t.num_row_variables,
             num_interaction_variables: t.num_interaction_variables,
             num_interactions: t.num_interactions,
+            num_real_rows: t.num_real_rows,
         }
     };
 
