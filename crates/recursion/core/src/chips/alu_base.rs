@@ -6,7 +6,6 @@ use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::{Field, PrimeField32};
-#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
@@ -15,7 +14,59 @@ use zkm_core_machine::utils::next_power_of_two;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::MachineAir;
 
-use crate::{builder::ZKMRecursionAirBuilder, *};
+use crate::{builder::ZKMRecursionAirBuilder, gpu_hooks, *};
+
+/// Try the GPU device-tracegen hook for `BaseAluChip`.
+///
+/// Returns `Some(matrix)` when ALL of the following hold:
+///   * `ZIREN_GPU_TRACEGEN_DEVICE=1` is set in the environment.
+///   * `F == KoalaBear` (the production reth path).
+///   * A hook is registered via
+///     [`gpu_hooks::register_base_alu_device_trace_hook`] (called from
+///     `compress_multi_gpu` startup in `ziren-gpu`).
+///   * The hook itself returns `Some` (it can decline; the caller
+///     then falls back to host).
+///
+/// The returned matrix is byte-identical to the host `generate_trace`
+/// output: same per-row entry layout (4 entries × 3 cols of
+/// `BaseAluValueCols<F>` = `(out, in1, in2)`), same `padded_nb_rows`,
+/// zero-padded tail (including any partial-row tail slots).  See
+/// `cuda/tracegen/recursion.cuh::recursion_base_alu_generate_trace_kernel`
+/// + `core/src/tracegen/recursion.rs::BaseAluChip::generate_trace_device`
+/// in the `ziren-gpu` repo.
+#[inline]
+fn try_device_trace<F: PrimeField32>(
+    events: &[BaseAluIo<F>],
+    padded_nb_rows: usize,
+) -> Option<RowMajorMatrix<F>> {
+    // Cheap env check (called once per chip per shard — perf is fine).
+    if std::env::var("ZIREN_GPU_TRACEGEN_DEVICE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        == false
+    {
+        return None;
+    }
+    // F=KoalaBear guard (avoids transmuting into the wrong field).
+    if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        return None;
+    }
+    let hook = gpu_hooks::get_base_alu_device_trace_hook()?;
+
+    // SAFETY: TypeId guard above proves F == KoalaBear, so the slice
+    // and result transmutes are layout-compatible (`F` and `KoalaBear`
+    // are both `#[repr(transparent)]` over a `u32`-backed monty-31
+    // representation; `BaseAluIo<F>` is `#[repr(C)]` with all fields
+    // of type `F`; `RowMajorMatrix<F>` is `Vec<F>` + width).
+    let events_kb: &[BaseAluEvent<KoalaBear>] = unsafe {
+        std::mem::transmute::<&[BaseAluIo<F>], &[BaseAluEvent<KoalaBear>]>(events)
+    };
+    let mat_kb = hook(events_kb, padded_nb_rows)?;
+    let width = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
+    let values_f: Vec<F> =
+        unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };
+    Some(RowMajorMatrix::new(values_f, width))
+}
 
 pub const NUM_BASE_ALU_ENTRIES_PER_ROW: usize = 4;
 
@@ -223,6 +274,14 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
         let events = &input.base_alu_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
+
+        // Integration #4: try the GPU device-tracegen hook first.
+        // Returns `None` when the env flag is unset, F != KoalaBear,
+        // no hook is registered, or the hook itself declines.
+        if let Some(mat) = try_device_trace(events, padded_nb_rows) {
+            return Ok(mat);
+        }
+
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -250,12 +309,20 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
             "generate_trace only supports KoalaBear field"
         );
 
+        let padded_nb_rows = self.num_rows(input).unwrap();
+
+        // Integration #4: try the GPU device-tracegen hook first.
+        // (`F` is enforced KoalaBear by the assert above, so the
+        // TypeId guard inside `try_device_trace` always matches.)
+        if let Some(mat) = try_device_trace(&input.base_alu_events, padded_nb_rows) {
+            return Ok(mat);
+        }
+
         let events = unsafe {
             std::mem::transmute::<&Vec<BaseAluIo<F>>, &Vec<BaseAluIo<KoalaBear>>>(
                 &input.base_alu_events,
             )
         };
-        let padded_nb_rows = self.num_rows(input).unwrap();
         let mut values = vec![KoalaBear::ZERO; padded_nb_rows * NUM_BASE_ALU_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
