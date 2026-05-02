@@ -397,6 +397,30 @@ pub mod jagged {
         // after round 0 (releasing the 4N base-field buffer before the
         // EF tables for rounds 1..n are built).  Saves one full N-element
         // clone vs the &[InnerVal] entry point.
+        // #105C dispatch hook: when ZIREN_GPU_JAGGED_PCS=1 is set,
+        // route the jagged-PCS sumcheck reduction to a GPU-accelerated
+        // path (zkm-gpu-basefold's `prove_jagged_reduction_gpu`,
+        // produces a byte-identical JaggedReductionProof).  Currently a
+        // no-op fallback that warns and returns the host implementation
+        // — the GPU integration body (DenseQDevice upload + GPU prove
+        // call + JaggedReductionProof type bridge) requires a CUDA-
+        // capable build environment and is the next increment of #105C.
+        // Mirror of the existing ZIREN_GPU_BASEFOLD env-flag pattern in
+        // basefold/stacked.rs:287.
+        if std::env::var("ZIREN_GPU_JAGGED_PCS").map(|v| v == "1").unwrap_or(false) {
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "ZIREN_GPU_JAGGED_PCS=1 set but GPU dispatch body not yet wired \
+                     in basefold_late_binding.rs:prove_jagged_basefold; falling back to \
+                     host prove_jagged_reduction_owned. Next increment: build the \
+                     gpu_prove_jagged wrapper in zkm-stark and feature-gate the \
+                     dependency on zkm-gpu-basefold. See #105C."
+                );
+            });
+        }
+
         let reduction = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);

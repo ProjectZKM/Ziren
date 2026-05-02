@@ -367,6 +367,60 @@ where
         };
     }
 
+    // Task #106 dispatch hook (sister of #102 GPU sumcheck): when
+    // ZIREN_GPU_ZEROCHECK=1 AND a GPU driver is registered via
+    // `crate::shard_level::sumcheck_poly::register_gpu_zerocheck_hook`
+    // AND `Challenge<SC>` is the concrete `Ef4` type used in production
+    // reth, route the inner degree-1 sumcheck loop to the registered
+    // GPU function-pointer.  Otherwise fall back to the host trait-driven
+    // path below.  Output is byte-identical (same per-round shape, same
+    // observe pattern, same MSB fold + insert(0, alpha) point).
+    if std::env::var("ZIREN_GPU_ZEROCHECK").map(|v| v == "1").unwrap_or(false) {
+        if let Some(gpu_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_zerocheck_hook()
+        {
+            use core::any::TypeId;
+            type Ef4 = p3_field::extension::BinomialExtensionField<
+                p3_koala_bear::KoalaBear,
+                4,
+            >;
+            if TypeId::of::<Challenge<SC>>() == TypeId::of::<Ef4>() {
+                // SAFETY: TypeId equality guarantees `Challenge<SC>` is
+                // `Ef4` at runtime — slice/value reinterpretation is
+                // sound.  Generic-Challenge callers (test code) take the
+                // host fallback path.
+                return unsafe {
+                    let c_table_ef4: Vec<Ef4> = {
+                        let mut me = std::mem::ManuallyDrop::new(c_table);
+                        Vec::from_raw_parts(
+                            me.as_mut_ptr().cast::<Ef4>(),
+                            me.len(),
+                            me.capacity(),
+                        )
+                    };
+                    let mut adapter = ChallengerAdapterEf4::<SC> {
+                        inner: challenger,
+                        _phantom: std::marker::PhantomData,
+                    };
+                    let proof_ef4 = gpu_hook(c_table_ef4, num_vars, &mut adapter);
+                    transmute_partial_sumcheck::<Ef4, Challenge<SC>>(proof_ef4)
+                };
+            }
+        } else {
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "ZIREN_GPU_ZEROCHECK=1 but no hook registered; \
+                     ziren-gpu's compress_multi_gpu must call \
+                     zkm_stark::shard_level::sumcheck_poly::\
+                     register_gpu_zerocheck_hook at startup.  \
+                     Falling back to host trait-driven sumcheck."
+                );
+            });
+        }
+    }
+
     let poly = ZerocheckRoundPolynomial::<Challenge<SC>>::new(c_table);
     let (mut proof, _component_evals) = reduce_sumcheck_to_evaluation::<
         Val<SC>,
@@ -639,6 +693,107 @@ pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usiz
 #[allow(dead_code)]
 fn _btreemap_anchor() -> BTreeMap<String, ()> {
     BTreeMap::new()
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Internal helpers for the GPU zerocheck dispatch hook (#106)
+// ────────────────────────────────────────────────────────────────────
+
+/// Type-erased adapter that forwards the GPU zerocheck hook's
+/// `observe_ef` / `sample_ef` calls into the host's concrete
+/// `SC::Challenger`.  Lives behind `&mut dyn GpuZerocheckChallenger` so
+/// the hook signature does not depend on `SC`.
+struct ChallengerAdapterEf4<'a, SC: StarkGenericConfig>
+where
+    Val<SC>: PrimeField,
+{
+    inner: &'a mut SC::Challenger,
+    _phantom: std::marker::PhantomData<SC>,
+}
+
+impl<'a, SC> crate::shard_level::sumcheck_poly::GpuZerocheckChallenger
+    for ChallengerAdapterEf4<'a, SC>
+where
+    SC: StarkGenericConfig,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+{
+    fn observe_ef(
+        &mut self,
+        v: p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>,
+    ) {
+        // SAFETY: This adapter is only constructed inside
+        // `prove_shard_zerocheck_via_trait` after a TypeId check that
+        // guarantees `Challenge<SC> == Ef4` and (via the codebase's
+        // single SC choice for the basefold path) `Val<SC> == KoalaBear`.
+        // `transmute_copy` round-trips bytes through identical
+        // representations.
+        let v_ef: Challenge<SC> = unsafe {
+            core::mem::transmute_copy::<
+                p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>,
+                Challenge<SC>,
+            >(&v)
+        };
+        // Mirror `observe_ext` from sumcheck_poly.rs: decompose the
+        // EF into base coefficients and observe each one.
+        for c in v_ef.as_basis_coefficients_slice() {
+            <SC::Challenger as p3_challenger::CanObserve<Val<SC>>>::observe(self.inner, *c);
+        }
+    }
+
+    fn sample_ef(
+        &mut self,
+    ) -> p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4> {
+        let alpha: Challenge<SC> = self.inner.sample_algebra_element::<Challenge<SC>>();
+        // SAFETY: see `observe_ef`.
+        unsafe {
+            core::mem::transmute_copy::<
+                Challenge<SC>,
+                p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>,
+            >(&alpha)
+        }
+    }
+}
+
+/// Reinterpret a `PartialSumcheckProof<A>` as `PartialSumcheckProof<B>`
+/// when `A` and `B` are the same concrete type at runtime (verified by
+/// a `TypeId` guard at the call site).
+///
+/// Walks the inner `Vec`s by hand because `transmute_copy` of a
+/// `PartialSumcheckProof` would attempt to copy the `Vec` headers
+/// directly (correct in this case, but going through `Vec::from_raw_parts`
+/// is more explicit and avoids any layout assumptions).
+unsafe fn transmute_partial_sumcheck<A, B>(
+    proof: PartialSumcheckProof<A>,
+) -> PartialSumcheckProof<B> {
+    use crate::shard_level::types::UnivariatePolynomial;
+    let PartialSumcheckProof { univariate_polys, claimed_sum, point_and_eval } = proof;
+    let univariate_polys: Vec<UnivariatePolynomial<B>> = univariate_polys
+        .into_iter()
+        .map(|p| {
+            let mut me = std::mem::ManuallyDrop::new(p.coefficients);
+            UnivariatePolynomial {
+                coefficients: Vec::from_raw_parts(
+                    me.as_mut_ptr().cast::<B>(),
+                    me.len(),
+                    me.capacity(),
+                ),
+            }
+        })
+        .collect();
+    let claimed_sum_b: B =
+        core::mem::transmute_copy::<A, B>(&std::mem::ManuallyDrop::new(claimed_sum));
+    let (pt, eval) = point_and_eval;
+    let pt_b: Vec<B> = {
+        let mut me = std::mem::ManuallyDrop::new(pt);
+        Vec::from_raw_parts(me.as_mut_ptr().cast::<B>(), me.len(), me.capacity())
+    };
+    let eval_b: B = core::mem::transmute_copy::<A, B>(&std::mem::ManuallyDrop::new(eval));
+    PartialSumcheckProof {
+        univariate_polys,
+        claimed_sum: claimed_sum_b,
+        point_and_eval: (pt_b, eval_b),
+    }
 }
 
 #[cfg(test)]

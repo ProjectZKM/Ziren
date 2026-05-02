@@ -408,6 +408,89 @@ pub fn get_gpu_eval_at_hook() -> Option<GpuEvalAtFn> {
     GPU_EVAL_AT_HOOK.get().copied()
 }
 
+// ────────────────────────────────────────────────────────────────────
+// GPU shard-zerocheck dispatch hook (#106 — sister of #102 / #103)
+// ────────────────────────────────────────────────────────────────────
+//
+// Companion to the GPU LogUp-GKR sumcheck hook above.  Replaces the
+// degree-1 inner sumcheck loop that runs over the lambda-RLC'd
+// combined chip C-table inside `prove_shard_zerocheck_via_trait`.
+//
+// The host call site:
+//   1. Builds the per-chip C-tables on host (rayon-parallel —
+//      `eval_constraints_on_hypercube_with_cumsums`).
+//   2. Pads + lambda-RLCs them to a single `combined: Vec<Ef4>`.
+//   3. Hands `combined` + `challenger` to the hook.
+//   4. The hook runs the per-round `(sum_lo, sum_hi - sum_lo, 0, 0)`
+//      coefficient computation, observes the 4 EF coefficients into
+//      the challenger, samples α, and MSB-folds — same arithmetic as
+//      `ZerocheckRoundPolynomial::sum_as_poly_in_last_variable` and
+//      `fix_last_variable`, but on device.
+//
+// Output is byte-identical to the host trait-driven path (same
+// `[c0, c1, 0, 0]` per-round shape, same observe pattern, same MSB
+// fold + insert(0, alpha) point).  The hook is only consulted when
+// `ZIREN_GPU_ZEROCHECK=1` is set AND `Challenge<SC>` is `Ef4`
+// (the production reth path) — generic-EF callers fall back to host.
+
+/// Signature of the GPU shard-zerocheck driver.  Takes the already
+/// pre-padded + lambda-RLC'd combined C-table on host (the GPU side
+/// uploads it once) plus a mutable host challenger, returns the same
+/// `PartialSumcheckProof<Ef4>` shape the host driver produces.
+///
+/// **Invariants the implementation must preserve** (so the GPU output
+/// is byte-identical to the host driver):
+///   * Per-round univariate poly is `[c0, c1, ZERO, ZERO]` (4 coeffs)
+///     where `c0 = Σ_{lo} table` and `c1 = Σ_{hi} table - c0`.
+///   * Each round observes all 4 coefficients into the challenger via
+///     `BasedVectorSpace::as_basis_coefficients_slice` BEFORE sampling
+///     the next α.
+///   * `point` is built front-first via `insert(0, alpha)` — round 0's
+///     α ends up at `point[n-1]`.
+///   * `claimed_sum = Ef4::ZERO` (a true zerocheck).
+///   * `point_and_eval.1 = c_table[0]` after the final fold.
+pub type GpuZerocheckFn = fn(
+    combined_c_table: Vec<Ef4>,
+    num_vars: usize,
+    challenger: &mut dyn GpuZerocheckChallenger,
+) -> PartialSumcheckProof<Ef4>;
+
+/// Type-erased challenger interface the GPU zerocheck hook uses to
+/// observe round polys + sample α without depending on a concrete
+/// `Challenger` type.  The host call site builds a thin
+/// `&mut dyn GpuZerocheckChallenger` adapter over its real
+/// `SC::Challenger` and passes it in.
+///
+/// Not `Send` — the hook is invoked single-threaded from the
+/// per-shard sumcheck dispatch, and `SC::Challenger` is rarely
+/// `Send` in practice (e.g. duplex challenger holds a permutation
+/// state behind shared borrows).
+pub trait GpuZerocheckChallenger {
+    /// Observe an `Ef4` element by decomposing into its base-field
+    /// basis coefficients (one `KoalaBear` observe per slot).  Mirrors
+    /// `observe_ext::<KoalaBear, Ef4, _>` above.
+    fn observe_ef(&mut self, v: Ef4);
+
+    /// Sample one fresh `Ef4` challenge from the transcript.
+    fn sample_ef(&mut self) -> Ef4;
+}
+
+static GPU_ZEROCHECK_HOOK: std::sync::OnceLock<GpuZerocheckFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU shard-zerocheck driver.  Idempotent; returns `Err`
+/// when a hook was already registered.  Called once by `ziren-gpu`'s
+/// `compress_multi_gpu` at startup.
+pub fn register_gpu_zerocheck_hook(f: GpuZerocheckFn) -> Result<(), GpuZerocheckFn> {
+    GPU_ZEROCHECK_HOOK.set(f)
+}
+
+/// Read the registered GPU zerocheck hook, if any.
+#[must_use]
+pub fn get_gpu_zerocheck_hook() -> Option<GpuZerocheckFn> {
+    GPU_ZEROCHECK_HOOK.get().copied()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;
