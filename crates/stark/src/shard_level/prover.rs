@@ -348,7 +348,44 @@ where
         .zip(main_traces.iter())
         .map(|(chip, trace)| {
             let name = chip.name().to_string();
-            let values_cloned: Vec<Val<SC>> = trace.values.clone();
+            // Width-pad fix (#95, May 2 2026): the verifier's
+            // verify_jagged_pcs_host (verifier.rs:333) sets each chip's
+            // column_count = chip.width().  But the recursion-runtime
+            // sometimes hands us main_traces with trace.width <
+            // chip.width() — populating only the columns the chip
+            // actually exercised in this shard.  Without padding, the
+            // prover's compute_jagged_metadata produces fewer offsets
+            // than the verifier expects, and build_weight_table
+            // overflows.
+            //
+            // Fix: pad missing columns with zeros so the trace's width
+            // matches the chip's declared width.  Constraint
+            // contributions from zero columns are zero, consistent with
+            // the unexercised semantics.
+            use p3_air::BaseAir;
+            let chip_width = <_ as BaseAir<Val<SC>>>::width(&chip.air);
+            let padded_trace: RowMajorMatrix<Val<SC>> = if trace.width == chip_width {
+                trace.clone()
+            } else if trace.width == 0 {
+                // Empty trace: keep width 0 so downstream skips it.
+                // (compute_jagged_metadata handles width=0 by pushing
+                // no offsets and leaving chip_infos.column_count=0.)
+                trace.clone()
+            } else if trace.width < chip_width {
+                let height = trace.values.len() / trace.width;
+                let mut padded = vec![Val::<SC>::ZERO; height * chip_width];
+                for r in 0..height {
+                    let src = &trace.values[r * trace.width..(r + 1) * trace.width];
+                    let dst = &mut padded[r * chip_width..r * chip_width + trace.width];
+                    dst.copy_from_slice(src);
+                    // Remaining cols [trace.width..chip_width] stay zero.
+                }
+                RowMajorMatrix::new(padded, chip_width)
+            } else {
+                // trace.width > chip_width — unexpected; pass through.
+                trace.clone()
+            };
+            let values_cloned: Vec<Val<SC>> = padded_trace.values;
             // SAFETY: Val<SC> == InnerVal at runtime (guarded by
             // TypeId above).  We're converting a Vec<A> into Vec<B>
             // where A and B are the same underlying type.  Use
@@ -363,7 +400,7 @@ where
             };
             (
                 name,
-                RowMajorMatrix::new(values, trace.width),
+                RowMajorMatrix::new(values, padded_trace.width),
             )
         })
         .collect();

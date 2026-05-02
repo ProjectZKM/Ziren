@@ -68,32 +68,22 @@ fn build_weight_table(
         let eq_c = &eq_per_chip[c_idx];
         for _j in 0..info.column_count {
             let off = packing.offsets[k];
-            // Bounds-check guard: if off + h_c > n, the chip's row_count
-            // exceeds the slot allotted by offsets.  Surface a precise
-            // diagnostic with all chip_infos + offsets so we can see
-            // whether the prover-built offsets and the (verifier-
-            // reconstructed) row_counts are consistent.
-            if off.saturating_add(h_c) > n {
-                eprintln!("=== build_weight_table OOB ===");
-                eprintln!("chip #{c_idx} '{}' col_k={k} off={off} h_c={h_c} \
-                          off+h_c={} > n={n} (1<<log_dense_size={})",
-                          info.name, off + h_c, packing.log_dense_size);
-                eprintln!("packing.chip_infos.len={}, offsets.len={}, total_values={}",
-                          packing.chip_infos.len(), packing.offsets.len(),
-                          packing.total_values);
-                eprintln!("--- chip_infos ---");
-                for (i, ci) in packing.chip_infos.iter().enumerate() {
-                    eprintln!("  chip[{i:2}] name='{:30}' row_count={:8} column_count={}",
-                              ci.name, ci.row_count, ci.column_count);
-                }
-                eprintln!("--- first 20 + last 5 offsets ---");
-                for (i, o) in packing.offsets.iter().enumerate() {
-                    if i < 20 || i >= packing.offsets.len().saturating_sub(5) {
-                        eprintln!("  offsets[{i:2}]={o}");
-                    }
-                }
-                panic!("build_weight_table OOB (see diagnostic above)");
-            }
+            // Bounds guard (#95 fix, May 2 2026): catches the case
+            // where a chip's column_count (from verifier-side
+            // chip.width()) exceeds the per-chip column_count the
+            // prover committed (from main_trace.width).  This used to
+            // overflow with an opaque 'index out of bounds'; now caught
+            // here with chip name + offsets context.  The W2
+            // emit_jagged_pcs_bytes width-pad fix is what should keep
+            // this from firing in production.
+            debug_assert!(
+                off.saturating_add(h_c) <= n,
+                "build_weight_table OOB: chip #{c_idx} '{}' col_k={k} off={off} \
+                 h_c={h_c} (off+h_c={}) > n={n}.  Prover and verifier disagree \
+                 on chip column count.  Likely cause: trace.width < chip.width() \
+                 in emit_jagged_pcs_bytes; pad to chip.width().",
+                info.name, off + h_c,
+            );
             for row in 0..h_c {
                 w[off + row] = gamma_pow * eq_c[row];
             }
