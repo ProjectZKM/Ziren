@@ -140,11 +140,19 @@ where
                         .enumerate()
                         .for_each(|(k, (n0_row, d0_row))| {
                             let row_upper = k;
+                            // PaddedMle (#88 bugfix): each source quadrant
+                            // can have its own num_real_rows. Substitute
+                            // the identity-fraction value when the source
+                            // row is in the padding region.
+                            let n0_real = row_upper < n0.num_real_rows;
+                            let d0_real = row_upper < d0.num_real_rows;
+                            let n1_real = row_upper < n1.num_real_rows;
+                            let d1_real = row_upper < d1.num_real_rows;
                             for i in 0..int_count {
-                                let n_00: EF = (*n0.get(row_upper, i)).into();
-                                let d_00: EF = *d0.get(row_upper, i);
-                                let n_01: EF = (*n1.get(row_upper, i)).into();
-                                let d_01: EF = *d1.get(row_upper, i);
+                                let n_00: EF = if n0_real { (*n0.get(row_upper, i)).into() } else { EF::ZERO };
+                                let d_00: EF = if d0_real { *d0.get(row_upper, i) } else { EF::ONE };
+                                let n_01: EF = if n1_real { (*n1.get(row_upper, i)).into() } else { EF::ZERO };
+                                let d_01: EF = if d1_real { *d1.get(row_upper, i) } else { EF::ONE };
                                 n0_row[i] = d_01 * n_00 + d_00 * n_01;
                                 d0_row[i] = d_00 * d_01;
                             }
@@ -161,11 +169,17 @@ where
                         .enumerate()
                         .for_each(|(k, (n1_row, d1_row))| {
                             let row_lower = k + next_rows;
+                            // PaddedMle (#88 bugfix): per-quadrant real-rows
+                            // check (same as upper-half block above).
+                            let n0_real = row_lower < n0.num_real_rows;
+                            let d0_real = row_lower < d0.num_real_rows;
+                            let n1_real = row_lower < n1.num_real_rows;
+                            let d1_real = row_lower < d1.num_real_rows;
                             for i in 0..int_count {
-                                let n_10: EF = (*n0.get(row_lower, i)).into();
-                                let d_10: EF = *d0.get(row_lower, i);
-                                let n_11: EF = (*n1.get(row_lower, i)).into();
-                                let d_11: EF = *d1.get(row_lower, i);
+                                let n_10: EF = if n0_real { (*n0.get(row_lower, i)).into() } else { EF::ZERO };
+                                let d_10: EF = if d0_real { *d0.get(row_lower, i) } else { EF::ONE };
+                                let n_11: EF = if n1_real { (*n1.get(row_lower, i)).into() } else { EF::ZERO };
+                                let d_11: EF = if d1_real { *d1.get(row_lower, i) } else { EF::ONE };
                                 n1_row[i] = d_11 * n_10 + d_10 * n_11;
                                 d1_row[i] = d_10 * d_11;
                             }
