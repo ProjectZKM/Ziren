@@ -491,6 +491,84 @@ pub fn get_gpu_zerocheck_hook() -> Option<GpuZerocheckFn> {
     GPU_ZEROCHECK_HOOK.get().copied()
 }
 
+// ────────────────────────────────────────────────────────────────────
+// GPU per-chip constraint-eval dispatch hook (#111 — sister of #106)
+// ────────────────────────────────────────────────────────────────────
+//
+// Companion to the GPU shard-zerocheck hook above.  Replaces the
+// host-CPU `eval_constraints_on_hypercube_with_cumsums` call (the
+// per-row constraint walk that builds the per-chip C-table) with a
+// CUDA-backed bytecode interpreter that evaluates the chip's AIR
+// constraints on device using the existing
+// `air::codegen_cuda_eval` → `Instruction16` pipeline that the legacy
+// FRI prover's quotient kernel uses.
+//
+// The host call site (in `prove_shard_zerocheck`):
+//   1. Has the per-chip main + preprocessed traces on host (rayon).
+//   2. Has the per-chip `(local_cumulative_sum, global_cumulative_sum,
+//      alpha)`.
+//   3. Hands `chip_name + traces + cumsums + alpha + public_values` to
+//      the hook keyed by chip name.
+//   4. The hook uploads the matrices, runs the cached per-chip
+//      bytecode on device, downloads the per-row `Vec<Ef4>` C-table.
+//
+// Output is byte-identical to `eval_constraints_on_hypercube_with_cumsums`
+// — same row order, same constraint-folding sum, same edge-row
+// selectors (is_first / is_last / is_transition).  The hook is only
+// consulted when `ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1` is set AND
+// `Challenge<SC>` is `Ef4` (production reth path).
+
+/// Per-row BaseFold constraint table builder, keyed by chip name.
+///
+/// **Invariants the implementation must preserve** (so output is
+/// byte-identical to the host fallback `eval_constraints_on_hypercube_with_cumsums`):
+///   * Output length == `1 << num_vars` == `main_trace.height()`.
+///   * `output[i] = Σ_j α^(K-1-j) · C_j(row_i, row_{(i+1) mod n}, ...)`
+///     where K is the chip's constraint count and the powers are
+///     applied in Horner order (acc = acc * α + c_i).
+///   * Selector rules: `is_first[0] = 1`, `is_last[n-1] = 1`,
+///     `is_transition[i] = 1` for `i < n-1`.
+///   * Permutation columns are unused (BaseFold path; perm trace is
+///     handled by LogUp-GKR), but the implementation must accept a
+///     placeholder permutation matrix (width 0 ok).
+///   * `local_cumulative_sum` and `global_cumulative_sum` are wired
+///     into the folder exactly as in
+///     `eval_constraints_on_hypercube_with_cumsums`.
+///
+/// Returns `Some(c_table)` on success, `None` if the GPU rejected the
+/// chip (e.g. unknown chip name, oversized memory) — callers must
+/// fall back to host on `None`.
+pub type GpuConstraintEvalFn = fn(
+    chip_name: &str,
+    main_row_major: &[p3_koala_bear::KoalaBear],
+    main_width: usize,
+    preprocessed_row_major: &[p3_koala_bear::KoalaBear],
+    preprocessed_width: usize,
+    public_values: &[p3_koala_bear::KoalaBear],
+    alpha: Ef4,
+    local_cumulative_sum: Ef4,
+    global_cumulative_sum_xy: [p3_koala_bear::KoalaBear; 14],
+    num_vars: usize,
+) -> Option<Vec<Ef4>>;
+
+static GPU_CONSTRAINT_EVAL_HOOK: std::sync::OnceLock<GpuConstraintEvalFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU per-chip constraint-eval driver.  Idempotent;
+/// returns `Err` when a hook was already registered.  Called once by
+/// `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_constraint_eval_hook(
+    f: GpuConstraintEvalFn,
+) -> Result<(), GpuConstraintEvalFn> {
+    GPU_CONSTRAINT_EVAL_HOOK.set(f)
+}
+
+/// Read the registered GPU constraint-eval hook, if any.
+#[must_use]
+pub fn get_gpu_constraint_eval_hook() -> Option<GpuConstraintEvalFn> {
+    GPU_CONSTRAINT_EVAL_HOOK.get().copied()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;

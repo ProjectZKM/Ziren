@@ -231,6 +231,110 @@ where
             };
             let local_cumulative_sum = Challenge::<SC>::ZERO;
 
+            // #111 dispatch hook: when ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1
+            // AND a GPU hook is registered AND `Challenge<SC>` is the
+            // production `Ef4` type, route the per-row constraint walk
+            // through the registered GPU bytecode interpreter (mirrors
+            // legacy FRI quotient kernel).  Output is byte-identical to
+            // `eval_constraints_on_hypercube_with_cumsums`; on `None`
+            // (chip rejected by GPU, e.g. oversized memory or unknown
+            // chip name) the host fallback runs unconditionally.
+            //
+            // The GPU table is materialized as `Vec<Ef4>` and reinterpreted
+            // back to `Vec<Challenge<SC>>` under TypeId equality (same
+            // `transmute` pattern used for the #106 zerocheck hook).
+            if std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_DEVICE")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
+                if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::
+                    get_gpu_constraint_eval_hook()
+                {
+                    use core::any::TypeId;
+                    type Ef4 = p3_field::extension::BinomialExtensionField<
+                        p3_koala_bear::KoalaBear,
+                        4,
+                    >;
+                    type Kb = p3_koala_bear::KoalaBear;
+                    if TypeId::of::<Challenge<SC>>() == TypeId::of::<Ef4>()
+                        && TypeId::of::<Val<SC>>() == TypeId::of::<Kb>()
+                    {
+                        // SAFETY: TypeId equality guarantees Val<SC> == Kb
+                        // and Challenge<SC> == Ef4; slice/value reinterp
+                        // is sound.
+                        let gpu_table = unsafe {
+                            let main_kb: &[Kb] = core::slice::from_raw_parts(
+                                main_trace.values.as_ptr().cast::<Kb>(),
+                                main_trace.values.len(),
+                            );
+                            let preproc_kb: &[Kb] = core::slice::from_raw_parts(
+                                preproc_trace.values.as_ptr().cast::<Kb>(),
+                                preproc_trace.values.len(),
+                            );
+                            let pv_kb: &[Kb] = core::slice::from_raw_parts(
+                                public_values.as_ptr().cast::<Kb>(),
+                                public_values.len(),
+                            );
+                            let alpha_ef4: Ef4 =
+                                core::mem::transmute_copy(&alpha);
+                            let lcs_ef4: Ef4 =
+                                core::mem::transmute_copy(&local_cumulative_sum);
+                            // Pack 7+7 SepticDigest x|y into a flat
+                            // [Kb; 14] for the hook signature.
+                            let mut gcs_xy: [Kb; 14] = [Kb::default(); 14];
+                            for j in 0..7 {
+                                gcs_xy[j] = core::mem::transmute_copy(
+                                    &global_cumulative_sum.0.x.0[j],
+                                );
+                                gcs_xy[j + 7] = core::mem::transmute_copy(
+                                    &global_cumulative_sum.0.y.0[j],
+                                );
+                            }
+                            gpu_hook(
+                                &chip.name(),
+                                main_kb,
+                                main_trace.width,
+                                preproc_kb,
+                                preproc_trace.width,
+                                pv_kb,
+                                alpha_ef4,
+                                lcs_ef4,
+                                gcs_xy,
+                                log_height,
+                            )
+                        };
+                        if let Some(t) = gpu_table {
+                            // SAFETY: TypeId guard above guarantees
+                            // Vec<Ef4> can be reinterpreted as
+                            // Vec<Challenge<SC>>.
+                            let table_ch: Vec<Challenge<SC>> = unsafe {
+                                let mut me = std::mem::ManuallyDrop::new(t);
+                                Vec::from_raw_parts(
+                                    me.as_mut_ptr().cast::<Challenge<SC>>(),
+                                    me.len(),
+                                    me.capacity(),
+                                )
+                            };
+                            return Some((log_height, table_ch));
+                        }
+                        // GPU rejected (None) — fall through to host.
+                    }
+                } else {
+                    use std::sync::OnceLock;
+                    static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                    WARN_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1 but no \
+                             hook registered; ziren-gpu's \
+                             compress_multi_gpu must call \
+                             zkm_stark::shard_level::sumcheck_poly::\
+                             register_gpu_constraint_eval_hook at \
+                             startup.  Falling back to host CPU."
+                        );
+                    });
+                }
+            }
+
             let table = crate::zerocheck_prover::eval_constraints_on_hypercube_with_cumsums::<SC, A>(
                 chip,
                 log_height,
