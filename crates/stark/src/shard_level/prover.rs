@@ -473,6 +473,18 @@ where
         if let Some(hook) =
             crate::shard_level::sumcheck_poly::get_gpu_jagged_orchestration_hook()
         {
+            // Debug instrumentation: one-shot warn on first
+            // successful GPU dispatch.
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            FIRED_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "#113 jagged_orchestration hook FIRED \
+                     (ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1, \
+                     gpu_hook dispatched, n_chips={})",
+                    chip_traces.len()
+                );
+            });
             // chip_traces / r_row_per_chip are already in the concrete
             // (`InnerVal = KoalaBear`, `InnerChallenge = Ef4`) form
             // (TypeId gate above + `kb31_poseidon2` type aliases).
@@ -480,6 +492,17 @@ where
             // straight through.  The hook owns the entire pipeline
             // and returns the rmp-serde bundle bytes directly.
             return hook(&chip_traces, &r_row_per_chip, lb_challenger);
+        } else {
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "#113 jagged_orchestration hook FELL THROUGH \
+                     (env=set, hook=None); ziren-gpu's compress_multi_gpu \
+                     must call register_gpu_jagged_orchestration_hook \
+                     at startup. Host orchestrator used."
+                );
+            });
         }
     }
 

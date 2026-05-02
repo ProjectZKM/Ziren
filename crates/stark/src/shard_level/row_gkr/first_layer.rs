@@ -320,9 +320,21 @@ where
                 if TypeId::of::<F>() == TypeId::of::<Kb>()
                     && TypeId::of::<EF>() == TypeId::of::<Ef4>()
                 {
+                    // Debug instrumentation: one-shot warn on first
+                    // successful GPU dispatch.
+                    use std::sync::OnceLock;
+                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "#112 interaction_eval hook FIRED \
+                             (ZIREN_GPU_INTERACTION_EVAL_DEVICE=1, \
+                             (F,EF)=(Kb,Ef4), gpu_hook dispatched, \
+                             chip={})", chip.name()
+                        );
+                    });
                     // SAFETY: TypeId equality guarantees F == Kb and
                     // EF == Ef4; slice/value reinterp is sound.
-                    unsafe {
+                    let r = unsafe {
                         let main_kb: &[Kb] = core::slice::from_raw_parts(
                             main_trace.values.as_ptr().cast::<Kb>(),
                             main_trace.values.len(),
@@ -368,8 +380,29 @@ where
                             );
                             (numer_f, denom_ef)
                         })
+                    };
+                    if r.is_none() {
+                        // Debug instrumentation: GPU declined chip.
+                        static REJECT_ONCE: OnceLock<()> = OnceLock::new();
+                        REJECT_ONCE.get_or_init(|| {
+                            tracing::warn!(
+                                "#112 interaction_eval hook FELL THROUGH \
+                                 (chip={}, GPU returned None); host fallback used",
+                                chip.name()
+                            );
+                        });
                     }
+                    r
                 } else {
+                    use std::sync::OnceLock;
+                    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+                    MISMATCH_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "#112 interaction_eval hook FELL THROUGH \
+                             (TypeId mismatch: (F,EF) != (Kb,Ef4)); \
+                             host fallback used"
+                        );
+                    });
                     None
                 }
             } else {
@@ -377,12 +410,11 @@ where
                 static WARN_ONCE: OnceLock<()> = OnceLock::new();
                 WARN_ONCE.get_or_init(|| {
                     tracing::warn!(
-                        "ZIREN_GPU_INTERACTION_EVAL_DEVICE=1 but no \
-                         hook registered; ziren-gpu's \
+                        "#112 interaction_eval hook FELL THROUGH \
+                         (env=set, hook=None); ziren-gpu's \
                          compress_multi_gpu must call \
-                         zkm_stark::shard_level::sumcheck_poly::\
                          register_gpu_interaction_eval_hook at \
-                         startup.  Falling back to host CPU."
+                         startup. Host CPU used."
                     );
                 });
                 None

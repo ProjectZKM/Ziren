@@ -56,20 +56,36 @@ fn try_device_trace<F: PrimeField32>(
     {
         return None;
     }
+    // Debug instrumentation: one-shot per-arm warns (FriFold tracegen).
+    use std::sync::OnceLock;
+    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+    static NOHOOK_ONCE: OnceLock<()> = OnceLock::new();
+    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+    static REJECT_ONCE: OnceLock<()> = OnceLock::new();
     if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        MISMATCH_ONCE.get_or_init(|| tracing::warn!("#3 FriFold hook FELL THROUGH (TypeId: F != KoalaBear)"));
         return None;
     }
-    let hook = gpu_hooks::get_fri_fold_device_trace_hook()?;
-
-    // SAFETY: TypeId guard above proves F == KoalaBear, so the slice
-    // and result transmutes are layout-compatible.  `FriFoldEvent<F>`
-    // is `#[repr(C)]` over `Block<F>` (= `[F; 4]`) plus base-felt
-    // fields; both monty-31 backings are `#[repr(transparent)]` over
-    // `u32`.
+    let hook = match gpu_hooks::get_fri_fold_device_trace_hook() {
+        Some(h) => h,
+        None => {
+            NOHOOK_ONCE.get_or_init(|| tracing::warn!("#3 FriFold hook FELL THROUGH (env=set, hook=None)"));
+            return None;
+        }
+    };
     let events_kb: &[FriFoldEvent<KoalaBear>] = unsafe {
         std::mem::transmute::<&[FriFoldEvent<F>], &[FriFoldEvent<KoalaBear>]>(events)
     };
-    let mat_kb = hook(events_kb, padded_nb_rows)?;
+    let mat_kb = match hook(events_kb, padded_nb_rows) {
+        Some(m) => {
+            FIRED_ONCE.get_or_init(|| tracing::warn!("#3 FriFold hook FIRED (ZIREN_GPU_TRACEGEN_DEVICE=1, dispatched)"));
+            m
+        }
+        None => {
+            REJECT_ONCE.get_or_init(|| tracing::warn!("#3 FriFold hook FELL THROUGH (hook returned None)"));
+            return None;
+        }
+    };
     let width = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
     let values_f: Vec<F> =
         unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };

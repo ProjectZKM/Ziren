@@ -259,6 +259,18 @@ where
                     if TypeId::of::<Challenge<SC>>() == TypeId::of::<Ef4>()
                         && TypeId::of::<Val<SC>>() == TypeId::of::<Kb>()
                     {
+                        // Debug instrumentation: one-shot warn on
+                        // first successful GPU dispatch.
+                        use std::sync::OnceLock;
+                        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                        FIRED_ONCE.get_or_init(|| {
+                            tracing::warn!(
+                                "#111 constraint_eval hook FIRED \
+                                 (ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1, \
+                                 (Val,Challenge)=(Kb,Ef4), gpu_hook dispatched; \
+                                 chip={})", chip.name()
+                            );
+                        });
                         // SAFETY: TypeId equality guarantees Val<SC> == Kb
                         // and Challenge<SC> == Ef4; slice/value reinterp
                         // is sound.
@@ -318,18 +330,35 @@ where
                             return Some((log_height, table_ch));
                         }
                         // GPU rejected (None) — fall through to host.
+                        static REJECT_ONCE: OnceLock<()> = OnceLock::new();
+                        REJECT_ONCE.get_or_init(|| {
+                            tracing::warn!(
+                                "#111 constraint_eval hook FELL THROUGH \
+                                 (chip={}, GPU returned None); host fallback used",
+                                chip.name()
+                            );
+                        });
+                    } else {
+                        use std::sync::OnceLock;
+                        static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+                        MISMATCH_ONCE.get_or_init(|| {
+                            tracing::warn!(
+                                "#111 constraint_eval hook FELL THROUGH \
+                                 (TypeId mismatch: (Val,Challenge) != (Kb,Ef4)); \
+                                 host fallback used"
+                            );
+                        });
                     }
                 } else {
                     use std::sync::OnceLock;
                     static WARN_ONCE: OnceLock<()> = OnceLock::new();
                     WARN_ONCE.get_or_init(|| {
                         tracing::warn!(
-                            "ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1 but no \
-                             hook registered; ziren-gpu's \
+                            "#111 constraint_eval hook FELL THROUGH \
+                             (env=set, hook=None); ziren-gpu's \
                              compress_multi_gpu must call \
-                             zkm_stark::shard_level::sumcheck_poly::\
                              register_gpu_constraint_eval_hook at \
-                             startup.  Falling back to host CPU."
+                             startup. Host CPU used."
                         );
                     });
                 }
@@ -489,6 +518,17 @@ where
                 4,
             >;
             if TypeId::of::<Challenge<SC>>() == TypeId::of::<Ef4>() {
+                // Debug instrumentation: one-shot warn on first
+                // successful GPU dispatch.
+                use std::sync::OnceLock;
+                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                FIRED_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "#106 zerocheck hook FIRED \
+                         (ZIREN_GPU_ZEROCHECK=1, Challenge=Ef4, \
+                         dispatched, num_vars={})", num_vars
+                    );
+                });
                 // SAFETY: TypeId equality guarantees `Challenge<SC>` is
                 // `Ef4` at runtime — slice/value reinterpretation is
                 // sound.  Generic-Challenge callers (test code) take the
@@ -509,17 +549,24 @@ where
                     let proof_ef4 = gpu_hook(c_table_ef4, num_vars, &mut adapter);
                     transmute_partial_sumcheck::<Ef4, Challenge<SC>>(proof_ef4)
                 };
+            } else {
+                use std::sync::OnceLock;
+                static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+                MISMATCH_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "#106 zerocheck hook FELL THROUGH \
+                         (TypeId mismatch: Challenge != Ef4); host used"
+                    );
+                });
             }
         } else {
             use std::sync::OnceLock;
             static WARN_ONCE: OnceLock<()> = OnceLock::new();
             WARN_ONCE.get_or_init(|| {
                 tracing::warn!(
-                    "ZIREN_GPU_ZEROCHECK=1 but no hook registered; \
+                    "#106 zerocheck hook FELL THROUGH (env=set, hook=None); \
                      ziren-gpu's compress_multi_gpu must call \
-                     zkm_stark::shard_level::sumcheck_poly::\
-                     register_gpu_zerocheck_hook at startup.  \
-                     Falling back to host trait-driven sumcheck."
+                     register_gpu_zerocheck_hook at startup. Host used."
                 );
             });
         }

@@ -74,19 +74,36 @@ fn try_device_trace<F: PrimeField32>(
     {
         return None;
     }
+    // Debug instrumentation: one-shot per-arm warns (#8 Poseidon2Wide).
+    use std::sync::OnceLock;
+    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+    static NOHOOK_ONCE: OnceLock<()> = OnceLock::new();
+    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+    static REJECT_ONCE: OnceLock<()> = OnceLock::new();
     if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        MISMATCH_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FELL THROUGH (TypeId: F != KoalaBear)"));
         return None;
     }
-    let hook = gpu_hooks::get_poseidon2_wide_device_trace_hook()?;
-
-    // SAFETY: TypeId guard above proves F == KoalaBear, so the slice
-    // and result transmutes are layout-compatible.  `Poseidon2Io<F>`
-    // is `#[repr(C)]` with `[F; WIDTH]` fields; `RowMajorMatrix<F>`
-    // is `Vec<F>` + width.
+    let hook = match gpu_hooks::get_poseidon2_wide_device_trace_hook() {
+        Some(h) => h,
+        None => {
+            NOHOOK_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FELL THROUGH (env=set, hook=None)"));
+            return None;
+        }
+    };
     let events_kb: &[Poseidon2Event<KoalaBear>] = unsafe {
         std::mem::transmute::<&[Poseidon2Event<F>], &[Poseidon2Event<KoalaBear>]>(events)
     };
-    let mat_kb = hook(events_kb, padded_nb_rows, width)?;
+    let mat_kb = match hook(events_kb, padded_nb_rows, width) {
+        Some(m) => {
+            FIRED_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FIRED (ZIREN_GPU_TRACEGEN_DEVICE=1, dispatched)"));
+            m
+        }
+        None => {
+            REJECT_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FELL THROUGH (hook returned None)"));
+            return None;
+        }
+    };
     let w = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
     debug_assert_eq!(w, width, "device hook returned matrix with unexpected width");
     let values_f: Vec<F> =

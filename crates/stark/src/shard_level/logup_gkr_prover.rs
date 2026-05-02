@@ -114,6 +114,16 @@ where
                         s.len(),
                     )
                 }
+                // Debug instrumentation: one-shot warn on first
+                // successful GPU dispatch.
+                use std::sync::OnceLock;
+                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                FIRED_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "#103 eval_at hook FIRED (ZIREN_GPU_EVAL_AT=1, \
+                         (F,EF)=(Kb,Ef4), gpu_hook dispatched)"
+                    );
+                });
                 unsafe {
                     let result_ef4: Vec<Ef4> = gpu_hook(
                         slice_cast::<F, Kb>(trace),
@@ -127,17 +137,27 @@ where
                         .as_mut_ptr() as *mut EF;
                     return Vec::from_raw_parts(ptr, len, cap);
                 }
+            } else {
+                // Debug instrumentation: TypeId guard failed.
+                use std::sync::OnceLock;
+                static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+                MISMATCH_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "#103 eval_at hook FELL THROUGH \
+                         (TypeId mismatch: (F,EF) != (Kb,Ef4)); \
+                         host evaluate_trace_columns_at_point used"
+                    );
+                });
             }
         } else {
             use std::sync::OnceLock;
             static WARN_ONCE: OnceLock<()> = OnceLock::new();
             WARN_ONCE.get_or_init(|| {
                 tracing::warn!(
-                    "ZIREN_GPU_EVAL_AT=1 but no hook registered; \
+                    "#103 eval_at hook FELL THROUGH (env=set, hook=None); \
                      ziren-gpu's compress_multi_gpu must call \
-                     zkm_stark::shard_level::sumcheck_poly::\
-                     register_gpu_eval_at_hook at startup.  \
-                     Falling back to host evaluate_trace_columns_at_point."
+                     register_gpu_eval_at_hook at startup. \
+                     Host evaluate_trace_columns_at_point used."
                 );
             });
         }

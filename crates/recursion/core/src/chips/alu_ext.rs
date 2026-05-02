@@ -45,22 +45,36 @@ fn try_device_trace<F: PrimeField32>(
     {
         return None;
     }
-    // F=KoalaBear guard (avoids transmuting into the wrong field).
+    // Debug instrumentation: one-shot per-arm warns (#7 ExtAlu).
+    use std::sync::OnceLock;
+    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+    static NOHOOK_ONCE: OnceLock<()> = OnceLock::new();
+    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+    static REJECT_ONCE: OnceLock<()> = OnceLock::new();
     if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        MISMATCH_ONCE.get_or_init(|| tracing::warn!("#7 ExtAlu hook FELL THROUGH (TypeId: F != KoalaBear)"));
         return None;
     }
-    let hook = gpu_hooks::get_ext_alu_device_trace_hook()?;
-
-    // SAFETY: TypeId guard above proves F == KoalaBear, so the slice
-    // and result transmutes are layout-compatible (`F` and `KoalaBear`
-    // are both `#[repr(transparent)]` over a `u32`-backed monty-31
-    // representation; `Block<F>` is `#[repr(C)]` over `[F; D]`;
-    // `ExtAluIo<Block<F>>` is `#[repr(C)]` with all fields of type
-    // `Block<F>`; `RowMajorMatrix<F>` is `Vec<F>` + width).
+    let hook = match gpu_hooks::get_ext_alu_device_trace_hook() {
+        Some(h) => h,
+        None => {
+            NOHOOK_ONCE.get_or_init(|| tracing::warn!("#7 ExtAlu hook FELL THROUGH (env=set, hook=None)"));
+            return None;
+        }
+    };
     let events_kb: &[ExtAluEvent<KoalaBear>] = unsafe {
         std::mem::transmute::<&[ExtAluIo<crate::air::Block<F>>], &[ExtAluEvent<KoalaBear>]>(events)
     };
-    let mat_kb = hook(events_kb, padded_nb_rows)?;
+    let mat_kb = match hook(events_kb, padded_nb_rows) {
+        Some(m) => {
+            FIRED_ONCE.get_or_init(|| tracing::warn!("#7 ExtAlu hook FIRED (ZIREN_GPU_TRACEGEN_DEVICE=1, dispatched)"));
+            m
+        }
+        None => {
+            REJECT_ONCE.get_or_init(|| tracing::warn!("#7 ExtAlu hook FELL THROUGH (hook returned None)"));
+            return None;
+        }
+    };
     let width = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
     let values_f: Vec<F> =
         unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };

@@ -43,21 +43,36 @@ fn try_device_trace<F: PrimeField32>(
     {
         return None;
     }
-    // F=KoalaBear guard (avoids transmuting into the wrong field).
+    // Debug instrumentation: one-shot per-arm warns (#3 Select).
+    use std::sync::OnceLock;
+    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+    static NOHOOK_ONCE: OnceLock<()> = OnceLock::new();
+    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+    static REJECT_ONCE: OnceLock<()> = OnceLock::new();
     if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        MISMATCH_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FELL THROUGH (TypeId: F != KoalaBear)"));
         return None;
     }
-    let hook = gpu_hooks::get_select_device_trace_hook()?;
-
-    // SAFETY: TypeId guard above proves F == KoalaBear, so the slice
-    // and result transmutes are layout-compatible (both `F` and
-    // `KoalaBear` are `#[repr(transparent)]` over a `u32`-backed
-    // monty-31 representation; `SelectIo<F>` is `#[repr(C)]` with all
-    // fields of type `F`; `RowMajorMatrix<F>` is `Vec<F>` + width).
+    let hook = match gpu_hooks::get_select_device_trace_hook() {
+        Some(h) => h,
+        None => {
+            NOHOOK_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FELL THROUGH (env=set, hook=None)"));
+            return None;
+        }
+    };
     let events_kb: &[SelectEvent<KoalaBear>] = unsafe {
         std::mem::transmute::<&[SelectIo<F>], &[SelectEvent<KoalaBear>]>(events)
     };
-    let mat_kb = hook(events_kb, padded_nb_rows)?;
+    let mat_kb = match hook(events_kb, padded_nb_rows) {
+        Some(m) => {
+            FIRED_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FIRED (ZIREN_GPU_TRACEGEN_DEVICE=1, dispatched)"));
+            m
+        }
+        None => {
+            REJECT_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FELL THROUGH (hook returned None)"));
+            return None;
+        }
+    };
     // `RowMajorMatrix`'s fields aren't all `pub` in this Plonky3 fork,
     // so go through `width()` + the public `values` Vec rather than
     // pattern-match.

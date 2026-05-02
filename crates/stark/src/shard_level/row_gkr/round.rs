@@ -1354,6 +1354,18 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                                     s.len(),
                                 )
                             }
+                            // Debug instrumentation: one-shot warn on
+                            // first successful GPU dispatch so perf
+                            // runs can confirm the hook FIRED (vs
+                            // silently fell through to host).
+                            use std::sync::OnceLock;
+                            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                            FIRED_ONCE.get_or_init(|| {
+                                tracing::warn!(
+                                    "#102 sumcheck hook FIRED (ZIREN_GPU_SUMCHECK=1, \
+                                     EF=Ef4, gpu_hook dispatched)"
+                                );
+                            });
                             unsafe {
                                 let evals_ef4: [Ef4; 4] = gpu_hook(
                                     slice_cast::<EF, Ef4>(self.eq_int.as_slice()),
@@ -1375,19 +1387,32 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                                     poly_coefficients_from_evals(evals_ef).to_vec(),
                                 );
                             }
+                        } else {
+                            // Debug instrumentation: TypeId guard
+                            // failed (EF != Ef4 at runtime).  Hook is
+                            // registered, env is set, but generic-EF
+                            // caller forces host fallback.
+                            use std::sync::OnceLock;
+                            static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
+                            MISMATCH_ONCE.get_or_init(|| {
+                                tracing::warn!(
+                                    "#102 sumcheck hook FELL THROUGH \
+                                     (TypeId mismatch: EF != Ef4); \
+                                     generic-EF caller, host fallback used"
+                                );
+                            });
                         }
                     } else {
-                        // Hook not registered — emit a one-shot warn
-                        // so users know to register from ziren-gpu.
+                        // Debug instrumentation: env=set, hook=None.
                         use std::sync::OnceLock;
                         static WARN_ONCE: OnceLock<()> = OnceLock::new();
                         WARN_ONCE.get_or_init(|| {
                             tracing::warn!(
-                                "ZIREN_GPU_SUMCHECK=1 but no hook registered; \
-                                 ziren-gpu's compress_multi_gpu must call \
-                                 zkm_stark::shard_level::sumcheck_poly::\
-                                 register_gpu_sumcheck_hook at startup.  \
-                                 Falling back to host round_poly_evaluations."
+                                "#102 sumcheck hook FELL THROUGH \
+                                 (env=set, hook=None); ziren-gpu's \
+                                 compress_multi_gpu must call \
+                                 register_gpu_sumcheck_hook at startup. \
+                                 Host round_poly_evaluations used."
                             );
                         });
                     }
