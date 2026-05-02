@@ -5,10 +5,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
 use std::thread::ScopedJoinHandle;
 use std::{
-    fs::File,
-    io::{
-        Seek, {self},
-    },
+    io,
     sync::{mpsc::sync_channel, Arc, Mutex},
 };
 use thiserror::Error;
@@ -163,9 +160,31 @@ where
         let _span = span.enter();
 
         // Spawn the checkpoint generator thread.
+        //
+        // Task #101 (in-memory shard checkpoints): pin each per-shard
+        // `ExecutionState` in RAM and send it directly through the channel.
+        // The previous implementation wrote each checkpoint to a `tempfile`,
+        // sent the `File` handle downstream, and the trace-gen worker
+        // `bincode::deserialize_from`'d it back.  That roundtrip costs ~5 s
+        // of wall time on the production reth wrap (per
+        // `docs/perf_reth_gpu.md`) and burns inode + page-cache pressure
+        // under `TMPDIR=/dev/shm`.  Mirrors the equivalent change already
+        // landed in `ziren-gpu/prover/src/core_multi_gpu.rs:136-159` for
+        // the multi-GPU code path; this brings the 1-GPU-fallback /
+        // CPU-prover baseline into line.
+        //
+        // RAM cost: an `ExecutionState` is dominated by the memory image
+        // diff since the last checkpoint (typically a few MB per shard),
+        // bounded by `checkpoints_channel_capacity` in flight.  We log
+        // every cache hit/miss-equivalent (here: every send/recv) at
+        // `trace` level so behaviour can be verified at runtime.
         let checkpoint_generator_span = tracing::Span::current().clone();
-        let (checkpoints_tx, checkpoints_rx) =
-            sync_channel::<(usize, File, bool, u64)>(opts.checkpoints_channel_capacity);
+        let (checkpoints_tx, checkpoints_rx) = sync_channel::<(
+            usize,
+            ExecutionState,
+            bool,
+            u64,
+        )>(opts.checkpoints_channel_capacity);
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
@@ -181,17 +200,16 @@ where
                             .execute_state(false)
                             .map_err(ZKMCoreProverError::ExecutionError)?;
 
-                        // Save the checkpoint to a temp file.
-                        let mut checkpoint_file =
-                            tempfile::tempfile().map_err(ZKMCoreProverError::IoError)?;
-                        checkpoint
-                            .save(&mut checkpoint_file)
-                            .map_err(ZKMCoreProverError::IoError)?;
-
-                        // Send the checkpoint.
-                        checkpoints_tx
-                            .send((index, checkpoint_file, done, runtime.state.global_clk))
-                            .unwrap();
+                        // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
+                        let global_clk = runtime.state.global_clk;
+                        tracing::trace!(
+                            target = "checkpoint_pin",
+                            event = "produce",
+                            index = index,
+                            done = done,
+                            global_clk = global_clk,
+                        );
+                        checkpoints_tx.send((index, checkpoint, done, global_clk)).unwrap();
 
                         // If we've reached the final checkpoint, break out of the loop.
                         if done {
@@ -244,12 +262,17 @@ where
                     let _: () = loop {
                         // Receive the latest checkpoint.
                         let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, mut checkpoint, done, num_cycles)) = received {
+                        if let Ok((index, execution_state, done, num_cycles)) = received {
+                            // Task #101: in-memory checkpoint — no
+                            // tempfile read, no bincode::deserialize.
+                            tracing::trace!(
+                                target = "checkpoint_pin",
+                                event = "consume",
+                                index = index,
+                                done = done,
+                                num_cycles = num_cycles,
+                            );
                             // Trace the checkpoint and reconstruct the execution records.
-                            let mut reader = io::BufReader::new(&checkpoint);
-                            let execution_state: ExecutionState =
-                                bincode::deserialize_from(&mut reader)
-                                    .expect("failed to deserialize state");
                             let (mut records, report) = tracing::debug_span!("trace checkpoint")
                                 .in_scope(|| {
                                     trace_checkpoint::<SC>(
@@ -261,7 +284,6 @@ where
                                 });
                             log::debug!("generated {} records", records.len());
                             *report_aggregate.lock().unwrap() += report;
-                            reset_seek(&mut checkpoint);
 
                             // Wait for our turn to update the state.
                             record_gen_sync.wait_for_turn(index);
@@ -808,10 +830,6 @@ where
     let (records, _) = runtime.execute_record(true).unwrap();
 
     (records, runtime.report)
-}
-
-fn reset_seek(file: &mut File) {
-    file.seek(std::io::SeekFrom::Start(0)).expect("failed to seek to start of tempfile");
 }
 
 #[cfg(debug_assertions)]

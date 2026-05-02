@@ -1317,16 +1317,47 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 self.lambda,
                 claim_v,
             ),
-            PolynomialLayer::Packed { n0, d0, n1, d1 } => round_poly_evaluations(
-                &self.eq_int,
-                &self.eq_row,
-                n0,
-                d0,
-                n1,
-                d1,
-                self.lambda,
-                claim_v,
-            ),
+            PolynomialLayer::Packed { n0, d0, n1, d1 } => {
+                // Task #102 dispatch hook: when ZIREN_GPU_SUMCHECK=1 is
+                // set, route to the GPU round-poly evaluator
+                // (ziren-gpu/cuda/basefold/sumcheck_round.cuh +
+                // core/src/basefold/sumcheck_round.rs::sumcheck_round_poly_evals_ef).
+                // Currently a no-op fallback that warns and returns
+                // the host implementation — `zkm-stark` does not yet
+                // depend on `zkm-gpu-core`, so the actual dispatch
+                // body lands in a follow-up that adds the optional
+                // feature-gated dependency.  Mirrors the existing
+                // ZIREN_GPU_BASEFOLD pattern in
+                // basefold/stacked.rs:287-301.
+                if std::env::var("ZIREN_GPU_SUMCHECK")
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
+                {
+                    use std::sync::OnceLock;
+                    static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                    WARN_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "ZIREN_GPU_SUMCHECK=1 set but GPU dispatch body not yet \
+                             wired in row_gkr/round.rs::sum_as_poly_in_last_variable; \
+                             falling back to host round_poly_evaluations.  \
+                             Next increment: feature-gate a zkm-gpu-core dependency \
+                             on zkm-stark and call \
+                             zkm_gpu_core::basefold::sumcheck_round::\
+                             sumcheck_round_poly_evals_ef.  See task #102."
+                        );
+                    });
+                }
+                round_poly_evaluations(
+                    &self.eq_int,
+                    &self.eq_row,
+                    n0,
+                    d0,
+                    n1,
+                    d1,
+                    self.lambda,
+                    claim_v,
+                )
+            },
         };
         let coeffs = poly_coefficients_from_evals(evals);
         UnivariatePolynomial::new(coeffs.to_vec())
