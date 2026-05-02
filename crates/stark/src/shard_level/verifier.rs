@@ -320,20 +320,24 @@ where
         ))
     })?;
 
-    // Derive JaggedChipInfo from the chip set + bundle packing.  The
-    // bundle's offsets[i] is the starting cell index of chip i in
-    // the stacked dense vector; row_count = main_trace height,
-    // column_count = main_trace width.  We read row_count from the
-    // bundle's y_per_chip lengths and column_count from the chip's
-    // BaseAir::width().
+    // #95-fix (May 2 2026): read per-chip `column_count` from the
+    // bundle's PackingMeta (written by the prover) instead of
+    // `BaseAir::width(chip)`.  This eliminates the prover-side width
+    // pad — the verifier now agrees with the *actually-exercised*
+    // column count, restoring Apr 30's perf on workloads with
+    // sparse-column chips.  Falls back to `BaseAir::width(chip)` for
+    // legacy bundles (column_counts vec is empty when serde-default
+    // populated from older wire format).
     use p3_air::BaseAir;
+    let column_counts_from_bundle: &[usize] = &bundle.packing.column_counts;
     let chip_infos: Vec<JaggedChipInfo> = chips
         .iter()
-        .map(|chip| {
-            let column_count = <_ as BaseAir<Val<SC>>>::width(*chip);
-            // row_count: best derivation from bundle metadata.  The
-            // prover's JaggedPacking builds offsets[i+1] - offsets[i]
-            // == row_count[i] * column_count[i].
+        .enumerate()
+        .map(|(i, chip)| {
+            let column_count = column_counts_from_bundle
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| <_ as BaseAir<Val<SC>>>::width(*chip));
             JaggedChipInfo {
                 name: chip.name().to_string(),
                 row_count: 0, // unknown at verifier time; filled via bundle offsets below

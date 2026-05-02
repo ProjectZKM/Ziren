@@ -290,11 +290,23 @@ pub mod jagged {
     /// from chip_infos it receives separately.  We don't serialize
     /// `dense_values` (that's the multi-GB vector we just committed
     /// to BaseFold).
+    ///
+    /// `column_counts` (#95-fix, May 2 2026): per-chip *actual*
+    /// column count as exercised by this shard's trace, written by
+    /// the prover from `compute_jagged_metadata`.  The verifier reads
+    /// this instead of `BaseAir::width(chip)` so the prover can send
+    /// `trace.width` (the truly-populated columns) without any
+    /// chip.width() pad.  Restores Apr 30's perf (~24x reduction in
+    /// jagged-PCS data on workloads with sparse-column chips).
+    /// Empty vec on the wire = legacy bundle → caller falls back to
+    /// `BaseAir::width(chip)` for backward compat.
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
     pub struct PackingMeta {
         pub offsets: Vec<usize>,
         pub total_values: usize,
         pub log_dense_size: usize,
+        #[serde(default)]
+        pub column_counts: Vec<usize>,
     }
 
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -446,6 +458,13 @@ pub mod jagged {
             offsets: packing.offsets.clone(),
             total_values: packing.total_values,
             log_dense_size: packing.log_dense_size,
+            // #95-fix: per-chip *actual* column count, so verifier
+            // does not need to consult `BaseAir::width(chip)`.
+            column_counts: packing
+                .chip_infos
+                .iter()
+                .map(|ci| ci.column_count)
+                .collect(),
         };
         JaggedBasefoldBundle {
             reduction,
