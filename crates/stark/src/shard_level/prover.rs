@@ -452,6 +452,37 @@ where
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
 
+    // #113 — GPU jagged-PCS orchestration dispatch.  When the env flag
+    // `ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1` is set AND the
+    // ziren-gpu crate has registered the device-resident orchestrator
+    // hook (via `register_gpu_jagged_orchestration_hook`), bypass the
+    // host orchestrator (`prove_jagged_basefold` below) and let the
+    // device driver own the entire jagged-PCS pipeline (commit,
+    // per-chip y-evals via #103, sumcheck reduction via #107, BaseFold
+    // open).  Output bytes MUST be byte-identical — the GPU side
+    // serializes the same `JaggedBasefoldBundle` shape via rmp-serde.
+    //
+    // Falls through to the host orchestrator if either the env flag is
+    // unset or no hook is registered (e.g. CPU-only build, or GPU crate
+    // hasn't initialised yet on the call path).  This keeps the host
+    // path the source of truth and the GPU dispatch strictly opt-in.
+    if std::env::var("ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        if let Some(hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_jagged_orchestration_hook()
+        {
+            // chip_traces / r_row_per_chip are already in the concrete
+            // (`InnerVal = KoalaBear`, `InnerChallenge = Ef4`) form
+            // (TypeId gate above + `kb31_poseidon2` type aliases).
+            // Both are identically-typed to the hook signature; pass
+            // straight through.  The hook owns the entire pipeline
+            // and returns the rmp-serde bundle bytes directly.
+            return hook(&chip_traces, &r_row_per_chip, lb_challenger);
+        }
+    }
+
     // SP1 single-dense path (Ziren #97): emit_jagged_pcs_bytes calls
     // prove_jagged_basefold directly.  The legacy per-chip dispatch
     // (gated on ZIREN_E3_PER_CHIP) was removed since SP1 only uses the

@@ -292,13 +292,119 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        let (numer_mat, denom_mat) = build_chip_interaction_tables::<F, EF>(
-            &interactions,
-            main_trace,
-            if prep_trace.width > 0 { Some(prep_trace) } else { None },
-            alpha,
-            betas,
-        );
+        // #112 dispatch hook: when ZIREN_GPU_INTERACTION_EVAL_DEVICE=1
+        // AND a GPU hook is registered AND `(F, EF) == (KoalaBear, Ef4)`
+        // (production basefold path), route the per-row interaction
+        // walk through the registered GPU descriptor kernel
+        // (`build_gkr_circuit_first_layer_koala_bear`).  Output is
+        // byte-identical to `build_chip_interaction_tables`; on `None`
+        // (chip rejected, unknown name, etc.) the host fallback runs
+        // unconditionally.
+        //
+        // The GPU output is materialized as `(Vec<KoalaBear>, Vec<Ef4>)`
+        // and reinterpreted back to `(Vec<F>, Vec<EF>)` under TypeId
+        // equality (same `transmute` pattern used for #106 and #111).
+        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if std::env::var(
+            "ZIREN_GPU_INTERACTION_EVAL_DEVICE",
+        )
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        {
+            if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
+                use core::any::TypeId;
+                type Ef4 = p3_field::extension::BinomialExtensionField<
+                    p3_koala_bear::KoalaBear,
+                    4,
+                >;
+                type Kb = p3_koala_bear::KoalaBear;
+                if TypeId::of::<F>() == TypeId::of::<Kb>()
+                    && TypeId::of::<EF>() == TypeId::of::<Ef4>()
+                {
+                    // SAFETY: TypeId equality guarantees F == Kb and
+                    // EF == Ef4; slice/value reinterp is sound.
+                    unsafe {
+                        let main_kb: &[Kb] = core::slice::from_raw_parts(
+                            main_trace.values.as_ptr().cast::<Kb>(),
+                            main_trace.values.len(),
+                        );
+                        let prep_kb: &[Kb] = if prep_trace.width > 0 {
+                            core::slice::from_raw_parts(
+                                prep_trace.values.as_ptr().cast::<Kb>(),
+                                prep_trace.values.len(),
+                            )
+                        } else {
+                            &[]
+                        };
+                        let alpha_ef4: Ef4 = core::mem::transmute_copy(&alpha);
+                        // Reinterpret betas slice EF→Ef4.
+                        let betas_ef4: &[Ef4] = core::slice::from_raw_parts(
+                            betas.as_ptr().cast::<Ef4>(),
+                            betas.len(),
+                        );
+                        let result = gpu_hook(
+                            &chip.name(),
+                            main_kb,
+                            main_trace.width,
+                            prep_kb,
+                            prep_trace.width,
+                            alpha_ef4,
+                            betas_ef4,
+                        );
+                        result.map(|(numer_kb, denom_ef4)| {
+                            // Reinterpret Vec<Kb> → Vec<F> and
+                            // Vec<Ef4> → Vec<EF> under TypeId
+                            // equality.
+                            let mut me_n = std::mem::ManuallyDrop::new(numer_kb);
+                            let numer_f: Vec<F> = Vec::from_raw_parts(
+                                me_n.as_mut_ptr().cast::<F>(),
+                                me_n.len(),
+                                me_n.capacity(),
+                            );
+                            let mut me_d = std::mem::ManuallyDrop::new(denom_ef4);
+                            let denom_ef: Vec<EF> = Vec::from_raw_parts(
+                                me_d.as_mut_ptr().cast::<EF>(),
+                                me_d.len(),
+                                me_d.capacity(),
+                            );
+                            (numer_f, denom_ef)
+                        })
+                    }
+                } else {
+                    None
+                }
+            } else {
+                use std::sync::OnceLock;
+                static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                WARN_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "ZIREN_GPU_INTERACTION_EVAL_DEVICE=1 but no \
+                         hook registered; ziren-gpu's \
+                         compress_multi_gpu must call \
+                         zkm_stark::shard_level::sumcheck_poly::\
+                         register_gpu_interaction_eval_hook at \
+                         startup.  Falling back to host CPU."
+                    );
+                });
+                None
+            }
+        } else {
+            None
+        };
+
+        let (numer_mat, denom_mat) = if let Some((numer_v, denom_v)) = gpu_tables {
+            (
+                RowMajorMatrix::new(numer_v, num_interactions),
+                RowMajorMatrix::new(denom_v, num_interactions),
+            )
+        } else {
+            build_chip_interaction_tables::<F, EF>(
+                &interactions,
+                main_trace,
+                if prep_trace.width > 0 { Some(prep_trace) } else { None },
+                alpha,
+                betas,
+            )
+        };
 
         // PaddedMle row optimisation (task #88):  do NOT materialise
         // the row padding here.  Compute the per-chip real row count,

@@ -569,6 +569,166 @@ pub fn get_gpu_constraint_eval_hook() -> Option<GpuConstraintEvalFn> {
     GPU_CONSTRAINT_EVAL_HOOK.get().copied()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// #112 — GPU per-chip LogUp-GKR phase-2 interaction-eval hook.
+//
+// Sister of the #111 constraint-eval hook above, but for the OTHER
+// per-row chip walk: `build_chip_interaction_tables` in
+// `crate::shard_level::row_gkr::first_layer`.  That host CPU walk
+// evaluates per-row interactions (multiplicity + per-arg
+// VirtualPairCols) for every chip, producing the
+// `(numerator: F, denominator: EF)` row-major tables that feed GKR
+// layer 0.
+//
+// The host walk is per-row rayon-parallel (after the Apr-25 perf
+// fix, see `first_layer.rs:107-136`), but for chips with hundreds
+// of thousands of rows (Cpu @ 131K, Program @ 524K) and tens of
+// interactions, the work is still CPU-bound.  This hook routes the
+// per-chip per-row walk through the same affine descriptor walk
+// that #109 ships in `ziren-gpu/cuda/basefold/build_gkr_circuit.cu`
+// — a single kernel launch per chip instead of per-row rayon.
+//
+// The hook is only consulted when
+// `ZIREN_GPU_INTERACTION_EVAL_DEVICE=1` is set AND `EF` is the
+// production `Ef4` type.  When unset, the host walk in
+// `build_chip_interaction_tables` runs unchanged.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Per-chip BaseFold LogUp-GKR phase-2 interaction-table builder,
+/// keyed by chip name.
+///
+/// **Invariants the implementation must preserve** (so output is
+/// byte-identical to the host fallback `build_chip_interaction_tables`):
+///   * Output lengths == `height * num_interactions` for both
+///     `numer` and `denom`, where `height = main_width == 0 ? 0 :
+///     main_row_major.len() / main_width` and `num_interactions =
+///     chip.sends().len() + chip.receives().len()`.
+///   * Row-major layout: `out[row * num_interactions + col] =
+///     generate_interaction_vals(interactions[col], row, ...)`.
+///   * `numer = +mult` for sends, `-mult` for receives — same
+///     `is_send` flag the host applies.
+///   * `denom = α + β_0 · argument_index + Σ_k β_k · vpc_k(row)` for
+///     each interaction — same affine evaluator as the host
+///     `generate_interaction_vals`.
+///
+/// Returns `Some((numer, denom))` on success, `None` if the GPU
+/// rejected the chip (unknown name, mismatched widths, betas too
+/// short) — callers must fall back to host on `None`.
+pub type GpuInteractionEvalFn = fn(
+    chip_name: &str,
+    main_row_major: &[p3_koala_bear::KoalaBear],
+    main_width: usize,
+    preprocessed_row_major: &[p3_koala_bear::KoalaBear],
+    preprocessed_width: usize,
+    alpha: Ef4,
+    betas: &[Ef4],
+) -> Option<(Vec<p3_koala_bear::KoalaBear>, Vec<Ef4>)>;
+
+static GPU_INTERACTION_EVAL_HOOK: std::sync::OnceLock<GpuInteractionEvalFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU per-chip interaction-eval driver.  Idempotent;
+/// returns `Err` when a hook was already registered.  Called once by
+/// `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_interaction_eval_hook(
+    f: GpuInteractionEvalFn,
+) -> Result<(), GpuInteractionEvalFn> {
+    GPU_INTERACTION_EVAL_HOOK.set(f)
+}
+
+/// Read the registered GPU interaction-eval hook, if any.
+#[must_use]
+pub fn get_gpu_interaction_eval_hook() -> Option<GpuInteractionEvalFn> {
+    GPU_INTERACTION_EVAL_HOOK.get().copied()
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// #113 — GPU jagged-PCS orchestration hook (sister of #105C / #107).
+//
+// Eliminates the per-shard host orchestrator overhead in
+// `crate::shard_level::prover::emit_jagged_pcs_bytes` by routing the
+// entire jagged-PCS prove pipeline (commit, per-chip y-evals, sumcheck
+// reduction, BaseFold opening) to a device-resident driver.  The
+// inner sumcheck KERNEL `prove_jagged_reduction_gpu` (#107) already
+// exists in `ziren-gpu/basefold/src/jagged_sumcheck.rs`; this hook
+// owns the WRAPPING (transcript management, per-chip y-evaluations
+// via #103, BaseFold open) so the ~30 ms × N_shards of host
+// coordination cost (per agent estimate, ~5.7 s on a 191-shard
+// compress wall) is recovered.
+//
+// The hook is concrete-typed at `(KoalaBear, Ef4, LbChallenger)` —
+// the production reth path.  Generic-EF callers fall back to the
+// host orchestrator even when `ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1`
+// is set.  Output bytes MUST be byte-identical to
+// `bundle.to_bytes()` from
+// `crate::basefold_late_binding::jagged::prove_jagged_basefold` —
+// validated via a CPU-equivalence test in the GPU crate.
+//
+// Gated under the `basefold` feature because the hook signature
+// references `crate::basefold_late_binding::LbChallenger`, which only
+// exists when basefold is compiled in.
+// ─────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "basefold")]
+mod jagged_orchestration_hook {
+    use super::Ef4;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+
+    /// Signature of the GPU jagged-PCS orchestration driver.  Mirrors
+    /// the host `emit_jagged_pcs_bytes` inner pipeline: takes the
+    /// per-chip concrete-typed traces, the per-chip row challenges,
+    /// and the outer (`LbChallenger`-typed) transcript pulled from the
+    /// type-gated `emit_jagged_pcs_bytes` call site.  Returns the
+    /// rmp-serde-encoded `JaggedBasefoldBundle` bytes, byte-identical
+    /// to the host `bundle.to_bytes()` for the same transcript/inputs.
+    ///
+    /// The implementation is responsible for:
+    ///   * BaseFold-stacked commit of the dense jagged MLE,
+    ///   * observing the commitment into `challenger`,
+    ///   * computing per-chip per-column y-values (eq · trace_col),
+    ///   * driving the sumcheck reduction (with all `observe_ext` /
+    ///     `sample_ef` calls forwarded to `challenger`),
+    ///   * opening the BaseFold commit at the reduction's `z*`,
+    ///   * serializing the bundle via rmp-serde.
+    ///
+    /// `chip_traces` are concrete `(String, RowMajorMatrix<KoalaBear>)`
+    /// pairs (already padded to chip widths by the caller, see #95);
+    /// `r_row_per_chip` lengths must equal `log2(padded_height)` per
+    /// chip.
+    pub type GpuJaggedOrchestrationFn = fn(
+        chip_traces: &[(String, RowMajorMatrix<KoalaBear>)],
+        r_row_per_chip: &[Vec<Ef4>],
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+    ) -> Vec<u8>;
+
+    static GPU_JAGGED_ORCHESTRATION_HOOK: std::sync::OnceLock<GpuJaggedOrchestrationFn> =
+        std::sync::OnceLock::new();
+
+    /// Register the GPU jagged-PCS orchestration driver.  Idempotent;
+    /// returns `Err` when a hook was already registered.  Called once
+    /// by `ziren-gpu`'s `compress_multi_gpu` at startup.
+    pub fn register_gpu_jagged_orchestration_hook(
+        f: GpuJaggedOrchestrationFn,
+    ) -> Result<(), GpuJaggedOrchestrationFn> {
+        GPU_JAGGED_ORCHESTRATION_HOOK.set(f)
+    }
+
+    /// Read the registered GPU jagged-PCS orchestration hook, if any.
+    #[must_use]
+    pub fn get_gpu_jagged_orchestration_hook() -> Option<GpuJaggedOrchestrationFn> {
+        GPU_JAGGED_ORCHESTRATION_HOOK.get().copied()
+    }
+}
+
+#[cfg(feature = "basefold")]
+pub use jagged_orchestration_hook::{
+    GpuJaggedOrchestrationFn, get_gpu_jagged_orchestration_hook,
+    register_gpu_jagged_orchestration_hook,
+};
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;
