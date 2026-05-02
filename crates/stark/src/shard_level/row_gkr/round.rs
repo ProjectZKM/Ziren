@@ -63,11 +63,15 @@
 
 use alloc::vec::Vec;
 
-use p3_challenger::{CanObserve, FieldChallenger};
+use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 
 use super::layer::{GkrCircuitLayer, LogUpGkrCpuLayer};
-use crate::shard_level::types::{LogupGkrRoundProof, PartialSumcheckProof, UnivariatePolynomial};
+use crate::shard_level::sumcheck_poly::{
+    reduce_sumcheck_to_evaluation, ComponentPoly, SumcheckPoly, SumcheckPolyBase,
+    SumcheckPolyFirstRound,
+};
+use crate::shard_level::types::{LogupGkrRoundProof, UnivariatePolynomial};
 
 /// Flatten a per-chip `LogUpGkrCpuLayer` into four layer-wide flat
 /// MLEs each of length `2^(num_row_variables + num_interaction_variables)`.
@@ -388,6 +392,10 @@ fn poly_coefficients_from_evals<EF: Field>(evals: [EF; 4]) -> [EF; 4] {
 }
 
 /// Evaluate a coefficient-form polynomial at a point via Horner's.
+///
+/// Retained for tests after Phase 3 refactor moved the production
+/// driver into `crate::shard_level::sumcheck_poly`.
+#[allow(dead_code)]
 fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
     let mut acc = EF::ZERO;
     for c in coeffs.iter().rev() {
@@ -658,224 +666,278 @@ fn pack_into_global<EF: Field>(
     (n0, d0, n1, d1)
 }
 
-/// Prove one GKR round.
+/// Build the eq-table for `coords` using parallel halving — split
+/// out so it can be called from both the trait constructor below and
+/// `prove_gkr_round` for backward-compatibility.
 ///
-/// Runs a `num_row_variables + num_interaction_variables`-round
-/// degree-3 sumcheck on the layer's per-chip sub-MLEs, binding the
-/// previous-round claim `(numerator_eval, denominator_eval)` to the
-/// per-layer openings `(n_0, n_1, d_0, d_1)` at the sumcheck's reduced
-/// point.
+/// Output is LSB-first: `weights[idx] = ∏_k coord_k^{bit_k(idx)} ·
+/// (1-coord_k)^{1-bit_k(idx)}`.
+fn build_eq_table<EF: Field + Send + Sync>(coords: &[EF]) -> Vec<EF> {
+    use p3_maybe_rayon::prelude::*;
+    let mut weights: Vec<EF> = vec![EF::ONE];
+    for &r in coords {
+        let old_len = weights.len();
+        let mut next: Vec<EF> = vec![EF::ZERO; old_len * 2];
+        let (lo, hi) = next.split_at_mut(old_len);
+        lo.par_iter_mut()
+            .zip(hi.par_iter_mut())
+            .zip(weights.par_iter())
+            .for_each(|((lo_j, hi_j), &w_j)| {
+                let prod = w_j * r;
+                *lo_j = w_j - prod;
+                *hi_j = prod;
+            });
+        weights = next;
+    }
+    weights
+}
+
+/// In-place fold of `tab` along its highest remaining variable at
+/// `alpha`, returning the folded length-`tab.len()/2` table.
+fn fold_eq<EF: Field + Send + Sync>(tab: &[EF], alpha: EF) -> Vec<EF> {
+    use p3_maybe_rayon::prelude::*;
+    let half = tab.len() / 2;
+    let mut out: Vec<EF> = vec![EF::ZERO; half];
+    out.par_iter_mut().enumerate().for_each(|(g, slot)| {
+        let lo = tab[g];
+        let hi = tab[g + half];
+        *slot = lo + alpha * (hi - lo);
+    });
+    out
+}
+
+/// Sumcheck-poly wrapper around the row-only LogUp-GKR layer state
+/// (Tier 1 Phase 3).
 ///
-/// ## Memory layout (Tier 1 Phase 2B — chip-structured folding)
+/// Mirrors SP1's
+/// [`LogupRoundPolynomial`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs#L13-L28)
+/// in role: it carries the layer's per-chip n/d MLEs plus the factored
+/// eq tables (`eq_row`, `eq_interaction`) and a batching scalar
+/// `lambda`.  The sumcheck driver in
+/// [`crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation`]
+/// walks it round-by-round.
 ///
-/// During the first `num_row_variables` rounds the n/d data is kept
-/// in **per-chip** `Vec<Vec<EF>>` form (`Σ_c chip_rows × chip_cols`)
-/// rather than the layer-wide `2^total_vars × |EF|` flat tables.
-/// This mirrors SP1's `LogUpGkrCpuLayer` representation
-/// (`/tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs:106-225`)
-/// and avoids materialising the column-padded interaction axis.  On
-/// production reth shards the saving is on the order of 10–60×
-/// because `Σ chip_cols ≪ 2^num_int_vars` for most layer shapes.
-///
-/// At the transition round (`chip_rows -> 1`) the per-chip 1-row
-/// tables are packed into a single global interaction-layer MLE of
-/// length `1 << num_interaction_variables` with default-padded slots
-/// (n=0, d=1).  Subsequent interaction-binding rounds operate on the
-/// packed MLE exactly as the post-Phase-2A code did.
-///
-/// The transcript bytes (round polynomials, openings, final eval) are
-/// byte-identical to the post-Phase-2A flat-layer prover; only the
-/// internal storage layout changes.
-///
-/// The caller must sample `lambda` via the challenger BEFORE calling
-/// this function — it is passed in explicitly so the caller can use
-/// the same challenger state for downstream layers.
-#[allow(clippy::too_many_arguments)]
-pub fn prove_gkr_round<F, EF, Challenger>(
-    circuit: &GkrCircuitLayer<F, EF>,
-    eval_point: &[EF],
-    numerator_eval: EF,
-    denominator_eval: EF,
+/// Differences from SP1:
+///   * Uses Ziren's `Vec<Vec<EF>>` chip-structured representation
+///     plus a flat `Vec<EF>` packed-interaction representation,
+///     matching Phase 2B's two-mode prover.
+///   * Numerators are pre-lifted to `EF` (Ziren currently lacks a
+///     base-field first-round optimization).  Therefore there is only
+///     one type for both `Self` and `NextRoundPoly`.
+///   * The batching `padding_adjustment` / `eq_adjustment` machinery
+///     is collapsed into a single `pad_eq_int_sum` cached scalar (the
+///     analytic identity-fraction contribution from un-covered global
+///     interaction columns).
+pub struct LogupRoundPolynomial<EF> {
+    /// Either a chip-structured `Vec<Vec<EF>>` (row-binding rounds) or
+    /// a packed flat `Vec<EF>` (interaction-binding rounds).
+    state: PolynomialLayer<EF>,
+    /// Factored eq table for the **interaction** variables.  Length is
+    /// `2^remaining_int_vars`.
+    eq_int: Vec<EF>,
+    /// Factored eq table for the **row** variables.  Length is
+    /// `2^remaining_row_vars`.
+    eq_row: Vec<EF>,
+    /// Cached `Σ eq_int[total_chip_cols..]` — analytic contribution
+    /// from the per-row "padding tail" of identity-fraction cells.
+    /// Recomputed when an interaction-binding round shrinks `eq_int`.
+    pad_eq_int_sum: EF,
+    /// Cached number of "active" global interaction columns covered by
+    /// at least one chip — used to recompute `pad_eq_int_sum` after an
+    /// interaction-binding fold.
+    active_cols: usize,
+    /// Batching scalar for `λ · numerator + denominator`.
     lambda: EF,
-    challenger: &mut Challenger,
-) -> LogupGkrRoundProof<EF>
-where
-    F: PrimeField,
-    EF: ExtensionField<F> + BasedVectorSpace<F>,
-    Challenger: FieldChallenger<F>,
-{
-    let (num_row_variables, num_interaction_variables) = match circuit {
-        GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
-        GkrCircuitLayer::FirstLayer(l) => (l.num_row_variables, l.num_interaction_variables),
-    };
-    let total_vars = num_row_variables + num_interaction_variables;
-    assert_eq!(
-        eval_point.len(),
-        total_vars,
-        "eval_point dimension {} must equal layer MLE dimension {}",
-        eval_point.len(),
-        total_vars,
-    );
+    /// Carry-over claim from the previous round — `Some(c)` means
+    /// `p(0) = c - p(1)` shortcut is valid; `None` means compute `p(0)`
+    /// directly (only used by the round-0 driver call).
+    current_claim: Option<EF>,
+    /// log₂ of the remaining interaction variables.  Tracked
+    /// separately from `eq_int.len()` so we can answer
+    /// `num_variables()` in O(1).
+    remaining_int_vars: usize,
+    /// log₂ of the remaining row variables.
+    remaining_row_vars: usize,
+    /// Original (= layer-global) `num_interaction_variables` — needed
+    /// at the chip→packed transition to size the packed MLE.
+    layer_int_vars: usize,
+}
 
-    // Build chip-structured state.  Numerators are lifted to EF here
-    // (one extra `.into()` per cell relative to SP1 which keeps the
-    // first round in F); the cost is `O(Σ_c chip_rows × chip_cols)` —
-    // negligible vs the per-round sumcheck work and the previous
-    // implementation's `O(2^total_vars)` flat allocation.
-    let mut chip_state: ChipLayerState<EF> = match circuit {
-        GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
-        GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
-    };
+/// Two-mode storage backing for `LogupRoundPolynomial.state`.
+///
+/// Mirrors SP1's `PolynomialLayer` (CircuitLayer / InteractionLayer)
+/// at a high level, with Ziren's representation choices.
+enum PolynomialLayer<EF> {
+    /// Row-binding mode — per-chip `Vec<Vec<EF>>` storage.
+    Chip(ChipLayerState<EF>),
+    /// Interaction-binding mode — single flat `Vec<EF>` per quadrant.
+    Packed { n0: Vec<EF>, d0: Vec<EF>, n1: Vec<EF>, d1: Vec<EF> },
+}
 
-    // Factored eq tables (Phase 1 + Phase 2A — unchanged).
-    //
-    // The flat `flatten_layer` view places bits `[0, num_int_vars)`
-    // of the flat index on the col axis and bits
-    // `[num_int_vars, total_vars)` on the row axis (LSB-first MLE
-    // convention).  Since the chip-structured view samples the
-    // row-fold at the outermost MSB-bound variable and reuses the
-    // same eq_int slot for every col within a chip, the numeric
-    // contribution at each `(row, col)` cell matches the flat
-    // formula `eq_int[chip_offset+col] * eq_row[row]` exactly.
-    let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
-    let build_eq = |coords: &[EF]| -> Vec<EF> {
-        use p3_maybe_rayon::prelude::*;
-        let mut weights: Vec<EF> = vec![EF::ONE];
-        for &r in coords {
-            let old_len = weights.len();
-            let mut next: Vec<EF> = vec![EF::ZERO; old_len * 2];
-            let (lo, hi) = next.split_at_mut(old_len);
-            lo.par_iter_mut()
-                .zip(hi.par_iter_mut())
-                .zip(weights.par_iter())
-                .for_each(|((lo_j, hi_j), &w_j)| {
-                    let prod = w_j * r;
-                    *lo_j = w_j - prod;
-                    *hi_j = prod;
-                });
-            weights = next;
-        }
-        weights
-    };
-    let mut eq_int: Vec<EF> = build_eq(interaction_point);
-    let mut eq_row: Vec<EF> = build_eq(row_point);
-    debug_assert_eq!(eq_int.len(), 1usize << num_interaction_variables);
-    debug_assert_eq!(eq_row.len(), 1usize << num_row_variables);
-
-    // Sum of eq_int over the "padding tail" — global cols not covered
-    // by any chip — so the row-binding rounds can add the analytic
-    // identity-fraction contribution without iterating padded cells.
-    let total_chip_cols: usize = chip_state.chip_cols.iter().sum();
-    let mut pad_eq_int_sum: EF = EF::ZERO;
-    for &v in &eq_int[total_chip_cols..] {
-        pad_eq_int_sum += v;
-    }
-
-    // Initial claim.
-    let claimed_sum = lambda * numerator_eval + denominator_eval;
-
-    let mut univariate_polys: Vec<UnivariatePolynomial<EF>> = Vec::with_capacity(total_vars);
-    let mut reduced_point: Vec<EF> = Vec::with_capacity(total_vars);
-    let mut current_claim = claimed_sum;
-
-    // Packed interaction-layer state, populated at the transition round.
-    let mut packed_n0: Vec<EF> = Vec::new();
-    let mut packed_d0: Vec<EF> = Vec::new();
-    let mut packed_n1: Vec<EF> = Vec::new();
-    let mut packed_d1: Vec<EF> = Vec::new();
-    let mut in_packed_mode = false;
-    // Edge case: layer has zero row variables — chip tables are already
-    // 1-row each, so we pack immediately and skip the row-binding phase.
-    if chip_state.chip_rows == 1 {
-        let (n0, d0, n1, d1) = pack_into_global(&chip_state, num_interaction_variables);
-        packed_n0 = n0;
-        packed_d0 = d0;
-        packed_n1 = n1;
-        packed_d1 = d1;
-        in_packed_mode = true;
-        chip_state.n0 = Vec::new();
-        chip_state.d0 = Vec::new();
-        chip_state.n1 = Vec::new();
-        chip_state.d1 = Vec::new();
-    }
-
-    for round in 0..total_vars {
-        let evals = if in_packed_mode {
-            round_poly_evaluations(
-                &eq_int,
-                &eq_row,
-                &packed_n0,
-                &packed_d0,
-                &packed_n1,
-                &packed_d1,
-                lambda,
-                current_claim,
-            )
-        } else {
-            round_poly_evaluations_chip_structured(
-                &chip_state,
-                &eq_int,
-                &eq_row,
-                pad_eq_int_sum,
-                lambda,
-                current_claim,
-            )
+impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
+    /// Build a `LogupRoundPolynomial` from a `GkrCircuitLayer`, the
+    /// previous round's eval claims, and the batching scalar.
+    ///
+    /// `eval_point` must have dimension
+    /// `num_row_variables + num_interaction_variables`; its lower
+    /// `num_interaction_variables` coords are the interaction-axis
+    /// random point, the upper coords are the row-axis random point.
+    pub fn new<F>(
+        circuit: &GkrCircuitLayer<F, EF>,
+        eval_point: &[EF],
+        numerator_eval: EF,
+        denominator_eval: EF,
+        lambda: EF,
+    ) -> Self
+    where
+        F: Field + Into<EF> + Copy + Sync,
+        EF: ExtensionField<F>,
+    {
+        let (num_row_variables, num_interaction_variables) = match circuit {
+            GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
+            GkrCircuitLayer::FirstLayer(l) => (l.num_row_variables, l.num_interaction_variables),
         };
-        let coeffs = poly_coefficients_from_evals(evals);
+        let total_vars = num_row_variables + num_interaction_variables;
+        assert_eq!(
+            eval_point.len(),
+            total_vars,
+            "LogupRoundPolynomial::new: eval_point dim {} != layer dim {}",
+            eval_point.len(),
+            total_vars,
+        );
 
-        // Observe the 4 coefficients into the challenger.
-        for c in &coeffs {
-            observe_ext::<F, EF, _>(challenger, *c);
+        let chip_state: ChipLayerState<EF> = match circuit {
+            GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
+            GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
+        };
+
+        let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
+        let eq_int = build_eq_table(interaction_point);
+        let eq_row = build_eq_table(row_point);
+        let total_chip_cols: usize = chip_state.chip_cols.iter().sum();
+        let mut pad_eq_int_sum = EF::ZERO;
+        for &v in &eq_int[total_chip_cols..] {
+            pad_eq_int_sum += v;
         }
 
-        // Sample this round's challenge.
-        let alpha: EF = challenger.sample_algebra_element::<EF>();
-        // MSB fold + insert-at-front.  See Phase 2A docstring for why
-        // this preserves the LSB-first MLE invariant downstream.
-        reduced_point.insert(0, alpha);
+        let claimed_sum = lambda * numerator_eval + denominator_eval;
 
-        // Update current_claim = p(alpha) for next round's 3-point trick.
-        current_claim = poly_eval(&coeffs, alpha);
+        let mut me = Self {
+            state: PolynomialLayer::Chip(chip_state),
+            eq_int,
+            eq_row,
+            pad_eq_int_sum,
+            active_cols: total_chip_cols,
+            lambda,
+            current_claim: Some(claimed_sum),
+            remaining_int_vars: num_interaction_variables,
+            remaining_row_vars: num_row_variables,
+            layer_int_vars: num_interaction_variables,
+        };
 
-        // Fold the n/d data.  Two regimes:
-        //   (a) row-binding — fold each chip's row axis in-place.
-        //   (b) packed-mode — fold the global interaction MLE, halving
-        //       eq_int as well.
-        let _ = round;
-        if !in_packed_mode {
-            fold_chip_state_row(&mut chip_state, alpha);
-            // After this fold, decide whether we should transition to
-            // packed mode for subsequent rounds.  The transition fires
-            // when chip_state.chip_rows has just collapsed to 1 — we
-            // pack and switch.  The transition itself is part of the
-            // *current* round's row-binding fold (no extra alpha is
-            // consumed) — packing happens between rounds.
-            if chip_state.chip_rows == 1 {
-                let (n0, d0, n1, d1) = pack_into_global(&chip_state, num_interaction_variables);
-                packed_n0 = n0;
-                packed_d0 = d0;
-                packed_n1 = n1;
-                packed_d1 = d1;
-                in_packed_mode = true;
-                // Free chip-state memory now that we've packed.
-                chip_state.n0 = Vec::new();
-                chip_state.d0 = Vec::new();
-                chip_state.n1 = Vec::new();
-                chip_state.d1 = Vec::new();
+        // Edge case: zero row variables — chip tables are already 1-row.
+        // Pack immediately so the first sumcheck round operates on the
+        // packed MLE (matches the original `prove_gkr_round` behavior).
+        if me.remaining_row_vars == 0 {
+            me.transition_to_packed();
+        }
+        me
+    }
+
+    /// Pop `Self` and return its claimed_sum (the initial sumcheck
+    /// claim).  Convenience for the driver call site.
+    pub fn claimed_sum(&self) -> EF {
+        self.current_claim.expect("claimed_sum: poly was constructed without a claim")
+    }
+
+    /// Switch from chip-structured to packed-flat storage.  Fired at
+    /// construction (when `num_row_variables == 0`) and at the
+    /// transition round (when `chip_rows` collapses to 1).
+    fn transition_to_packed(&mut self) {
+        if let PolynomialLayer::Chip(state) = &self.state {
+            debug_assert_eq!(state.chip_rows, 1);
+            let (n0, d0, n1, d1) = pack_into_global(state, self.layer_int_vars);
+            self.state = PolynomialLayer::Packed { n0, d0, n1, d1 };
+        }
+    }
+
+    /// Recompute `pad_eq_int_sum` after an interaction-binding fold
+    /// shrinks `eq_int`.  Called from `fix_last_variable` only when
+    /// the fold targeted the interaction axis.
+    fn recompute_pad_eq_int_sum(&mut self) {
+        // After folding interaction variable k, the new active_cols
+        // is `ceil(active_cols / 2)` (even/odd cols pair up).  But we
+        // can derive it more simply: the active region halves in
+        // length whenever the prior region had any "padding tail" that
+        // crosses the half-boundary.  For correctness in the trait
+        // refactor we just sum eq_int[active_cols..] from scratch
+        // after each fold.
+        // The new active_cols when binding the highest int var:
+        //   new_active = ceil(old_active / 2) — because LSB-first
+        //   layout pairs up (i, i + new_len), and any column in the
+        //   pad-tail of the OLD layout maps to either lo or hi side.
+        //   For simplicity (and to match the OLD code's `pad_eq_int_sum`
+        //   semantics, which were computed once at start over the
+        //   *post-fold* eq_int), we bound active_cols to eq_int.len().
+        let new_len = self.eq_int.len();
+        // Deterministic: cap to new_len.  When active_cols was already
+        // <= new_len, the active region is unchanged in coverage; when
+        // it exceeded new_len, the shrink pulled in pad rows.
+        self.active_cols = self.active_cols.min(new_len);
+        let mut s = EF::ZERO;
+        for &v in &self.eq_int[self.active_cols..] {
+            s += v;
+        }
+        self.pad_eq_int_sum = s;
+    }
+}
+
+impl<EF: Field + Send + Sync> SumcheckPolyBase for LogupRoundPolynomial<EF> {
+    fn num_variables(&self) -> u32 {
+        (self.remaining_row_vars + self.remaining_int_vars) as u32
+    }
+}
+
+impl<EF: Field + Send + Sync> ComponentPoly<EF> for LogupRoundPolynomial<EF> {
+    fn get_component_poly_evals(&self) -> Vec<EF> {
+        match &self.state {
+            PolynomialLayer::Packed { n0, d0, n1, d1 } => {
+                debug_assert_eq!(n0.len(), 1);
+                vec![n0[0], d0[0], n1[0], d1[0]]
             }
-        } else {
-            // Packed-mode fold — shared with Phase 2A.
-            let half = packed_n0.len() / 2;
-            let mut n0_n: Vec<EF> = vec![EF::ZERO; half];
-            let mut d0_n: Vec<EF> = vec![EF::ZERO; half];
-            let mut n1_n: Vec<EF> = vec![EF::ZERO; half];
-            let mut d1_n: Vec<EF> = vec![EF::ZERO; half];
-            {
+            PolynomialLayer::Chip(_) => {
+                panic!("get_component_poly_evals called before all rounds completed")
+            }
+        }
+    }
+}
+
+impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
+    fn fix_last_variable(mut self, alpha: EF) -> Self {
+        // Fold n/d data based on current mode.
+        match &mut self.state {
+            PolynomialLayer::Chip(state) => {
+                fold_chip_state_row(state, alpha);
+                self.remaining_row_vars -= 1;
+                if state.chip_rows == 1 && self.remaining_row_vars == 0 {
+                    // Don't transition yet if there are still row
+                    // variables left.  But chip_rows == 1 with
+                    // remaining_row_vars == 0 means we're done with
+                    // row binding; transition now.
+                    self.transition_to_packed();
+                }
+            }
+            PolynomialLayer::Packed { n0, d0, n1, d1 } => {
                 use p3_maybe_rayon::prelude::*;
-                let n0_in = &packed_n0;
-                let d0_in = &packed_d0;
-                let n1_in = &packed_n1;
-                let d1_in = &packed_d1;
+                let half = n0.len() / 2;
+                let mut n0_n: Vec<EF> = vec![EF::ZERO; half];
+                let mut d0_n: Vec<EF> = vec![EF::ZERO; half];
+                let mut n1_n: Vec<EF> = vec![EF::ZERO; half];
+                let mut d1_n: Vec<EF> = vec![EF::ZERO; half];
+                let n0_in: &[EF] = n0;
+                let d0_in: &[EF] = d0;
+                let n1_in: &[EF] = n1;
+                let d1_in: &[EF] = d1;
                 let chunk_size = 4096.min(half).max(1);
                 n0_n.par_chunks_mut(chunk_size)
                     .zip(d0_n.par_chunks_mut(chunk_size))
@@ -900,72 +962,163 @@ where
                             d1_o[i] = lo_d1 + alpha * (hi_d1 - lo_d1);
                         }
                     });
+                self.state =
+                    PolynomialLayer::Packed { n0: n0_n, d0: d0_n, n1: n1_n, d1: d1_n };
+                self.remaining_int_vars -= 1;
             }
-            packed_n0 = n0_n;
-            packed_d0 = d0_n;
-            packed_n1 = n1_n;
-            packed_d1 = d1_n;
         }
 
-        // Fold whichever eq factor corresponds to the variable bound
-        // this round.  Same MSB-first cadence as Phase 2A: row first,
-        // then interaction.
-        if eq_row.len() > 1 {
-            let half = eq_row.len() / 2;
-            let mut eq_row_n: Vec<EF> = vec![EF::ZERO; half];
-            {
-                use p3_maybe_rayon::prelude::*;
-                let src = &eq_row;
-                eq_row_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
-                    let lo = src[g];
-                    let hi = src[g + half];
-                    *slot = lo + alpha * (hi - lo);
-                });
-            }
-            eq_row = eq_row_n;
-            // Update pad_eq_int_sum's analogue is unnecessary — we
-            // only need it for row-binding rounds, and once we're in
-            // packed mode the contribution is already explicit.
+        // Fold the eq factor that corresponds to the variable bound
+        // this round.  MSB-first cadence: row first, then interaction.
+        // We use eq_row.len() > 1 as the discriminator (matches the
+        // original Phase 2A logic).
+        if self.eq_row.len() > 1 {
+            self.eq_row = fold_eq(&self.eq_row, alpha);
+            // Row fold doesn't affect pad_eq_int_sum.
         } else {
-            let half = eq_int.len() / 2;
-            let mut eq_int_n: Vec<EF> = vec![EF::ZERO; half];
-            {
-                use p3_maybe_rayon::prelude::*;
-                let src = &eq_int;
-                eq_int_n.par_iter_mut().enumerate().for_each(|(g, slot)| {
-                    let lo = src[g];
-                    let hi = src[g + half];
-                    *slot = lo + alpha * (hi - lo);
-                });
-            }
-            eq_int = eq_int_n;
+            self.eq_int = fold_eq(&self.eq_int, alpha);
+            self.recompute_pad_eq_int_sum();
         }
 
-        univariate_polys.push(UnivariatePolynomial::new(coeffs.to_vec()));
+        // Update the carried claim for next round's 3-eval trick.
+        if let Some(claim) = self.current_claim {
+            // Compute p(alpha) using the round-poly we already produced.
+            // But here we don't have access to the round poly — the
+            // driver uses `poly_eval` on the previously-emitted poly.
+            // So we set claim to None; the driver will pass the
+            // correct round_claim into the next sum_as_poly call.
+            //
+            // Actually, we don't need to track current_claim in self
+            // at all — the driver passes it in via the `claim`
+            // argument to `sum_as_poly_in_last_variable`.  Just clear
+            // it so the trait doesn't get confused.
+            let _ = claim;
+            self.current_claim = None;
+        }
+
+        self
     }
 
-    // Openings at the reduced point.  After all `total_vars` rounds we
-    // must be in packed mode and the packed MLE has length 1.
-    debug_assert!(in_packed_mode, "expected packed mode after all rounds");
-    debug_assert_eq!(packed_n0.len(), 1);
-    let numerator_0 = packed_n0[0];
-    let numerator_1 = packed_n1[0];
-    let denominator_0 = packed_d0[0];
-    let denominator_1 = packed_d1[0];
+    fn sum_as_poly_in_last_variable(&self, claim: Option<EF>) -> UnivariatePolynomial<EF> {
+        let claim_v = claim.expect("sum_as_poly_in_last_variable: claim required");
+        let evals = match &self.state {
+            PolynomialLayer::Chip(state) => round_poly_evaluations_chip_structured(
+                state,
+                &self.eq_int,
+                &self.eq_row,
+                self.pad_eq_int_sum,
+                self.lambda,
+                claim_v,
+            ),
+            PolynomialLayer::Packed { n0, d0, n1, d1 } => round_poly_evaluations(
+                &self.eq_int,
+                &self.eq_row,
+                n0,
+                d0,
+                n1,
+                d1,
+                self.lambda,
+                claim_v,
+            ),
+        };
+        let coeffs = poly_coefficients_from_evals(evals);
+        UnivariatePolynomial::new(coeffs.to_vec())
+    }
+}
 
-    // Final eval = eq(reduced_point) · [λ · (n0·d1 + n1·d0) + d0·d1].
-    debug_assert_eq!(eq_int.len(), 1);
-    debug_assert_eq!(eq_row.len(), 1);
-    let eq_final = eq_int[0] * eq_row[0];
-    let final_eval = eq_final
-        * (lambda * (numerator_0 * denominator_1 + numerator_1 * denominator_0)
-            + denominator_0 * denominator_1);
+impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomial<EF> {
+    type NextRoundPoly = Self;
+    fn fix_t_variables(self, alpha: EF, t: usize) -> Self::NextRoundPoly {
+        assert_eq!(t, 1, "Ziren only supports t = 1 first-round binding");
+        self.fix_last_variable(alpha)
+    }
+    fn sum_as_poly_in_last_t_variables(
+        &self,
+        claim: Option<EF>,
+        t: usize,
+    ) -> UnivariatePolynomial<EF> {
+        assert_eq!(t, 1, "Ziren only supports t = 1 first-round binding");
+        self.sum_as_poly_in_last_variable(claim)
+    }
+}
 
-    let sumcheck_proof = PartialSumcheckProof {
-        univariate_polys,
-        claimed_sum,
-        point_and_eval: (reduced_point, final_eval),
-    };
+/// Prove one GKR round.
+///
+/// Runs a `num_row_variables + num_interaction_variables`-round
+/// degree-3 sumcheck on the layer's per-chip sub-MLEs, binding the
+/// previous-round claim `(numerator_eval, denominator_eval)` to the
+/// per-layer openings `(n_0, n_1, d_0, d_1)` at the sumcheck's reduced
+/// point.
+///
+/// ## Memory layout (Tier 1 Phase 2B — chip-structured folding)
+///
+/// During the first `num_row_variables` rounds the n/d data is kept
+/// in **per-chip** `Vec<Vec<EF>>` form (`Σ_c chip_rows × chip_cols`)
+/// rather than the layer-wide `2^total_vars × |EF|` flat tables.
+/// This mirrors SP1's `LogUpGkrCpuLayer` representation
+/// (`/tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs:106-225`)
+/// and avoids materialising the column-padded interaction axis.  On
+/// production reth shards the saving is on the order of 10–60×
+/// because `Σ chip_cols ≪ 2^num_int_vars` for most layer shapes.
+///
+/// ## Tier 1 Phase 3 — trait-driven sumcheck
+///
+/// The body now constructs a `LogupRoundPolynomial` and dispatches to
+/// the generic [`reduce_sumcheck_to_evaluation`] driver.  The
+/// transcript bytes (round polynomials, openings, final eval) are
+/// byte-identical to the post-Phase-2B prover; only the dispatch
+/// shape changes (manual loop → trait-driven driver).
+///
+/// The caller must sample `lambda` via the challenger BEFORE calling
+/// this function — it is passed in explicitly so the caller can use
+/// the same challenger state for downstream layers.
+#[allow(clippy::too_many_arguments)]
+pub fn prove_gkr_round<F, EF, Challenger>(
+    circuit: &GkrCircuitLayer<F, EF>,
+    eval_point: &[EF],
+    numerator_eval: EF,
+    denominator_eval: EF,
+    lambda: EF,
+    challenger: &mut Challenger,
+) -> LogupGkrRoundProof<EF>
+where
+    F: PrimeField,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    Challenger: FieldChallenger<F>,
+{
+    // Construct the trait-shaped sumcheck poly that wraps the layer
+    // data + eq tables + lambda.  See `LogupRoundPolynomial::new` for
+    // the construction details (chip-structured n/d storage,
+    // factored eq tables, padding-tail cached sum).
+    let poly = LogupRoundPolynomial::<EF>::new(
+        circuit,
+        eval_point,
+        numerator_eval,
+        denominator_eval,
+        lambda,
+    );
+    let claimed_sum = poly.claimed_sum();
+
+    // Single-poly call — `lambda` argument is unused inside the driver
+    // (RLC of one poly is identity).  We pass `EF::ONE` so callers
+    // that someday extend to multi-poly batching get a sensible
+    // default.
+    let (sumcheck_proof, component_evals) = reduce_sumcheck_to_evaluation::<F, EF, _, _>(
+        vec![poly],
+        challenger,
+        vec![claimed_sum],
+        1,
+        EF::ONE,
+    );
+
+    // Component evals layout: [n0, d0, n1, d1] per `ComponentPoly` impl.
+    debug_assert_eq!(component_evals.len(), 1);
+    let evals = &component_evals[0];
+    debug_assert_eq!(evals.len(), 4);
+    let numerator_0 = evals[0];
+    let denominator_0 = evals[1];
+    let numerator_1 = evals[2];
+    let denominator_1 = evals[3];
 
     LogupGkrRoundProof {
         numerator_0,
@@ -973,22 +1126,6 @@ where
         denominator_0,
         denominator_1,
         sumcheck_proof,
-    }
-}
-
-/// Observe an extension-field element into a base-field challenger
-/// by decomposing into its base-field components.  Mirrors the
-/// challenger protocol used elsewhere in Ziren (e.g.
-/// `FieldChallenger::observe_algebra_element`).
-#[inline]
-fn observe_ext<F, EF, Challenger>(challenger: &mut Challenger, v: EF)
-where
-    F: Field,
-    EF: BasedVectorSpace<F>,
-    Challenger: CanObserve<F>,
-{
-    for c in v.as_basis_coefficients_slice() {
-        challenger.observe(*c);
     }
 }
 
