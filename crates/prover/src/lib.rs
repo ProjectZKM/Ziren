@@ -661,6 +661,58 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
+    /// Build the bn254-Wrap (basefold) recursion program — terminal
+    /// stage analog of [`Self::wrap_program`] for the basefold pipeline.
+    ///
+    /// Differs from [`Self::shrink_program_basefold`] in two ways:
+    /// 1. Compiles with [`WrapConfig`] (instead of [`InnerConfig`]) so
+    ///    the resulting [`RecursionProgram`] is provable on the OuterSC
+    ///    (BN254-friendly) ring via [`Self::wrap_prover`], not the
+    ///    KoalaBear-side [`Self::shrink_prover`].
+    /// 2. Verifies the input proof against
+    ///    [`Self::shrink_prover`]`.machine()` (the machine that produced
+    ///    the shrink-basefold output we are wrapping), mirroring how the
+    ///    legacy [`Self::wrap_program`] verifies against `shrink_prover`.
+    ///
+    /// The `verify_wrap_basefold` body is generic over `C: CircuitConfig`
+    /// with `F=InnerVal` / `EF=InnerChallenge` / `Bit=Felt<KoalaBear>`,
+    /// and `WrapConfig` satisfies these bounds (see
+    /// `recursion/circuit/src/lib.rs:327`), so the same verifier function
+    /// works unchanged here.
+    ///
+    /// Not cached — like [`Self::shrink_program_basefold`], the program
+    /// is built fresh per call from the real input shape (cumulative-sum
+    /// maps, chip names, column counts).  `wrap_bn254` is invoked once
+    /// per end-to-end proof, so the per-call build cost is acceptable.
+    pub fn wrap_bn254_program_basefold(
+        &self,
+        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
+
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+
+        let builder_span = tracing::debug_span!("build wrap-bn254-basefold program").entered();
+        let mut builder = Builder::<WrapConfig>::default();
+        let input_var = input.read(&mut builder);
+        verify_wrap_basefold::<WrapConfig, InnerSC, _>(
+            &mut builder,
+            input_var,
+            self.shrink_prover.machine(),
+            max_log_row_count,
+        );
+        let operations = builder.into_operations();
+        builder_span.exit();
+
+        let compiler_span = tracing::debug_span!("compile wrap-bn254-basefold program").entered();
+        let mut compiler = AsmCompiler::<WrapConfig>::default();
+        let program = compiler.compile(operations);
+        compiler_span.exit();
+        Arc::new(program)
+    }
+
     pub fn get_recursion_core_inputs(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1404,6 +1456,73 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
+        // META #59 Phase 4 (#50): basefold-aware wrap_bn254 dispatch.
+        //
+        // When `ZIREN_USE_BASEFOLD=1` AND the input shrink-stage proof
+        // carries a basefold side channel, build the wrap_bn254 program
+        // via [`Self::wrap_bn254_program_basefold`] (which compiles a
+        // `WrapConfig`-rooted `RecursionProgram` from the basefold
+        // wrap-witness shape) instead of the legacy
+        // `ZKMCompressWithVKeyWitnessValues` + merkle-vk path.
+        //
+        // Mirrors the gate used by [`Self::shrink`] (#51).  Without this
+        // dispatch the legacy `wrap_program()` reads its merkle-shaped
+        // witness from a stream that the basefold compress / shrink
+        // pipeline never populated, panicking with "attempted to read
+        // from empty witness stream" (perf10 May 1, 2026).
+        //
+        // The witness stream uses `Witnessable::<WrapConfig>::write` —
+        // `ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2>` impls
+        // `Witnessable<C>` for any `C: CircuitConfig<F=InnerVal,
+        // EF=InnerChallenge, Bit=Felt<KoalaBear>>`, and `WrapConfig`
+        // satisfies that bound (see `recursion/circuit/src/lib.rs:327`).
+        let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
+            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+            .unwrap_or(true);
+        if use_basefold && compressed_proof.basefold_shard_proof.is_some() {
+            let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
+            let input = ZKMWrapBasefoldWitnessValues {
+                vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            };
+            let program = self.wrap_bn254_program_basefold(&input);
+
+            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                program.clone(),
+                self.shrink_prover.config().perm.clone(),
+            );
+            let mut witness_stream = Vec::new();
+            Witnessable::<WrapConfig>::write(&input, &mut witness_stream);
+            runtime.witness_stream = witness_stream.into();
+            runtime
+                .run()
+                .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
+            runtime.print_stats();
+            tracing::debug!("wrap_bn254 basefold program executed successfully");
+
+            let (wrap_pk, wrap_vk) = tracing::debug_span!("setup wrap_bn254 basefold")
+                .in_scope(|| self.wrap_prover.setup(&program));
+            if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
+                tracing::debug!("wrap verifier key set (basefold)");
+            }
+
+            let mut wrap_challenger = self.wrap_prover.config().challenger();
+            let time = std::time::Instant::now();
+            let mut wrap_proof = self
+                .wrap_prover
+                .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
+                .unwrap();
+            let elapsed = time.elapsed();
+            tracing::debug!("wrap_bn254 basefold proving time: {:?}", elapsed);
+            let mut wrap_challenger = self.wrap_prover.config().challenger();
+            self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
+            tracing::info!("wrapping (basefold) successful");
+
+            return Ok(ZKMReduceProof {
+                vk: wrap_vk,
+                proof: wrap_proof.shard_proofs.pop().unwrap(),
+            });
+        }
+
         let input = ZKMCompressWitnessValues {
             vks_and_proofs: vec![(compressed_vk, compressed_proof)],
             is_complete: true,
