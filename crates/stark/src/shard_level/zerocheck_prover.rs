@@ -48,11 +48,15 @@
 use std::collections::BTreeMap;
 
 use p3_air::Air;
-use p3_challenger::{CanObserve, FieldChallenger};
+use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 
+use super::sumcheck_poly::{
+    reduce_sumcheck_to_evaluation, ComponentPoly, SumcheckPoly, SumcheckPolyBase,
+    SumcheckPolyFirstRound,
+};
 use super::types::{LogUpEvaluations, PartialSumcheckProof, UnivariatePolynomial};
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
@@ -106,33 +110,29 @@ where
     padded
 }
 
-/// Shard-level zerocheck prover skeleton.
+/// Shard-level zerocheck prover.
 ///
 /// SP1 reference: `ShardProver::zerocheck` at
 /// `/tmp/sp1/crates/hypercube/src/prover/shard.rs:474-646`.
 ///
-/// # Status
+/// # Pipeline
 ///
-/// Returns a [`PartialSumcheckProof::dummy()`] for now.  The
-/// remaining work to land before this is production-callable:
+///   1. Sample three EF challenges from the transcript:
+///      `alpha` (per-chip constraint batching), `gkr_batch_open`
+///      (transcript alignment with the verifier — D1 fix), and
+///      `lambda` (inter-chip RLC).
+///   2. Build per-chip constraint tables `C_i: {0,1}^{m_i} → EF`
+///      via [`crate::zerocheck_prover::eval_constraints_on_hypercube_with_cumsums`]
+///      (per-chip rayon parallel — W3).
+///   3. Pad each table to `2^max_log_degree` and lambda-RLC them
+///      into a single combined table.
+///   4. Run the combined table through the trait-driven sumcheck
+///      driver [`crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation`]
+///      via [`ZerocheckRoundPolynomial`] (Tier 1 Phase 3 cutover).
 ///
-///   - Per-chip C-table generation: thread the
-///     `batching_challenge` (powers-of-alpha) into
-///     `eval_constraints_on_hypercube` for each chip, producing
-///     per-chip `Vec<EF>` of size `2^chip_log_degree`.
-///   - Padding to `max_log_degree`: lift each chip's table via
-///     [`pad_chip_table`].
-///   - Lambda-RLC: fold padded tables via [`combine_two_tables`]
-///     in a `lambda^i` accumulation.
-///   - Single shard-level sumcheck: feed the combined table
-///     through `prove_zerocheck_with_challenger`.
-///   - Shape projection: convert Ziren's
-///     `ZerocheckProof::rounds: Vec<[EF; 3]>` (degree-2 sample
-///     points) into `UnivariatePolynomial::coefficients` via
-///     Lagrange interpolation on `{0, 1, 2}`.
-///
-/// All four steps are mechanical; bundling them comes in
-/// subsequent iterations.
+/// The transcript bytes are byte-identical to the prior ad-hoc
+/// loop — see [`ZerocheckRoundPolynomial`] for the per-round
+/// arithmetic and the reduction equality.
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
@@ -303,30 +303,40 @@ where
     };
 
     // Step 5: run a single shard-level sumcheck on the combined
-    // table, using SP1-shape transcript observations (4 monomial
-    // coefficients per round, matching verify_sumcheck_host).
-    prove_shard_zerocheck_sumcheck_sp1_transcript::<SC>(
-        &combined,
-        max_log_degree,
-        challenger,
-    )
+    // table, using the SumcheckPoly trait machinery introduced in
+    // Tier 1 Phase 3.  The wrapping `ZerocheckRoundPolynomial<EF>`
+    // produces a per-round `[c0, c1, ZERO, ZERO]` 4-coefficient
+    // polynomial (degree-1 padded to the verifier's
+    // `expected_degree = 3` shape — matching
+    // `verify_sumcheck_host` at line 882).  See the trait impls
+    // below for the round-poly arithmetic; the byte-identity proof
+    // (this driver path produces the same coefficients, transcript
+    // observations, reduced point, and final claim as the prior
+    // ad-hoc loop) is documented on
+    // [`ZerocheckRoundPolynomial`].
+    prove_shard_zerocheck_via_trait::<SC>(combined, max_log_degree, challenger)
 }
 
-/// Direct sumcheck prover for shard-level zerocheck, matching the
-/// transcript pattern of [`super::verifier::verify_sumcheck_host`].
+/// Trait-driven sumcheck for the shard-level zerocheck.
 ///
-/// Proves `Σ_b C(b) == 0` (the vanishing-constraint claim) via a
-/// direct degree-1 sumcheck — no eq-wedge factor, unlike Ziren's
-/// [`prove_zerocheck_with_challenger`] which samples an r-point from
-/// the transcript (that r-sampling would desync with the shard-level
-/// verifier which doesn't mirror it).
+/// Wraps the combined per-shard C-table in a
+/// [`ZerocheckRoundPolynomial`] and dispatches to the generic
+/// [`reduce_sumcheck_to_evaluation`] driver.  Result is byte-identical
+/// to the prior `prove_shard_zerocheck_sumcheck_sp1_transcript`:
 ///
-/// Round polynomials are linear in X (`p(X) = Σ_{b'} C(X, b')`), so
-/// they have 2 coefficients natively.  We pad to 4 coefs with
-/// trailing zeros to satisfy the verifier's `expected_degree = 3`
-/// shape check — the polynomial evaluations are unchanged.
-fn prove_shard_zerocheck_sumcheck_sp1_transcript<SC>(
-    c_evals: &[Challenge<SC>],
+/// * Each round emits a 4-coefficient `[c0, c1, ZERO, ZERO]` polynomial
+///   (degree-1 padded to the verifier's `expected_degree = 3` shape).
+/// * Each round observes all 4 coefficients into the challenger via
+///   `BasedVectorSpace::as_basis_coefficients_slice`.
+/// * The reduced point is `insert(0, alpha)`-built — round 0's α
+///   ends up at `point[n-1]`, round (n-1)'s α at `point[0]`.
+/// * `claimed_sum = ZERO` (a true zerocheck).
+/// * `point_and_eval.1 = c_table[0]` after the final fold, which
+///   equals `poly_eval(last_round_poly, alpha_last)` (the driver
+///   computes the latter; both equal because `Σ c_table_new == p(α)`
+///   under MSB fold).
+fn prove_shard_zerocheck_via_trait<SC>(
+    c_table: Vec<Challenge<SC>>,
     num_vars: usize,
     challenger: &mut SC::Challenger,
 ) -> PartialSumcheckProof<Challenge<SC>>
@@ -337,68 +347,201 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
 
-    debug_assert_eq!(c_evals.len(), 1 << num_vars);
+    debug_assert_eq!(c_table.len(), 1 << num_vars);
 
-    let mut c_table = c_evals.to_vec();
-
-    let mut univariate_polys: Vec<UnivariatePolynomial<Challenge<SC>>> =
-        Vec::with_capacity(num_vars);
-    let mut reduced_point: Vec<Challenge<SC>> = Vec::with_capacity(num_vars);
-
-    for _ in 0..num_vars {
-        let half = c_table.len() / 2;
-
-        // p(X) = Σ_{b'} C(b', X) is linear in X for a multilinear C
-        // when binding the **highest** remaining variable (MSB fold).
-        //   p(0) = Σ_{b'} C(b', 0) = sum of low-half entries (b < half)
-        //   p(1) = Σ_{b'} C(b', 1) = sum of high-half entries (b >= half)
-        let mut p0 = Challenge::<SC>::ZERO;
-        let mut p1 = Challenge::<SC>::ZERO;
-        for i in 0..half {
-            p0 += c_table[i];
-            p1 += c_table[i + half];
-        }
-
-        // Monomial coefficients of p(X) = a + b·X with a = p(0),
-        // b = p(1) - p(0).  Pad to 4 coefs with trailing zeros to
-        // satisfy the verifier's degree-3 shape check.
-        let c0 = p0;
-        let c1 = p1 - p0;
-        let poly = UnivariatePolynomial {
-            coefficients: vec![c0, c1, Challenge::<SC>::ZERO, Challenge::<SC>::ZERO],
+    if num_vars == 0 {
+        // Edge case: zero-variable poly.  No rounds to run; the
+        // claim is just `c_table[0]` (which equals 0 for a true
+        // zerocheck since Σ_b C(b) = C() = 0).  This matches the
+        // prior ad-hoc loop's behaviour (the loop body never
+        // executes; final_claim falls through to c_table[0]).
+        let final_claim = if c_table.is_empty() {
+            Challenge::<SC>::ZERO
+        } else {
+            c_table[0]
         };
-
-        // Observe all 4 coefficients into the challenger (SP1-shape).
-        for c in &poly.coefficients {
-            for b in c.as_basis_coefficients_slice() {
-                challenger.observe(*b);
-            }
-        }
-
-        let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-        // MSB fold + insert-at-front: keep the LSB-first MLE
-        // invariant `reduced_point[k] = challenge for var k`.
-        reduced_point.insert(0, alpha);
-        univariate_polys.push(poly);
-
-        // MSB fold of the constraint table: out[g] = lo + α·(hi - lo)
-        // with lo = c_table[g], hi = c_table[g + half].
-        let mut next: Vec<Challenge<SC>> = vec![Challenge::<SC>::ZERO; half];
-        for g in 0..half {
-            let lo = c_table[g];
-            let hi = c_table[g + half];
-            next[g] = lo + alpha * (hi - lo);
-        }
-        c_table = next;
+        return PartialSumcheckProof {
+            univariate_polys: Vec::new(),
+            claimed_sum: Challenge::<SC>::ZERO,
+            point_and_eval: (Vec::new(), final_claim),
+        };
     }
 
-    // Final claim: c_table has been folded to a single element.
-    let final_claim = if c_table.is_empty() { Challenge::<SC>::ZERO } else { c_table[0] };
+    let poly = ZerocheckRoundPolynomial::<Challenge<SC>>::new(c_table);
+    let (mut proof, _component_evals) = reduce_sumcheck_to_evaluation::<
+        Val<SC>,
+        Challenge<SC>,
+        ZerocheckRoundPolynomial<Challenge<SC>>,
+        SC::Challenger,
+    >(
+        vec![poly],
+        challenger,
+        vec![Challenge::<SC>::ZERO],
+        1,
+        Challenge::<SC>::ONE,
+    );
+    // `claimed_sum` returned by the driver is `rlc_eval(&claims, λ) =
+    // ZERO` (single-poly RLC degenerates to the lone claim).  This
+    // equals the prior implementation's `claimed_sum: ZERO`.  Mark
+    // the field explicitly to make the byte-identity invariant
+    // self-evident at the call site.
+    proof.claimed_sum = Challenge::<SC>::ZERO;
+    proof
+}
 
-    PartialSumcheckProof {
-        univariate_polys,
-        claimed_sum: Challenge::<SC>::ZERO, // zerocheck: claimed_sum is 0
-        point_and_eval: (reduced_point, final_claim),
+/// Trait-shaped wrapper around the combined per-shard zerocheck
+/// C-table, plumbed through
+/// [`crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation`]
+/// (Tier 1 Phase 3).
+///
+/// # Round-poly arithmetic
+///
+/// The combined constraint table `C: {0,1}^n → EF` (built upstream by
+/// the lambda-RLC of per-chip C-tables) is multilinear, so the
+/// per-round polynomial under MSB fold is **linear in X**:
+///
+/// ```text
+///   p(X) = Σ_{b' ∈ {0,1}^{remaining-1}} C(b', X)
+///        = (1 - X) · Σ_{b'} C(b', 0) + X · Σ_{b'} C(b', 1)
+///        = sum_lo + X · (sum_hi - sum_lo)
+/// ```
+///
+/// where `sum_lo = Σ_{i < half} C[i]` and `sum_hi = Σ_{i < half}
+/// C[i + half]` (the low/high halves of the current `c_table`).
+///
+/// We pad the resulting `[sum_lo, sum_hi - sum_lo]` to four
+/// coefficients with trailing zeros — matching the verifier's
+/// `expected_degree = 3` shape check
+/// ([`crate::shard_level::verifier::verify_sumcheck_host`] line 882)
+/// and the prior ad-hoc loop's transcript bytes byte-for-byte.
+///
+/// # Vs the LogUp-GKR `LogupRoundPolynomial`
+///
+/// LogUp-GKR's round poly is degree-3 (4-eval form) because it
+/// multiplies an `eq` factor against a degree-3 numerator/denominator
+/// bracket.  The zerocheck round poly here is degree-1 (no `eq` factor,
+/// pure C-table sum) — but both pass through the same generic driver,
+/// so the trait machinery is shape-agnostic.
+///
+/// # Component poly evals
+///
+/// Zerocheck consumers don't read the component openings (only the
+/// `PartialSumcheckProof` is forwarded downstream via
+/// [`crate::shard_level::shard_proof::BasefoldShardProof::zerocheck_proof`]).
+/// We return `vec![c_table[0]]` after the final fold so the trait
+/// contract is well-formed; the value is discarded by the caller.
+pub struct ZerocheckRoundPolynomial<EF> {
+    /// Current folded C-table.  Length is `2^remaining_vars`; halves
+    /// each round under the MSB-fold convention `out[g] = lo + α·(hi -
+    /// lo)`.
+    c_table: Vec<EF>,
+    /// log₂ of the remaining table size — tracked separately so
+    /// `num_variables()` is O(1) and the construction-time
+    /// `num_vars` is preserved across folds (the table shrinks by 2×
+    /// per round, so `c_table.len() == 1 << remaining_vars` always
+    /// holds).
+    remaining_vars: usize,
+}
+
+impl<EF: Field + Send + Sync> ZerocheckRoundPolynomial<EF> {
+    /// Construct from an already-built combined C-table.  The table's
+    /// length must be a power of two (caller pads to `2^max_log_degree`
+    /// upstream).
+    pub fn new(c_table: Vec<EF>) -> Self {
+        debug_assert!(
+            c_table.len().is_power_of_two(),
+            "ZerocheckRoundPolynomial: c_table.len() must be a power of two, got {}",
+            c_table.len()
+        );
+        let remaining_vars = c_table.len().trailing_zeros() as usize;
+        Self { c_table, remaining_vars }
+    }
+}
+
+impl<EF: Field + Send + Sync> SumcheckPolyBase for ZerocheckRoundPolynomial<EF> {
+    fn num_variables(&self) -> u32 {
+        self.remaining_vars as u32
+    }
+}
+
+impl<EF: Field + Send + Sync> ComponentPoly<EF> for ZerocheckRoundPolynomial<EF> {
+    fn get_component_poly_evals(&self) -> Vec<EF> {
+        // After all rounds the table has folded to a single element.
+        // Zerocheck consumers don't actually use component openings —
+        // we expose the final fold value to satisfy the trait contract.
+        debug_assert_eq!(
+            self.c_table.len(),
+            1,
+            "get_component_poly_evals: called with c_table.len() = {} (expected 1 after all folds)",
+            self.c_table.len()
+        );
+        vec![self.c_table[0]]
+    }
+}
+
+impl<EF: Field + Send + Sync> SumcheckPoly<EF> for ZerocheckRoundPolynomial<EF> {
+    fn fix_last_variable(mut self, alpha: EF) -> Self {
+        // MSB fold: out[g] = c_table[g] + α·(c_table[g+half] -
+        // c_table[g]).  Allocates a fresh `Vec<EF>` (matches the prior
+        // loop's `vec![ZERO; half] + write` pattern); the truncation
+        // is implicit in the new vector's size.
+        debug_assert!(
+            self.c_table.len() >= 2,
+            "fix_last_variable: requires >= 2 entries"
+        );
+        let half = self.c_table.len() / 2;
+        let mut next: Vec<EF> = vec![EF::ZERO; half];
+        for g in 0..half {
+            let lo = self.c_table[g];
+            let hi = self.c_table[g + half];
+            next[g] = lo + alpha * (hi - lo);
+        }
+        self.c_table = next;
+        self.remaining_vars -= 1;
+        self
+    }
+
+    fn sum_as_poly_in_last_variable(&self, _claim: Option<EF>) -> UnivariatePolynomial<EF> {
+        // We compute p(0) = sum_lo and p(1) = sum_hi directly rather
+        // than using the 3-eval trick (`p(0) = claim - p(1)`).  This
+        // matches the prior loop's transcript bytes exactly: the
+        // emitted `[c0, c1, ZERO, ZERO]` is built from the same
+        // sum_lo/sum_hi pair the prior loop computed.  The `claim`
+        // argument is unused because the round poly is degree 1 and
+        // cheap to compute directly.
+        let half = self.c_table.len() / 2;
+        let mut p0 = EF::ZERO;
+        let mut p1 = EF::ZERO;
+        for i in 0..half {
+            p0 += self.c_table[i];
+            p1 += self.c_table[i + half];
+        }
+        // Monomial form of p(X) = a + b·X with a = p(0), b = p(1) -
+        // p(0).  Pad to 4 coefficients with trailing zeros for the
+        // verifier's `expected_degree = 3` shape check.
+        let c0 = p0;
+        let c1 = p1 - p0;
+        UnivariatePolynomial {
+            coefficients: vec![c0, c1, EF::ZERO, EF::ZERO],
+        }
+    }
+}
+
+impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for ZerocheckRoundPolynomial<EF> {
+    type NextRoundPoly = Self;
+
+    fn fix_t_variables(self, alpha: EF, t: usize) -> Self::NextRoundPoly {
+        assert_eq!(t, 1, "ZerocheckRoundPolynomial only supports t = 1");
+        self.fix_last_variable(alpha)
+    }
+
+    fn sum_as_poly_in_last_t_variables(
+        &self,
+        claim: Option<EF>,
+        t: usize,
+    ) -> UnivariatePolynomial<EF> {
+        assert_eq!(t, 1, "ZerocheckRoundPolynomial only supports t = 1");
+        self.sum_as_poly_in_last_variable(claim)
     }
 }
 

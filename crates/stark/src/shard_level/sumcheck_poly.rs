@@ -8,10 +8,14 @@
 //!
 //! The intent is to *uniformize* sumcheck driving across Ziren — every
 //! "polynomial that can be sumchecked" implements the trait and the
-//! generic driver below walks it round-by-round.  Today only
-//! `prove_gkr_round` (in `crates/stark/src/shard_level/row_gkr/round.rs`)
-//! consumes this scaffolding; `prove_shard_zerocheck` may follow in a
-//! later commit.
+//! generic driver below walks it round-by-round.  Two consumers today:
+//!   * `prove_gkr_round` (in `crates/stark/src/shard_level/row_gkr/round.rs`)
+//!     via [`crate::shard_level::row_gkr::round::LogupRoundPolynomial`]
+//!     (4-eval / degree-3 round shape).
+//!   * `prove_shard_zerocheck` (in
+//!     `crates/stark/src/shard_level/zerocheck_prover.rs`) via
+//!     [`crate::shard_level::zerocheck_prover::ZerocheckRoundPolynomial`]
+//!     (linear / `[c0, c1, 0, 0]` 4-coefficient round shape).
 //!
 //! ## Convention vs SP1
 //!
