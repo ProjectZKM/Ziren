@@ -93,6 +93,19 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
+    // Per-shard phase timing instrumentation.  Each phase span emits
+    // an `info!(elapsed_ms = ..., phase = "...", chips = ...)` line on
+    // exit so a downstream perf run reveals the true per-shard cost
+    // breakdown.  Parent caller (e.g. core_multi_gpu / prove_shards)
+    // can wrap with its own `shard = N` span — that field is
+    // automatically inherited via tracing's parent-context machinery.
+    let n_chips = chips.len();
+    let _shard_span = tracing::info_span!(
+        "prove_shard_to_basefold",
+        chips = n_chips
+    )
+    .entered();
+
     // ── Phase 1: Transcript prologue ────────────────────────
     //
     // Observe public values, main commitment, and per-chip
@@ -100,33 +113,53 @@ where
     // (count + name length + name bytes) binds the verifier's
     // post-commit challenges to the shard's chip-set identity.
 
-    for &pv in public_values.iter() {
-        challenger.observe(pv);
-    }
-    for &c in main_commitment.iter() {
-        challenger.observe(c);
-    }
-    let num_chips = Val::<SC>::from_u64(chips.len() as u64);
-    challenger.observe(num_chips);
-    for chip in chips.iter() {
-        let name_bytes = chip.name();
-        let len_felt = Val::<SC>::from_u64(name_bytes.len() as u64);
-        challenger.observe(len_felt);
-        for byte in name_bytes.bytes() {
-            challenger.observe(Val::<SC>::from_u64(byte as u64));
+    let _t_phase1 = std::time::Instant::now();
+    {
+        let _span = tracing::info_span!("phase_transcript_prologue").entered();
+        for &pv in public_values.iter() {
+            challenger.observe(pv);
+        }
+        for &c in main_commitment.iter() {
+            challenger.observe(c);
+        }
+        let num_chips = Val::<SC>::from_u64(chips.len() as u64);
+        challenger.observe(num_chips);
+        for chip in chips.iter() {
+            let name_bytes = chip.name();
+            let len_felt = Val::<SC>::from_u64(name_bytes.len() as u64);
+            challenger.observe(len_felt);
+            for byte in name_bytes.bytes() {
+                challenger.observe(Val::<SC>::from_u64(byte as u64));
+            }
         }
     }
+    tracing::info!(
+        elapsed_ms = _t_phase1.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "transcript",
+        "shard phase done"
+    );
 
     // ── Phase 2: LogUp-GKR ─────────────────────────────────
     // SP1-style row-only reduction: emits circuit_output of length
     // 2^(num_interaction_variables + 1) matching the recursion verifier.
     // See docs/task_23_blocker.md for the protocol mismatch this fixes.
-    let logup_gkr_proof = prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
-        chips,
-        preprocessed_traces,
-        main_traces,
-        max_log_row_count,
-        challenger,
+    let _t_phase2 = std::time::Instant::now();
+    let logup_gkr_proof = {
+        let _span = tracing::info_span!("phase_logup_gkr").entered();
+        prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
+            chips,
+            preprocessed_traces,
+            main_traces,
+            max_log_row_count,
+            challenger,
+        )
+    };
+    tracing::info!(
+        elapsed_ms = _t_phase2.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "logup_gkr",
+        "shard phase done"
     );
 
     // ── Phase 3: Zerocheck ─────────────────────────────────
@@ -135,14 +168,24 @@ where
     // so the zerocheck prover can build its initial sumcheck
     // claims from them (matches SP1's wiring at
     // `prover/shard.rs:560-572`).
-    let zerocheck_proof = prove_shard_zerocheck::<SC, A>(
-        chips,
-        preprocessed_traces,
-        main_traces,
-        &logup_gkr_proof.logup_evaluations,
-        &public_values,
-        max_log_row_count,
-        challenger,
+    let _t_phase3 = std::time::Instant::now();
+    let zerocheck_proof = {
+        let _span = tracing::info_span!("phase_zerocheck").entered();
+        prove_shard_zerocheck::<SC, A>(
+            chips,
+            preprocessed_traces,
+            main_traces,
+            &logup_gkr_proof.logup_evaluations,
+            &public_values,
+            max_log_row_count,
+            challenger,
+        )
+    };
+    tracing::info!(
+        elapsed_ms = _t_phase3.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "zerocheck",
+        "shard phase done"
     );
 
     // Phase 3 → 4 bridge: observe per-chip opening count + openings
@@ -152,7 +195,9 @@ where
     // prover and verifier sides.  Order MUST match verifier: num_chips
     // (felt), then for each chip in `chips` order: preprocessed local
     // basis coefficients, then main local basis coefficients.
+    let _t_phase35 = std::time::Instant::now();
     {
+        let _span = tracing::info_span!("phase_bridge_3_4").entered();
         use p3_field::BasedVectorSpace;
         let num_chips_felt = Val::<SC>::from_u64(chips.len() as u64);
         challenger.observe(num_chips_felt);
@@ -177,6 +222,12 @@ where
             }
         }
     }
+    tracing::info!(
+        elapsed_ms = _t_phase35.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "bridge_3_4",
+        "shard phase done"
+    );
 
     // ── Phase 4: Jagged-PCS opening ────────────────────────
     //
@@ -190,14 +241,26 @@ where
     //     when SC is KoalaBearPoseidon2 (full transcript binding).
     //     Falls back to a fresh challenger + empty bytes when SC
     //     isn't the KoalaBear configuration.
-    let evaluation_proof = emit_jagged_pcs_bytes::<SC, A>(
-        chips,
-        main_traces,
-        &logup_gkr_proof.logup_evaluations.point,
-        challenger,
+    let _t_phase4 = std::time::Instant::now();
+    let evaluation_proof = {
+        let _span = tracing::info_span!("phase_jagged_pcs").entered();
+        emit_jagged_pcs_bytes::<SC, A>(
+            chips,
+            main_traces,
+            &logup_gkr_proof.logup_evaluations.point,
+            challenger,
+        )
+    };
+    tracing::info!(
+        elapsed_ms = _t_phase4.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "jagged_pcs",
+        "shard phase done"
     );
 
     // ── Phase 5: Assembly ──────────────────────────────────
+    let _t_phase5 = std::time::Instant::now();
+    let _phase5_span = tracing::info_span!("phase_assembly").entered();
     //
     // Build per-chip opened_values from the LogUp-GKR phase's
     // chip_openings (`logup_evaluations.chip_openings`).  The
@@ -277,7 +340,7 @@ where
     // `BasefoldShardProof::{logup_gkr_proof, zerocheck_proof}`
     // fields are typed to `LogupGkrProof`/`PartialSumcheckProof`
     // — pass them through directly.
-    BasefoldShardProof {
+    let proof = BasefoldShardProof {
         public_values,
         main_commitment,
         logup_gkr_proof,
@@ -286,7 +349,15 @@ where
         chip_log_heights,
         chip_cumulative_sums,
         evaluation_proof,
-    }
+    };
+    drop(_phase5_span);
+    tracing::info!(
+        elapsed_ms = _t_phase5.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "assembly",
+        "shard phase done"
+    );
+    proof
 }
 
 /// Emit jagged-PCS opening bytes by driving

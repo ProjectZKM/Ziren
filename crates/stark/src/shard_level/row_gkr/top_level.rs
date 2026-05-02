@@ -111,7 +111,19 @@ where
         .unwrap_or(0);
     let num_row_variables = max_height.max(1).next_power_of_two().trailing_zeros().max(2) as usize;
 
+    // Per-shard LogUp-GKR sub-phase timing.  Three sub-phases:
+    //   (a) first-layer build (Step 2 — build_gkr_circuit; per-chip
+    //       interaction-MLE construction, the typical hot path for
+    //       multi-table reth/keccak workloads).
+    //   (b) layer transitions / sumcheck rounds (Step 5 — per-layer
+    //       degree-3 sumcheck; bottom-up).
+    //   (c) output extraction (Step 6 — per-chip trace MLE evals at
+    //       the terminal eval_point).
+    let n_chips = chips.len();
+
     // Step 2: build GKR circuit + extract output MLEs.
+    let _t_first = std::time::Instant::now();
+    let _first_span = tracing::info_span!("logup_gkr_first_layer").entered();
     let (output, mut circuit) = build_gkr_circuit::<F, EF, A>(
         chips,
         preprocessed_traces,
@@ -122,6 +134,13 @@ where
     );
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
+    drop(_first_span);
+    tracing::info!(
+        elapsed_ms = _t_first.elapsed().as_millis() as u64,
+        chips = n_chips,
+        sub_phase = "first_layer",
+        "logup_gkr sub-phase done"
+    );
 
     // Step 2.5: observe circuit_output into the challenger before
     // sampling eval_point.  Mirrors `verify_logup_gkr_host` lines
@@ -183,6 +202,8 @@ where
     let mut round_proofs = Vec::with_capacity(circuit.layers.len());
     circuit.layers.reverse();
 
+    let _t_layers = std::time::Instant::now();
+    let _layers_span = tracing::info_span!("logup_gkr_layer_transitions").entered();
     // Skip the num_row_variables == 0 terminal (unused — only there to
     // enable clean termination of the build loop).
     for layer in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
@@ -225,6 +246,15 @@ where
         eval_point = next_eval_point;
         round_proofs.push(round_proof);
     }
+    let n_layers = round_proofs.len();
+    drop(_layers_span);
+    tracing::info!(
+        elapsed_ms = _t_layers.elapsed().as_millis() as u64,
+        chips = n_chips,
+        layers = n_layers,
+        sub_phase = "layer_transitions",
+        "logup_gkr sub-phase done"
+    );
 
     // Step 6: per-chip trace evaluations at the terminal eval_point.
     // The eval_point has dimension (num_row_variables + num_interaction_variables + 1)
@@ -235,6 +265,8 @@ where
     // Phase 4 perf fix (Apr 25 2026): parallelize per-chip evaluation.
     // Each chip's trace_evaluations is independent; parallelism here
     // mirrors the per-chip pattern used elsewhere in the basefold path.
+    let _t_extract = std::time::Instant::now();
+    let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
         .par_iter()
@@ -301,6 +333,13 @@ where
             )
         })
         .collect();
+    drop(_extract_span);
+    tracing::info!(
+        elapsed_ms = _t_extract.elapsed().as_millis() as u64,
+        chips = n_chips,
+        sub_phase = "output_extract",
+        "logup_gkr sub-phase done"
+    );
 
     // Step 7: assemble.
     // The LogUpEvaluations.point is the trace-dimension slice of the

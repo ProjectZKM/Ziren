@@ -343,8 +343,24 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
+        // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
+        // the numbered protocol steps below: (1) metadata, (2) commit
+        // (incl. dense materialize + BaseFold encode), (3) per-chip
+        // y_{c,j} evaluation, (4) jagged-sumcheck reduction, (5) BaseFold
+        // open at z*.
+        let n_chips = chip_traces.len();
+
         // (1) Pack metadata.
+        let _t_meta = std::time::Instant::now();
+        let _meta_span = tracing::info_span!("jagged_compute_metadata").entered();
         let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        drop(_meta_span);
+        tracing::info!(
+            elapsed_ms = _t_meta.elapsed().as_millis() as u64,
+            chips = n_chips,
+            sub_phase = "compute_metadata",
+            "jagged sub-phase done"
+        );
 
         // (2) Commit dense as a single Mle via BaseFold-stacked.  The
         // stacked PCS interleaves into stripes of bounded size — the
@@ -358,6 +374,8 @@ pub mod jagged {
         // 112 GB RSS).  Re-materialization is a cheap linear pass over
         // `chip_traces` compared to the LDE / stripe work already done
         // in the commit.
+        let _t_commit = std::time::Instant::now();
+        let _commit_span = tracing::info_span!("jagged_dense_commit").entered();
         let (commit, prover_data) = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
@@ -368,6 +386,14 @@ pub mod jagged {
             )];
             commit_basefold_late_binding(dense_traces, challenger)
         };
+        drop(_commit_span);
+        tracing::info!(
+            elapsed_ms = _t_commit.elapsed().as_millis() as u64,
+            chips = n_chips,
+            log_dense_size = packing.log_dense_size as u64,
+            sub_phase = "dense_commit",
+            "jagged sub-phase done"
+        );
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
         //
@@ -376,6 +402,8 @@ pub mod jagged {
         // (chip × col × row) is O(N_chips · max_w · max_h) which for
         // a 22-chip MIPS shard padded to 2^19 rows hits ~10M+ EF
         // multiply-adds. Each chip × column reduction is independent.
+        let _t_yvals = std::time::Instant::now();
+        let _yvals_span = tracing::info_span!("jagged_y_per_chip").entered();
         use p3_maybe_rayon::prelude::*;
         let y_per_chip: Vec<Vec<InnerChallenge>> = chip_traces
             .par_iter()
@@ -399,6 +427,13 @@ pub mod jagged {
                     .collect::<Vec<_>>()
             })
             .collect();
+        drop(_yvals_span);
+        tracing::info!(
+            elapsed_ms = _t_yvals.elapsed().as_millis() as u64,
+            chips = n_chips,
+            sub_phase = "y_per_chip",
+            "jagged sub-phase done"
+        );
 
         // (4) Re-materialize dense_q for the sumcheck reduction, then
         // drop it immediately after.  This is the counterpart of the
@@ -433,6 +468,8 @@ pub mod jagged {
             });
         }
 
+        let _t_red = std::time::Instant::now();
+        let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
@@ -444,14 +481,30 @@ pub mod jagged {
                 challenger,
             )
         };
+        drop(_red_span);
+        tracing::info!(
+            elapsed_ms = _t_red.elapsed().as_millis() as u64,
+            chips = n_chips,
+            sub_phase = "sumcheck_reduce",
+            "jagged sub-phase done"
+        );
 
         // (5) Open the BaseFold commit at z*.
         // The reduction's eval_point matches the BaseFold eval point
         // dimension (= log_dense_size) by construction.
+        let _t_open = std::time::Instant::now();
+        let _open_span = tracing::info_span!("jagged_basefold_open").entered();
         let proof = open_basefold_late_binding(
             prover_data,
             reduction.eval_point.clone(),
             challenger,
+        );
+        drop(_open_span);
+        tracing::info!(
+            elapsed_ms = _t_open.elapsed().as_millis() as u64,
+            chips = n_chips,
+            sub_phase = "basefold_open",
+            "jagged sub-phase done"
         );
 
         let packing_meta = PackingMeta {

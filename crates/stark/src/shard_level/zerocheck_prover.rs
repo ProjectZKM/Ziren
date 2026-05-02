@@ -150,6 +150,13 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
 
+    // Per-shard zerocheck sub-phase timing.  Three sub-phases:
+    //   (a) per-chip C-table build (Step 2 par_iter — typically the
+    //       hot kernel for column-rich chips like Cpu, MemoryLocal).
+    //   (b) lambda-RLC fold (Step 4 — N×target_size ext-mul-adds).
+    //   (c) sumcheck driver (Step 5 — log_n rounds of MSB folds).
+    let n_chips = chips.len();
+
     // Step 1: sample the per-chip constraint-batching challenge
     // (powers-of-alpha), the gkr_batch_open challenge (transcript
     // alignment with verify_zerocheck_host — see verifier.rs:544),
@@ -198,6 +205,8 @@ where
     // failure, etc.) fall through to the per-chip GPU/CPU path inside
     // the par_iter — each chip's `gpu_batched_results[idx]` is checked
     // at the top of the per-chip body.
+    let _t_ctable = std::time::Instant::now();
+    let _ctable_span = tracing::info_span!("zerocheck_ctable_build").entered();
     let gpu_batched_results: Option<Vec<Option<Vec<Challenge<SC>>>>> =
         compute_gpu_batched_pre_pass::<SC, A>(
             chips,
@@ -408,6 +417,14 @@ where
         })
         .collect();
 
+    drop(_ctable_span);
+    tracing::info!(
+        elapsed_ms = _t_ctable.elapsed().as_millis() as u64,
+        chips = n_chips,
+        sub_phase = "ctable_build",
+        "zerocheck sub-phase done"
+    );
+
     // Step 3: determine the shard's max log_degree (== sumcheck
     // round count) and pad each chip table up to that size.
     //
@@ -418,6 +435,8 @@ where
     // recursion verifier enforces
     // `zerocheck_point.dim == pcs_max_log_row_count` at
     // `recursion/circuit/src/zerocheck.rs:488`.
+    let _t_rlc = std::time::Instant::now();
+    let _rlc_span = tracing::info_span!("zerocheck_lambda_rlc").entered();
     let shard_log_row_count: usize = main_traces
         .iter()
         .map(|t| {
@@ -465,6 +484,14 @@ where
         acc
     };
 
+    drop(_rlc_span);
+    tracing::info!(
+        elapsed_ms = _t_rlc.elapsed().as_millis() as u64,
+        chips = n_chips,
+        sub_phase = "lambda_rlc",
+        "zerocheck sub-phase done"
+    );
+
     // Step 5: run a single shard-level sumcheck on the combined
     // table, using the SumcheckPoly trait machinery introduced in
     // Tier 1 Phase 3.  The wrapping `ZerocheckRoundPolynomial<EF>`
@@ -477,7 +504,17 @@ where
     // observations, reduced point, and final claim as the prior
     // ad-hoc loop) is documented on
     // [`ZerocheckRoundPolynomial`].
-    prove_shard_zerocheck_via_trait::<SC>(combined, max_log_degree, challenger)
+    let _t_sumcheck = std::time::Instant::now();
+    let _sumcheck_span = tracing::info_span!("zerocheck_sumcheck").entered();
+    let proof = prove_shard_zerocheck_via_trait::<SC>(combined, max_log_degree, challenger);
+    drop(_sumcheck_span);
+    tracing::info!(
+        elapsed_ms = _t_sumcheck.elapsed().as_millis() as u64,
+        chips = n_chips,
+        sub_phase = "sumcheck",
+        "zerocheck sub-phase done"
+    );
+    proof
 }
 
 /// Trait-driven sumcheck for the shard-level zerocheck.
