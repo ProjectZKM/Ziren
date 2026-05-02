@@ -43,7 +43,7 @@
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{BaseAluEvent, ExtAluEvent, Poseidon2Event, SelectEvent};
+use crate::{BaseAluEvent, BatchFRIEvent, ExtAluEvent, FriFoldEvent, Poseidon2Event, SelectEvent};
 
 // ────────────────────────────────────────────────────────────────────
 // SelectChip device-tracegen hook
@@ -218,4 +218,138 @@ pub fn register_ext_alu_device_trace_hook(
 #[must_use]
 pub fn get_ext_alu_device_trace_hook() -> Option<ExtAluChipDeviceTraceFn> {
     EXT_ALU_DEVICE_TRACE_HOOK.get().copied()
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Poseidon2SkinnyChip device-tracegen hook (integration #5 — sister
+// of #4 Poseidon2Wide; multi-row-per-event skinny variant).
+// ────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU `Poseidon2SkinnyChip<DEGREE>` trace generator.
+///
+/// Receives the host-side `poseidon2_events` slice and the padded row
+/// count.  Each event expands to `OUTPUT_ROUND_IDX + 1` = 11 rows
+/// (input row + 8 external rounds + 1 internal-rounds row + output row);
+/// trailing rows beyond `events.len() * 11` are zero-padded — matching
+/// the host `rows.resize(num_rows, [F::ZERO; NUM_POSEIDON2_COLS])`
+/// behavior in `chips/poseidon2_skinny/trace.rs`.
+///
+/// Width is fixed at `NUM_POSEIDON2_COLS` (28) regardless of `DEGREE`
+/// — the host `BaseAir::width()` impl in `chips/poseidon2_skinny/air.rs`
+/// returns that constant for all degrees ≥ 9 (the only supported set).
+///
+/// Returns a row-major matrix that is byte-identical to the host
+/// `Poseidon2SkinnyChip::generate_trace` output.
+///
+/// Returning `None` lets the caller fall back to the host
+/// implementation (e.g. when the GPU is unhealthy or a CUDA op fails).
+pub type Poseidon2SkinnyChipDeviceTraceFn = fn(
+    events: &[Poseidon2Event<KoalaBear>],
+    padded_nb_rows: usize,
+) -> Option<RowMajorMatrix<KoalaBear>>;
+
+static POSEIDON2_SKINNY_DEVICE_TRACE_HOOK: std::sync::OnceLock<Poseidon2SkinnyChipDeviceTraceFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU `Poseidon2SkinnyChip` tracegen.  Idempotent —
+/// returns `Err(_)` if a hook is already installed.  Called once by
+/// the `ziren-gpu` prover crate at startup.
+pub fn register_poseidon2_skinny_device_trace_hook(
+    f: Poseidon2SkinnyChipDeviceTraceFn,
+) -> Result<(), Poseidon2SkinnyChipDeviceTraceFn> {
+    POSEIDON2_SKINNY_DEVICE_TRACE_HOOK.set(f)
+}
+
+/// Read the registered hook, if any.  Used by
+/// [`crate::chips::poseidon2_skinny::Poseidon2SkinnyChip::generate_trace`]
+/// under `ZIREN_GPU_TRACEGEN_DEVICE=1`.
+#[must_use]
+pub fn get_poseidon2_skinny_device_trace_hook() -> Option<Poseidon2SkinnyChipDeviceTraceFn> {
+    POSEIDON2_SKINNY_DEVICE_TRACE_HOOK.get().copied()
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FriFoldChip device-tracegen hook (integration #6 — sister of Select)
+// ────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU `FriFoldChip<DEGREE>` trace generator.
+///
+/// Receives the host-side `fri_fold_events` slice plus the padded row
+/// count; returns a row-major matrix that is byte-identical to the
+/// host `FriFoldChip::generate_trace` output.
+///
+/// The chip is parameterised by `DEGREE`, but the trace layout is
+/// `DEGREE`-independent (`BaseAir::width()` = `NUM_FRI_FOLD_COLS`,
+/// constant for all degrees).  Each event becomes one row holding
+/// `(z, alpha, x, p_at_x, p_at_z, alpha_pow_input, ro_input,
+/// alpha_pow_output, ro_output)` (one base felt + 8 extension `Block<F>`s
+/// = 33 base felts).  Padding rows beyond `events.len()` are
+/// zero-filled by the kernel's `cudaMemsetAsync` — matching the host
+/// `rows.resize(num_rows, [F::ZERO; NUM_FRI_FOLD_COLS])` behavior.
+///
+/// Returning `None` lets the caller fall back to the host
+/// implementation (e.g. when the GPU is unhealthy or a CUDA op fails).
+pub type FriFoldChipDeviceTraceFn = fn(
+    events: &[FriFoldEvent<KoalaBear>],
+    padded_nb_rows: usize,
+) -> Option<RowMajorMatrix<KoalaBear>>;
+
+static FRI_FOLD_DEVICE_TRACE_HOOK: std::sync::OnceLock<FriFoldChipDeviceTraceFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU `FriFoldChip` tracegen.  Idempotent — returns
+/// `Err(_)` if a hook is already installed.  Called once by the
+/// `ziren-gpu` prover crate at startup.
+pub fn register_fri_fold_device_trace_hook(
+    f: FriFoldChipDeviceTraceFn,
+) -> Result<(), FriFoldChipDeviceTraceFn> {
+    FRI_FOLD_DEVICE_TRACE_HOOK.set(f)
+}
+
+/// Read the registered hook, if any.  Used by
+/// [`crate::chips::fri_fold::FriFoldChip::generate_trace`] under
+/// `ZIREN_GPU_TRACEGEN_DEVICE=1`.
+#[must_use]
+pub fn get_fri_fold_device_trace_hook() -> Option<FriFoldChipDeviceTraceFn> {
+    FRI_FOLD_DEVICE_TRACE_HOOK.get().copied()
+}
+
+// ────────────────────────────────────────────────────────────────────
+// BatchFRIChip device-tracegen hook (integration #6 — sister of FriFold)
+// ────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU `BatchFRIChip<DEGREE>` trace generator.
+///
+/// Receives the host-side `batch_fri_events` slice plus the padded row
+/// count; returns a row-major matrix that is byte-identical to the
+/// host `BatchFRIChip::generate_trace` output.
+///
+/// Width is `NUM_BATCH_FRI_COLS` — `DEGREE` does not affect the row
+/// layout.  Each event becomes one row holding `(acc, alpha_pow,
+/// p_at_z, p_at_x)` (3 extension `Block<F>`s + 1 base felt = 13 base
+/// felts).  Padding rows beyond `events.len()` are zero-filled by the
+/// kernel's `cudaMemsetAsync`.
+///
+/// Returning `None` falls back to the host implementation.
+pub type BatchFRIChipDeviceTraceFn = fn(
+    events: &[BatchFRIEvent<KoalaBear>],
+    padded_nb_rows: usize,
+) -> Option<RowMajorMatrix<KoalaBear>>;
+
+static BATCH_FRI_DEVICE_TRACE_HOOK: std::sync::OnceLock<BatchFRIChipDeviceTraceFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU `BatchFRIChip` tracegen.  Idempotent.
+pub fn register_batch_fri_device_trace_hook(
+    f: BatchFRIChipDeviceTraceFn,
+) -> Result<(), BatchFRIChipDeviceTraceFn> {
+    BATCH_FRI_DEVICE_TRACE_HOOK.set(f)
+}
+
+/// Read the registered hook, if any.  Used by
+/// [`crate::chips::batch_fri::BatchFRIChip::generate_trace`] under
+/// `ZIREN_GPU_TRACEGEN_DEVICE=1`.
+#[must_use]
+pub fn get_batch_fri_device_trace_hook() -> Option<BatchFRIChipDeviceTraceFn> {
+    BATCH_FRI_DEVICE_TRACE_HOOK.get().copied()
 }
