@@ -320,6 +320,45 @@ where
                 if TypeId::of::<F>() == TypeId::of::<Kb>()
                     && TypeId::of::<EF>() == TypeId::of::<Ef4>()
                 {
+                    // FIX (perf23 pre-mortem #112 width-pad bug):
+                    // descriptors were built with chip's *declared* width
+                    // (BaseAir::width(chip.air)), runtime trace may be
+                    // narrower → cache lookup silently rejected.
+                    // Pad main/prep traces to chip widths here, mirroring
+                    // the #95 jagged-pad fix at prover.rs:386.
+                    use p3_air::BaseAir;
+                    let chip_main_width = <_ as BaseAir<F>>::width(&chip.air);
+                    let chip_prep_width = chip.preprocessed_width();
+                    let main_height = if main_trace.width == 0 { 0 } else { main_trace.values.len() / main_trace.width };
+                    let main_padded: Vec<F> = if main_trace.width == chip_main_width || main_trace.width == 0 {
+                        main_trace.values.clone()
+                    } else if main_trace.width < chip_main_width {
+                        let mut padded = vec![F::ZERO; main_height * chip_main_width];
+                        for r in 0..main_height {
+                            let src = &main_trace.values[r * main_trace.width..(r + 1) * main_trace.width];
+                            let dst = &mut padded[r * chip_main_width..r * chip_main_width + main_trace.width];
+                            dst.copy_from_slice(src);
+                        }
+                        padded
+                    } else {
+                        main_trace.values.clone()
+                    };
+                    let prep_height = if prep_trace.width == 0 { 0 } else { prep_trace.values.len() / prep_trace.width };
+                    let prep_padded: Vec<F> = if prep_trace.width == chip_prep_width || prep_trace.width == 0 {
+                        prep_trace.values.clone()
+                    } else if prep_trace.width < chip_prep_width {
+                        let mut padded = vec![F::ZERO; prep_height * chip_prep_width];
+                        for r in 0..prep_height {
+                            let src = &prep_trace.values[r * prep_trace.width..(r + 1) * prep_trace.width];
+                            let dst = &mut padded[r * chip_prep_width..r * chip_prep_width + prep_trace.width];
+                            dst.copy_from_slice(src);
+                        }
+                        padded
+                    } else {
+                        prep_trace.values.clone()
+                    };
+                    let main_padded_width = if main_trace.width == 0 { 0 } else { chip_main_width };
+                    let prep_padded_width = if prep_trace.width == 0 { 0 } else { chip_prep_width };
                     // Debug instrumentation: one-shot warn on first
                     // successful GPU dispatch.
                     use std::sync::OnceLock;
@@ -336,13 +375,13 @@ where
                     // EF == Ef4; slice/value reinterp is sound.
                     let r = unsafe {
                         let main_kb: &[Kb] = core::slice::from_raw_parts(
-                            main_trace.values.as_ptr().cast::<Kb>(),
-                            main_trace.values.len(),
+                            main_padded.as_ptr().cast::<Kb>(),
+                            main_padded.len(),
                         );
-                        let prep_kb: &[Kb] = if prep_trace.width > 0 {
+                        let prep_kb: &[Kb] = if prep_padded_width > 0 {
                             core::slice::from_raw_parts(
-                                prep_trace.values.as_ptr().cast::<Kb>(),
-                                prep_trace.values.len(),
+                                prep_padded.as_ptr().cast::<Kb>(),
+                                prep_padded.len(),
                             )
                         } else {
                             &[]
@@ -356,9 +395,9 @@ where
                         let result = gpu_hook(
                             &chip.name(),
                             main_kb,
-                            main_trace.width,
+                            main_padded_width,
                             prep_kb,
-                            prep_trace.width,
+                            prep_padded_width,
                             alpha_ef4,
                             betas_ef4,
                         );
