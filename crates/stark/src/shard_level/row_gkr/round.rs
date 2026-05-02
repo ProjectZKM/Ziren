@@ -1318,34 +1318,79 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 claim_v,
             ),
             PolynomialLayer::Packed { n0, d0, n1, d1 } => {
-                // Task #102 dispatch hook: when ZIREN_GPU_SUMCHECK=1 is
-                // set, route to the GPU round-poly evaluator
-                // (ziren-gpu/cuda/basefold/sumcheck_round.cuh +
-                // core/src/basefold/sumcheck_round.rs::sumcheck_round_poly_evals_ef).
-                // Currently a no-op fallback that warns and returns
-                // the host implementation — `zkm-stark` does not yet
-                // depend on `zkm-gpu-core`, so the actual dispatch
-                // body lands in a follow-up that adds the optional
-                // feature-gated dependency.  Mirrors the existing
-                // ZIREN_GPU_BASEFOLD pattern in
-                // basefold/stacked.rs:287-301.
+                // Task #102 dispatch hook (Phase 2): when
+                // ZIREN_GPU_SUMCHECK=1 AND a GPU evaluator is
+                // registered via
+                // `crate::shard_level::sumcheck_poly::register_gpu_sumcheck_hook`
+                // AND `EF` is the concrete `Ef4` type used in
+                // production reth, route to the registered GPU
+                // function-pointer.  Otherwise fall back to host
+                // round_poly_evaluations.
+                //
+                // The TypeId guard + transmute is sound because
+                // TypeId equality guarantees `EF` and `Ef4` are the
+                // same concrete type at runtime.  Generic-EF callers
+                // (test code, non-production paths) always take the
+                // host fallback.
                 if std::env::var("ZIREN_GPU_SUMCHECK")
                     .map(|v| v == "1")
                     .unwrap_or(false)
                 {
-                    use std::sync::OnceLock;
-                    static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                    WARN_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "ZIREN_GPU_SUMCHECK=1 set but GPU dispatch body not yet \
-                             wired in row_gkr/round.rs::sum_as_poly_in_last_variable; \
-                             falling back to host round_poly_evaluations.  \
-                             Next increment: feature-gate a zkm-gpu-core dependency \
-                             on zkm-stark and call \
-                             zkm_gpu_core::basefold::sumcheck_round::\
-                             sumcheck_round_poly_evals_ef.  See task #102."
-                        );
-                    });
+                    if let Some(gpu_hook) =
+                        crate::shard_level::sumcheck_poly::get_gpu_sumcheck_hook()
+                    {
+                        use core::any::TypeId;
+                        type Ef4 = p3_field::extension::BinomialExtensionField<
+                            p3_koala_bear::KoalaBear, 4>;
+                        if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
+                            // SAFETY: TypeId equality guarantees EF == Ef4
+                            // at runtime.  Slice reinterpretation via
+                            // *const pointer cast bypasses the
+                            // compile-time size-check that
+                            // mem::transmute requires for generic types.
+                            unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
+                                core::slice::from_raw_parts(
+                                    s.as_ptr().cast::<B>(),
+                                    s.len(),
+                                )
+                            }
+                            unsafe {
+                                let evals_ef4: [Ef4; 4] = gpu_hook(
+                                    slice_cast::<EF, Ef4>(self.eq_int.as_slice()),
+                                    slice_cast::<EF, Ef4>(self.eq_row.as_slice()),
+                                    slice_cast::<EF, Ef4>(n0.as_slice()),
+                                    slice_cast::<EF, Ef4>(d0.as_slice()),
+                                    slice_cast::<EF, Ef4>(n1.as_slice()),
+                                    slice_cast::<EF, Ef4>(d1.as_slice()),
+                                    core::mem::transmute_copy::<EF, Ef4>(&self.lambda),
+                                    core::mem::transmute_copy::<EF, Ef4>(&claim_v),
+                                );
+                                let evals_ef: [EF; 4] = [
+                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[0]),
+                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[1]),
+                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[2]),
+                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[3]),
+                                ];
+                                return UnivariatePolynomial::new(
+                                    poly_coefficients_from_evals(evals_ef).to_vec(),
+                                );
+                            }
+                        }
+                    } else {
+                        // Hook not registered — emit a one-shot warn
+                        // so users know to register from ziren-gpu.
+                        use std::sync::OnceLock;
+                        static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                        WARN_ONCE.get_or_init(|| {
+                            tracing::warn!(
+                                "ZIREN_GPU_SUMCHECK=1 but no hook registered; \
+                                 ziren-gpu's compress_multi_gpu must call \
+                                 zkm_stark::shard_level::sumcheck_poly::\
+                                 register_gpu_sumcheck_hook at startup.  \
+                                 Falling back to host round_poly_evaluations."
+                            );
+                        });
+                    }
                 }
                 round_poly_evaluations(
                     &self.eq_int,

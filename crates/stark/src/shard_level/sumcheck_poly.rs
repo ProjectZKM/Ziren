@@ -320,6 +320,56 @@ fn rlc_eval<EF: Field>(vals: &[EF], lambda: EF) -> EF {
     acc
 }
 
+// ────────────────────────────────────────────────────────────────────
+// GPU sumcheck dispatch hook (#102 Phase 2)
+// ────────────────────────────────────────────────────────────────────
+//
+// Function-pointer-hook pattern: ziren-gpu's `compress_multi_gpu`
+// (or any GPU-aware caller) registers a concrete-typed sumcheck-round
+// evaluator at startup; the host `LogupRoundPolynomial` dispatch in
+// `row_gkr/round.rs::sum_as_poly_in_last_variable` invokes it via
+// the hook when `ZIREN_GPU_SUMCHECK=1` is set.
+//
+// Concrete signature: `Ef4 = BinomialExtensionField<KoalaBear, 4>`.
+// Generic-EF callers fall back to host even if the env flag is set
+// (they're not the production reth path which uses Ef4).
+//
+// This pattern avoids a cyclic Cargo dep between `zkm-stark` and
+// `zkm-gpu-core` — the GPU crate has the kernel; Ziren only stores
+// the hook pointer.
+type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+
+/// Signature of the GPU sumcheck round-poly evaluator.  Returns the
+/// 4-point evaluations (p(0), p(1), p(2), p(3)) for the round.
+pub type GpuSumcheckEvalsFn = fn(
+    eq_int: &[Ef4],
+    eq_row: &[Ef4],
+    n0: &[Ef4],
+    d0: &[Ef4],
+    n1: &[Ef4],
+    d1: &[Ef4],
+    lambda: Ef4,
+    current_claim: Ef4,
+) -> [Ef4; 4];
+
+static GPU_SUMCHECK_HOOK: std::sync::OnceLock<GpuSumcheckEvalsFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU sumcheck round-poly evaluator.  Called once by
+/// the ziren-gpu prover crate at startup (or first use).  Returns
+/// `Err` if a hook has already been registered.
+pub fn register_gpu_sumcheck_hook(
+    f: GpuSumcheckEvalsFn,
+) -> Result<(), GpuSumcheckEvalsFn> {
+    GPU_SUMCHECK_HOOK.set(f)
+}
+
+/// Read the registered GPU sumcheck hook, if any.
+#[must_use]
+pub fn get_gpu_sumcheck_hook() -> Option<GpuSumcheckEvalsFn> {
+    GPU_SUMCHECK_HOOK.get().copied()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;
