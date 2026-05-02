@@ -322,7 +322,7 @@ where
     SC::Challenger: 'static,
 {
     use core::any::{Any, TypeId};
-    use crate::basefold_late_binding::jagged::prove_jagged_basefold_dispatch;
+    use crate::basefold_late_binding::jagged::prove_jagged_basefold;
     use crate::{InnerChallenge, InnerVal};
 
     // Gate on Val<SC> == InnerVal, Challenge<SC> == InnerChallenge,
@@ -403,8 +403,12 @@ where
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
 
-    let bundle =
-        prove_jagged_basefold_dispatch(&chip_traces, &r_row_per_chip, lb_challenger);
+    // SP1 single-dense path (Ziren #97): emit_jagged_pcs_bytes calls
+    // prove_jagged_basefold directly.  The legacy per-chip dispatch
+    // (gated on ZIREN_E3_PER_CHIP) was removed since SP1 only uses the
+    // single dense flow and the per-chip experiment had unresolved
+    // soundness gaps that surfaced in production reth wrap (#95).
+    let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, lb_challenger);
     bundle.to_bytes()
 }
 

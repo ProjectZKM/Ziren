@@ -111,8 +111,8 @@ pub fn evaluate_mle_ext<C: CircuitConfig>(
     // partial_lagrange — index-as-MSB expansion (LSB-first point):
     // for each new coord, double the table by `(1-r)` and `r`
     // factors, putting the i_k=0 contribution at index `j` and the
-    // i_k=1 contribution at index `j + old_len`.  Matches
-    // `crate::basefold::jagged_per_chip::poly::partial_lagrange_lsb`.
+    // i_k=1 contribution at index `j + old_len`.  LSB-first
+    // partial-lagrange convention shared by the BaseFold pipeline.
     let mut weights: Vec<SymbolicExt<C::F, C::EF>> = vec![SymbolicExt::ONE];
     for &r in point {
         let r_sym: SymbolicExt<C::F, C::EF> = r.into();

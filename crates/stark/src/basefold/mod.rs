@@ -28,7 +28,10 @@ pub mod encoder;
 pub mod fri;
 pub mod mle;
 pub mod proof;
-pub mod jagged_per_chip;
+// jagged_per_chip module removed (Ziren #97, May 2 2026): per-chip
+// jagged-PCS path was an E3 perf experiment that diverged from SP1's
+// single-dense design and never landed.  Removed in favor of the
+// SP1-aligned dense path in `basefold_late_binding::jagged`.
 pub mod prover;
 pub mod stacked;
 pub mod verifier;
