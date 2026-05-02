@@ -370,6 +370,44 @@ pub fn get_gpu_sumcheck_hook() -> Option<GpuSumcheckEvalsFn> {
     GPU_SUMCHECK_HOOK.get().copied()
 }
 
+// ────────────────────────────────────────────────────────────────────
+// GPU per-chip eval_at dispatch hook (#103 Phase 2)
+// ────────────────────────────────────────────────────────────────────
+//
+// Mirrors the sumcheck hook above for the LogUp-GKR Step 6 per-chip
+// trace evaluation (`evaluate_trace_columns_at_point` in
+// `logup_gkr_prover.rs`).  ziren-gpu registers a CUDA-backed
+// implementation; Ziren's host call site dispatches via the hook
+// when `ZIREN_GPU_EVAL_AT=1` is set.
+//
+// Concrete F=KoalaBear, EF=Ef4 — same TypeId guard pattern as the
+// sumcheck hook.
+type Kb = p3_koala_bear::KoalaBear;
+
+/// Signature: `(trace_row_major: &[Kb], width: usize, eval_point: &[Ef4])
+///            -> Vec<Ef4>` returning one Ef4 per column.  Receives
+/// row-major host data; the implementation is responsible for any
+/// device upload/download.
+pub type GpuEvalAtFn = fn(
+    trace: &[Kb],
+    width: usize,
+    eval_point: &[Ef4],
+) -> Vec<Ef4>;
+
+static GPU_EVAL_AT_HOOK: std::sync::OnceLock<GpuEvalAtFn> = std::sync::OnceLock::new();
+
+/// Register the GPU per-chip eval_at evaluator.  Idempotent; returns
+/// `Err` if a hook was already registered.
+pub fn register_gpu_eval_at_hook(f: GpuEvalAtFn) -> Result<(), GpuEvalAtFn> {
+    GPU_EVAL_AT_HOOK.set(f)
+}
+
+/// Read the registered GPU eval_at hook, if any.
+#[must_use]
+pub fn get_gpu_eval_at_hook() -> Option<GpuEvalAtFn> {
+    GPU_EVAL_AT_HOOK.get().copied()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;

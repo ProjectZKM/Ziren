@@ -53,6 +53,98 @@ use crate::logup_gkr::{build_lookup_leaves, prove_logup_gkr as prove_logup_gkr_i
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
 
+/// Per-chip MLE `eval_at` dispatch helper (#103).
+///
+/// Currently this function ALWAYS delegates to the host
+/// implementation [`evaluate_trace_columns_at_point`].  The GPU
+/// path lives in `zkm-gpu-core::basefold::per_chip_eval_at`
+/// (crate `ziren-gpu/core`) and operates on a
+/// `ColMajorMatrixDevice<KoalaBear>` rather than a host slice — so
+/// integrating the dispatch through this generic helper would
+/// require plumbing a `dyn DeviceTrace` accessor through the
+/// generic Ziren prover, which is intentionally out of scope.
+///
+/// Instead the GPU prover (which already owns the device matrices)
+/// should call
+/// `zkm_gpu_core::basefold::per_chip_eval_at::eval_chip_columns_at_point_device`
+/// directly when `ZIREN_GPU_EVAL_AT=1` and fall back to this host
+/// helper otherwise.
+///
+/// This stub exists so the host-side dispatch site
+/// (`prove_shard_logup_gkr_rows` step 6 in
+/// `crates/stark/src/shard_level/row_gkr/top_level.rs:239-289`)
+/// can be migrated to a single named entry point in a future
+/// follow-up without touching call sites again.
+///
+/// See `/data/stephen/ziren-gpu/core/src/basefold/per_chip_eval_at.rs`
+/// for the GPU implementation.
+pub fn evaluate_trace_columns_at_point_or_device<F, EF>(
+    trace: &[F],
+    width: usize,
+    eval_point: &[EF],
+) -> Vec<EF>
+where
+    F: PrimeField + Sync,
+    EF: ExtensionField<F> + Send + Sync,
+{
+    // Task #103 Phase 2: GPU dispatch via function-pointer hook.
+    // When ZIREN_GPU_EVAL_AT=1 AND a hook is registered AND F=KoalaBear
+    // / EF=Ef4 (production reth path), invoke the registered GPU
+    // implementation.  Otherwise fall back to the rayon host path.
+    //
+    // Same TypeId-guarded slice_cast pattern as the #102 sumcheck
+    // hook in row_gkr/round.rs::sum_as_poly_in_last_variable.
+    if std::env::var("ZIREN_GPU_EVAL_AT")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        if let Some(gpu_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_eval_at_hook()
+        {
+            use core::any::TypeId;
+            type Kb = p3_koala_bear::KoalaBear;
+            type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
+            if TypeId::of::<F>() == TypeId::of::<Kb>()
+                && TypeId::of::<EF>() == TypeId::of::<Ef4>()
+            {
+                // SAFETY: TypeId equality guarantees F == Kb and EF == Ef4.
+                unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
+                    core::slice::from_raw_parts(
+                        s.as_ptr().cast::<B>(),
+                        s.len(),
+                    )
+                }
+                unsafe {
+                    let result_ef4: Vec<Ef4> = gpu_hook(
+                        slice_cast::<F, Kb>(trace),
+                        width,
+                        slice_cast::<EF, Ef4>(eval_point),
+                    );
+                    // SAFETY: EF == Ef4 — Vec layout identical.
+                    let len = result_ef4.len();
+                    let cap = result_ef4.capacity();
+                    let ptr = core::mem::ManuallyDrop::new(result_ef4)
+                        .as_mut_ptr() as *mut EF;
+                    return Vec::from_raw_parts(ptr, len, cap);
+                }
+            }
+        } else {
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "ZIREN_GPU_EVAL_AT=1 but no hook registered; \
+                     ziren-gpu's compress_multi_gpu must call \
+                     zkm_stark::shard_level::sumcheck_poly::\
+                     register_gpu_eval_at_hook at startup.  \
+                     Falling back to host evaluate_trace_columns_at_point."
+                );
+            });
+        }
+    }
+    evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)
+}
+
 /// Compute per-column MLE evaluations of a row-major trace at a
 /// multilinear point.
 ///
