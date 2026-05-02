@@ -2,7 +2,6 @@
 
 use core::borrow::Borrow;
 use itertools::Itertools;
-#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use std::borrow::BorrowMut;
 use tracing::instrument;
@@ -18,14 +17,64 @@ use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
 
 use zkm_derive::AlignedBorrow;
 
-#[cfg(feature = "sys")]
 use crate::FriFoldEvent;
 use crate::{
-    air::Block, builder::ZKMRecursionAirBuilder, runtime::Instruction, runtime::RecursionProgram,
-    ExecutionRecord, FriFoldInstr,
+    air::Block, builder::ZKMRecursionAirBuilder, gpu_hooks, runtime::Instruction,
+    runtime::RecursionProgram, ExecutionRecord, FriFoldInstr,
 };
 
 use super::mem::MemoryAccessColsChips;
+
+/// Try the GPU device-tracegen hook for `FriFoldChip`.
+///
+/// Returns `Some(matrix)` only when ALL of the following hold:
+///   * `ZIREN_GPU_TRACEGEN_DEVICE=1` is set in the environment.
+///   * `F == KoalaBear` (production reth path).
+///   * A hook is registered via
+///     [`gpu_hooks::register_fri_fold_device_trace_hook`] (called from
+///     `compress_multi_gpu` startup in `ziren-gpu`).
+///   * The hook itself returns `Some` (it can decline; the caller then
+///     falls back to host).
+///
+/// The returned matrix is byte-identical to the host `generate_trace`
+/// output: same column layout (`FriFoldCols<F>` = `(z, alpha, x,
+/// p_at_x, p_at_z, alpha_pow_input, ro_input, alpha_pow_output,
+/// ro_output)`, all `Block<F>` except `x: F`), same `padded_nb_rows`,
+/// zero-padded tail.  See
+/// `cuda/tracegen/recursion.cuh::recursion_fri_fold_generate_trace_kernel`
+/// + `core/src/tracegen/recursion.rs::FriFoldChip::generate_trace_device`
+/// in the `ziren-gpu` repo.
+#[inline]
+fn try_device_trace<F: PrimeField32>(
+    events: &[FriFoldEvent<F>],
+    padded_nb_rows: usize,
+) -> Option<RowMajorMatrix<F>> {
+    if std::env::var("ZIREN_GPU_TRACEGEN_DEVICE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        == false
+    {
+        return None;
+    }
+    if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        return None;
+    }
+    let hook = gpu_hooks::get_fri_fold_device_trace_hook()?;
+
+    // SAFETY: TypeId guard above proves F == KoalaBear, so the slice
+    // and result transmutes are layout-compatible.  `FriFoldEvent<F>`
+    // is `#[repr(C)]` over `Block<F>` (= `[F; 4]`) plus base-felt
+    // fields; both monty-31 backings are `#[repr(transparent)]` over
+    // `u32`.
+    let events_kb: &[FriFoldEvent<KoalaBear>] = unsafe {
+        std::mem::transmute::<&[FriFoldEvent<F>], &[FriFoldEvent<KoalaBear>]>(events)
+    };
+    let mat_kb = hook(events_kb, padded_nb_rows)?;
+    let width = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
+    let values_f: Vec<F> =
+        unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };
+    Some(RowMajorMatrix::new(values_f, width))
+}
 
 pub const NUM_FRI_FOLD_COLS: usize = core::mem::size_of::<FriFoldCols<u8>>();
 pub const NUM_FRI_FOLD_PREPROCESSED_COLS: usize =
@@ -278,6 +327,16 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
+        // Integration #6: try the GPU device-tracegen hook first (only
+        // on the padded path — `pad=false` callers expect a tightly
+        // packed trace which the kernel does not produce).
+        if self.pad {
+            let padded_nb_rows = self.num_rows(input).unwrap();
+            if let Some(mat) = try_device_trace(&input.fri_fold_events, padded_nb_rows) {
+                return Ok(mat);
+            }
+        }
+
         let mut rows = input
             .fri_fold_events
             .iter()
@@ -328,6 +387,16 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
             std::any::TypeId::of::<KoalaBear>(),
             "generate_trace only supports KoalaBear field"
         );
+
+        // Integration #6: try the GPU device-tracegen hook first.
+        // (`F` is enforced KoalaBear by the assert above, so the
+        // TypeId guard inside `try_device_trace` always matches.)
+        if self.pad {
+            let padded_nb_rows = self.num_rows(input).unwrap();
+            if let Some(mat) = try_device_trace(&input.fri_fold_events, padded_nb_rows) {
+                return Ok(mat);
+            }
+        }
 
         let events = unsafe {
             std::mem::transmute::<&Vec<FriFoldEvent<F>>, &Vec<FriFoldEvent<KoalaBear>>>(

@@ -7,7 +7,6 @@ use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
-#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::BorrowMut;
@@ -17,14 +16,62 @@ use zkm_derive::AlignedBorrow;
 use zkm_stark::air::ExtensionAirBuilder;
 use zkm_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 
-#[cfg(feature = "sys")]
 use crate::BatchFRIEvent;
 use crate::{
     air::Block,
     builder::ZKMRecursionAirBuilder,
+    gpu_hooks,
     runtime::{Instruction, RecursionProgram},
     Address, BatchFRIInstr, ExecutionRecord,
 };
+
+/// Try the GPU device-tracegen hook for `BatchFRIChip`.
+///
+/// Returns `Some(matrix)` only when ALL of the following hold:
+///   * `ZIREN_GPU_TRACEGEN_DEVICE=1` is set in the environment.
+///   * `F == KoalaBear` (production reth path).
+///   * A hook is registered via
+///     [`gpu_hooks::register_batch_fri_device_trace_hook`] (called from
+///     `compress_multi_gpu` startup in `ziren-gpu`).
+///   * The hook itself returns `Some` (it can decline; the caller then
+///     falls back to host).
+///
+/// The returned matrix is byte-identical to the host `generate_trace`
+/// output: same column layout (`BatchFRICols<F>` = `(acc, alpha_pow,
+/// p_at_z, p_at_x)`, three `Block<F>` extension words + one base felt
+/// = 13 base felts), same `padded_nb_rows`, zero-padded tail.  See
+/// `cuda/tracegen/recursion.cuh::recursion_batch_fri_generate_trace_kernel`
+/// + `core/src/tracegen/recursion.rs::BatchFRIChip::generate_trace_device`
+/// in the `ziren-gpu` repo.
+#[inline]
+fn try_device_trace<F: PrimeField32>(
+    events: &[BatchFRIEvent<F>],
+    padded_nb_rows: usize,
+) -> Option<RowMajorMatrix<F>> {
+    if std::env::var("ZIREN_GPU_TRACEGEN_DEVICE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        == false
+    {
+        return None;
+    }
+    if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
+        return None;
+    }
+    let hook = gpu_hooks::get_batch_fri_device_trace_hook()?;
+
+    // SAFETY: TypeId guard above proves F == KoalaBear; both
+    // `BatchFRIEvent<F>` and `Block<F>` are `#[repr(C)]` over
+    // KoalaBear-laid-out fields, so the slice transmute is sound.
+    let events_kb: &[BatchFRIEvent<KoalaBear>] = unsafe {
+        std::mem::transmute::<&[BatchFRIEvent<F>], &[BatchFRIEvent<KoalaBear>]>(events)
+    };
+    let mat_kb = hook(events_kb, padded_nb_rows)?;
+    let width = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
+    let values_f: Vec<F> =
+        unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };
+    Some(RowMajorMatrix::new(values_f, width))
+}
 
 pub const NUM_BATCH_FRI_COLS: usize = core::mem::size_of::<BatchFRICols<u8>>();
 pub const NUM_BATCH_FRI_PREPROCESSED_COLS: usize =
@@ -206,6 +253,12 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         input: &ExecutionRecord<F>,
         _: &mut ExecutionRecord<F>,
     ) -> Result<RowMajorMatrix<F>, Self::Error> {
+        // Integration #6: try the GPU device-tracegen hook first.
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        if let Some(mat) = try_device_trace(&input.batch_fri_events, padded_nb_rows) {
+            return Ok(mat);
+        }
+
         let mut rows = input
             .batch_fri_events
             .iter()
@@ -248,6 +301,12 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
             std::any::TypeId::of::<KoalaBear>(),
             "generate_trace only supports KoalaBear field"
         );
+
+        // Integration #6: try the GPU device-tracegen hook first.
+        let padded_nb_rows = self.num_rows(input).unwrap();
+        if let Some(mat) = try_device_trace(&input.batch_fri_events, padded_nb_rows) {
+            return Ok(mat);
+        }
 
         let mut rows = input
             .batch_fri_events
