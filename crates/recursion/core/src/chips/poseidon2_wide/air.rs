@@ -79,7 +79,14 @@ where
 
 impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     /// Eval the constraints for the external rounds.
-    fn eval_external_round<AB>(
+    ///
+    /// Made `pub` so external crates (in particular the GPU prover's
+    /// `BlockAir` per-sub-block dispatch in
+    /// `ziren-gpu/core/src/basefold/air_block.rs`) can fan the
+    /// per-round constraint emission across multiple kernel launches.
+    /// Single-call semantics are unchanged — see `Self::eval` for the
+    /// canonical sequencing.
+    pub fn eval_external_round<AB>(
         &self,
         builder: &mut AB,
         local_row: &dyn Poseidon2<AB::Var>,
@@ -136,7 +143,11 @@ impl<const DEGREE: usize> Poseidon2WideChip<DEGREE> {
     }
 
     /// Eval the constraints for the internal rounds.
-    fn eval_internal_rounds<AB>(&self, builder: &mut AB, local_row: &dyn Poseidon2<AB::Var>)
+    ///
+    /// Made `pub` for the same reason as
+    /// [`Self::eval_external_round`]: enables GPU `BlockAir` per-block
+    /// dispatch to emit the internal-round block independently.
+    pub fn eval_internal_rounds<AB>(&self, builder: &mut AB, local_row: &dyn Poseidon2<AB::Var>)
     where
         AB: ZKMRecursionAirBuilder,
     {
