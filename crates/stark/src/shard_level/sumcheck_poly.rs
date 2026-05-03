@@ -961,6 +961,85 @@ pub use jagged_pcs_device_hook::{
     register_gpu_jagged_pcs_device_hook,
 };
 
+// ────────────────────────────────────────────────────────────────────
+// C-full H2 — device-resident LogUp-GKR per-layer sumcheck hook.
+// ────────────────────────────────────────────────────────────────────
+//
+// Sister of the per-round `GpuSumcheckEvalsFn` (#102) above, but
+// STATEFUL across all `total_vars` rounds of one GKR layer's
+// sumcheck.  The hook receives the flattened layer state PLUS
+// transcript closures for observe + sample, runs the entire round
+// loop device-resident (state never leaves the GPU between rounds —
+// only ~3 EF partials + alpha cross PCIe per round), and returns
+// the assembled per-round univariate polynomials + the final 4
+// component openings.  Mirrors H1's `prove_jagged_reduction_gpu`
+// pattern at `/home/ubuntu/sd/ziren-gpu/basefold/src/jagged_sumcheck.rs`.
+//
+// Concrete-typed (`Ef4`) for the same reason as #102 — the function-
+// pointer hook can't carry a generic `EF` parameter.  Generic-EF
+// callers always take the host fallback (`reduce_sumcheck_to_evaluation`).
+//
+// Returns `None` when the GPU path declines (table below
+// MIN_DEVICE_HALF, CUDA error, or hook stub) so the caller falls
+// back to the host trait-driven driver — no proof-correctness risk.
+
+/// Result of the device-resident per-layer LogUp-GKR sumcheck.
+/// Carries the same data the host trait-driven path would emit.
+#[derive(Debug, Clone)]
+pub struct GpuLogupRoundResult {
+    /// Per-round univariate polynomials in coefficient form
+    /// (low-degree-first).  `len() == num_variables`.
+    pub univariate_polys: Vec<Vec<Ef4>>,
+    /// The reduced point, built via `insert(0, alpha)` per round —
+    /// same convention as the host driver so downstream consumers
+    /// (`eq_eval` etc.) see byte-identical layout.
+    pub point: Vec<Ef4>,
+    /// `rlc_eval(evals, lambda)` at the terminal alpha — for the
+    /// single-poly case this is just `evals[0]`.
+    pub final_eval: Ef4,
+    /// Component openings at the reduced point — `[n0, d0, n1, d1]`,
+    /// matching `LogupRoundPolynomial::get_component_poly_evals` order.
+    pub openings: [Ef4; 4],
+}
+
+/// Signature of the device-resident per-layer LogUp-GKR sumcheck.
+/// Returns `None` to indicate "GPU path declined; please fall back
+/// to the host trait driver".  The caller has no way to distinguish
+/// "tiny table" from "CUDA failure" from "stub" — the hook MUST
+/// log/instrument internally.
+pub type GpuLogupRoundProverFn = fn(
+    n0_flat: Vec<Ef4>,
+    d0_flat: Vec<Ef4>,
+    n1_flat: Vec<Ef4>,
+    d1_flat: Vec<Ef4>,
+    eq_int: Vec<Ef4>,
+    eq_row: Vec<Ef4>,
+    lambda: Ef4,
+    initial_claim: Ef4,
+    num_variables: usize,
+    observe_ef: &dyn Fn(Ef4),
+    sample_ef: &dyn Fn() -> Ef4,
+) -> Option<GpuLogupRoundResult>;
+
+static GPU_LOGUP_ROUND_HOOK: std::sync::OnceLock<GpuLogupRoundProverFn> =
+    std::sync::OnceLock::new();
+
+/// Register the device-resident LogUp-GKR per-layer sumcheck prover.
+/// Idempotent; returns `Err` if a hook was already registered.
+/// Called once by `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_logup_round_hook(
+    f: GpuLogupRoundProverFn,
+) -> Result<(), GpuLogupRoundProverFn> {
+    GPU_LOGUP_ROUND_HOOK.set(f)
+}
+
+/// Read the registered device-resident LogUp-GKR per-layer sumcheck
+/// prover, if any.
+#[must_use]
+pub fn get_gpu_logup_round_hook() -> Option<GpuLogupRoundProverFn> {
+    GPU_LOGUP_ROUND_HOOK.get().copied()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;

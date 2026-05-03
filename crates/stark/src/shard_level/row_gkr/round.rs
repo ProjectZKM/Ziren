@@ -71,7 +71,7 @@ use crate::shard_level::sumcheck_poly::{
     reduce_sumcheck_to_evaluation, ComponentPoly, SumcheckPoly, SumcheckPolyBase,
     SumcheckPolyFirstRound,
 };
-use crate::shard_level::types::{LogupGkrRoundProof, UnivariatePolynomial};
+use crate::shard_level::types::{LogupGkrRoundProof, PartialSumcheckProof, UnivariatePolynomial};
 
 /// Flatten a per-chip `LogUpGkrCpuLayer` into four layer-wide flat
 /// MLEs each of length `2^(num_row_variables + num_interaction_variables)`.
@@ -1494,6 +1494,59 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F>,
 {
+    // C-full H2 — device-resident per-layer LogUp-GKR sumcheck.
+    //
+    // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a GPU prover is
+    // registered via `register_gpu_logup_round_hook` AND `EF` is the
+    // production `Ef4` concrete type, route the entire per-layer
+    // sumcheck (all `total_vars` rounds) through the GPU hook so the
+    // (n0, d0, n1, d1, eq_int, eq_row) state stays device-resident
+    // across rounds — mirrors H1's `prove_jagged_reduction_gpu` shape.
+    //
+    // The hook may decline (`None`) for tiny tables (<MIN_DEVICE_HALF)
+    // or on CUDA error; in either case we fall through to the host
+    // trait-driven driver below.  Generic-EF callers (test code,
+    // non-production) take the host path unconditionally.
+    if std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        if let Some(gpu_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook()
+        {
+            use core::any::TypeId;
+            type Ef4 = p3_field::extension::BinomialExtensionField<
+                p3_koala_bear::KoalaBear, 4>;
+            if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
+                use std::sync::OnceLock;
+                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                FIRED_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "C-full H2 logup-round hook FIRED \
+                         (ZIREN_GPU_LOGUP_GKR_DEVICE=1, EF=Ef4, \
+                         gpu_hook present); attempting device-resident \
+                         per-layer sumcheck"
+                    );
+                });
+                if let Some(proof) = try_logup_round_gpu::<F, EF, _>(
+                    circuit,
+                    eval_point,
+                    numerator_eval,
+                    denominator_eval,
+                    lambda,
+                    challenger,
+                    gpu_hook,
+                ) {
+                    return proof;
+                }
+                // GPU hook returned None — fall through to host.  The
+                // hook is responsible for its own logging on the
+                // decline path; we don't double-log here to avoid log
+                // spam on the (intentional) MIN_DEVICE_HALF cutoff.
+            }
+        }
+    }
+
     // Construct the trait-shaped sumcheck poly that wraps the layer
     // data + eq tables + lambda.  See `LogupRoundPolynomial::new` for
     // the construction details (chip-structured n/d storage,
@@ -1534,6 +1587,169 @@ where
         denominator_0,
         denominator_1,
         sumcheck_proof,
+    }
+}
+
+/// C-full H2 — try the device-resident GPU hook for one full GKR layer's
+/// sumcheck.  Returns `Some(proof)` on GPU success, `None` if the hook
+/// declined (caller falls back to host trait driver).
+///
+/// The function is generic over `EF` only so the call site can stay
+/// generic; at runtime the dispatch is gated on `EF == Ef4` via TypeId
+/// (checked by the caller before invoking).  The body does the
+/// host-side work that mirrors `LogupRoundPolynomial::new`'s prologue —
+/// flatten the layer to (n0, d0, n1, d1) packed-mode tables, build the
+/// factored eq tables — then forwards to the registered hook with
+/// transcript closures so the hook can drive observe + sample without
+/// taking a generic `Challenger` parameter (which would prevent
+/// function-pointer dispatch).
+#[allow(clippy::too_many_arguments)]
+fn try_logup_round_gpu<F, EF, Challenger>(
+    circuit: &GkrCircuitLayer<F, EF>,
+    eval_point: &[EF],
+    numerator_eval: EF,
+    denominator_eval: EF,
+    lambda: EF,
+    challenger: &mut Challenger,
+    gpu_hook: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFn,
+) -> Option<LogupGkrRoundProof<EF>>
+where
+    F: PrimeField,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    Challenger: FieldChallenger<F>,
+{
+    type Ef4 = p3_field::extension::BinomialExtensionField<
+        p3_koala_bear::KoalaBear, 4>;
+
+    // Verified by the caller, but `cast_to_ef4` below relies on this so
+    // we re-assert defensively.
+    debug_assert_eq!(
+        core::any::TypeId::of::<EF>(),
+        core::any::TypeId::of::<Ef4>(),
+        "try_logup_round_gpu invoked with EF != Ef4",
+    );
+
+    // SAFETY: TypeId equality (asserted above) guarantees `EF` and
+    // `Ef4` are the same concrete type at runtime; transmute_copy is
+    // therefore well-defined.  Slice / Vec versions reinterpret the
+    // pointer with the same layout (`Ef4 = [KoalaBear; 4]`,
+    // `EF = [F; 4]` with `F = KoalaBear`).
+    #[inline]
+    fn cast_ef_to_ef4<EF: 'static + Copy>(v: EF) -> Ef4 {
+        unsafe { core::mem::transmute_copy::<EF, Ef4>(&v) }
+    }
+    #[inline]
+    fn cast_ef4_to_ef<EF: 'static + Copy>(v: Ef4) -> EF {
+        unsafe { core::mem::transmute_copy::<Ef4, EF>(&v) }
+    }
+    #[inline]
+    fn cast_vec_ef_to_ef4<EF: 'static>(mut v: Vec<EF>) -> Vec<Ef4> {
+        // SAFETY: same-layout transmute.  Use `Vec::from_raw_parts`
+        // pattern: take ownership of the buffer, reinterpret element
+        // type.  `EF` and `Ef4` have identical size + alignment under
+        // the TypeId guard.
+        let len = v.len();
+        let cap = v.capacity();
+        let ptr = v.as_mut_ptr();
+        core::mem::forget(v);
+        unsafe { Vec::from_raw_parts(ptr.cast::<Ef4>(), len, cap) }
+    }
+
+    // ─── Build host-side flatten + eq, mirrors LogupRoundPolynomial::new ───
+    let (num_row_variables, num_interaction_variables) = match circuit {
+        GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
+        GkrCircuitLayer::FirstLayer(l) => {
+            (l.num_row_variables, l.num_interaction_variables)
+        }
+    };
+    let total_vars = num_row_variables + num_interaction_variables;
+    if total_vars == 0 {
+        // Zero-variable layer — host path is fine, no perf benefit.
+        return None;
+    }
+
+    let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
+        GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
+        GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
+    };
+    let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
+    let eq_int = build_eq_table(interaction_point);
+    let eq_row = build_eq_table(row_point);
+
+    let initial_claim = lambda * numerator_eval + denominator_eval;
+
+    // Transcript closures — capture `&mut Challenger` so the hook
+    // drives the same transcript bytes as the host trait-driven path.
+    // We use `RefCell` + `&` so both closures can borrow.
+    let challenger_cell = core::cell::RefCell::new(challenger);
+    let observe = |v: Ef4| {
+        let mut ch = challenger_cell.borrow_mut();
+        let v_ef: EF = cast_ef4_to_ef::<EF>(v);
+        observe_ext_local::<F, EF, _>(&mut **ch, v_ef);
+    };
+    let sample = || -> Ef4 {
+        let mut ch = challenger_cell.borrow_mut();
+        let s: EF = ch.sample_algebra_element::<EF>();
+        cast_ef_to_ef4::<EF>(s)
+    };
+
+    let result = gpu_hook(
+        cast_vec_ef_to_ef4::<EF>(n0_flat),
+        cast_vec_ef_to_ef4::<EF>(d0_flat),
+        cast_vec_ef_to_ef4::<EF>(n1_flat),
+        cast_vec_ef_to_ef4::<EF>(d1_flat),
+        cast_vec_ef_to_ef4::<EF>(eq_int),
+        cast_vec_ef_to_ef4::<EF>(eq_row),
+        cast_ef_to_ef4::<EF>(lambda),
+        cast_ef_to_ef4::<EF>(initial_claim),
+        total_vars,
+        &observe,
+        &sample,
+    )?;
+
+    // Reassemble the LogupGkrRoundProof from the GPU result.  Order
+    // of openings MUST match `ComponentPoly::get_component_poly_evals`
+    // for `LogupRoundPolynomial`: [n0, d0, n1, d1].  See
+    // `top_level.rs:225-230` for the call-site that observes the
+    // openings into the challenger in the order n0, n1, d0, d1.
+    let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
+        .univariate_polys
+        .into_iter()
+        .map(|coeffs| UnivariatePolynomial {
+            coefficients: coeffs.into_iter().map(cast_ef4_to_ef::<EF>).collect(),
+        })
+        .collect();
+    let point: Vec<EF> = result.point.into_iter().map(cast_ef4_to_ef::<EF>).collect();
+    let final_eval: EF = cast_ef4_to_ef::<EF>(result.final_eval);
+    let claimed_sum = initial_claim;
+    let claimed_sum_ef: EF = claimed_sum;
+
+    let sumcheck_proof = PartialSumcheckProof::<EF> {
+        univariate_polys,
+        claimed_sum: claimed_sum_ef,
+        point_and_eval: (point, final_eval),
+    };
+
+    Some(LogupGkrRoundProof {
+        numerator_0: cast_ef4_to_ef::<EF>(result.openings[0]),
+        denominator_0: cast_ef4_to_ef::<EF>(result.openings[1]),
+        numerator_1: cast_ef4_to_ef::<EF>(result.openings[2]),
+        denominator_1: cast_ef4_to_ef::<EF>(result.openings[3]),
+        sumcheck_proof,
+    })
+}
+
+/// Local copy of `observe_ext` to avoid pulling the private helper from
+/// `sumcheck_poly` into this module's public API.  Same body.
+#[inline]
+fn observe_ext_local<F, EF, Challenger>(challenger: &mut Challenger, v: EF)
+where
+    F: Field,
+    EF: BasedVectorSpace<F>,
+    Challenger: p3_challenger::CanObserve<F>,
+{
+    for c in v.as_basis_coefficients_slice() {
+        challenger.observe(*c);
     }
 }
 
