@@ -343,6 +343,25 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
+        prove_jagged_basefold_with_y_per_chip(
+            chip_traces,
+            r_row_per_chip,
+            None,
+            challenger,
+        )
+    }
+
+    /// Variant of [`prove_jagged_basefold`] that lets the caller pass a
+    /// pre-computed `y_per_chip` (e.g. computed device-resident on
+    /// GPU).  When `pre_y_per_chip` is `Some`, step (3) — the host
+    /// triple-nested per-column reduction — is skipped entirely.
+    /// Output bytes are identical to the host path.
+    pub fn prove_jagged_basefold_with_y_per_chip(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+    ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
         // (incl. dense materialize + BaseFold encode), (3) per-chip
@@ -405,28 +424,39 @@ pub mod jagged {
         let _t_yvals = std::time::Instant::now();
         let _yvals_span = tracing::info_span!("jagged_y_per_chip").entered();
         use p3_maybe_rayon::prelude::*;
-        let y_per_chip: Vec<Vec<InnerChallenge>> = chip_traces
-            .par_iter()
-            .zip(r_row_per_chip.par_iter())
-            .map(|((_name, trace), r_row_c)| {
-                let h = trace.values.len() / trace.width.max(1);
-                let w = trace.width;
-                let h_padded = h.next_power_of_two();
-                assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
+        let y_per_chip: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip {
+            // Pre-computed (e.g. device-resident GPU eval).  Skip the
+            // host triple-nested reduction entirely.
+            assert_eq!(
+                pre.len(),
+                chip_traces.len(),
+                "pre_y_per_chip length must match chip_traces length",
+            );
+            pre
+        } else {
+            chip_traces
+                .par_iter()
+                .zip(r_row_per_chip.par_iter())
+                .map(|((_name, trace), r_row_c)| {
+                    let h = trace.values.len() / trace.width.max(1);
+                    let w = trace.width;
+                    let h_padded = h.next_power_of_two();
+                    assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
-                let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
-                (0..w)
-                    .into_par_iter()
-                    .map(|col| {
-                        let mut acc = InnerChallenge::ZERO;
-                        for row in 0..h {
-                            acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
-                        }
-                        acc
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+                    let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                    (0..w)
+                        .into_par_iter()
+                        .map(|col| {
+                            let mut acc = InnerChallenge::ZERO;
+                            for row in 0..h {
+                                acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
+                            }
+                            acc
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
         drop(_yvals_span);
         tracing::info!(
             elapsed_ms = _t_yvals.elapsed().as_millis() as u64,
