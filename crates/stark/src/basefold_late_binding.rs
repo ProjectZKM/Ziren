@@ -187,7 +187,75 @@ fn chips_to_mles_owned(
 /// `trace.values.clone()` round-trip in `chips_to_mles_owned`).
 /// Returns a public commitment (observed by the challenger as a
 /// side effect) and prover-side state for later opening.
+///
+/// **#76 / D2 (C-full C4 plan §5)** — when `ZIREN_GPU_BASEFOLD=1` is
+/// set AND ziren-gpu has registered the device commit hook (via
+/// [`register_gpu_basefold_commit_hook`]), the commit dispatches
+/// through `FriCudaProver::encode_and_commit` + `CudaTcsProver` on
+/// device.  Output `(commit, prover_data)` must be byte-identical to
+/// the host path (the device hook host-side observes the same digest
+/// into the same `LbChallenger`).  Falls through to the host
+/// implementation on any of: env unset, hook unregistered, hook
+/// returns `Err` (shape unsupported / device error).
 pub fn commit_basefold_late_binding(
+    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+    challenger: &mut LbChallenger,
+) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+        if let Some(hook) = get_gpu_basefold_commit_hook() {
+            // The hook signature returns `Result` so the device side
+            // can tunnel its host-input back to us on shape-unsupported
+            // / runtime errors (we then run the host path with the
+            // returned input — no double-allocation, no challenger
+            // double-observe).
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
+            match hook(chip_traces, challenger) {
+                Ok(out) => {
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold commit FIRED \
+                             (#76/D2 ZIREN_GPU_BASEFOLD=1, gpu_hook dispatched, \
+                             area={}, log_stacking_height={})",
+                            out.0.area, out.0.log_stacking_height,
+                        );
+                    });
+                    return out;
+                }
+                Err(returned_traces) => {
+                    FELLBACK_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold commit hook returned Err — falling \
+                             back to host commit_basefold_late_binding. The \
+                             device side could not handle this shape; the \
+                             host commit is the source of truth."
+                        );
+                    });
+                    return commit_basefold_late_binding_host(returned_traces, challenger);
+                }
+            }
+        } else {
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "ZIREN_GPU_BASEFOLD=1 set but no GPU commit hook \
+                     registered; ziren-gpu's compress_multi_gpu must call \
+                     register_gpu_basefold_commit_hook at startup. \
+                     Falling back to host BaseFold commit. See #76/D2."
+                );
+            });
+        }
+    }
+    commit_basefold_late_binding_host(chip_traces, challenger)
+}
+
+/// Pure host-side implementation of [`commit_basefold_late_binding`]
+/// — extracted so the GPU dispatch hook can fall back to it on
+/// shape-unsupported / runtime errors without re-entering the env-flag
+/// dispatch loop.  Always runs the CPU BaseFold + Plonky3 MMCS commit.
+pub fn commit_basefold_late_binding_host(
     chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
     challenger: &mut LbChallenger,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
@@ -213,6 +281,67 @@ pub fn commit_basefold_late_binding(
         log_stacking_height,
     };
     (commit, prover_data)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// #76 / D2 (C-full C4 plan §5) — GPU BaseFold commit dispatch hook.
+//
+// Mirror of the #174 (C-full B1) jagged-PCS device-trace hook pattern
+// in `crate::shard_level::sumcheck_poly::jagged_pcs_device_hook`.  The
+// hook receives the same inputs as `commit_basefold_late_binding` and
+// returns a byte-identical `(commit, prover_data)` — the device side
+// is responsible for:
+//
+//   * uploading the per-chip traces to GPU memory,
+//   * running `FriCudaProver::encode_and_commit` (the existing 1349
+//     LOC device commit) + the SP1 `compress([root, hash([h, w])])`
+//     post-processing step (C4 risk #3) so the digest matches Plonky3
+//     `MerkleTreeMmcs`,
+//   * observing the resulting commitment into the supplied
+//     `LbChallenger` (so the transcript stays in lock-step with the
+//     host path),
+//   * assembling a `BasefoldLateBindingProverData` whose
+//     `stacked_data.pcs_batch_data.prover_data` is shape-compatible
+//     with the host `MerkleTreeMmcs::ProverData` consumed downstream by
+//     `open_basefold_late_binding`.  The shape compatibility risk is
+//     C4 risk #1 — until the open-path adapter lands the device hook
+//     can return `Err` on un-handled shapes and we fall back to host.
+//
+// The hook returns `Result<.., Vec<...>>` instead of `Option<..>` so
+// the device side can tunnel ownership of the host-input back to the
+// host fallback on error (mirrors the `try_emit_jagged_pcs_bytes_device`
+// fall-through contract in B1).
+// ─────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU BaseFold commit driver.  Same inputs as
+/// [`commit_basefold_late_binding`].  On success returns the
+/// byte-equivalent `(commit, prover_data)`.  On unrecoverable
+/// shape/runtime error returns the original `chip_traces` so the host
+/// fallback can run without losing ownership.
+pub type GpuBasefoldCommitFn = fn(
+    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+    challenger: &mut LbChallenger,
+) -> Result<
+    (BasefoldLateBindingCommit, BasefoldLateBindingProverData),
+    Vec<(String, RowMajorMatrix<LbVal>)>,
+>;
+
+static GPU_BASEFOLD_COMMIT_HOOK: std::sync::OnceLock<GpuBasefoldCommitFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU BaseFold commit driver.  Idempotent; returns
+/// `Err(existing_hook)` when a hook was already registered.  Called
+/// once by `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_basefold_commit_hook(
+    f: GpuBasefoldCommitFn,
+) -> Result<(), GpuBasefoldCommitFn> {
+    GPU_BASEFOLD_COMMIT_HOOK.set(f)
+}
+
+/// Read the registered GPU BaseFold commit hook, if any.
+#[must_use]
+pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
+    GPU_BASEFOLD_COMMIT_HOOK.get().copied()
 }
 
 /// Open the committed batch at a single point and produce the
@@ -432,6 +561,15 @@ pub mod jagged {
                 chip_traces.len(),
                 "pre_y_per_chip length must match chip_traces length",
             );
+            // C-full D1 empty-chip skip: for empty-trace chips
+            // (height==0 || width==0) the GPU dispatch supplies
+            // `Vec::new()`; the host fallback (else branch) below
+            // would have asserted on `h_padded.trailing_zeros() ==
+            // r_row_c.len()` (h_padded=1, trailing_zeros=0 vs
+            // r_row_c.len()=max_log_row_count).  Just accept the
+            // empty per-chip y slot — y_{c,j} is the empty product
+            // for an empty column set, so the downstream sumcheck
+            // reduction skips it naturally.
             pre
         } else {
             chip_traces
@@ -440,6 +578,21 @@ pub mod jagged {
                 .map(|((_name, trace), r_row_c)| {
                     let h = trace.values.len() / trace.width.max(1);
                     let w = trace.width;
+                    // C-full D1 empty-chip skip: for an empty-trace
+                    // chip (h == 0 || w == 0) there are no columns to
+                    // reduce; return an empty Vec.  The original
+                    // assertion `h_padded.trailing_zeros() ==
+                    // r_row_c.len()` fires for h=0 (h_padded=1,
+                    // trailing_zeros=0) but r_row_c is sized to
+                    // max_log_row_count (e.g. 4), so the chip would
+                    // panic before reaching the inner reduction.
+                    // This matches the device-fusion path's behavior
+                    // (Vec::new() per empty chip) above and the
+                    // downstream consumers tolerate empty per-chip
+                    // y slots.
+                    if h == 0 || w == 0 {
+                        return Vec::new();
+                    }
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
