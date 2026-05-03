@@ -243,6 +243,41 @@ where
         (commit, StackedBasefoldProverData { pcs_batch_data, interleaved_mles })
     }
 
+    /// Convenience accessor for the underlying [`BasefoldProver`].
+    /// Used by the GPU dispatch hook (#76 / D2 — C-full E2) so the
+    /// device-encoded codewords can be committed via
+    /// [`BasefoldProver::commit_codewords`] without re-routing through
+    /// `interleave_multilinears_with_fixed_rate` twice.
+    pub fn basefold_prover(&self) -> &BasefoldProver<F, EF, MT, D> {
+        &self.basefold_prover
+    }
+
+    /// Stacked-PCS analogue of [`BasefoldProver::commit_codewords`]:
+    /// commit a heterogeneous batch of MLEs given the per-stripe
+    /// **already-interleaved** multilinears AND the per-stripe
+    /// pre-encoded codewords.  Caller is responsible for supplying
+    /// codewords byte-equivalent to the host-encoded ones (typically
+    /// from `FriCudaProver::encode_and_commit` device path — validated
+    /// by `ziren-gpu/basefold/tests/cpu_vs_gpu_commit.rs`).
+    pub fn commit_multilinears_with_codewords(
+        &self,
+        interleaved_mles: Vec<Arc<Mle<F>>>,
+        codewords: Vec<Arc<super::code::RsCodeWord<F>>>,
+    ) -> (MT::Commitment, StackedBasefoldProverData<F, MT>)
+    where
+        F: Send + Sync,
+        D: Send + Sync,
+    {
+        debug_assert_eq!(
+            interleaved_mles.len(),
+            codewords.len(),
+            "interleaved_mles and codewords must be parallel arrays",
+        );
+        let (commit, pcs_batch_data) =
+            self.basefold_prover.commit_codewords(codewords);
+        (commit, StackedBasefoldProverData { pcs_batch_data, interleaved_mles })
+    }
+
     pub fn prove_trusted_evaluation<Challenger>(
         &self,
         eval_point: Vec<EF>,

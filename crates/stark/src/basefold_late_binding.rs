@@ -158,7 +158,10 @@ fn chips_to_mles(
     (mles, dims)
 }
 
-fn chips_to_mles_owned(
+/// Public for the GPU dispatch hook (#76 / D2 — C-full E2): the
+/// device-side commit path needs to run the same MLE-construction +
+/// padding logic as the host before invoking the GPU encoder.
+pub fn chips_to_mles_owned(
     chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
 ) -> (Vec<Arc<Mle<LbVal>>>, Vec<(usize, u32)>) {
     let mut mles = Vec::with_capacity(chip_traces.len());
@@ -281,6 +284,86 @@ pub fn commit_basefold_late_binding_host(
         log_stacking_height,
     };
     (commit, prover_data)
+}
+
+/// Driver shared by host + GPU dispatch: takes per-chip traces and a
+/// codeword-encoder closure (host: `DftEncoder::encode_batch`; GPU:
+/// `FriCudaProver::encode_and_commit` per-mle), and produces the
+/// late-binding commit + prover_data.
+///
+/// The codeword shape supplied by the closure MUST be byte-equivalent
+/// to what the host encoder produces (validated by
+/// `ziren-gpu/basefold/tests/cpu_vs_gpu_commit.rs` for the GPU path).
+/// The MMCS commit step itself stays on host so the returned
+/// `prover_data.stacked_data.pcs_batch_data.prover_data` is shape-
+/// compatible with the open path (`open_basefold_late_binding`)
+/// without further changes.
+///
+/// Used by the GPU dispatch hook (#76 / D2 — C-full E2) to shortcut
+/// the encode step onto device while keeping the MMCS-commit + open
+/// path on host (option A in `/tmp/c_full_d2_followup.md`).
+pub fn commit_basefold_late_binding_with_encoder<E>(
+    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+    challenger: &mut LbChallenger,
+    encoder: E,
+) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData)
+where
+    E: FnOnce(
+        &[Arc<Mle<LbVal>>],
+    ) -> Vec<Arc<crate::basefold::code::RsCodeWord<LbVal>>>,
+{
+    let (mles, chip_dims) = chips_to_mles_owned(chip_traces);
+    let total_entries: usize = mles.iter().map(|m| m.guts.values.len()).sum();
+    let log_stacking_height = pick_log_stacking_height(total_entries);
+    let area = total_entries.next_multiple_of(1usize << log_stacking_height);
+
+    let (prover, _verifier, _mmcs) = build_pcs(log_stacking_height);
+
+    // Shape-equivalent to `prover.commit_multilinears(mles)` but with
+    // the encode step bypassed: the supplied closure produces the
+    // per-stripe codewords (typically on device).  The MMCS commit
+    // runs on host so the returned `BasefoldProverData::prover_data`
+    // is the Plonky3 `MerkleTreeMmcs::ProverData` shape that the open
+    // path (`open_basefold_late_binding` →
+    // `prove_trusted_evaluation`) consumes — no enum variant or
+    // open-path adapter required.
+    let interleaved_mles = crate::basefold::stacked::interleave_multilinears_with_fixed_rate(
+        DEFAULT_BATCH_SIZE,
+        mles,
+        log_stacking_height,
+    );
+    let codewords = encoder(&interleaved_mles);
+    debug_assert_eq!(
+        interleaved_mles.len(),
+        codewords.len(),
+        "encoder must return one codeword per interleaved stripe",
+    );
+    let (commitment, stacked_data) =
+        prover.commit_multilinears_with_codewords(interleaved_mles, codewords);
+
+    challenger.observe(commitment.clone());
+
+    let commit = BasefoldLateBindingCommit {
+        commitment: commitment.clone(),
+        chip_dims: chip_dims.clone(),
+        area,
+        log_stacking_height,
+    };
+    let prover_data = BasefoldLateBindingProverData {
+        stacked_data,
+        chip_dims,
+        area,
+        log_stacking_height,
+    };
+    (commit, prover_data)
+}
+
+/// Production-grade FRI config used by the late-binding pipeline.
+/// Public so the GPU dispatch hook can construct a matching
+/// device-side encoder (same `log_blowup`, same coset shift) without
+/// re-creating the env-overrides logic.
+pub fn lb_fri_config() -> FriConfig<LbVal> {
+    FriConfig::<LbVal>::from_env_or_default()
 }
 
 // ─────────────────────────────────────────────────────────────────────

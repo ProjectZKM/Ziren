@@ -88,7 +88,30 @@ where
         D: Send + Sync,
     {
         let codewords = self.encoder.encode_batch(mles);
+        self.commit_codewords(codewords)
+    }
 
+    /// Commit a batch of *already-encoded* RS codewords for one round
+    /// of the protocol.
+    ///
+    /// Mirrors [`Self::commit_mles`] but skips the host
+    /// [`DftEncoder::encode_batch`] step — used by the GPU dispatch
+    /// path (`#76 / D2 — C-full E2`) where codewords are produced on
+    /// device by `FriCudaProver::encode_and_commit` and pulled back to
+    /// host before this step.
+    ///
+    /// The returned `BasefoldProverData` is byte-equivalent to what
+    /// `commit_mles` returns when the codewords are byte-identical to
+    /// the ones host encode would have produced (validated by
+    /// `ziren-gpu/basefold/tests/cpu_vs_gpu_commit.rs`).
+    pub fn commit_codewords(
+        &self,
+        codewords: Vec<Arc<RsCodeWord<F>>>,
+    ) -> (MT::Commitment, BasefoldProverData<F, MT>)
+    where
+        F: Send + Sync,
+        D: Send + Sync,
+    {
         // For commitment: stack each codeword as one matrix in the
         // `mmcs.commit` call.  Layout matches what
         // `query_openings_at_indices` will read back.
