@@ -110,6 +110,104 @@ where
     padded
 }
 
+/// Parallel lambda-RLC fold over per-chip C-tables.
+///
+/// Given `padded[i]` (each of length `target_size`) and the RLC
+/// challenge `lambda`, computes `acc[k] = Σ_i λ^i · padded[i][k]`
+/// for `k ∈ [0, target_size)`.
+///
+/// **Algorithm:**
+///   1. Precompute `[λ^0, λ^1, …, λ^{n-1}]` (sequential, n ≤ 50 chips).
+///   2. Chunk the output buffer and dispatch one rayon task per
+///      chunk; each task scans every `padded[i]` for its slice of
+///      `k` indices and accumulates `Σ_i powers[i] · padded[i][k]`.
+///
+/// **Byte-identity:** EF addition is associative, the per-chip
+/// `λ^i` weight is identical regardless of which thread accumulates
+/// it, and IndexedParallelIterator preserves source order.  Bit-
+/// for-bit identical to the prior serial outer-loop implementation
+/// (the `compute_combined_table_rlc_serial` reference below).
+///
+/// Used by `prove_shard_zerocheck` Step 4 (C-full B3 fusion).
+fn compute_combined_table_rlc<SC>(
+    padded: &[Vec<Challenge<SC>>],
+    lambda: Challenge<SC>,
+    target_size: usize,
+) -> Vec<Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    Challenge<SC>: ExtensionField<Val<SC>>,
+{
+    use p3_field::PrimeCharacteristicRing;
+    if padded.is_empty() {
+        return vec![Challenge::<SC>::ZERO; target_size];
+    }
+    if padded.len() == 1 {
+        // Single chip: no RLC needed (lambda^0 = 1).
+        return padded[0].clone();
+    }
+    // Precompute powers-of-lambda once.
+    let n = padded.len();
+    let mut powers: Vec<Challenge<SC>> = Vec::with_capacity(n);
+    let mut p = Challenge::<SC>::ONE;
+    for _ in 0..n {
+        powers.push(p);
+        p *= lambda;
+    }
+    // Chunked parallel fold over output index `k`.  Chunk size
+    // 4096 keeps the per-task EF buffer hot in L2 (≈64KB at 16B/EF
+    // for Ef4) while amortizing rayon dispatch.
+    let mut acc: Vec<Challenge<SC>> = vec![Challenge::<SC>::ZERO; target_size];
+    let chunk_size = 4096usize.min(target_size.max(1));
+    acc.par_chunks_mut(chunk_size)
+        .enumerate()
+        .for_each(|(chunk_idx, out_chunk)| {
+            let k_start = chunk_idx * chunk_size;
+            let k_end = (k_start + out_chunk.len()).min(target_size);
+            for i in 0..n {
+                let w = powers[i];
+                let slice = &padded[i][k_start..k_end];
+                for (out, &t) in out_chunk.iter_mut().zip(slice.iter()) {
+                    *out += w * t;
+                }
+            }
+        });
+    acc
+}
+
+/// Strictly-serial reference implementation of the lambda-RLC fold.
+///
+/// Mirrors the pre-B3 serial outer loop (zerocheck_prover.rs line
+/// 473-485, prior to the parallel rewrite).  Used ONLY when
+/// `ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1` is set, to assert
+/// byte-equivalence between the parallel host fold and a known-
+/// correct reference.  Once the full device-resident fusion lands,
+/// the same flag will assert byte-equivalence between the device
+/// path and this reference.
+fn compute_combined_table_rlc_serial<SC>(
+    padded: &[Vec<Challenge<SC>>],
+    lambda: Challenge<SC>,
+    target_size: usize,
+) -> Vec<Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    Challenge<SC>: ExtensionField<Val<SC>>,
+{
+    use p3_field::PrimeCharacteristicRing;
+    if padded.is_empty() {
+        return vec![Challenge::<SC>::ZERO; target_size];
+    }
+    let mut acc = padded[0].clone();
+    let mut lambda_pow = lambda;
+    for table in padded.iter().skip(1) {
+        for (a, &t) in acc.iter_mut().zip(table.iter()) {
+            *a += lambda_pow * t;
+        }
+        lambda_pow *= lambda;
+    }
+    acc
+}
+
 /// Shard-level zerocheck prover.
 ///
 /// SP1 reference: `ShardProver::zerocheck` at
@@ -470,19 +568,68 @@ where
 
     // Step 4: lambda-RLC the padded tables into a single combined
     // table.  combined = Σ_i λ^i · padded[i].
-    let combined: Vec<Challenge<SC>> = if padded.is_empty() {
-        vec![Challenge::<SC>::ZERO; target_size]
-    } else {
-        let mut acc = padded[0].clone();
-        let mut lambda_pow = lambda;
-        for table in padded.iter().skip(1) {
-            for (a, &t) in acc.iter_mut().zip(table.iter()) {
-                *a += lambda_pow * t;
-            }
-            lambda_pow *= lambda;
+    //
+    // C-full B3 (Apr 2026) — fused host-side RLC.
+    //
+    // Previously: serial outer loop over chips, serial inner loop over
+    // table elements (≈100-300ms/shard, no SIMD/par per A4 plan §3).
+    //
+    // Now: precompute λ^i powers once, then chunk the output buffer
+    // and let rayon distribute chunks across threads.  Each thread
+    // computes `acc[k] = Σ_i powers[i] · padded[i][k]` over a slice
+    // of `k` indices — the inner loop is contiguous EF mul-adds,
+    // hot in L2.  This is byte-identical to the serial loop because
+    // EF addition is associative and the per-chip `λ^i` weight is
+    // identical regardless of accumulation order.
+    //
+    // The full device-resident fusion (combined-table on GPU, no
+    // host pad, no host RLC, hand the device handle straight into
+    // #106's GPU sumcheck) is the architectural target documented
+    // in /tmp/c_full_a4_plan.md §3 and the deferred follow-up
+    // /tmp/c_full_b3_followup.md.  This commit ships the host-side
+    // win (≈3-7s/shard per A4 estimates) without touching the
+    // ziren-gpu hook signatures or requiring a new CUDA kernel.
+    let combined: Vec<Challenge<SC>> = compute_combined_table_rlc::<SC>(
+        &padded, lambda, target_size,
+    );
+
+    // Optional debug invariant: when ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1
+    // is set, recompute the combined table via the prior strictly-serial
+    // implementation and assert byte-equivalence.  This is the
+    // "dual-run" verification harness called for in
+    // /tmp/c_full_a4_plan.md §4 — once the full device-resident path
+    // lands, the same flag will run both the host RLC and the
+    // GPU-fused RLC and assert equality.  Cheap (one extra `2^max_log_degree`
+    // EF buffer per shard) and only enabled under the env flag.
+    if std::env::var("ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        let reference = compute_combined_table_rlc_serial::<SC>(
+            &padded, lambda, target_size,
+        );
+        assert_eq!(
+            combined.len(), reference.len(),
+            "zerocheck verify: combined len {} != reference len {}",
+            combined.len(), reference.len(),
+        );
+        for (i, (c, r)) in combined.iter().zip(reference.iter()).enumerate() {
+            assert_eq!(
+                c, r,
+                "zerocheck verify: combined[{}] != reference[{}] (n_chips={}, target_size={})",
+                i, i, padded.len(), target_size,
+            );
         }
-        acc
-    };
+        use std::sync::OnceLock;
+        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+        FIRED_ONCE.get_or_init(|| {
+            tracing::warn!(
+                "ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1: dual-run \
+                 byte-equivalence PASSED (n_chips={}, target_size={})",
+                padded.len(), target_size,
+            );
+        });
+    }
 
     drop(_rlc_span);
     tracing::info!(
@@ -649,11 +796,89 @@ where
     if chip_names.is_empty() { return Some(vec![None; chips.len()]); }
 
     let chip_names_refs: Vec<&str> = chip_names.iter().map(String::as_str).collect();
-    let batched_out: Vec<Option<Vec<Ef4>>> = batched_hook(
-        &chip_names_refs, &main_row_majors, &main_widths, &prep_row_majors, &prep_widths,
-        public_values_kb, &alphas, &local_cumulative_sums, &global_cumulative_sums_xy,
-        &num_vars_list,
-    );
+
+    // ── #147 cross-shard batching dispatch ──
+    //
+    // When `ZIREN_GPU_CROSS_SHARD_BATCH=1` is set AND a cross-shard
+    // hook is registered, route through the per-process coordinator
+    // (cross_shard_coordinator) which blocks the calling worker
+    // thread until either `ZIREN_GPU_CROSS_SHARD_BATCH_N` (default
+    // 4) shards have submitted or a timeout fires (default 100 ms).
+    // The coordinator dispatches one cross-shard hook call covering
+    // all submitted shards (typically 4-8 shards × 2-3 MEMORY_SIZE
+    // buckets ≈ 8-12 launches in place of N×K per-chip launches),
+    // then scatters the per-shard outputs back to each caller.
+    //
+    // Output is byte-identical to per-shard `batched_hook` because
+    // the cross-shard hook's per-chip descriptor is identical to
+    // the per-shard variant's — see `prove_constraints_cross_shard_gpu`
+    // docstring in `ziren-gpu/core/src/basefold/constraint_eval.rs`.
+    let batched_out: Vec<Option<Vec<Ef4>>> = if cross_shard_batch_enabled() {
+        if let Some(cross_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_cross_shard_hook()
+        {
+            match cross_shard_coordinator::submit_and_wait(
+                cross_hook,
+                &chip_names_refs,
+                &main_row_majors,
+                &main_widths,
+                &prep_row_majors,
+                &prep_widths,
+                public_values_kb,
+                &alphas,
+                &local_cumulative_sums,
+                &global_cumulative_sums_xy,
+                &num_vars_list,
+            ) {
+                Some(v) => {
+                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "#147 cross-shard constraint-eval coordinator FIRED \
+                             (ZIREN_GPU_CROSS_SHARD_BATCH=1, cross_shard_hook dispatched)"
+                        );
+                    });
+                    v
+                }
+                None => {
+                    static FELL_ONCE: OnceLock<()> = OnceLock::new();
+                    FELL_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "#147 cross-shard coordinator FELL THROUGH \
+                             (returned None — total dispatch failure or empty batch); \
+                             falling back to per-shard batched dispatch"
+                        );
+                    });
+                    batched_hook(
+                        &chip_names_refs, &main_row_majors, &main_widths,
+                        &prep_row_majors, &prep_widths, public_values_kb,
+                        &alphas, &local_cumulative_sums,
+                        &global_cumulative_sums_xy, &num_vars_list,
+                    )
+                }
+            }
+        } else {
+            static MISSING_ONCE: OnceLock<()> = OnceLock::new();
+            MISSING_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "#147 ZIREN_GPU_CROSS_SHARD_BATCH=1 but no cross-shard hook \
+                     registered; ziren-gpu must call register_cross_shard_hook \
+                     at startup. Falling back to per-shard batched dispatch."
+                );
+            });
+            batched_hook(
+                &chip_names_refs, &main_row_majors, &main_widths, &prep_row_majors,
+                &prep_widths, public_values_kb, &alphas, &local_cumulative_sums,
+                &global_cumulative_sums_xy, &num_vars_list,
+            )
+        }
+    } else {
+        batched_hook(
+            &chip_names_refs, &main_row_majors, &main_widths, &prep_row_majors,
+            &prep_widths, public_values_kb, &alphas, &local_cumulative_sums,
+            &global_cumulative_sums_xy, &num_vars_list,
+        )
+    };
     debug_assert_eq!(batched_out.len(), keep_idx.len());
 
     let mut result: Vec<Option<Vec<Challenge<SC>>>> = (0..chips.len()).map(|_| None).collect();
@@ -681,6 +906,281 @@ where
     }
     if !any_kept { return None; }
     Some(result)
+}
+
+/// Module-level concrete `Ef4` alias used by the cross-shard
+/// coordinator and the cross-shard hook signature.  Production
+/// extension type for `KoalaBearPoseidon2` (matches `Challenge<SC>`
+/// under TypeId guard).
+type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+
+/// Returns `true` iff `ZIREN_GPU_CROSS_SHARD_BATCH=1` is set.  Cached
+/// on first call.
+fn cross_shard_batch_enabled() -> bool {
+    use std::sync::OnceLock;
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| {
+        std::env::var("ZIREN_GPU_CROSS_SHARD_BATCH").as_deref() == Ok("1")
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// #147 — cross-shard constraint-eval coordinator.
+//
+// `compute_gpu_batched_pre_pass` is invoked from `prove_shard_zerocheck`
+// once per shard.  In the multi-GPU compress orchestrator, several
+// shard workers run concurrently (one per GPU device), so multiple
+// per-shard `batched_hook` calls fire in parallel.  Each per-shard
+// dispatch issues ~3 CUDA launches (one per MEMORY_SIZE bucket).
+// Across 4-8 in-flight shard workers that's ~12-24 separate launches
+// per round of the orchestrator's pipeline, leaving the GPU
+// under-utilised on the constraint-eval phase (kernel-launch overhead
+// exceeds per-bucket work).
+//
+// The cross-shard coordinator gathers per-shard submissions in a
+// process-global queue and, once `ZIREN_GPU_CROSS_SHARD_BATCH_N`
+// shards have arrived (or `ZIREN_GPU_CROSS_SHARD_BATCH_TIMEOUT_MS`
+// elapses), dispatches the registered cross-shard hook ONCE on the
+// entire gathered batch.  Per-shard outputs are scattered back to
+// the calling threads via per-submission slots.
+//
+// Output is byte-identical to per-shard `batched_hook` because the
+// cross-shard hook's per-chip ChipDesc is identical to the per-shard
+// variant's.
+mod cross_shard_coordinator {
+    use std::sync::{Condvar, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use super::Ef4;
+    use crate::shard_level::sumcheck_poly::GpuConstraintEvalCrossShardFn;
+
+    struct Submission {
+        chip_names: Vec<String>,
+        main_row_majors: Vec<Vec<p3_koala_bear::KoalaBear>>,
+        main_widths: Vec<usize>,
+        preprocessed_row_majors: Vec<Vec<p3_koala_bear::KoalaBear>>,
+        preprocessed_widths: Vec<usize>,
+        public_values: Vec<p3_koala_bear::KoalaBear>,
+        alphas: Vec<Ef4>,
+        local_cumulative_sums: Vec<Ef4>,
+        global_cumulative_sums_xy: Vec<[p3_koala_bear::KoalaBear; 14]>,
+        num_vars_list: Vec<usize>,
+        slot: usize,
+    }
+
+    struct State {
+        pending: Vec<Submission>,
+        done: Vec<Option<Vec<Option<Vec<Ef4>>>>>,
+        next_slot: usize,
+        dispatching: bool,
+    }
+
+    struct Coordinator {
+        state: Mutex<State>,
+        cv: Condvar,
+    }
+
+    fn coordinator() -> &'static Coordinator {
+        static C: OnceLock<Coordinator> = OnceLock::new();
+        C.get_or_init(|| Coordinator {
+            state: Mutex::new(State {
+                pending: Vec::new(),
+                done: Vec::new(),
+                next_slot: 0,
+                dispatching: false,
+            }),
+            cv: Condvar::new(),
+        })
+    }
+
+    fn batch_n() -> usize {
+        static N: OnceLock<usize> = OnceLock::new();
+        *N.get_or_init(|| {
+            std::env::var("ZIREN_GPU_CROSS_SHARD_BATCH_N")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|&n| n >= 1)
+                .unwrap_or(4)
+        })
+    }
+
+    fn timeout_ms() -> u64 {
+        static T: OnceLock<u64> = OnceLock::new();
+        *T.get_or_init(|| {
+            std::env::var("ZIREN_GPU_CROSS_SHARD_BATCH_TIMEOUT_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(100)
+        })
+    }
+
+    /// Submit a per-shard chip slice set + block until the cross-shard
+    /// hook dispatches it.  Returns `Some(per_chip_out)` on success
+    /// or `None` on total dispatch failure.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn submit_and_wait(
+        hook: GpuConstraintEvalCrossShardFn,
+        chip_names: &[&str],
+        main_row_majors: &[&[p3_koala_bear::KoalaBear]],
+        main_widths: &[usize],
+        preprocessed_row_majors: &[&[p3_koala_bear::KoalaBear]],
+        preprocessed_widths: &[usize],
+        public_values: &[p3_koala_bear::KoalaBear],
+        alphas: &[Ef4],
+        local_cumulative_sums: &[Ef4],
+        global_cumulative_sums_xy: &[[p3_koala_bear::KoalaBear; 14]],
+        num_vars_list: &[usize],
+    ) -> Option<Vec<Option<Vec<Ef4>>>> {
+        let n = chip_names.len();
+        let mut sub = Submission {
+            chip_names: chip_names.iter().map(|s| (*s).to_string()).collect(),
+            main_row_majors: main_row_majors.iter().map(|s| s.to_vec()).collect(),
+            main_widths: main_widths.to_vec(),
+            preprocessed_row_majors: preprocessed_row_majors
+                .iter()
+                .map(|s| s.to_vec())
+                .collect(),
+            preprocessed_widths: preprocessed_widths.to_vec(),
+            public_values: public_values.to_vec(),
+            alphas: alphas.to_vec(),
+            local_cumulative_sums: local_cumulative_sums.to_vec(),
+            global_cumulative_sums_xy: global_cumulative_sums_xy.to_vec(),
+            num_vars_list: num_vars_list.to_vec(),
+            slot: 0,
+        };
+        debug_assert!(
+            sub.main_row_majors.len() == n
+                && sub.main_widths.len() == n
+                && sub.preprocessed_row_majors.len() == n
+                && sub.preprocessed_widths.len() == n
+                && sub.alphas.len() == n
+                && sub.local_cumulative_sums.len() == n
+                && sub.global_cumulative_sums_xy.len() == n
+                && sub.num_vars_list.len() == n,
+            "cross-shard submission: input slices must all be length {n}"
+        );
+
+        let coord = coordinator();
+        let n_target = batch_n();
+        let t_ms = timeout_ms();
+        let deadline = Instant::now() + Duration::from_millis(t_ms);
+
+        let my_slot;
+        {
+            let mut state = coord.state.lock().unwrap();
+            my_slot = state.next_slot;
+            state.next_slot += 1;
+            state.done.push(None);
+            sub.slot = my_slot;
+            state.pending.push(sub);
+            coord.cv.notify_all();
+        }
+
+        loop {
+            let mut state = coord.state.lock().unwrap();
+            if let Some(out) = state.done[my_slot].take() {
+                if state.done.iter().all(Option::is_none)
+                    && state.pending.is_empty()
+                    && !state.dispatching
+                {
+                    state.done.clear();
+                    state.next_slot = 0;
+                }
+                if out.is_empty() {
+                    return None;
+                }
+                return Some(out);
+            }
+            if state.dispatching {
+                let s2 = coord.cv.wait(state).unwrap();
+                drop(s2);
+                continue;
+            }
+
+            let now = Instant::now();
+            let pending_n = state.pending.len();
+            let should_dispatch = pending_n >= n_target || now >= deadline;
+            if !should_dispatch {
+                let remaining = deadline.saturating_duration_since(now);
+                let (s2, _to) = coord.cv.wait_timeout(state, remaining).unwrap();
+                drop(s2);
+                continue;
+            }
+
+            let drained: Vec<Submission> = std::mem::take(&mut state.pending);
+            state.dispatching = true;
+            drop(state);
+
+            let chip_names_per_shard: Vec<Vec<&str>> = drained
+                .iter()
+                .map(|s| s.chip_names.iter().map(String::as_str).collect())
+                .collect();
+            let chip_names_per_shard_refs: Vec<&[&str]> =
+                chip_names_per_shard.iter().map(Vec::as_slice).collect();
+            let main_row_majors_per_shard: Vec<Vec<&[p3_koala_bear::KoalaBear]>> = drained
+                .iter()
+                .map(|s| s.main_row_majors.iter().map(Vec::as_slice).collect())
+                .collect();
+            let main_row_majors_per_shard_refs: Vec<&[&[p3_koala_bear::KoalaBear]]> =
+                main_row_majors_per_shard.iter().map(Vec::as_slice).collect();
+            let main_widths_per_shard_refs: Vec<&[usize]> =
+                drained.iter().map(|s| s.main_widths.as_slice()).collect();
+            let prep_row_majors_per_shard: Vec<Vec<&[p3_koala_bear::KoalaBear]>> = drained
+                .iter()
+                .map(|s| s.preprocessed_row_majors.iter().map(Vec::as_slice).collect())
+                .collect();
+            let prep_row_majors_per_shard_refs: Vec<&[&[p3_koala_bear::KoalaBear]]> =
+                prep_row_majors_per_shard.iter().map(Vec::as_slice).collect();
+            let prep_widths_per_shard_refs: Vec<&[usize]> = drained
+                .iter()
+                .map(|s| s.preprocessed_widths.as_slice())
+                .collect();
+            let pv_per_shard_refs: Vec<&[p3_koala_bear::KoalaBear]> =
+                drained.iter().map(|s| s.public_values.as_slice()).collect();
+            let alphas_per_shard_refs: Vec<&[Ef4]> =
+                drained.iter().map(|s| s.alphas.as_slice()).collect();
+            let lcs_per_shard_refs: Vec<&[Ef4]> = drained
+                .iter()
+                .map(|s| s.local_cumulative_sums.as_slice())
+                .collect();
+            let gcs_per_shard_refs: Vec<&[[p3_koala_bear::KoalaBear; 14]]> = drained
+                .iter()
+                .map(|s| s.global_cumulative_sums_xy.as_slice())
+                .collect();
+            let nv_per_shard_refs: Vec<&[usize]> =
+                drained.iter().map(|s| s.num_vars_list.as_slice()).collect();
+
+            let hook_out: Vec<Vec<Option<Vec<Ef4>>>> = hook(
+                &chip_names_per_shard_refs,
+                &main_row_majors_per_shard_refs,
+                &main_widths_per_shard_refs,
+                &prep_row_majors_per_shard_refs,
+                &prep_widths_per_shard_refs,
+                &pv_per_shard_refs,
+                &alphas_per_shard_refs,
+                &lcs_per_shard_refs,
+                &gcs_per_shard_refs,
+                &nv_per_shard_refs,
+            );
+
+            let dispatch_failed = hook_out.is_empty();
+            {
+                let mut state = coord.state.lock().unwrap();
+                if dispatch_failed {
+                    for s in &drained {
+                        state.done[s.slot] = Some(Vec::new());
+                    }
+                } else {
+                    debug_assert_eq!(hook_out.len(), drained.len());
+                    for (s, out) in drained.iter().zip(hook_out.into_iter()) {
+                        state.done[s.slot] = Some(out);
+                    }
+                }
+                state.dispatching = false;
+                coord.cv.notify_all();
+            }
+        }
+    }
 }
 
 fn prove_shard_zerocheck_via_trait<SC>(
