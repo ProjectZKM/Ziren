@@ -48,6 +48,7 @@ use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
+use super::main_trace_loader::{EagerHostLoader, MainTraceLoader};
 use super::shard_proof::BasefoldShardProof;
 use super::row_gkr::top_level::prove_shard_logup_gkr_rows;
 use super::zerocheck_prover::prove_shard_zerocheck;
@@ -93,6 +94,78 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
+    // Trampoline to the loader-based entry point (C-full D4).  The
+    // existing call sites continue to pass a borrowed slice; we wrap
+    // it in an [`EagerHostLoader`] so behaviour is byte-equivalent.
+    let loader = EagerHostLoader::new(main_traces);
+    prove_shard_to_basefold_with_loader::<SC, A, _>(
+        chips,
+        preprocessed_traces,
+        &loader,
+        main_commitment,
+        public_values,
+        max_log_row_count,
+        challenger,
+    )
+}
+
+/// Loader-based entry point for the shard-level BaseFold
+/// orchestrator (C-full D4 — task #184).
+///
+/// Identical to [`prove_shard_to_basefold`] except the per-chip
+/// main traces are pulled from a [`MainTraceLoader`] instead of a
+/// borrowed slice.  Callers that already have host traces in
+/// memory should use [`prove_shard_to_basefold`] directly (it
+/// wraps an [`EagerHostLoader`]); callers with device-resident
+/// traces (the GPU shard prover) supply a [`super::main_trace_loader::LazyDeviceLoader`].
+///
+/// # Current behaviour
+///
+/// The orchestrator materializes ALL traces upfront via
+/// [`MainTraceLoader::materialize_all`].  This preserves
+/// byte-equivalent output and matches the existing host-fallback
+/// path requirements (Phase 5 cumulative sums + Phase 3 batched
+/// pre-pass + Phase 4 jagged-PCS clone all read every chip).
+///
+/// Future work (C-full D5+): plumb the loader THROUGH the phase
+/// fns so each consumer pulls only chips it actually needs.  See
+/// `/tmp/c_full_c1_followup.md` for the per-site map of
+/// `main_trace.values` consumers.
+#[allow(clippy::too_many_arguments)]
+pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
+    chips: &[&Chip<Val<SC>, A>],
+    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    main_trace_loader: &L,
+    main_commitment: [Val<SC>; 8],
+    public_values: Vec<Val<SC>>,
+    max_log_row_count: usize,
+    challenger: &mut SC::Challenger,
+) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+    L: MainTraceLoader<Val<SC>>,
+{
+    debug_assert_eq!(
+        chips.len(),
+        main_trace_loader.len(),
+        "chips and main_trace_loader must be parallel arrays",
+    );
+
+    // C-full D4 staging: materialize ALL chip main traces upfront
+    // (byte-equivalent to the legacy `&[RowMajorMatrix]` entrypoint).
+    // Phase 5 cumulative sums + Phase 3 batched pre-pass + Phase 4
+    // jagged-PCS chip_traces clone all read every chip's host trace
+    // unconditionally today — pulling on demand here would be
+    // strictly equal in wall.  Future per-phase loader plumbing
+    // will let GPU callers skip pulls when a device-resident path
+    // exists for the chip.
+    let main_traces: Vec<RowMajorMatrix<Val<SC>>> =
+        main_trace_loader.materialize_all();
+    let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
+
     // Per-shard phase timing instrumentation.  Each phase span emits
     // an `info!(elapsed_ms = ..., phase = "...", chips = ...)` line on
     // exit so a downstream perf run reveals the true per-shard cost
@@ -496,6 +569,55 @@ where
     let lb_challenger = challenger_any
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
+
+    // #174 (C-full B1) — DEVICE-trace jagged-PCS dispatch.  When the
+    // env flag `ZIREN_GPU_JAGGED_PCS_DEVICE=1` is set AND ziren-gpu's
+    // `phase4_device` has registered its device-trace hook (via
+    // `register_gpu_jagged_pcs_device_hook`), dispatch through the
+    // device-trace `emit_jagged_pcs_bytes_device` path.  The hook reads
+    // the per-shard device-trace snapshot installed by
+    // `prove_shard_to_basefold_gpu` keyed by chip name; we hand it the
+    // chip-iteration-order names + per-chip `r_row` + the same
+    // `LbChallenger` we'd pass to `prove_jagged_basefold`.  Output bytes
+    // MUST be byte-identical to the host emit (validated on the GPU
+    // box against the legacy default).
+    //
+    // Falls through to the host orchestrator (and then to the #113
+    // host-trace hook below) if either the env flag is unset or no
+    // hook is registered.  Strictly opt-in.
+    if std::env::var("ZIREN_GPU_JAGGED_PCS_DEVICE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        if let Some(hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_jagged_pcs_device_hook()
+        {
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            FIRED_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "#174 jagged_pcs_device hook FIRED \
+                     (ZIREN_GPU_JAGGED_PCS_DEVICE=1, gpu_hook dispatched, \
+                     n_chips={})",
+                    chip_traces.len()
+                );
+            });
+            let chip_names: Vec<alloc::string::String> =
+                chip_traces.iter().map(|(name, _)| name.clone()).collect();
+            return hook(&chip_names, &r_row_per_chip, lb_challenger);
+        } else {
+            use std::sync::OnceLock;
+            static WARN_ONCE: OnceLock<()> = OnceLock::new();
+            WARN_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "#174 jagged_pcs_device hook FELL THROUGH \
+                     (env=set, hook=None); ziren-gpu's compress_multi_gpu \
+                     must call register_gpu_jagged_pcs_device_hook \
+                     at startup. #113/host orchestrator used."
+                );
+            });
+        }
+    }
 
     // #113 — GPU jagged-PCS orchestration dispatch.  When the env flag
     // `ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1` is set AND the

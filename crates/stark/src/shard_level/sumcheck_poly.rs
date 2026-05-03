@@ -492,6 +492,49 @@ pub fn get_gpu_zerocheck_hook() -> Option<GpuZerocheckFn> {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// GPU zerocheck combine hook (C-full C2 — sister of #106 above).
+// ────────────────────────────────────────────────────────────────────
+//
+// Replaces the host parallel lambda-RLC fold in
+// `prove_shard_zerocheck` step 4 with a single CUDA kernel launch via
+// `ziren-gpu/cuda/basefold/zerocheck_combine.cuh`.  Hook fires when
+// `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set in the environment.
+//
+// Inputs are the per-chip padded host tables (already padded to
+// `target_size = 1 << max_log_degree`) and the precomputed powers
+// vector `[1, λ, …, λ^(n-1)]`.  Output is the combined table as a
+// host `Vec<Ef4>` byte-identical to the host serial / parallel fold.
+
+/// Hook signature for the GPU lambda-RLC combine kernel.
+///
+/// Returns `None` on dispatch failure (caller falls back to the host
+/// parallel fold unconditionally — byte-identity preserved).
+pub type GpuZerocheckCombineFn = fn(
+    padded_tables: &[Vec<Ef4>],
+    powers_of_lambda: &[Ef4],
+    target_size: usize,
+) -> Option<Vec<Ef4>>;
+
+static GPU_ZEROCHECK_COMBINE_HOOK: std::sync::OnceLock<GpuZerocheckCombineFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU lambda-RLC combine hook.  Idempotent; returns
+/// `Err` when a hook was already registered.  Called once by
+/// `ziren-gpu`'s `compress_multi_gpu` at startup (alongside the
+/// `register_gpu_zerocheck_hook` call above).
+pub fn register_gpu_zerocheck_combine_hook(
+    f: GpuZerocheckCombineFn,
+) -> Result<(), GpuZerocheckCombineFn> {
+    GPU_ZEROCHECK_COMBINE_HOOK.set(f)
+}
+
+/// Read the registered GPU lambda-RLC combine hook, if any.
+#[must_use]
+pub fn get_gpu_zerocheck_combine_hook() -> Option<GpuZerocheckCombineFn> {
+    GPU_ZEROCHECK_COMBINE_HOOK.get().copied()
+}
+
+// ────────────────────────────────────────────────────────────────────
 // GPU per-chip constraint-eval dispatch hook (#111 — sister of #106)
 // ────────────────────────────────────────────────────────────────────
 //
@@ -614,6 +657,80 @@ pub fn register_gpu_constraint_eval_batched_hook(
 #[must_use]
 pub fn get_gpu_constraint_eval_batched_hook() -> Option<GpuConstraintEvalBatchedFn> {
     GPU_CONSTRAINT_EVAL_BATCHED_HOOK.get().copied()
+}
+
+// ────────────────────────────────────────────────────────────────────
+// #147 — CROSS-SHARD batched variant of `GpuConstraintEvalBatchedFn`.
+// ────────────────────────────────────────────────────────────────────
+//
+// Same per-chip semantics as `GpuConstraintEvalBatchedFn` (above), but
+// accepts MULTIPLE shards' chip lists in one call.  The implementation
+// aggregates ALL shards' chip descriptors into one device-resident
+// `descs[]` array and dispatches one CUDA launch per MEMORY_SIZE
+// bucket spanning ALL shards (typically 4-8 shards × 2-3 buckets ≈
+// 8-12 launches in place of N×K per-chip launches).
+//
+// The hook is consulted by the cross-shard coordinator inside
+// `crate::shard_level::zerocheck_prover` when
+// `ZIREN_GPU_CROSS_SHARD_BATCH=1` is set: each shard's worker thread
+// submits its chip slices to a process-global coordinator, which
+// blocks until either `ZIREN_GPU_CROSS_SHARD_BATCH_N` shards have
+// arrived (or the timeout fires), then calls this hook ONCE with all
+// submitted shards and scatters the per-shard outputs back to the
+// waiters.
+//
+// The signature uses parallel "vec of per-shard slices" arrays — the
+// outer slice indexes shard, the inner slice indexes chip within that
+// shard.  All outer arrays MUST have length ==
+// `chip_names_per_shard.len()`.
+//
+// Output `Vec<Vec<Option<Vec<Ef4>>>>` is parallel-indexed by shard
+// then chip: `result[s][i]` is `Some(c_table)` iff
+// `chip_names_per_shard[s][i]` dispatched on GPU; `None` when the GPU
+// rejected (cache miss / size mismatch / dispatch failure) — the
+// coordinator falls back to per-shard batched dispatch (or host CPU)
+// for those slots.
+//
+// Empty outer `Vec` (`Vec::new()`) signals total dispatch failure for
+// the entire batch — coordinator falls back to per-shard batched
+// dispatch wholesale.
+
+/// Cross-shard batched per-shard BaseFold constraint-table builder.
+/// See module comment above for invariants.  Mirrors the per-shard
+/// `GpuConstraintEvalBatchedFn` signature, lifted by one outer
+/// `&[…]` (one entry per shard).
+#[allow(clippy::type_complexity)]
+pub type GpuConstraintEvalCrossShardFn = fn(
+    chip_names_per_shard: &[&[&str]],
+    main_row_majors_per_shard: &[&[&[p3_koala_bear::KoalaBear]]],
+    main_widths_per_shard: &[&[usize]],
+    preprocessed_row_majors_per_shard: &[&[&[p3_koala_bear::KoalaBear]]],
+    preprocessed_widths_per_shard: &[&[usize]],
+    public_values_per_shard: &[&[p3_koala_bear::KoalaBear]],
+    alphas_per_shard: &[&[Ef4]],
+    local_cumulative_sums_per_shard: &[&[Ef4]],
+    global_cumulative_sums_xy_per_shard: &[&[[p3_koala_bear::KoalaBear; 14]]],
+    num_vars_list_per_shard: &[&[usize]],
+) -> Vec<Vec<Option<Vec<Ef4>>>>;
+
+static GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK:
+    std::sync::OnceLock<GpuConstraintEvalCrossShardFn> = std::sync::OnceLock::new();
+
+/// Register the cross-shard batched GPU constraint-eval driver.
+/// Idempotent; returns `Err` when a hook was already registered.
+/// Called once by `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_constraint_eval_cross_shard_hook(
+    f: GpuConstraintEvalCrossShardFn,
+) -> Result<(), GpuConstraintEvalCrossShardFn> {
+    GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK.set(f)
+}
+
+/// Read the registered cross-shard batched GPU constraint-eval hook,
+/// if any.
+#[must_use]
+pub fn get_gpu_constraint_eval_cross_shard_hook()
+    -> Option<GpuConstraintEvalCrossShardFn> {
+    GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK.get().copied()
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -774,6 +891,74 @@ mod jagged_orchestration_hook {
 pub use jagged_orchestration_hook::{
     GpuJaggedOrchestrationFn, get_gpu_jagged_orchestration_hook,
     register_gpu_jagged_orchestration_hook,
+};
+
+// ─────────────────────────────────────────────────────────────────────
+// #174 (C-full B1) — GPU jagged-PCS DEVICE-trace orchestration hook.
+//
+// Sister of #113 [`jagged_orchestration_hook`] above.  The #113 hook
+// receives HOST traces (`RowMajorMatrix<KoalaBear>`) — the same shape
+// the host emit feeds into `prove_jagged_basefold`.  This new hook
+// receives only chip NAMES + per-chip `r_row` + the transcript; the
+// hook implementation looks up the per-chip device-resident traces
+// from the `prove_shard_to_basefold_gpu` per-shard snapshot
+// (`ziren-gpu/basefold/src/logup_gkr.rs::ACTIVE_CHIP_TRACES`) and
+// dispatches the byte-for-byte equivalent
+// `phase4_device::emit_jagged_pcs_bytes_device` device-trace path —
+// skipping the per-chip `to_host_naive()` pull-back that the #113
+// host-trace hook would have to do.
+//
+// Activated by `ZIREN_GPU_JAGGED_PCS_DEVICE=1` (matches the env name
+// the `phase4_device` doc-comment advertises).  Until this hook
+// landed, that env flag was DEAD — `phase4_device::emit_jagged_pcs_bytes_device`
+// existed and was tested but no caller ever invoked it from the
+// shard-prover prove path.  Output bytes MUST be byte-identical to
+// the host `bundle.to_bytes()` (validated end-to-end on the GPU box
+// against the v1 default).
+// ─────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "basefold")]
+mod jagged_pcs_device_hook {
+    use super::Ef4;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    /// Signature of the GPU jagged-PCS device-trace orchestration
+    /// driver.  Inputs are the chip NAMES (in chip-iteration order;
+    /// the hook uses these to look up device traces from the
+    /// per-shard snapshot installed by `prove_shard_to_basefold_gpu`)
+    /// + per-chip `r_row` + the outer `LbChallenger`.  Returns the
+    /// rmp-serde-encoded `JaggedBasefoldBundle` bytes, byte-identical
+    /// to host `bundle.to_bytes()`.
+    pub type GpuJaggedPcsDeviceFn = fn(
+        chip_names: &[String],
+        r_row_per_chip: &[Vec<Ef4>],
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+    ) -> Vec<u8>;
+
+    static GPU_JAGGED_PCS_DEVICE_HOOK: std::sync::OnceLock<GpuJaggedPcsDeviceFn> =
+        std::sync::OnceLock::new();
+
+    /// Register the device-trace jagged-PCS orchestration driver.
+    /// Idempotent; returns `Err` when a hook was already registered.
+    /// Called once by `ziren-gpu`'s `compress_multi_gpu` at startup.
+    pub fn register_gpu_jagged_pcs_device_hook(
+        f: GpuJaggedPcsDeviceFn,
+    ) -> Result<(), GpuJaggedPcsDeviceFn> {
+        GPU_JAGGED_PCS_DEVICE_HOOK.set(f)
+    }
+
+    /// Read the registered device-trace jagged-PCS hook, if any.
+    #[must_use]
+    pub fn get_gpu_jagged_pcs_device_hook() -> Option<GpuJaggedPcsDeviceFn> {
+        GPU_JAGGED_PCS_DEVICE_HOOK.get().copied()
+    }
+}
+
+#[cfg(feature = "basefold")]
+pub use jagged_pcs_device_hook::{
+    GpuJaggedPcsDeviceFn, get_gpu_jagged_pcs_device_hook,
+    register_gpu_jagged_pcs_device_hook,
 };
 
 #[cfg(test)]

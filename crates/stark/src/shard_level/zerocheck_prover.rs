@@ -208,6 +208,128 @@ where
     acc
 }
 
+/// C-full C2 — opt-in device fusion path for the lambda-RLC step.
+///
+/// When `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set AND a GPU combine
+/// hook is registered (via
+/// [`crate::shard_level::sumcheck_poly::register_gpu_zerocheck_combine_hook`])
+/// AND `Challenge<SC> == Ef4`, dispatch the `Σ_i λ^i · padded[i]` fold
+/// through the registered CUDA kernel
+/// (`combine_ctables_with_lambda_powers` in
+/// `ziren-gpu/cuda/basefold/zerocheck_combine.cuh`).  Otherwise (or on
+/// dispatch failure) fall back to the host parallel
+/// [`compute_combined_table_rlc`].
+///
+/// **Byte-identity:** EF addition is associative; the per-chip lambda
+/// power is identical regardless of which thread or device computes
+/// it.  Output matches the host serial reference bit-for-bit.  When
+/// `ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1` is also set, the
+/// caller asserts equality against `compute_combined_table_rlc_serial`.
+fn compute_combined_table_rlc_with_device<SC>(
+    padded: &[Vec<Challenge<SC>>],
+    lambda: Challenge<SC>,
+    target_size: usize,
+) -> Vec<Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+{
+    use core::any::TypeId;
+    use p3_field::PrimeCharacteristicRing;
+    if !std::env::var("ZIREN_GPU_ZEROCHECK_DEVICE_FUSION")
+        .map(|v| v == "1").unwrap_or(false)
+    {
+        return compute_combined_table_rlc::<SC>(padded, lambda, target_size);
+    }
+    // Trivial cases — never bother with a device dispatch.
+    if padded.is_empty() {
+        return vec![Challenge::<SC>::ZERO; target_size];
+    }
+    if padded.len() == 1 {
+        return padded[0].clone();
+    }
+    type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+    if TypeId::of::<Challenge<SC>>() != TypeId::of::<Ef4>() {
+        // Host-only build (no Ef4) — fall back silently to host fold.
+        return compute_combined_table_rlc::<SC>(padded, lambda, target_size);
+    }
+    let Some(hook) =
+        crate::shard_level::sumcheck_poly::get_gpu_zerocheck_combine_hook()
+    else {
+        use std::sync::OnceLock;
+        static WARN_ONCE: OnceLock<()> = OnceLock::new();
+        WARN_ONCE.get_or_init(|| {
+            tracing::warn!(
+                "ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1 but no combine hook \
+                 registered; ziren-gpu must call \
+                 register_gpu_zerocheck_combine_hook at startup. \
+                 Falling back to host parallel fold."
+            );
+        });
+        return compute_combined_table_rlc::<SC>(padded, lambda, target_size);
+    };
+    // Precompute powers-of-lambda on host (sequential; n ≤ ~50 chips).
+    let n = padded.len();
+    let mut powers: Vec<Challenge<SC>> = Vec::with_capacity(n);
+    let mut p = Challenge::<SC>::ONE;
+    for _ in 0..n {
+        powers.push(p);
+        p *= lambda;
+    }
+    // Reinterpret padded slices + powers as Ef4 via TypeId guard.
+    // SAFETY: TypeId equality guarantees Challenge<SC> and Ef4 have
+    // identical layout; slice reinterp is sound for the lifetime of
+    // the function (no aliasing — the original `padded` is borrowed
+    // shared, and we drop the Ef4 view before returning).
+    let padded_ef4: &[Vec<Ef4>] = unsafe {
+        core::slice::from_raw_parts(
+            padded.as_ptr().cast::<Vec<Ef4>>(),
+            padded.len(),
+        )
+    };
+    let powers_ef4: &[Ef4] = unsafe {
+        core::slice::from_raw_parts(
+            powers.as_ptr().cast::<Ef4>(),
+            powers.len(),
+        )
+    };
+    match hook(padded_ef4, powers_ef4, target_size) {
+        Some(out_ef4) => {
+            // SAFETY: TypeId guarantees Ef4 == Challenge<SC>; convert
+            // ownership of the Vec<Ef4> into Vec<Challenge<SC>> by
+            // re-wrapping the buffer.  ManuallyDrop avoids a double-free.
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            FIRED_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "C-full C2 zerocheck combine hook FIRED \
+                     (ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1, \
+                     n_chips={n}, target_size={target_size})"
+                );
+            });
+            unsafe {
+                let mut me = std::mem::ManuallyDrop::new(out_ef4);
+                Vec::from_raw_parts(
+                    me.as_mut_ptr().cast::<Challenge<SC>>(),
+                    me.len(),
+                    me.capacity(),
+                )
+            }
+        }
+        None => {
+            use std::sync::OnceLock;
+            static FELL_ONCE: OnceLock<()> = OnceLock::new();
+            FELL_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "C-full C2 zerocheck combine hook FELL THROUGH \
+                     (returned None); host parallel fold used"
+                );
+            });
+            compute_combined_table_rlc::<SC>(padded, lambda, target_size)
+        }
+    }
+}
+
 /// Shard-level zerocheck prover.
 ///
 /// SP1 reference: `ShardProver::zerocheck` at
@@ -586,10 +708,16 @@ where
     // host pad, no host RLC, hand the device handle straight into
     // #106's GPU sumcheck) is the architectural target documented
     // in /tmp/c_full_a4_plan.md §3 and the deferred follow-up
-    // /tmp/c_full_b3_followup.md.  This commit ships the host-side
-    // win (≈3-7s/shard per A4 estimates) without touching the
-    // ziren-gpu hook signatures or requiring a new CUDA kernel.
-    let combined: Vec<Challenge<SC>> = compute_combined_table_rlc::<SC>(
+    // /tmp/c_full_b3_followup.md.  C-full C2 (this revision) ships
+    // the device fusion kernel (`combine_ctables_with_lambda_powers`)
+    // without yet eliminating the host pad — when
+    // `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set AND a hook is
+    // registered AND `Challenge<SC> == Ef4`, the lambda-RLC fold runs
+    // on device.  Output is byte-identical to the host serial /
+    // parallel fold (associative EF addition) and the dual-run
+    // verifier below asserts equality.  Falls back to the host
+    // parallel fold on any dispatch failure.
+    let combined: Vec<Challenge<SC>> = compute_combined_table_rlc_with_device::<SC>(
         &padded, lambda, target_size,
     );
 
