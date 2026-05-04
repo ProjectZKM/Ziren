@@ -292,10 +292,12 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        // #112 dispatch hook: when ZIREN_GPU_INTERACTION_EVAL_DEVICE=1
-        // AND a GPU hook is registered AND `(F, EF) == (KoalaBear, Ef4)`
-        // (production basefold path), route the per-row interaction
-        // walk through the registered GPU descriptor kernel
+        // #112 + C-full K1 dispatch hook: when EITHER
+        // `ZIREN_GPU_INTERACTION_EVAL_DEVICE=1` OR
+        // `ZIREN_GPU_BUILD_GKR_DEVICE=1` is set, AND a GPU hook is
+        // registered AND `(F, EF) == (KoalaBear, Ef4)` (production
+        // basefold path), route the per-row interaction walk through
+        // the registered GPU descriptor kernel
         // (`build_gkr_circuit_first_layer_koala_bear`).  Output is
         // byte-identical to `build_chip_interaction_tables`; on `None`
         // (chip rejected, unknown name, etc.) the host fallback runs
@@ -304,12 +306,22 @@ where
         // The GPU output is materialized as `(Vec<KoalaBear>, Vec<Ef4>)`
         // and reinterpreted back to `(Vec<F>, Vec<EF>)` under TypeId
         // equality (same `transmute` pattern used for #106 and #111).
-        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if std::env::var(
-            "ZIREN_GPU_INTERACTION_EVAL_DEVICE",
-        )
-        .map(|v| v == "1")
-        .unwrap_or(false)
-        {
+        //
+        // C-full K1: the `ZIREN_GPU_BUILD_GKR_DEVICE=1` alias (matching
+        // the docstring contract in
+        // `ziren-gpu/basefold/src/logup_gkr.rs::register_build_gkr_device_hook`)
+        // engages the same hook slot, letting operators flip the
+        // device-resident first-layer construction without touching
+        // the legacy #112 flag name.  Bridge work — feeding device
+        // buffers DIRECTLY into the J3 pool's `LogupGkrDevicePool::upload`
+        // (skipping host pull-back) — is documented in the K1 follow-up.
+        let interaction_env = std::env::var("ZIREN_GPU_INTERACTION_EVAL_DEVICE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let build_gkr_env = std::env::var("ZIREN_GPU_BUILD_GKR_DEVICE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if interaction_env || build_gkr_env {
             if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
                 use core::any::TypeId;
                 type Ef4 = p3_field::extension::BinomialExtensionField<

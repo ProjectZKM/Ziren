@@ -313,17 +313,14 @@ where
         // #76 / D2 (C-full C4 plan §5) — GPU dispatch hook for the
         // **OPEN/prove** phase.  The COMMIT side of `ZIREN_GPU_BASEFOLD=1`
         // is wired in `basefold_late_binding::commit_basefold_late_binding`
-        // (see `register_gpu_basefold_commit_hook`).  The OPEN side
-        // (this site) is not yet wired — `BasefoldProverData` carried
-        // by `prover_data.pcs_batch_data` would need to be a device
-        // variant before we can avoid the host re-prove here, which is
-        // C4 risk #1 (open-path divergence).  When the device commit
-        // hook fires AND its `prover_data` becomes a device-resident
-        // enum variant, this site can dispatch via a sister hook
-        // `register_gpu_basefold_open_hook`.  Until then this is a
-        // documentation marker — no fallback warn (the COMMIT site
-        // already emits a single FIRED message) so the log stays
-        // quiet.
+        // (see `register_gpu_basefold_commit_hook`).  The OPEN side is
+        // wired one level up at `basefold_late_binding::open_basefold_late_binding`
+        // (see `register_gpu_basefold_open_hook`, #191/H3) — the
+        // sister hook intercepts at the late-binding entry so it can
+        // see the full `BasefoldLateBindingProverData` (including the
+        // commit-time metadata it needs to drive the device prove).
+        // No dispatch logic at this `stacked.rs` site; this comment
+        // stays as a navigation marker.
         let _ = ();
 
         let basefold_proof = self.basefold_prover.prove_trusted_mle_evaluations(

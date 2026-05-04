@@ -427,16 +427,183 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
     GPU_BASEFOLD_COMMIT_HOOK.get().copied()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// #107 / G1 — GPU jagged-reduction sumcheck dispatch hook.
+//
+// Mirrors the host `crate::jagged_sumcheck::prove_jagged_reduction_owned`
+// signature one-for-one — same inputs (owned `dense_q`, packing,
+// `r_row_per_chip`, `y_per_chip`, challenger), same output
+// (`JaggedReductionProof<InnerChallenge>`).  Wired from
+// `prove_jagged_basefold_with_y_per_chip` step (4) when
+// `ZIREN_GPU_JAGGED_PCS=1` is set.
+//
+// Per-shard wall: 2.41–2.76s × 25 shards ≈ 62s of the 144s tendermint
+// compress wall (per E2's per-shard logs) — the largest remaining
+// per-shard host bottleneck after the BaseFold commit moved to GPU.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU jagged-reduction prover hook.  Same inputs
+/// as [`crate::jagged_sumcheck::prove_jagged_reduction_owned`], same
+/// output.  Implementations MUST be byte-equivalent to the host
+/// reduction (verified by the existing host fallback when the hook is
+/// not registered).  Implementations MAY return `None` to signal a
+/// hard fall-through to the host body (e.g. when shape constraints
+/// the GPU path doesn't support are detected).
+pub type GpuJaggedReductionFn = fn(
+    dense_q: alloc::vec::Vec<LbVal>,
+    packing: &crate::jagged::JaggedPacking<LbVal>,
+    r_row_per_chip: &[alloc::vec::Vec<LbChallenge>],
+    y_per_chip: &[alloc::vec::Vec<LbChallenge>],
+    challenger: &mut LbChallenger,
+) -> Option<crate::jagged_sumcheck::JaggedReductionProof<LbChallenge>>;
+
+static GPU_JAGGED_REDUCTION_HOOK: std::sync::OnceLock<GpuJaggedReductionFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU jagged-reduction hook.  Idempotent; returns
+/// `Err(existing_hook)` when a hook was already registered.  Called
+/// once by `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_jagged_reduction_hook(
+    f: GpuJaggedReductionFn,
+) -> Result<(), GpuJaggedReductionFn> {
+    GPU_JAGGED_REDUCTION_HOOK.set(f)
+}
+
+/// Read the registered GPU jagged-reduction hook, if any.
+#[must_use]
+pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
+    GPU_JAGGED_REDUCTION_HOOK.get().copied()
+}
+
 /// Open the committed batch at a single point and produce the
 /// stacked-basefold proof.  `eval_point.len()` must equal
 /// `log_stacking_height + log(num_stripes_padded)`.
+///
+/// **#191 / H3 (C-full C4 plan §5 sister to E2)** — when
+/// `ZIREN_GPU_BASEFOLD=1` is set AND ziren-gpu has registered the GPU
+/// open hook (via [`register_gpu_basefold_open_hook`]), the open
+/// dispatches through `FriCudaProver::prove` on device.  Output proof
+/// must be byte-identical to the host path (the device hook host-side
+/// observes the same digests + univariate messages into the supplied
+/// `LbChallenger`).  Falls through to the host implementation on any
+/// of: env unset, hook unregistered, hook returns `Err` (shape
+/// unsupported / device error — `Err` returns ownership of the
+/// `prover_data` so the host fallback can run without losing it).
 pub fn open_basefold_late_binding(
+    prover_data: BasefoldLateBindingProverData,
+    eval_point: Vec<LbChallenge>,
+    challenger: &mut LbChallenger,
+) -> StackedBasefoldProof<LbVal, LbChallenge, LbMmcs> {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+        if let Some(hook) = get_gpu_basefold_open_hook() {
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
+            match hook(prover_data, eval_point, challenger) {
+                Ok(proof) => {
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold open FIRED \
+                             (#191/H3 ZIREN_GPU_BASEFOLD=1, gpu_hook dispatched)"
+                        );
+                    });
+                    return proof;
+                }
+                Err((returned_prover_data, returned_eval_point)) => {
+                    FELLBACK_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold open hook returned Err — falling \
+                             back to host open_basefold_late_binding. The \
+                             device side could not handle this shape; the \
+                             host open is the source of truth."
+                        );
+                    });
+                    return open_basefold_late_binding_host(
+                        returned_prover_data,
+                        returned_eval_point,
+                        challenger,
+                    );
+                }
+            }
+        }
+        // No hook registered: silently fall through (the COMMIT site
+        // already emits its own one-shot WARN_ONCE for the same
+        // env-set + no-hook condition; we don't need to double up).
+    }
+    open_basefold_late_binding_host(prover_data, eval_point, challenger)
+}
+
+/// Pure host-side implementation of [`open_basefold_late_binding`] —
+/// extracted so the GPU dispatch hook can fall back to it on
+/// shape-unsupported / runtime errors without re-entering the env-flag
+/// dispatch loop.  Always runs the CPU StackedPcsProver
+/// `prove_trusted_evaluation` body.
+pub fn open_basefold_late_binding_host(
     prover_data: BasefoldLateBindingProverData,
     eval_point: Vec<LbChallenge>,
     challenger: &mut LbChallenger,
 ) -> StackedBasefoldProof<LbVal, LbChallenge, LbMmcs> {
     let (prover, _verifier, _mmcs) = build_pcs(prover_data.log_stacking_height);
     prover.prove_trusted_evaluation(eval_point, vec![prover_data.stacked_data], challenger)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// #191 / H3 (C-full C4 plan §5 sister to E2) — GPU BaseFold open
+// dispatch hook.
+//
+// Mirror of the E2 commit hook ([`register_gpu_basefold_commit_hook`]).
+// The hook receives the same inputs as `open_basefold_late_binding` and
+// returns a byte-identical `StackedBasefoldProof` — the device side is
+// responsible for:
+//
+//   * routing the per-stripe MLEs / codewords held in
+//     `prover_data.stacked_data.pcs_batch_data` to GPU memory (or
+//     reading from a device-resident cache if the commit hook installed
+//     one),
+//   * running `FriCudaProver::prove` (the existing 1349 LOC device
+//     prove driver in `ziren-gpu/basefold/src/fri.rs`),
+//   * observing the per-round univariate-poly evals + Merkle commits +
+//     PoW witness into the supplied `LbChallenger` so the transcript
+//     stays in lock-step with the host path,
+//   * assembling a `StackedBasefoldProof` whose `basefold_proof.*` is
+//     shape-compatible with the host path consumed by
+//     `verify_basefold_late_binding`.
+//
+// The hook returns `Result<.., (prover_data, eval_point)>` so the device
+// side can tunnel ownership of the host inputs back to the host fallback
+// on error (mirrors the `commit_basefold_late_binding` hook contract).
+// ─────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU BaseFold open driver.  Same inputs as
+/// [`open_basefold_late_binding`].  On success returns the byte-
+/// equivalent `StackedBasefoldProof`.  On unrecoverable shape/runtime
+/// error returns the original `(prover_data, eval_point)` so the host
+/// fallback can run without losing ownership.
+pub type GpuBasefoldOpenFn = fn(
+    prover_data: BasefoldLateBindingProverData,
+    eval_point: Vec<LbChallenge>,
+    challenger: &mut LbChallenger,
+) -> Result<
+    StackedBasefoldProof<LbVal, LbChallenge, LbMmcs>,
+    (BasefoldLateBindingProverData, Vec<LbChallenge>),
+>;
+
+static GPU_BASEFOLD_OPEN_HOOK: std::sync::OnceLock<GpuBasefoldOpenFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU BaseFold open driver.  Idempotent; returns
+/// `Err(existing_hook)` when a hook was already registered.  Called
+/// once by `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_basefold_open_hook(
+    f: GpuBasefoldOpenFn,
+) -> Result<(), GpuBasefoldOpenFn> {
+    GPU_BASEFOLD_OPEN_HOOK.set(f)
+}
+
+/// Read the registered GPU BaseFold open hook, if any.
+#[must_use]
+pub fn get_gpu_basefold_open_hook() -> Option<GpuBasefoldOpenFn> {
+    GPU_BASEFOLD_OPEN_HOOK.get().copied()
 }
 
 /// Verify the proof against a previously observed commitment.
@@ -710,42 +877,91 @@ pub mod jagged {
         // after round 0 (releasing the 4N base-field buffer before the
         // EF tables for rounds 1..n are built).  Saves one full N-element
         // clone vs the &[InnerVal] entry point.
-        // #105C dispatch hook: when ZIREN_GPU_JAGGED_PCS=1 is set,
-        // route the jagged-PCS sumcheck reduction to a GPU-accelerated
-        // path (zkm-gpu-basefold's `prove_jagged_reduction_gpu`,
-        // produces a byte-identical JaggedReductionProof).  Currently a
-        // no-op fallback that warns and returns the host implementation
-        // — the GPU integration body (DenseQDevice upload + GPU prove
-        // call + JaggedReductionProof type bridge) requires a CUDA-
-        // capable build environment and is the next increment of #105C.
-        // Mirror of the existing ZIREN_GPU_BASEFOLD env-flag pattern in
-        // basefold/stacked.rs:287.
-        if std::env::var("ZIREN_GPU_JAGGED_PCS").map(|v| v == "1").unwrap_or(false) {
-            use std::sync::OnceLock;
-            static WARN_ONCE: OnceLock<()> = OnceLock::new();
-            WARN_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "ZIREN_GPU_JAGGED_PCS=1 set but GPU dispatch body not yet wired \
-                     in basefold_late_binding.rs:prove_jagged_basefold; falling back to \
-                     host prove_jagged_reduction_owned. Next increment: build the \
-                     gpu_prove_jagged wrapper in zkm-stark and feature-gate the \
-                     dependency on zkm-gpu-basefold. See #105C."
-                );
-            });
-        }
-
+        // #107 / G1 dispatch: when ZIREN_GPU_JAGGED_PCS=1 is set AND a
+        // GPU jagged-reduction hook has been registered (by ziren-gpu's
+        // `compress_multi_gpu` startup block), route the reduction
+        // through the device hook.  The hook is byte-equivalent to
+        // `prove_jagged_reduction_owned` (verified by the existing
+        // host fallback path + the GPU-side scaffold tests in
+        // `ziren-gpu/basefold/src/jagged_sumcheck.rs::tests`).  When
+        // the hook returns `None` (unsupported shape) or is not
+        // registered, the host fallback path runs unchanged.
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
-            crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                dense_q,
-                &packing,
-                r_row_per_chip,
-                &y_per_chip,
-                challenger,
-            )
+
+            let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            let hook = if try_gpu {
+                super::get_gpu_jagged_reduction_hook()
+            } else {
+                None
+            };
+
+            match hook {
+                Some(f) => {
+                    use std::sync::OnceLock;
+                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            chips = n_chips,
+                            log_dense_size = packing.log_dense_size as u64,
+                            "#107 jagged_pcs FIRED — GPU jagged-reduction hook \
+                             driving sumcheck reduce ({} chips)",
+                            n_chips,
+                        );
+                    });
+                    // Move dense_q into the hook.  Move-not-clone:
+                    // avoids holding a 4N base-field duplicate live
+                    // across the call.  On a hard fall-through (None
+                    // returned by the hook) we lose ownership — the
+                    // host fallback below re-materializes dense_q in
+                    // that case, mirroring the pre-G1 behaviour.
+                    let r_row = r_row_per_chip.to_vec();
+                    let y_clone = y_per_chip.clone();
+                    let saved_dense = if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
+                        .map(|v| v == "1").unwrap_or(false)
+                    {
+                        Some(dense_q.clone())
+                    } else {
+                        None
+                    };
+                    match f(dense_q, &packing, &r_row, &y_clone, challenger) {
+                        Some(p) => p,
+                        None => {
+                            tracing::warn!(
+                                chips = n_chips,
+                                log_dense_size = packing.log_dense_size as u64,
+                                "#107 jagged_pcs hook returned None — falling back \
+                                 to host prove_jagged_reduction_owned",
+                            );
+                            let dense_q = saved_dense.unwrap_or_else(|| {
+                                materialize_dense_jagged::<InnerVal>(
+                                    chip_traces,
+                                    packing.log_dense_size,
+                                )
+                            });
+                            crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                                dense_q,
+                                &packing,
+                                r_row_per_chip,
+                                &y_per_chip,
+                                challenger,
+                            )
+                        }
+                    }
+                }
+                None => crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                    dense_q,
+                    &packing,
+                    r_row_per_chip,
+                    &y_per_chip,
+                    challenger,
+                ),
+            }
         };
         drop(_red_span);
         tracing::info!(
