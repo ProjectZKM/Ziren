@@ -19,6 +19,7 @@ members = [
     "crates/curves",
     "crates/derive",
    # "crates/picus",
+    "crates/poly",
     "crates/primitives",
     "crates/prover",
     "crates/recursion/circuit",
@@ -115,6 +116,7 @@ zkm-instruction-test-defs = { path = "crates/core/instruction-test-defs" }
 zkm-core-machine = { path = "crates/core/machine", default-features = false }
 zkm-derive = { path = "crates/derive" }
 zkm-primitives = { path = "crates/primitives" }
+zkm-poly = { path = "crates/poly" }
 zkm-stark = { path = "crates/stark" }
 zkm-prover = { path = "crates/prover" }
 zkm-build = { path = "crates/build" }

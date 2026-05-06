@@ -7942,8 +7942,8 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "typenum",
+ "zkm-poly",
  "zkm-primitives",
- "zkm-stark",
 ]
 
 [[package]]
@@ -7972,6 +7972,14 @@ dependencies = [
  "serde",
  "sha2",
  "zkm-primitives",
+]
+
+[[package]]
+name = "zkm-poly"
+version = "1.2.5"
+dependencies = [
+ "itertools 0.13.0",
+ "p3-field",
 ]
 
 [[package]]
@@ -8249,6 +8257,7 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.23",
  "zkm-derive",
+ "zkm-poly",
  "zkm-primitives",
  "zkm-zkvm",
 ]
