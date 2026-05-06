@@ -66,27 +66,33 @@ where
     debug_assert!(height >= 2 && height.is_power_of_two());
     debug_assert_eq!(width, EF::DIMENSION, "codeword width must equal EF::DIMENSION");
 
-    // (1) Reshape into Merkle leaves: pair adjacent rows.  Each leaf
-    // is now 2 * EF::D base elements, i.e. one pair of EF values.
-    // Move (don't clone) the codeword storage into the leaves matrix —
-    // we re-materialize the EF view from a fresh chunked slice below.
+    // (1) Build the EF view first by BORROWING the storage — the
+    // base→EF parse only needs read access.  We then move the storage
+    // into the leaves matrix without ever cloning the (potentially
+    // multi-MB) Vec.  Saves one full O(N) memcpy per round per shard.
+    //
+    // Order is byte-identical to the prior (clone-based) impl: the
+    // only challenger interaction below is observe(commit) followed by
+    // sample(beta), unchanged.
     let codeword_storage = current_codeword.data.values;
-    let codeword_storage_for_ef: Vec<F> = codeword_storage.clone();
-    let leaves_mat = RowMajorMatrix::new(codeword_storage, 2 * width);
-
-    // (2) Commit leaves via the MMCS — moves into commit, no extra copy.
-    let (commitment, prover_data) = mmcs.commit(vec![leaves_mat]);
-    challenger.observe(commitment.clone());
-
-    // (3) Sample fold randomness.
-    let beta: EF = challenger.sample_algebra_element();
-
-    // (4) Fold codeword: F-storage view -> Vec<EF> -> fold -> back to
-    // F storage with halved height.
-    let codeword_ef: Vec<EF> = codeword_storage_for_ef
+    let codeword_ef: Vec<EF> = codeword_storage
         .par_chunks_exact(EF::DIMENSION)
         .map(|chunk| EF::from_basis_coefficients_iter(chunk.iter().copied()).unwrap())
         .collect();
+
+    // (2) Reshape into Merkle leaves: pair adjacent rows.  Each leaf
+    // is 2 * EF::D base elements (one pair of EF values).  Moves
+    // codeword_storage into the leaves matrix (no copy).
+    let leaves_mat = RowMajorMatrix::new(codeword_storage, 2 * width);
+
+    // (3) Commit leaves via the MMCS — moves into commit, no extra copy.
+    let (commitment, prover_data) = mmcs.commit(vec![leaves_mat]);
+    challenger.observe(commitment.clone());
+
+    // (4) Sample fold randomness.
+    let beta: EF = challenger.sample_algebra_element();
+
+    // (5) Fold codeword using the EF view we built in (1).
     debug_assert_eq!(codeword_ef.len(), height);
     let folded_ef = fold_even_odd_ext::<F, EF>(codeword_ef, beta);
     debug_assert_eq!(folded_ef.len(), height / 2);
