@@ -204,11 +204,28 @@ where
 
     let _t_layers = std::time::Instant::now();
     let _layers_span = tracing::info_span!("logup_gkr_layer_transitions").entered();
-    // Skip the num_row_variables == 0 terminal (unused — only there to
-    // enable clean termination of the build loop).
-    for layer in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
+    // Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `circuit.layers`
+    // is now `Vec<LayerState>`.  Skip the num_row_variables == 0 terminal
+    // (unused — only there to enable clean termination of the build
+    // loop), then dispatch on the LayerState variant.  Today only Host
+    // is ever constructed (Step 4c will install Device entries).
+    for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         // Sample lambda for this round.
         let lambda: EF = challenger.sample_algebra_element::<EF>();
+
+        let layer = match state {
+            super::layer::LayerState::Host(layer) => layer,
+            // TODO (Step 4c): pull the device-resident layer through
+            // the registered `GpuLayerTransitionFn`, materialize it as
+            // a host `GkrCircuitLayer`, and pass it to `prove_gkr_round`
+            // (or, once H2's per-layer device sumcheck is wired up,
+            // route directly to the device prover without round-trip).
+            super::layer::LayerState::Device { .. } => unreachable!(
+                "Step 4b: LayerState::Device is unreachable in \
+                 prove_shard_logup_gkr_rows — only Host is constructed \
+                 today.  Step 4c lands the Device path."
+            ),
+        };
 
         // Run the sumcheck.
         let round_proof = prove_gkr_round::<F, EF, _>(

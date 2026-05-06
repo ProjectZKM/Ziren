@@ -430,20 +430,29 @@ impl<F: Field, EF: ExtensionField<F>> LayerState<F, EF> {
 ///
 /// Port of
 /// [`LogupGkrCpuCircuit<F, EF>`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L27-L29).
+///
+/// Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `layers` now
+/// stores [`LayerState`] entries so the per-layer storage can be
+/// EITHER host-resident (current production path,
+/// `LayerState::Host(GkrCircuitLayer)`) OR device-resident
+/// (`LayerState::Device { handle, .. }`) without changing the outer
+/// container type.  Step 4c will wire the GPU prover to install
+/// `Device` entries on the way down through `build_gkr_circuit` —
+/// only `Host` is constructed today.
 pub struct LogupGkrCpuCircuit<F: Field, EF: ExtensionField<F>> {
-    pub layers: Vec<GkrCircuitLayer<F, EF>>,
+    pub layers: Vec<LayerState<F, EF>>,
     _phantom: PhantomData<(F, EF)>,
 }
 
 impl<F: Field, EF: ExtensionField<F>> LogupGkrCpuCircuit<F, EF> {
     #[must_use]
-    pub const fn new(layers: Vec<GkrCircuitLayer<F, EF>>) -> Self {
+    pub const fn new(layers: Vec<LayerState<F, EF>>) -> Self {
         Self { layers, _phantom: PhantomData }
     }
 
     /// Pop the bottom-most (most-reduced) layer.  Used by
     /// `prove_gkr_round` to walk the circuit bottom-up.
-    pub fn pop_bottom(&mut self) -> Option<GkrCircuitLayer<F, EF>> {
+    pub fn pop_bottom(&mut self) -> Option<LayerState<F, EF>> {
         self.layers.pop()
     }
 }
@@ -527,14 +536,14 @@ mod tests {
     fn circuit_pops_bottom_in_lifo_order() {
         let table_ef: RowMajorTable<EF> = RowMajorTable::filled(1, 2, EF::default());
         let make_layer = |rows: usize| {
-            GkrCircuitLayer::<KoalaBear, EF>::Layer(LogUpGkrCpuLayer {
+            LayerState::<KoalaBear, EF>::Host(GkrCircuitLayer::Layer(LogUpGkrCpuLayer {
                 numerator_0: vec![table_ef.clone()],
                 denominator_0: vec![table_ef.clone()],
                 numerator_1: vec![table_ef.clone()],
                 denominator_1: vec![table_ef.clone()],
                 num_row_variables: rows,
                 num_interaction_variables: 2,
-            })
+            }))
         };
         let mut circuit = LogupGkrCpuCircuit::new(vec![make_layer(3), make_layer(2), make_layer(1)]);
         assert_eq!(circuit.pop_bottom().unwrap().num_row_variables(), 1);

@@ -14,7 +14,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use super::extract::{extract_outputs, LogUpGkrOutput};
 use super::first_layer::generate_first_layer;
-use super::layer::{GkrCircuitLayer, LogupGkrCpuCircuit};
+use super::layer::{GkrCircuitLayer, LayerState, LogupGkrCpuCircuit};
 use super::transition::layer_transition;
 use crate::air::MachineAir;
 use crate::Chip;
@@ -90,7 +90,12 @@ where
         "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
          num_row_variables=1 produces no terminal EF layer for output extraction");
 
-    let mut layers: Vec<GkrCircuitLayer<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
+    // Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `layers` now
+    // stores `LayerState<F, EF>` so a future GPU prover (Step 4c) can
+    // install `LayerState::Device { handle, .. }` entries on the way
+    // down.  Today every entry is `LayerState::Host(GkrCircuitLayer)`,
+    // so behavior is byte-identical to the pre-4b path.
+    let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
 
     // Special case: num_row_variables=2 input → first.num=1 → use
     // first as the terminal directly via F→EF promotion.
@@ -114,18 +119,18 @@ where
         let next = layer_transition::<F, EF>(&first);
         last_ef_layer = Some(next);
     }
-    layers.push(GkrCircuitLayer::FirstLayer(first));
+    layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
     // Subsequent transitions stay in EF.
     while let Some(curr) = last_ef_layer.take() {
         if curr.num_row_variables >= 1 {
             let next = layer_transition::<EF, EF>(&curr);
             last_ef_layer = Some(next);
-            layers.push(GkrCircuitLayer::Layer(curr));
+            layers.push(LayerState::Host(GkrCircuitLayer::Layer(curr)));
         } else {
             // curr is the null terminal layer (num_row_variables == 0).
             // Add to layer stack but stop transitioning.
-            layers.push(GkrCircuitLayer::Layer(curr));
+            layers.push(LayerState::Host(GkrCircuitLayer::Layer(curr)));
         }
     }
 
@@ -136,13 +141,25 @@ where
     //     (F→EF-promoted FirstLayer)
     //   * num_row_variables>=3 input → layers[len-2] is the EF Layer
     //     with num_row_variables==1
+    //
+    // Step 4b: dispatch on `LayerState`.  Device variant is unreachable
+    // here today (Step 4c will install it); when it lands the Device
+    // arm will need to pull the terminal cells from the registered hook
+    // (TODO in Step 4c) before invoking `extract_outputs`.
     let output = if let Some(t) = terminal_owned.as_ref() {
         extract_outputs(t)
     } else {
         match &layers[layers.len() - 2] {
-            GkrCircuitLayer::Layer(l) => extract_outputs(l),
-            GkrCircuitLayer::FirstLayer(_) => unreachable!(
+            LayerState::Host(GkrCircuitLayer::Layer(l)) => extract_outputs(l),
+            LayerState::Host(GkrCircuitLayer::FirstLayer(_)) => unreachable!(
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
+            ),
+            LayerState::Device { .. } => unreachable!(
+                "Step 4b: Device variant is unreachable in build_gkr_circuit \
+                 — only Host is constructed today.  Step 4c will install \
+                 Device entries; the Device arm must then materialize the \
+                 terminal layer via the registered \
+                 GpuLayerTransitionFn before invoking extract_outputs."
             ),
         }
     };
