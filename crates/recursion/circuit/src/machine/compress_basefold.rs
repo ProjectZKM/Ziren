@@ -384,8 +384,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // so we pass a fresh challenger here.
         let mut _challenger = machine.config().challenger_variable(builder);
 
-        // Step 5f: actual verify_shard call.  Closure types
-        // aligned via FC generic in placeholder_jagged_evaluator_fn.
+        // Step 5f: actual verify_shard call.
         // Explicit turbofish required because P (PCS verifier
         // type inside BasefoldShardVerifier) has a Pcs::Domain
         // associated type that the inferencer can't pin down
@@ -788,49 +787,6 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
     }
 }
 
-/// Public re-export of the placeholder factories so downstream
-/// crates / tests can construct closures matching the
-/// `BasefoldShardVerifier::verify_shard` `EVPV` and `JE` bounds.
-///
-/// Both factories are stubs returning shape-correct closures that
-/// don't pass real verification — they exist to unblock the call
-/// site signature integration; production wiring uses
-/// machine-specific constraint folders + the
-/// `RecursiveJaggedEvalSumcheckConfig` driver instead.
-
-/// Placeholder jagged-evaluator closure.  Returns
-/// `(zero_ext, vec![])` — structurally correct for compilation
-/// but doesn't pass real verification.  Kept for bring-up / A-B
-/// testing while `real_jagged_evaluator_fn` matures.
-pub fn placeholder_jagged_evaluator_fn<C, FC>(
-    _builder: &mut Builder<C>,
-) -> impl FnOnce(
-    &mut Builder<C>,
-    &JaggedDimensionMetadata<Felt<C::F>>,
-    &[Ext<C::F, C::EF>],
-    &[Ext<C::F, C::EF>],
-    &[Ext<C::F, C::EF>],
-    &JaggedSumcheckEvalProof<Ext<C::F, C::EF>>,
-    &mut FC,
-) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>)
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    FC: crate::challenger::FieldChallengerVariable<C, C::Bit>,
-{
-    move |builder: &mut Builder<C>,
-          _meta: &JaggedDimensionMetadata<Felt<C::F>>,
-          _z_row: &[Ext<C::F, C::EF>],
-          _z_index: &[Ext<C::F, C::EF>],
-          _z_eval: &[Ext<C::F, C::EF>],
-          _proof: &JaggedSumcheckEvalProof<Ext<C::F, C::EF>>,
-          _challenger: &mut FC|
-          -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>) {
-        use p3_field::PrimeCharacteristicRing;
-        let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-        (zero, Vec::new())
-    }
-}
-
 /// Real jagged-evaluator closure.
 ///
 /// Runs the jagged-eval sub-sumcheck verification entirely in-circuit,
@@ -1031,14 +987,6 @@ mod tests {
         let _f = noop_eval_public_values_fn::<C>();
         // Closure exists; shape verified at call site by the
         // EVPV trait bound on `verify_shard`.
-    }
-
-    /// Smoke test: placeholder_jagged_evaluator_fn factory
-    /// produces a callable closure of the right type.
-    #[test]
-    fn placeholder_jagged_evaluator_fn_constructs() {
-        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let _f = placeholder_jagged_evaluator_fn::<C, crate::challenger::DuplexChallengerVariable<C>>(&mut builder);
     }
 
 }
