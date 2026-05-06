@@ -194,7 +194,7 @@ where
 
 impl<F, EF, MT, D> StackedPcsProver<F, EF, MT, D>
 where
-    F: TwoAdicField,
+    F: TwoAdicField + p3_field::PrimeField64,
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F, Commitment: Clone>,
     D: TwoAdicSubgroupDft<F>,

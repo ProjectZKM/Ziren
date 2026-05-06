@@ -32,6 +32,81 @@ use super::fri::{commit_phase_round, final_poly};
 use super::mle::{Mle, message_from_iter};
 use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 
+/// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`.
+///
+/// Issue #231 — plonky3's [`p3_challenger::DuplexChallenger::grind`] is
+/// implemented with `(0..num_batches).into_par_iter().find_map_any(...)`,
+/// which returns the witness from whichever rayon worker finishes first.
+/// On multi-GPU runs the result is therefore non-deterministic across
+/// re-invocations of the same shard, even though the proof is honest.
+///
+/// That non-determinism cascades into the recursion compress program:
+/// the basefold proof's `pow_witness` field is included in the
+/// `evaluation_proof_bytes: Vec<u8>` (msgpack-encoded) carried by the
+/// next layer's witness.  A different `pow_witness` value yields a
+/// different msgpack byte length (msgpack uses variable-length integer
+/// encoding), which shifts the witness-read instruction count, which
+/// can flip the `RecursionShapeConfig::fix_shape` selection, which
+/// changes the compress program's preprocessed traces, which changes
+/// `compressed_proof.vk.hash_koalabear()`.  Concretely measured: 3
+/// distinct vk hashes across runs v8/v9/v10 of `bench_8x5090.sh
+/// tendermint compress`.
+///
+/// This helper provides a deterministic substitute that returns the
+/// *smallest-index* canonical-u64 witness satisfying the PoW
+/// condition.  The output is reproducible across runs, machines, and
+/// thread-pool sizes, eliminating the cascade.
+///
+/// Implementation: parallel rayon `find_first` (NOT `find_any`).  A
+/// sequential walk was tried first — at ~65 ms per grind for 16-bit
+/// PoW it back-pressured the per-shard host-pool worker enough that
+/// shards backed up and the host RAM grew unbounded (Linux OOM-killer
+/// terminated the perf binary at ~850 GB anon-rss).  `find_first`
+/// keeps the CPU work parallel so per-shard wall stays close to
+/// plonky3's parallel grind, while its left-of-match cancellation
+/// rule guarantees the smallest-index witness wins regardless of
+/// thread scheduling.
+///
+/// Validated: 3 back-to-back tendermint compress runs (v1/v2b/v3 of
+/// the May 6 fix session) produce IDENTICAL `compressed_proof.vk
+/// .hash_koalabear()`; baseline (without fix) produced 3 distinct
+/// hashes (v8/v9/v10).
+fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
+where
+    F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
+    C: GrindingChallenger<Witness = F>,
+{
+    use p3_field::PrimeCharacteristicRing;
+    use p3_maybe_rayon::prelude::*;
+    if bits == 0 {
+        return F::ZERO;
+    }
+    let order = F::ORDER_U64;
+    // Parallel search with `find_first` semantics — returns the
+    // smallest-index witness, NOT the first-thread-wins witness as
+    // plonky3's `find_any` does.  See the docstring for why parallel
+    // is required (sequential OOM'd the host).
+    let witness = (0..order)
+        .into_par_iter()
+        .map(|i| {
+            // SAFETY: i < F::ORDER_U64 by iterator bound, so this is
+            // a valid canonical field element.
+            unsafe { <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i) }
+        })
+        .find_first(|&w| {
+            let mut probe = challenger.clone();
+            probe.check_witness(bits, w)
+        })
+        .expect("deterministic_grind: failed to find a PoW witness");
+    // Replay on the real challenger to commit its state update
+    // (observe(witness) + sample_bits(bits)).  Mirrors plonky3's
+    // post-find `assert!(check_fn(self, witness))`.
+    let ok = challenger.check_witness(bits, witness);
+    debug_assert!(ok);
+    let _ = ok;
+    witness
+}
+
 /// Prover-side state for one committed round.
 ///
 /// Holds the mmcs ProverData (needed to open at query indices later)
@@ -50,7 +125,7 @@ pub struct BasefoldProver<F: Field, EF: ExtensionField<F>, MT: Mmcs<F>, D> {
 
 impl<F, EF, MT, D> BasefoldProver<F, EF, MT, D>
 where
-    F: TwoAdicField,
+    F: TwoAdicField + p3_field::PrimeField64,
     EF: ExtensionField<F> + TwoAdicField,
     MT: Mmcs<F, Commitment: Clone>,
     D: TwoAdicSubgroupDft<F>,
@@ -256,7 +331,10 @@ where
 
         // (1) Batch grinding witness (forces verifier-prover to share
         // a transcript prefix before sampling batching coefficients).
-        let batch_grinding_witness = challenger.grind(BATCH_GRINDING_BITS);
+        // Issue #231: use deterministic_grind to keep the witness
+        // value reproducible across runs (plonky3's parallel grind
+        // uses `find_any` which is non-deterministic).
+        let batch_grinding_witness = deterministic_grind(challenger, BATCH_GRINDING_BITS);
 
         // (2) Sample batching coefficients via partial-Lagrange basis.
         let total_polys: usize = mle_rounds
@@ -342,7 +420,9 @@ where
         challenger.observe_algebra_element(fp);
 
         let pow_bits = self.config().proof_of_work_bits;
-        let pow_witness = challenger.grind(pow_bits);
+        // Issue #231: see `deterministic_grind` for why this call must
+        // not delegate to plonky3's parallel `challenger.grind`.
+        let pow_witness = deterministic_grind(challenger, pow_bits);
 
         // (7) Sample query indices.
         let log_codeword_size = num_variables + self.config().log_blowup();
