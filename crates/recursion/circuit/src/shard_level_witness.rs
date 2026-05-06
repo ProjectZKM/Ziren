@@ -628,9 +628,14 @@ where
 ///   right degree.
 /// * `row_counts` — per-round per-chip Felt-witnessed bit-decomp;
 ///   currently zero felts shape-aligned with `column_counts_by_round`.
-/// * `expected_eval` — derived from `bundle.reduction.q_at_z` *
-///   `Σ y_per_chip` weighted by gamma in the reduction transcript;
-///   currently zero (in-circuit verifier will recompute internally).
+///
+/// **NOT a placeholder anymore (Phase 4a follow-up)**:
+/// * `expected_eval` ← `bundle.reduction.q_at_z` — the verifier's
+///   closing identity at recursive_jagged_pcs.rs:279 asserts
+///   `jagged_eval * expected_eval == sumcheck.point_and_eval.1`
+///   which mirrors the host verifier's terminal
+///   `q_at_z * w(z) == current_claim` (jagged_sumcheck.rs verify
+///   path); `q_at_z` is exactly the prover-emitted `expected_eval`.
 ///
 /// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// so downstream callers can swap with no shape change.
@@ -769,6 +774,19 @@ where
         .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
         .collect();
 
+    // ── REAL: expected_eval from bundle.reduction.q_at_z ──
+    // The in-circuit verifier's closing identity
+    // (recursive_jagged_pcs.rs:279) asserts
+    //     jagged_eval * expected_eval == sumcheck.point_and_eval.1
+    // which mirrors the host verifier's terminal check
+    //     q_at_z * w(z) == current_claim
+    // (jagged_sumcheck.rs verify_jagged_reduction).  `expected_eval`
+    // therefore takes the role of `q_at_z` — the dense-trace
+    // evaluation at the reduction's z*.  Witness through the
+    // existing InnerChallenge Witnessable.
+    let expected_eval: Ext<C::F, C::EF> =
+        <_ as Witnessable<C>>::read(&bundle.reduction.q_at_z, builder);
+
     // ── Top-level assembly ──
     JaggedPcsProofVariable {
         params: jagged_dim_metadata,
@@ -778,7 +796,7 @@ where
         column_counts: column_counts_by_round.to_vec(),
         row_counts,
         original_commitments,
-        expected_eval: zero_ext(builder),
+        expected_eval,
     }
 }
 
