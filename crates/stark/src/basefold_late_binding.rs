@@ -1114,30 +1114,30 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // (4) Re-materialize dense_q for the sumcheck reduction, then
-        // drop it immediately after.  This is the counterpart of the
-        // move-into-commit optimization in step (2): the two 4N
-        // buffers never coexist.
+        // (4) Run the jagged sumcheck reduction.
         //
-        // Use the `_owned` variant so the inner loop can drop dense_q
-        // after round 0 (releasing the 4N base-field buffer before the
-        // EF tables for rounds 1..n are built).  Saves one full N-element
-        // clone vs the &[InnerVal] entry point.
+        // Opt #1 + #3 (May 6 2026): the host fallback now uses the
+        // **streaming** reduction (`prove_jagged_reduction_streaming`)
+        // which walks `chip_traces` directly via `DenseJaggedIter` —
+        // no `dense_q` buffer materialized, no `w` weight table either.
+        // Round-0 peak shrinks from ~36N to ~16N EF bytes (the fold
+        // outputs).  Wall savings on tendermint compress: ~1.6-2.7s/
+        // shard × 25 shards.
+        //
+        // The streaming path produces a byte-identical `JaggedReductionProof`
+        // to the dense `prove_jagged_reduction_owned` path for the same
+        // transcript inputs (challenger state, gamma, y_per_chip,
+        // r_row_per_chip) — verified by `test_jagged_reduction_streaming_matches_dense`.
+        //
         // #107 / G1 dispatch: when ZIREN_GPU_JAGGED_PCS=1 is set AND a
         // GPU jagged-reduction hook has been registered (by ziren-gpu's
         // `compress_multi_gpu` startup block), route the reduction
-        // through the device hook.  The hook is byte-equivalent to
-        // `prove_jagged_reduction_owned` (verified by the existing
-        // host fallback path + the GPU-side scaffold tests in
-        // `ziren-gpu/basefold/src/jagged_sumcheck.rs::tests`).  When
-        // the hook returns `None` (unsupported shape) or is not
-        // registered, the host fallback path runs unchanged.
+        // through the device hook (which still consumes a flat `dense_q`).
+        // We materialize `dense_q` on demand only for the GPU path; the
+        // host streaming fallback never pays for it.
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
-
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
                 .map(|v| v == "1")
                 .unwrap_or(false);
@@ -1160,21 +1160,20 @@ pub mod jagged {
                             n_chips,
                         );
                     });
-                    // Move dense_q into the hook.  Move-not-clone:
-                    // avoids holding a 4N base-field duplicate live
-                    // across the call.  On a hard fall-through (None
-                    // returned by the hook) we lose ownership — the
-                    // host fallback below re-materializes dense_q in
-                    // that case, mirroring the pre-G1 behaviour.
+                    // Materialize `dense_q` only for the GPU path —
+                    // the host streaming fallback (below) does not
+                    // need it.
+                    let dense_q = materialize_dense_jagged::<InnerVal>(
+                        chip_traces,
+                        packing.log_dense_size,
+                    );
+                    // Move dense_q into the hook.  On a hard
+                    // fall-through (None returned by the hook) we lose
+                    // ownership — the streaming host fallback below
+                    // walks `chip_traces` directly so no
+                    // re-materialization is needed.
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
-                    let saved_dense = if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
-                        .map(|v| v == "1").unwrap_or(false)
-                    {
-                        Some(dense_q.clone())
-                    } else {
-                        None
-                    };
                     match f(dense_q, &packing, &r_row, &y_clone, challenger) {
                         Some(p) => p,
                         None => {
@@ -1182,16 +1181,10 @@ pub mod jagged {
                                 chips = n_chips,
                                 log_dense_size = packing.log_dense_size as u64,
                                 "#107 jagged_pcs hook returned None — falling back \
-                                 to host prove_jagged_reduction_owned",
+                                 to host prove_jagged_reduction_streaming",
                             );
-                            let dense_q = saved_dense.unwrap_or_else(|| {
-                                materialize_dense_jagged::<InnerVal>(
-                                    chip_traces,
-                                    packing.log_dense_size,
-                                )
-                            });
-                            crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                                dense_q,
+                            prove_jagged_reduction_streaming(
+                                chip_traces,
                                 &packing,
                                 r_row_per_chip,
                                 &y_per_chip,
@@ -1200,8 +1193,8 @@ pub mod jagged {
                         }
                     }
                 }
-                None => crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                    dense_q,
+                None => prove_jagged_reduction_streaming(
+                    chip_traces,
                     &packing,
                     r_row_per_chip,
                     &y_per_chip,
