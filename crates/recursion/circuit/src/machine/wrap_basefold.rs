@@ -141,7 +141,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
 
     // #241 Phase 4e: env-gated bundle path (ZIREN_USE_BUNDLE_LIFT=1).
     // Default off — see compress_basefold for the gating rationale.
-    let evaluation_proof_var = if std::env::var("ZIREN_USE_BUNDLE_LIFT").is_ok() {
+    let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
         match evaluation_proof_bundle_opt.as_ref() {
             Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
                 builder,
