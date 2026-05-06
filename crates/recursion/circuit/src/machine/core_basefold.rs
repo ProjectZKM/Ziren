@@ -408,7 +408,29 @@ pub fn verify_core_basefold<C, SC, A>(
             );
         let mut challenger = machine.config().challenger_variable(builder);
 
-        basefold_shard_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(
+        // #244 fix: when bundle path is active and bundle is Some,
+        // rebuild verifier with the bundle's log_stacking_height
+        // (prover-side dynamic value via pick_log_stacking_height).
+        // This makes verifier's stack_dim match the prover's, fixing
+        // the batch_evaluations shape assertion at
+        // recursive_stacked_pcs.rs:159.
+        let per_proof_verifier;
+        let active_verifier = if std::env::var("ZIREN_USE_BUNDLE_LIFT").is_ok() {
+            if let Some(bundle) = evaluation_proof_bundle_opt.as_ref() {
+                per_proof_verifier =
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier(
+                        max_log_row_count,
+                        bundle.commit.log_stacking_height,
+                    );
+                &per_proof_verifier
+            } else {
+                &basefold_shard_verifier
+            }
+        } else {
+            &basefold_shard_verifier
+        };
+
+        active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(
             builder,
             &basefold_vk,
             &basefold_shard_proof_variable,
