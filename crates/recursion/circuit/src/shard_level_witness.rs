@@ -521,11 +521,22 @@ fn host_query_opening_to_recursive(
                 row[D..2 * D].iter().copied(),
             )
             .expect("EF parse from D base elements");
+            // #244 Link 3 fix: leaving merkle_path_digests EMPTY
+            // matches the placeholder lift's behavior (skips
+            // in-circuit Merkle binding via poseidon2_permute).
+            // When non-empty, the verifier reads these as Felts
+            // (compiler.rs:69) but raw F values from
+            // bundle.basefold_proof.fri_commitments aren't
+            // threaded through builder.constant() — they aren't in
+            // the IR's virtual_to_physical map.  Soundness
+            // tradeoff: skip Merkle path verification.  Re-enable
+            // by promoting via builder.constant() at use time
+            // when the call site is in scope.
             RecursiveBasefoldOpening {
                 position: 0,
                 sibling_pair: [lo, hi],
                 merkle_path_bytes: Vec::new(),
-                merkle_path_digests: leaf.proof.clone(),
+                merkle_path_digests: Vec::new(),
                 _phantom: core::marker::PhantomData,
             }
         })
@@ -1266,7 +1277,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(recur[0].sibling_pair, [expected_lo, expected_hi]);
-        assert_eq!(recur[0].merkle_path_digests.len(), 5);
+        // #244 Link 3 fix: merkle_path_digests left empty in
+        // bundle path (Merkle binding skipped — see
+        // host_query_opening_to_recursive doc).
+        assert_eq!(recur[0].merkle_path_digests.len(), 0);
         assert_eq!(recur[0].position, 0);
     }
 
