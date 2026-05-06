@@ -31,7 +31,7 @@ use crate::{
 };
 
 /// Witness values for the wrap stage — host-side input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "StarkVerifyingKey<SC>: Serialize",
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>"

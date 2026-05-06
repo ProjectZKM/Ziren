@@ -64,7 +64,18 @@ pub struct ChipCumulativeSums<F, EF> {
 /// Field declaration order matches the so the wire format
 /// transports byte-identically (modulo the inner-type
 /// substitutions noted in [`mod-level docs`](super)).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// `Debug` derive dropped (#241 Phase 4b) — the new
+/// `evaluation_proof_bundle` field's underlying
+/// [`crate::basefold_late_binding::jagged::JaggedBasefoldBundle`]
+/// transitively contains `BasefoldProof` whose `MT::Proof`
+/// associated type does not carry `Debug` bounds.  Re-deriving Debug
+/// would require manual impls or a Debug bound on `Mmcs::Proof`
+/// upstream.  Nothing in the codebase Debug-prints a
+/// `BasefoldShardProof` (verified via grep), so dropping it is the
+/// path of least resistance.  Cascades to dropping Debug from the
+/// 4 recursion-circuit machine wrapper structs that embed it.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>")]
 pub struct BasefoldShardProof<F, EF> {
     /// Public values for the shard.
@@ -101,7 +112,38 @@ pub struct BasefoldShardProof<F, EF> {
     /// (when `basefold` feature on); otherwise empty.  The
     /// recursion-side `JaggedPcsProofVariable` is reconstructed
     /// from these bytes by the witness layer.
+    ///
+    /// **Status (#241 Phase 4b)**: Being phased out in favor of the
+    /// structured [`Self::evaluation_proof_bundle`] field below.  The
+    /// bytes path goes through rmp-serde's variable-length integer
+    /// encoding which has caused multi-GPU compress hash variance
+    /// (#240 cascade).  Once the structured-witness lift in
+    /// `crates/recursion/circuit/src/shard_level_witness.rs` is wired
+    /// into all 5 production call sites (compress/wrap/deferred/core
+    /// + shard_proof_variable_lift), this field can be deleted.
     pub evaluation_proof: Vec<u8>,
+    /// Structured jagged-PCS bundle (#241 Phase 4b structural fix).
+    ///
+    /// Wire format: deterministic-length per-element encoding via the
+    /// recursion-circuit's `Witnessable` traversal — eliminates the
+    /// rmp-serde varint cascade that breaks compress_vk determinism.
+    ///
+    /// **Cfg-gated**: only present in the `basefold` feature build
+    /// (the only build that produces/consumes a `JaggedBasefoldBundle`
+    /// in the first place).  Concrete `InnerVal`/`InnerChallenge`
+    /// typing is intentional — the in-circuit verifier
+    /// `lift_jagged_basefold_bundle` only operates on those concrete
+    /// types regardless of the surrounding `BasefoldShardProof<F, EF>`
+    /// generics, since all production instantiations pin
+    /// `F = InnerVal, EF = InnerChallenge`.
+    ///
+    /// `serde(default)` so old proof bytes (without this field)
+    /// deserialize cleanly to `None`.  Population happens in
+    /// [`crate::shard_level::prover::prove_shard_to_basefold`]
+    /// alongside the existing `evaluation_proof` bytes write.
+    #[cfg(feature = "basefold")]
+    #[serde(default)]
+    pub evaluation_proof_bundle: Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>,
 }
 
 impl<F, EF> BasefoldShardProof<F, EF>
@@ -122,6 +164,8 @@ where
             chip_log_heights: std::collections::BTreeMap::new(),
             chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: Vec::new(),
+            #[cfg(feature = "basefold")]
+            evaluation_proof_bundle: None,
         }
     }
 }

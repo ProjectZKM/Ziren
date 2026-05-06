@@ -413,6 +413,12 @@ where
     // `BasefoldShardProof::{logup_gkr_proof, zerocheck_proof}`
     // fields are typed to `LogupGkrProof`/`PartialSumcheckProof`
     // — pass them through directly.
+    //
+    // #241 Phase 4b: `evaluation_proof_bundle` populated as `None`
+    // here (basefold feature only).  Threading the structured bundle
+    // through `emit_jagged_pcs_bytes` requires a signature change
+    // (return `(bytes, bundle)` instead of just bytes); deferred
+    // until call-site consumers are ready to prefer the bundle path.
     let proof = BasefoldShardProof {
         public_values,
         main_commitment,
@@ -422,6 +428,8 @@ where
         chip_log_heights,
         chip_cumulative_sums,
         evaluation_proof,
+        #[cfg(feature = "basefold")]
+        evaluation_proof_bundle: None,
     };
     drop(_phase5_span);
     tracing::info!(

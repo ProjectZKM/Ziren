@@ -52,7 +52,7 @@ use crate::{
 ///
 /// Mirrors [`super::core::ZKMRecursionWitnessValues`] with `ShardProof<SC>`
 /// swapped for [`BasefoldShardProof`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "StarkVerifyingKey<SC>: Serialize",
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>"
