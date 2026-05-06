@@ -315,7 +315,7 @@ where
     //     Falls back to a fresh challenger + empty bytes when SC
     //     isn't the KoalaBear configuration.
     let _t_phase4 = std::time::Instant::now();
-    let evaluation_proof = {
+    let (evaluation_proof, evaluation_proof_bundle_opt) = {
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
         emit_jagged_pcs_bytes::<SC, A>(
             chips,
@@ -414,11 +414,12 @@ where
     // fields are typed to `LogupGkrProof`/`PartialSumcheckProof`
     // — pass them through directly.
     //
-    // #241 Phase 4b: `evaluation_proof_bundle` populated as `None`
-    // here (basefold feature only).  Threading the structured bundle
-    // through `emit_jagged_pcs_bytes` requires a signature change
-    // (return `(bytes, bundle)` instead of just bytes); deferred
-    // until call-site consumers are ready to prefer the bundle path.
+    // #241 Phase 4c: emit_jagged_pcs_bytes now returns `(bytes,
+    // bundle)`.  The structured bundle gets stuffed into the new
+    // `evaluation_proof_bundle` field alongside the legacy bytes.
+    // Recursion-circuit consumers can now prefer the structured path
+    // via `lift_evaluation_proof_via_bundle`; the bytes path remains
+    // load-bearing until Phase 4e drops it entirely.
     let proof = BasefoldShardProof {
         public_values,
         main_commitment,
@@ -429,7 +430,7 @@ where
         chip_cumulative_sums,
         evaluation_proof,
         #[cfg(feature = "basefold")]
-        evaluation_proof_bundle: None,
+        evaluation_proof_bundle: evaluation_proof_bundle_opt,
     };
     drop(_phase5_span);
     tracing::info!(
@@ -464,12 +465,16 @@ where
 /// transcript state — no fresh instance, no divergence.  (Task #26
 /// had previously used a fresh challenger; the soundness caveat
 /// from 4a9685e is now resolved.)
+/// Returns `(bytes, bundle)` — bytes for the legacy `evaluation_proof`
+/// field on `BasefoldShardProof`, bundle for the new structured
+/// `evaluation_proof_bundle` field (#241 Phase 4c).  Bundle is `None`
+/// when the SC config doesn't match the KoalaBear monomorphization.
 fn emit_jagged_pcs_bytes<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
-) -> Vec<u8>
+) -> (Vec<u8>, Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>)
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -489,7 +494,7 @@ where
         || TypeId::of::<SC::Challenger>()
             != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
     {
-        return Vec::new();
+        return (Vec::new(), None);
     }
 
     // Build per-chip (name, cloned trace) in the expected concrete
@@ -612,7 +617,11 @@ where
             });
             let chip_names: Vec<alloc::string::String> =
                 chip_traces.iter().map(|(name, _)| name.clone()).collect();
-            return hook(&chip_names, &r_row_per_chip, lb_challenger);
+            // GPU hook only returns bytes — bundle stays None on the
+            // device path until the hook signature is extended.  The
+            // recursion-circuit consumers fall back to the bytes path
+            // when bundle is None.
+            return (hook(&chip_names, &r_row_per_chip, lb_challenger), None);
         } else {
             use std::sync::OnceLock;
             static WARN_ONCE: OnceLock<()> = OnceLock::new();
@@ -666,7 +675,9 @@ where
             // Both are identically-typed to the hook signature; pass
             // straight through.  The hook owns the entire pipeline
             // and returns the rmp-serde bundle bytes directly.
-            return hook(&chip_traces, &r_row_per_chip, lb_challenger);
+            // GPU orchestrator hook only returns bytes — bundle
+            // stays None on the device path (Phase 4c).
+            return (hook(&chip_traces, &r_row_per_chip, lb_challenger), None);
         } else {
             use std::sync::OnceLock;
             static WARN_ONCE: OnceLock<()> = OnceLock::new();
@@ -687,7 +698,8 @@ where
     // single dense flow and the per-chip experiment had unresolved
     // soundness gaps that surfaced in production reth wrap (#95).
     let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, lb_challenger);
-    bundle.to_bytes()
+    let bytes = bundle.to_bytes();
+    (bytes, Some(bundle))
 }
 
 
