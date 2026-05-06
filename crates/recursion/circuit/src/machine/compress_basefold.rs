@@ -280,7 +280,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // all-zero placeholder was masking.  Validation path:
         // 1) flip env on, 2) fix shape mismatch, 3) make this the
         // unconditional default.
-        let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
+        let evaluation_proof_var = if std::env::var("ZIREN_USE_BUNDLE_LIFT").is_ok() {
             match evaluation_proof_bundle_opt.as_ref() {
                 Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
                     builder,
