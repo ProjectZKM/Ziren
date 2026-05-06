@@ -58,6 +58,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             Vec<u8>,
+            Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
         ),
     )>,
     /// META #59 Phase D: per-input per-chip cumulative sums.
@@ -105,7 +106,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         builder,
         &vk_legacy,
     );
-    let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes) =
+    let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, _evaluation_proof_bundle_opt) =
         proof_tuple;
 
     let chip_names: Vec<String> =

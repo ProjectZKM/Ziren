@@ -238,6 +238,14 @@ where
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
         Vec<u8>,
+        // #241 Phase 4d: structured bundle host-side passthrough.
+        // When `Some`, machine flows can call
+        // [`lift_jagged_basefold_bundle`] directly instead of going
+        // through bytes deserialization (kills the rmp-serde varint
+        // cascade — the actual determinism fix #240).  When `None`
+        // (GPU device path / older proofs), call sites fall back to
+        // [`lift_evaluation_proof_via_bundle`] which deserializes bytes.
+        Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
     );
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -250,12 +258,14 @@ where
         // jagged-PCS-variable reconstruction step consumes them
         // separately (no felt-level witness reads here).
         let evaluation_proof_bytes = self.evaluation_proof.clone();
+        let evaluation_proof_bundle = self.evaluation_proof_bundle.clone();
         (
             main_commitment_arr,
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof_bytes,
+            evaluation_proof_bundle,
         )
     }
 
@@ -1029,7 +1039,7 @@ mod tests {
             InnerVal,
             InnerChallenge,
         >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
-        let (main_commit, pvs, _logup, _zerocheck, evbytes) =
+        let (main_commit, pvs, _logup, _zerocheck, evbytes, _bundle_opt) =
             <_ as Witnessable<C>>::read(&proof, &mut builder);
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);

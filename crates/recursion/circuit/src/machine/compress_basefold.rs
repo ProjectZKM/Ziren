@@ -103,6 +103,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             Vec<u8>,
+            Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
         ),
     )>,
     /// META #59 Phase D: per-input per-chip cumulative sums (witnessed
@@ -234,6 +235,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof_bytes,
+            evaluation_proof_bundle_opt,
         ) = proof_tuple;
 
         // Step 2: derive chip names + per-round column counts from the

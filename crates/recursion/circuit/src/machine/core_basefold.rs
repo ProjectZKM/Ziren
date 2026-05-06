@@ -88,6 +88,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
         Vec<u8>,
+        Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
     )>,
     /// META #59 swap 1+2: per-shard per-chip cumulative sums.
     pub chip_cumulative_sums_per_shard: Vec<
@@ -200,7 +201,7 @@ pub fn verify_core_basefold<C, SC, A>(
 
     // ---- Per-shard verification + consistency assertions ----
     for (i, proof_tuple) in shard_proof_tuples.into_iter().enumerate() {
-        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes) =
+        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, _evaluation_proof_bundle_opt) =
             proof_tuple;
 
         // Chip presence is encoded in the LogUp-GKR chip_openings set.
