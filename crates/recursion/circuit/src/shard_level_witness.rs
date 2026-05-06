@@ -1411,6 +1411,7 @@ mod tests {
                 log_dense_size: 0,
                 column_counts: vec![],
             },
+            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let bytes = bundle.to_bytes();
         let cols: Vec<Vec<usize>> = vec![vec![3]];
@@ -1464,6 +1465,7 @@ mod tests {
                 log_dense_size: 6,
                 column_counts: vec![1, 1, 1],
             },
+            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         let rows: Vec<Vec<usize>> = vec![vec![16, 16, 16]];
@@ -1523,6 +1525,7 @@ mod tests {
                 log_dense_size: 0,
                 column_counts: vec![],
             },
+            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
         let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 21, &cols, None);

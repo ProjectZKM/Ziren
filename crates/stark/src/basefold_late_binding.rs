@@ -953,6 +953,16 @@ pub mod jagged {
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
         pub commit: BasefoldLateBindingCommit,
         pub packing: PackingMeta,
+        /// Jagged-eval sub-protocol proof (#243 — SP1 port scaffold).
+        ///
+        /// Produced by [`crate::jagged_eval_sumcheck::prove_jagged_evaluation`]
+        /// alongside the outer reduction sumcheck.  Currently a
+        /// scaffold dummy; the real body is the day-2 work of #243.
+        ///
+        /// `serde(default)` so existing wire-format bundles
+        /// deserialize cleanly with a placeholder.
+        #[serde(default = "crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy")]
+        pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
     }
 
     impl JaggedBasefoldBundle {
@@ -1255,12 +1265,34 @@ pub mod jagged {
                 .map(|ci| ci.column_count)
                 .collect(),
         };
+        // #243 jagged-eval sub-protocol scaffold — produces a
+        // structurally-valid placeholder.  Real sumcheck body lands
+        // in #243's day-2 work.  Inputs (z_row, z_col, z_trace) come
+        // from the existing reduction state:
+        //   z_row    = r_row_per_chip[0] (or a flattened canonical
+        //              choice — TODO: align with verifier expectation)
+        //   z_col    = derived from gamma + chip indices (TODO)
+        //   z_trace  = reduction.eval_point (the outer sumcheck's z*)
+        let prefix_sums_for_eval: Vec<usize> = {
+            let mut acc = 0usize;
+            let mut out = Vec::with_capacity(packing.chip_infos.len() + 1);
+            out.push(0);
+            for info in &packing.chip_infos {
+                acc += info.row_count;
+                out.push(acc);
+            }
+            out
+        };
+        let _ = prefix_sums_for_eval; // wired-but-unused until #243 day-2
+        let jagged_eval = crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy();
+
         JaggedBasefoldBundle {
             reduction,
             basefold_proof: proof,
             y_per_chip,
             commit,
             packing: packing_meta,
+            jagged_eval,
         }
     }
     /// Verifier mirror.
