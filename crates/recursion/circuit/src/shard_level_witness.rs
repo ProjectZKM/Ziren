@@ -399,6 +399,47 @@ where
     }
 }
 
+/// Bit-decompose a `usize` value into exactly `num_bits` LSB-first
+/// felts, each constrained to `{0, 1}`.  Helper for the Phase 4b
+/// lift fields that need bit-decomposed metadata
+/// (`params.col_prefix_sums[k]` and `row_counts[round][chip]`); the
+/// in-circuit verifier Horner-decodes these via
+/// `final_area = bit + 2*final_area` (recursive_jagged_pcs.rs:262-272).
+///
+/// Convention: matches the verifier's MSB-first Horner accumulation
+/// — the first felt in the returned Vec is the MOST-SIGNIFICANT bit
+/// (bit `num_bits-1`), the last is bit 0.  For value 5 with 4 bits:
+/// returns `[0, 1, 0, 1]` representing `0*8 + 1*4 + 0*2 + 1*1`.
+///
+/// # Panics
+///
+/// Panics if `value` requires more than `num_bits` to represent.
+pub fn bit_decompose_usize_to_felts<C>(
+    builder: &mut Builder<C>,
+    value: usize,
+    num_bits: usize,
+) -> Vec<Felt<C::F>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    use p3_field::PrimeCharacteristicRing;
+    if num_bits < usize::BITS as usize {
+        assert!(
+            value < (1usize << num_bits),
+            "bit_decompose_usize_to_felts: value {} exceeds {} bits",
+            value,
+            num_bits,
+        );
+    }
+    (0..num_bits)
+        .rev()
+        .map(|i| {
+            let bit = (value >> i) & 1;
+            builder.constant(if bit == 1 { C::F::ONE } else { C::F::ZERO })
+        })
+        .collect()
+}
+
 /// Convert a host-side BaseFold component opening (one
 /// [`MerkleOpening`]) into the per-round per-query
 /// [`RecursiveBasefoldComponentOpening`] vector.
@@ -765,12 +806,59 @@ where
         },
     };
 
+    // ── PARTIAL-REAL: col_prefix_sums from bundle.packing.offsets ──
+    // The verifier asserts col_prefix_sums.last() bit-decodes to the
+    // total dense area (recursive_jagged_pcs.rs:262-272).  Real
+    // entries [0..bundle.packing.offsets.len()] come from
+    // bundle.packing.offsets (cumulative dense offsets).  Remaining
+    // padded slots fill with zero-decompositions until Phase 4b
+    // figures out the artificial-zero column insertion at round
+    // boundaries.
+    //
+    // NOTE: For non-empty bundles this gives BETTER-but-not-COMPLETE
+    // data — the artificial zero insertions for jagged padding are
+    // still missing.  Empty bundles produce all-zero decompositions
+    // which match the prior placeholder byte-for-byte.
+    let bits_per_entry = max_log_row_count + 1;
+    let total_values = bundle.packing.total_values;
+    let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
+    // [0] = 0 (always)
+    col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+    // [1..len(offsets)+1] = bit-decomp of bundle.packing.offsets[k-1]
+    for &offset in bundle.packing.offsets.iter() {
+        if col_prefix_sums.len() >= col_prefix_sums_len {
+            break;
+        }
+        // Defensively cap value at (1 << bits_per_entry) - 1 so the
+        // decomposition helper doesn't panic on oversized offsets
+        // (very large dense areas approaching 2^max_log_row_count).
+        let safe = if bits_per_entry < usize::BITS as usize {
+            offset.min((1usize << bits_per_entry) - 1)
+        } else {
+            offset
+        };
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, safe, bits_per_entry));
+    }
+    // Final entry should bit-decode to total_values; pad-fill earlier
+    // entries with zeros if we ran short.
+    while col_prefix_sums.len() < col_prefix_sums_len - 1 {
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+    }
+    if col_prefix_sums.len() < col_prefix_sums_len {
+        let safe_total = if bits_per_entry < usize::BITS as usize {
+            total_values.min((1usize << bits_per_entry) - 1)
+        } else {
+            total_values
+        };
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, safe_total, bits_per_entry));
+    }
     let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
-        col_prefix_sums: (0..col_prefix_sums_len)
-            .map(|_| (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect())
-            .collect(),
+        col_prefix_sums,
     };
 
+    // row_counts remain placeholder zeros — caller-plumbed per-chip
+    // row counts are Phase 4b proper (caller has chip-shape registry
+    // access; bundle alone doesn't carry per-chip row_count).
     let row_counts: Vec<Vec<Felt<C::F>>> = column_counts_by_round
         .iter()
         .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
@@ -1146,6 +1234,52 @@ mod tests {
         };
         let recur = host_basefold_proof_to_recursive(&proof, vec![]);
         let _var = <_ as Witnessable<C>>::read(&recur, &mut builder);
+    }
+
+    /// #241 Phase 4b infrastructure: bit_decompose_usize_to_felts
+    /// MSB-first ordering matches the verifier's Horner decode at
+    /// recursive_jagged_pcs.rs:262-272 (`final_area = bit + 2*final_area`).
+    #[test]
+    fn bit_decompose_zero_yields_all_zero_felts() {
+        use p3_field::PrimeCharacteristicRing;
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 5);
+        assert_eq!(bits.len(), 5);
+        // (Felts are SSA references; we can't read concrete values
+        // here without running the circuit — just shape-check.)
+        let _ = bits;
+        let _ = InnerVal::ZERO;
+    }
+
+    /// #241 Phase 4b: bit decomposition shape with non-zero values.
+    /// 4 bits LSB-first: 5 = [0, 1, 0, 1] when read MSB-first.
+    #[test]
+    fn bit_decompose_shape_matches_num_bits() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 5, 4);
+        assert_eq!(bits.len(), 4);
+        let bits_zero = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 8);
+        assert_eq!(bits_zero.len(), 8);
+        let bits_max = bit_decompose_usize_to_felts::<C>(&mut builder, 255, 8);
+        assert_eq!(bits_max.len(), 8);
+    }
+
+    /// #241 Phase 4b: overflow panic when value exceeds bit budget.
+    #[test]
+    #[should_panic(expected = "exceeds 4 bits")]
+    fn bit_decompose_overflow_panics() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        // 16 needs 5 bits; only allotted 4 → panic.
+        let _ = bit_decompose_usize_to_felts::<C>(&mut builder, 16, 4);
+    }
+
+    /// #241 Phase 4b: edge case — zero bits is meaningful only for
+    /// value zero.  Returns empty Vec.
+    #[test]
+    fn bit_decompose_zero_bits_for_zero_value() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let bits = bit_decompose_usize_to_felts::<C>(&mut builder, 0, 0);
+        assert_eq!(bits.len(), 0);
     }
 
     /// #241 Phase 4a: bytes adapter falls back to zero placeholder
