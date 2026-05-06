@@ -95,6 +95,36 @@ where
     // install `LayerState::Device { handle, .. }` entries on the way
     // down.  Today every entry is `LayerState::Host(GkrCircuitLayer)`,
     // so behavior is byte-identical to the pre-4b path.
+    //
+    // ─────────────────────────────────────────────────────────────────
+    // Step 4c (`/tmp/step4_backend_parametrize_plan.md`) — opt-in GPU
+    // dispatch path:
+    //
+    //   * Env var:  ZIREN_GPU_LAYER_TRANSITION=1
+    //   * Hooks:    register_gpu_layer_init_hook
+    //               register_gpu_layer_transition_hook
+    //               register_gpu_layer_pull_hook
+    //               (all three must be installed by ziren-gpu at startup;
+    //                if any are missing we fall through to the host path)
+    //   * Type req: F == LbVal && EF == LbChallenge (TypeId-checked at
+    //               runtime; recursion-circuit / wrap-circuit
+    //               instantiations don't satisfy this and stay host-only)
+    //
+    // When all conditions hold, the FIRST EF layer (produced by the
+    // F→EF host transition out of the FirstLayer) is uploaded to device
+    // via `GpuLayerInitFn`; subsequent transitions evolve the
+    // device-resident layer state in place via `GpuLayerTransitionFn`;
+    // the terminal device handle is materialized back to host via
+    // `GpuLayerPullFn` so `extract_outputs` can run on host unchanged.
+    //
+    // The first EF layer is computed on host (one round, the F→EF
+    // promotion happens here) so the device hook sees uniform-EF
+    // input; this avoids an init contract that branches on the
+    // base-vs-extension state of the input layer.
+    //
+    // Default behavior (env var unset OR any hook missing OR TypeId
+    // mismatch) is byte-identical to the pre-4c path.
+    // ─────────────────────────────────────────────────────────────────
     let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
 
     // Special case: num_row_variables=2 input → first.num=1 → use
@@ -121,7 +151,17 @@ where
     }
     layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
-    // Subsequent transitions stay in EF.
+    // Step 4c device-path probe: only enter the device branch if env
+    // var is set, all three hooks registered, types match, AND there is
+    // at least one EF layer in hand (i.e. at least one host transition
+    // happened, so `last_ef_layer` is `Some`).
+    let device_terminal: Option<super::layer::LogUpGkrCpuLayer<EF, EF>> =
+        try_run_device_path::<F, EF>(&mut last_ef_layer, &mut layers);
+
+    // Subsequent transitions stay in EF.  When the device path took
+    // over, `last_ef_layer` is `None` here and the loop is a no-op
+    // (all intermediate `LayerState::Device` entries were already
+    // pushed by `try_run_device_path`).
     while let Some(curr) = last_ef_layer.take() {
         if curr.num_row_variables >= 1 {
             let next = layer_transition::<EF, EF>(&curr);
@@ -135,18 +175,17 @@ where
     }
 
     // Pick the terminal layer (num_row_variables == 1) for output
-    // extraction. Two paths:
+    // extraction. Three paths:
     //
     //   * num_row_variables=2 input → terminal_owned is Some
     //     (F→EF-promoted FirstLayer)
-    //   * num_row_variables>=3 input → layers[len-2] is the EF Layer
-    //     with num_row_variables==1
-    //
-    // Step 4b: dispatch on `LayerState`.  Device variant is unreachable
-    // here today (Step 4c will install it); when it lands the Device
-    // arm will need to pull the terminal cells from the registered hook
-    // (TODO in Step 4c) before invoking `extract_outputs`.
+    //   * device path took over → device_terminal is Some
+    //     (pulled from device via GpuLayerPullFn)
+    //   * num_row_variables>=3 input, host path → layers[len-2] is the
+    //     EF Layer with num_row_variables==1
     let output = if let Some(t) = terminal_owned.as_ref() {
+        extract_outputs(t)
+    } else if let Some(t) = device_terminal.as_ref() {
         extract_outputs(t)
     } else {
         match &layers[layers.len() - 2] {
@@ -155,15 +194,213 @@ where
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
             ),
             LayerState::Device { .. } => unreachable!(
-                "Step 4b: Device variant is unreachable in build_gkr_circuit \
-                 — only Host is constructed today.  Step 4c will install \
-                 Device entries; the Device arm must then materialize the \
-                 terminal layer via the registered \
-                 GpuLayerTransitionFn before invoking extract_outputs."
+                "Step 4c: when the device path was taken, `device_terminal` \
+                 carries the pulled host EF layer; the layers[len-2] arm is \
+                 only entered on the host-only path where every entry is Host."
             ),
         }
     };
     (output, LogupGkrCpuCircuit::new(layers))
+}
+
+/// Step 4c device-path entry point.  Returns `Some(terminal)` when
+/// the device path was taken (terminal layer pulled back to host for
+/// `extract_outputs`), `None` otherwise (host path runs unchanged).
+///
+/// Side effects when `Some` is returned:
+///   * `last_ef_layer` is consumed (set to `None`) — the device branch
+///     drives all remaining transitions, no further host work needed.
+///   * `layers` gains one `LayerState::Device { .. }` entry per
+///     intermediate device-resident layer (matching the count the host
+///     path would have pushed).
+///
+/// Returns `None` when ANY of the following:
+///   * `ZIREN_GPU_LAYER_TRANSITION` env var is unset / not "1"
+///   * any of the three GPU hooks (init, transition, pull) is unregistered
+///   * `F != LbVal` or `EF != LbChallenge` (TypeId check)
+///   * `last_ef_layer` is `None` on entry (no host transition happened —
+///     can only occur when `first.num_row_variables == 0`, which the
+///     `>= 2` assertion above already rules out, but this guard keeps
+///     the device branch robust)
+fn try_run_device_path<F, EF>(
+    last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
+    layers: &mut Vec<LayerState<F, EF>>,
+) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+{
+    // Gate 1: env var.
+    if std::env::var("ZIREN_GPU_LAYER_TRANSITION")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        == false
+    {
+        return None;
+    }
+
+    // Gate 2: feature + concrete-type + hooks all available.  The
+    // device path is only meaningful when the basefold feature is
+    // compiled in (the hooks live there) and when the generic types
+    // resolve to the production stack.
+    #[cfg(feature = "basefold")]
+    {
+        try_run_device_path_basefold::<F, EF>(last_ef_layer, layers)
+    }
+    #[cfg(not(feature = "basefold"))]
+    {
+        // Without the basefold feature there are no GPU hooks; the env
+        // var is silently ignored.  Suppress unused-variable warnings.
+        let _ = (last_ef_layer, layers);
+        None
+    }
+}
+
+#[cfg(feature = "basefold")]
+fn try_run_device_path_basefold<F, EF>(
+    last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
+    layers: &mut Vec<LayerState<F, EF>>,
+) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+{
+    use core::any::TypeId;
+
+    use crate::basefold_late_binding::{
+        get_gpu_layer_init_hook, get_gpu_layer_pull_hook,
+        get_gpu_layer_transition_hook, HostLayerView, LbChallenge, LbVal,
+    };
+
+    // Need 'static bound on F/EF to use TypeId; the build_gkr_circuit
+    // generics already satisfy this (PrimeField : 'static is implied
+    // by the standard p3 field bounds), but we re-check via the
+    // TypeId comparisons below — `TypeId::of::<F>()` requires F : 'static.
+
+    // Gate 3: hooks registered.
+    let init_hook = get_gpu_layer_init_hook()?;
+    let transition_hook = get_gpu_layer_transition_hook()?;
+    let pull_hook = get_gpu_layer_pull_hook()?;
+
+    // Gate 4: TypeId match (recursion-circuit instantiates over a
+    // different field stack — those calls fall through to host).
+    if TypeId::of::<F>() != TypeId::of::<LbVal>()
+        || TypeId::of::<EF>() != TypeId::of::<LbChallenge>()
+    {
+        return None;
+    }
+
+    // Gate 5: at least one EF layer present (i.e. the F→EF host
+    // transition above produced something).  When this is `None` the
+    // FirstLayer was already the terminal and the host path's
+    // `terminal_owned` short-circuit takes over; no device dispatch.
+    let first_ef_layer = last_ef_layer.take()?;
+
+    // SAFETY: TypeId gates 4 confirm `EF == LbChallenge` and
+    // `F == LbVal` at runtime; the layer type
+    // `LogUpGkrCpuLayer<EF, EF>` therefore has identical layout to
+    // `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` and `RowMajorTable<EF>`
+    // to `RowMajorTable<LbChallenge>`.  We reinterpret-borrow via a
+    // pointer cast so the upload stays zero-copy on the host side.
+    //
+    // The borrow in `view` cannot outlive `first_ef_layer`; we pass
+    // `view` by value to the init hook which returns immediately with
+    // a `u64` handle.
+    let layer_as_lb: &super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> = unsafe {
+        &*(&first_ef_layer
+            as *const super::layer::LogUpGkrCpuLayer<EF, EF>
+            as *const super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge>)
+    };
+
+    let view = HostLayerView {
+        numerator_0: &layer_as_lb.numerator_0,
+        denominator_0: &layer_as_lb.denominator_0,
+        numerator_1: &layer_as_lb.numerator_1,
+        denominator_1: &layer_as_lb.denominator_1,
+        num_row_variables: layer_as_lb.num_row_variables,
+        num_interaction_variables: layer_as_lb.num_interaction_variables,
+    };
+
+    let mut handle: u64 = init_hook(view);
+    let mut cur_num_row_variables = first_ef_layer.num_row_variables;
+    let cur_num_interaction_variables = first_ef_layer.num_interaction_variables;
+
+    // Push the first EF layer as a Host entry — the host transition
+    // out of the FirstLayer already happened, and the sumcheck round
+    // dispatcher (Step 4d, future) needs the per-layer cells anyway.
+    // Storing it host-side here matches the host path's behavior for
+    // this one layer; only SUBSEQUENT layers go through Device.
+    layers.push(LayerState::Host(GkrCircuitLayer::Layer(first_ef_layer)));
+
+    // Drive the remaining transitions on device.  `cur_num_row_variables`
+    // was the ROW count of the layer we just uploaded; each transition
+    // halves it, mirroring the host loop's `curr.num_row_variables >= 1`
+    // termination.
+    //
+    // The host loop pushes EVERY layer (including the final null
+    // terminal at num=0).  We do the same to keep `layers.len()`
+    // identical to the host path so `layers[layers.len() - 2]`
+    // indexing in downstream code (Step 4d round.rs migration, future)
+    // still resolves to the terminal at num=1.
+    //
+    // We capture the handle at num=1 (the TERMINAL layer
+    // `extract_outputs` needs) before the final transition that takes
+    // it to num=0; pulling the terminal handle (not the post-final
+    // null one) mirrors the host path's `layers[len - 2]` indexing.
+    let mut terminal_handle: Option<u64> = None;
+    while cur_num_row_variables >= 1 {
+        // BEFORE invoking the next transition, record this handle if
+        // the layer at the CURRENT step has num_row_variables == 1
+        // (i.e. transitioning out of the terminal candidate).
+        if cur_num_row_variables == 1 {
+            terminal_handle = Some(handle);
+        }
+        let next_handle = transition_hook(handle);
+        cur_num_row_variables = cur_num_row_variables.saturating_sub(1);
+        layers.push(LayerState::Device {
+            handle: next_handle,
+            num_row_variables: cur_num_row_variables,
+            num_interaction_variables: cur_num_interaction_variables,
+        });
+        handle = next_handle;
+    }
+
+    // Special case: when first_ef_layer.num_row_variables == 1 the
+    // first uploaded layer IS the terminal — the loop above never
+    // ran (entry condition `cur >= 1` would fire for one iteration,
+    // setting terminal_handle = first_handle, then transition + push
+    // null terminal).  Both branches have terminal_handle = Some(_).
+    //
+    // Edge case: when first_ef_layer.num_row_variables == 0 the loop
+    // body never executes and terminal_handle stays None.  In that
+    // case extract_outputs cannot run on this device-pulled terminal,
+    // so we fall back to pulling the initial handle.  This degenerate
+    // shape never appears in production (build_gkr_circuit asserts
+    // num_row_variables >= 2 at entry, which guarantees the first EF
+    // layer has num >= 1) but the `unwrap_or(handle)` keeps the
+    // device-path code total.
+    let terminal_handle = terminal_handle.unwrap_or(handle);
+
+    // Pull the terminal device-resident layer back to host so
+    // `extract_outputs` (host primitive) can run unchanged.  Pulling
+    // the captured terminal_handle (NOT the post-loop `handle` which
+    // points at the null terminal at num=0) mirrors the host path's
+    // `layers[layers.len() - 2]` indexing.
+    let terminal_lb: super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> =
+        pull_hook(terminal_handle);
+
+    // SAFETY: TypeId gate 4 confirms `LbChallenge == EF` at runtime;
+    // the `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` struct has
+    // identical layout to `LogUpGkrCpuLayer<EF, EF>`.  Reinterpret via
+    // `transmute_copy` and `forget` to move ownership safely.
+    let terminal_ef: super::layer::LogUpGkrCpuLayer<EF, EF> = unsafe {
+        let out: super::layer::LogUpGkrCpuLayer<EF, EF> =
+            core::mem::transmute_copy(&terminal_lb);
+        core::mem::forget(terminal_lb);
+        out
+    };
+
+    Some(terminal_ef)
 }
 
 /// F→EF promotion of a FirstLayer's numerators (denominators are

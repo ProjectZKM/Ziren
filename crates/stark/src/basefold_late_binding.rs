@@ -531,6 +531,110 @@ pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
     GPU_LAYER_TRANSITION_HOOK.get().copied()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Step 4c (`/tmp/step4_backend_parametrize_plan.md`) — companion hooks
+// for layer-state lifecycle on device:
+//
+//   * `GpuLayerInitFn`     — upload the FIRST EF Layer (post-FirstLayer
+//                            host transition) to device, return handle.
+//   * `GpuLayerTransitionFn` (defined above) — produce the next
+//                            device-resident layer state from a prev
+//                            handle.  Step 4a contract; unchanged.
+//   * `GpuLayerPullFn`     — materialize a device handle back into a
+//                            host `LogUpGkrCpuLayer<EF, EF>` so the
+//                            terminal extraction can run on host.
+//
+// `HostLayerView<'a>` is the borrowed-cells shape passed to the init
+// hook.  It carries borrowed `RowMajorTable<LbChallenge>` slices for
+// each of the four sub-MLEs plus the layer dimensions.  Borrows-only
+// keeps the upload zero-copy on the host side; the GPU side decides
+// whether to memcpy into device memory or pin + dma.
+//
+// All three hooks are typed concretely on `LbVal`/`LbChallenge` (the
+// production field stack — `KoalaBear` + `BinomialExtensionField<..,4>`).
+// `build_gkr_circuit` is generic over `F`/`EF`, so the dispatch site
+// uses `core::any::TypeId` to confirm the generics match before calling
+// the hook; on type mismatch the host path runs unchanged.  This
+// matches the architecture in #76 / D2 (commit hook) where the device
+// only ever sees concrete LbVal/LbChallenge buffers.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Borrowed-cells view of an EF row-GKR layer suitable for the GPU
+/// init hook.  The four sub-MLEs are passed by slice so the upload
+/// stays zero-copy on the host side; the GPU side is responsible for
+/// the memcpy / pin + dma into device memory.
+///
+/// Lifetime borrows from the `LogUpGkrCpuLayer<LbChallenge, LbChallenge>`
+/// the dispatch site holds across the call.
+pub struct HostLayerView<'a> {
+    pub numerator_0: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
+    pub denominator_0: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
+    pub numerator_1: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
+    pub denominator_1: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
+    pub num_row_variables: usize,
+    pub num_interaction_variables: usize,
+}
+
+/// Signature of the GPU row-GKR layer-init driver.  Uploads the first
+/// EF layer (constructed on host by the F→EF transition out of the
+/// FirstLayer) to device memory, returns an opaque handle the
+/// transition / pull hooks can consume.
+///
+/// Step 4c: declared but only invoked when the
+/// `ZIREN_GPU_LAYER_TRANSITION` env var is set, the hook + the
+/// transition hook + the pull hook are all registered, AND the
+/// `build_gkr_circuit` generic types resolve to (`LbVal`, `LbChallenge`).
+pub type GpuLayerInitFn =
+    for<'a> fn(view: HostLayerView<'a>) -> u64;
+
+static GPU_LAYER_INIT_HOOK: std::sync::OnceLock<GpuLayerInitFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU row-GKR layer-init driver.  Idempotent; returns
+/// `Err(existing_hook)` when a hook was already registered.
+pub fn register_gpu_layer_init_hook(
+    f: GpuLayerInitFn,
+) -> Result<(), GpuLayerInitFn> {
+    GPU_LAYER_INIT_HOOK.set(f)
+}
+
+/// Read the registered GPU row-GKR layer-init hook, if any.
+#[must_use]
+pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
+    GPU_LAYER_INIT_HOOK.get().copied()
+}
+
+/// Signature of the GPU row-GKR layer-pull driver.  Materializes a
+/// device-resident layer back to host as a
+/// `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` so the terminal
+/// extraction (`extract_outputs`) can run on host without an
+/// additional device-side primitive.
+///
+/// Called once at the end of `build_gkr_circuit` if the device path
+/// was taken — `extract_outputs` already exists on host and operates
+/// on a 1-row layer, so the pull cost is dominated by a
+/// `4 × num_chips × num_interactions` element copy back from device.
+pub type GpuLayerPullFn = fn(
+    handle: u64,
+) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge>;
+
+static GPU_LAYER_PULL_HOOK: std::sync::OnceLock<GpuLayerPullFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU row-GKR layer-pull driver.  Idempotent; returns
+/// `Err(existing_hook)` when a hook was already registered.
+pub fn register_gpu_layer_pull_hook(
+    f: GpuLayerPullFn,
+) -> Result<(), GpuLayerPullFn> {
+    GPU_LAYER_PULL_HOOK.set(f)
+}
+
+/// Read the registered GPU row-GKR layer-pull hook, if any.
+#[must_use]
+pub fn get_gpu_layer_pull_hook() -> Option<GpuLayerPullFn> {
+    GPU_LAYER_PULL_HOOK.get().copied()
+}
+
 /// Open the committed batch at a single point and produce the
 /// stacked-basefold proof.  `eval_point.len()` must equal
 /// `log_stacking_height + log(num_stripes_padded)`.
