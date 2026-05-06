@@ -94,15 +94,9 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for FpOpChip<P> {
         }
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            FpOpCols::<u8, P>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        FpOpCols::<u8, P>::picus_info()
     }
 
     fn generate_trace(

@@ -7,6 +7,9 @@ repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
+[features]
+picus = []
+
 [dependencies]
 p3-air = { workspace = true  }
 p3-field = { workspace = true  }

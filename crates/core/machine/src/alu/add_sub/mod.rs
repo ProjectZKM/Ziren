@@ -87,15 +87,9 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
         Some(nb_rows)
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            AddSubCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        AddSubCols::<u8>::picus_info()
     }
 
     fn generate_trace(

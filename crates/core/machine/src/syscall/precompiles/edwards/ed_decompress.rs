@@ -216,15 +216,9 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
         "EdDecompress".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            EdDecompressCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        EdDecompressCols::<u8>::picus_info()
     }
 
     fn generate_trace(

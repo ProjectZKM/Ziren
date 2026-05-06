@@ -78,15 +78,9 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
         "Global".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            GlobalCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        GlobalCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(

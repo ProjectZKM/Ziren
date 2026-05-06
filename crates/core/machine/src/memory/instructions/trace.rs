@@ -33,15 +33,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryInstructionsChip {
         "MemoryInstrs".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            MemoryInstructionsColumns::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        MemoryInstructionsColumns::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

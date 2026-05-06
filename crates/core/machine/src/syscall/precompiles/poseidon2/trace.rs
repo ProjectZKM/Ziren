@@ -27,15 +27,9 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         "Poseidon2Permute".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            Poseidon2MemCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        Poseidon2MemCols::<u8>::picus_info()
     }
 
     fn local_only(&self) -> bool {

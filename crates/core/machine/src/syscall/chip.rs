@@ -120,15 +120,9 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         format!("Syscall{}", self.shard_kind).to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            SyscallCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        SyscallCols::<u8>::picus_info()
     }
 
     fn local_only(&self) -> bool {

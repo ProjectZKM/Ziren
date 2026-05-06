@@ -31,31 +31,25 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         "KeccakSponge".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
+        let mut info = KeccakSpongeCols::<u8>::picus_info();
         #[cfg(feature = "picus")]
         {
-            let mut info = KeccakSpongeCols::<u8>::picus_info();
-            #[cfg(feature = "picus")]
-            {
-                let projection = KeccakPermutationProjection::picus_projection_info();
+            let projection = KeccakPermutationProjection::picus_projection_info();
 
-                // Expose the embedded Keccak permutation input state on the parent
-                // module interface so Picus cannot vary it existentially when checking
-                // boundary/transition phases.
-                info.transition_input_ranges.extend(
-                    projection
-                        .input_ranges
-                        .into_iter()
-                        .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
-                );
-            }
+            // Expose the embedded Keccak permutation input state on the parent
+            // module interface so Picus cannot vary it existentially when checking
+            // boundary/transition phases.
+            info.transition_input_ranges.extend(
+                projection
+                    .input_ranges
+                    .into_iter()
+                    .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
+            );
+        }
 
-            info
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        info
     }
 
     fn generate_dependencies(

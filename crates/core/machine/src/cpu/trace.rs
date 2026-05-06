@@ -28,15 +28,9 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         self.id().to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            CpuCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        CpuCols::<u8>::picus_info()
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {

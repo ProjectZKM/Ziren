@@ -63,15 +63,9 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         }
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            MemoryInitCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        MemoryInitCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(

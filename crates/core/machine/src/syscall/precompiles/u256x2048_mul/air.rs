@@ -99,15 +99,9 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
         "U256XU2048Mul".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            U256x2048MulCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        U256x2048MulCols::<u8>::picus_info()
     }
 
     fn generate_trace(

@@ -162,15 +162,9 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> MachineAir<F>
         }
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            WeierstrassDoubleAssignCols::<u8, E::BaseField>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        WeierstrassDoubleAssignCols::<u8, E::BaseField>::picus_info()
     }
 
     fn generate_dependencies(

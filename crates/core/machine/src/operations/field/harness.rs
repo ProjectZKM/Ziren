@@ -101,15 +101,9 @@ impl<F: PrimeField32> MachineAir<F> for FieldOpHarnessChip {
         true
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            FieldOpHarnessCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        FieldOpHarnessCols::<u8>::picus_info()
     }
 }
 
@@ -172,15 +166,9 @@ impl<F: PrimeField32> MachineAir<F> for FieldDenHarnessChip {
         true
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            FieldDenHarnessCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        FieldDenHarnessCols::<u8>::picus_info()
     }
 }
 
@@ -242,15 +230,9 @@ impl<F: PrimeField32> MachineAir<F> for FieldInnerProductHarnessChip {
         true
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            FieldInnerProductHarnessCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        FieldInnerProductHarnessCols::<u8>::picus_info()
     }
 }
 

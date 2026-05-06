@@ -26,15 +26,9 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         "ShaExtend".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            ShaExtendCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        ShaExtendCols::<u8>::picus_info()
     }
 
     fn generate_trace(

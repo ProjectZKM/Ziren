@@ -6,11 +6,13 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_max_constraint_degree, SymbolicAirBuilder};
 use p3_util::log2_ceil_usize;
 
+#[cfg(feature = "picus")]
+use crate::PicusInfo;
 use crate::{
     air::{LookupScope, MachineAir, MultiTableAirBuilder, ZKMAirBuilder},
     local_permutation_trace_width,
     lookup::{Lookup, LookupBuilder, LookupKind},
-    scoped_lookups, PicusInfo,
+    scoped_lookups,
 };
 
 use super::{eval_permutation_constraints, generate_permutation_trace, PROOF_MAX_NUM_PVS};
@@ -252,6 +254,7 @@ where
         self.air.local_only_row_sensitive()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         self.air.picus_info()
     }

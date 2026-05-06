@@ -29,15 +29,9 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
         "ShaCompress".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            ShaCompressCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        ShaCompressCols::<u8>::picus_info()
     }
 
     fn selectors_partition_real_rows(&self) -> bool {

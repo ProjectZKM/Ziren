@@ -29,15 +29,9 @@ impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
         "BooleanCircuitGarble".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            BooleanCircuitGarbleCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        BooleanCircuitGarbleCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(

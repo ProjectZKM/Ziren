@@ -116,15 +116,9 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         Some(nb_rows)
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
-        #[cfg(feature = "picus")]
-        {
-            LtCols::<u8>::picus_info()
-        }
-        #[cfg(not(feature = "picus"))]
-        {
-            zkm_stark::PicusInfo::default()
-        }
+        LtCols::<u8>::picus_info()
     }
 
     fn generate_trace(
