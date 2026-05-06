@@ -289,10 +289,15 @@ where
 // eval→coeff conversion lives at the Phase 2 bundle assembly site,
 // not in these per-piece witness reads.
 
-use zkm_stark::basefold::proof::{LeafOpening, MerkleOpening};
+use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
+use zkm_stark::basefold::stacked::StackedBasefoldProof;
 use zkm_stark::basefold_late_binding::LbMmcs;
 use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
 
+use crate::basefold_verifier::{
+    RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
+    RecursiveBasefoldRound,
+};
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::univariate::{interpolate_3point_evals_at_012, UnivariatePolynomial};
 
@@ -387,6 +392,160 @@ where
             leaf.write(witness);
         }
     }
+}
+
+/// Convert a host-side BaseFold component opening (one
+/// [`MerkleOpening`]) into the per-round per-query
+/// [`RecursiveBasefoldComponentOpening`] vector.
+///
+/// `leaf_values` passes through verbatim.  `merkle_path_bytes` is
+/// left empty — the in-circuit verifier doesn't read these bytes,
+/// it walks the Merkle path through the digest field; bytes are a
+/// legacy carrier the existing recursion-circuit retains for
+/// witness-stream layout compatibility but no longer consumes.
+fn host_component_opening_to_recursive(
+    opening: &MerkleOpening<InnerVal, LbMmcs>,
+) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, 8>> {
+    opening
+        .leaves
+        .iter()
+        .map(|leaf| RecursiveBasefoldComponentOpening {
+            leaf_values: leaf.values.clone(),
+            merkle_path_bytes: Vec::new(),
+            _phantom: core::marker::PhantomData,
+        })
+        .collect()
+}
+
+/// Convert a host-side BaseFold commit-phase opening (one
+/// [`MerkleOpening`]) into the per-round per-query
+/// [`RecursiveBasefoldOpening`] vector.
+///
+/// Per FRI commit-phase shape (see
+/// [`zkm_stark::basefold::fri::commit_phase_round`]), each leaf
+/// bundles `2 * EF::DIMENSION` base-field elements representing two
+/// adjacent EF codeword values (the sibling pair).  This converter
+/// parses those into the in-circuit `[EF; 2]` shape and copies the
+/// Merkle siblings into `merkle_path_digests` for binding.
+///
+/// **Position field**: set to `0` placeholder.  Real positions come
+/// from the FRI challenger transcript and must be re-derived at the
+/// verifier call site (Phase 4 of #241).  The in-circuit verifier
+/// recomputes positions from its own challenger anyway, so the
+/// `position` field passed through is informational only.
+fn host_query_opening_to_recursive(
+    opening: &MerkleOpening<InnerVal, LbMmcs>,
+) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge, 8>> {
+    use p3_field::BasedVectorSpace;
+    const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
+    opening
+        .leaves
+        .iter()
+        .map(|leaf| {
+            assert_eq!(
+                leaf.values.len(),
+                1,
+                "commit-phase leaf must have exactly one inner matrix",
+            );
+            let row = &leaf.values[0];
+            assert_eq!(
+                row.len(),
+                2 * D,
+                "commit-phase leaf row must have 2*EF::DIMENSION = {} base elements, got {}",
+                2 * D,
+                row.len(),
+            );
+            let lo = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                row[..D].iter().copied(),
+            )
+            .expect("EF parse from D base elements");
+            let hi = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                row[D..2 * D].iter().copied(),
+            )
+            .expect("EF parse from D base elements");
+            RecursiveBasefoldOpening {
+                position: 0,
+                sibling_pair: [lo, hi],
+                merkle_path_bytes: Vec::new(),
+                merkle_path_digests: leaf.proof.clone(),
+                _phantom: core::marker::PhantomData,
+            }
+        })
+        .collect()
+}
+
+/// Convert a host-side [`BasefoldProof`] into the recursion-circuit
+/// [`RecursiveBasefoldProof`] shape.
+///
+/// Mapping:
+/// * `rounds[i]` ← (`univariate_messages[i]`, `fri_commitments[i]` 1-cap root)
+/// * `final_poly` / `pow_witness` / `batch_grinding_witness` pass through
+/// * `component_openings[r]` ← [`host_component_opening_to_recursive`]
+/// * `query_phase_openings[r]` ← [`host_query_opening_to_recursive`]
+/// * `batch_evaluations` ← caller-supplied (lives on
+///   [`StackedBasefoldProof`] one level up; see
+///   [`host_stacked_basefold_to_recursive`])
+///
+/// Output is host-typed; pair with the existing
+/// [`RecursiveBasefoldProof`] Witnessable in
+/// [`crate::basefold_witness`] for a one-line `.read(builder)` flow.
+pub fn host_basefold_proof_to_recursive(
+    proof: &BasefoldProof<InnerVal, InnerChallenge, LbMmcs>,
+    batch_evaluations: Vec<Vec<InnerChallenge>>,
+) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
+    assert_eq!(
+        proof.univariate_messages.len(),
+        proof.fri_commitments.len(),
+        "BasefoldProof: univariate_messages.len() != fri_commitments.len()",
+    );
+
+    let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge, 8>> = proof
+        .univariate_messages
+        .iter()
+        .zip(proof.fri_commitments.iter())
+        .map(|(uni, commit)| {
+            let cap_roots = commit.roots();
+            assert_eq!(
+                cap_roots.len(),
+                1,
+                "FRI commitment cap must have exactly 1 root (height-0 cap), got {}",
+                cap_roots.len(),
+            );
+            RecursiveBasefoldRound { uni_poly: *uni, commitment: cap_roots[0] }
+        })
+        .collect();
+
+    let component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<_, _, 8>>> = proof
+        .component_polynomials_query_openings_and_proofs
+        .iter()
+        .map(host_component_opening_to_recursive)
+        .collect();
+
+    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _, 8>>> = proof
+        .query_phase_openings_and_proofs
+        .iter()
+        .map(host_query_opening_to_recursive)
+        .collect();
+
+    RecursiveBasefoldProof {
+        rounds,
+        final_poly: proof.final_poly,
+        pow_witness: proof.pow_witness,
+        batch_grinding_witness: proof.batch_grinding_witness,
+        component_openings,
+        query_phase_openings,
+        batch_evaluations,
+    }
+}
+
+/// Convert a host-side [`StackedBasefoldProof`] into the
+/// recursion-circuit [`RecursiveBasefoldProof`] shape, threading
+/// `batch_evaluations` through.  Companion to
+/// [`host_basefold_proof_to_recursive`] for the stacked-PCS layer.
+pub fn host_stacked_basefold_to_recursive(
+    proof: &StackedBasefoldProof<InnerVal, InnerChallenge, LbMmcs>,
+) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
+    host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
 
 /// Convert a host-side eval-form jagged sumcheck proof into the
@@ -592,5 +751,146 @@ mod tests {
         let psp = jagged_reduction_to_partial_sumcheck(&proof);
         let _var: PartialSumcheckProof<Ext<InnerVal, InnerChallenge>> =
             <_ as Witnessable<C>>::read(&psp, &mut builder);
+    }
+
+    /// #241 Phase 3: empty BaseFold proof converts to empty
+    /// recursive shape — exercises the rounds.iter().zip path with
+    /// zero rounds and the components/query_phase pass-through.
+    #[test]
+    fn host_basefold_proof_converter_empty() {
+        let proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            univariate_messages: vec![],
+            fri_commitments: vec![],
+            component_polynomials_query_openings_and_proofs: vec![],
+            query_phase_openings_and_proofs: vec![],
+            final_poly: InnerChallenge::ZERO,
+            pow_witness: InnerVal::ZERO,
+            batch_grinding_witness: InnerVal::ZERO,
+        };
+        let recur = host_basefold_proof_to_recursive(&proof, vec![]);
+        assert_eq!(recur.rounds.len(), 0);
+        assert_eq!(recur.component_openings.len(), 0);
+        assert_eq!(recur.query_phase_openings.len(), 0);
+        assert_eq!(recur.batch_evaluations.len(), 0);
+    }
+
+    /// #241 Phase 3: rounds preserve uni_poly + extracted cap root.
+    /// The cap-extraction asserts the 1-cap invariant in
+    /// host_basefold_proof_to_recursive.
+    #[test]
+    fn host_basefold_proof_converter_round_shape() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_symmetric::MerkleCap;
+        let uni_poly: [InnerChallenge; 2] =
+            [InnerChallenge::from_u8(7), InnerChallenge::from_u8(11)];
+        let digest: [InnerVal; 8] = core::array::from_fn(|i| InnerVal::from_u16(i as u16));
+        let cap = MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![digest]);
+        let proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            univariate_messages: vec![uni_poly],
+            fri_commitments: vec![cap],
+            component_polynomials_query_openings_and_proofs: vec![],
+            query_phase_openings_and_proofs: vec![],
+            final_poly: InnerChallenge::from_u8(99),
+            pow_witness: InnerVal::from_u8(13),
+            batch_grinding_witness: InnerVal::from_u8(17),
+        };
+        let recur = host_basefold_proof_to_recursive(&proof, vec![]);
+        assert_eq!(recur.rounds.len(), 1);
+        assert_eq!(recur.rounds[0].uni_poly, uni_poly);
+        assert_eq!(recur.rounds[0].commitment, digest);
+        assert_eq!(recur.final_poly, InnerChallenge::from_u8(99));
+        assert_eq!(recur.pow_witness, InnerVal::from_u8(13));
+        assert_eq!(recur.batch_grinding_witness, InnerVal::from_u8(17));
+    }
+
+    /// #241 Phase 3: query-phase opening parses leaf row
+    /// `[F; 2*D]` into `[EF; 2]` sibling pair via the binomial
+    /// extension's `from_basis_coefficients_iter`.
+    #[test]
+    fn host_query_opening_extracts_sibling_pair() {
+        use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+        let lo_basis: [InnerVal; 4] = [
+            InnerVal::from_u8(1),
+            InnerVal::from_u8(2),
+            InnerVal::from_u8(3),
+            InnerVal::from_u8(4),
+        ];
+        let hi_basis: [InnerVal; 4] = [
+            InnerVal::from_u8(5),
+            InnerVal::from_u8(6),
+            InnerVal::from_u8(7),
+            InnerVal::from_u8(8),
+        ];
+        let mut row = lo_basis.to_vec();
+        row.extend_from_slice(&hi_basis);
+        let leaf = LeafOpening::<InnerVal, LbMmcs> {
+            values: vec![row],
+            proof: vec![[InnerVal::ZERO; 8]; 5],
+        };
+        let opening = MerkleOpening::<InnerVal, LbMmcs> { leaves: vec![leaf] };
+        let recur = host_query_opening_to_recursive(&opening);
+        assert_eq!(recur.len(), 1);
+        let expected_lo =
+            <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                lo_basis.iter().copied(),
+            )
+            .unwrap();
+        let expected_hi =
+            <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                hi_basis.iter().copied(),
+            )
+            .unwrap();
+        assert_eq!(recur[0].sibling_pair, [expected_lo, expected_hi]);
+        assert_eq!(recur[0].merkle_path_digests.len(), 5);
+        assert_eq!(recur[0].position, 0);
+    }
+
+    /// #241 Phase 3: stacked converter threads batch_evaluations from
+    /// the host StackedBasefoldProof verbatim.
+    #[test]
+    fn host_stacked_basefold_threads_batch_evaluations() {
+        use p3_field::PrimeCharacteristicRing;
+        let bf_proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            univariate_messages: vec![],
+            fri_commitments: vec![],
+            component_polynomials_query_openings_and_proofs: vec![],
+            query_phase_openings_and_proofs: vec![],
+            final_poly: InnerChallenge::ZERO,
+            pow_witness: InnerVal::ZERO,
+            batch_grinding_witness: InnerVal::ZERO,
+        };
+        let stacked = StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            basefold_proof: bf_proof,
+            batch_evaluations: vec![
+                vec![InnerChallenge::from_u8(1), InnerChallenge::from_u8(2)],
+                vec![InnerChallenge::from_u8(3)],
+            ],
+        };
+        let recur = host_stacked_basefold_to_recursive(&stacked);
+        assert_eq!(recur.batch_evaluations.len(), 2);
+        assert_eq!(recur.batch_evaluations[0].len(), 2);
+        assert_eq!(recur.batch_evaluations[1].len(), 1);
+        assert_eq!(recur.batch_evaluations[0][0], InnerChallenge::from_u8(1));
+    }
+
+    /// #241 Phase 3: converter output flows through the existing
+    /// `RecursiveBasefoldProof` Witnessable impl
+    /// (basefold_witness.rs:443) — confirms the bridge composes
+    /// end-to-end with the pre-existing witness surface.
+    #[test]
+    fn host_basefold_converter_witnessable_composition() {
+        use p3_field::PrimeCharacteristicRing;
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            univariate_messages: vec![],
+            fri_commitments: vec![],
+            component_polynomials_query_openings_and_proofs: vec![],
+            query_phase_openings_and_proofs: vec![],
+            final_poly: InnerChallenge::ZERO,
+            pow_witness: InnerVal::ZERO,
+            batch_grinding_witness: InnerVal::ZERO,
+        };
+        let recur = host_basefold_proof_to_recursive(&proof, vec![]);
+        let _var = <_ as Witnessable<C>>::read(&recur, &mut builder);
     }
 }
