@@ -293,6 +293,9 @@ use zkm_stark::basefold::proof::{LeafOpening, MerkleOpening};
 use zkm_stark::basefold_late_binding::LbMmcs;
 use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
 
+use crate::partial_sumcheck::PartialSumcheckProof;
+use crate::univariate::{interpolate_3point_evals_at_012, UnivariatePolynomial};
+
 impl<C> Witnessable<C> for JaggedReductionRound<InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
@@ -386,6 +389,53 @@ where
     }
 }
 
+/// Convert a host-side eval-form jagged sumcheck proof into the
+/// coefficient-form [`PartialSumcheckProof`] that the in-circuit
+/// jagged-PCS verifier consumes.
+///
+/// Field mapping:
+/// * `univariate_polys[i]` ← Lagrange-interpolate `rounds[i].evals`
+///   at `x ∈ {0, 1, 2}` via [`interpolate_3point_evals_at_012`].
+/// * `claimed_sum` ← `rounds[0].evals[0] + rounds[0].evals[1]`
+///   (the round-0 sum-hypothesis identity `g(0) + g(1) = S`).
+/// * `point_and_eval.0` ← `eval_point`.
+/// * `point_and_eval.1` ← last round's polynomial evaluated at
+///   `eval_point[last]`.
+///
+/// Output is a host-typed `PartialSumcheckProof<InnerChallenge>` that
+/// can be `.read(builder)` via the existing impl in
+/// [`crate::basefold_witness`].  No witness-stream interaction here.
+pub fn jagged_reduction_to_partial_sumcheck(
+    proof: &JaggedReductionProof<InnerChallenge>,
+) -> PartialSumcheckProof<InnerChallenge> {
+    assert_eq!(
+        proof.rounds.len(),
+        proof.eval_point.len(),
+        "jagged reduction: rounds.len() must equal eval_point.len()",
+    );
+    assert!(
+        !proof.rounds.is_empty(),
+        "jagged reduction: at least one round required for claimed_sum",
+    );
+
+    let univariate_polys: Vec<UnivariatePolynomial<InnerChallenge>> = proof
+        .rounds
+        .iter()
+        .map(|r| interpolate_3point_evals_at_012(r.evals))
+        .collect();
+
+    let claimed_sum = proof.rounds[0].evals[0] + proof.rounds[0].evals[1];
+
+    let last_idx = proof.rounds.len() - 1;
+    let final_eval = univariate_polys[last_idx].eval_at_point(proof.eval_point[last_idx]);
+
+    PartialSumcheckProof {
+        univariate_polys,
+        claimed_sum,
+        point_and_eval: (proof.eval_point.clone(), final_eval),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +522,75 @@ mod tests {
         };
         let var = <_ as Witnessable<C>>::read(&host, &mut builder);
         assert_eq!(var.leaves.len(), 2);
+    }
+
+    /// #241 Phase 2: eval-form → coeff-form converter shape sanity.
+    /// Output univariate count matches input round count and the
+    /// reconstructed polys agree with the input evals at x ∈ {0,1,2}.
+    #[test]
+    fn jagged_reduction_converter_shape_and_roundtrip() {
+        use p3_field::PrimeCharacteristicRing;
+        let mk = |a: u16, b: u16, c: u16| JaggedReductionRound::<InnerChallenge> {
+            evals: [
+                InnerChallenge::from_u16(a),
+                InnerChallenge::from_u16(b),
+                InnerChallenge::from_u16(c),
+            ],
+        };
+        let proof = JaggedReductionProof::<InnerChallenge> {
+            rounds: vec![mk(1, 2, 7), mk(0, 5, 12), mk(3, 3, 3)],
+            eval_point: vec![
+                InnerChallenge::from_u16(11),
+                InnerChallenge::from_u16(13),
+                InnerChallenge::from_u16(17),
+            ],
+            q_at_z: InnerChallenge::from_u16(99),
+        };
+        let psp = jagged_reduction_to_partial_sumcheck(&proof);
+        assert_eq!(psp.univariate_polys.len(), 3);
+        assert_eq!(psp.point_and_eval.0.len(), 3);
+        // Round 0: p(0)=1, p(1)=2 → claimed_sum = 3.
+        assert_eq!(psp.claimed_sum, InnerChallenge::from_u16(3));
+        // Each univariate poly's evals at 0/1/2 round-trip to the
+        // original [p0, p1, p2].
+        for (round, poly) in proof.rounds.iter().zip(psp.univariate_polys.iter()) {
+            assert_eq!(
+                poly.eval_at_point(InnerChallenge::ZERO),
+                round.evals[0],
+            );
+            assert_eq!(
+                poly.eval_at_point(InnerChallenge::ONE),
+                round.evals[1],
+            );
+            assert_eq!(
+                poly.eval_at_point(InnerChallenge::from_u8(2)),
+                round.evals[2],
+            );
+        }
+        // final_eval = last round's poly evaluated at last
+        // eval_point coordinate.
+        let last = psp.univariate_polys.last().unwrap();
+        let expected_final = last.eval_at_point(proof.eval_point[2]);
+        assert_eq!(psp.point_and_eval.1, expected_final);
+    }
+
+    /// #241 Phase 2: converter output flows through the existing
+    /// `PartialSumcheckProof` Witnessable impl.  Confirms the bridge
+    /// composes with the pre-existing recursion-circuit witness
+    /// surface (basefold_witness.rs:73).
+    #[test]
+    fn jagged_reduction_converter_witnessable_composition() {
+        use p3_field::PrimeCharacteristicRing;
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let proof = JaggedReductionProof::<InnerChallenge> {
+            rounds: vec![JaggedReductionRound {
+                evals: [InnerChallenge::ONE, InnerChallenge::ZERO, InnerChallenge::ZERO],
+            }],
+            eval_point: vec![InnerChallenge::ZERO],
+            q_at_z: InnerChallenge::ZERO,
+        };
+        let psp = jagged_reduction_to_partial_sumcheck(&proof);
+        let _var: PartialSumcheckProof<Ext<InnerVal, InnerChallenge>> =
+            <_ as Witnessable<C>>::read(&psp, &mut builder);
     }
 }

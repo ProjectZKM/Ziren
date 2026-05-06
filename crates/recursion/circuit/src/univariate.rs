@@ -136,6 +136,45 @@ pub fn interpolate<K: Field>(xs: &[K], ys: &[K]) -> UnivariatePolynomial<K> {
     result
 }
 
+/// Recover a degree-2 polynomial in coefficient form from its
+/// evaluations at `x = 0, 1, 2`.
+///
+/// Used to bridge Ziren's eval-form jagged-sumcheck rounds (host
+/// emits `[p(0), p(1), p(2)]` from
+/// [`zkm_stark::jagged_sumcheck::JaggedReductionRound`], where
+/// `p(2)` comes from linear extrapolation `q1.double() - q0`) to the
+/// coefficient-form [`UnivariatePolynomial`] consumed by the
+/// in-circuit jagged-PCS verifier.  Mirrors the SP1 bundle format
+/// where rounds are already coefficient-form on the wire.
+///
+/// Closed-form via Lagrange basis at the integer triple `{0, 1, 2}`:
+///
+/// ```text
+///   c_0 = p(0)
+///   c_1 = -3/2 · p(0) + 2 · p(1) − 1/2 · p(2)
+///   c_2 =  1/2 · p(0) − p(1) + 1/2 · p(2)
+/// ```
+///
+/// Faster than calling [`interpolate`] with three sample points
+/// (avoids the O(n²) Lagrange-basis loop) and uses one inversion
+/// instead of three.
+pub fn interpolate_3point_evals_at_012<K: Field>(
+    evals: [K; 3],
+) -> UnivariatePolynomial<K> {
+    let [p0, p1, p2] = evals;
+    let two_inv = K::from_u8(2).inverse();
+    let c0 = p0;
+    // p(1) - p(0) - (p(2) - 2 p(1) + p(0)) / 2
+    //   = p(0) · (-3/2) + p(1) · 2 + p(2) · (-1/2)
+    let three_halves_p0 = (p0 + p0 + p0) * two_inv;
+    let half_p2 = p2 * two_inv;
+    let c1 = -three_halves_p0 + p1 + p1 - half_p2;
+    // (p(2) - 2 p(1) + p(0)) / 2
+    let half_p0 = p0 * two_inv;
+    let c2 = half_p0 - p1 + half_p2;
+    UnivariatePolynomial::new(vec![c0, c1, c2])
+}
+
 /// Random-linear combination of univariate polynomials weighted by
 /// powers of `lambda`: result = `Σ_i λ^(n-1-i) · polys[i]`.
 pub fn random_linear_combination<K: Field>(
@@ -188,5 +227,56 @@ mod tests {
         assert_eq!(poly.eval_at_point(F::ZERO), F::ONE);
         assert_eq!(poly.eval_at_point(F::ONE), F::TWO);
         assert_eq!(poly.eval_at_point(F::TWO), F::from_u16(7));
+    }
+
+    /// `interpolate_3point_evals_at_012` matches the generic
+    /// `interpolate` helper for the integer triple `{0, 1, 2}`.
+    #[test]
+    fn interpolate_3point_at_012_matches_generic_interpolate() {
+        let evals = [F::ONE, F::TWO, F::from_u16(7)];
+        let fast = interpolate_3point_evals_at_012(evals);
+        let slow =
+            interpolate(&[F::ZERO, F::ONE, F::TWO], &evals.to_vec());
+        assert_eq!(fast.coefficients, slow.coefficients);
+    }
+
+    /// Constant evaluations `[c, c, c]` recover the constant
+    /// polynomial `c + 0·X + 0·X²`.
+    #[test]
+    fn interpolate_3point_constant_evals_yield_constant_poly() {
+        let c = F::from_u16(42);
+        let poly = interpolate_3point_evals_at_012([c, c, c]);
+        assert_eq!(poly.coefficients[0], c);
+        assert_eq!(poly.coefficients[1], F::ZERO);
+        assert_eq!(poly.coefficients[2], F::ZERO);
+    }
+
+    /// `[p(0), p(1), p(2)] = [0, 1, 2]` recovers `p(X) = X`.
+    #[test]
+    fn interpolate_3point_linear_evals_yield_linear_poly() {
+        let evals = [F::ZERO, F::ONE, F::TWO];
+        let poly = interpolate_3point_evals_at_012(evals);
+        assert_eq!(poly.coefficients[0], F::ZERO);
+        assert_eq!(poly.coefficients[1], F::ONE);
+        assert_eq!(poly.coefficients[2], F::ZERO);
+    }
+
+    /// Round-trip: emitting evals from a known polynomial then
+    /// interpolating recovers the same coefficients.
+    #[test]
+    fn interpolate_3point_round_trip() {
+        // p(X) = 1 + 3X + 5X²  →  p(0)=1, p(1)=9, p(2)=27.
+        let original = UnivariatePolynomial::new(vec![
+            F::ONE,
+            F::from_u8(3),
+            F::from_u8(5),
+        ]);
+        let evals = [
+            original.eval_at_point(F::ZERO),
+            original.eval_at_point(F::ONE),
+            original.eval_at_point(F::TWO),
+        ];
+        let recovered = interpolate_3point_evals_at_012(evals);
+        assert_eq!(recovered.coefficients, original.coefficients);
     }
 }
