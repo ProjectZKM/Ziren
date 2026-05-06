@@ -82,6 +82,9 @@ where
         // Check public values constraints.
         self.eval_pc(builder, local, next, public_values);
 
+        // Check control flag consistency.
+        self.eval_control_flags(builder, local);
+
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
 
@@ -89,10 +92,30 @@ where
         builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_b);
         builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.instruction.imm_c);
         builder.when(not_real.clone()).assert_zero(AB::Expr::one() - local.is_rw_a);
+        builder.when(not_real.clone()).assert_zero(local.is_check_memory);
+        builder.when(not_real.clone()).assert_zero(local.is_halt);
+        builder.when(not_real.clone()).assert_zero(local.is_sequential);
+        builder.when(not_real.clone()).assert_zero(local.next_pc);
+        builder.when(not_real).assert_zero(local.next_next_pc);
     }
 }
 
 impl CpuChip {
+    /// Constraints for control flags carried in the CPU row.
+    pub(crate) fn eval_control_flags<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &CpuCols<AB::Var>,
+    ) {
+        builder.when(local.is_real).assert_bool(local.is_rw_a);
+        builder.when(local.is_real).assert_bool(local.is_check_memory);
+        builder.when(local.is_real).assert_bool(local.is_halt);
+        builder.when(local.is_real).assert_bool(local.is_sequential);
+
+        // Halting instructions are not sequential.
+        builder.when(local.is_real).assert_zero(local.is_halt * local.is_sequential);
+    }
+
     /// Constraints related to the shard and clk.
     ///
     /// This method ensures that all of the shard values are the same and that the clk starts at 0
@@ -169,7 +192,6 @@ impl CpuChip {
             .assert_eq(local.next_next_pc, next.next_pc);
 
         builder
-            .when_transition()
             .when(local.is_real)
             .when(local.is_sequential)
             .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_canonical_u32(4));

@@ -33,6 +33,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryInstructionsChip {
         "MemoryInstrs".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
         MemoryInstructionsColumns::<u8>::picus_info()
     }

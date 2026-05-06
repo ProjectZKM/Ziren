@@ -10,13 +10,17 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 use zkm_stark::{
     air::{
         AirLookup, BaseAirBuilder, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
         ZKM_PROOF_NUM_PV_ELTS,
     },
-    LookupKind, PicusInfo, Word,
+    LookupKind, Word,
 };
 
 use crate::{
@@ -59,6 +63,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
         }
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
         MemoryInitCols::<u8>::picus_info()
     }
@@ -211,16 +216,20 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
     }
 }
 
-#[derive(AlignedBorrow, PicusAnnotations, Clone, Copy)]
+#[derive(AlignedBorrow, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct MemoryInitCols<T: Copy> {
     /// The shard number of the memory access.
+    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub shard: T,
 
     /// The timestamp of the memory access.
+    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub timestamp: T,
 
     /// The address of the memory access.
+    #[cfg_attr(feature = "picus", picus(input, transition_input))]
     pub addr: T,
 
     /// Comparison assertions for address to be strictly increasing.
@@ -230,6 +239,7 @@ pub struct MemoryInitCols<T: Copy> {
     pub addr_bits: KoalaBearBitDecomposition<T>,
 
     /// The value of the memory access.
+    #[cfg_attr(feature = "picus", picus(transition_input))]
     pub value: [T; 32],
 
     /// Whether the memory access is a real access.
@@ -265,6 +275,35 @@ where
         for i in 0..32 {
             builder.assert_bool(local.value[i]);
         }
+        // Canonicalize padded rows to the default zero trace shape so witness columns cannot
+        // drift in extraction modules.
+        builder.when_not(local.is_real).assert_zero(local.shard);
+        builder.when_not(local.is_real).assert_zero(local.timestamp);
+        builder.when_not(local.is_real).assert_zero(local.addr);
+        builder.when_not(local.is_real).assert_zero(local.is_next_comp);
+        for i in 0..32 {
+            builder.when_not(local.is_real).assert_zero(local.value[i]);
+            builder.when_not(local.is_real).assert_zero(local.addr_bits.bits[i]);
+            builder.when_not(local.is_real).assert_zero(local.lt_cols.bit_flags[i]);
+        }
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_2);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_3);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_4);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_5);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_6);
+        builder
+            .when_not(local.is_real)
+            .assert_zero(local.addr_bits.and_most_sig_byte_decomp_0_to_7);
 
         let mut byte1 = AB::Expr::zero();
         let mut byte2 = AB::Expr::zero();
@@ -343,8 +382,19 @@ where
         // - In the last real row, we need to assert that addr = last_finalize_addr.
 
         // Assert that addr < addr' when the next row is real.
-        builder.when_transition().assert_eq(next.is_next_comp, next.is_real);
-        next.lt_cols.eval(builder, &local.addr_bits.bits, &next.addr_bits.bits, next.is_next_comp);
+        //
+        // Keep these constraints transition-scoped so boundary modules don't introduce unconstrained
+        // `next`-row helper witnesses.
+        {
+            let mut transition = builder.when_transition();
+            transition.assert_eq(next.is_next_comp, next.is_real);
+            next.lt_cols.eval(
+                &mut transition,
+                &local.addr_bits.bits,
+                &next.addr_bits.bits,
+                next.is_next_comp,
+            );
+        }
 
         // Assert that the real rows are all padded to the top.
         builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
@@ -382,11 +432,50 @@ where
         let is_first_row = builder.is_first_row();
         IsZeroOperation::<AB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
 
+        // Outside the first row, `is_prev_addr_zero` is a pure witness helper and should stay at
+        // its default trace value. Constrain this through transition `next` columns so the single
+        // row case does not accidentally force first-row helpers to zero in boundary extraction.
+        builder.when_transition().assert_zero(next.is_prev_addr_zero.inverse);
+        builder.when_transition().assert_zero(next.is_prev_addr_zero.result);
+
+        // When prev_addr == 0 in the first row, canonicalize the helper witness to match trace
+        // population (inverse = 0).
+        builder
+            .when_first_row()
+            .when(local.is_prev_addr_zero.result)
+            .assert_zero(local.is_prev_addr_zero.inverse);
+
         // Constrain the is_first_comp column.
         builder.assert_bool(local.is_first_comp);
         builder
             .when_first_row()
             .assert_eq(local.is_first_comp, AB::Expr::one() - local.is_prev_addr_zero.result);
+        // In the degenerate single-row case, force the row to be the `%x0` address case.
+        // This removes a Picus-only underconstrained branch where `addr` can drift without inputs.
+        let is_single_row = builder.is_first_row() * builder.is_last_row();
+        builder.when(is_single_row.clone()).assert_zero(local.is_first_comp);
+        // In the degenerate single-row finalize case, the only real finalized
+        // address is `%x0`, whose routing metadata is canonical in the executor
+        // trace population (`shard = 0`, `timestamp = 1`).
+        // Pin these to avoid underconstrained single-row witnesses in extraction.
+        if self.kind == MemoryChipType::Finalize {
+            builder.when(is_single_row.clone()).assert_zero(local.shard);
+            builder.when(is_single_row).assert_eq(local.timestamp, AB::Expr::one());
+        }
+        builder.when_transition().assert_zero(next.is_first_comp);
+        // For all non-first real rows (`is_next_comp = 1` in this trace), first-row-only helper
+        // columns must be zero.
+        builder.when(local.is_next_comp).assert_zero(local.is_prev_addr_zero.inverse);
+        builder.when(local.is_next_comp).assert_zero(local.is_prev_addr_zero.result);
+        builder.when(local.is_next_comp).assert_zero(local.is_first_comp);
+
+        // Canonicalize local less-than helper flags when no local comparison is requested.
+        // This is exactly the case `is_first_comp = 0` and `is_next_comp = 0`.
+        let no_local_lt_check =
+            (AB::Expr::one() - local.is_first_comp) * (AB::Expr::one() - local.is_next_comp);
+        for flag in local.lt_cols.bit_flags.iter() {
+            builder.assert_zero(no_local_lt_check.clone() * (*flag));
+        }
 
         // Ensure at least one real row.
         builder.when_first_row().assert_one(local.is_real);

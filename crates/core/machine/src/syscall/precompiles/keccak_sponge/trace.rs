@@ -1,5 +1,7 @@
+#[cfg(feature = "picus")]
+use crate::syscall::precompiles::keccak_sponge::columns::KeccakPermutationProjection;
 use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakPermutationProjection, KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::utils::keccakf_u32s;
 use crate::syscall::precompiles::keccak_sponge::{
@@ -29,19 +31,23 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         "KeccakSponge".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
         let mut info = KeccakSpongeCols::<u8>::picus_info();
-        let projection = KeccakPermutationProjection::picus_projection_info();
+        #[cfg(feature = "picus")]
+        {
+            let projection = KeccakPermutationProjection::picus_projection_info();
 
-        // Expose the embedded Keccak permutation input state on the parent
-        // module interface so Picus cannot vary it existentially when checking
-        // boundary/transition phases.
-        info.transition_input_ranges.extend(
-            projection
-                .input_ranges
-                .into_iter()
-                .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
-        );
+            // Expose the embedded Keccak permutation input state on the parent
+            // module interface so Picus cannot vary it existentially when checking
+            // boundary/transition phases.
+            info.transition_input_ranges.extend(
+                projection
+                    .input_ranges
+                    .into_iter()
+                    .map(|(start, end, name)| (start, end, format!("keccak_{name}"))),
+            );
+        }
 
         info
     }
@@ -148,7 +154,14 @@ impl KeccakSpongeChip {
                 cols.shard = F::from_canonical_u32(event.shard);
                 cols.clk = F::from_canonical_u32(event.clk);
                 cols.is_real = F::ONE;
-                cols.input_len = F::from_canonical_u32(event.input.len() as u32);
+                // Keep `input_len` consistent with the dedicated memory read
+                // (`input_length_record`) used by the AIR constraints.
+                cols.input_len = F::from_canonical_u32(event.input_len_u32s);
+                // Keep `input_length_mem` populated on every real row so AIR
+                // constraints that bind `input_len`/range-check these bytes on
+                // all real rows are satisfied consistently.
+                cols.input_length_mem.access.value = Word::from(event.input_length_record.value);
+                blu.add_u8_range_checks(&event.input_length_record.value.to_le_bytes());
                 cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
                 cols.is_absorbed =
                     F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
@@ -166,16 +179,18 @@ impl KeccakSpongeChip {
                 // read the input
                 if round == 0 {
                     for j in 0..KECCAK_GENERAL_RATE_U32S {
-                        cols.block_mem[j].populate(
-                            event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j],
-                            blu,
-                        );
+                        let record = event.input_read_records[i * KECCAK_GENERAL_RATE_U32S + j];
+                        cols.block_mem[j].populate(record, blu);
+                        blu.add_u8_range_checks(&record.value.to_le_bytes());
                     }
                 }
 
                 // original state
                 for j in 0..KECCAK_STATE_U32S {
                     cols.original_state[j] = Word::from(state_u32s[j]);
+                    // Match AIR-side `slice_range_check_u8` constraints on
+                    // `original_state` bytes for each real row.
+                    blu.add_u8_range_checks(&state_u32s[j].to_le_bytes());
                 }
 
                 // xor
@@ -197,7 +212,9 @@ impl KeccakSpongeChip {
                 // if this is the last row of the last block, populate writing output
                 if i == (block_num - 1) && round == (NUM_ROUNDS - 1) {
                     for j in 0..KECCAK_GENERAL_OUTPUT_U32S {
-                        cols.output_mem[j].populate(event.output_write_records[j], blu);
+                        let record = event.output_write_records[j];
+                        cols.output_mem[j].populate(record, blu);
+                        blu.add_u8_range_checks(&record.value.to_le_bytes());
                     }
                 }
 

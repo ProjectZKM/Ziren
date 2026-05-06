@@ -1,13 +1,18 @@
 use std::mem::size_of;
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+use zkm_stark::Word;
 
 use crate::operations::KoalaBearWordRangeChecker;
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 
 pub const NUM_BRANCH_COLS: usize = size_of::<BranchColumns<u8>>();
 
 /// The column layout for branching.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct BranchColumns<T> {
     /// The current program counter.
@@ -36,17 +41,17 @@ pub struct BranchColumns<T> {
     pub op_c_value: Word<T>,
 
     /// Branch Instructions Selectors.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_beq: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_bne: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_bltz: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_blez: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_bgtz: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_bgez: T,
 
     /// The branching column is equal to:

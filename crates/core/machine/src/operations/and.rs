@@ -1,10 +1,11 @@
-use core::{
-    borrow::Borrow,
-    mem::{size_of, transmute},
-};
+#[cfg(feature = "picus")]
+use core::borrow::Borrow;
+#[cfg(feature = "picus")]
+use core::mem::{size_of, transmute};
 
 use p3_field::{Field, FieldAlgebra};
 use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
 use zkm_derive::PicusProjection;
 
 use zkm_core_executor::{
@@ -14,6 +15,7 @@ use zkm_core_executor::{
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
+#[cfg(feature = "picus")]
 use crate::utils::indices_arr;
 
 /// A set of columns needed to compute the and of two words.
@@ -24,11 +26,14 @@ pub struct AndOperation<T> {
     pub value: Word<T>,
 }
 
+#[cfg(feature = "picus")]
 const NUM_AND_OPERATION_SUMMARY_COLS: usize = size_of::<AndOperationSummaryCols<u8>>();
 
+#[cfg(feature = "picus")]
 const AND_OPERATION_SUMMARY_COL_MAP: AndOperationSummaryCols<usize> =
     make_and_operation_summary_col_map();
 
+#[cfg(feature = "picus")]
 const fn make_and_operation_summary_col_map() -> AndOperationSummaryCols<usize> {
     let indices_arr = indices_arr::<NUM_AND_OPERATION_SUMMARY_COLS>();
     unsafe {
@@ -42,6 +47,7 @@ const fn make_and_operation_summary_col_map() -> AndOperationSummaryCols<usize> 
 /// auxiliary module.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
+#[cfg(feature = "picus")]
 struct AndOperationSummaryCols<T> {
     pub a: Word<T>,
     pub b: Word<T>,
@@ -49,20 +55,21 @@ struct AndOperationSummaryCols<T> {
     pub cols: AndOperation<T>,
 }
 
-#[derive(PicusProjection)]
-#[picus_projection(
+#[cfg(feature = "picus")]
+#[cfg_attr(feature = "picus", derive(PicusProjection))]
+#[cfg_attr(feature = "picus", picus_projection(
     source = AndOperationSummaryCols<u8>,
     col_map = AND_OPERATION_SUMMARY_COL_MAP
-)]
+))]
 #[allow(dead_code)]
 struct AndOperationSummaryProjection {
-    #[picus(input, path = a)]
+    #[cfg_attr(feature = "picus", picus(input, path = a))]
     pub a: Word<u8>,
-    #[picus(input, path = b)]
+    #[cfg_attr(feature = "picus", picus(input, path = b))]
     pub b: Word<u8>,
-    #[picus(input, path = is_real)]
+    #[cfg_attr(feature = "picus", picus(input, path = is_real))]
     pub is_real: u8,
-    #[picus(output, path = cols.value)]
+    #[cfg_attr(feature = "picus", picus(output, path = cols.value))]
     pub value: Word<u8>,
 }
 
@@ -126,6 +133,7 @@ impl<F: Field> AndOperation<F> {
         let current_outputs: Vec<AB::Expr> =
             cols.value.0.iter().map(|limb| (*limb).into()).collect();
 
+        #[cfg(feature = "picus")]
         if builder.is_known_one(&is_real_expr)
             && builder.try_emit_projected_summary(
                 "AndOperation",

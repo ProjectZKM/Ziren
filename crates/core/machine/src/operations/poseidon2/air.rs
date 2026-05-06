@@ -1,4 +1,6 @@
-use std::{array, mem::size_of};
+use std::array;
+#[cfg(feature = "picus")]
+use std::mem::size_of;
 
 use p3_air::PairBuilder;
 use p3_field::{FieldAlgebra, PrimeField32};
@@ -7,10 +9,9 @@ use p3_poseidon2::matmul_internal;
 use zkm_primitives::RC_16_30_U32;
 use zkm_stark::air::{MachineAirBuilder, OperationSummaryAirBuilder};
 
-use super::{
-    permutation::{permutation, Poseidon2Cols, Poseidon2Degree3Cols, Poseidon2Degree3Projection},
-    NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH,
-};
+#[cfg(feature = "picus")]
+use super::permutation::{permutation, Poseidon2Degree3Cols, Poseidon2Degree3Projection};
+use super::{permutation::Poseidon2Cols, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 
 const INTERNAL_DIAG_MONTY_16: [KoalaBear; 16] = KoalaBear::new_array([
     KoalaBear::ORDER_U32 - 2,
@@ -174,11 +175,14 @@ pub fn eval_degree3<AB>(builder: &mut AB, local_row: &dyn Poseidon2Cols<AB::Var>
 where
     AB: MachineAirBuilder + PairBuilder + OperationSummaryAirBuilder,
 {
+    #[cfg(feature = "picus")]
     let current_inputs: Vec<AB::Expr> =
         local_row.external_rounds_state()[0].iter().map(|value| (*value).into()).collect();
+    #[cfg(feature = "picus")]
     let current_outputs: Vec<AB::Expr> =
         local_row.perm_output().iter().map(|value| (*value).into()).collect();
 
+    #[cfg(feature = "picus")]
     if builder.try_emit_projected_summary(
         "Poseidon2Degree3Permutation",
         &Poseidon2Degree3Projection::picus_projection_info(),

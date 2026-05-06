@@ -76,7 +76,9 @@ use zkm_core_executor::{
 };
 
 use crate::{memory::MemoryReadWriteCols, CoreChipError};
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{
     air::{MachineAir, PicusInfo},
@@ -104,7 +106,8 @@ const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 pub struct DivRemChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct DivRemCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -142,19 +145,19 @@ pub struct DivRemCols<T> {
     pub is_c_0: IsZeroWordOperation<T>,
 
     /// Flag to indicate whether the opcode is DIV.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_div: T,
 
     /// Flag to indicate whether the opcode is DIVU.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_divu: T,
 
     /// Flag to indicate whether the opcode is MOD.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_mod: T,
 
     /// Flag to indicate whether the opcode is MODU.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_modu: T,
 
     /// Flag to indicate whether the division operation overflows.
@@ -214,6 +217,7 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         "DivRem".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         DivRemCols::<u8>::picus_info()
     }
@@ -353,6 +357,8 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
 
                 // Range check.
                 {
+                    output.add_u8_range_checks(&event.b.to_le_bytes());
+                    output.add_u8_range_checks(&event.c.to_le_bytes());
                     output.add_u8_range_checks(&quotient.to_le_bytes());
                     output.add_u8_range_checks(&remainder.to_le_bytes());
                     output.add_u8_range_checks(&c_times_quotient);
@@ -665,6 +671,10 @@ where
 
         // Range check all the bytes.
         {
+            // Constrain operands to byte limbs so extracted standalone modules
+            // cannot pick non-byte witness values for word inputs.
+            builder.slice_range_check_u8(&local.b.0, is_real.clone());
+            builder.slice_range_check_u8(&local.c.0, is_real.clone());
             builder.slice_range_check_u8(&local.quotient.0, is_real.clone());
             builder.slice_range_check_u8(&local.remainder.0, is_real.clone());
 

@@ -1,8 +1,10 @@
 use crate::air::{MemoryAirBuilder, WordAirBuilder};
 use crate::memory::MemoryCols;
 use crate::operations::XorOperation;
+#[cfg(feature = "picus")]
+use crate::syscall::precompiles::keccak_sponge::columns::KeccakPermutationProjection;
 use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakPermutationProjection, KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
+    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
 };
 use crate::syscall::precompiles::keccak_sponge::{
     KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
@@ -69,6 +71,7 @@ where
         builder.when_last_row().assert_zero(local.is_real);
 
         // Xor
+        let not_read_block = AB::Expr::one() - local.read_block;
         for i in 0..KECCAK_GENERAL_RATE_U32S {
             XorOperation::<AB::F>::eval(
                 builder,
@@ -77,13 +80,66 @@ where
                 local.xored_general_rate[i],
                 local.read_block,
             );
+            for j in 0..4 {
+                builder
+                    .when(not_read_block.clone())
+                    .assert_zero(local.xored_general_rate[i].value[j]);
+                builder
+                    .when(not_read_block.clone())
+                    .assert_zero(local.block_mem[i].access.value[j]);
+            }
         }
+
+        // Range-constrain the sponge state bytes.
+        //
+        // `original_state` is interpreted as bytes when building u16/u64 limbs
+        // (including for `next.original_state` in absorbed-state transitions).
+        // Enforce each byte is in [0, 255] to prevent unconstrained field limbs
+        // from satisfying packed equalities spuriously.
+        let mut original_state_bytes = Vec::with_capacity(KECCAK_STATE_U32S * 4);
+        for i in 0..KECCAK_STATE_U32S {
+            for j in 0..4 {
+                original_state_bytes.push(local.original_state[i][j]);
+            }
+        }
+        builder.slice_range_check_u8(&original_state_bytes, local.is_real);
+
+        // Range-constrain memory words that are interpreted as byte-packed u16/u64 limbs.
+        // `input_length_mem` is constrained against `input_len` on all real rows,
+        // so keep it byte-range constrained on all real rows as well.
+        // `block_mem` is only read on `read_block`,
+        // and `output_mem` is only used on `write_output`.
+        let mut input_len_bytes = Vec::with_capacity(4);
+        for j in 0..4 {
+            input_len_bytes.push(local.input_length_mem.value()[j]);
+        }
+        builder.slice_range_check_u8(&input_len_bytes, local.is_real);
+
+        let mut block_mem_bytes = Vec::with_capacity(KECCAK_GENERAL_RATE_U32S * 4);
+        for i in 0..KECCAK_GENERAL_RATE_U32S {
+            for j in 0..4 {
+                block_mem_bytes.push(local.block_mem[i].access.value[j]);
+            }
+        }
+        builder.slice_range_check_u8(&block_mem_bytes, local.read_block);
+
+        let mut output_mem_bytes = Vec::with_capacity(KECCAK_GENERAL_OUTPUT_U32S * 4);
+        for i in 0..KECCAK_GENERAL_OUTPUT_U32S {
+            for j in 0..4 {
+                output_mem_bytes.push(local.output_mem[i].value()[j]);
+            }
+        }
+        builder.slice_range_check_u8(&output_mem_bytes, local.write_output);
 
         // Constrain the absorbed bytes
         builder
             .when_transition()
-            .when(not_final_step)
+            .when(not_final_step.clone())
             .assert_eq(local.already_absorbed_u32s, next.already_absorbed_u32s);
+        builder
+            .when_transition()
+            .when(not_final_step)
+            .assert_eq(local.input_address, next.input_address);
         // If this is the first block, absorbed bytes should be 0
         builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::zero());
         // If this is the final block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
@@ -104,11 +160,25 @@ where
             next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
+        // Outside the absorbed-edge transition, keep `original_state` stable
+        // across rows. Exclude the final output row because its successor is a
+        // padding row.
+        let keep_original_state =
+            (AB::Expr::one() - local.is_absorbed) * (AB::Expr::one() - local.write_output);
+        let mut keep_transition_builder = builder.when_transition();
+        let mut keep_state_builder = keep_transition_builder.when(keep_original_state);
+        for i in 0..KECCAK_STATE_U32S {
+            keep_state_builder.assert_word_eq(local.original_state[i], next.original_state[i]);
+        }
+
         // Eval the plonky3 keccak air. Picus can hide the full sub-AIR behind a
         // semantic boundary; other builders continue to inline the exact
         // `SubAirBuilder` path.
+        #[cfg(feature = "picus")]
         let current_inputs = self.keccak_summary_inputs::<AB>(local);
+        #[cfg(feature = "picus")]
         let current_outputs = self.keccak_summary_outputs::<AB>(local);
+        #[cfg(feature = "picus")]
         if !builder.try_emit_hidden_subair_summary(
             "KeccakAir",
             &KeccakPermutationProjection::picus_projection_info(),
@@ -122,6 +192,12 @@ where
                 SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
             self.p3_keccak.eval(&mut sub_builder);
         }
+        #[cfg(not(feature = "picus"))]
+        {
+            let mut sub_builder =
+                SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
+            self.p3_keccak.eval(&mut sub_builder);
+        }
     }
 }
 
@@ -131,6 +207,7 @@ impl KeccakSpongeChip {
     /// The surrounding sponge AIR ties these lanes to memory/original-state
     /// data, so they must remain visible caller inputs even when the full
     /// Keccak round system is summarized as a hidden submodule.
+    #[cfg(feature = "picus")]
     fn keccak_summary_inputs<AB: ZKMAirBuilder>(
         &self,
         local: &KeccakSpongeCols<AB::Var>,
@@ -156,6 +233,7 @@ impl KeccakSpongeChip {
     /// 2. `final_step`
     /// 3. `A'''[0, 0]`
     /// 4. the remaining 24 `A'''` lanes in witness layout order
+    #[cfg(feature = "picus")]
     fn keccak_summary_outputs<AB: ZKMAirBuilder>(
         &self,
         local: &KeccakSpongeCols<AB::Var>,
@@ -187,8 +265,19 @@ impl KeccakSpongeChip {
         let first_step = local.keccak.step_flags[0];
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
 
+        // Defensive constraints for the summarized Keccak sub-AIR boundary:
+        // enforce booleanity and mutual exclusion of first/final step flags.
+        // This prevents degenerate witnesses where a single row is both
+        // first-round and final-round when summary internals are hidden.
+        builder.when(local.is_real).assert_bool(first_step);
+        builder.when(local.is_real).assert_bool(final_step);
+        builder.when(local.is_real).assert_zero(first_step * final_step);
+
         // receive syscall
         builder.assert_eq(first_block * first_step * local.is_real, local.receive_syscall);
+
+        // Input block memory is only read on the first Keccak round of a real row.
+        builder.assert_eq(local.read_block, first_step * local.is_real);
 
         // write output flag
         builder.assert_eq(final_block * final_step * local.is_real, local.write_output);
@@ -210,6 +299,11 @@ impl KeccakSpongeChip {
             &local.input_length_mem,
             local.receive_syscall,
         );
+        // Bind the scalar `input_len` to the memory-provided 4-byte word on
+        // the syscall row.
+        builder
+            .when(local.receive_syscall)
+            .assert_eq(local.input_len, local.input_length_mem.value().reduce::<AB>());
         // Verify the input length has not changed
         builder
             .when(local.is_real)

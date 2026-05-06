@@ -1,17 +1,20 @@
-use core::{
-    borrow::Borrow,
-    mem::{size_of, transmute},
-};
+#[cfg(feature = "picus")]
+use core::borrow::Borrow;
+#[cfg(feature = "picus")]
+use core::mem::{size_of, transmute};
 
 use p3_field::{Field, FieldAlgebra};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
-use zkm_derive::{AlignedBorrow, PicusProjection};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusProjection;
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
+#[cfg(feature = "picus")]
 use crate::utils::indices_arr;
 
 /// A set of columns needed to compute the xor of two words.
@@ -22,11 +25,14 @@ pub struct XorOperation<T> {
     pub value: Word<T>,
 }
 
+#[cfg(feature = "picus")]
 const NUM_XOR_OPERATION_SUMMARY_COLS: usize = size_of::<XorOperationSummaryCols<u8>>();
 
+#[cfg(feature = "picus")]
 const XOR_OPERATION_SUMMARY_COL_MAP: XorOperationSummaryCols<usize> =
     make_xor_operation_summary_col_map();
 
+#[cfg(feature = "picus")]
 const fn make_xor_operation_summary_col_map() -> XorOperationSummaryCols<usize> {
     let indices_arr = indices_arr::<NUM_XOR_OPERATION_SUMMARY_COLS>();
     unsafe {
@@ -44,6 +50,7 @@ const fn make_xor_operation_summary_col_map() -> XorOperationSummaryCols<usize> 
 /// summarized module.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
+#[cfg(feature = "picus")]
 struct XorOperationSummaryCols<T> {
     pub a: Word<T>,
     pub b: Word<T>,
@@ -51,20 +58,21 @@ struct XorOperationSummaryCols<T> {
     pub cols: XorOperation<T>,
 }
 
-#[derive(PicusProjection)]
-#[picus_projection(
+#[cfg(feature = "picus")]
+#[cfg_attr(feature = "picus", derive(PicusProjection))]
+#[cfg_attr(feature = "picus", picus_projection(
     source = XorOperationSummaryCols<u8>,
     col_map = XOR_OPERATION_SUMMARY_COL_MAP
-)]
+))]
 #[allow(dead_code)]
 struct XorOperationSummaryProjection {
-    #[picus(input, path = a)]
+    #[cfg_attr(feature = "picus", picus(input, path = a))]
     pub a: Word<u8>,
-    #[picus(input, path = b)]
+    #[cfg_attr(feature = "picus", picus(input, path = b))]
     pub b: Word<u8>,
-    #[picus(input, path = is_real)]
+    #[cfg_attr(feature = "picus", picus(input, path = is_real))]
     pub is_real: u8,
-    #[picus(output, path = cols.value)]
+    #[cfg_attr(feature = "picus", picus(output, path = cols.value))]
     pub value: Word<u8>,
 }
 
@@ -134,6 +142,7 @@ impl<F: Field> XorOperation<F> {
         // This operation is only functional when `is_real = 1`; otherwise the
         // exact AIR leaves `cols.value` unconstrained. Only outline it once the
         // guard has already been specialized to one.
+        #[cfg(feature = "picus")]
         if builder.is_known_one(&is_real_expr)
             && builder.try_emit_projected_summary(
                 "XorOperation",

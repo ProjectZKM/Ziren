@@ -244,6 +244,7 @@ pub trait OperationSummaryAirBuilder: AirBuilder {
     /// this hook may emit an auxiliary module with a dummy constant output when
     /// their target IR requires every module call to produce at least one
     /// result.
+    #[allow(clippy::too_many_arguments)]
     fn try_emit_memory_timestamp_summary(
         &mut self,
         _do_check: Self::Expr,
@@ -296,6 +297,7 @@ pub trait OperationSummaryAirBuilder: AirBuilder {
     /// enable flag is known to be one. In that case, the hidden witness should
     /// reflect the specialized value directly rather than carrying an
     /// additional symbolic guard through the nested module.
+    #[allow(clippy::too_many_arguments)]
     fn try_emit_projected_summary_with_hidden_consts<F>(
         &mut self,
         _module_name: &str,
@@ -331,6 +333,7 @@ pub trait OperationSummaryAirBuilder: AirBuilder {
     ///
     /// Returning `false` leaves the caller responsible for lowering the sub-AIR
     /// inline, typically through `SubAirBuilder`.
+    #[allow(clippy::too_many_arguments)]
     fn try_emit_hidden_subair_summary<F>(
         &mut self,
         _module_name: &str,

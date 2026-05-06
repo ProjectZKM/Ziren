@@ -27,6 +27,7 @@ impl<F: PrimeField32> MachineAir<F> for Poseidon2PermuteChip {
         "Poseidon2Permute".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
         Poseidon2MemCols::<u8>::picus_info()
     }
@@ -133,6 +134,10 @@ impl Poseidon2PermuteChip {
             cols.state_mem[i].populate(event.state_records[i], blu);
             cols.pre_state_range_check_cols[i].populate(event.pre_state[i]);
             cols.post_state_range_check_cols[i].populate(event.post_state[i]);
+
+            // Match AIR-side U8Range lookups for low three limbs of each word.
+            blu.add_u8_range_checks(&event.pre_state[i].to_le_bytes()[..3]);
+            blu.add_u8_range_checks(&event.post_state[i].to_le_bytes()[..3]);
         }
     }
 }

@@ -8,7 +8,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-zkm-core-machine = { workspace = true }
+zkm-core-machine = { workspace = true, features = ["picus"] }
 zkm-core-executor = {workspace = true}
 zkm-stark = {workspace = true}
 p3-air = { workspace = true  }

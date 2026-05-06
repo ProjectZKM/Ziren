@@ -10,7 +10,10 @@ use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
+use zkm_stark::{
+    air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir},
+    ZKMAirBuilder,
+};
 
 #[cfg(feature = "sys")]
 use crate::ExpReverseBitsEvent;

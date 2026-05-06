@@ -4,7 +4,9 @@ use std::{
     mem::size_of,
 };
 
-use zkm_derive::{AlignedBorrow, PicusProjection};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusProjection;
 
 use crate::operations::poseidon2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 use crate::utils::indices_arr;
@@ -58,12 +60,12 @@ pub struct Poseidon2Degree3Cols<T: Copy> {
 /// Projection `path = ...` points at the semantic source slice. The projected
 /// field type determines the width, while the derive recursively takes the
 /// first source column from the path.
-#[derive(PicusProjection)]
-#[picus_projection(source = Poseidon2Degree3Cols<u8>, col_map = POSEIDON2_DEGREE3_COL_MAP)]
+#[cfg_attr(feature = "picus", derive(PicusProjection))]
+#[cfg_attr(feature = "picus", picus_projection(source = Poseidon2Degree3Cols<u8>, col_map = POSEIDON2_DEGREE3_COL_MAP))]
 pub struct Poseidon2Degree3Projection {
-    #[picus(input, path = state.external_rounds_state[0])]
+    #[cfg_attr(feature = "picus", picus(input, path = state.external_rounds_state[0]))]
     pub state_in: [u8; WIDTH],
-    #[picus(output, path = state.output_state)]
+    #[cfg_attr(feature = "picus", picus(output, path = state.output_state))]
     pub state_out: [u8; WIDTH],
 }
 

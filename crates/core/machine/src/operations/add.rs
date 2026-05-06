@@ -1,17 +1,21 @@
-use core::{
-    borrow::Borrow,
-    mem::{size_of, transmute},
-};
+#[cfg(feature = "picus")]
+use core::borrow::Borrow;
+#[cfg(feature = "picus")]
+use core::mem::{size_of, transmute};
 
 use zkm_core_executor::events::ByteRecord;
+#[cfg(feature = "picus")]
 use zkm_primitives::consts::WORD_SIZE;
 use zkm_stark::{air::ZKMAirBuilder, Word};
 
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
-use zkm_derive::{AlignedBorrow, PicusProjection};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusProjection;
 
 use crate::air::WordAirBuilder;
+#[cfg(feature = "picus")]
 use crate::utils::indices_arr;
 
 /// A set of columns needed to compute the add of two words.
@@ -25,11 +29,14 @@ pub struct AddOperation<T> {
     pub carry: [T; 3],
 }
 
+#[cfg(feature = "picus")]
 const NUM_ADD_OPERATION_SUMMARY_COLS: usize = size_of::<AddOperationSummaryCols<u8>>();
 
+#[cfg(feature = "picus")]
 const ADD_OPERATION_SUMMARY_COL_MAP: AddOperationSummaryCols<usize> =
     make_add_operation_summary_col_map();
 
+#[cfg(feature = "picus")]
 const fn make_add_operation_summary_col_map() -> AddOperationSummaryCols<usize> {
     let indices_arr = indices_arr::<NUM_ADD_OPERATION_SUMMARY_COLS>();
     unsafe {
@@ -43,6 +50,7 @@ const fn make_add_operation_summary_col_map() -> AddOperationSummaryCols<usize> 
 /// local auxiliary module.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]
+#[cfg(feature = "picus")]
 struct AddOperationSummaryCols<T> {
     pub a: Word<T>,
     pub b: Word<T>,
@@ -50,18 +58,19 @@ struct AddOperationSummaryCols<T> {
     pub cols: AddOperation<T>,
 }
 
-#[derive(PicusProjection)]
-#[picus_projection(
+#[cfg(feature = "picus")]
+#[cfg_attr(feature = "picus", derive(PicusProjection))]
+#[cfg_attr(feature = "picus", picus_projection(
     source = AddOperationSummaryCols<u8>,
     col_map = ADD_OPERATION_SUMMARY_COL_MAP
-)]
+))]
 #[allow(dead_code)]
 struct AddOperationSummaryProjection {
-    #[picus(input, path = a)]
+    #[cfg_attr(feature = "picus", picus(input, path = a))]
     pub a: Word<u8>,
-    #[picus(input, path = b)]
+    #[cfg_attr(feature = "picus", picus(input, path = b))]
     pub b: Word<u8>,
-    #[picus(output, path = cols.value)]
+    #[cfg_attr(feature = "picus", picus(output, path = cols.value))]
     pub value: Word<u8>,
 }
 
@@ -153,38 +162,41 @@ impl<F: Field> AddOperation<F> {
         cols: AddOperation<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut current_inputs: Vec<AB::Expr> = Vec::with_capacity(WORD_SIZE * 2);
-        for limb in a.0 {
-            current_inputs.push(limb.into());
-        }
-        for limb in b.0 {
-            current_inputs.push(limb.into());
-        }
-
-        let current_outputs: Vec<AB::Expr> =
-            cols.value.0.iter().map(|limb| (*limb).into()).collect();
-
-        if builder.is_known_one(&is_real)
-            && builder.try_emit_projected_summary_with_hidden_consts(
-                "AddOperation",
-                &AddOperationSummaryProjection::picus_projection_info(),
-                &current_inputs,
-                &current_outputs,
-                size_of::<AddOperationSummaryCols<u8>>(),
-                &[(ADD_OPERATION_SUMMARY_COL_MAP.is_real, 1)],
-                |builder, source_row| {
-                    let source: &AddOperationSummaryCols<AB::Var> = (*source_row).borrow();
-                    Self::eval_exact(
-                        builder,
-                        source.a,
-                        source.b,
-                        source.cols,
-                        source.is_real.into(),
-                    );
-                },
-            )
+        #[cfg(feature = "picus")]
         {
-            return;
+            let mut current_inputs: Vec<AB::Expr> = Vec::with_capacity(WORD_SIZE * 2);
+            for limb in a.0 {
+                current_inputs.push(limb.into());
+            }
+            for limb in b.0 {
+                current_inputs.push(limb.into());
+            }
+
+            let current_outputs: Vec<AB::Expr> =
+                cols.value.0.iter().map(|limb| (*limb).into()).collect();
+
+            if builder.is_known_one(&is_real)
+                && builder.try_emit_projected_summary_with_hidden_consts(
+                    "AddOperation",
+                    &AddOperationSummaryProjection::picus_projection_info(),
+                    &current_inputs,
+                    &current_outputs,
+                    size_of::<AddOperationSummaryCols<u8>>(),
+                    &[(ADD_OPERATION_SUMMARY_COL_MAP.is_real, 1)],
+                    |builder, source_row| {
+                        let source: &AddOperationSummaryCols<AB::Var> = (*source_row).borrow();
+                        Self::eval_exact(
+                            builder,
+                            source.a,
+                            source.b,
+                            source.cols,
+                            source.is_real.into(),
+                        );
+                    },
+                )
+            {
+                return;
+            }
         }
 
         Self::eval_exact(builder, a, b, cols, is_real);

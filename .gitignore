@@ -8,6 +8,7 @@ bins
 *.s
 *.txt
 *.codex
+picus_out
 
 # Proofs
 **/proof-with-pis.bin

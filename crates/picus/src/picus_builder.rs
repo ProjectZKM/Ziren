@@ -235,6 +235,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
     /// The builder materializes the trace rows needed by `phase`, optionally
     /// specializes selected columns to constants, and records whether this pass
     /// should contribute interface ports or only additional constraints.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chip_to_analyze: &'chips Chip<Felt, A>,
         picus_module: PicusModule,
@@ -387,6 +388,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         let mut exprs = Vec::new();
         for (start, end, _) in ranges {
             assert!(*start <= *end && *end <= source_row.len());
+            #[allow(clippy::needless_range_loop)]
             for col_idx in *start..*end {
                 exprs.push(source_row[col_idx].into());
             }
@@ -506,6 +508,7 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
         self.flush_pending_expr_bindings();
         let width = self.main.width();
         let mut is_input = vec![false; width];
+        #[allow(clippy::needless_range_loop)]
         for (start, end, _) in input_ranges {
             assert!(*start <= *end && *end <= width);
             for idx in *start..*end {
@@ -760,7 +763,9 @@ impl<'chips, A: MachineAir<Felt>> PicusBuilder<'chips, A> {
                         }
                     }
                 } else if v == (ByteOpcode::LTU as u64) {
-                    let lt_const = PicusConstraint::new_lt(values[2].clone(), values[3].clone());
+                    // Byte lookup values are laid out as: [opcode, a1, a2, b, c].
+                    // For LTU, a1 should encode (b < c), so compare values[3] and values[4].
+                    let lt_const = PicusConstraint::new_lt(values[3].clone(), values[4].clone());
                     if let PicusExpr::Const(1) = values[1] {
                         self.push_constraint(lt_const);
                     } else {

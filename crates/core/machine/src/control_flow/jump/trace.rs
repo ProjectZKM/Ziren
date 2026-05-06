@@ -29,6 +29,7 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
         "Jump".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         JumpColumns::<u8>::picus_info()
     }

@@ -18,7 +18,7 @@ use zkm_core_executor::events::{
 };
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_stark::MachineAir;
+use zkm_stark::{MachineAir, PicusInfo};
 
 impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
     type Record = ExecutionRecord;
@@ -27,6 +27,11 @@ impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
 
     fn name(&self) -> String {
         "BooleanCircuitGarble".to_string()
+    }
+
+    #[cfg(feature = "picus")]
+    fn picus_info(&self) -> PicusInfo {
+        BooleanCircuitGarbleCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(
@@ -120,6 +125,7 @@ impl BooleanCircuitGarbleChip {
             cols.input_address = F::from_canonical_u32(input_address);
             cols.output_address = F::from_canonical_u32(event.output_addr);
             cols.gates_num = F::from_canonical_u32(gates_num as u32);
+            cols.checks_acc = F::ONE;
             for i in 0..4 {
                 let delta_i_bytes = event.delta[i].to_le_bytes();
                 cols.delta[i]
@@ -208,7 +214,7 @@ impl BooleanCircuitGarbleChip {
             cols.checks[0] = F::from_canonical_u32(check_u32s[1]);
             cols.checks[1] = F::from_canonical_u32(check_u32s[2]);
             cols.checks[2] = F::from_canonical_u32(check_u32s[3]);
-            cols.checks[3] = F::from_canonical_u32(check_u32s[3] * (pre_check as u32));
+            cols.checks_acc = F::from_bool(pre_check);
             pre_check = pre_check && (check_u32s[3] == 1);
 
             // if this is the last gate, write result

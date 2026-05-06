@@ -29,6 +29,7 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
         "SysLinux".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> zkm_stark::PicusInfo {
         SysLinuxCols::<u8>::picus_info()
     }
@@ -103,6 +104,10 @@ impl<F: PrimeField32> MachineAir<F> for SysLinuxChip {
         } else {
             !shard.get_precompile_events(SyscallCode::SYS_LINUX).is_empty()
         }
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 }
 

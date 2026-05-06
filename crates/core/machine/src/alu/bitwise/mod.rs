@@ -13,7 +13,9 @@ use zkm_core_executor::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 use zkm_stark::{
     air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
@@ -32,7 +34,8 @@ pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 pub struct BitwiseChip;
 
 /// The column layout for the chip.
-#[derive(AlignedBorrow, PicusAnnotations, Default, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct BitwiseCols<T> {
     /// The current/next pc, used for instruction lookup table.
@@ -49,19 +52,19 @@ pub struct BitwiseCols<T> {
     pub c: Word<T>,
 
     /// If the opcode is NOR.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_nor: T,
 
     /// If the opcode is XOR.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_xor: T,
 
     // If the opcode is OR.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_or: T,
 
     /// If the opcode is AND.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_and: T,
 }
 
@@ -76,6 +79,7 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         "Bitwise".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         BitwiseCols::<u8>::picus_info()
     }

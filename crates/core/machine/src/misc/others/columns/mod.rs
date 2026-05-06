@@ -11,12 +11,17 @@ pub use misc_specific::*;
 pub use sext::*;
 
 use std::mem::size_of;
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+use zkm_stark::Word;
 
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 
-#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct MiscInstrColumns<T: Copy> {
     /// The shard number.
@@ -39,20 +44,20 @@ pub struct MiscInstrColumns<T: Copy> {
     pub misc_specific_columns: MiscSpecificCols<T>,
 
     /// Misc Instruction Selectors.
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_sext: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_ins: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_ext: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_maddu: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_msubu: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_madd: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_msub: T,
-    #[picus(selector)]
+    #[cfg_attr(feature = "picus", picus(selector))]
     pub is_teq: T,
 }

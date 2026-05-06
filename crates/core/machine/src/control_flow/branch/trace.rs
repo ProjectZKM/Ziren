@@ -29,6 +29,7 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
         "Branch".to_string()
     }
 
+    #[cfg(feature = "picus")]
     fn picus_info(&self) -> PicusInfo {
         BranchColumns::<u8>::picus_info()
     }

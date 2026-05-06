@@ -3,17 +3,22 @@ pub use instruction::*;
 
 use p3_util::indices_arr;
 use std::mem::{size_of, transmute};
-use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
+use zkm_stark::Word;
 
 use crate::memory::{MemoryCols, MemoryReadCols, MemoryReadWriteCols};
+#[cfg(feature = "picus")]
+use zkm_stark::PicusInfo;
 
 pub const NUM_CPU_COLS: usize = size_of::<CpuCols<u8>>();
 
 pub const CPU_COL_MAP: CpuCols<usize> = make_col_map();
 
 /// The column layout for the CPU.
-#[derive(AlignedBorrow, Default, PicusAnnotations, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct CpuCols<T: Copy> {
     /// The current shard.

@@ -18,7 +18,7 @@ use zkm_stark::{
     septic_curve::{SepticCurve, SepticCurveComplete},
     septic_digest::SepticDigest,
     septic_extension::{SepticBlock, SepticExtension},
-    LookupKind, ZKMAirBuilder,
+    LookupKind, PicusInfo, ZKMAirBuilder,
 };
 
 use crate::{
@@ -27,6 +27,8 @@ use crate::{
     CoreChipError,
 };
 use zkm_derive::AlignedBorrow;
+#[cfg(feature = "picus")]
+use zkm_derive::PicusAnnotations;
 
 const NUM_GLOBAL_COLS: usize = size_of::<GlobalCols<u8>>();
 
@@ -51,9 +53,11 @@ pub struct Ghost {
 pub struct GlobalChip;
 
 #[derive(AlignedBorrow)]
+#[cfg_attr(feature = "picus", derive(PicusAnnotations))]
 #[repr(C)]
 pub struct GlobalCols<T: Copy> {
     pub message: [T; 7],
+    #[cfg_attr(feature = "picus", picus(output))]
     pub kind: T,
     pub lookup: GlobalLookupOperation<T>,
     pub is_receive: T,
@@ -72,6 +76,11 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
     fn name(&self) -> String {
         assert_eq!(GLOBAL_INITIAL_DIGEST_POS_COPY, GLOBAL_INITIAL_DIGEST_POS);
         "Global".to_string()
+    }
+
+    #[cfg(feature = "picus")]
+    fn picus_info(&self) -> PicusInfo {
+        GlobalCols::<u8>::picus_info()
     }
 
     fn generate_dependencies(
@@ -233,6 +242,13 @@ where
         // For a syscall global lookup, `kind = LookupKind::Syscall` is used.
         // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is also known to be a `u8` value.
         // Note that `local.is_real` is constrained to be boolean in `eval_single_digest`.
+        // Enforce local consistency for direction selectors:
+        // - each selector is boolean;
+        // - real rows choose exactly one direction; padded rows choose none.
+        builder.assert_bool(local.is_receive);
+        builder.assert_bool(local.is_send);
+        builder.assert_eq(local.is_receive + local.is_send, local.is_real.into());
+
         builder.receive(
             AirLookup::new(
                 vec![
