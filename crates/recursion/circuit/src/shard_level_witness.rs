@@ -667,6 +667,44 @@ where
     }
 }
 
+/// Convert a host-side `PartialSumcheckProof<InnerChallenge>` to the
+/// circuit-variable form via `builder.constant()` instead of
+/// witness-stream `.read()` — the bundle is host-side data, NOT
+/// witness-stream input.
+///
+/// **#245 fix**: previously called `<host_sumcheck as
+/// Witnessable<C>>::read(...)` which consumed felts from the runtime
+/// witness stream that were never written there (bundle is added
+/// separately on `BasefoldShardProof.evaluation_proof_bundle`,
+/// outside the felt-stream).  Empty-stream panic at e2e test time.
+/// Treating bundle values as IR constants matches their semantics.
+fn host_sumcheck_to_const_var<C>(
+    builder: &mut Builder<C>,
+    host: &PartialSumcheckProof<InnerChallenge>,
+) -> PartialSumcheckProof<Ext<C::F, C::EF>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    PartialSumcheckProof {
+        univariate_polys: host
+            .univariate_polys
+            .iter()
+            .map(|poly| UnivariatePolynomial {
+                coefficients: poly
+                    .coefficients
+                    .iter()
+                    .map(|c| builder.constant(*c))
+                    .collect(),
+            })
+            .collect(),
+        claimed_sum: builder.constant(host.claimed_sum),
+        point_and_eval: (
+            host.point_and_eval.0.iter().map(|x| builder.constant(*x)).collect(),
+            builder.constant(host.point_and_eval.1),
+        ),
+    }
+}
+
 /// Lift a host-side [`JaggedBasefoldBundle`] into the in-circuit
 /// [`JaggedPcsProofVariable`] shape — the structured replacement for
 /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
@@ -761,29 +799,27 @@ where
     let num_rounds = column_counts_by_round.len().max(1);
 
     // ── REAL: sumcheck_proof from bundle.reduction ──
-    // Convert eval-form rounds to coeff-form polys, then witness via
-    // the existing PartialSumcheckProof Witnessable impl
-    // (basefold_witness.rs:73).
+    // Convert eval-form rounds to coeff-form polys via Phase 2's
+    // host converter, then promote to circuit variables via
+    // `builder.constant()` (#245 fix — bundle is host-side data, not
+    // witness-stream input).
     let host_sumcheck = jagged_reduction_to_partial_sumcheck(&bundle.reduction);
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> =
-        <_ as Witnessable<C>>::read(&host_sumcheck, builder);
+        host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
 
     // ── REAL: basefold proof from bundle.basefold_proof ──
-    // host_stacked_basefold_to_recursive folds the basefold rounds,
-    // commit-phase openings, and component openings into the
-    // RecursiveBasefoldProof shape.  The existing Witnessable impl
-    // on RecursiveBasefoldProof (basefold_witness.rs:443) treats the
-    // EF/F scalar fields as constants (uni_poly, commitment,
-    // final_poly, pow_witness, etc.) and witnesses the component +
-    // query_phase openings.
+    // RecursiveBasefoldProof's Witnessable::read (basefold_witness.rs:443)
+    // happens to NOT call witness-stream reads (its scalar fields are
+    // pass-through F/EF constants and the nested rounds/openings
+    // also clone instead of streaming).  Safe to use `.read()` here
+    // — the call routes through the existing impl that emits no
+    // runtime stream consumption.
     let host_basefold = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
     let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold, builder);
 
-    // ── REAL: batch_evaluations as Ext (witnessed for stacked layer) ──
-    // The RecursiveStackedPcsProof wrapper keeps batch_evaluations
-    // separately at Ext<F,EF> level (so they can flow through the
-    // sumcheck identity in-circuit), in addition to the constant
-    // copy living inside the RecursiveBasefoldProof itself.
+    // ── REAL: batch_evaluations as Ext (constants for stacked layer) ──
+    // #245 fix: builder.constant() per element (was witness-stream
+    // .read on InnerChallenge values that aren't on the stream).
     let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = bundle
         .basefold_proof
         .batch_evaluations
@@ -791,7 +827,7 @@ where
         .map(|round| {
             round
                 .iter()
-                .map(|ef| <_ as Witnessable<C>>::read(ef, builder))
+                .map(|ef| builder.constant(*ef))
                 .collect()
         })
         .collect();
@@ -815,8 +851,9 @@ where
         "BasefoldLateBindingCommit cap must have exactly 1 root, got {}",
         cap_roots.len(),
     );
+    // #245 fix: builder.constant() instead of witness-stream read.
     let first_commit_digest: [Felt<C::F>; 8] =
-        core::array::from_fn(|i| <_ as Witnessable<C>>::read(&cap_roots[0][i], builder));
+        core::array::from_fn(|i| builder.constant(cap_roots[0][i]));
     // For multi-round (jagged with rotating commits) the bundle
     // would have one cap per round.  Currently Ziren commits the
     // jagged-PCS to one batched cap, so subsequent round slots get
@@ -959,17 +996,11 @@ where
     };
 
     // ── REAL: expected_eval from bundle.reduction.q_at_z ──
-    // The in-circuit verifier's closing identity
-    // (recursive_jagged_pcs.rs:279) asserts
+    // The in-circuit verifier's closing identity asserts
     //     jagged_eval * expected_eval == sumcheck.point_and_eval.1
-    // which mirrors the host verifier's terminal check
-    //     q_at_z * w(z) == current_claim
-    // (jagged_sumcheck.rs verify_jagged_reduction).  `expected_eval`
-    // therefore takes the role of `q_at_z` — the dense-trace
-    // evaluation at the reduction's z*.  Witness through the
-    // existing InnerChallenge Witnessable.
-    let expected_eval: Ext<C::F, C::EF> =
-        <_ as Witnessable<C>>::read(&bundle.reduction.q_at_z, builder);
+    // mirroring the host verifier's q_at_z * w(z) == current_claim.
+    // #245 fix: builder.constant() instead of witness-stream read.
+    let expected_eval: Ext<C::F, C::EF> = builder.constant(bundle.reduction.q_at_z);
 
     // ── Top-level assembly ──
     JaggedPcsProofVariable {
