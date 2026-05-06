@@ -375,7 +375,15 @@ pub enum LayerState<F: Field, EF: ExtensionField<F>> {
     /// here so callers that only need shape metadata (e.g. the
     /// sumcheck round dispatcher) can read them without consulting
     /// the registry.
+    ///
+    /// `circuit_id` (#230 multi-GPU fix) scopes the handle to a single
+    /// `build_gkr_circuit` invocation.  The GPU side keys its registry
+    /// by `(device_id, circuit_id)` so concurrent shards on the same
+    /// GPU stay isolated — `pull_device_layer_to_host` threads this ID
+    /// through to the pull hook so it can locate the right per-circuit
+    /// bucket regardless of which other shards are in flight.
     Device {
+        circuit_id: u64,
         handle: u64,
         num_row_variables: usize,
         num_interaction_variables: usize,

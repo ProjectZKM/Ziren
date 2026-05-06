@@ -241,8 +241,8 @@ where
         // the next round allocates.
         let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
             super::layer::LayerState::Host(_) => None,
-            super::layer::LayerState::Device { handle, .. } => {
-                Some(pull_device_layer_to_host::<F, EF>(*handle))
+            super::layer::LayerState::Device { circuit_id, handle, .. } => {
+                Some(pull_device_layer_to_host::<F, EF>(*circuit_id, *handle))
             }
         };
 
@@ -460,7 +460,10 @@ where
 ///   `try_run_device_path_basefold` being absent, which is impossible
 ///   under the current build matrix.
 #[cfg(feature = "basefold")]
-fn pull_device_layer_to_host<F, EF>(handle: u64) -> super::layer::GkrCircuitLayer<F, EF>
+fn pull_device_layer_to_host<F, EF>(
+    circuit_id: u64,
+    handle: u64,
+) -> super::layer::GkrCircuitLayer<F, EF>
 where
     F: PrimeField,
     EF: ExtensionField<F>,
@@ -487,8 +490,12 @@ where
          transition / pull) to be installed before producing any Device entries",
     );
 
+    // #230 multi-GPU fix: thread circuit_id so the GPU side can scope
+    // its registry lookup to this build_gkr_circuit invocation's
+    // bucket — otherwise concurrent shards on the same GPU collide on
+    // the per-GPU `next_handle` counter.
     let pulled_lb: super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> =
-        pull_hook(handle);
+        pull_hook(circuit_id, handle);
 
     // SAFETY: TypeId gate above confirms `EF == LbChallenge` at runtime;
     // `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` therefore has
@@ -511,7 +518,10 @@ where
 /// `#[cfg(feature = "basefold")]`-gated), so reaching this branch
 /// indicates an impossible state.
 #[cfg(not(feature = "basefold"))]
-fn pull_device_layer_to_host<F, EF>(_handle: u64) -> super::layer::GkrCircuitLayer<F, EF>
+fn pull_device_layer_to_host<F, EF>(
+    _circuit_id: u64,
+    _handle: u64,
+) -> super::layer::GkrCircuitLayer<F, EF>
 where
     F: PrimeField,
     EF: ExtensionField<F>,

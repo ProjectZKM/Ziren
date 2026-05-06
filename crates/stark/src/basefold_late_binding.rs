@@ -510,7 +510,14 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 ///
 /// Step 4a scaffolding only — no caller invokes this yet.  Step 4c
 /// will wire the dispatch into `build_gkr_circuit`.
-pub type GpuLayerTransitionFn = fn(prev_handle: u64) -> u64;
+///
+/// **#230 multi-GPU fix** — `circuit_id` scopes the hook to a single
+/// GKR-circuit build call.  The GPU side keys its registry by
+/// `(device_id, circuit_id)` so concurrent shards on the same GPU
+/// don't share a `next_handle` counter (which previously caused
+/// "handle not in registry" panics when one shard's pull stepped on
+/// another's intermediate handles).
+pub type GpuLayerTransitionFn = fn(circuit_id: u64, prev_handle: u64) -> u64;
 
 static GPU_LAYER_TRANSITION_HOOK: std::sync::OnceLock<GpuLayerTransitionFn> =
     std::sync::OnceLock::new();
@@ -584,8 +591,12 @@ pub struct HostLayerView<'a> {
 /// `ZIREN_GPU_LAYER_TRANSITION` env var is set, the hook + the
 /// transition hook + the pull hook are all registered, AND the
 /// `build_gkr_circuit` generic types resolve to (`LbVal`, `LbChallenge`).
+///
+/// **#230 multi-GPU fix** — `circuit_id` scopes this hook to a single
+/// GKR-circuit build call.  See `GpuLayerTransitionFn` docs for the
+/// per-circuit registry rationale.
 pub type GpuLayerInitFn =
-    for<'a> fn(view: HostLayerView<'a>) -> u64;
+    for<'a> fn(circuit_id: u64, view: HostLayerView<'a>) -> u64;
 
 static GPU_LAYER_INIT_HOOK: std::sync::OnceLock<GpuLayerInitFn> =
     std::sync::OnceLock::new();
@@ -614,7 +625,14 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
 /// was taken — `extract_outputs` already exists on host and operates
 /// on a 1-row layer, so the pull cost is dominated by a
 /// `4 × num_chips × num_interactions` element copy back from device.
+///
+/// **#230 multi-GPU fix** — `circuit_id` scopes this hook to a single
+/// GKR-circuit build call.  The GPU side can SAFELY drain that
+/// circuit's intermediate states after extracting the requested
+/// terminal (no concurrent shards' state to step on, since they have
+/// distinct `circuit_id`s).
 pub type GpuLayerPullFn = fn(
+    circuit_id: u64,
     handle: u64,
 ) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge>;
 
@@ -633,6 +651,32 @@ pub fn register_gpu_layer_pull_hook(
 #[must_use]
 pub fn get_gpu_layer_pull_hook() -> Option<GpuLayerPullFn> {
     GPU_LAYER_PULL_HOOK.get().copied()
+}
+
+/// Process-wide monotonic counter for GKR-circuit IDs.  Each
+/// `build_gkr_circuit` call that takes the device path allocates a
+/// fresh ID via [`allocate_gpu_layer_circuit_id`] and threads it
+/// through every [`GpuLayerInitFn`] / [`GpuLayerTransitionFn`] /
+/// [`GpuLayerPullFn`] invocation.  The GPU side keys its registry by
+/// `(device_id, circuit_id)` so concurrent shards on the same GPU are
+/// fully isolated — fixes #230 multi-GPU panics caused by a shared
+/// `next_handle` counter being stepped on across shards.
+static NEXT_GPU_LAYER_CIRCUIT_ID: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+/// Allocate a fresh process-unique GKR-circuit ID for use with the
+/// GPU layer-state hooks.  Must be called once per
+/// `build_gkr_circuit` device-path invocation; the returned ID is
+/// passed verbatim to every init/transition/pull hook for that
+/// circuit.
+///
+/// IDs start at 1 (0 reserved as a sentinel) and increment
+/// monotonically.  Wraparound is not handled — at u64 capacity that
+/// would require ~10^9 circuits/sec for centuries, which is well
+/// outside the threat model.
+#[must_use]
+pub fn allocate_gpu_layer_circuit_id() -> u64 {
+    NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Open the committed batch at a single point and produce the

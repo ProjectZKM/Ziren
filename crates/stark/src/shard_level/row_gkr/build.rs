@@ -268,7 +268,7 @@ where
     use core::any::TypeId;
 
     use crate::basefold_late_binding::{
-        get_gpu_layer_init_hook, get_gpu_layer_pull_hook,
+        allocate_gpu_layer_circuit_id, get_gpu_layer_init_hook, get_gpu_layer_pull_hook,
         get_gpu_layer_transition_hook, HostLayerView, LbChallenge, LbVal,
     };
 
@@ -321,7 +321,14 @@ where
         num_interaction_variables: layer_as_lb.num_interaction_variables,
     };
 
-    let mut handle: u64 = init_hook(view);
+    // #230 multi-GPU fix: allocate a fresh circuit_id for this
+    // build_gkr_circuit call.  The GPU side keys its registry by
+    // (device_id, circuit_id) so concurrent shards on the same GPU
+    // don't share a `next_handle` counter.  Threaded through every
+    // init/transition/pull invocation for this circuit.
+    let circuit_id: u64 = allocate_gpu_layer_circuit_id();
+
+    let mut handle: u64 = init_hook(circuit_id, view);
     let mut cur_num_row_variables = first_ef_layer.num_row_variables;
     let cur_num_interaction_variables = first_ef_layer.num_interaction_variables;
 
@@ -355,9 +362,10 @@ where
         if cur_num_row_variables == 1 {
             terminal_handle = Some(handle);
         }
-        let next_handle = transition_hook(handle);
+        let next_handle = transition_hook(circuit_id, handle);
         cur_num_row_variables = cur_num_row_variables.saturating_sub(1);
         layers.push(LayerState::Device {
+            circuit_id,
             handle: next_handle,
             num_row_variables: cur_num_row_variables,
             num_interaction_variables: cur_num_interaction_variables,
@@ -387,7 +395,7 @@ where
     // points at the null terminal at num=0) mirrors the host path's
     // `layers[layers.len() - 2]` indexing.
     let terminal_lb: super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> =
-        pull_hook(terminal_handle);
+        pull_hook(circuit_id, terminal_handle);
 
     // SAFETY: TypeId gate 4 confirms `LbChallenge == EF` at runtime;
     // the `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` struct has
