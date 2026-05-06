@@ -433,11 +433,13 @@ fn host_component_opening_to_recursive(
 /// parses those into the in-circuit `[EF; 2]` shape and copies the
 /// Merkle siblings into `merkle_path_digests` for binding.
 ///
-/// **Position field**: set to `0` placeholder.  Real positions come
-/// from the FRI challenger transcript and must be re-derived at the
-/// verifier call site (Phase 4 of #241).  The in-circuit verifier
-/// recomputes positions from its own challenger anyway, so the
-/// `position` field passed through is informational only.
+/// **Position field**: set to `0` placeholder.  This is INFORMATIONAL
+/// ONLY — the in-circuit verifier samples its own query positions
+/// from the FRI challenger transcript at
+/// [`basefold_verifier.rs:837-839`] and never reads `.position`.
+/// (Confirmed by grep: zero `.position` reads in basefold_verifier.rs.)
+/// No fix needed at this site; binding-soundness happens through the
+/// `merkle_path_digests` field, not through `position`.
 fn host_query_opening_to_recursive(
     opening: &MerkleOpening<InnerVal, LbMmcs>,
 ) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge, 8>> {
