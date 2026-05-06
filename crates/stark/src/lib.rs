@@ -17,6 +17,8 @@ pub mod basefold_late_binding;
 #[cfg(feature = "basefold")]
 pub mod jagged;
 #[cfg(feature = "basefold")]
+pub mod jagged_branching_program;
+#[cfg(feature = "basefold")]
 pub mod jagged_eval_sumcheck;
 #[cfg(feature = "basefold")]
 pub mod jagged_sumcheck;
