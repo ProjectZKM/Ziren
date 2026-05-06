@@ -201,7 +201,7 @@ pub fn verify_core_basefold<C, SC, A>(
 
     // ---- Per-shard verification + consistency assertions ----
     for (i, proof_tuple) in shard_proof_tuples.into_iter().enumerate() {
-        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, _evaluation_proof_bundle_opt) =
+        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, evaluation_proof_bundle_opt) =
             proof_tuple;
 
         // Chip presence is encoded in the LogUp-GKR chip_openings set.
@@ -317,12 +317,32 @@ pub fn verify_core_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![preprocessed_widths_pre, main_widths_pre];
 
-        let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-            builder,
-            &evaluation_proof_bytes,
-            max_log_row_count,
-            &column_counts_by_round_pre,
-        );
+        // #241 Phase 4e: env-gated bundle path (ZIREN_USE_BUNDLE_LIFT=1).
+        // Default off — see compress_basefold for the gating rationale.
+        let evaluation_proof_var = if std::env::var("ZIREN_USE_BUNDLE_LIFT").is_ok() {
+            match evaluation_proof_bundle_opt.as_ref() {
+                Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+                    builder,
+                    bundle,
+                    max_log_row_count,
+                    &column_counts_by_round_pre,
+                    None,
+                ),
+                None => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                    builder,
+                    &evaluation_proof_bytes,
+                    max_log_row_count,
+                    &column_counts_by_round_pre,
+                ),
+            }
+        } else {
+            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                builder,
+                &evaluation_proof_bytes,
+                max_log_row_count,
+                &column_counts_by_round_pre,
+            )
+        };
         let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
             builder,
             &chip_names,

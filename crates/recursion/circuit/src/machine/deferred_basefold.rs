@@ -188,7 +188,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 builder,
                 &vk_legacy,
             );
-        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, _evaluation_proof_bundle_opt) =
+        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, evaluation_proof_bundle_opt) =
             proof_tuple;
 
         let chip_names: Vec<String> =
@@ -225,12 +225,32 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
 
-        let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-            builder,
-            &evaluation_proof_bytes,
-            max_log_row_count,
-            &column_counts_by_round,
-        );
+        // #241 Phase 4e: env-gated bundle path (ZIREN_USE_BUNDLE_LIFT=1).
+        // Default off — see compress_basefold for the gating rationale.
+        let evaluation_proof_var = if std::env::var("ZIREN_USE_BUNDLE_LIFT").is_ok() {
+            match evaluation_proof_bundle_opt.as_ref() {
+                Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+                    builder,
+                    bundle,
+                    max_log_row_count,
+                    &column_counts_by_round,
+                    None,
+                ),
+                None => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                    builder,
+                    &evaluation_proof_bytes,
+                    max_log_row_count,
+                    &column_counts_by_round,
+                ),
+            }
+        } else {
+            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                builder,
+                &evaluation_proof_bytes,
+                max_log_row_count,
+                &column_counts_by_round,
+            )
+        };
         let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
             builder,
             &chip_names,

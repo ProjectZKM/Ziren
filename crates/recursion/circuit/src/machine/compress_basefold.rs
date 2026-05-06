@@ -270,12 +270,40 @@ pub fn verify_compress_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![preprocessed_widths_pre, main_widths_pre];
 
-        let evaluation_proof_var = crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-            builder,
-            &evaluation_proof_bytes,
-            max_log_row_count,
-            &column_counts_by_round_pre,
-        );
+        // #241 Phase 4e: prefer structured bundle path when env flag
+        // ZIREN_USE_BUNDLE_LIFT=1 is set (the actual #240 cascade
+        // fix).  Default off so existing dummy-fixture tests still
+        // pass — the bundle path exposes a pre-existing
+        // RecursiveStackedPcsVerifier shape mismatch on the
+        // produce_real_basefold_shard_proof fixture (small trace
+        // shape vs production verifier expectations) that the
+        // all-zero placeholder was masking.  Validation path:
+        // 1) flip env on, 2) fix shape mismatch, 3) make this the
+        // unconditional default.
+        let evaluation_proof_var = if std::env::var("ZIREN_USE_BUNDLE_LIFT").is_ok() {
+            match evaluation_proof_bundle_opt.as_ref() {
+                Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+                    builder,
+                    bundle,
+                    max_log_row_count,
+                    &column_counts_by_round_pre,
+                    None,
+                ),
+                None => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                    builder,
+                    &evaluation_proof_bytes,
+                    max_log_row_count,
+                    &column_counts_by_round_pre,
+                ),
+            }
+        } else {
+            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                builder,
+                &evaluation_proof_bytes,
+                max_log_row_count,
+                &column_counts_by_round_pre,
+            )
+        };
 
         let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
             builder,
