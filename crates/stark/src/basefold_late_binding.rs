@@ -79,12 +79,23 @@ pub const DEFAULT_BATCH_SIZE: usize = 32;
 /// Choose the largest `log_stacking_height ≤ DEFAULT` that still
 /// leaves at least one batch_point variable.  Required for tiny
 /// commits where total entries < `1 << DEFAULT_LOG_STACKING_HEIGHT`.
+///
+/// **#244 (May 6 2026)**: this clamping creates prover/verifier param
+/// divergence — prover scales the stacking height down for small
+/// commits, but the in-circuit verifier (built once per shard with
+/// max_log_row_count) does not.  The bundle-lift path in
+/// `crates/recursion/circuit/src/machine/core_basefold.rs` rebuilds
+/// the verifier per-proof using `bundle.commit.log_stacking_height`
+/// (the value the prover actually used), so the clamping is
+/// preserved for memory efficiency on small commits AND the bundle
+/// path's verifier matches the prover.  The default (bytes) path's
+/// verifier still uses max_log_row_count but the all-zero placeholder
+/// lift's shape doesn't depend on the prover-emitted shape, so the
+/// mismatch is invisible.  See #244 for the chain analysis.
 pub fn pick_log_stacking_height(total_entries: usize) -> u32 {
     let log_total = total_entries.next_power_of_two().trailing_zeros();
     // Reserve at least 1 var for the batching point (= 2 stripes
-    // minimum).  If the data is so small that even one stripe covers
-    // everything, we still need that extra var so the stacked PCS
-    // verifier's `point.len() ≥ log_stacking_height` invariant holds.
+    // minimum).
     let max_for_data = log_total.saturating_sub(1).max(1);
     DEFAULT_LOG_STACKING_HEIGHT.min(max_for_data)
 }
