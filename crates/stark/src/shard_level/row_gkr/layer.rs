@@ -320,6 +320,111 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
     }
 }
 
+/// Backend-parametrized layer storage — Step 4a scaffolding from
+/// `/tmp/step4_backend_parametrize_plan.md`.
+///
+/// # Why this exists
+///
+/// `build_gkr_circuit` currently runs every host-side layer transition
+/// upfront and stuffs the resulting `Vec<RowMajorTable<F>>` cells into
+/// `GkrCircuitLayer::{FirstLayer, Layer}` BEFORE any sumcheck round
+/// executes.  Three previous attempts (#218 Q1, #219 Q2, #220 R1)
+/// wired a transition CUDA kernel via a side-channel registry, but
+/// because `build_gkr_circuit` STILL ran the host transitions on the
+/// way down, the GPU kernel was redundant — the circuit always held a
+/// host materialization, so the GPU result was never observed.
+///
+/// The fix is to migrate the layer storage from host-only
+/// (`GkrCircuitLayer<F, EF>`) to a sum type (`LayerState`) that can
+/// carry EITHER a host `GkrCircuitLayer` OR an opaque `u64` handle
+/// pointing into a side-channel registry the GPU prover installs.
+/// Once that migration is complete, the GPU prover can install a
+/// `GpuLayerTransitionFn` (see [`crate::basefold_late_binding`]) that
+/// evolves the device-resident layer state in place across rounds —
+/// `build_gkr_circuit` no longer needs to materialize anything on host.
+///
+/// # Migration plan
+///
+/// * **Step 4a (this commit)** — introduce `LayerState` + the
+///   `GpuLayerTransitionFn` hook signature + the registry, both
+///   unused.  No behavior change.
+/// * **Step 4b** — switch `LogupGkrCpuCircuit::layers` to
+///   `Vec<LayerState<F, EF>>`; round.rs / extract.rs gain a
+///   `match` on the variant, with `Device` arms still routed to host
+///   via on-demand materialization.
+/// * **Step 4c** — make `build_gkr_circuit` skip the host transition
+///   loop when the GPU hook is registered, dispatching through the
+///   `GpuLayerTransitionFn` instead.
+/// * **Step 4d** — add a streaming/lazy variant for the row-only
+///   sumcheck so the device handle is consumed in-place by the
+///   per-round prover.
+///
+/// See `/tmp/step4_backend_parametrize_plan.md` for the full
+/// rationale + per-step cut points.
+#[allow(dead_code)]
+pub enum LayerState<F: Field, EF: ExtensionField<F>> {
+    /// Host-resident layer (current production path).  The
+    /// `GkrCircuitLayer` carries the `Vec<RowMajorTable<F | EF>>`
+    /// cells materialized on the way down through `build_gkr_circuit`.
+    Host(GkrCircuitLayer<F, EF>),
+    /// Opaque handle into a side-channel registry installed by the
+    /// GPU prover.  The registry stores device-resident layer state;
+    /// the handle is `u64` so we don't pull device types into stark.
+    ///
+    /// `num_row_variables` / `num_interaction_variables` are mirrored
+    /// here so callers that only need shape metadata (e.g. the
+    /// sumcheck round dispatcher) can read them without consulting
+    /// the registry.
+    Device {
+        handle: u64,
+        num_row_variables: usize,
+        num_interaction_variables: usize,
+    },
+}
+
+impl<F: Field, EF: ExtensionField<F>> LayerState<F, EF> {
+    /// log₂ of row count for this layer (matches
+    /// [`GkrCircuitLayer::num_row_variables`]).
+    #[inline]
+    #[must_use]
+    pub fn num_row_variables(&self) -> usize {
+        match self {
+            Self::Host(layer) => layer.num_row_variables(),
+            Self::Device { num_row_variables, .. } => *num_row_variables,
+        }
+    }
+
+    /// log₂ of (max chip-interaction count rounded up) for this
+    /// layer (matches [`GkrCircuitLayer::num_interaction_variables`]).
+    #[inline]
+    #[must_use]
+    pub fn num_interaction_variables(&self) -> usize {
+        match self {
+            Self::Host(layer) => layer.num_interaction_variables(),
+            Self::Device { num_interaction_variables, .. } => *num_interaction_variables,
+        }
+    }
+
+    /// `true` when this layer is host-resident.
+    #[inline]
+    #[must_use]
+    pub fn is_host(&self) -> bool {
+        matches!(self, Self::Host(_))
+    }
+
+    /// Borrow the host-resident `GkrCircuitLayer`, or `None` for a
+    /// device-resident layer.  Step 4b/4c will add a sibling
+    /// `as_device_handle()` that returns the `u64`.
+    #[inline]
+    #[must_use]
+    pub fn as_host(&self) -> Option<&GkrCircuitLayer<F, EF>> {
+        match self {
+            Self::Host(layer) => Some(layer),
+            Self::Device { .. } => None,
+        }
+    }
+}
+
 /// The full GKR circuit — layers indexed top-down (layer 0 = first /
 /// largest, layer N-1 = terminal interaction-only).
 ///

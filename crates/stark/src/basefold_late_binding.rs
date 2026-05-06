@@ -475,6 +475,62 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
     GPU_JAGGED_REDUCTION_HOOK.get().copied()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Step 4a (`/tmp/step4_backend_parametrize_plan.md`) — GPU row-GKR
+// layer-transition dispatch hook scaffolding.
+//
+// Mirror of the existing GpuJaggedReductionFn pattern above.  Used by
+// future steps (4b/4c) that migrate
+// `crate::shard_level::row_gkr::build::build_gkr_circuit` from running
+// host transitions UPFRONT to lazily evolving a device-resident layer
+// state in place.
+//
+// The host signature consumes a `prev_handle: u64` opaque side-channel
+// id (registered by the GPU prover) and returns a `u64` for the next
+// layer's device-resident state.  Stark side never dereferences the
+// handle — that's entirely the GPU prover's bookkeeping.
+//
+// Three previous attempts (#218 Q1, #219 Q2, #220 R1) wired a
+// transition CUDA kernel via a side-channel registry but
+// `build_gkr_circuit` STILL ran host transitions, so the kernel was
+// redundant — the host materialization always overrode the device
+// result.  Step 4 fixes this by making `LayerState::Device` a true
+// alternative to `LayerState::Host`, with the GPU hook as the only
+// path that produces it.
+//
+// **NOT YET WIRED** — Step 4a is scaffolding only.  Step 4c will be
+// the first commit that actually consults the registered hook.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU row-GKR layer-transition driver.  Consumes
+/// the previous layer's opaque device handle (`prev_handle`) and
+/// returns the new layer's device handle.  The GPU prover owns
+/// allocation / deallocation of the device-resident state behind the
+/// handles — the stark crate never dereferences them.
+///
+/// Step 4a scaffolding only — no caller invokes this yet.  Step 4c
+/// will wire the dispatch into `build_gkr_circuit`.
+pub type GpuLayerTransitionFn = fn(prev_handle: u64) -> u64;
+
+static GPU_LAYER_TRANSITION_HOOK: std::sync::OnceLock<GpuLayerTransitionFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU row-GKR layer-transition driver.  Idempotent;
+/// returns `Err(existing_hook)` when a hook was already registered.
+/// Will be called once by `ziren-gpu`'s `compress_multi_gpu` at
+/// startup once Step 4c lands.
+pub fn register_gpu_layer_transition_hook(
+    f: GpuLayerTransitionFn,
+) -> Result<(), GpuLayerTransitionFn> {
+    GPU_LAYER_TRANSITION_HOOK.set(f)
+}
+
+/// Read the registered GPU row-GKR layer-transition hook, if any.
+#[must_use]
+pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
+    GPU_LAYER_TRANSITION_HOOK.get().copied()
+}
+
 /// Open the committed batch at a single point and produce the
 /// stacked-basefold proof.  `eval_point.len()` must equal
 /// `log_stacking_height + log(num_stripes_padded)`.
