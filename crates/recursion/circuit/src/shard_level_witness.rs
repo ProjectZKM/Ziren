@@ -553,6 +553,56 @@ pub fn host_stacked_basefold_to_recursive(
     host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
 
+/// Bytes-input adapter for [`lift_jagged_basefold_bundle`].
+///
+/// Deserializes `evaluation_proof_bytes` (rmp-serde wire format) into
+/// a [`JaggedBasefoldBundle`] then calls
+/// [`lift_jagged_basefold_bundle`].  When bytes are empty (the
+/// scaffolding-test path that the existing
+/// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`] handles
+/// gracefully) or malformed, falls back to the all-zero placeholder
+/// from `lift_evaluation_proof_bytes` so behavior matches the existing
+/// recursion-circuit machine flows byte-for-byte.
+///
+/// Phase 4a callers (compress/wrap/deferred/core_basefold +
+/// shard_proof_variable_lift) can adopt this adapter via a one-line
+/// swap from `lift_evaluation_proof_bytes(...)` →
+/// `lift_evaluation_proof_via_bundle(...)`.  Phase 4b will then
+/// finish the cutover by changing the upstream
+/// `BasefoldShardProof.evaluation_proof` field type from `Vec<u8>` to
+/// `JaggedBasefoldBundle`, eliminating this adapter and the
+/// rmp-serde round trip — which is the actual fix for the #240
+/// determinism cascade.
+pub fn lift_evaluation_proof_via_bundle<C>(
+    builder: &mut Builder<C>,
+    bytes: &[u8],
+    max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
+) -> JaggedPcsProofVariable<
+    RecursiveBasefoldProof<C::F, C::EF, 8>,
+    [Felt<C::F>; 8],
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
+        lift_jagged_basefold_bundle(builder, &bundle, max_log_row_count, column_counts_by_round)
+    } else {
+        // Empty / malformed bytes — fall back to the all-zero
+        // placeholder (preserves shape compatibility with scaffolding
+        // tests and the BasefoldShardProof::empty() construction
+        // path).
+        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+            builder,
+            bytes,
+            max_log_row_count,
+            column_counts_by_round,
+        )
+    }
+}
+
 /// Lift a host-side [`JaggedBasefoldBundle`] into the in-circuit
 /// [`JaggedPcsProofVariable`] shape — the structured replacement for
 /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
@@ -1076,6 +1126,71 @@ mod tests {
         };
         let recur = host_basefold_proof_to_recursive(&proof, vec![]);
         let _var = <_ as Witnessable<C>>::read(&recur, &mut builder);
+    }
+
+    /// #241 Phase 4a: bytes adapter falls back to zero placeholder
+    /// for empty bytes (matches the BasefoldShardProof::empty path).
+    #[test]
+    fn lift_evaluation_proof_via_bundle_empty_bytes_falls_back() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
+        let var = lift_evaluation_proof_via_bundle::<C>(&mut builder, &[], 21, &cols);
+        assert_eq!(var.column_counts, cols);
+        assert_eq!(var.original_commitments.len(), 2);
+    }
+
+    /// #241 Phase 4a: bytes adapter routes a real bundle's bytes
+    /// through lift_jagged_basefold_bundle.  Round-trips serialize +
+    /// deserialize via rmp-serde, then lifts.
+    #[test]
+    fn lift_evaluation_proof_via_bundle_real_bundle_bytes() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_symmetric::MerkleCap;
+        use zkm_stark::basefold_late_binding::jagged::PackingMeta;
+        use zkm_stark::basefold_late_binding::BasefoldLateBindingCommit;
+
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
+        let bundle = JaggedBasefoldBundle {
+            reduction: JaggedReductionProof::<InnerChallenge> {
+                rounds: vec![JaggedReductionRound {
+                    evals: [InnerChallenge::ZERO; 3],
+                }],
+                eval_point: vec![InnerChallenge::ZERO],
+                q_at_z: InnerChallenge::ZERO,
+            },
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+                basefold_proof: BasefoldProof {
+                    univariate_messages: vec![],
+                    fri_commitments: vec![],
+                    component_polynomials_query_openings_and_proofs: vec![],
+                    query_phase_openings_and_proofs: vec![],
+                    final_poly: InnerChallenge::ZERO,
+                    pow_witness: InnerVal::ZERO,
+                    batch_grinding_witness: InnerVal::ZERO,
+                },
+                batch_evaluations: vec![],
+            },
+            y_per_chip: vec![],
+            commit: BasefoldLateBindingCommit {
+                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+                chip_dims: vec![],
+                area: 0,
+                log_stacking_height: 0,
+            },
+            packing: PackingMeta {
+                offsets: vec![],
+                total_values: 0,
+                log_dense_size: 0,
+                column_counts: vec![],
+            },
+        };
+        let bytes = bundle.to_bytes();
+        let cols: Vec<Vec<usize>> = vec![vec![3]];
+        let var = lift_evaluation_proof_via_bundle::<C>(&mut builder, &bytes, 21, &cols);
+        assert_eq!(var.column_counts, cols);
+        // sumcheck_proof has the real reduction round (1 univariate poly).
+        assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
     }
 
     /// #241 Phase 4a: bundle lift produces a structurally valid
