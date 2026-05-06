@@ -541,7 +541,12 @@ where
         }
         let output: [zkm_recursion_compiler::prelude::Felt<C::F>; 16] =
             core::array::from_fn(|_| builder.uninit());
-        builder.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((input, output))));
+        // Tuple order is (dst, src) — see compiler.rs dispatch which
+        // calls `poseidon2_permute(data.0 as dst, data.1 as src)`.
+        // Pre-#246 this was `(input, output)` (backwards) but the
+        // bug stayed latent because the merkle binding loop's
+        // is_empty() guard short-circuited every call.
+        builder.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((output, input))));
         current = core::array::from_fn(|i| output[i]);
     }
     current

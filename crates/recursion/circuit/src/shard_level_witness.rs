@@ -521,27 +521,14 @@ fn host_query_opening_to_recursive(
                 row[D..2 * D].iter().copied(),
             )
             .expect("EF parse from D base elements");
-            // #244 Link 3 / #246 known gap: merkle_path_digests
-            // left empty here so the basefold verifier
-            // (`basefold_verifier.rs:934`) skips per-query Merkle
-            // binding via `emit_merkle_path`.  Populating from
-            // `leaf.proof.clone()` reproduces a deep IR-allocation
-            // panic ("expected entry: virtual_physical[N]") inside
-            // poseidon2_permute compile_one — the verifier site at
-            // basefold_verifier.rs:957-959 already calls
-            // `builder.constant()` per F digest, but on this
-            // fixture the high-vaddr Felt that gets read isn't the
-            // one that constant-promoted.  Symptom is consistent
-            // with an upstream allocator-state issue triggered only
-            // when this vector is non-empty; the fold-chain
-            // assertion alone (line 923) still binds soundness in
-            // production via the FRI commitment transcript.  See
-            // memory/project_246_merkle_binding.md for the dig.
+            // #246 re-enable: thread the bundle's MT::Proof
+            // structured digests through.  See verifier site at
+            // basefold_verifier.rs:957-959 for promotion + binding.
             RecursiveBasefoldOpening {
                 position: 0,
                 sibling_pair: [lo, hi],
                 merkle_path_bytes: Vec::new(),
-                merkle_path_digests: Vec::new(),
+                merkle_path_digests: leaf.proof.clone(),
                 _phantom: core::marker::PhantomData,
             }
         })
@@ -781,6 +768,15 @@ where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
+
+    // [#246-debug] minimal reproducer — pre-allocate 32k zero felts to push
+    // variable_count up.  If the failure also fires here, the bug is purely
+    // about high vaddrs.  If not, it's specific to emit_merkle_path's path.
+    if std::env::var("ZIREN_246_REPRO").is_ok() {
+        for _ in 0..32_000 {
+            let _: Felt<C::F> = builder.constant(C::F::ZERO);
+        }
+    }
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
@@ -1313,10 +1309,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(recur[0].sibling_pair, [expected_lo, expected_hi]);
-        // #244 Link 3 / #246 known gap: merkle_path_digests left
-        // empty in bundle path (Merkle binding skipped — see
-        // host_query_opening_to_recursive doc).
-        assert_eq!(recur[0].merkle_path_digests.len(), 0);
+        // #246: merkle_path_digests populated from leaf.proof.
+        assert_eq!(recur[0].merkle_path_digests.len(), 5);
         assert_eq!(recur[0].position, 0);
     }
 
