@@ -209,8 +209,29 @@ pub fn build_basefold_shard_verifier(
     log_stacking_height: u32,
 ) -> crate::shard_basefold::BasefoldShardVerifier<crate::basefold_verifier::RecursiveBasefoldVerifier>
 {
+    build_basefold_shard_verifier_with_num_vars(
+        max_log_row_count,
+        log_stacking_height,
+        max_log_row_count,
+    )
+}
+
+/// Variant that accepts an explicit `num_variables` for the inner
+/// BasefoldVerifierParams, decoupled from `max_log_row_count`.  Used
+/// by the #241 Phase 4e bundle path: when bundle is present, the
+/// verifier's num_variables must match `bundle.basefold_proof
+/// .basefold_proof.fri_commitments.len()` (the prover-emitted FRI
+/// round count) rather than `max_log_row_count`.  See #244 for the
+/// chain of pre-existing prover/verifier param mismatches this
+/// closes.
+pub fn build_basefold_shard_verifier_with_num_vars(
+    max_log_row_count: usize,
+    log_stacking_height: u32,
+    num_variables: usize,
+) -> crate::shard_basefold::BasefoldShardVerifier<crate::basefold_verifier::RecursiveBasefoldVerifier>
+{
     let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::new(
-        crate::basefold_verifier::BasefoldVerifierParams::production_default(max_log_row_count),
+        crate::basefold_verifier::BasefoldVerifierParams::production_default(num_variables),
     );
     let stacked_pcs_verifier = crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
         basefold_verifier,
