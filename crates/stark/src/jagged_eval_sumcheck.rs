@@ -52,6 +52,7 @@
 use alloc::vec::Vec;
 
 use p3_challenger::FieldChallenger;
+use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 
 use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
@@ -113,29 +114,42 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// alongside the outer jagged-reduction sumcheck.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_jagged_evaluation(
-    _prefix_sums: &[usize],
-    _z_row: &[InnerChallenge],
-    _z_col: &[InnerChallenge],
-    _z_trace: &[InnerChallenge],
+    prefix_sums: &[usize],
+    z_row: &[InnerChallenge],
+    z_col: &[InnerChallenge],
+    z_trace: &[InnerChallenge],
     challenger: &mut InnerChallenger,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
-    // SCAFFOLDING (#243 Phase 1): return placeholder.  The real body
-    // observes `expected_sum` then runs sumcheck — see module docs.
+    // #243 day-2 progress: real `claimed_sum` via the closed-form
+    // jagged-polynomial evaluator (foundation landed in commit
+    // 2e66555).  The sumcheck `univariate_polys` and `point_and_eval`
+    // remain placeholder until the structural sumcheck prover lands
+    // (avoiding O(2^N) hypercube materialization needs SP1's
+    // JaggedAssistSumAsPoly trick).
     //
-    // Even the stub observes a zero placeholder so the challenger
-    // state advances by the same number of bytes the real protocol
-    // would consume — keeps Fiat-Shamir alignment with the verifier
-    // when the verifier observes the placeholder's claimed_sum (zero)
-    // before its sub-sumcheck.
-    use p3_field::PrimeCharacteristicRing;
-    challenger.observe_algebra_element(InnerChallenge::ZERO);
-    JaggedSumcheckEvalProof::dummy()
+    // Even with empty rounds, the claimed_sum being CORRECT means the
+    // verifier's first identity check (claimed_sum == jagged_eval at
+    // sumcheck_eval.rs:64) passes.  The remaining (round-by-round
+    // sum identity, final point-eval check) still fail until rounds
+    // are filled.
+
+    let claimed_sum = if prefix_sums.len() < 2 {
+        InnerChallenge::ZERO
+    } else {
+        crate::jagged_branching_program::full_jagged_evaluation(
+            prefix_sums, z_row, z_col, z_trace,
+        )
+    };
+    challenger.observe_algebra_element(claimed_sum);
+
+    let mut proof = JaggedSumcheckEvalProof::dummy();
+    proof.partial_sumcheck_proof.claimed_sum = claimed_sum;
+    proof
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p3_field::PrimeCharacteristicRing;
     use zkm_primitives::poseidon2_init;
 
     #[test]
@@ -156,7 +170,34 @@ mod tests {
             &[InnerChallenge::ZERO; 5],
             &mut challenger,
         );
-        // Stub returns dummy — empty univariates, zero claim.
+        // Empty univariates remain (sumcheck prover not yet wired);
+        // claimed_sum is now real (computed via full_jagged_evaluation).
         assert!(proof.partial_sumcheck_proof.univariate_polys.is_empty());
+    }
+
+    /// #243 day-2: claimed_sum equals the closed-form expected sum.
+    /// At z_col=0 (boolean point), z_col_lagrange[0] = 1, others = 0,
+    /// so claimed_sum equals BP.eval(t_0, t_1).  At all-zero z_row /
+    /// z_trace too, BP eval is the indicator at the zero point.
+    #[test]
+    fn prove_jagged_evaluation_claimed_sum_matches_closed_form() {
+        let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
+        let mut challenger = InnerChallenger::new(perm);
+        // Single column, height 3, so t_0 = 0, t_1 = 3.
+        let prefix_sums = vec![0usize, 3];
+        let log_m = 2; // log2_ceil(3) = 2
+        let z_row = vec![InnerChallenge::ZERO; log_m + 1];
+        let z_col: Vec<InnerChallenge> = vec![]; // 1 col → 0 challenge bits
+        let z_trace = vec![InnerChallenge::ZERO; log_m + 1];
+
+        let proof = prove_jagged_evaluation(
+            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger,
+        );
+
+        // Direct computation via the closed-form evaluator.
+        let expected = crate::jagged_branching_program::full_jagged_evaluation(
+            &prefix_sums, &z_row, &z_col, &z_trace,
+        );
+        assert_eq!(proof.partial_sumcheck_proof.claimed_sum, expected);
     }
 }
