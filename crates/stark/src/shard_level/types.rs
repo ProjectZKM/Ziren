@@ -45,6 +45,17 @@ impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
     pub fn zero(degree: usize) -> Self {
         Self { coefficients: vec![K::ZERO; degree + 1] }
     }
+
+    /// Evaluate the polynomial at `point` via Horner's method.
+    /// Returns the constant term `coefficients[0]` for an empty
+    /// polynomial.
+    pub fn eval_at_point(&self, point: K) -> K {
+        let mut acc = K::ZERO;
+        for &c in self.coefficients.iter().rev() {
+            acc = acc * point + c;
+        }
+        acc
+    }
 }
 
 /// A sumcheck proof carrying the per-round univariate polynomials

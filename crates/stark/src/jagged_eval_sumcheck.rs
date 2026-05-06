@@ -52,11 +52,14 @@
 use alloc::vec::Vec;
 
 use p3_challenger::FieldChallenger;
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
+use crate::jagged_branching_program::{
+    bits_big_endian, full_jagged_evaluation, BranchingProgram,
+};
 use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
-use crate::shard_level::types::PartialSumcheckProof;
+use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
 /// Jagged-eval sub-protocol proof — wraps a [`PartialSumcheckProof`]
 /// over the polynomial defined in this module's docs.
@@ -112,6 +115,210 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// The prover is callable from
 /// [`crate::basefold_late_binding::jagged::prove_jagged_basefold`]
 /// alongside the outer jagged-reduction sumcheck.
+/// Reverse the lowest `n` bits of `v`.  Used to align the LSB-first
+/// hypercube indexing (used by partial_lagrange) with the MSB-first
+/// big-endian Point convention SP1 uses for `merged_prefix_sums`.
+fn bit_reverse(v: usize, n: usize) -> usize {
+    let mut r = 0;
+    for j in 0..n {
+        if (v >> j) & 1 == 1 {
+            r |= 1 << (n - 1 - j);
+        }
+    }
+    r
+}
+
+/// Materialize `F[i] = Σ_k z_col_lagrange[k] × EQ(i, merged_prefix_sums[k])`
+/// over the boolean hypercube of dimension `n = 2 * half`.
+///
+/// At boolean inputs, EQ collapses to an indicator: `F[i]` is non-zero
+/// iff hypercube vertex `i` matches some merged prefix sum exactly.
+/// This makes the materialization O(num_cols) rather than
+/// O(num_cols × 2^n).
+///
+/// Index mapping (per the MSB-first / LSB-first alignment between
+/// SP1's big-endian Point and partial_lagrange's table indexing):
+///   `i = (bit_reverse(upper_k, half) << half) | bit_reverse(lower_k, half)`
+fn materialize_f_evals(
+    z_col_lagrange: &[InnerChallenge],
+    prefix_sums: &[usize],
+    half: usize,
+) -> Vec<InnerChallenge> {
+    let n = 2 * half;
+    let total = 1usize << n;
+    let mut evals = vec![InnerChallenge::ZERO; total];
+    let num_cols = z_col_lagrange.len();
+    for k in 0..num_cols {
+        if k + 1 >= prefix_sums.len() {
+            break;
+        }
+        let lower = prefix_sums[k];
+        let upper = prefix_sums[k + 1];
+        let low_half = bit_reverse(lower, half);
+        let high_half = bit_reverse(upper, half);
+        let i = (high_half << half) | low_half;
+        if i < total {
+            evals[i] += z_col_lagrange[k];
+        }
+    }
+    evals
+}
+
+/// Materialize `BP[i] = BranchingProgram::eval(lower_bits, upper_bits)`
+/// over the boolean hypercube of dimension `n = 2 * half`.
+///
+/// Index mapping: hypercube vertex `i` decomposes via LSB-first bits.
+/// First `half` bits ↔ var_0..var_{half-1} (lower's MSB-first
+/// representation per partial_lagrange convention); last `half` bits ↔
+/// var_half..var_{n-1} (upper's MSB-first).
+fn materialize_bp_evals(
+    bp: &BranchingProgram<InnerChallenge>,
+    half: usize,
+) -> Vec<InnerChallenge> {
+    let n = 2 * half;
+    let total = 1usize << n;
+    let mut evals = vec![InnerChallenge::ZERO; total];
+    for i in 0..total {
+        // Lower's big-endian bits = [bit_0(i), bit_1(i), ..., bit_{half-1}(i)]
+        let lower_bits: Vec<InnerChallenge> = (0..half)
+            .map(|j| {
+                if (i >> j) & 1 == 1 {
+                    InnerChallenge::ONE
+                } else {
+                    InnerChallenge::ZERO
+                }
+            })
+            .collect();
+        let upper_bits: Vec<InnerChallenge> = (half..n)
+            .map(|j| {
+                if (i >> j) & 1 == 1 {
+                    InnerChallenge::ONE
+                } else {
+                    InnerChallenge::ZERO
+                }
+            })
+            .collect();
+        evals[i] = bp.eval(&lower_bits, &upper_bits);
+    }
+    evals
+}
+
+/// Construct a degree-2 univariate polynomial from 3 evaluations at
+/// xs = [0, 1/2, 1] via closed-form Lagrange interpolation.
+///
+/// Returns coefficients `[c0, c1, c2]` such that
+/// `c0 + c1 * X + c2 * X² = p(X)` matches the 3 input evals.
+///
+/// Closed form derivation (xs = {0, 1/2, 1}):
+///   c0 = p(0)
+///   c1 = -3 p(0) + 4 p(1/2) - p(1)
+///   c2 =  2 p(0) - 4 p(1/2) + 2 p(1)
+fn univariate_from_three_evals(
+    p0: InnerChallenge,
+    p_half: InnerChallenge,
+    p1: InnerChallenge,
+) -> UnivariatePolynomial<InnerChallenge> {
+    let three = InnerChallenge::from_u8(3);
+    let four = InnerChallenge::from_u8(4);
+    let two = InnerChallenge::from_u8(2);
+    let c0 = p0;
+    let c1 = -three * p0 + four * p_half - p1;
+    let c2 = two * p0 - four * p_half + two * p1;
+    UnivariatePolynomial::new(vec![c0, c1, c2])
+}
+
+/// Run a naive multilinear sumcheck over `P = F × BP` (product of two
+/// multilinear extensions, so `P` has degree 2 per variable).
+///
+/// Each round emits `[c0, c1, c2]` coefficients (degree-2 univariate
+/// poly), observes them into the challenger, samples the next
+/// challenge, and folds both `F` and `BP` against it.  Returns a
+/// [`PartialSumcheckProof`] whose `claimed_sum` matches the input
+/// `claimed_sum`, whose `point_and_eval.0` is the n challenges in
+/// round order, and whose `point_and_eval.1` is `F × BP` at the
+/// final folded point.
+///
+/// **Complexity**: O(2^n) memory + O(n × 2^n) time.  Only feasible
+/// for small `n` (test fixtures, log_m ≤ ~12).  Production needs
+/// SP1's structural prover (JaggedAssistSumAsPoly).
+fn naive_jagged_eval_sumcheck(
+    mut f: Vec<InnerChallenge>,
+    mut bp: Vec<InnerChallenge>,
+    claimed_sum: InnerChallenge,
+    challenger: &mut InnerChallenger,
+) -> PartialSumcheckProof<InnerChallenge> {
+    let n = f.len().trailing_zeros() as usize;
+    debug_assert_eq!(f.len(), 1 << n);
+    debug_assert_eq!(bp.len(), 1 << n);
+
+    let half_inv = InnerChallenge::from_u8(2).inverse();
+    let four_inv = InnerChallenge::from_u8(4).inverse();
+
+    let mut univariate_polys = Vec::with_capacity(n);
+    let mut points = Vec::with_capacity(n);
+
+    for _round in 0..n {
+        let half_len = f.len() / 2;
+        let mut g0 = InnerChallenge::ZERO;
+        let mut g1 = InnerChallenge::ZERO;
+        let mut g_half = InnerChallenge::ZERO;
+        for i in 0..half_len {
+            let f0 = f[2 * i];
+            let f1 = f[2 * i + 1];
+            let bp0 = bp[2 * i];
+            let bp1 = bp[2 * i + 1];
+            g0 += f0 * bp0;
+            g1 += f1 * bp1;
+            // P at var_r = 1/2 is (F0+F1)*(BP0+BP1)/4 (cancels the
+            // two halve factors at once).
+            g_half += (f0 + f1) * (bp0 + bp1) * four_inv;
+        }
+        let _ = half_inv;
+
+        let poly = univariate_from_three_evals(g0, g_half, g1);
+        // Observe coefficients into challenger (matches SP1's
+        // observe_constant_length_extension_slice in eval_sumcheck_prover.rs:237).
+        for &c in &poly.coefficients {
+            challenger.observe_algebra_element(c);
+        }
+        univariate_polys.push(poly);
+
+        // Sample next challenge.
+        let r: InnerChallenge = challenger.sample_algebra_element();
+        points.push(r);
+
+        // Fold F and BP at r.
+        let mut new_f = Vec::with_capacity(half_len);
+        let mut new_bp = Vec::with_capacity(half_len);
+        for i in 0..half_len {
+            let f0 = f[2 * i];
+            let f1 = f[2 * i + 1];
+            let bp0 = bp[2 * i];
+            let bp1 = bp[2 * i + 1];
+            new_f.push(f0 + r * (f1 - f0));
+            new_bp.push(bp0 + r * (bp1 - bp0));
+        }
+        f = new_f;
+        bp = new_bp;
+    }
+
+    debug_assert_eq!(f.len(), 1);
+    debug_assert_eq!(bp.len(), 1);
+    let final_eval = f[0] * bp[0];
+
+    PartialSumcheckProof {
+        univariate_polys,
+        claimed_sum,
+        point_and_eval: (points, final_eval),
+    }
+}
+
+/// Naive-sumcheck threshold: above this `n = 2*(log_m+1)`, fall back
+/// to the dummy proof (production needs SP1's structural prover).
+/// Set to `n=24` (log_m=11) → 16M-cell hypercube — fits in ~64MB EF
+/// per side.  log_m=12 (n=26) would need 256MB and gets slow.
+const NAIVE_SUMCHECK_MAX_N: usize = 24;
+
 #[allow(clippy::too_many_arguments)]
 pub fn prove_jagged_evaluation(
     prefix_sums: &[usize],
@@ -120,31 +327,65 @@ pub fn prove_jagged_evaluation(
     z_trace: &[InnerChallenge],
     challenger: &mut InnerChallenger,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
-    // #243 day-2 progress: real `claimed_sum` via the closed-form
-    // jagged-polynomial evaluator (foundation landed in commit
-    // 2e66555).  The sumcheck `univariate_polys` and `point_and_eval`
-    // remain placeholder until the structural sumcheck prover lands
-    // (avoiding O(2^N) hypercube materialization needs SP1's
-    // JaggedAssistSumAsPoly trick).
-    //
-    // Even with empty rounds, the claimed_sum being CORRECT means the
-    // verifier's first identity check (claimed_sum == jagged_eval at
-    // sumcheck_eval.rs:64) passes.  The remaining (round-by-round
-    // sum identity, final point-eval check) still fail until rounds
-    // are filled.
+    // #243 day-2 complete (test fixtures): claimed_sum + naive
+    // sumcheck via materialization for small workloads.
+    // Production large workloads still need SP1's structural prover
+    // (JaggedAssistSumAsPoly) — fall back to dummy with real
+    // claimed_sum when n exceeds NAIVE_SUMCHECK_MAX_N.
 
-    let claimed_sum = if prefix_sums.len() < 2 {
-        InnerChallenge::ZERO
-    } else {
-        crate::jagged_branching_program::full_jagged_evaluation(
-            prefix_sums, z_row, z_col, z_trace,
-        )
-    };
+    if prefix_sums.len() < 2 {
+        challenger.observe_algebra_element(InnerChallenge::ZERO);
+        return JaggedSumcheckEvalProof::dummy();
+    }
+
+    // half = log_m + 1 = number of bits per prefix sum.
+    let half = z_trace.len();
+    let n = 2 * half;
+
+    let claimed_sum = full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);
     challenger.observe_algebra_element(claimed_sum);
 
-    let mut proof = JaggedSumcheckEvalProof::dummy();
-    proof.partial_sumcheck_proof.claimed_sum = claimed_sum;
-    proof
+    if n > NAIVE_SUMCHECK_MAX_N {
+        // Fall back: real claimed_sum, empty rounds.  Verifier 1st
+        // identity passes; downstream identities fail until SP1
+        // structural prover lands.
+        let mut proof = JaggedSumcheckEvalProof::dummy();
+        proof.partial_sumcheck_proof.claimed_sum = claimed_sum;
+        return proof;
+    }
+
+    // Naive path: materialize F and BP over the hypercube, run
+    // standard product-of-multilinears sumcheck.
+    let z_col_lagrange =
+        crate::jagged_branching_program::partial_lagrange(z_col);
+    let bp = BranchingProgram::new(z_row.to_vec(), z_trace.to_vec());
+
+    let f_evals = materialize_f_evals(&z_col_lagrange, prefix_sums, half);
+    let bp_evals = materialize_bp_evals(&bp, half);
+
+    // Sanity check: the materialized P sums to claimed_sum.
+    debug_assert_eq!(
+        f_evals
+            .iter()
+            .zip(bp_evals.iter())
+            .map(|(f, b)| *f * *b)
+            .fold(InnerChallenge::ZERO, |a, b| a + b),
+        claimed_sum,
+        "materialized P sum mismatch — F[i] or BP[i] indexing bug",
+    );
+
+    let partial_sumcheck_proof =
+        naive_jagged_eval_sumcheck(f_evals, bp_evals, claimed_sum, challenger);
+
+    JaggedSumcheckEvalProof { partial_sumcheck_proof }
+}
+
+// Suppress unused-import warning for bits_big_endian (re-exported
+// for downstream use; not directly called here once naive prover
+// lands).
+#[allow(dead_code)]
+fn _unused_bits_be_ref() {
+    let _: fn(usize, usize) -> Vec<InnerChallenge> = bits_big_endian;
 }
 
 #[cfg(test)]
@@ -160,9 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn prove_jagged_evaluation_stub_returns_dummy() {
+    fn prove_jagged_evaluation_naive_path_emits_round_polys() {
         let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
         let mut challenger = InnerChallenger::new(perm);
+        // 4 chips, log_m=4 → half=5, n=10. Within naive threshold (n=24).
         let proof = prove_jagged_evaluation(
             &[0, 16, 32, 48],
             &[InnerChallenge::ZERO; 5],
@@ -170,9 +412,71 @@ mod tests {
             &[InnerChallenge::ZERO; 5],
             &mut challenger,
         );
-        // Empty univariates remain (sumcheck prover not yet wired);
-        // claimed_sum is now real (computed via full_jagged_evaluation).
-        assert!(proof.partial_sumcheck_proof.univariate_polys.is_empty());
+        // Naive path produces n round polys.  half = z_trace.len() = 5,
+        // so n = 10.
+        assert_eq!(proof.partial_sumcheck_proof.univariate_polys.len(), 10);
+        assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 10);
+    }
+
+    /// #243 naive sumcheck: round-by-round identity holds.  Each
+    /// round's univariate poly satisfies `g(0) + g(1) = previous round
+    /// claim`, and the final point evaluates to the per-round
+    /// folded poly value.  This is the core soundness identity the
+    /// recursion verifier checks at recursive_jagged_pcs.rs.
+    #[test]
+    fn naive_jagged_eval_sumcheck_round_identities_hold() {
+        let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
+        let mut challenger = InnerChallenger::new(perm);
+
+        // Tiny fixture: 2 columns of heights [3, 2], log_m=2, n=6.
+        let prefix_sums = vec![0usize, 3, 5];
+        let half = 3; // log_m + 1
+        let z_row = vec![
+            InnerChallenge::from_u8(7),
+            InnerChallenge::from_u8(11),
+            InnerChallenge::from_u8(13),
+        ];
+        let z_col = vec![InnerChallenge::from_u8(17)]; // 2 cols → 1 challenge
+        let z_trace = vec![
+            InnerChallenge::from_u8(19),
+            InnerChallenge::from_u8(23),
+            InnerChallenge::from_u8(29),
+        ];
+        // half = z_trace.len() so n = 2*3 = 6 → 64-cell hypercube.
+
+        let proof = prove_jagged_evaluation(
+            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger,
+        );
+        let psp = &proof.partial_sumcheck_proof;
+
+        // Closed-form claimed_sum.
+        let expected_sum = crate::jagged_branching_program::full_jagged_evaluation(
+            &prefix_sums, &z_row, &z_col, &z_trace,
+        );
+        assert_eq!(psp.claimed_sum, expected_sum);
+
+        // n round polys.
+        let n = 2 * half;
+        assert_eq!(psp.univariate_polys.len(), n);
+        assert_eq!(psp.point_and_eval.0.len(), n);
+
+        // Round identity: g_round(0) + g_round(1) == claim_so_far.
+        // claim_0 = claimed_sum; claim_{r+1} = g_r(challenge_r).
+        let mut claim = psp.claimed_sum;
+        for (round_idx, poly) in psp.univariate_polys.iter().enumerate() {
+            let g0 = poly.eval_at_point(InnerChallenge::ZERO);
+            let g1 = poly.eval_at_point(InnerChallenge::ONE);
+            assert_eq!(
+                g0 + g1, claim,
+                "round {round_idx}: g(0) + g(1) should equal claim {claim:?}",
+            );
+            // Next round's claim = poly evaluated at the round's challenge.
+            claim = poly.eval_at_point(psp.point_and_eval.0[round_idx]);
+        }
+
+        // Final identity: last round's poly at last challenge equals
+        // point_and_eval.1.
+        assert_eq!(claim, psp.point_and_eval.1);
     }
 
     /// #243 day-2: claimed_sum equals the closed-form expected sum.
