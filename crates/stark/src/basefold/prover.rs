@@ -57,20 +57,42 @@ use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 /// condition.  The output is reproducible across runs, machines, and
 /// thread-pool sizes, eliminating the cascade.
 ///
-/// Implementation: parallel rayon `find_first` (NOT `find_any`).  A
-/// sequential walk was tried first — at ~65 ms per grind for 16-bit
-/// PoW it back-pressured the per-shard host-pool worker enough that
-/// shards backed up and the host RAM grew unbounded (Linux OOM-killer
-/// terminated the perf binary at ~850 GB anon-rss).  `find_first`
-/// keeps the CPU work parallel so per-shard wall stays close to
-/// plonky3's parallel grind, while its left-of-match cancellation
-/// rule guarantees the smallest-index witness wins regardless of
-/// thread scheduling.
+/// Implementation: chunk-deterministic parallel search.  The
+/// canonical-u64 search space `[0, ORDER_U64)` is partitioned into
+/// fixed-size chunks of `GRIND_CHUNK_SIZE` consecutive integers.  Each
+/// chunk runs an inner `find_first` (deterministic smallest witness in
+/// that chunk).  The outer `find_first` over chunk indices then picks
+/// the smallest-index chunk that produced any witness.  Because chunks
+/// are contiguous index ranges, the result is bit-identical to the
+/// global "smallest-index witness" — i.e. equivalent to a single
+/// `find_first` over `[0, ORDER_U64)` — but with bounded parallelism
+/// granularity that avoids rayon's split-on-demand overhead.
+///
+/// Why faster than naive global `find_first`: rayon's `find_first`
+/// honors left-of-match cancellation, but with split-on-demand it can
+/// produce many tiny work units; cancellation of high-index workers
+/// only fires once a left-sibling completes.  Bucketing into 65 K
+/// chunks bounds the outer index space to `~ORDER_U64 / 65 K ≈ 32 K`
+/// chunks for KoalaBear, of which only `winner_chunk_idx + 1` chunks
+/// actually need to run end-to-end; the rest cancel cleanly once the
+/// outer `find_first` resolves.  For typical pow_bits=21, expected
+/// `winner_chunk_idx ≈ (1 << 21) / 65536 = 32`.  Wall ≈
+/// `32 * 65 K hashes / num_cores`, an order of magnitude tighter than
+/// the un-chunked variant on big multi-GPU machines.
+///
+/// Sequential was tried first — at ~65 ms per grind for 16-bit PoW it
+/// back-pressured the per-shard host-pool worker enough that shards
+/// backed up and the host RAM grew unbounded (Linux OOM-killer
+/// terminated the perf binary at ~850 GB anon-rss).
 ///
 /// Validated: 3 back-to-back tendermint compress runs (v1/v2b/v3 of
 /// the May 6 fix session) produce IDENTICAL `compressed_proof.vk
 /// .hash_koalabear()`; baseline (without fix) produced 3 distinct
-/// hashes (v8/v9/v10).
+/// hashes (v8/v9/v10).  Chunk-deterministic variant preserves the
+/// same vk hash because the witness selected is the same min-index
+/// element of the valid set.
+const GRIND_CHUNK_SIZE: u64 = 1 << 16; // 65 536
+
 fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
@@ -78,24 +100,44 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
     use p3_maybe_rayon::prelude::*;
+    // PrimeCharacteristicRing brings F::ZERO into scope.
     if bits == 0 {
         return F::ZERO;
     }
     let order = F::ORDER_U64;
-    // Parallel search with `find_first` semantics — returns the
-    // smallest-index witness, NOT the first-thread-wins witness as
-    // plonky3's `find_any` does.  See the docstring for why parallel
-    // is required (sequential OOM'd the host).
-    let witness = (0..order)
+    let chunk = GRIND_CHUNK_SIZE;
+    // Number of chunks (last one may be short if order isn't a multiple
+    // of chunk; KoalaBear ORDER_U64 = 0x7f00_0001 = 2_130_706_433, not
+    // a multiple of 2^16, so we let the last chunk's iter clip naturally).
+    let num_chunks: u64 = order.div_ceil(chunk);
+
+    let witness = (0u64..num_chunks)
         .into_par_iter()
-        .map(|i| {
-            // SAFETY: i < F::ORDER_U64 by iterator bound, so this is
-            // a valid canonical field element.
-            unsafe { <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i) }
-        })
-        .find_first(|&w| {
-            let mut probe = challenger.clone();
-            probe.check_witness(bits, w)
+        .find_map_first(|chunk_idx| {
+            let lo = chunk_idx.saturating_mul(chunk);
+            let hi = core::cmp::min(lo.saturating_add(chunk), order);
+            // Inner scan over u64 indices in this chunk — sequential
+            // is intentional.  Two reasons: (a) the outer rayon already
+            // saturates the thread pool with many chunk closures, so a
+            // nested par_iter would over-subscribe and add scheduling
+            // latency; (b) sequential lets the compiler keep the
+            // challenger clone in registers across the tight hash loop.
+            // The chunk size (`GRIND_CHUNK_SIZE` = 65 536) is small
+            // enough that one core walks it in a few ms for KoalaBear,
+            // i.e. comparable to one rayon split-on-demand scheduling
+            // cycle.
+            for i in lo..hi {
+                // SAFETY: i < ORDER_U64 by chunk construction, so this
+                // is a valid canonical field element.
+                let w = unsafe {
+                    <F as p3_field::integers::QuotientMap<u64>>::from_canonical_unchecked(i)
+                };
+                let mut probe = challenger.clone();
+                if probe.check_witness(bits, w) {
+                    return Some(w);
+                }
+            }
+            None
         })
         .expect("deterministic_grind: failed to find a PoW witness");
     // Replay on the real challenger to commit its state update
