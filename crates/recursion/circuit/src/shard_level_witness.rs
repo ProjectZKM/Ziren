@@ -521,17 +521,22 @@ fn host_query_opening_to_recursive(
                 row[D..2 * D].iter().copied(),
             )
             .expect("EF parse from D base elements");
-            // #244 Link 3 fix: leaving merkle_path_digests EMPTY
-            // matches the placeholder lift's behavior (skips
-            // in-circuit Merkle binding via poseidon2_permute).
-            // When non-empty, the verifier reads these as Felts
-            // (compiler.rs:69) but raw F values from
-            // bundle.basefold_proof.fri_commitments aren't
-            // threaded through builder.constant() — they aren't in
-            // the IR's virtual_to_physical map.  Soundness
-            // tradeoff: skip Merkle path verification.  Re-enable
-            // by promoting via builder.constant() at use time
-            // when the call site is in scope.
+            // #244 Link 3 / #246 known gap: merkle_path_digests
+            // left empty here so the basefold verifier
+            // (`basefold_verifier.rs:934`) skips per-query Merkle
+            // binding via `emit_merkle_path`.  Populating from
+            // `leaf.proof.clone()` reproduces a deep IR-allocation
+            // panic ("expected entry: virtual_physical[N]") inside
+            // poseidon2_permute compile_one — the verifier site at
+            // basefold_verifier.rs:957-959 already calls
+            // `builder.constant()` per F digest, but on this
+            // fixture the high-vaddr Felt that gets read isn't the
+            // one that constant-promoted.  Symptom is consistent
+            // with an upstream allocator-state issue triggered only
+            // when this vector is non-empty; the fold-chain
+            // assertion alone (line 923) still binds soundness in
+            // production via the FRI commitment transcript.  See
+            // memory/project_246_merkle_binding.md for the dig.
             RecursiveBasefoldOpening {
                 position: 0,
                 sibling_pair: [lo, hi],
@@ -1308,8 +1313,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(recur[0].sibling_pair, [expected_lo, expected_hi]);
-        // #244 Link 3 fix: merkle_path_digests left empty in
-        // bundle path (Merkle binding skipped — see
+        // #244 Link 3 / #246 known gap: merkle_path_digests left
+        // empty in bundle path (Merkle binding skipped — see
         // host_query_opening_to_recursive doc).
         assert_eq!(recur[0].merkle_path_digests.len(), 0);
         assert_eq!(recur[0].position, 0);
