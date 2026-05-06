@@ -703,8 +703,16 @@ pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
 /// `(device_id, circuit_id)` so concurrent shards on the same GPU are
 /// fully isolated — fixes #230 multi-GPU panics caused by a shared
 /// `next_handle` counter being stepped on across shards.
-static NEXT_GPU_LAYER_CIRCUIT_ID: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1);
+// Backing storage uses AtomicUsize, not AtomicU64, so the file
+// compiles on the zkvm-elf target (mipsel — no
+// `target_has_atomic="64"`).  The GPU registry never executes on the
+// zkvm-elf binary, but the symbol still has to type-check in that
+// build because `row_gkr/build.rs` imports the helper unconditionally.
+// Public API (`u64`) is preserved via cast.  On host (64-bit)
+// `usize == u64`; on the 32-bit zkvm-elf the upper bits are always
+// zero and circuit IDs grow well within `u32::MAX`.
+static NEXT_GPU_LAYER_CIRCUIT_ID: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(1);
 
 /// Allocate a fresh process-unique GKR-circuit ID for use with the
 /// GPU layer-state hooks.  Must be called once per
@@ -718,7 +726,7 @@ static NEXT_GPU_LAYER_CIRCUIT_ID: std::sync::atomic::AtomicU64 =
 /// outside the threat model.
 #[must_use]
 pub fn allocate_gpu_layer_circuit_id() -> u64 {
-    NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64
 }
 
 /// Open the committed batch at a single point and produce the

@@ -272,6 +272,120 @@ where
     }
 }
 
+// ── Jagged-PCS bundle Witnessable surface (#241 Phase 1) ─────────
+//
+// Additive Witnessable bridges for the host-side jagged-PCS bundle
+// pieces.  These compile against the existing in-circuit verifier
+// surface but are NOT yet wired into call sites — that's Phase 2-4
+// per task #241.  Phase 1's purpose is to establish the field-by-
+// field witness mapping so subsequent phases can compose the full
+// `JaggedBasefoldBundle::Witnessable` from these primitives.
+//
+// Reference: SP1's [`JaggedSumcheckEvalProof` / `JaggedPcsProof`
+// Witnessable](file:///tmp/sp1/crates/recursion/circuit/src/jagged/witness.rs).
+// The Ziren bundle stores per-round eval-form sumcheck rounds
+// (`JaggedReductionRound { evals: [EF; 3] }`) where SP1 stores
+// coefficient-form (`UnivariatePolynomial { coefficients }`); the
+// eval→coeff conversion lives at the Phase 2 bundle assembly site,
+// not in these per-piece witness reads.
+
+use zkm_stark::basefold::proof::{LeafOpening, MerkleOpening};
+use zkm_stark::basefold_late_binding::LbMmcs;
+use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
+
+impl<C> Witnessable<C> for JaggedReductionRound<InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable = JaggedReductionRound<Ext<C::F, C::EF>>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        JaggedReductionRound { evals: self.evals.read(builder) }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.evals.write(witness);
+    }
+}
+
+impl<C> Witnessable<C> for JaggedReductionProof<InnerChallenge>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable = JaggedReductionProof<Ext<C::F, C::EF>>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        JaggedReductionProof {
+            rounds: self.rounds.read(builder),
+            eval_point: self.eval_point.read(builder),
+            q_at_z: self.q_at_z.read(builder),
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.rounds.write(witness);
+        self.eval_point.write(witness);
+        self.q_at_z.write(witness);
+    }
+}
+
+/// In-circuit companion to [`zkm_stark::basefold::proof::LeafOpening`].
+///
+/// `values` is the matrix-of-leaves grid that comes through the witness
+/// stream as `Felt` cells; `proof` (Merkle path siblings) is treated as
+/// constant base-field digests passed through verbatim — matching the
+/// existing pattern in [`crate::basefold_witness`] for
+/// `RecursiveBasefoldOpening::merkle_path_digests`.
+pub struct LeafOpeningVar<F> {
+    pub values: Vec<Vec<Felt<F>>>,
+    pub proof: Vec<[F; 8]>,
+}
+
+/// In-circuit companion to [`zkm_stark::basefold::proof::MerkleOpening`].
+pub struct MerkleOpeningVar<F> {
+    pub leaves: Vec<LeafOpeningVar<F>>,
+}
+
+impl<C> Witnessable<C> for LeafOpening<InnerVal, LbMmcs>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable = LeafOpeningVar<C::F>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        LeafOpeningVar {
+            values: self.values.read(builder),
+            // Merkle path siblings are constants in the proof — they
+            // ride out-of-band; no felt-witness allocation here.
+            proof: self.proof.clone(),
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        self.values.write(witness);
+        // Constant-valued; no witness-stream writes.
+    }
+}
+
+impl<C> Witnessable<C> for MerkleOpening<InnerVal, LbMmcs>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    type WitnessVariable = MerkleOpeningVar<C::F>;
+
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        MerkleOpeningVar {
+            leaves: self.leaves.iter().map(|l| l.read(builder)).collect(),
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
+        for leaf in &self.leaves {
+            leaf.write(witness);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +410,67 @@ mod tests {
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);
         assert!(evbytes.is_empty());
+    }
+
+    /// #241 Phase 1: JaggedReductionRound Witnessable round-trips a
+    /// 3-EF struct through the witness stream.
+    #[test]
+    fn jagged_reduction_round_witnessable_reads() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let host = JaggedReductionRound::<InnerChallenge> {
+            evals: [InnerChallenge::ZERO; 3],
+        };
+        let var: JaggedReductionRound<Ext<InnerVal, InnerChallenge>> =
+            <_ as Witnessable<C>>::read(&host, &mut builder);
+        assert_eq!(var.evals.len(), 3);
+    }
+
+    /// #241 Phase 1: JaggedReductionProof Witnessable cascades through
+    /// rounds + eval_point + q_at_z.
+    #[test]
+    fn jagged_reduction_proof_witnessable_reads() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let host = JaggedReductionProof::<InnerChallenge> {
+            rounds: vec![
+                JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] },
+                JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] },
+            ],
+            eval_point: vec![InnerChallenge::ZERO; 4],
+            q_at_z: InnerChallenge::ZERO,
+        };
+        let var = <_ as Witnessable<C>>::read(&host, &mut builder);
+        assert_eq!(var.rounds.len(), 2);
+        assert_eq!(var.eval_point.len(), 4);
+    }
+
+    /// #241 Phase 1: LeafOpening Witnessable handles the (Vec<Vec<F>>,
+    /// MT::Proof const-passthrough) split correctly.
+    #[test]
+    fn leaf_opening_witnessable_reads() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let host = LeafOpening::<InnerVal, LbMmcs> {
+            values: vec![vec![InnerVal::ZERO; 4], vec![InnerVal::ZERO; 4]],
+            proof: vec![[InnerVal::ZERO; 8]; 3],
+        };
+        let var = <_ as Witnessable<C>>::read(&host, &mut builder);
+        assert_eq!(var.values.len(), 2);
+        assert_eq!(var.values[0].len(), 4);
+        assert_eq!(var.proof.len(), 3);
+    }
+
+    /// #241 Phase 1: MerkleOpening Witnessable composes through a Vec
+    /// of LeafOpenings.
+    #[test]
+    fn merkle_opening_witnessable_reads() {
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let leaf = LeafOpening::<InnerVal, LbMmcs> {
+            values: vec![vec![InnerVal::ZERO; 2]],
+            proof: vec![[InnerVal::ZERO; 8]; 2],
+        };
+        let host = MerkleOpening::<InnerVal, LbMmcs> {
+            leaves: vec![leaf.clone(), leaf],
+        };
+        let var = <_ as Witnessable<C>>::read(&host, &mut builder);
+        assert_eq!(var.leaves.len(), 2);
     }
 }
