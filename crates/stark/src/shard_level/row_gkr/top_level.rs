@@ -207,24 +207,50 @@ where
     // Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `circuit.layers`
     // is now `Vec<LayerState>`.  Skip the num_row_variables == 0 terminal
     // (unused — only there to enable clean termination of the build
-    // loop), then dispatch on the LayerState variant.  Today only Host
-    // is ever constructed (Step 4c will install Device entries).
+    // loop), then dispatch on the LayerState variant.
+    //
+    // Step 4d — when `LayerState::Device { handle, .. }` appears (only
+    // possible when `ZIREN_GPU_LAYER_TRANSITION=1` + all three GPU hooks
+    // registered + `(F, EF) == (LbVal, LbChallenge)` — see
+    // `build_gkr_circuit`'s gates 1-4), invoke the registered
+    // `GpuLayerPullFn` to materialize the device-resident layer back to
+    // host as a `LogUpGkrCpuLayer<LbChallenge, LbChallenge>`, wrap it as
+    // a `GkrCircuitLayer::Layer`, and run the existing per-round
+    // sumcheck on it.  This is the "MVP Path-A" from the plan: pull-back
+    // per round.  A subsequent optimization (H2 — see
+    // `prove_gkr_round`'s `ZIREN_GPU_LOGUP_GKR_DEVICE` branch) keeps
+    // the round computation device-resident; that's a follow-up.
+    //
+    // The pulled layer must outlive the `prove_gkr_round` call but is
+    // dropped immediately after — `pulled_owners` keeps each pulled
+    // layer alive through the iteration that consumes it.  We use a
+    // small per-iteration owner slot (`Option`) rather than a Vec so
+    // the previous round's host materialization is dropped before the
+    // next round allocates.
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         // Sample lambda for this round.
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
-        let layer = match state {
+        // Per-iteration storage for a Device-pulled host layer.  When
+        // the variant is Host, this stays None and we borrow directly
+        // from the circuit; when the variant is Device, the pull hook
+        // returns an owned layer that we wrap into a `GkrCircuitLayer`
+        // and store here so the borrow handed to `prove_gkr_round`
+        // outlives the call.  The owner is dropped at end of scope
+        // (each iteration), releasing the host materialization before
+        // the next round allocates.
+        let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
+            super::layer::LayerState::Host(_) => None,
+            super::layer::LayerState::Device { handle, .. } => {
+                Some(pull_device_layer_to_host::<F, EF>(*handle))
+            }
+        };
+
+        let layer: &super::layer::GkrCircuitLayer<F, EF> = match state {
             super::layer::LayerState::Host(layer) => layer,
-            // TODO (Step 4c): pull the device-resident layer through
-            // the registered `GpuLayerTransitionFn`, materialize it as
-            // a host `GkrCircuitLayer`, and pass it to `prove_gkr_round`
-            // (or, once H2's per-layer device sumcheck is wired up,
-            // route directly to the device prover without round-trip).
-            super::layer::LayerState::Device { .. } => unreachable!(
-                "Step 4b: LayerState::Device is unreachable in \
-                 prove_shard_logup_gkr_rows — only Host is constructed \
-                 today.  Step 4c lands the Device path."
-            ),
+            super::layer::LayerState::Device { .. } => {
+                pulled_owner.as_ref().expect("Device variant always assigns Some above")
+            }
         };
 
         // Run the sumcheck.
@@ -404,6 +430,97 @@ where
     for c in v.as_basis_coefficients_slice() {
         challenger.observe(*c);
     }
+}
+
+/// Step 4d (`/tmp/step4_backend_parametrize_plan.md`) — pull a
+/// device-resident GKR layer back to host for per-round sumcheck
+/// consumption.  Invoked from the round loop's `LayerState::Device`
+/// arm.
+///
+/// Calls the registered [`GpuLayerPullFn`] hook (typed concretely on
+/// `LbChallenge`) and re-interprets the returned
+/// `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` as a
+/// `LogUpGkrCpuLayer<EF, EF>` so it can wrap into the generic
+/// `GkrCircuitLayer<F, EF>::Layer` consumed by `prove_gkr_round`.
+///
+/// # Panics
+///
+/// * When `EF != LbChallenge` — `LayerState::Device` should never
+///   appear under instantiations that don't match the production field
+///   stack (`build_gkr_circuit`'s Gate 4 enforces this), so a Device
+///   entry under a mismatched `EF` is a programmer error.
+/// * When no `GpuLayerPullFn` is registered — same reasoning: the
+///   device path in `build_gkr_circuit` requires all three hooks
+///   (init/transition/pull) to be installed before producing any
+///   Device entries; missing pull at consume-time is a programmer
+///   error.
+/// * Without the `basefold` feature compiled in — there are no GPU
+///   hooks to dispatch through; reaching this code path would imply a
+///   Device entry was somehow constructed despite the `cfg`-gated
+///   `try_run_device_path_basefold` being absent, which is impossible
+///   under the current build matrix.
+#[cfg(feature = "basefold")]
+fn pull_device_layer_to_host<F, EF>(handle: u64) -> super::layer::GkrCircuitLayer<F, EF>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+{
+    use core::any::TypeId;
+
+    use crate::basefold_late_binding::{get_gpu_layer_pull_hook, LbChallenge};
+
+    // TypeId gate (mirrors `try_run_device_path_basefold`'s Gate 4 in
+    // build.rs).  Recursion-circuit / wrap-circuit instantiations use a
+    // different EF; they should never produce Device entries to begin
+    // with — see `build_gkr_circuit`'s Gate 4 — so reaching this branch
+    // under a mismatched EF is a programmer error.
+    assert_eq!(
+        TypeId::of::<EF>(),
+        TypeId::of::<LbChallenge>(),
+        "Step 4d: LayerState::Device encountered under EF != LbChallenge; \
+         build_gkr_circuit's Gate 4 (TypeId match) should have prevented this"
+    );
+
+    let pull_hook = get_gpu_layer_pull_hook().expect(
+        "Step 4d: LayerState::Device encountered with no GpuLayerPullFn registered; \
+         build_gkr_circuit's device-path entry requires all three hooks (init / \
+         transition / pull) to be installed before producing any Device entries",
+    );
+
+    let pulled_lb: super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> =
+        pull_hook(handle);
+
+    // SAFETY: TypeId gate above confirms `EF == LbChallenge` at runtime;
+    // `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` therefore has
+    // identical layout to `LogUpGkrCpuLayer<EF, EF>`.  Mirror the
+    // `transmute_copy` + `forget` pattern from `try_run_device_path_basefold`
+    // (build.rs lines 396-401) to move ownership safely.
+    let pulled_ef: super::layer::LogUpGkrCpuLayer<EF, EF> = unsafe {
+        let out: super::layer::LogUpGkrCpuLayer<EF, EF> =
+            core::mem::transmute_copy(&pulled_lb);
+        core::mem::forget(pulled_lb);
+        out
+    };
+
+    super::layer::GkrCircuitLayer::Layer(pulled_ef)
+}
+
+/// Stub for builds without the `basefold` feature.  `LayerState::Device`
+/// cannot be constructed without the basefold feature (the
+/// `try_run_device_path_basefold` dispatch in `build.rs` is itself
+/// `#[cfg(feature = "basefold")]`-gated), so reaching this branch
+/// indicates an impossible state.
+#[cfg(not(feature = "basefold"))]
+fn pull_device_layer_to_host<F, EF>(_handle: u64) -> super::layer::GkrCircuitLayer<F, EF>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+{
+    unreachable!(
+        "Step 4d: LayerState::Device encountered without `basefold` feature; \
+         the device path in build_gkr_circuit is feature-gated and cannot \
+         produce Device entries here"
+    );
 }
 
 #[cfg(test)]
