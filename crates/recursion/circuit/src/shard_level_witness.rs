@@ -661,24 +661,43 @@ where
 ///   (witnessed as `[Felt<F>; 8]`).
 /// * `column_counts` ← caller-supplied `column_counts_by_round` (verbatim).
 ///
-/// **Phase 4b TODO** (still-placeholder, awaiting cross-context derivation):
-/// * `params.col_prefix_sums` — needs bit-decomposition of
-///   `bundle.packing.offsets` against `max_log_row_count`; currently
-///   zero-felts of the right shape (matches existing lift placeholder).
-/// * `jagged_eval_proof` — Ziren's bundle does not carry the SP1
-///   jagged-eval sub-proof yet (the prover only emits the reduction
-///   sumcheck); placeholder polynomial set to zero coeffs of the
-///   right degree.
-/// * `row_counts` — per-round per-chip Felt-witnessed bit-decomp;
-///   currently zero felts shape-aligned with `column_counts_by_round`.
-///
-/// **NOT a placeholder anymore (Phase 4a follow-up)**:
+/// **NOT placeholders (resolved via Phase 4a/4b commits)**:
 /// * `expected_eval` ← `bundle.reduction.q_at_z` — the verifier's
 ///   closing identity at recursive_jagged_pcs.rs:279 asserts
 ///   `jagged_eval * expected_eval == sumcheck.point_and_eval.1`
 ///   which mirrors the host verifier's terminal
 ///   `q_at_z * w(z) == current_claim` (jagged_sumcheck.rs verify
 ///   path); `q_at_z` is exactly the prover-emitted `expected_eval`.
+/// * `params.col_prefix_sums` ← bundle.packing.offsets walked in
+///   lock-step with column_counts_by_round, with cc[len-2]+1
+///   artificial-zero columns inserted at round boundaries.  Final
+///   entry bit-decodes to bundle.packing.total_values.
+/// * `row_counts` ← `row_counts_by_round` parameter when caller
+///   supplies it (each per-chip count materialized as a single Felt
+///   constant); falls back to zero placeholders when None.
+/// * `position` field on RecursiveBasefoldOpening — informational
+///   only; verifier samples positions from challenger transcript.
+///
+/// **Phase 4b STRUCTURAL TODO** (call-site swap blocked on these):
+/// * `jagged_eval_proof` — Ziren's bundle does not carry the SP1
+///   jagged-eval sub-proof.  The placeholder zero-coefs satisfy the
+///   `real_jagged_evaluator_fn` closure trivially when ALL adjacent
+///   fields are also zero (the existing `lift_evaluation_proof_bytes`
+///   regime) but break under partial-real data (jagged_eval derived
+///   from zeros vs real expected_eval × real sumcheck.point_and_eval.1
+///   fails the closing identity).  To resolve: either (a) port SP1's
+///   stark-side jagged-eval sub-protocol emission so the bundle
+///   carries it, or (b) wire the verifier-side
+///   `placeholder_jagged_evaluator_fn` for the basefold path
+///   (loosens soundness — temporary unblock only).
+/// * Genericity of `BasefoldShardProof<F, EF>` — the wire-format
+///   field `evaluation_proof: Vec<u8>` is generic-friendly but
+///   replacing it with `JaggedBasefoldBundle` (concrete
+///   InnerVal/InnerChallenge) requires either dropping the struct
+///   generics or cfg-gating the field per feature.  All real
+///   instantiations use `<InnerVal, InnerChallenge>` so the
+///   generics aren't load-bearing — recommended fix is dropping
+///   them entirely (struct → concrete).
 ///
 /// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// so downstream callers can swap with no shape change.
