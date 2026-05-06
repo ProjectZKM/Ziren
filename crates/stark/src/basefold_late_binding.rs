@@ -653,6 +653,48 @@ pub fn get_gpu_layer_pull_hook() -> Option<GpuLayerPullFn> {
     GPU_LAYER_PULL_HOOK.get().copied()
 }
 
+/// Signature of the GPU row-GKR per-circuit drain driver.  Releases
+/// every device-resident layer state still held by the GPU registry
+/// for `circuit_id` (typically intermediate layers whose handles were
+/// observed but never explicitly pulled).  Idempotent — calling drain
+/// on a circuit_id whose bucket has already been removed is a no-op.
+///
+/// **Step 4 multi-GPU fix** — `GpuLayerPullFn` only releases the
+/// SINGLE handle it was asked to materialize, so the per-circuit
+/// bucket retains all the OTHER intermediate layer states until the
+/// GPU process exits or the bucket is dropped.  Across 8 concurrent
+/// shards × 8 GPUs that adds up to ~18 layers × per-shard MB → OOM
+/// in the basefold commit Merkle phase.  Wiring the drain hook from
+/// the row-GKR top-level prover (called once after the entire pull
+/// loop completes) bounds peak GPU memory to one shard's per-circuit
+/// state instead of all in-flight shards' per-circuit state.
+///
+/// Hook contract is total — must not fail.  GPU-side errors should
+/// be panicked (mirrors the other layer hooks); silently succeeding
+/// on a missing bucket is fine (idempotent).
+pub type GpuLayerDrainCircuitFn = fn(circuit_id: u64);
+
+static GPU_LAYER_DRAIN_HOOK: std::sync::OnceLock<GpuLayerDrainCircuitFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU row-GKR per-circuit drain driver.  Idempotent;
+/// returns `Err(existing_hook)` when a hook was already registered.
+pub fn register_gpu_layer_drain_circuit_hook(
+    f: GpuLayerDrainCircuitFn,
+) -> Result<(), GpuLayerDrainCircuitFn> {
+    GPU_LAYER_DRAIN_HOOK.set(f)
+}
+
+/// Read the registered GPU row-GKR per-circuit drain hook, if any.
+/// When `None`, callers MUST be tolerant: the GPU side either has
+/// not registered the hook yet (older ziren-gpu builds) or the host
+/// path is in use (no device state to drain).  In both cases the
+/// row-GKR top-level prover should simply skip the drain call.
+#[must_use]
+pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
+    GPU_LAYER_DRAIN_HOOK.get().copied()
+}
+
 /// Process-wide monotonic counter for GKR-circuit IDs.  Each
 /// `build_gkr_circuit` call that takes the device path allocates a
 /// fresh ID via [`allocate_gpu_layer_circuit_id`] and threads it

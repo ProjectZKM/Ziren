@@ -227,6 +227,20 @@ where
     // small per-iteration owner slot (`Option`) rather than a Vec so
     // the previous round's host materialization is dropped before the
     // next round allocates.
+    //
+    // Step 4 multi-GPU OOM fix — capture the device-side `circuit_id`
+    // (unique per `build_gkr_circuit` call) the FIRST time we observe
+    // a `LayerState::Device` entry.  After the entire pull loop
+    // finishes, we explicitly invoke the registered
+    // `GpuLayerDrainCircuitFn` so the GPU side can release every
+    // intermediate state buffer that `pull_hook` left behind (it only
+    // removes the single handle it materialized, by design — see
+    // `gpu_layer_pull_hook` "v5" comment in
+    // `ziren-gpu/basefold/src/layer_transition_dispatch.rs`).  Without
+    // this drain, ~18 layers' worth of per-shard device buffers stay
+    // resident across all 8 concurrent shards × 8 GPUs and OOM the
+    // basefold commit Merkle phase that follows.
+    let mut device_circuit_id_to_drain: Option<u64> = None;
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         // Sample lambda for this round.
         let lambda: EF = challenger.sample_algebra_element::<EF>();
@@ -242,6 +256,21 @@ where
         let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
             super::layer::LayerState::Host(_) => None,
             super::layer::LayerState::Device { circuit_id, handle, .. } => {
+                // Record the per-circuit ID for the post-loop drain.
+                // Every Device entry from the same `build_gkr_circuit`
+                // invocation shares the same circuit_id (allocated
+                // once via `allocate_gpu_layer_circuit_id`), so a
+                // single Option suffices.
+                if device_circuit_id_to_drain.is_none() {
+                    device_circuit_id_to_drain = Some(*circuit_id);
+                } else {
+                    debug_assert_eq!(
+                        device_circuit_id_to_drain,
+                        Some(*circuit_id),
+                        "all Device layers in one build_gkr_circuit call must \
+                         share circuit_id"
+                    );
+                }
                 Some(pull_device_layer_to_host::<F, EF>(*circuit_id, *handle))
             }
         };
@@ -290,6 +319,23 @@ where
         round_proofs.push(round_proof);
     }
     let n_layers = round_proofs.len();
+
+    // Step 4 multi-GPU OOM fix — drain the device-side per-circuit
+    // bucket now that every Device layer in this `build_gkr_circuit`
+    // invocation has been pulled + consumed.  No-op when (a) the host
+    // path was taken (no device state to drain) or (b) the GPU side
+    // has not registered the drain hook yet (older ziren-gpu builds —
+    // pull_hook leaves the bucket lingering, which costs memory but
+    // does not break correctness).  See `GpuLayerDrainCircuitFn`
+    // contract in `crates/stark/src/basefold_late_binding.rs`.
+    if let Some(circuit_id) = device_circuit_id_to_drain {
+        if let Some(drain_hook) =
+            crate::basefold_late_binding::get_gpu_layer_drain_circuit_hook()
+        {
+            drain_hook(circuit_id);
+        }
+    }
+
     drop(_layers_span);
     tracing::info!(
         elapsed_ms = _t_layers.elapsed().as_millis() as u64,
