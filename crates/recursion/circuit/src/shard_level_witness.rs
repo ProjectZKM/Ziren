@@ -291,12 +291,17 @@ where
 
 use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 use zkm_stark::basefold::stacked::StackedBasefoldProof;
+use zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle;
 use zkm_stark::basefold_late_binding::LbMmcs;
 use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
 
 use crate::basefold_verifier::{
     RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
     RecursiveBasefoldRound,
+};
+use crate::jagged_circuit::{
+    JaggedDimensionMetadata, JaggedPcsProofVariable, JaggedSumcheckEvalProof,
+    RecursiveStackedPcsProof,
 };
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::univariate::{interpolate_3point_evals_at_012, UnivariatePolynomial};
@@ -546,6 +551,185 @@ pub fn host_stacked_basefold_to_recursive(
     proof: &StackedBasefoldProof<InnerVal, InnerChallenge, LbMmcs>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
     host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
+}
+
+/// Lift a host-side [`JaggedBasefoldBundle`] into the in-circuit
+/// [`JaggedPcsProofVariable`] shape — the structured replacement for
+/// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
+///
+/// **Phase 4a substance** (real data threaded into the variable):
+/// * `sumcheck_proof` ← [`jagged_reduction_to_partial_sumcheck`] on `bundle.reduction`
+///   (eval-form rounds → coeff-form polys, claimed_sum derived).
+/// * `pcs_proof.batch_evaluations` ← witnessed copy of
+///   `bundle.basefold_proof.batch_evaluations`.
+/// * `pcs_proof.pcs_proof` ← [`host_stacked_basefold_to_recursive`] on
+///   `bundle.basefold_proof` (rounds, openings, scalar fields).
+/// * `original_commitments[0]` ← `bundle.commit.commitment` 1-cap root
+///   (witnessed as `[Felt<F>; 8]`).
+/// * `column_counts` ← caller-supplied `column_counts_by_round` (verbatim).
+///
+/// **Phase 4b TODO** (still-placeholder, awaiting cross-context derivation):
+/// * `params.col_prefix_sums` — needs bit-decomposition of
+///   `bundle.packing.offsets` against `max_log_row_count`; currently
+///   zero-felts of the right shape (matches existing lift placeholder).
+/// * `jagged_eval_proof` — Ziren's bundle does not carry the SP1
+///   jagged-eval sub-proof yet (the prover only emits the reduction
+///   sumcheck); placeholder polynomial set to zero coeffs of the
+///   right degree.
+/// * `row_counts` — per-round per-chip Felt-witnessed bit-decomp;
+///   currently zero felts shape-aligned with `column_counts_by_round`.
+/// * `expected_eval` — derived from `bundle.reduction.q_at_z` *
+///   `Σ y_per_chip` weighted by gamma in the reduction transcript;
+///   currently zero (in-circuit verifier will recompute internally).
+///
+/// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
+/// so downstream callers can swap with no shape change.
+pub fn lift_jagged_basefold_bundle<C>(
+    builder: &mut Builder<C>,
+    bundle: &JaggedBasefoldBundle,
+    max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
+) -> JaggedPcsProofVariable<
+    RecursiveBasefoldProof<C::F, C::EF, 8>,
+    [Felt<C::F>; 8],
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
+    let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
+    let zero_uni_poly =
+        |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
+            UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
+        };
+
+    // ── Padding shape (mirror of jagged_pcs_lift.rs:111-137) ──
+    let total_cols_before_pad: usize = column_counts_by_round
+        .iter()
+        .map(|cc| {
+            let flattened = cc.iter().sum::<usize>();
+            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+            flattened + added
+        })
+        .sum();
+    let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
+    let col_prefix_sums_len = padded_cols + 1;
+    let num_col_variables = padded_cols.trailing_zeros() as usize;
+    let num_rounds = column_counts_by_round.len().max(1);
+
+    // ── REAL: sumcheck_proof from bundle.reduction ──
+    // Convert eval-form rounds to coeff-form polys, then witness via
+    // the existing PartialSumcheckProof Witnessable impl
+    // (basefold_witness.rs:73).
+    let host_sumcheck = jagged_reduction_to_partial_sumcheck(&bundle.reduction);
+    let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> =
+        <_ as Witnessable<C>>::read(&host_sumcheck, builder);
+
+    // ── REAL: basefold proof from bundle.basefold_proof ──
+    // host_stacked_basefold_to_recursive folds the basefold rounds,
+    // commit-phase openings, and component openings into the
+    // RecursiveBasefoldProof shape.  The existing Witnessable impl
+    // on RecursiveBasefoldProof (basefold_witness.rs:443) treats the
+    // EF/F scalar fields as constants (uni_poly, commitment,
+    // final_poly, pow_witness, etc.) and witnesses the component +
+    // query_phase openings.
+    let host_basefold = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
+    let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold, builder);
+
+    // ── REAL: batch_evaluations as Ext (witnessed for stacked layer) ──
+    // The RecursiveStackedPcsProof wrapper keeps batch_evaluations
+    // separately at Ext<F,EF> level (so they can flow through the
+    // sumcheck identity in-circuit), in addition to the constant
+    // copy living inside the RecursiveBasefoldProof itself.
+    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = bundle
+        .basefold_proof
+        .batch_evaluations
+        .iter()
+        .map(|round| {
+            round
+                .iter()
+                .map(|ef| <_ as Witnessable<C>>::read(ef, builder))
+                .collect()
+        })
+        .collect();
+
+    let stacked_pcs_proof = RecursiveStackedPcsProof::<
+        RecursiveBasefoldProof<C::F, C::EF, 8>,
+        C::F,
+        C::EF,
+    > {
+        batch_evaluations: batch_evaluations_ext,
+        pcs_proof: basefold_proof_var,
+    };
+
+    // ── REAL: original_commitments[0] from bundle.commit ──
+    // The committed cap is height-0 (1 root) for the BaseFold
+    // late-binding adapter — see basefold_late_binding.rs.
+    let cap_roots = bundle.commit.commitment.roots();
+    assert_eq!(
+        cap_roots.len(),
+        1,
+        "BasefoldLateBindingCommit cap must have exactly 1 root, got {}",
+        cap_roots.len(),
+    );
+    let first_commit_digest: [Felt<C::F>; 8] =
+        core::array::from_fn(|i| <_ as Witnessable<C>>::read(&cap_roots[0][i], builder));
+    // For multi-round (jagged with rotating commits) the bundle
+    // would have one cap per round.  Currently Ziren commits the
+    // jagged-PCS to one batched cap, so subsequent round slots get
+    // zero-felt placeholders to match the verifier's
+    // num_rounds-shape expectation.
+    let mut original_commitments: Vec<[Felt<C::F>; 8]> = Vec::with_capacity(num_rounds);
+    original_commitments.push(first_commit_digest);
+    for _ in 1..num_rounds {
+        original_commitments.push(core::array::from_fn(|_| zero_felt(builder)));
+    }
+
+    // ── PLACEHOLDER (Phase 4b): jagged_eval_proof + params + row_counts ──
+    //
+    // jagged_eval_proof: the sub-protocol proof.  Ziren's bundle
+    // does not carry this — the prover only emits the outer
+    // reduction sumcheck.  Until SP1's full eval-sub-protocol is
+    // ported, keep a degree-1 zero placeholder of the right shape.
+    let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
+        partial_sumcheck_proof: PartialSumcheckProof {
+            univariate_polys: (0..num_col_variables)
+                .map(|_| zero_uni_poly(builder, 1))
+                .collect(),
+            claimed_sum: zero_ext(builder),
+            point_and_eval: (
+                (0..num_col_variables).map(|_| zero_ext(builder)).collect(),
+                zero_ext(builder),
+            ),
+        },
+    };
+
+    let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
+        col_prefix_sums: (0..col_prefix_sums_len)
+            .map(|_| (0..max_log_row_count + 1).map(|_| zero_felt(builder)).collect())
+            .collect(),
+    };
+
+    let row_counts: Vec<Vec<Felt<C::F>>> = column_counts_by_round
+        .iter()
+        .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
+        .collect();
+
+    // ── Top-level assembly ──
+    JaggedPcsProofVariable {
+        params: jagged_dim_metadata,
+        sumcheck_proof,
+        jagged_eval_proof,
+        pcs_proof: stacked_pcs_proof,
+        column_counts: column_counts_by_round.to_vec(),
+        row_counts,
+        original_commitments,
+        expected_eval: zero_ext(builder),
+    }
 }
 
 /// Convert a host-side eval-form jagged sumcheck proof into the
@@ -892,5 +1076,64 @@ mod tests {
         };
         let recur = host_basefold_proof_to_recursive(&proof, vec![]);
         let _var = <_ as Witnessable<C>>::read(&recur, &mut builder);
+    }
+
+    /// #241 Phase 4a: bundle lift produces a structurally valid
+    /// JaggedPcsProofVariable with shape matching the existing
+    /// lift_evaluation_proof_bytes placeholder for empty bundles.
+    #[test]
+    fn lift_jagged_basefold_bundle_smoke() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_symmetric::MerkleCap;
+        use zkm_stark::basefold_late_binding::jagged::PackingMeta;
+        use zkm_stark::basefold_late_binding::BasefoldLateBindingCommit;
+
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        // Minimal-but-valid bundle: one reduction round, empty
+        // basefold proof, single-cap commit.
+        let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
+        let bundle = JaggedBasefoldBundle {
+            reduction: JaggedReductionProof::<InnerChallenge> {
+                rounds: vec![JaggedReductionRound {
+                    evals: [InnerChallenge::ZERO; 3],
+                }],
+                eval_point: vec![InnerChallenge::ZERO],
+                q_at_z: InnerChallenge::ZERO,
+            },
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+                basefold_proof: BasefoldProof {
+                    univariate_messages: vec![],
+                    fri_commitments: vec![],
+                    component_polynomials_query_openings_and_proofs: vec![],
+                    query_phase_openings_and_proofs: vec![],
+                    final_poly: InnerChallenge::ZERO,
+                    pow_witness: InnerVal::ZERO,
+                    batch_grinding_witness: InnerVal::ZERO,
+                },
+                batch_evaluations: vec![],
+            },
+            y_per_chip: vec![],
+            commit: BasefoldLateBindingCommit {
+                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+                chip_dims: vec![],
+                area: 0,
+                log_stacking_height: 0,
+            },
+            packing: PackingMeta {
+                offsets: vec![],
+                total_values: 0,
+                log_dense_size: 0,
+                column_counts: vec![],
+            },
+        };
+        let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
+        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 21, &cols);
+        // column_counts pass through verbatim.
+        assert_eq!(var.column_counts, cols);
+        // num_rounds == 2 → 2 commitment slots, first from bundle,
+        // rest zero placeholders.
+        assert_eq!(var.original_commitments.len(), 2);
+        // sumcheck_proof has one univariate poly (one reduction round).
+        assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
     }
 }
