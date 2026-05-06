@@ -631,7 +631,7 @@ where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
-        lift_jagged_basefold_bundle(builder, &bundle, max_log_row_count, column_counts_by_round)
+        lift_jagged_basefold_bundle(builder, &bundle, max_log_row_count, column_counts_by_round, None)
     } else {
         // Empty / malformed bytes — fall back to the all-zero
         // placeholder (preserves shape compatibility with scaffolding
@@ -687,6 +687,7 @@ pub fn lift_jagged_basefold_bundle<C>(
     bundle: &JaggedBasefoldBundle,
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
+    row_counts_by_round: Option<&[Vec<usize>]>,
 ) -> JaggedPcsProofVariable<
     RecursiveBasefoldProof<C::F, C::EF, 8>,
     [Felt<C::F>; 8],
@@ -806,63 +807,116 @@ where
         },
     };
 
-    // ── PARTIAL-REAL: col_prefix_sums from bundle.packing.offsets ──
-    // The verifier asserts col_prefix_sums.last() bit-decodes to the
-    // total dense area (recursive_jagged_pcs.rs:262-272).  Real
-    // entries [0..bundle.packing.offsets.len()] come from
-    // bundle.packing.offsets (cumulative dense offsets).  Remaining
-    // padded slots fill with zero-decompositions until Phase 4b
-    // figures out the artificial-zero column insertion at round
-    // boundaries.
+    // ── REAL: col_prefix_sums with artificial-zero insertion ──
+    // Walks column_counts_by_round + bundle.packing.offsets in
+    // lock-step, emitting per-real-column bit-decompositions and
+    // per-round artificial-zero columns (the cc[len-2]+1 padding
+    // rule the host prover applies for stripe alignment — see
+    // jagged_pcs_lift.rs:111-118 for the formula derivation).
     //
-    // NOTE: For non-empty bundles this gives BETTER-but-not-COMPLETE
-    // data — the artificial zero insertions for jagged padding are
-    // still missing.  Empty bundles produce all-zero decompositions
-    // which match the prior placeholder byte-for-byte.
+    // Artificial columns have zero width, so their cumulative offset
+    // equals the previous column's offset (no advance).  This makes
+    // col_prefix_sums monotonic non-decreasing and ensures the final
+    // entry bit-decodes to bundle.packing.total_values.
+    //
+    // For empty bundles all decompositions reduce to zero-felts,
+    // preserving byte-for-byte compat with the prior placeholder.
     let bits_per_entry = max_log_row_count + 1;
     let total_values = bundle.packing.total_values;
+    let cap_to_bits = |v: usize| -> usize {
+        if bits_per_entry < usize::BITS as usize {
+            v.min((1usize << bits_per_entry) - 1)
+        } else {
+            v
+        }
+    };
     let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
     // [0] = 0 (always)
     col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
-    // [1..len(offsets)+1] = bit-decomp of bundle.packing.offsets[k-1]
-    for &offset in bundle.packing.offsets.iter() {
-        if col_prefix_sums.len() >= col_prefix_sums_len {
-            break;
+    let mut offset_idx: usize = 0;
+    let mut current_offset: usize = 0;
+    for cc in column_counts_by_round.iter() {
+        // Real columns: per-column advance via bundle.packing.offsets.
+        let real_in_round = cc.iter().sum::<usize>();
+        for _ in 0..real_in_round {
+            if offset_idx < bundle.packing.offsets.len() {
+                current_offset = bundle.packing.offsets[offset_idx];
+                offset_idx += 1;
+            }
+            if col_prefix_sums.len() >= col_prefix_sums_len {
+                break;
+            }
+            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+                builder,
+                cap_to_bits(current_offset),
+                bits_per_entry,
+            ));
         }
-        // Defensively cap value at (1 << bits_per_entry) - 1 so the
-        // decomposition helper doesn't panic on oversized offsets
-        // (very large dense areas approaching 2^max_log_row_count).
-        let safe = if bits_per_entry < usize::BITS as usize {
-            offset.min((1usize << bits_per_entry) - 1)
-        } else {
-            offset
-        };
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, safe, bits_per_entry));
+        // Artificial-zero columns: cc[len-2]+1 if cc has >=2 chips,
+        // else 1 (degenerate single-chip round).  They share the
+        // current_offset (no advance).
+        let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+        for _ in 0..added {
+            if col_prefix_sums.len() >= col_prefix_sums_len {
+                break;
+            }
+            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+                builder,
+                cap_to_bits(current_offset),
+                bits_per_entry,
+            ));
+        }
     }
-    // Final entry should bit-decode to total_values; pad-fill earlier
-    // entries with zeros if we ran short.
+    // Pad to padded_cols (skip last slot — that one's reserved for
+    // total_values).  Padding columns also have zero advance.
     while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+            builder,
+            cap_to_bits(current_offset),
+            bits_per_entry,
+        ));
     }
+    // Final slot = bit-decomp of total_values.  This is what the
+    // verifier's final_area Horner-decode at
+    // recursive_jagged_pcs.rs:262-272 asserts equals the
+    // accumulated row-count sum.
     if col_prefix_sums.len() < col_prefix_sums_len {
-        let safe_total = if bits_per_entry < usize::BITS as usize {
-            total_values.min((1usize << bits_per_entry) - 1)
-        } else {
-            total_values
-        };
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, safe_total, bits_per_entry));
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+            builder,
+            cap_to_bits(total_values),
+            bits_per_entry,
+        ));
     }
     let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
         col_prefix_sums,
     };
 
-    // row_counts remain placeholder zeros — caller-plumbed per-chip
-    // row counts are Phase 4b proper (caller has chip-shape registry
-    // access; bundle alone doesn't carry per-chip row_count).
-    let row_counts: Vec<Vec<Felt<C::F>>> = column_counts_by_round
-        .iter()
-        .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
-        .collect();
+    // ── REAL (when caller-plumbed): row_counts from row_counts_by_round ──
+    // Bundle alone lacks per-chip row counts; caller passes them via
+    // row_counts_by_round (parallel to column_counts_by_round).  When
+    // None, falls back to the zero placeholder for backward compat
+    // with scaffolding tests + early adopters.
+    // The verifier reads row_counts[round][chip] as a SINGLE Felt
+    // representing the chip's row count (recursive_jagged_pcs.rs:248-260
+    // dereferences row as a Felt and repeats it `col` times).  Since
+    // max_log_row_count is well within KoalaBear's 31-bit range, the
+    // raw count fits in a single Felt constant.
+    let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(row_counts_src) = row_counts_by_round {
+        row_counts_src
+            .iter()
+            .map(|round| {
+                round
+                    .iter()
+                    .map(|&rc| builder.constant(C::F::from_u64(rc as u64)))
+                    .collect()
+            })
+            .collect()
+    } else {
+        column_counts_by_round
+            .iter()
+            .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
+            .collect()
+    };
 
     // ── REAL: expected_eval from bundle.reduction.q_at_z ──
     // The in-circuit verifier's closing identity
@@ -1347,6 +1401,62 @@ mod tests {
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
     }
 
+    /// #241 Phase 4b: row_counts_by_round plumbed through produces
+    /// non-zero row_counts in the variable (one Felt per chip).
+    #[test]
+    fn lift_jagged_basefold_bundle_with_row_counts() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_symmetric::MerkleCap;
+        use zkm_stark::basefold_late_binding::jagged::PackingMeta;
+        use zkm_stark::basefold_late_binding::BasefoldLateBindingCommit;
+
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
+        let bundle = JaggedBasefoldBundle {
+            reduction: JaggedReductionProof::<InnerChallenge> {
+                rounds: vec![JaggedReductionRound {
+                    evals: [InnerChallenge::ZERO; 3],
+                }],
+                eval_point: vec![InnerChallenge::ZERO],
+                q_at_z: InnerChallenge::ZERO,
+            },
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+                basefold_proof: BasefoldProof {
+                    univariate_messages: vec![],
+                    fri_commitments: vec![],
+                    component_polynomials_query_openings_and_proofs: vec![],
+                    query_phase_openings_and_proofs: vec![],
+                    final_poly: InnerChallenge::ZERO,
+                    pow_witness: InnerVal::ZERO,
+                    batch_grinding_witness: InnerVal::ZERO,
+                },
+                batch_evaluations: vec![],
+            },
+            y_per_chip: vec![],
+            commit: BasefoldLateBindingCommit {
+                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+                chip_dims: vec![],
+                area: 0,
+                log_stacking_height: 0,
+            },
+            packing: PackingMeta {
+                offsets: vec![0, 16, 32],
+                total_values: 64,
+                log_dense_size: 6,
+                column_counts: vec![1, 1, 1],
+            },
+        };
+        let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
+        let rows: Vec<Vec<usize>> = vec![vec![16, 16, 16]];
+        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 8, &cols, Some(&rows));
+        assert_eq!(var.row_counts.len(), 1);
+        assert_eq!(var.row_counts[0].len(), 3);
+        // col_prefix_sums has padded_cols+1 entries.  With cc=[1,1,1]
+        // total_real=3, added=cc[len-2]+1=1+1=2, so per round 3+2=5
+        // total before pad → next_power_of_two = 8 → col_prefix_sums.len = 9.
+        assert_eq!(var.params.col_prefix_sums.len(), 9);
+    }
+
     /// #241 Phase 4a: bundle lift produces a structurally valid
     /// JaggedPcsProofVariable with shape matching the existing
     /// lift_evaluation_proof_bytes placeholder for empty bundles.
@@ -1396,7 +1506,7 @@ mod tests {
             },
         };
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 21, &cols);
+        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 21, &cols, None);
         // column_counts pass through verbatim.
         assert_eq!(var.column_counts, cols);
         // num_rounds == 2 → 2 commitment slots, first from bundle,
