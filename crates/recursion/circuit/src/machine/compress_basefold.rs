@@ -419,7 +419,35 @@ pub fn verify_compress_basefold<C, SC, A>(
         // type inside BasefoldShardVerifier) has a Pcs::Domain
         // associated type that the inferencer can't pin down
         // from the call alone.
-        _basefold_shard_verifier
+        // #244 + #249 fix: when bundle path is active and bundle is
+        // Some, rebuild verifier with the bundle's clamped
+        // `log_stacking_height` AND the actual num_variables (=
+        // bundle.basefold_proof.fri_commitments.len()).  Mirrors the
+        // already-landed pattern in `core_basefold.rs:418-434`; was
+        // missing here so multi-shard compress with bundle lift on
+        // hit `basefold_verifier.rs:779` (`rounds.len() != num_variables`)
+        // when small shards triggered `pick_log_stacking_height` clamping.
+        let per_proof_verifier;
+        let active_verifier =
+            if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
+                if let Some(bundle) = evaluation_proof_bundle_opt.as_ref() {
+                    let bundle_num_vars =
+                        bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                    per_proof_verifier =
+                        crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars(
+                            max_log_row_count,
+                            bundle.commit.log_stacking_height,
+                            bundle_num_vars,
+                        );
+                    &per_proof_verifier
+                } else {
+                    &_basefold_shard_verifier
+                }
+            } else {
+                &_basefold_shard_verifier
+            };
+
+        active_verifier
             .verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(
                 builder,
                 &_basefold_vk,
