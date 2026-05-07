@@ -140,6 +140,34 @@ impl<P> RecursiveStackedPcsVerifier<P> {
                 padded_point.push(builder.constant(C::EF::ZERO));
             }
         }
+        // #249 SP1-port (verifier side): mirror the prover's eval_point
+        // extension in `crates/stark/src/basefold_late_binding.rs`
+        // step (5) of `prove_jagged_basefold`.  The prover sampled
+        // additional Fiat-Shamir coords to extend the sumcheck output
+        // from log_dense_size to log2(commit_area).  Sample matching
+        // coords in the same transcript order so the in-circuit verifier
+        // sees the same extended point.
+        //
+        // Inferred target dim: the proof's batch_evaluations are flat
+        // 2^batch_dim entries; batch_dim = log2(batch_evals_flat.len()).
+        // Combined with the known stack_dim, the target total dim is
+        // stack_dim + log2(batch_evals_flat.len().next_power_of_two()).
+        let proof_batch_evals_count: usize = proof
+            .batch_evaluations
+            .iter()
+            .map(|r| r.len())
+            .sum();
+        let needed_batch_dim = if proof_batch_evals_count <= 1 {
+            0
+        } else {
+            proof_batch_evals_count
+                .next_power_of_two()
+                .trailing_zeros() as usize
+        };
+        let needed_total_dim = stack_dim + needed_batch_dim;
+        while padded_point.len() < needed_total_dim {
+            padded_point.push(challenger.sample_ext(builder));
+        }
         let total_dim = padded_point.len();
         let batch_dim = total_dim - stack_dim;
         // #249: align with Ziren prover convention.  The prover at

@@ -20,7 +20,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use p3_challenger::CanObserve;
+use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::Radix2DitParallel;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
@@ -911,7 +911,7 @@ pub fn verify_basefold_late_binding(
 pub mod jagged {
     use alloc::vec::Vec;
 
-    use p3_challenger::CanObserve;
+    use p3_challenger::{CanObserve, FieldChallenger};
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -1247,13 +1247,32 @@ pub mod jagged {
         );
 
         // (5) Open the BaseFold commit at z*.
-        // The reduction's eval_point matches the BaseFold eval point
-        // dimension (= log_dense_size) by construction.
+        //
+        // #249 SP1-port: the jagged sumcheck reduces over `dense_q`
+        // which has 2^log_dense_size cells.  But the BaseFold
+        // commitment covers `prover_data.area` cells (= num_stripes ×
+        // batch_size × stack_height after interleaving), which can be
+        // strictly larger than 2^log_dense_size when the dense data
+        // doesn't fill the next stripe-multiple.  The BaseFold open
+        // requires a point of dimension log2(area), not
+        // log_dense_size.
+        //
+        // Mirrors SP1's `slop_stacked::StackedPcsProver::prove_trusted_evaluation`
+        // contract: `eval_point.dimension() == log2(total_data_length)`.
+        // Sample additional Fiat-Shamir coords to extend the point;
+        // the verifier samples matching coords in the same transcript
+        // order (recursive_jagged_pcs.rs after `verify_sumcheck`).
+        let target_dim = prover_data.area.trailing_zeros() as usize;
+        let mut extended_eval_point = reduction.eval_point.clone();
+        while extended_eval_point.len() < target_dim {
+            let r: InnerChallenge = challenger.sample_algebra_element();
+            extended_eval_point.push(r);
+        }
         let _t_open = std::time::Instant::now();
         let _open_span = tracing::info_span!("jagged_basefold_open").entered();
         let proof = open_basefold_late_binding(
             prover_data,
-            reduction.eval_point.clone(),
+            extended_eval_point,
             challenger,
         );
         drop(_open_span);
@@ -1341,12 +1360,25 @@ pub mod jagged {
             return false;
         };
 
-        // Verify the BaseFold opening: claim is q_at_z, point is z*.
+        // #249 SP1-port: extend z_star from log_dense_size to log2(area)
+        // by sampling additional Fiat-Shamir coords, mirroring the
+        // prover's extension in `prove_jagged_basefold` step (5).
+        // Both sides sample from the same transcript state at the same
+        // point in the protocol so the coords match.
+        let target_dim = bundle.commit.area.trailing_zeros() as usize;
+        let mut extended_z_star = z_star;
+        while extended_z_star.len() < target_dim {
+            let r: InnerChallenge = challenger.sample_algebra_element();
+            extended_z_star.push(r);
+        }
+
+        // Verify the BaseFold opening: claim is q_at_z, point is the
+        // extended z*.
         let res = verify_basefold_late_binding(
             &bundle.commit.commitment,
             bundle.commit.area,
             bundle.commit.log_stacking_height,
-            &z_star,
+            &extended_z_star,
             q_at_z,
             &bundle.basefold_proof,
             challenger,
