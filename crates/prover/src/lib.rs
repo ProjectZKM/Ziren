@@ -423,17 +423,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// analog of [`Self::compress_program`].
     ///
     /// SP1-style per-arity cache (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`):
-    /// when `ZIREN_PROGRAM_CACHE=1`, the program is built once per arity and
-    /// reused. With `ZIREN_VERIFY_PROGRAM_CACHE=1`, every cache hit rebuilds
-    /// and asserts bincode byte-equality — catches the failure mode where
-    /// real input shapes vary across calls of the same arity.
+    /// the program is built once per arity and reused. Default ON; set
+    /// `ZIREN_PROGRAM_CACHE=0` to disable for ablation. With
+    /// `ZIREN_VERIFY_PROGRAM_CACHE=1`, every cache hit rebuilds and asserts
+    /// bincode byte-equality — catches the failure mode where real input
+    /// shapes vary across calls of the same arity (validated clean on
+    /// tendermint+geth post-#255 lift normalization).
     pub fn compose_program_basefold(
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let cache_enabled = std::env::var("ZIREN_PROGRAM_CACHE")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+            .map(|v| v != "0")
+            .unwrap_or(true);
         let verify_cache = std::env::var("ZIREN_VERIFY_PROGRAM_CACHE")
             .map(|v| v == "1")
             .unwrap_or(false);
