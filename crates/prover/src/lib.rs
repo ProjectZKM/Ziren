@@ -188,6 +188,20 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 
     /// Whether to verify verification keys.
     pub vk_verification: bool,
+
+    /// Per-arity cache for the basefold compose recursion program.
+    ///
+    /// Mirrors SP1's pattern (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`,
+    /// `compose_programs: BTreeMap<usize, Arc<RecursionProgram>>`): the compose
+    /// program's structure is determined by arity (count of input proofs)
+    /// once per-input shapes are stable, so one program per arity suffices.
+    ///
+    /// Opt-in via `ZIREN_PROGRAM_CACHE=1`. With `ZIREN_VERIFY_PROGRAM_CACHE=1`
+    /// every cache hit rebuilds and asserts byte-equality (bincode) — catches
+    /// the failure mode where real input shapes vary across calls of the
+    /// same arity, which would mean caching the wrong program.
+    pub compose_programs_basefold_cache:
+        Mutex<BTreeMap<usize, Arc<RecursionProgram<KoalaBear>>>>,
 }
 
 impl<C: ZKMProverComponents> ZKMProver<C> {
@@ -270,6 +284,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
+            compose_programs_basefold_cache: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -388,7 +403,62 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Build the Compose (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::compress_program`].
+    ///
+    /// SP1-style per-arity cache (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`):
+    /// when `ZIREN_PROGRAM_CACHE=1`, the program is built once per arity and
+    /// reused. With `ZIREN_VERIFY_PROGRAM_CACHE=1`, every cache hit rebuilds
+    /// and asserts bincode byte-equality — catches the failure mode where
+    /// real input shapes vary across calls of the same arity.
     pub fn compose_program_basefold(
+        &self,
+        input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
+        let cache_enabled = std::env::var("ZIREN_PROGRAM_CACHE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let verify_cache = std::env::var("ZIREN_VERIFY_PROGRAM_CACHE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let arity = input.vks_and_proofs.len();
+
+        if cache_enabled || verify_cache {
+            let cached = {
+                let guard = self.compose_programs_basefold_cache.lock().unwrap();
+                guard.get(&arity).cloned()
+            };
+            if let Some(cached) = cached {
+                if verify_cache {
+                    let fresh = self.build_compose_program_basefold_uncached(input);
+                    let cached_bytes = bincode::serialize(&*cached)
+                        .expect("compose program cache: serialize cached");
+                    let fresh_bytes = bincode::serialize(&*fresh)
+                        .expect("compose program cache: serialize fresh");
+                    assert_eq!(
+                        cached_bytes, fresh_bytes,
+                        "compose program cache divergence at arity={arity}: \
+                         real input shapes vary across calls of the same arity \
+                         — SP1's per-arity cache is unsafe; revert ZIREN_PROGRAM_CACHE",
+                    );
+                }
+                return cached;
+            }
+        }
+
+        let program = self.build_compose_program_basefold_uncached(input);
+
+        if cache_enabled || verify_cache {
+            let mut guard = self.compose_programs_basefold_cache.lock().unwrap();
+            // Use entry API so a concurrent inserter doesn't get clobbered.
+            return Arc::clone(guard.entry(arity).or_insert(program));
+        }
+
+        program
+    }
+
+    /// Uncached body of [`Self::compose_program_basefold`] — exposed so the
+    /// cache wrapper can rebuild on `ZIREN_VERIFY_PROGRAM_CACHE=1` to
+    /// assert byte-equality.
+    fn build_compose_program_basefold_uncached(
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
