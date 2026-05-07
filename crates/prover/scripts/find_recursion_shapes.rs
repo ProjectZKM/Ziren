@@ -40,7 +40,6 @@ fn main() {
 
     // Set whether to verify verification keys.
     prover.vk_verification = !args.dummy;
-    prover.join_programs_map.clear();
 
     // Get the default compress shape configuration.
     let compress_shape_config =

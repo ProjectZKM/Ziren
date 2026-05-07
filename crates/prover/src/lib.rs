@@ -133,6 +133,13 @@ const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
 
 const CORE_CACHE_SIZE: usize = 5;
+/// Tree-reduce arity for the compress stage. SP1 uses 4
+/// (`DEFAULT_ARITY`). Ziren's tree-reduce worker
+/// (`generate next layer inputs`) currently waits for
+/// `batch.len() == batch_size` before emitting, which deadlocks at
+/// the final layer when the leftover count is < batch_size. Bumping
+/// past 2 requires porting SP1's CompressTree drain semantics.
+/// Tracked in #104 follow-up.
 pub const REDUCE_BATCH_SIZE: usize = 2;
 
 // TODO: FIX
@@ -161,18 +168,6 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The machine used for proving the wrapping step.
     pub wrap_prover: C::WrapProver,
 
-    /// The cache of compiled recursion programs.
-    pub lift_programs_lru: Mutex<LruCache<ZKMRecursionShape, Arc<RecursionProgram<KoalaBear>>>>,
-
-    /// The number of cache misses for recursion programs.
-    pub lift_cache_misses: AtomicUsize,
-
-    /// The cache of compiled compression programs.
-    pub join_programs_map: BTreeMap<ZKMCompressWithVkeyShape, Arc<RecursionProgram<KoalaBear>>>,
-
-    /// The number of cache misses for compression programs.
-    pub join_cache_misses: AtomicUsize,
-
     /// The root of the allowed recursion verification keys.
     pub recursion_vk_root: <InnerSC as FieldHasher<KoalaBear>>::Digest,
 
@@ -187,9 +182,6 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 
     /// The recursion shape configuration.
     pub compress_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
-
-    /// The program for wrapping.
-    pub wrap_program: OnceLock<Arc<RecursionProgram<KoalaBear>>>,
 
     /// The verifying key for wrapping.
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
@@ -259,63 +251,24 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let (root, merkle_tree) = MerkleTree::commit(allowed_vk_map.keys().copied().collect());
 
-        // Skip upfront compress-program construction when running under
-        // ZIREN_USE_BASEFOLD=1 — the basefold compress path uses
-        // `recursion_program_basefold` / `compose_program_basefold` /
-        // `deferred_program_basefold` (built lazily per-input from
-        // `recursion_program_basefold` etc.), not these
-        // `compress_program_from_input`-derived programs.  Building the
-        // 16 (= 4 shapes ^ REDUCE_BATCH_SIZE=2) compress programs
-        // upfront with `vk_verification=true` takes >5 minutes per
-        // program (Merkle-proof verification adds heavy hint code), so
-        // skipping them shaves >80 minutes off startup.  Legacy FRI
-        // path (ZIREN_USE_BASEFOLD=0) still pre-builds them.
-        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
-        let basefold_path = std::env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
-            .unwrap_or(true);
-        let mut compress_programs = BTreeMap::new();
-        if !basefold_path {
-            if let Some(config) = &recursion_shape_config {
-                ZKMProofShape::generate_compress_shapes(config, REDUCE_BATCH_SIZE).for_each(
-                    |shape| {
-                        let compress_shape = ZKMCompressWithVkeyShape {
-                            compress_shape: shape.into(),
-                            merkle_tree_height: merkle_tree.height,
-                        };
-                        let input = ZKMCompressWithVKeyWitnessValues::dummy(
-                            compress_prover.machine(),
-                            &compress_shape,
-                        );
-                        let program = compress_program_from_input::<C>(
-                            recursion_shape_config.as_ref(),
-                            &compress_prover,
-                            vk_verification,
-                            &input,
-                        );
-                        let program = Arc::new(program);
-                        compress_programs.insert(compress_shape, program);
-                    },
-                );
-            }
-        }
+        // Legacy FRI compress-program registry removed (May 2026): the
+        // basefold path is now the only path. Compose / deferred / shrink
+        // / wrap programs are all built lazily per witness via the
+        // `*_basefold` builders. The upfront FRI build was 4 ^ REDUCE_BATCH_SIZE
+        // programs (256 at arity-4) at >5 min/program with vk_verification.
+        let _ = core_cache_size;
 
         Self {
             core_prover,
             compress_prover,
             shrink_prover,
             wrap_prover,
-            lift_programs_lru: Mutex::new(LruCache::new(core_cache_size)),
-            lift_cache_misses: AtomicUsize::new(0),
-            join_programs_map: compress_programs,
-            join_cache_misses: AtomicUsize::new(0),
             recursion_vk_root: root,
             recursion_vk_tree: merkle_tree,
             recursion_vk_map: allowed_vk_map,
             core_shape_config,
             compress_shape_config: recursion_shape_config,
             vk_verification,
-            wrap_program: OnceLock::new(),
             wrap_vk: OnceLock::new(),
         }
     }
@@ -405,172 +358,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             public_values,
             cycles,
         })
-    }
-
-    pub fn recursion_program(
-        &self,
-        input: &ZKMRecursionWitnessValues<CoreSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        let mut cache = self.lift_programs_lru.lock().unwrap_or_else(|e| e.into_inner());
-        cache
-            .get_or_insert(input.shape(), || {
-                let misses = self.lift_cache_misses.fetch_add(1, Ordering::Relaxed);
-                tracing::debug!("core cache miss, misses: {}", misses);
-                // Get the operations.
-                let builder_span = tracing::debug_span!("build recursion program").entered();
-                let mut builder = Builder::<InnerConfig>::default();
-
-                let input = input.read(&mut builder);
-                ZKMRecursiveVerifier::verify(&mut builder, self.core_prover.machine(), input);
-                let operations = builder.into_operations();
-                builder_span.exit();
-
-                // Compile the program.
-                let compiler_span = tracing::debug_span!("compile recursion program").entered();
-                let mut compiler = AsmCompiler::<InnerConfig>::default();
-                let mut program = compiler.compile(operations);
-                if let Some(recursion_shape_config) = &self.compress_shape_config {
-                    recursion_shape_config.fix_shape(&mut program);
-                }
-                let program = Arc::new(program);
-                compiler_span.exit();
-                program
-            })
-            .clone()
-    }
-
-    pub fn compress_program(
-        &self,
-        input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        self.join_programs_map.get(&input.shape()).cloned().unwrap_or_else(|| {
-            tracing::warn!("compress program not found in map, recomputing join program.");
-            // Get the operations.
-            Arc::new(compress_program_from_input::<C>(
-                self.compress_shape_config.as_ref(),
-                &self.compress_prover,
-                self.vk_verification,
-                input,
-            ))
-        })
-    }
-
-    pub fn shrink_program(
-        &self,
-        shrink_shape: RecursionShape,
-        input: &ZKMCompressWithVKeyWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        // Get the operations.
-        let builder_span = tracing::debug_span!("build shrink program").entered();
-        let mut builder = Builder::<InnerConfig>::default();
-        let input = input.read(&mut builder);
-        // Verify the proof.
-        ZKMCompressRootVerifierWithVKey::verify(
-            &mut builder,
-            self.compress_prover.machine(),
-            input,
-            self.vk_verification,
-            PublicValuesOutputDigest::Reduce,
-        );
-        let operations = builder.into_operations();
-        builder_span.exit();
-
-        // Compile the program.
-        let compiler_span = tracing::debug_span!("compile shrink program").entered();
-        let mut compiler = AsmCompiler::<InnerConfig>::default();
-        let mut program = compiler.compile(operations);
-        *program.shape_mut() = Some(shrink_shape);
-        let program = Arc::new(program);
-        compiler_span.exit();
-        program
-    }
-
-    pub fn wrap_program(&self) -> Arc<RecursionProgram<KoalaBear>> {
-        self.wrap_program
-            .get_or_init(|| {
-                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
-                    eprintln!("[wrap-marker] WRAP PROGRAM COMPILE BEGIN");
-                }
-                // Get the operations.
-                let builder_span = tracing::debug_span!("build compress program").entered();
-                let mut builder = Builder::<WrapConfig>::default();
-
-                let shrink_shape: OrderedShape = ShrinkAir::<KoalaBear>::shrink_shape().into();
-                let input_shape = ZKMCompressShape::from(vec![shrink_shape]);
-                let shape = ZKMCompressWithVkeyShape {
-                    compress_shape: input_shape,
-                    merkle_tree_height: self.recursion_vk_tree.height,
-                };
-                let dummy_input =
-                    ZKMCompressWithVKeyWitnessValues::dummy(self.shrink_prover.machine(), &shape);
-
-                let input = dummy_input.read(&mut builder);
-
-                // Attest that the merkle tree root is correct.
-                let root = input.merkle_var.root;
-                for (val, expected) in root.iter().zip(self.recursion_vk_root.iter()) {
-                    builder.assert_felt_eq(*val, *expected);
-                }
-                // Verify the proof.
-                ZKMCompressRootVerifierWithVKey::verify(
-                    &mut builder,
-                    self.shrink_prover.machine(),
-                    input,
-                    self.vk_verification,
-                    PublicValuesOutputDigest::Root,
-                );
-
-                let operations = builder.into_operations();
-                builder_span.exit();
-
-                // Compile the program.
-                let compiler_span = tracing::debug_span!("compile compress program").entered();
-                let mut compiler = AsmCompiler::<WrapConfig>::default();
-                let program = Arc::new(compiler.compile(operations));
-                compiler_span.exit();
-                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
-                    eprintln!("[wrap-marker] WRAP PROGRAM COMPILE END");
-                }
-                program
-            })
-            .clone()
-    }
-
-    pub fn deferred_program(
-        &self,
-        input: &ZKMDeferredWitnessValues<InnerSC>,
-    ) -> Arc<RecursionProgram<KoalaBear>> {
-        // Compile the program.
-
-        // Get the operations.
-        let operations_span =
-            tracing::debug_span!("get operations for the deferred program").entered();
-        let mut builder = Builder::<InnerConfig>::default();
-        let input_read_span = tracing::debug_span!("Read input values").entered();
-        let input = input.read(&mut builder);
-        input_read_span.exit();
-        let verify_span = tracing::debug_span!("Verify deferred program").entered();
-
-        // Verify the proof.
-        ZKMDeferredVerifier::verify(
-            &mut builder,
-            self.compress_prover.machine(),
-            input,
-            self.vk_verification,
-        );
-        verify_span.exit();
-        let operations = builder.into_operations();
-        operations_span.exit();
-
-        let compiler_span = tracing::debug_span!("compile deferred program").entered();
-        let mut compiler = AsmCompiler::<InnerConfig>::default();
-        let mut program = compiler.compile(operations);
-        if let Some(recursion_shape_config) = &self.compress_shape_config {
-            recursion_shape_config.fix_shape(&mut program);
-        }
-        let program = Arc::new(program);
-        compiler_span.exit();
-        program
     }
 
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
@@ -983,7 +770,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let num_first_layer_inputs = first_layer_inputs.len();
         let mut num_layer_inputs = num_first_layer_inputs;
         while num_layer_inputs > batch_size {
-            num_layer_inputs = num_layer_inputs.div_ceil(2);
+            num_layer_inputs = num_layer_inputs.div_ceil(batch_size);
             expected_height += 1;
         }
 
@@ -1038,27 +825,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 "get program and witness stream"
                             )
                             .in_scope(|| match input {
-                                ZKMCircuitWitness::Core(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.recursion_program(&input), witness_stream)
-                                }
-                                ZKMCircuitWitness::Deferred(input) => {
-                                    let mut witness_stream = Vec::new();
-                                    Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-                                    (self.deferred_program(&input), witness_stream)
-                                }
-                                ZKMCircuitWitness::Compress(input) => {
-                                    let mut witness_stream = Vec::new();
-
-                                    let input_with_merkle = self.make_merkle_proofs(input);
-
-                                    Witnessable::<InnerConfig>::write(
-                                        &input_with_merkle,
-                                        &mut witness_stream,
+                                ZKMCircuitWitness::Core(_)
+                                | ZKMCircuitWitness::Deferred(_)
+                                | ZKMCircuitWitness::Compress(_) => {
+                                    panic!(
+                                        "legacy FRI witness variant reached trace-gen worker; \
+                                         basefold side-channel must be populated for every shard"
                                     );
-
-                                    (self.compress_program(&input_with_merkle), witness_stream)
                                 }
                                 ZKMCircuitWitness::CoreBasefold(input) => {
                                     let mut witness_stream = Vec::new();
@@ -1365,87 +1138,39 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Result<ZKMReduceProof<InnerSC>, ZKMRecursionProverError> {
         // Make the compress proof.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced_proof;
-        // META #59 Phase 4 (#51): when ZIREN_USE_BASEFOLD=1 AND the
-        // input proof carries a basefold side channel, dispatch to
-        // `shrink_program_basefold` instead of the legacy FRI path.
-        // ZKMWrapBasefoldWitnessValues has no merkle wrapper (unlike
-        // legacy ZKMCompressWithVKeyWitnessValues) — vk binding is
-        // enforced via the basefold verifier's chip_ordering plumbing
-        // rather than a vk-merkle index.
-        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
-        let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
-            .unwrap_or(true);
-        if use_basefold && compressed_proof.basefold_shard_proof.is_some() {
-            let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
-            let input = ZKMWrapBasefoldWitnessValues {
-                vks_and_proofs: vec![(compressed_vk, basefold_proof)],
-            };
-            let program = self.shrink_program_basefold(&input);
-
-            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
-                program.clone(),
-                self.shrink_prover.config().perm.clone(),
-            );
-            let mut witness_stream = Vec::new();
-            Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
-            runtime.witness_stream = witness_stream.into();
-            runtime
-                .run()
-                .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
-            runtime.print_stats();
-            tracing::debug!("Shrink basefold program executed successfully");
-
-            let (shrink_pk, shrink_vk) = tracing::debug_span!("setup shrink basefold")
-                .in_scope(|| self.shrink_prover.setup(&program));
-            let mut challenger = self.shrink_prover.config().challenger();
-            let mut compress_proof = self
-                .shrink_prover
-                .prove(&shrink_pk, vec![runtime.record], &mut challenger, opts.recursion_opts)
-                .unwrap();
-            return Ok(ZKMReduceProof {
-                vk: shrink_vk,
-                proof: compress_proof.shard_proofs.pop().unwrap(),
-            });
-        }
-
-        let input = ZKMCompressWitnessValues {
-            vks_and_proofs: vec![(compressed_vk, compressed_proof)],
-            is_complete: true,
+        let basefold_proof = *compressed_proof
+            .basefold_shard_proof
+            .clone()
+            .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
         };
+        let program = self.shrink_program_basefold(&input);
 
-        let input_with_merkle = self.make_merkle_proofs(input);
-
-        let program =
-            self.shrink_program(ShrinkAir::<KoalaBear>::shrink_shape(), &input_with_merkle);
-
-        // Run the compress program.
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
             self.shrink_prover.config().perm.clone(),
         );
-
         let mut witness_stream = Vec::new();
-        Witnessable::<InnerConfig>::write(&input_with_merkle, &mut witness_stream);
-
+        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
         runtime.witness_stream = witness_stream.into();
-
-        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
-
+        runtime
+            .run()
+            .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
         runtime.print_stats();
-        tracing::debug!("Shrink program executed successfully");
+        tracing::debug!("Shrink basefold program executed successfully");
 
-        let (shrink_pk, shrink_vk) =
-            tracing::debug_span!("setup shrink").in_scope(|| self.shrink_prover.setup(&program));
-
-        // Prove the compress program.
-        let mut compress_challenger = self.shrink_prover.config().challenger();
+        let (shrink_pk, shrink_vk) = tracing::debug_span!("setup shrink basefold")
+            .in_scope(|| self.shrink_prover.setup(&program));
+        let mut challenger = self.shrink_prover.config().challenger();
         let mut compress_proof = self
             .shrink_prover
-            .prove(&shrink_pk, vec![runtime.record], &mut compress_challenger, opts.recursion_opts)
+            .prove(&shrink_pk, vec![runtime.record], &mut challenger, opts.recursion_opts)
             .unwrap();
-
-        Ok(ZKMReduceProof { vk: shrink_vk, proof: compress_proof.shard_proofs.pop().unwrap() })
+        Ok(ZKMReduceProof {
+            vk: shrink_vk,
+            proof: compress_proof.shard_proofs.pop().unwrap(),
+        })
     }
 
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
@@ -1456,146 +1181,32 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
-        // META #59 Phase 4 (#50): basefold-aware wrap_bn254 dispatch.
-        //
-        // When `ZIREN_USE_BASEFOLD=1` AND the input shrink-stage proof
-        // carries a basefold side channel, build the wrap_bn254 program
-        // via [`Self::wrap_bn254_program_basefold`] (which compiles a
-        // `WrapConfig`-rooted `RecursionProgram` from the basefold
-        // wrap-witness shape) instead of the legacy
-        // `ZKMCompressWithVKeyWitnessValues` + merkle-vk path.
-        //
-        // Mirrors the gate used by [`Self::shrink`] (#51).  Without this
-        // dispatch the legacy `wrap_program()` reads its merkle-shaped
-        // witness from a stream that the basefold compress / shrink
-        // pipeline never populated, panicking with "attempted to read
-        // from empty witness stream" (perf10 May 1, 2026).
-        //
-        // The witness stream uses `Witnessable::<WrapConfig>::write` —
-        // `ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2>` impls
-        // `Witnessable<C>` for any `C: CircuitConfig<F=InnerVal,
-        // EF=InnerChallenge, Bit=Felt<KoalaBear>>`, and `WrapConfig`
-        // satisfies that bound (see `recursion/circuit/src/lib.rs:327`).
-        let use_basefold = std::env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
-            .unwrap_or(true);
-        if use_basefold && compressed_proof.basefold_shard_proof.is_some() {
-            let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
-            let input = ZKMWrapBasefoldWitnessValues {
-                vks_and_proofs: vec![(compressed_vk, basefold_proof)],
-            };
-            let program = self.wrap_bn254_program_basefold(&input);
-
-            let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
-                program.clone(),
-                self.shrink_prover.config().perm.clone(),
-            );
-            let mut witness_stream = Vec::new();
-            Witnessable::<WrapConfig>::write(&input, &mut witness_stream);
-            runtime.witness_stream = witness_stream.into();
-            runtime
-                .run()
-                .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
-            runtime.print_stats();
-            tracing::debug!("wrap_bn254 basefold program executed successfully");
-
-            let (wrap_pk, wrap_vk) = tracing::debug_span!("setup wrap_bn254 basefold")
-                .in_scope(|| self.wrap_prover.setup(&program));
-            if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
-                tracing::debug!("wrap verifier key set (basefold)");
-            }
-
-            let mut wrap_challenger = self.wrap_prover.config().challenger();
-            let time = std::time::Instant::now();
-            let mut wrap_proof = self
-                .wrap_prover
-                .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
-                .unwrap();
-            let elapsed = time.elapsed();
-            tracing::debug!("wrap_bn254 basefold proving time: {:?}", elapsed);
-            let mut wrap_challenger = self.wrap_prover.config().challenger();
-            self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
-            tracing::info!("wrapping (basefold) successful");
-
-            return Ok(ZKMReduceProof {
-                vk: wrap_vk,
-                proof: wrap_proof.shard_proofs.pop().unwrap(),
-            });
-        }
-
-        let input = ZKMCompressWitnessValues {
-            vks_and_proofs: vec![(compressed_vk, compressed_proof)],
-            is_complete: true,
+        let basefold_proof = *compressed_proof
+            .basefold_shard_proof
+            .clone()
+            .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
         };
-        let input_with_vk = self.make_merkle_proofs(input);
+        let program = self.wrap_bn254_program_basefold(&input);
 
-        let program = self.wrap_program();
-
-        // Run the compress program.
         let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
             program.clone(),
             self.shrink_prover.config().perm.clone(),
         );
-
         let mut witness_stream = Vec::new();
-        Witnessable::<InnerConfig>::write(&input_with_vk, &mut witness_stream);
-
+        Witnessable::<WrapConfig>::write(&input, &mut witness_stream);
         runtime.witness_stream = witness_stream.into();
-
-        runtime.run().map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
-
+        runtime
+            .run()
+            .map_err(|e| ZKMRecursionProverError::RuntimeError(e.to_string()))?;
         runtime.print_stats();
-        tracing::debug!("wrap program executed successfully");
+        tracing::debug!("wrap_bn254 basefold program executed successfully");
 
-        // Setup the wrap program.
-        let (wrap_pk, wrap_vk) =
-            tracing::debug_span!("setup wrap").in_scope(|| self.wrap_prover.setup(&program));
-
+        let (wrap_pk, wrap_vk) = tracing::debug_span!("setup wrap_bn254 basefold")
+            .in_scope(|| self.wrap_prover.setup(&program));
         if self.wrap_vk.set(wrap_vk.clone()).is_ok() {
-            tracing::debug!("wrap verifier key set");
-        }
-
-        // Prove the wrap program.
-        //
-        // `ZIREN_DEBUG_WRAP_EVENTS=1` dumps per-chip event counts from the
-        // runtime.record — useful context when the verifier reports
-        // "local cumulative sum is not zero".  A large event-count skew
-        // (e.g. extra BaseAlu events vs. what MemoryVar can feed) would
-        // indicate which chip is out of balance.
-        if std::env::var("ZIREN_DEBUG_WRAP_EVENTS").is_ok() {
-            tracing::warn!("ZIREN_DEBUG_WRAP_EVENTS=1: per-chip event counts below");
-            eprintln!(
-                "[wrap events] base_alu={} ext_alu={} mem_var={} mem_const={} \
-                 poseidon2={} select={} batch_fri={} exp_rev_bits={} commit_pv={}",
-                runtime.record.base_alu_events.len(),
-                runtime.record.ext_alu_events.len(),
-                runtime.record.mem_var_events.len(),
-                runtime.record.mem_const_count,
-                runtime.record.poseidon2_events.len(),
-                runtime.record.select_events.len(),
-                runtime.record.batch_fri_events.len(),
-                runtime.record.exp_reverse_bits_len_events.len(),
-                runtime.record.commit_pv_hash_events.len(),
-            );
-        }
-
-        // `ZIREN_DEBUG_WRAP_LOOKUPS=1` runs debug_lookups_with_all_chips,
-        // printing per-(LookupKind, key) send/receive discrepancies with
-        // chip attribution. Answers "which argument bus is out of balance
-        // and in which chip?" — the missing diagnostic for the wrap
-        // cumsum bug.
-        if std::env::var("ZIREN_DEBUG_WRAP_LOOKUPS").is_ok() {
-            tracing::warn!(
-                "ZIREN_DEBUG_WRAP_LOOKUPS=1: running debug_lookups_with_all_chips"
-            );
-            let host_pk = self.wrap_prover.pk_to_host(&wrap_pk);
-            zkm_stark::debug_lookups_with_all_chips::<OuterSC, WrapAir<<OuterSC as zkm_stark::StarkGenericConfig>::Val>>(
-                self.wrap_prover.machine(),
-                &host_pk,
-                std::slice::from_ref(&runtime.record),
-                zkm_stark::LookupKind::all_kinds(),
-                zkm_stark::LookupScope::Local,
-            );
+            tracing::debug!("wrap verifier key set (basefold)");
         }
 
         let mut wrap_challenger = self.wrap_prover.config().challenger();
@@ -1605,12 +1216,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .prove(&wrap_pk, vec![runtime.record], &mut wrap_challenger, opts.recursion_opts)
             .unwrap();
         let elapsed = time.elapsed();
-        tracing::debug!("wrap proving time: {:?}", elapsed);
+        tracing::debug!("wrap_bn254 basefold proving time: {:?}", elapsed);
         let mut wrap_challenger = self.wrap_prover.config().challenger();
         self.wrap_prover.machine().verify(&wrap_vk, &wrap_proof, &mut wrap_challenger).unwrap();
-        tracing::info!("wrapping successful");
+        tracing::info!("wrapping (basefold) successful");
 
-        Ok(ZKMReduceProof { vk: wrap_vk, proof: wrap_proof.shard_proofs.pop().unwrap() })
+        Ok(ZKMReduceProof {
+            vk: wrap_vk,
+            proof: wrap_proof.shard_proofs.pop().unwrap(),
+        })
     }
 
     /// Wrap the STARK proven over a SNARK-friendly field into a PLONK proof.
@@ -1782,39 +1396,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
     }
-}
-
-pub fn compress_program_from_input<C: ZKMProverComponents>(
-    config: Option<&RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
-    compress_prover: &C::CompressProver,
-    vk_verification: bool,
-    input: &ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2>,
-) -> RecursionProgram<KoalaBear> {
-    let builder_span = tracing::debug_span!("build compress program").entered();
-    let mut builder = Builder::<InnerConfig>::default();
-    // read the input.
-    let input = input.read(&mut builder);
-    // Verify the proof.
-    ZKMCompressWithVKeyVerifier::verify(
-        &mut builder,
-        compress_prover.machine(),
-        input,
-        vk_verification,
-        PublicValuesOutputDigest::Reduce,
-    );
-    let operations = builder.into_operations();
-    builder_span.exit();
-
-    // Compile the program.
-    let compiler_span = tracing::debug_span!("compile compress program").entered();
-    let mut compiler = AsmCompiler::<InnerConfig>::default();
-    let mut program = compiler.compile(operations);
-    if let Some(config) = config {
-        config.fix_shape(&mut program);
-    }
-    compiler_span.exit();
-
-    program
 }
 
 #[cfg(test)]
