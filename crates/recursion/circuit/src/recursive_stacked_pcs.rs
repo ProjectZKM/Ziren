@@ -142,7 +142,18 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         }
         let total_dim = padded_point.len();
         let batch_dim = total_dim - stack_dim;
-        let (batch_point, stack_point) = padded_point.split_at(batch_dim);
+        // #249: align with Ziren prover convention.  The prover at
+        // `crates/stark/src/basefold/stacked.rs` uses
+        // `eval_point[..stack_dim]` (LSB-first) as stack_point because
+        // Ziren's dense_q layout puts row (= stack) bits at the LSBs of
+        // the flat index and column (= batch) bits at the MSBs.  SP1
+        // uses the opposite convention (stack at MSBs).  The prior
+        // `split_at(batch_dim)` was SP1-style and gave stack_point as
+        // the *trailing* coords, mismatching the prover's *leading*
+        // coords for any workload with batch_dim>0 (multi-stripe).
+        // Fibonacci has batch_dim==0 so both ranges coincide; tendermint
+        // / reth have batch_dim>0 and tripped recursive_stacked_pcs.rs:159.
+        let (stack_point, batch_point) = padded_point.split_at(stack_dim);
 
         // Flatten per-round per-stripe evaluations into one big
         // batch_evaluations Mle of length 2^batch_dim.
