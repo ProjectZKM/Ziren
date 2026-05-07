@@ -204,6 +204,27 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
+            // Bundle-lift-sized shape (#256). After #249 lifted the
+            // stacked-PCS contract block, tendermint bundle-lift
+            // produces a compose program with chip heights none of
+            // the above shapes fit. Observed:
+            //   MemoryConst≈149290 (log≈18), Select≈157920 (log≈18),
+            //   BaseAlu≈91431 (log≈17), ExtAlu≈93619 (log≈17).
+            // Caps with 1-bit headroom on the binding dimensions so
+            // this also fits reth/geth shards which may grow modestly.
+            // Placed last so programs that fit Shapes #1-4 pick those
+            // and pay no extra padding.
+            [
+                (mem_var.clone(), 18),
+                (select.clone(), 19),
+                (mem_const.clone(), 19),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 18),
+                (ext_alu.clone(), 18),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
         ]
         .map(HashMap::from)
         .to_vec();
