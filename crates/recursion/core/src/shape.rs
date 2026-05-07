@@ -204,16 +204,17 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift-sized shape (#256). After #249 lifted the
-            // stacked-PCS contract block, tendermint bundle-lift
-            // produces a compose program with chip heights none of
-            // the above shapes fit. Observed:
+            // Bundle-lift compose level h=0 (#256). After #249 lifted
+            // the stacked-PCS contract block, tendermint bundle-lift's
+            // first compose level (lift outputs → arity-4 compose)
+            // panics shape.rs:91 with chip heights none of the above
+            // shapes fit. Observed:
             //   MemoryConst≈149290 (log≈18), Select≈157920 (log≈18),
             //   BaseAlu≈91431 (log≈17), ExtAlu≈93619 (log≈17).
-            // Caps with 1-bit headroom on the binding dimensions so
-            // this also fits reth/geth shards which may grow modestly.
-            // Placed last so programs that fit Shapes #1-4 pick those
-            // and pay no extra padding.
+            // Caps with 1-bit headroom on binding dimensions for reth/
+            // geth headroom. Placed before the larger #6 below so h=0
+            // compose programs prefer this smaller cap and pay less
+            // padding.
             [
                 (mem_var.clone(), 18),
                 (select.clone(), 19),
@@ -221,6 +222,25 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (batch_fri.clone(), 21),
                 (base_alu.clone(), 18),
                 (ext_alu.clone(), 18),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // Bundle-lift compose level h=1+ (#256). Each compose tree
+            // level grows: h=0 outputs become h=1 inputs, h=1 compose
+            // verifies them and produces bigger chip heights still.
+            // Tendermint h=1 panic showed roughly 2× h=0:
+            //   MemoryConst≈375959 (log≈19), Select≈315840 (log≈19),
+            //   ExtAlu≈306869 (log≈19), BaseAlu≈182828 (log≈18),
+            //   MemoryVar≈102404 (log≈17), Poseidon2WideDeg3≈59776 (log≈16).
+            // Bigger caps fit h=1 + h=2 + reth/geth deeper trees.
+            [
+                (mem_var.clone(), 19),
+                (select.clone(), 20),
+                (mem_const.clone(), 20),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 19),
+                (ext_alu.clone(), 20),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
