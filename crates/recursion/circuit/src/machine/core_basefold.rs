@@ -317,8 +317,9 @@ pub fn verify_core_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![preprocessed_widths_pre, main_widths_pre];
 
-        // #241 Phase 4e: env-gated bundle path (ZIREN_USE_BUNDLE_LIFT=1).
-        // Default off — see compress_basefold for the gating rationale.
+        // #245 Phase 4f: bundle path is the default.  Set
+        // ZIREN_DISABLE_BUNDLE_LIFT=1 to fall back to the placeholder
+        // lift (bypass while #249 recursion-shape follow-on lands).
         let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
             match evaluation_proof_bundle_opt.as_ref() {
                 Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(

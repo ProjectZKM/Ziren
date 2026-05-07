@@ -270,16 +270,11 @@ pub fn verify_compress_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![preprocessed_widths_pre, main_widths_pre];
 
-        // #241 Phase 4e: prefer structured bundle path when env flag
-        // ZIREN_USE_BUNDLE_LIFT=1 is set (the actual #240 cascade
-        // fix).  Default off so existing dummy-fixture tests still
-        // pass — the bundle path exposes a pre-existing
-        // RecursiveStackedPcsVerifier shape mismatch on the
-        // produce_real_basefold_shard_proof fixture (small trace
-        // shape vs production verifier expectations) that the
-        // all-zero placeholder was masking.  Validation path:
-        // 1) flip env on, 2) fix shape mismatch, 3) make this the
-        // unconditional default.
+        // #245 Phase 4f: bundle path is the default (closes #240
+        // multi-GPU determinism cascade).  ZIREN_DISABLE_BUNDLE_LIFT=1
+        // falls back to the placeholder lift — kept as bypass while
+        // the #249 follow-on (recursion shape registry expansion for
+        // tendermint shard heights) lands.
         let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
             match evaluation_proof_bundle_opt.as_ref() {
                 Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
