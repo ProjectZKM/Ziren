@@ -44,7 +44,7 @@ use zkm_core_machine::{
     mips::MipsAir,
     reduce::ZKMReduceProof,
     shape::CoreShapeConfig,
-    utils::{concurrency::TurnBasedSync, ZKMCoreProverError},
+    utils::ZKMCoreProverError,
 };
 use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
 use zkm_recursion_circuit::{
@@ -790,25 +790,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let _span = span.enter();
 
             // Spawn a worker that sends the first layer inputs to a bounded channel.
-            let input_sync = Arc::new(TurnBasedSync::new());
+            //
+            // No turn-based sync here: the per-height pending lists in the
+            // next-layer worker (see `pending: Vec<Vec<Item>>` below) are
+            // arrival-order tolerant, so workers can race to drain `input_rx`
+            // without preserving first-layer index order. SP1 dropped the
+            // equivalent serialization for the same reason.
             let (input_tx, input_rx) = sync_channel::<(usize, usize, ZKMCircuitWitness)>(
                 opts.recursion_opts.checkpoints_channel_capacity,
             );
             let input_tx = Arc::new(Mutex::new(input_tx));
             {
                 let input_tx = Arc::clone(&input_tx);
-                let input_sync = Arc::clone(&input_sync);
                 s.spawn(move || {
                     for (index, input) in first_layer_inputs.into_iter().enumerate() {
-                        input_sync.wait_for_turn(index);
                         input_tx.lock().unwrap().send((index, 0, input)).unwrap();
-                        input_sync.advance_turn();
                     }
                 });
             }
 
             // Spawn workers who generate the records and traces.
-            let record_and_trace_sync = Arc::new(TurnBasedSync::new());
             let (record_and_trace_tx, record_and_trace_rx) =
                 sync_channel::<(
                     usize,
@@ -821,7 +822,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let record_and_trace_rx = Arc::new(Mutex::new(record_and_trace_rx));
             let input_rx = Arc::new(Mutex::new(input_rx));
             for _ in 0..opts.recursion_opts.trace_gen_workers {
-                let record_and_trace_sync = Arc::clone(&record_and_trace_sync);
                 let record_and_trace_tx = Arc::clone(&record_and_trace_tx);
                 let input_rx = Arc::clone(&input_rx);
                 let span = tracing::debug_span!("generate records and traces");
@@ -917,18 +917,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 }
                             };
 
-                            // Wait for our turn to update the state.
-                            record_and_trace_sync.wait_for_turn(index);
-
                             // Send the record and traces to the worker.
+                            // Mpsc channel is order-preserving in send order;
+                            // arrival order in the prove pool is fine because
+                            // the next-layer worker buckets by `height` and
+                            // drains FIFO within the bucket.
                             record_and_trace_tx
                                 .lock()
                                 .unwrap()
                                 .send((index, height, program, record, traces))
                                 .unwrap();
-
-                            // Advance the turn.
-                            record_and_trace_sync.advance_turn();
                         } else {
                             break Ok(());
                         }
@@ -937,7 +935,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
 
             // Spawn workers who generate the compress proofs.
-            let proofs_sync = Arc::new(TurnBasedSync::new());
             let (proofs_tx, proofs_rx) =
                 sync_channel::<(usize, usize, StarkVerifyingKey<InnerSC>, ShardProof<InnerSC>)>(
                     num_first_layer_inputs * 2,
@@ -946,7 +943,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let proofs_rx = Arc::new(Mutex::new(proofs_rx));
             let mut prover_handles = Vec::new();
             for _ in 0..opts.recursion_opts.shard_batch_size {
-                let prover_sync = Arc::clone(&proofs_sync);
                 let record_and_trace_rx = Arc::clone(&record_and_trace_rx);
                 let proofs_tx = Arc::clone(&proofs_tx);
                 let span = tracing::debug_span!("prove");
@@ -995,14 +991,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     )
                                     .unwrap();
 
-                                // Wait for our turn to update the state.
-                                prover_sync.wait_for_turn(index);
-
-                                // Send the proof.
+                                // Send the proof. Order in proofs_rx is whatever
+                                // the prove pool finishes in; the next-layer
+                                // worker buckets by `height` so arrival order
+                                // does not affect tree-reduce correctness.
                                 proofs_tx.lock().unwrap().send((index, height, vk, proof)).unwrap();
-
-                                // Advance the turn.
-                                prover_sync.advance_turn();
                             });
                         } else {
                             break;
@@ -1106,13 +1099,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 },
                             );
 
-                            input_sync.wait_for_turn(count);
                             input_tx
                                 .lock()
                                 .unwrap()
                                 .send((count, next_input_height, input))
                                 .unwrap();
-                            input_sync.advance_turn();
                             count += 1;
 
                             if is_complete {
