@@ -158,13 +158,19 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             RecursionAir::<F, DEGREE>::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>).name();
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
 
+        // Sized from observed basefold lift heights with +1-2 headroom.
+        // Geth measured (May-7): MemoryConst=155K (log≈18), BaseAlu=294K
+        // (log≈19), ExtAlu=328K (log≈19). Bumped mem_const 17→19,
+        // base_alu/ext_alu 18→20 for reth headroom (similar shard size,
+        // may exceed geth). Expand here if `fix_shape` panics
+        // "no shape found for heights" on a new workload.
         let shape: HashMap<String, usize> = [
             (mem_var, 18),
             (select, 18),
-            (mem_const, 17),
+            (mem_const, 19),
             (batch_fri, 21),
-            (base_alu, 18),
-            (ext_alu, 18),
+            (base_alu, 20),
+            (ext_alu, 20),
             (exp_reverse_bits_len, 18),
             (poseidon2_wide, 18),
             (public_values, PUB_VALUES_LOG_HEIGHT),
