@@ -128,6 +128,54 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     }
 }
 
+impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
+    RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
+{
+    /// Single-shape config sized for the basefold *normalize* (lift)
+    /// program — the SP1-equivalent of `compress_proof_shape_from_arity`.
+    ///
+    /// Multi-shape `default()` would let smaller core shards pick smaller
+    /// canonical shapes for their lift output, breaking the per-arity
+    /// compose program cache (#254): two arity-4 compose calls fed lifts
+    /// of different shapes produce non-equivalent compose programs.
+    /// Single-shape forces every lift to land on the SAME canonical
+    /// chip heights — SP1's pattern at
+    /// `/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:441`.
+    ///
+    /// If `fix_shape` panics with "no shape found for heights" on a real
+    /// workload, expand the relevant entry below — the canonical shape
+    /// must bound every basefold lift output's per-chip log_height.
+    pub fn basefold_lift_only_default() -> Self {
+        let mem_const = RecursionAir::<F, DEGREE>::MemoryConst(MemoryConstChip::default()).name();
+        let mem_var = RecursionAir::<F, DEGREE>::MemoryVar(MemoryVarChip::default()).name();
+        let base_alu = RecursionAir::<F, DEGREE>::BaseAlu(BaseAluChip).name();
+        let ext_alu = RecursionAir::<F, DEGREE>::ExtAlu(ExtAluChip).name();
+        let poseidon2_wide =
+            RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>).name();
+        let batch_fri = RecursionAir::<F, DEGREE>::BatchFRI(BatchFRIChip::<DEGREE>).name();
+        let select = RecursionAir::<F, DEGREE>::Select(SelectChip).name();
+        let exp_reverse_bits_len =
+            RecursionAir::<F, DEGREE>::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>).name();
+        let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
+
+        let shape: HashMap<String, usize> = [
+            (mem_var, 18),
+            (select, 18),
+            (mem_const, 17),
+            (batch_fri, 21),
+            (base_alu, 18),
+            (ext_alu, 18),
+            (exp_reverse_bits_len, 18),
+            (poseidon2_wide, 18),
+            (public_values, PUB_VALUES_LOG_HEIGHT),
+        ]
+        .into_iter()
+        .collect();
+
+        Self { allowed_shapes: vec![shape], _marker: PhantomData }
+    }
+}
+
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
     for RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {

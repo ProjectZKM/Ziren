@@ -183,6 +183,18 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The recursion shape configuration.
     pub compress_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
 
+    /// Single-shape recursion shape configuration sized for the basefold
+    /// **lift** (normalize) program. Distinct from `compress_shape_config`
+    /// which is multi-shape and used for compose/deferred/wrap.
+    ///
+    /// Single-shape is mandatory: SP1's per-arity compose cache (#254)
+    /// requires every lift output to share canonical chip heights so
+    /// compose programs at the same arity are byte-equivalent. Multi-shape
+    /// would let smaller lifts pick smaller canonical shapes and reintroduce
+    /// shape variance.
+    pub basefold_lift_shape_config:
+        Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
+
     /// The verifying key for wrapping.
     pub wrap_vk: OnceLock<StarkVerifyingKey<OuterSC>>,
 
@@ -245,6 +257,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .unwrap_or(true)
             .then_some(RecursionShapeConfig::default());
 
+        let basefold_lift_shape_config = env::var("FIX_RECURSION_SHAPES")
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(true)
+            .then_some(RecursionShapeConfig::basefold_lift_only_default());
+
         let vk_verification =
             env::var("VERIFY_VK").map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(true);
 
@@ -282,6 +299,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             recursion_vk_map: allowed_vk_map,
             core_shape_config,
             compress_shape_config: recursion_shape_config,
+            basefold_lift_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
             compose_programs_basefold_cache: Mutex::new(BTreeMap::new()),
@@ -378,14 +396,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// Intentionally NOT calling `recursion_shape_config.fix_shape(...)` —
-    /// the legacy shape config's `allowed_shapes` was generated for the
-    /// smaller legacy recursion programs (~10s of K instructions). The
-    /// basefold normalize program is ~660K instructions and produces
-    /// chip heights that don't fit any legacy shape, panicking with
-    /// "no shape found for heights: ...". The basefold path produces
-    /// its own VK based on the program's actual structure; shape
-    /// fixing only matters once basefold-aware shapes are enumerated.
+    /// Applies `basefold_lift_shape_config.fix_shape` (single-shape) so every
+    /// lift output lands on canonical chip heights — prerequisite for SP1's
+    /// per-arity compose program cache (#254/#255). Multi-shape config from
+    /// `compress_shape_config` would let smaller core shards pick smaller
+    /// canonical shapes for their lift, breaking compose-cache invariants.
     pub fn recursion_program_basefold(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
@@ -393,11 +408,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        let program = build_normalize_basefold_program(
+        let mut program = build_normalize_basefold_program(
             self.core_prover.machine(),
             input,
             max_log_row_count,
         );
+        if let Some(basefold_lift_shape_config) = &self.basefold_lift_shape_config {
+            basefold_lift_shape_config.fix_shape(&mut program);
+        }
         Arc::new(program)
     }
 
