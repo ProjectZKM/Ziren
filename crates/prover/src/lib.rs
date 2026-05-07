@@ -134,13 +134,13 @@ const WRAP_DEGREE: usize = 9;
 
 const CORE_CACHE_SIZE: usize = 5;
 /// Tree-reduce arity for the compress stage. SP1 uses 4
-/// (`DEFAULT_ARITY`). Ziren's tree-reduce worker
-/// (`generate next layer inputs`) currently waits for
-/// `batch.len() == batch_size` before emitting, which deadlocks at
-/// the final layer when the leftover count is < batch_size. Bumping
-/// past 2 requires porting SP1's CompressTree drain semantics.
-/// Tracked in #104 follow-up.
-pub const REDUCE_BATCH_SIZE: usize = 2;
+/// (`DEFAULT_ARITY`). Ziren's tree-reduce worker pre-computes
+/// `layer_sizes` and emits partial batches when the source layer is
+/// exhausted, so any arity ≥ 2 reaches the root cleanly. Larger
+/// arity → fewer compress invocations
+/// (`(N-1)/(k-1)` total) and amortizes per-shard fixed overhead
+/// (Merkle binding, witness assembly, program build).
+pub const REDUCE_BATCH_SIZE: usize = 4;
 
 // TODO: FIX
 //
@@ -765,14 +765,24 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let first_layer_inputs =
             self.get_first_layer_inputs(vk, shard_proofs, &deferred_proofs, first_layer_batch_size);
 
-        // Calculate the expected height of the tree.
-        let mut expected_height = if first_layer_inputs.len() == 1 { 0 } else { 1 };
+        // Pre-compute the input count at each height of the tree so the
+        // next-layer worker can flush a partial batch when its layer is
+        // exhausted (otherwise an arity > 2 tree with leftovers wedges
+        // waiting for items that will never arrive). `layer_sizes[h]` is
+        // the number of inputs the worker will receive at height `h`;
+        // height 0 is the first-layer input count, and the deepest entry
+        // is the final layer that still needs reduction (≤ batch_size).
         let num_first_layer_inputs = first_layer_inputs.len();
-        let mut num_layer_inputs = num_first_layer_inputs;
-        while num_layer_inputs > batch_size {
-            num_layer_inputs = num_layer_inputs.div_ceil(batch_size);
-            expected_height += 1;
+        let mut layer_sizes: Vec<usize> = vec![num_first_layer_inputs];
+        while *layer_sizes.last().unwrap() > batch_size {
+            let last = *layer_sizes.last().unwrap();
+            layer_sizes.push(last.div_ceil(batch_size));
         }
+        // Tree height = number of reductions to produce the root.
+        // With one first-layer input, height = 0 (passthrough); otherwise
+        // every layer in `layer_sizes` needs one reduction step (the last
+        // one a partial batch if `last < batch_size`).
+        let expected_height = if num_first_layer_inputs == 1 { 0 } else { layer_sizes.len() };
 
         // Generate the proofs.
         let span = tracing::Span::current().clone();
@@ -1003,6 +1013,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             }
 
             // Spawn a worker that generates inputs for the next layer.
+            //
+            // The worker buckets incoming proofs by height and emits a
+            // ComposeBasefold reduction whenever a height bucket has
+            // either accumulated `batch_size` items or its source layer
+            // has delivered everything it will. Per-height bucketing
+            // means cross-layer arrivals (e.g. a height-1 prove output
+            // landing while we're still collecting height-0 items) don't
+            // wedge the bucket they don't belong in, which the previous
+            // single-`batch` design did at any arity > 2.
+            let layer_sizes_worker = layer_sizes.clone();
             let handle = {
                 let input_tx = Arc::clone(&input_tx);
                 let proofs_rx = Arc::clone(&proofs_rx);
@@ -1010,80 +1030,81 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 s.spawn(move || {
                     let _span = span.enter();
                     let mut count = num_first_layer_inputs;
-                    let mut batch: Vec<(
+                    type Item = (
                         usize,
                         usize,
                         StarkVerifyingKey<InnerSC>,
                         ShardProof<InnerSC>,
-                    )> = Vec::new();
+                    );
+                    let mut pending: Vec<Vec<Item>> =
+                        (0..layer_sizes_worker.len()).map(|_| Vec::new()).collect();
+                    let mut received_at_height: Vec<usize> =
+                        vec![0usize; layer_sizes_worker.len()];
+                    let mut done = false;
                     loop {
-                        if expected_height == 0 {
+                        if expected_height == 0 || done {
                             break;
                         }
                         let received = { proofs_rx.lock().unwrap().recv() };
-                        if let Ok((index, height, vk, proof)) = received {
-                            batch.push((index, height, vk, proof));
+                        let (index, height, vk, proof) = match received {
+                            Ok(v) => v,
+                            Err(_) => break,
+                        };
+                        // Items at `expected_height` are the root produced
+                        // by the final reduction; the main thread reads
+                        // those off `proofs_rx` directly. Anything beyond
+                        // is unexpected — drop it on the floor (drains the
+                        // channel so the prove pool can shut down cleanly).
+                        if height >= layer_sizes_worker.len() {
+                            continue;
+                        }
+                        pending[height].push((index, height, vk, proof));
+                        received_at_height[height] += 1;
 
-                            // If we haven't reached the batch size, continue.
-                            if batch.len() < batch_size {
-                                continue;
-                            }
+                        let layer_exhausted = received_at_height[height]
+                            >= layer_sizes_worker[height];
 
-                            // Compute whether we're at the last input of a layer.
-                            let mut is_last = false;
-                            if let Some(first) = batch.first() {
-                                is_last = first.1 != height;
-                            }
+                        // Drain pending[height] in chunks of up to
+                        // `batch_size`. Once the source layer is exhausted
+                        // we also flush the final partial chunk.
+                        while !pending[height].is_empty()
+                            && (pending[height].len() >= batch_size || layer_exhausted)
+                        {
+                            let take = pending[height].len().min(batch_size);
+                            let chunk: Vec<Item> =
+                                pending[height].drain(..take).collect();
+                            let next_input_height = height + 1;
+                            // is_complete iff this emission produces the
+                            // root and there's nothing else queued at this
+                            // height (covers both N-power-of-arity and
+                            // partial-final-chunk cases).
+                            let is_complete = next_input_height == expected_height
+                                && pending[height].is_empty();
 
-                            // If we're at the last input of a layer, we need to only include the
-                            // first input, otherwise we include all inputs.
-                            let inputs =
-                                if is_last { vec![batch[0].clone()] } else { batch.clone() };
-
-                            let next_input_height = inputs[0].1 + 1;
-
-                            let is_complete = next_input_height == expected_height;
-
-                            let vks_and_proofs = inputs
+                            // Basefold is the only path; every input must
+                            // carry a basefold side-channel. Missing
+                            // side-channel is an upstream bug, not a
+                            // fall-through condition.
+                            let bf_vks_and_proofs: Vec<_> = chunk
                                 .into_iter()
-                                .map(|(_, _, vk, proof)| (vk, proof))
-                                .collect::<Vec<_>>();
-                            // When basefold is enabled AND every input carries
-                            // a basefold side-channel, emit a ComposeBasefold
-                            // witness for the cluster-parametrized compose
-                            // program. Otherwise fall back to legacy Compress.
-                            // Cutover (#35, Apr 30): default opt-out.
-                            let use_basefold = env::var("ZIREN_USE_BASEFOLD")
-                                .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
-                                .unwrap_or(true);
-                            let all_have_bf = use_basefold
-                                && vks_and_proofs
-                                    .iter()
-                                    .all(|(_, p)| p.basefold_shard_proof.is_some());
-                            let input = if all_have_bf {
-                                let bf_vks_and_proofs = vks_and_proofs
-                                    .into_iter()
-                                    .map(|(vk, proof)| {
-                                        let bf = *proof
-                                            .basefold_shard_proof
-                                            .as_ref()
-                                            .unwrap()
-                                            .clone();
-                                        (vk, bf)
-                                    })
-                                    .collect::<Vec<_>>();
-                                ZKMCircuitWitness::ComposeBasefold(
-                                    ZKMCompressBasefoldWitnessValues {
-                                        vks_and_proofs: bf_vks_and_proofs,
-                                        is_complete,
-                                    },
-                                )
-                            } else {
-                                ZKMCircuitWitness::Compress(ZKMCompressWitnessValues {
-                                    vks_and_proofs,
-                                    is_complete,
+                                .map(|(_, _, vk, proof)| {
+                                    let bf = *proof
+                                        .basefold_shard_proof
+                                        .as_ref()
+                                        .expect(
+                                            "compress next-layer worker: input proof missing \
+                                             basefold side-channel — legacy FRI path removed",
+                                        )
+                                        .clone();
+                                    (vk, bf)
                                 })
-                            };
+                                .collect();
+                            let input = ZKMCircuitWitness::ComposeBasefold(
+                                ZKMCompressBasefoldWitnessValues {
+                                    vks_and_proofs: bf_vks_and_proofs,
+                                    is_complete,
+                                },
+                            );
 
                             input_sync.wait_for_turn(count);
                             input_tx
@@ -1094,20 +1115,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             input_sync.advance_turn();
                             count += 1;
 
-                            // If we're at the root of the tree, stop generating inputs.
                             if is_complete {
+                                done = true;
                                 break;
                             }
-
-                            // If we were at the last input of a layer, we keep everything but the
-                            // first input. Otherwise, we empty the batch.
-                            if is_last {
-                                batch = vec![batch[1].clone()];
-                            } else {
-                                batch = Vec::new();
-                            }
-                        } else {
-                            break;
                         }
                     }
                 })
