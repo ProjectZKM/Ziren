@@ -175,11 +175,11 @@ impl<F> UnsafeRecord<F> {
             ),
             fri_fold_events: create_uninit_vec(event_counts.fri_fold_events),
             batch_fri_events: create_uninit_vec(event_counts.batch_fri_events),
-            // No counter on RecursionAirEventCount yet for these — pre-size
-            // to 0; the runtime will resize on push as a temporary fallback
-            // until the analyze pass tracks them. Phase C step 2b-iii.
-            commit_pv_hash_events: Vec::new(),
-            sumcheck_verify_events: Vec::new(),
+            // #259 Phase C step 2c-ii prep: pre-size from the new
+            // counters added to RecursionAirEventCount so all 11 event
+            // vecs are ready for offset-based writes.
+            commit_pv_hash_events: create_uninit_vec(event_counts.commit_pv_hash_events),
+            sumcheck_verify_events: create_uninit_vec(event_counts.sumcheck_verify_events),
         }
     }
 

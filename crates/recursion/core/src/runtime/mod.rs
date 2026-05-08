@@ -765,6 +765,11 @@ where
         self.record.ext_alu_events.reserve(event_counts.ext_alu_events);
         self.record.exp_reverse_bits_len_events.reserve(event_counts.exp_reverse_bits_len_events);
         self.record.select_events.reserve(event_counts.select_events);
+        // #259 Phase C step 2c-ii prep: reserve the newly-tracked event vecs.
+        self.record.fri_fold_events.reserve(event_counts.fri_fold_events);
+        self.record.batch_fri_events.reserve(event_counts.batch_fri_events);
+        self.record.commit_pv_hash_events.reserve(event_counts.commit_pv_hash_events);
+        self.record.sumcheck_verify_events.reserve(event_counts.sumcheck_verify_events);
     }
 }
 

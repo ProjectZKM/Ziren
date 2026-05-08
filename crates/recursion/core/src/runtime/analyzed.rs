@@ -136,10 +136,16 @@ impl<F> RawProgram<Instruction<F>> {
                     &mut counts.mem_var_events,
                     output_x_addrs_mults.len() + output_y_addrs_mults.len(),
                 ),
+                // #259 Phase C step 2c-ii prep: assign event-vec offsets
+                // for the two newly-tracked event types.
+                Instruction::CommitPublicValues(_) => {
+                    incr(&mut counts.commit_pv_hash_events, 1)
+                }
+                Instruction::SumcheckVerify(_) => {
+                    incr(&mut counts.sumcheck_verify_events, 1)
+                }
                 // No event-vector slot consumed; offset is meaningless.
-                Instruction::CommitPublicValues(_)
-                | Instruction::Print(_)
-                | Instruction::SumcheckVerify(_) => 0,
+                Instruction::Print(_) => 0,
             }
         }
 

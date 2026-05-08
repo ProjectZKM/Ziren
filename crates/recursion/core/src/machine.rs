@@ -60,6 +60,14 @@ pub struct RecursionAirEventCount {
     pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
+    /// #259 Phase C step 2c-ii prep: counters for the remaining
+    /// event-emit sites in `Runtime::run` (commit_pv_hash at the
+    /// CommitPublicValues match arm, sumcheck_verify at the
+    /// SumcheckVerify match arm). Populated by `AddAssign<&Instruction>`
+    /// so `UnsafeRecord::new` can pre-size these vecs once the runtime
+    /// walker swaps to offset-based writes.
+    pub commit_pv_hash_events: usize,
+    pub sumcheck_verify_events: usize,
 }
 
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
@@ -238,11 +246,14 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 self.mem_var_events += output_x_addrs_mults.len();
                 self.mem_var_events += output_y_addrs_mults.len();
             }
-            Instruction::CommitPublicValues(_) => {}
+            // #259 Phase C step 2c-ii prep: populate the new counters so
+            // `UnsafeRecord::new` can pre-size these vecs once the runtime
+            // walker swaps to offset-based writes. CommitPublicValues emits
+            // exactly one commit_pv_hash event per instruction; SumcheckVerify
+            // emits one sumcheck_verify event per instruction.
+            Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
-            Instruction::SumcheckVerify(_) => {
-                // TODO: Add sumcheck_verify_events counter when chip is fully wired.
-            }
+            Instruction::SumcheckVerify(_) => self.sumcheck_verify_events += 1,
         }
     }
 }
