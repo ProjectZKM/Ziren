@@ -228,6 +228,16 @@ pub fn verify_compress_basefold<C, SC, A>(
             max_log_row_count as u32,
         );
 
+    // #259 sizing diagnostic: log instruction count BEFORE the per-input
+    // verify loop so the loop's contribution to total compose program
+    // instructions can be measured. Set ZIREN_LOG_COMPOSE_LOOP=1 to enable.
+    // Loop body is the candidate for SP1's `ir_par_map_collect` parallelism
+    // (`/tmp/sp1/crates/recursion/circuit/src/machine/compress.rs:159`).
+    let _zlcl_enabled = std::env::var("ZIREN_LOG_COMPOSE_LOOP")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let _zlcl_n = vks_and_proofs.len();
+    let _zlcl_pre = builder.variable_count();
     for (_i, (vk_legacy, proof_tuple)) in vks_and_proofs.into_iter().enumerate() {
         let (
             main_commit,
@@ -786,6 +796,18 @@ pub fn verify_compress_basefold<C, SC, A>(
         // the per-shard sum into the Vec; final reduction via
         // builder.sum_digest_v2 happens outside the loop.
         _global_cumulative_sums.push(_current_public_values.global_cumulative_sum);
+    }
+    // #259 sizing diagnostic: per-input verify loop emitted N variables for
+    // arity=K. If `loop_vars / total_vars` is large, parallelizing this loop
+    // via `ir_par_map_collect` (SP1 compress.rs:159) yields a near-K× compose
+    // build speedup once Phase B+D land.
+    if _zlcl_enabled {
+        let _zlcl_post = builder.variable_count();
+        let _zlcl_loop_vars = _zlcl_post.saturating_sub(_zlcl_pre);
+        eprintln!(
+            "[compose_loop] arity={} loop_vars={} pre_vars={} post_vars={}",
+            _zlcl_n, _zlcl_loop_vars, _zlcl_pre, _zlcl_post,
+        );
     }
 
     // Step 6m: post-loop output assembly.  Lifts compress.rs:454-498.
