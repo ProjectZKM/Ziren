@@ -148,7 +148,15 @@ impl<F> RawProgram<Instruction<F>> {
                 Instruction::CommitPublicValues(_) => {
                     incr(&mut counts.commit_pv_hash_events, 1)
                 }
+                // SumcheckVerify is multi-chip: emits 1 sumcheck_verify event
+                // (primary) + 1 mem_var event (for the new_claim memory
+                // write at runtime/mod.rs:728). Both counters increment.
+                // The returned offset is the sumcheck_verify offset
+                // (primary chip); the mem_var offset must be tracked
+                // separately when AnalyzedInstruction grows a secondary
+                // offset field for multi-chip emitters (next prep step).
                 Instruction::SumcheckVerify(_) => {
+                    counts.mem_var_events += 1;
                     incr(&mut counts.sumcheck_verify_events, 1)
                 }
                 // No event-vector slot consumed; offset is meaningless.

@@ -259,11 +259,17 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             // #259 Phase C step 2c-ii prep: populate the new counters so
             // `UnsafeRecord::new` can pre-size these vecs once the runtime
             // walker swaps to offset-based writes. CommitPublicValues emits
-            // exactly one commit_pv_hash event per instruction; SumcheckVerify
-            // emits one sumcheck_verify event per instruction.
+            // exactly one commit_pv_hash event per instruction.
             Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
-            Instruction::SumcheckVerify(_) => self.sumcheck_verify_events += 1,
+            // SumcheckVerify is multi-chip: emits 1 sumcheck_verify event
+            // (the proof claim) AND 1 mem_var event (for the new_claim
+            // witness write at runtime/mod.rs:728). Both counters must
+            // increment so UnsafeRecord pre-sizes both vecs correctly.
+            Instruction::SumcheckVerify(_) => {
+                self.sumcheck_verify_events += 1;
+                self.mem_var_events += 1;
+            }
         }
     }
 }
