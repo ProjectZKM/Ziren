@@ -752,10 +752,13 @@ where
     }
 
     pub fn preallocate_record(&mut self) {
-        let event_counts = self
-            .program
-            .iter_instructions()
-            .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
+        // #259 Phase C step 2c: walk seq_blocks recursively (handling
+        // SeqBlock::Parallel) via the analyze module's `event_counts`
+        // helper instead of flattening through `iter_instructions`. The
+        // counts are identical today (compiler emits a single Basic
+        // block; no Parallel blocks yet), but the recursive walk is the
+        // correct foundation for when parallel blocks land.
+        let event_counts = self.program.seq_blocks.event_counts();
         self.record.poseidon2_events.reserve(event_counts.poseidon2_wide_events);
         self.record.mem_var_events.reserve(event_counts.mem_var_events);
         self.record.base_alu_events.reserve(event_counts.base_alu_events);

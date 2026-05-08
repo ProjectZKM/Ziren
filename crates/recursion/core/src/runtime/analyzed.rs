@@ -51,6 +51,40 @@ impl<F> AnalyzedInstruction<F> {
 }
 
 impl<F> RawProgram<Instruction<F>> {
+    /// Walk seq_blocks (recursing into `SeqBlock::Parallel` sub-programs)
+    /// and accumulate per-chip event counts without rewriting the program.
+    ///
+    /// Used by [`crate::runtime::Runtime::preallocate_record`] to size the
+    /// `ExecutionRecord` event vectors before walking. Equivalent to
+    /// running [`Self::analyze`] and discarding the offset assignments,
+    /// but cheaper because no Vec rebuild happens.
+    pub fn event_counts(&self) -> RecursionAirEventCount {
+        fn walk_block<T>(
+            block: &SeqBlock<Instruction<T>>,
+            counts: &mut RecursionAirEventCount,
+        ) {
+            match block {
+                SeqBlock::Basic(basic) => {
+                    for instr in &basic.instrs {
+                        *counts += instr;
+                    }
+                }
+                SeqBlock::Parallel(par_blocks) => {
+                    for sub in par_blocks {
+                        for b in &sub.seq_blocks {
+                            walk_block(b, counts);
+                        }
+                    }
+                }
+            }
+        }
+        let mut counts = RecursionAirEventCount::default();
+        for b in &self.seq_blocks {
+            walk_block(b, &mut counts);
+        }
+        counts
+    }
+
     /// Analyze the program: assign each instruction an offset into the
     /// per-chip event vectors, and return the total per-chip event count.
     ///
@@ -232,5 +266,39 @@ mod tests {
         let (_, counts) = prog.analyze();
         // 4 outer (2+2) + 2 sub × 2 instrs each = 4 + 4 = 8 base_alu events.
         assert_eq!(counts.base_alu_events, 8);
+    }
+
+    #[test]
+    fn event_counts_matches_analyze_for_parallel_program() {
+        // Same shape as analyze_handles_parallel_blocks, but verify the
+        // non-consuming `event_counts()` produces the same totals as
+        // the consuming `analyze()` path. This is the contract that
+        // `Runtime::preallocate_record` relies on.
+        let make_basic = || {
+            SeqBlock::Basic(BasicBlock {
+                instrs: vec![dummy_base_alu(), dummy_base_alu(), dummy_mem()],
+            })
+        };
+        let par_subs: Vec<RawProgram<Instruction<KoalaBear>>> = vec![
+            RawProgram { seq_blocks: vec![make_basic()] },
+            RawProgram { seq_blocks: vec![make_basic(), make_basic()] },
+        ];
+        let prog: RawProgram<Instruction<KoalaBear>> = RawProgram {
+            seq_blocks: vec![
+                make_basic(),
+                SeqBlock::Parallel(par_subs),
+                make_basic(),
+            ],
+        };
+        let counts_via_event_counts = prog.event_counts();
+        let (_, counts_via_analyze) = prog.analyze();
+        assert_eq!(counts_via_event_counts.base_alu_events, counts_via_analyze.base_alu_events);
+        assert_eq!(counts_via_event_counts.mem_const_events, counts_via_analyze.mem_const_events);
+        assert_eq!(counts_via_event_counts.ext_alu_events, counts_via_analyze.ext_alu_events);
+        assert_eq!(counts_via_event_counts.poseidon2_wide_events, counts_via_analyze.poseidon2_wide_events);
+        // Total instructions: 1 outer + 3 inner sub-progs + 1 outer trailer
+        // = 5 basic blocks × 3 instrs each = 15 → 10 base_alu + 5 mem.
+        assert_eq!(counts_via_event_counts.base_alu_events, 10);
+        assert_eq!(counts_via_event_counts.mem_const_events, 5);
     }
 }
