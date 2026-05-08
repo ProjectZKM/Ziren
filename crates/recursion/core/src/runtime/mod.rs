@@ -272,18 +272,31 @@ where
         if let Ok(path) = std::env::var("ZIREN_DUMP_PROGRAM") {
             use std::io::Write as _;
             if let Ok(mut f) = std::fs::File::create(&path) {
-                for (pc, instr) in self.program.instructions.iter().enumerate() {
+                for (pc, instr) in self.program.iter_instructions().enumerate() {
                     let _ = writeln!(f, "{:5} {}", pc, instr_short(instr));
                 }
             }
         }
         self.preallocate_record();
-        while self.pc < F::from_u32(self.program.instructions.len() as u32) {
-            let idx = self.pc.as_canonical_u32() as usize;
-            let instruction = self.program.instructions[idx].clone();
-
+        // Phase A4 (#259): walk seq_blocks via iter_instructions() instead
+        // of indexing the flat instructions Vec by PC. PC is incremented
+        // sequentially per instruction so that backtrace lookups
+        // (`nearest_pc_backtrace`) and pc-as-value debug logging continue
+        // to work unchanged. seq_blocks contains the same instruction
+        // sequence in the same order today (single Basic block) so this
+        // is zero behavior change. Foundation for Phase B+C parallel
+        // runtime.
+        // SP1 ref: `/tmp/sp1/crates/recursion/executor/src/runtime/mod.rs`
+        // (the Runtime::run loop iterates the RawProgram).
+        // Snapshot an Arc-clone of the program so the iterator borrow
+        // doesn't conflict with the &mut self field accesses inside the
+        // loop body. Arc::clone is just a refcount bump, not a deep
+        // copy.
+        let program = self.program.clone();
+        for instr in program.iter_instructions() {
             let next_clk = self.clk + F::from_u32(4);
             let next_pc = self.pc + F::ONE;
+            let instruction = instr.clone();
             match instruction {
                 Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
                     self.nb_base_ops += 1;
