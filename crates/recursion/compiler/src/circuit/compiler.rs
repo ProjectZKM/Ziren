@@ -808,16 +808,26 @@ where
         self.next_addr = Default::default();
         self.virtual_to_physical.clear();
         // Place constant-initializing instructions at the top.
-        let (instructions, traces) = tracing::debug_span!("construct program").in_scope(|| {
-            if debug_mode {
-                let instrs_all = instrs_consts.chain(instrs);
-                let traces_all = std::iter::repeat_n(None, total_consts).chain(traces);
-                (instrs_all.collect(), traces_all.collect())
-            } else {
-                (instrs_consts.chain(instrs).collect(), traces)
-            }
-        });
-        RecursionProgram { instructions, total_memory, traces, shape: None }
+        let (instructions, traces): (Vec<_>, Vec<_>) =
+            tracing::debug_span!("construct program").in_scope(|| {
+                if debug_mode {
+                    let instrs_all = instrs_consts.chain(instrs);
+                    let traces_all = std::iter::repeat_n(None, total_consts).chain(traces);
+                    (instrs_all.collect(), traces_all.collect())
+                } else {
+                    (instrs_consts.chain(instrs).collect(), traces)
+                }
+            });
+        // #259 Phase A3: emit SeqBlock representation alongside the flat
+        // instructions list. Single Basic block today (no parallelism
+        // emission yet — that lands in Phase C with DslIr::Parallel +
+        // IrIter). Both fields hold equivalent content; runtime continues
+        // to use `instructions` until Phase A4 migration. The clone is
+        // a one-time program-build cost and goes away when `instructions`
+        // is removed in Phase A5.
+        let seq_blocks =
+            zkm_recursion_core::runtime::RawProgram::from_linear(instructions.clone());
+        RecursionProgram { instructions, seq_blocks, total_memory, traces, shape: None }
     }
 }
 
