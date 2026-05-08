@@ -16,19 +16,31 @@ pub trait Memory<F> {
     /// Allocates memory with at least the given capacity.
     fn with_capacity(capacity: usize) -> Self;
 
-    /// Read from a memory address. Decrements the memory entry's mult count.
+    /// Read from a memory address.
+    ///
+    /// #259 Phase B step 2: the previous `mr_mult(addr, mult)` API
+    /// decremented `MemoryEntry::mult` on every read. The decrement
+    /// result was never read by any consumer (chips read mult from the
+    /// instruction-side preprocessed columns, not from `MemoryEntry`),
+    /// so the bookkeeping was dead code. Mirroring SP1's `MemVec`
+    /// (`/tmp/sp1/crates/recursion/executor/src/memory.rs:39`), the
+    /// only read API is `mr` — no mult decrement happens at runtime.
+    /// This removes the last barrier to using `ParMemVec` for parallel
+    /// `SeqBlock::Parallel` execution: with no shared mult counter to
+    /// alias, concurrent reads of disjoint addresses are race-free
+    /// without atomics.
     ///
     /// # Panics
     /// Panics if the address is unassigned.
     fn mr(&mut self, addr: Address<F>) -> &mut MemoryEntry<F>;
 
-    /// Read from a memory address. Reduces the memory entry's mult count by the given amount.
-    ///
-    /// # Panics
-    /// Panics if the address is unassigned.
-    fn mr_mult(&mut self, addr: Address<F>, mult: F) -> &mut MemoryEntry<F>;
-
     /// Write to a memory address, setting the given value and mult.
+    ///
+    /// `mult` is stored on the entry but never read at runtime; it is
+    /// retained only so the existing tests / future audit hooks can
+    /// inspect the originally-written value. Phase D may drop the
+    /// field entirely once the parallel runtime is wired and the
+    /// chip-side audit confirms it never reads `MemoryEntry::mult`.
     ///
     /// # Panics
     /// Panics if the address is already assigned.
@@ -44,16 +56,8 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
     }
 
     fn mr(&mut self, addr: Address<F>) -> &mut MemoryEntry<F> {
-        self.mr_mult(addr, F::ONE)
-    }
-
-    fn mr_mult(&mut self, addr: Address<F>, mult: F) -> &mut MemoryEntry<F> {
         match self.0.entry(addr.as_usize()) {
-            Entry::Occupied(mut entry) => {
-                let entry_mult = &mut entry.get_mut().mult;
-                *entry_mult -= mult;
-                entry.into_mut()
-            }
+            Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(_) => panic!("tried to read from unassigned address: {addr:?}",),
         }
     }
@@ -79,15 +83,8 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
     }
 
     fn mr(&mut self, addr: Address<F>) -> &mut MemoryEntry<F> {
-        self.mr_mult(addr, F::ONE)
-    }
-
-    fn mr_mult(&mut self, addr: Address<F>, mult: F) -> &mut MemoryEntry<F> {
         match self.0.get_mut(addr.as_usize()) {
-            Some(Some(entry)) => {
-                entry.mult -= mult;
-                entry
-            }
+            Some(Some(entry)) => entry,
             _ => panic!(
                 "tried to read from unassigned address: {addr:?}\nbacktrace: {:?}",
                 backtrace::Backtrace::new()
@@ -131,17 +128,17 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 /// `/tmp/sp1/crates/recursion/executor/src/memory.rs:25-100`.
 ///
 /// Differences from SP1's `MemVec`:
-/// - SP1's `MemoryEntry` is `{ val }` only; Ziren's adds `mult` for
-///   logup multiplicity tracking. The mult field is held inline today
-///   — concurrent writes to different cells are race-free, but
-///   concurrent decrements through `mr_unchecked`'s `&MemoryEntry`
-///   would alias. Phase B step 2 will resolve mult-tracking for
-///   parallel reads (current options: move mult to a separate Vec
-///   updated by the runtime; or wrap mult in `AtomicU{32,64}` with
-///   canonical-repr conversion to F).
-/// - For now, `mr_unchecked` returns `&MemoryEntry<F>` (read-only). The
-///   caller cannot decrement mult through it. Phase B step 2 supplies
-///   a thread-safe mult-update path.
+/// - SP1's `MemoryEntry` is `{ val }` only; Ziren's still carries
+///   `mult` for binary compatibility with the existing chip preprocessed
+///   layout. #259 Phase B step 2 audit established that `MemoryEntry::mult`
+///   is **never read** at runtime — chips read mult from the
+///   instruction-side preprocessed columns, not from `MemoryEntry`. The
+///   `mr_mult` decrement was therefore dead, and was removed (along with
+///   `mr_mult` from the `Memory` trait). `ParMemVec` consequently needs
+///   no thread-safe mult-update path: with no shared counter to alias,
+///   parallel reads of disjoint addresses are race-free without atomics.
+///   `mr_unchecked` returns `&MemoryEntry<F>` and only `val` is consumed
+///   downstream.
 #[derive(Debug, Default)]
 #[allow(dead_code)]
 pub struct ParMemVec<F>(Vec<SyncUnsafeCell<MaybeUninit<MemoryEntry<F>>>>);

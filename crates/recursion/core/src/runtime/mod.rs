@@ -306,14 +306,14 @@ where
                     let debug_shapes = std::env::var("ZIREN_DEBUG_READ_SHAPES").is_ok();
                     if debug_shapes {
                         let pc = self.pc.as_canonical_u32();
-                        let e1 = self.memory.mr_mult(addrs.in1, F::ZERO).val;
+                        let e1 = self.memory.mr(addrs.in1).val;
                         if !e1.0[1].is_zero() || !e1.0[2].is_zero() || !e1.0[3].is_zero() {
                             eprintln!(
                                 "[read shape] pc={} chip=BaseAlu op={:?} addr={} out_addr={} ext=true",
                                 pc, opcode, addrs.in1.as_usize(), addrs.out.as_usize()
                             );
                         }
-                        let e2 = self.memory.mr_mult(addrs.in2, F::ZERO).val;
+                        let e2 = self.memory.mr(addrs.in2).val;
                         if !e2.0[1].is_zero() || !e2.0[2].is_zero() || !e2.0[3].is_zero() {
                             eprintln!(
                                 "[read shape] pc={} chip=BaseAlu op={:?} addr={} out_addr={} ext=true",
@@ -394,7 +394,7 @@ where
                     self.nb_memory_ops += 1;
                     match kind {
                         MemAccessKind::Read => {
-                            let mem_entry = self.memory.mr_mult(addr, mult);
+                            let mem_entry = self.memory.mr(addr);
                             assert_eq!(
                                 mem_entry.val, val,
                                 "stored memory value should be the specified value"
@@ -412,7 +412,7 @@ where
                     if std::env::var("ZIREN_DEBUG_READ_SHAPES").is_ok() {
                         let pc = self.pc.as_canonical_u32();
                         for (i, &addr) in input.iter().enumerate() {
-                            let e = self.memory.mr_mult(addr, F::ZERO).val;
+                            let e = self.memory.mr(addr).val;
                             if !e.0[1].is_zero() || !e.0[2].is_zero() || !e.0[3].is_zero() {
                                 eprintln!(
                                     "[read shape] pc={} chip=Poseidon2 slot={} addr={} ext=true",
@@ -475,7 +475,7 @@ where
                 }
                 Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
                     self.nb_bit_decompositions += 1;
-                    let num = self.memory.mr_mult(input_addr, F::ZERO).val[0].as_canonical_u32();
+                    let num = self.memory.mr(input_addr).val[0].as_canonical_u32();
                     // Decompose the num into LE bits.
                     let bits = (0..output_addrs_mults.len())
                         .map(|i| Block::from(F::from_u32((num >> i) & 1)))
@@ -495,16 +495,16 @@ where
                     input2_y_addrs,
                 }) => {
                     let input1_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input1_x_addrs[i], F::ZERO).val[0]
+                        self.memory.mr(input1_x_addrs[i]).val[0]
                     });
                     let input1_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input1_y_addrs[i], F::ZERO).val[0]
+                        self.memory.mr(input1_y_addrs[i]).val[0]
                     });
                     let input2_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input2_x_addrs[i], F::ZERO).val[0]
+                        self.memory.mr(input2_x_addrs[i]).val[0]
                     });
                     let input2_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr_mult(input2_y_addrs[i], F::ZERO).val[0]
+                        self.memory.mr(input2_y_addrs[i]).val[0]
                     });
                     let point1 = SepticCurve { x: input1_x, y: input1_y };
                     let point2 = SepticCurve { x: input2_x, y: input2_y };
@@ -653,12 +653,12 @@ where
                 Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
                     FieldEltType::Base => {
                         self.nb_print_f += 1;
-                        let f = self.memory.mr_mult(addr, F::ZERO).val[0];
+                        let f = self.memory.mr(addr).val[0];
                         writeln!(self.debug_stdout, "PRINTF={f}")
                     }
                     FieldEltType::Extension => {
                         self.nb_print_e += 1;
-                        let ef = self.memory.mr_mult(addr, F::ZERO).val;
+                        let ef = self.memory.mr(addr).val;
                         writeln!(self.debug_stdout, "PRINTEF={ef:?}")
                     }
                 }
@@ -668,7 +668,7 @@ where
                     input_addr,
                 }) => {
                     self.nb_bit_decompositions += 1;
-                    let fs = self.memory.mr_mult(input_addr, F::ZERO).val;
+                    let fs = self.memory.mr(input_addr).val;
                     // Write the bits to the array at dst.
                     for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults) {
                         let felt = Block::from(f);
