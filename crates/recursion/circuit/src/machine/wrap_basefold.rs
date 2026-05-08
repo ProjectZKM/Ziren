@@ -26,24 +26,35 @@ use zkm_stark::{
 
 use crate::{
     challenger::CanObserveVariable,
-    machine::{assert_root_public_values_valid, RootPublicValues},
+    hash::{FieldHasher, FieldHasherVariable},
+    machine::{
+        assert_root_public_values_valid, RootPublicValues, ZKMMerkleProofVerifier,
+        ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
+    },
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
 /// Witness values for the wrap stage — host-side input.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "StarkVerifyingKey<SC>: Serialize",
-    deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>"
+    serialize = "StarkVerifyingKey<SC>: Serialize, ZKMMerkleProofWitnessValues<SC>: Serialize",
+    deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>, ZKMMerkleProofWitnessValues<SC>: for<'d> Deserialize<'d>"
 ))]
-pub struct ZKMWrapBasefoldWitnessValues<SC: zkm_stark::StarkGenericConfig> {
+pub struct ZKMWrapBasefoldWitnessValues<
+    SC: zkm_stark::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
+> {
     /// Single `(vk, root-proof)` pair to wrap.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
+    /// vk-merkle witness binding the input VK against the canonical
+    /// vk_root.  #261 SP1 alignment — mirrors SP1's
+    /// `SP1CompressRootVerifierWithVKey::verify` which forwards to
+    /// `SP1MerkleProofVerifier` (`/tmp/sp1/crates/recursion/circuit/src/machine/root.rs:30-50`).
+    pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
 }
 
 pub struct ZKMWrapBasefoldWitnessVariable<
     C: CircuitConfig<F = p3_koala_bear::KoalaBear>,
-    SC: KoalaBearFriParametersVariable<C>,
+    SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
     pub vks_and_proofs: Vec<(
         VerifyingKeyVariable<C, SC>,
@@ -71,6 +82,9 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             >,
         >,
     >,
+    /// vk-merkle witness — in-circuit cousin of
+    /// [`ZKMWrapBasefoldWitnessValues::vk_merkle_data`].
+    pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,19 +100,32 @@ pub fn verify_wrap_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMWrapBasefoldWitnessVariable<C, SC>,
     machine: &zkm_stark::StarkMachine<SC, A>,
+    value_assertions: bool,
     max_log_row_count: usize,
 ) where
     SC: KoalaBearFriParametersVariable<
-        C,
-        FriChallengerVariable = crate::challenger::DuplexChallengerVariable<C>,
-        DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
-        Val = InnerVal,
-    >,
+            C,
+            FriChallengerVariable = crate::challenger::DuplexChallengerVariable<C>,
+            DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
+            Val = InnerVal,
+        > + FieldHasherVariable<C>,
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
-    let ZKMWrapBasefoldWitnessVariable { vks_and_proofs, chip_cumulative_sums_per_input } = input;
+    let ZKMWrapBasefoldWitnessVariable {
+        vks_and_proofs,
+        chip_cumulative_sums_per_input,
+        vk_merkle_data,
+    } = input;
+
+    // #261 SP1 alignment: bind the single input VK to the witnessed
+    // vk_root via merkle proof, mirroring SP1's
+    // `SP1CompressRootVerifierWithVKey::verify` (forwards to
+    // `SP1CompressWithVKeyVerifier::verify` which runs
+    // `SP1MerkleProofVerifier`).
+    let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
+    ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
 
@@ -275,7 +302,7 @@ impl ZKMWrapBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
             zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
             A,
         >,
-        shape: &super::compress::ZKMCompressShape,
+        shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
         A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
@@ -286,13 +313,18 @@ impl ZKMWrapBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
                 >,
             >,
     {
-        let vks_and_proofs = shape
+        let vks_and_proofs: Vec<_> = shape
+            .compress_shape
             .proof_shapes
             .iter()
             .map(|proof_shape| {
                 crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape)
             })
             .collect();
-        Self { vks_and_proofs }
+        let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
+            vks_and_proofs.len(),
+            shape.merkle_tree_height,
+        );
+        Self { vks_and_proofs, vk_merkle_data }
     }
 }

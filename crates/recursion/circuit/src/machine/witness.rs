@@ -483,9 +483,13 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
+            // #261 SP1 alignment: read vk-merkle witness so verify_wrap_basefold
+            // can bind the input VK hash against vk_merkle_data.root.
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
+                vk_merkle_data,
             }
         }
 
@@ -497,6 +501,8 @@ mod basefold_witness {
                     sums.write(witness);
                 }
             }
+            // #261 SP1 alignment: write vk-merkle witness in matching order.
+            self.vk_merkle_data.write(witness);
         }
     }
 }

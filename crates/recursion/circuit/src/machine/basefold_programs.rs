@@ -153,10 +153,15 @@ where
 /// Build the Wrap (terminal) program.  Verifies a single root
 /// recursive proof and reflects its [`RootPublicValues`] to the
 /// outer ring.
+/// #261 SP1 alignment: wrap (terminal) takes `value_assertions` like
+/// compose to control whether merkle membership proofs are enforced
+/// (true) or only witnessed (false). Mirrors SP1's
+/// `SP1CompressRootVerifierWithVKey::verify` `value_assertions` flag.
 pub fn build_wrap_basefold_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2>,
     max_log_row_count: usize,
+    value_assertions: bool,
 ) -> RecursionProgram<KoalaBear>
 where
     A: MachineAir<KoalaBear>
@@ -169,6 +174,7 @@ where
         &mut builder,
         input_var,
         machine,
+        value_assertions,
         max_log_row_count,
     );
     let operations = builder.into_operations();

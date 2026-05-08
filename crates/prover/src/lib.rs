@@ -514,6 +514,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.compress_prover.machine(),
             input,
             max_log_row_count,
+            self.vk_verification,
         );
         Arc::new(program)
     }
@@ -558,6 +559,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             &mut builder,
             input_var,
             self.shrink_prover.machine(),
+            self.vk_verification,
             max_log_row_count,
         );
         let operations = builder.into_operations();
@@ -1222,8 +1224,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
+        // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // can bind the input VK against the canonical vk_root.
+        let vk_merkle_data =
+            self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            vk_merkle_data,
         };
         let program = self.shrink_program_basefold(&input);
 
@@ -1265,8 +1272,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
+        // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // can bind the input VK against the canonical vk_root.
+        let vk_merkle_data =
+            self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            vk_merkle_data,
         };
         let program = self.wrap_bn254_program_basefold(&input);
 

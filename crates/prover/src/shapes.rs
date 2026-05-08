@@ -555,9 +555,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.compose_program_basefold(&input)
             }
             ZKMCompressProgramShape::Shrink(shape) => {
+                // #261 SP1 alignment: dummy now consumes the full
+                // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
+                // sizes the vk-merkle witness for the wrap stage too.
                 let input = ZKMWrapBasefoldWitnessValues::dummy(
                     self.compress_prover.machine(),
-                    &shape.compress_shape,
+                    &shape,
                 );
                 self.shrink_program_basefold(&input)
             }
