@@ -469,7 +469,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.compress_prover.machine(),
             input,
             max_log_row_count,
-            self.recursion_vk_root,
+            self.vk_verification,
             PublicValuesOutputDigest::Reduce,
         );
         if let Some(recursion_shape_config) = &self.compress_shape_config {
@@ -1162,9 +1162,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     (vk, bf)
                                 })
                                 .collect();
+                            // #261: bundle vk-merkle witness so the compose
+                            // program can read vk_root from input rather than
+                            // baking it as a compile-time constant.
+                            let vks_only: Vec<StarkVerifyingKey<InnerSC>> =
+                                bf_vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
+                            let vk_merkle_data =
+                                self.make_basefold_merkle_proofs(&vks_only);
                             let input = ZKMCircuitWitness::ComposeBasefold(
                                 ZKMCompressBasefoldWitnessValues {
                                     vks_and_proofs: bf_vks_and_proofs,
+                                    vk_merkle_data,
                                     is_complete,
                                 },
                             );
@@ -1415,6 +1423,52 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             );
         }
         digest
+    }
+
+    /// #261 helper: build a merkle witness for a slice of VKs without
+    /// going through the legacy `ZKMCompressWitnessValues` shape.
+    /// Used by basefold compose/wrap to bundle vk_merkle_data into the
+    /// witness that the recursion program reads.  Mirror of the inner
+    /// half of [`Self::make_merkle_proofs`].
+    pub fn make_basefold_merkle_proofs(
+        &self,
+        vks: &[StarkVerifyingKey<InnerSC>],
+    ) -> ZKMMerkleProofWitnessValues<InnerSC> {
+        let num_vks = self.recursion_vk_map.len();
+        let (vk_indices, vk_digest_values): (Vec<_>, Vec<_>) = if self.vk_verification {
+            vks.iter()
+                .map(|vk| {
+                    let vk_digest = vk.hash_koalabear();
+                    let index = self
+                        .recursion_vk_map
+                        .get(&vk_digest)
+                        .expect("vk not allowed");
+                    (index, vk_digest)
+                })
+                .unzip()
+        } else {
+            vks.iter()
+                .map(|vk| {
+                    let vk_digest = vk.hash_koalabear();
+                    let index = (vk_digest[0].as_canonical_u32() as usize) % num_vks;
+                    (index, [KoalaBear::from_usize(index); 8])
+                })
+                .unzip()
+        };
+
+        let proofs = vk_indices
+            .iter()
+            .map(|index| {
+                let (_, proof) = MerkleTree::open(&self.recursion_vk_tree, *index);
+                proof
+            })
+            .collect();
+
+        ZKMMerkleProofWitnessValues {
+            root: self.recursion_vk_root,
+            values: vk_digest_values,
+            vk_merkle_proofs: proofs,
+        }
     }
 
     pub fn make_merkle_proofs(

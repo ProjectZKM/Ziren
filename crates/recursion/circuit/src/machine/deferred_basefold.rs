@@ -403,9 +403,16 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             >,
     {
         use p3_field::PrimeCharacteristicRing;
+        // #261: compress dummy now requires the full ZKMCompressWithVkeyShape so
+        // its vk_merkle_data can be sized.  Deferred overrides vk_merkle_data
+        // below with its own proof set, so the inner one is throwaway.
+        let inner_shape = super::ZKMCompressWithVkeyShape {
+            compress_shape: shape.inner.clone(),
+            merkle_tree_height: shape.height,
+        };
         let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<
             zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
-        >::dummy::<A>(machine, &shape.inner);
+        >::dummy::<A>(machine, &inner_shape);
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
             inner.vks_and_proofs.len(),
             shape.height,

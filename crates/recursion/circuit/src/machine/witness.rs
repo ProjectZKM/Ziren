@@ -352,10 +352,15 @@ mod basefold_witness {
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
         SC: zkm_stark::StarkGenericConfig
-            + KoalaBearFriParametersVariable<C>,
+            + KoalaBearFriParametersVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
         Com<SC>:
             Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
         StarkVerifyingKey<SC>: Witnessable<C, WitnessVariable = VerifyingKeyVariable<C, SC>>,
+        crate::machine::ZKMMerkleProofWitnessValues<SC>: Witnessable<
+            C,
+            WitnessVariable = crate::machine::ZKMMerkleProofWitnessVariable<C, SC>,
+        >,
     {
         type WitnessVariable = ZKMCompressBasefoldWitnessVariable<C, SC>;
 
@@ -372,10 +377,14 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
+            // #261: read vk-merkle witness so verify_compress_basefold can
+            // bind each child VK hash to vk_merkle_data.root.
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
             ZKMCompressBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
+                vk_merkle_data,
                 is_complete,
             }
         }
@@ -388,6 +397,8 @@ mod basefold_witness {
                     sums.write(witness);
                 }
             }
+            // #261: write vk-merkle witness in matching read order.
+            self.vk_merkle_data.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
     }

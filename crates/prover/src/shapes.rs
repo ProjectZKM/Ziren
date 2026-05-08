@@ -546,9 +546,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.deferred_program_basefold(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
+                // #261: dummy now consumes the full ZKMCompressWithVkeyShape so
+                // its embedded merkle_tree_height sizes the vk-merkle witness.
                 let input = ZKMCompressBasefoldWitnessValues::dummy(
                     self.compress_prover.machine(),
-                    &shape.compress_shape,
+                    &shape,
                 );
                 self.compose_program_basefold(&input)
             }

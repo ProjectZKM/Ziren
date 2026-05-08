@@ -56,7 +56,11 @@ use zkm_stark::{
 };
 
 use crate::{CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable};
+use crate::hash::{FieldHasher, FieldHasherVariable};
 use crate::jagged_circuit::{JaggedDimensionMetadata, JaggedSumcheckEvalProof};
+use crate::machine::{
+    ZKMMerkleProofVerifier, ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
+};
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 
 /// Compress witness value type for the SP1-style shard-level
@@ -67,12 +71,22 @@ use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 /// but with `ShardProof<SC>` swapped for `BasefoldShardProof`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "StarkVerifyingKey<SC>: Serialize",
-    deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>"
+    serialize = "StarkVerifyingKey<SC>: Serialize, ZKMMerkleProofWitnessValues<SC>: Serialize",
+    deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>, ZKMMerkleProofWitnessValues<SC>: for<'d> Deserialize<'d>"
 ))]
-pub struct ZKMCompressBasefoldWitnessValues<SC: zkm_stark::StarkGenericConfig> {
+pub struct ZKMCompressBasefoldWitnessValues<
+    SC: zkm_stark::StarkGenericConfig + FieldHasher<KoalaBear>,
+> {
     /// Per-input (vk, basefold-proof) pairs to aggregate.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
+    /// vk-merkle witness binding the vk_root used by the verifier to the
+    /// allowed-VK set.  Mirrors SP1's
+    /// `SP1CompressWithVKeyWitnessValues::merkle_val`
+    /// (`/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:107`).
+    /// #261 fix: vk_root is sourced from this witness rather than baked
+    /// as a compile-time constant, so the compose program is independent
+    /// of the vk_map root and vk_map regen is self-consistent.
+    pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
     pub is_complete: bool,
 }
 
@@ -87,7 +101,7 @@ pub struct ZKMCompressBasefoldWitnessValues<SC: zkm_stark::StarkGenericConfig> {
 /// bytes reconstruction step is in place.
 pub struct ZKMCompressBasefoldWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
-    SC: KoalaBearFriParametersVariable<C>,
+    SC: FieldHasherVariable<C> + KoalaBearFriParametersVariable<C>,
 > {
     /// Per-input (vk, basefold-proof-tuple) pairs.
     pub vks_and_proofs: Vec<(
@@ -118,6 +132,9 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             >,
         >,
     >,
+    /// vk-merkle witness — the in-circuit cousin of
+    /// [`ZKMCompressBasefoldWitnessValues::vk_merkle_data`].
+    pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub is_complete: Felt<C::F>,
 }
 
@@ -163,15 +180,15 @@ pub fn verify_compress_basefold<C, SC, A>(
     builder: &mut zkm_recursion_compiler::ir::Builder<C>,
     input: ZKMCompressBasefoldWitnessVariable<C, SC>,
     machine: &zkm_stark::StarkMachine<SC, A>,
-    vk_root: [Felt<C::F>; DIGEST_SIZE],
+    value_assertions: bool,
     kind: super::compress::PublicValuesOutputDigest,
     max_log_row_count: usize,
 ) where
     SC: KoalaBearFriParametersVariable<
-        C,
-        Val = zkm_stark::InnerVal,
-        DigestVariable = [Felt<zkm_stark::InnerVal>; 8],
-    >,
+            C,
+            Val = zkm_stark::InnerVal,
+            DigestVariable = [Felt<zkm_stark::InnerVal>; 8],
+        > + FieldHasherVariable<C>,
     C: CircuitConfig<F = zkm_stark::InnerVal, EF = zkm_stark::InnerChallenge>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
@@ -180,8 +197,19 @@ pub fn verify_compress_basefold<C, SC, A>(
     let ZKMCompressBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
+        vk_merkle_data,
         is_complete,
     } = input;
+
+    // #261: source vk_root from the merkle witness (SP1 pattern at
+    // `/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:118`)
+    // and bind each input's VK hash to that root via merkle proof.
+    // Replaces the previous compile-time `vk_root` parameter, decoupling
+    // the compose program structure from the vk_map root.
+    let vk_root = vk_merkle_data.root;
+    let vk_hashes: Vec<_> =
+        vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
+    ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
     // Step 6 (pre-loop): initialize aggregated public-output
     // accumulators.  Verbatim copy from
@@ -1019,13 +1047,15 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
     /// helper for each input proof shape.
     ///
     /// Used by `program_from_shape` (#52) to build basefold compress
-    /// programs from cached shapes.
+    /// programs from cached shapes.  Takes the full `ZKMCompressWithVkeyShape`
+    /// so the embedded `merkle_tree_height` sizes the vk-merkle witness —
+    /// mirrors `ZKMCompressWithVKeyWitnessValues::dummy` (#261 fix).
     pub fn dummy<A>(
         machine: &zkm_stark::StarkMachine<
             zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
             A,
         >,
-        shape: &super::compress::ZKMCompressShape,
+        shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
         A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
@@ -1036,14 +1066,19 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
                 >,
             >,
     {
-        let vks_and_proofs = shape
+        let vks_and_proofs: Vec<_> = shape
+            .compress_shape
             .proof_shapes
             .iter()
             .map(|proof_shape| {
                 crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape)
             })
             .collect();
-        Self { vks_and_proofs, is_complete: false }
+        let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
+            vks_and_proofs.len(),
+            shape.merkle_tree_height,
+        );
+        Self { vks_and_proofs, vk_merkle_data, is_complete: false }
     }
 }
 
