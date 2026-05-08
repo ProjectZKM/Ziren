@@ -100,8 +100,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]> = Vec::new();
         program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::ExpReverseBitsLen(instr) = instruction {
                     Some(instr)
@@ -157,8 +156,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for ExpReverseBitsLenCh
 
         let mut rows: Vec<[KoalaBear; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]> = Vec::new();
         program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::ExpReverseBitsLen(x) => Some(unsafe {
                     std::mem::transmute::<&ExpReverseBitsInstr<F>, &ExpReverseBitsInstr<KoalaBear>>(
@@ -525,7 +523,10 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }

@@ -752,8 +752,7 @@ where
     pub fn preallocate_record(&mut self) {
         let event_counts = self
             .program
-            .instructions
-            .iter()
+            .iter_instructions()
             .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
         self.record.poseidon2_events.reserve(event_counts.poseidon2_wide_events);
         self.record.mem_var_events.reserve(event_counts.mem_var_events);

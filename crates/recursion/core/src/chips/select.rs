@@ -140,8 +140,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let instrs = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::Select(x) => Some(x),
                 _ => None,
@@ -181,8 +180,7 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         let instrs = unsafe {
             std::mem::transmute::<Vec<&SelectInstr<F>>, Vec<&SelectInstr<KoalaBear>>>(
                 program
-                    .instructions
-                    .iter()
+                    .iter_instructions()
                     .filter_map(|instruction| match instruction {
                         Instruction::Select(x) => Some(x),
                         _ => None,
@@ -417,7 +415,10 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }

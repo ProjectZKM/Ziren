@@ -182,7 +182,10 @@ pub(crate) mod tests {
                 }))
                 .collect::<Vec<_>>();
 
-        let program = Arc::new(RecursionProgram { instructions, ..Default::default() });
+        let program = Arc::new(RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        });
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             KoalaBearPoseidon2::new().perm,

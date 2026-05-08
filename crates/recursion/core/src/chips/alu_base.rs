@@ -173,8 +173,7 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         // Allocating an intermediate `Vec` is faster.
         let instrs = program
-            .instructions
-            .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
             .filter_map(|instruction| match instruction {
                 Instruction::BaseAlu(x) => Some(x),
                 _ => None,
@@ -228,8 +227,7 @@ impl<F: PrimeField32> MachineAir<F> for BaseAluChip {
         let instrs = unsafe {
             std::mem::transmute::<Vec<&BaseAluInstr<F>>, Vec<&BaseAluInstr<KoalaBear>>>(
                 program
-                    .instructions
-                    .iter()
+                    .iter_instructions()
                     .filter_map(|instruction| match instruction {
                         Instruction::BaseAlu(x) => Some(x),
                         _ => None,
@@ -472,7 +470,10 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }

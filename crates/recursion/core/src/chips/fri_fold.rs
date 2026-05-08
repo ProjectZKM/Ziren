@@ -181,8 +181,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_FRI_FOLD_PREPROCESSED_COLS]> = Vec::new();
         program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::FriFold(instr) = instruction {
                     Some(instr)
@@ -276,8 +275,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for FriFoldChip<DEGREE>
 
         let mut rows: Vec<[KoalaBear; NUM_FRI_FOLD_PREPROCESSED_COLS]> = Vec::new();
         program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::FriFold(instr) => Some(unsafe {
                     std::mem::transmute::<&Box<FriFoldInstr<F>>, &Box<FriFoldInstr<KoalaBear>>>(
@@ -738,7 +736,10 @@ mod tests {
             })
             .collect::<Vec<Instruction<F>>>();
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }

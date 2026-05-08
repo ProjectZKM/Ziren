@@ -171,8 +171,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
 
     pub fn heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
         let heights = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
 
         [
@@ -321,7 +320,10 @@ pub mod tests {
     }
 
     fn test_instructions(instructions: Vec<Instruction<F>>) {
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
         run_recursion_test_machines(program);
     }
 

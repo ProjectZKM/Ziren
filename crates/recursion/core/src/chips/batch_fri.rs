@@ -154,8 +154,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_BATCH_FRI_PREPROCESSED_COLS]> = Vec::new();
         program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::BatchFRI(instr) = instruction {
                     Some(instr)
@@ -210,8 +209,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         let instrs = unsafe {
             std::mem::transmute::<Vec<&Box<BatchFRIInstr<F>>>, Vec<&Box<BatchFRIInstr<KoalaBear>>>>(
                 program
-                    .instructions
-                    .iter()
+                    .iter_instructions()
                     .filter_map(|instruction| match instruction {
                         Instruction::BatchFRI(x) => Some(x),
                         _ => None,

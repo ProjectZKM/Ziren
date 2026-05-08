@@ -10,18 +10,13 @@ use crate::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
-    /// Linearly ordered instruction list. Today this is the canonical
-    /// program representation that the runtime executes; the compiler
-    /// emits it directly. SeqBlock-based programs (`seq_blocks` below)
-    /// are introduced by #259 Phase A1/A2 as additive scaffolding for
-    /// the SP1 parallel-runtime port — empty for now, populated once
-    /// the compiler is migrated in Phase A3.
-    pub instructions: Vec<Instruction<F>>,
-    /// Optional SeqBlock representation of the program (#259 Phase A2).
-    /// Empty for compiler output today; will become the canonical
-    /// representation once Phase A3 (compiler) and Phase A4 (runtime)
-    /// land. `#[serde(default)]` keeps backward compatibility with
-    /// programs serialized before this field existed.
+    /// SeqBlock representation of the program — the canonical
+    /// instruction container. Phase A4 (#259) migrated the runtime
+    /// off the flat `instructions` Vec and onto `iter_instructions()`,
+    /// and Phase A5 dropped the redundant `instructions` field
+    /// entirely. The compiler emits one `Basic` block today; Phase C
+    /// will introduce `Parallel` blocks once the memory layer is
+    /// thread-safe.
     #[serde(default = "RawProgram::default")]
     pub seq_blocks: RawProgram<Instruction<F>>,
     pub total_memory: usize,
@@ -31,31 +26,20 @@ pub struct RecursionProgram<F> {
 }
 
 impl<F> RecursionProgram<F> {
-    /// Iterate over the program's instructions in execution order.
-    ///
-    /// If `seq_blocks` is populated (post-Phase A3 compiler), walks the
-    /// SeqBlock structure (recursing through parallel sub-programs in
-    /// vec order — execution order is canonical even though parallel
-    /// sub-programs may run concurrently at runtime). Otherwise falls
-    /// back to the flat `instructions` list (current compiler output).
+    /// Iterate over the program's instructions in execution order,
+    /// recursing through parallel sub-programs in deterministic vec
+    /// order (the runtime collapses Parallel to sequential today;
+    /// Phase D will dispatch via `par_iter` once the memory layer is
+    /// thread-safe).
     ///
     /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/program.rs::raw::RawProgram::iter`.
-    pub fn iter_instructions(&self) -> Box<dyn Iterator<Item = &Instruction<F>> + '_> {
-        if !self.seq_blocks.seq_blocks.is_empty() {
-            Box::new(self.seq_blocks.iter())
-        } else {
-            Box::new(self.instructions.iter())
-        }
+    pub fn iter_instructions(&self) -> impl Iterator<Item = &Instruction<F>> {
+        self.seq_blocks.iter()
     }
 
-    /// Total instruction count, recursing through parallel sub-programs
-    /// when `seq_blocks` is populated.
+    /// Total instruction count, recursing through parallel sub-programs.
     pub fn instruction_count(&self) -> usize {
-        if !self.seq_blocks.seq_blocks.is_empty() {
-            self.seq_blocks.instruction_count()
-        } else {
-            self.instructions.len()
-        }
+        self.seq_blocks.instruction_count()
     }
 }
 

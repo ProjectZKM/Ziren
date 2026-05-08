@@ -278,8 +278,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         // Allocating an intermediate `Vec` is faster.
         let instrs = program
-            .instructions
-            .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+            .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
             .filter_map(|instruction| match instruction {
                 Poseidon2(instr) => Some(instr.as_ref()),
                 _ => None,
@@ -320,8 +319,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         // Allocating an intermediate `Vec` is faster.
         let instrs: Vec<&Poseidon2SkinnyInstr<KoalaBear>> =
             program
-                .instructions
-                .iter() // Faster than using `rayon` for some reason. Maybe vectorization?
+                .iter_instructions() // Faster than using `rayon` for some reason. Maybe vectorization?
                 .filter_map(|instruction| match instruction {
                     Poseidon2(instr) => Some(unsafe {
                         std::mem::transmute::<

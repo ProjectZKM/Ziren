@@ -818,16 +818,12 @@ where
                     (instrs_consts.chain(instrs).collect(), traces)
                 }
             });
-        // #259 Phase A3: emit SeqBlock representation alongside the flat
-        // instructions list. Single Basic block today (no parallelism
-        // emission yet — that lands in Phase C with DslIr::Parallel +
-        // IrIter). Both fields hold equivalent content; runtime continues
-        // to use `instructions` until Phase A4 migration. The clone is
-        // a one-time program-build cost and goes away when `instructions`
-        // is removed in Phase A5.
-        let seq_blocks =
-            zkm_recursion_core::runtime::RawProgram::from_linear(instructions.clone());
-        RecursionProgram { instructions, seq_blocks, total_memory, traces, shape: None }
+        // #259 Phase A5: `instructions` field has been dropped — the
+        // SeqBlock representation is canonical. Single Basic block
+        // today (no parallelism emission yet — that lands in Phase C
+        // with DslIr::Parallel + IrIter).
+        let seq_blocks = zkm_recursion_core::runtime::RawProgram::from_linear(instructions);
+        RecursionProgram { seq_blocks, total_memory, traces, shape: None }
     }
 }
 

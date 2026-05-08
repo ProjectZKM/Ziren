@@ -82,8 +82,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
         let commit_pv_hash_instrs = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::CommitPublicValues(instr) = instruction {
                     Some(instr)
@@ -135,8 +134,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
         let mut rows: Vec<[KoalaBear; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
         let commit_pv_hash_instrs = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::CommitPublicValues(instr) = instruction {
                     Some(unsafe {
@@ -362,7 +360,10 @@ mod tests {
         let public_values_a: &RecursionPublicValues<u32> = public_values_a.as_slice().borrow();
         instructions.push(instr::commit_public_values(public_values_a));
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }

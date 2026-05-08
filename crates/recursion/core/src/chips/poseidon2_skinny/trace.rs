@@ -286,13 +286,18 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        let instructions =
-            program.instructions.iter().filter_map(|instruction| match instruction {
-                Poseidon2(instr) => Some(instr),
-                _ => None,
-            });
-
-        let num_instructions = instructions.clone().count();
+        // Phase A5 (#259): the canonical instruction container is now
+        // `seq_blocks`; `iter_instructions()` yields `Box<dyn Iterator>`
+        // which doesn't impl Clone, so we recompute the count via a
+        // separate iterator (cheap — just a walk).
+        let num_instructions = program
+            .iter_instructions()
+            .filter(|instr| matches!(instr, Poseidon2(_)))
+            .count();
+        let instructions = program.iter_instructions().filter_map(|instruction| match instruction {
+            Poseidon2(instr) => Some(instr),
+            _ => None,
+        });
 
         let mut rows = vec![
             [F::ZERO; PREPROCESSED_POSEIDON2_WIDTH];
@@ -371,7 +376,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
         );
 
         let instructions =
-            program.instructions.iter().filter_map(|instruction| match instruction {
+            program.iter_instructions().filter_map(|instruction| match instruction {
                 Poseidon2(instr) => Some(unsafe {
                     std::mem::transmute::<
                         &Box<Poseidon2SkinnyInstr<F>>,
@@ -382,7 +387,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
             });
 
         let num_instructions =
-            program.instructions.iter().filter(|instr| matches!(instr, Poseidon2(_))).count();
+            program.iter_instructions().filter(|instr| matches!(instr, Poseidon2(_))).count();
 
         let mut rows = vec![
             [KoalaBear::ZERO; PREPROCESSED_POSEIDON2_WIDTH];

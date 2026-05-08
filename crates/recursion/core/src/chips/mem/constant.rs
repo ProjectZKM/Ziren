@@ -58,8 +58,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::Mem(MemInstr { addrs, vals, mult, kind }) => {
                     let mult = mult.to_owned();
@@ -217,10 +216,10 @@ mod tests {
     #[test]
     pub fn prove_basic_mem() {
         run_recursion_test_machines(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 2),
-            ],
+            ]),
             ..Default::default()
         });
     }
@@ -229,10 +228,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_mult() {
         prove_program(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 999, 1, 2),
-            ],
+            ]),
             ..Default::default()
         });
     }
@@ -241,10 +240,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_address() {
         prove_program(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 999, 2),
-            ],
+            ]),
             ..Default::default()
         });
     }
@@ -253,10 +252,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_value() {
         prove_program(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 999),
-            ],
+            ]),
             ..Default::default()
         });
     }

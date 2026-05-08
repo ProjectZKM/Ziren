@@ -58,10 +58,17 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        // Phase A5 (#259): collect instructions into a Vec so we can
+        // par_iter — `iter_instructions()` returns a sequential
+        // iterator, but rayon parallelism here is a meaningful speedup
+        // so we materialize first. `.copied()` flattens
+        // `Iter<Item = &&Instruction<F>>` to `&Instruction<F>` so the
+        // closure body matches the original signature.
+        let instructions: Vec<&Instruction<F>> = program.iter_instructions().collect();
         // Allocating an intermediate `Vec` is faster.
-        let accesses = program
-            .instructions
+        let accesses = instructions
             .par_iter() // Using `rayon` here provides a big speedup.
+            .copied()
             .flat_map_iter(|instruction| match instruction {
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr {
@@ -197,10 +204,10 @@ mod tests {
     #[test]
     pub fn prove_basic_mem() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 2),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -211,10 +218,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_mult() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 999, 1, 2),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -225,10 +232,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_address() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 999, 2),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -239,10 +246,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_value() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 999),
-            ],
+            ]),
             ..Default::default()
         };
 
