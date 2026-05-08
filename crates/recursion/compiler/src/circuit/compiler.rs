@@ -642,52 +642,28 @@ where
         // In debug mode, we perform cycle tracking and keep track of backtraces.
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
-        // Compile each IR instruction into a list of ASM instructions, then combine them.
-        // This step also counts the number of times each address is read from.
-        let (mut instrs, traces) = tracing::debug_span!("compile_one loop").in_scope(|| {
-            let mut instrs = Vec::with_capacity(PREALLOC_INSTRUCTIONS);
+        // Compile each IR instruction into a SeqBlock structure (#259
+        // Phase C). Most ops accumulate into the current Basic block;
+        // a `DslIr::Parallel` op flushes the current Basic block and
+        // pushes a `SeqBlock::Parallel(per_subprogram_RawProgram)`.
+        // This step also counts the number of times each address is
+        // read from. Backfill below walks the resulting flat
+        // iter_mut, which descends into Parallel sub-programs.
+        let (mut top_seq_blocks, traces) = tracing::debug_span!("compile_one loop").in_scope(|| {
             let mut traces = vec![];
-            if debug_mode {
-                let mut span_builder =
-                    SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string());
-                for (ir_instr, trace) in operations {
-                    self.compile_one(ir_instr, &mut |item| match item {
-                        Ok(instr) => {
-                            println!("instr: {instr:?}");
-                            span_builder.item(instr_name(&instr));
-                            instrs.push(instr);
-                            #[cfg(feature = "debug")]
-                            traces.push(trace.clone());
-                        }
-                        Err(CompileOneErr::CycleTrackerEnter(name)) => {
-                            span_builder.enter(name);
-                        }
-                        Err(CompileOneErr::CycleTrackerExit) => {
-                            span_builder.exit().unwrap();
-                        }
-                        Err(CompileOneErr::Unsupported(instr)) => {
-                            panic!("unsupported instruction: {instr:?}\nbacktrace: {trace:?}")
-                        }
-                    });
-                }
+            let mut span_builder = if debug_mode {
+                Some(SpanBuilder::<_, &'static str>::new("cycle_tracker".to_string()))
+            } else {
+                None
+            };
+            let blocks = self.compile_block(operations, debug_mode, &mut traces, span_builder.as_mut());
+            if let Some(span_builder) = span_builder {
                 let cycle_tracker_root_span = span_builder.finish().unwrap();
                 for line in cycle_tracker_root_span.lines() {
                     tracing::info!("{}", line);
                 }
-            } else {
-                for (ir_instr, trace) in operations {
-                    self.compile_one(ir_instr, &mut |item| match item {
-                        Ok(instr) => instrs.push(instr),
-                        Err(
-                            CompileOneErr::CycleTrackerEnter(_) | CompileOneErr::CycleTrackerExit,
-                        ) => (),
-                        Err(CompileOneErr::Unsupported(instr)) => {
-                            panic!("unsupported instruction: {instr:?}\nbacktrace: {trace:?}")
-                        }
-                    });
-                }
             }
-            (instrs, traces)
+            (blocks, traces)
         });
 
         // Replace the mults using the address count data gathered in this previous.
@@ -697,7 +673,10 @@ where
             *mult = self.addr_to_mult.remove(addr.as_usize()).unwrap()
         };
         tracing::debug_span!("backfill mult").in_scope(|| {
-            for asm_instr in instrs.iter_mut() {
+            // Walk all instructions across the SeqBlock structure
+            // (descends into Parallel sub-programs via the SeqBlock
+            // iterator boilerplate in seq_block.rs).
+            for asm_instr in top_seq_blocks.iter_mut().flatten() {
                 match asm_instr {
                     Instruction::BaseAlu(BaseAluInstr {
                         mult,
@@ -794,36 +773,153 @@ where
         debug_assert!(self.addr_to_mult.is_empty());
         // Initialize constants.
         let total_consts = self.consts.len();
-        let instrs_consts =
-            self.consts.drain().sorted_by_key(|x| x.1 .0 .0).map(|(imm, (addr, mult))| {
+        let instrs_consts: Vec<Instruction<C::F>> = self
+            .consts
+            .drain()
+            .sorted_by_key(|x| x.1 .0 .0)
+            .map(|(imm, (addr, mult))| {
                 Instruction::Mem(MemInstr {
                     addrs: MemIo { inner: addr },
                     vals: MemIo { inner: imm.as_block() },
                     mult,
                     kind: MemAccessKind::Write,
                 })
-            });
+            })
+            .collect();
         tracing::debug!("number of consts to initialize: {}", instrs_consts.len());
         // Reset the other fields.
         self.next_addr = Default::default();
         self.virtual_to_physical.clear();
-        // Place constant-initializing instructions at the top.
-        let (instructions, traces): (Vec<_>, Vec<_>) =
-            tracing::debug_span!("construct program").in_scope(|| {
-                if debug_mode {
-                    let instrs_all = instrs_consts.chain(instrs);
-                    let traces_all = std::iter::repeat_n(None, total_consts).chain(traces);
-                    (instrs_all.collect(), traces_all.collect())
-                } else {
-                    (instrs_consts.chain(instrs).collect(), traces)
+        // #259 Phase C: assemble the final SeqBlock structure. Constants
+        // are prepended as a Basic block; the user's compiled SeqBlocks
+        // (which may contain SeqBlock::Parallel) follow. Traces are
+        // prepended with `None`s for the const init prefix.
+        let final_traces: Vec<_> = tracing::debug_span!("construct program").in_scope(|| {
+            if debug_mode {
+                std::iter::repeat_n(None, total_consts).chain(traces).collect()
+            } else {
+                traces
+            }
+        });
+        let mut final_seq_blocks: Vec<SeqBlock<Instruction<C::F>>> =
+            Vec::with_capacity(top_seq_blocks.len() + 1);
+        if !instrs_consts.is_empty() {
+            final_seq_blocks.push(SeqBlock::Basic(BasicBlock { instrs: instrs_consts }));
+        }
+        final_seq_blocks.extend(top_seq_blocks);
+        let seq_blocks = zkm_recursion_core::runtime::RawProgram { seq_blocks: final_seq_blocks };
+        RecursionProgram { seq_blocks, total_memory, traces: final_traces, shape: None }
+    }
+
+    /// Compile a TracedVec of DSL ops into a `Vec<SeqBlock<Instruction<F>>>`.
+    ///
+    /// Most ops accumulate into a "current Basic block" buffer.
+    /// `DslIr::Parallel(par_blocks)` flushes the current buffer to a
+    /// `SeqBlock::Basic`, then recursively compiles each sub-block
+    /// into its own `RawProgram`, and pushes a `SeqBlock::Parallel`.
+    /// Cycle-tracker enter/exit ops thread through `span_builder`
+    /// as in the legacy compile loop.
+    ///
+    /// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/circuit/compiler.rs::compile_raw_program`
+    /// (lines 639-697).
+    fn compile_block<F>(
+        &mut self,
+        operations: TracedVec<DslIr<C>>,
+        debug_mode: bool,
+        traces: &mut Vec<Option<backtrace::Backtrace>>,
+        mut span_builder: Option<&mut SpanBuilder<String, &'static str>>,
+    ) -> Vec<SeqBlock<Instruction<C::F>>>
+    where
+        F: PrimeField + TwoAdicField,
+        C: Config<N = F, F = F> + Debug,
+    {
+        let mut seq_blocks: Vec<SeqBlock<Instruction<C::F>>> = Vec::new();
+        let mut current_basic: Vec<Instruction<C::F>> = Vec::with_capacity(PREALLOC_INSTRUCTIONS);
+        for (ir_instr, trace) in operations {
+            // Use an enum to pull the per-instruction outcomes out of
+            // the FnMut closure (the closure is Send-bound and we
+            // can't borrow span_builder mutably across it).
+            enum Outcome<F> {
+                Push(F),
+                Enter(String),
+                Exit,
+            }
+            let mut outcomes: Vec<Outcome<Instruction<C::F>>> = Vec::new();
+            match ir_instr {
+                DslIr::Parallel(par_blocks) => {
+                    // Flush the in-progress Basic block before opening the
+                    // Parallel boundary.
+                    if !current_basic.is_empty() {
+                        seq_blocks.push(SeqBlock::Basic(BasicBlock {
+                            instrs: std::mem::take(&mut current_basic),
+                        }));
+                    }
+                    // Recursively compile each sub-block into its own
+                    // RawProgram. The span builder is threaded
+                    // through so cycle-tracker enter/exit ops nested
+                    // inside a Parallel block continue to register.
+                    let sub_progs: Vec<zkm_recursion_core::runtime::RawProgram<Instruction<C::F>>> =
+                        par_blocks
+                            .into_iter()
+                            .map(|b| {
+                                let blocks = self.compile_block(
+                                    b.ops,
+                                    debug_mode,
+                                    traces,
+                                    span_builder.as_deref_mut(),
+                                );
+                                zkm_recursion_core::runtime::RawProgram { seq_blocks: blocks }
+                            })
+                            .collect();
+                    seq_blocks.push(SeqBlock::Parallel(sub_progs));
                 }
-            });
-        // #259 Phase A5: `instructions` field has been dropped — the
-        // SeqBlock representation is canonical. Single Basic block
-        // today (no parallelism emission yet — that lands in Phase C
-        // with DslIr::Parallel + IrIter).
-        let seq_blocks = zkm_recursion_core::runtime::RawProgram::from_linear(instructions);
-        RecursionProgram { seq_blocks, total_memory, traces, shape: None }
+                other => {
+                    let trace_clone = trace.clone();
+                    self.compile_one(other, |item| match item {
+                        Ok(instr) => outcomes.push(Outcome::Push(instr)),
+                        Err(CompileOneErr::CycleTrackerEnter(name)) => {
+                            outcomes.push(Outcome::Enter(name))
+                        }
+                        Err(CompileOneErr::CycleTrackerExit) => outcomes.push(Outcome::Exit),
+                        Err(CompileOneErr::Unsupported(instr)) => {
+                            panic!("unsupported instruction: {instr:?}\nbacktrace: {trace_clone:?}")
+                        }
+                    });
+                    // Drain outcomes outside the closure so we can
+                    // mutate span_builder freely.
+                    for outcome in outcomes {
+                        match outcome {
+                            Outcome::Push(instr) => {
+                                if debug_mode {
+                                    println!("instr: {instr:?}");
+                                    if let Some(sb) = span_builder.as_deref_mut() {
+                                        sb.item(instr_name(&instr));
+                                    }
+                                    #[cfg(feature = "debug")]
+                                    traces.push(trace.clone());
+                                }
+                                current_basic.push(instr);
+                            }
+                            Outcome::Enter(name) => {
+                                if let Some(sb) = span_builder.as_deref_mut() {
+                                    sb.enter(name);
+                                }
+                            }
+                            Outcome::Exit => {
+                                if let Some(sb) = span_builder.as_deref_mut() {
+                                    sb.exit().unwrap();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Flush trailing Basic block.
+        if !current_basic.is_empty() {
+            seq_blocks.push(SeqBlock::Basic(BasicBlock { instrs: current_basic }));
+        }
+        seq_blocks
     }
 }
 

@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_stark::septic_curve::SepticCurve;
 
@@ -343,4 +345,37 @@ pub enum DslIr<C: Config> {
     ExpReverseBitsLen(Ptr<C::N>, Var<C::N>, Var<C::N>),
     /// Reverse bits exponentiation. Output, base, exponent bits.
     CircuitV2ExpReverseBits(Felt<C::F>, Felt<C::F>, Vec<Felt<C::F>>),
+
+    // #259 Phase C scaffold — structuring IR constructors.
+    /// Sub-blocks that may be executed in parallel.
+    ///
+    /// Each sub-block carries a disjoint `addrs_written` range; the
+    /// runtime today walks them sequentially via Phase A4's
+    /// `iter_instructions` (Phase D will dispatch via `par_iter` once
+    /// the memory layer is thread-safe). Emitted by callers via the
+    /// `IrIter::ir_par_map_collect` extension trait.
+    ///
+    /// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/ir/instructions.rs:298`.
+    Parallel(Vec<DslIrBlock<C>>),
+}
+
+/// A linearly ordered block of DSL IR ops together with the range of
+/// virtual addresses it writes to.
+///
+/// Blocks are produced by `IrIter::ir_par_map_collect` and consumed
+/// by the compiler when lowering `DslIr::Parallel`. The
+/// `addrs_written` range is closed at the lower end and open at the
+/// upper, matching the convention of `Builder::variable_count`.
+///
+/// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/ir/instructions.rs:306`.
+#[derive(Clone, Debug)]
+pub struct DslIrBlock<C: Config> {
+    pub ops: TracedVec<DslIr<C>>,
+    pub addrs_written: Range<u32>,
+}
+
+impl<C: Config> Default for DslIrBlock<C> {
+    fn default() -> Self {
+        Self { ops: TracedVec::default(), addrs_written: 0..0 }
+    }
 }
