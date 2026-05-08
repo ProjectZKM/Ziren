@@ -47,7 +47,7 @@ use std::mem::MaybeUninit;
 
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
+use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
 use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
 use zkm_stark::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
@@ -266,7 +266,17 @@ pub fn verify_compress_basefold<C, SC, A>(
         .unwrap_or(false);
     let _zlcl_n = vks_and_proofs.len();
     let _zlcl_pre = builder.variable_count();
-    for (_i, (vk_legacy, proof_tuple)) in vks_and_proofs.into_iter().enumerate() {
+    // #259 Phase D: split the per-input loop into a parallel-friendly
+    // VERIFY pass (ir_par_map_collect emits DslIr::Parallel) and a
+    // sequential AGGREGATE pass. Mirrors SP1's compress.rs:159+182
+    // pattern. Verify ops have no aggregator-state dependencies; only
+    // `public_values: Vec<Felt>` flows from verify to aggregate (it's
+    // cloned at closure entry before being moved into the proof
+    // assembly call).
+    let _verify_pubvals: Vec<Vec<Felt<C::F>>> = vks_and_proofs
+        .into_iter()
+        .enumerate()
+        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (_i, (vk_legacy, proof_tuple))| {
         let (
             main_commit,
             public_values,
@@ -275,6 +285,9 @@ pub fn verify_compress_basefold<C, SC, A>(
             evaluation_proof_bytes,
             evaluation_proof_bundle_opt,
         ) = proof_tuple;
+        // Clone public_values for the aggregate pass — it's moved into
+        // `assemble_basefold_shard_proof_variable` below.
+        let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
         // Step 2: derive chip names + per-round column counts from the
         // shard's logup_gkr_proof.chip_openings (same pattern as
@@ -540,6 +553,14 @@ pub fn verify_compress_basefold<C, SC, A>(
         // bounds of `ZKMCompressVerifier::verify` at
         // `super::compress.rs:75-80`).
 
+        // #259 Phase D: end of verify pass — emit `public_values`
+        // (cloned at closure entry) for the sequential aggregate pass.
+        _pubvals_for_aggregate
+    });
+
+    // Sequential aggregate pass: state mutations + consistency checks.
+    // Mirrors SP1's compress.rs:182 sequential loop.
+    for (_i, public_values) in _verify_pubvals.into_iter().enumerate() {
         // Step 6: aggregate public values into the compress
         // output digest.  Begin copy-over of legacy logic at
         // `crate::machine::compress::ZKMCompressVerifier::verify`
@@ -548,13 +569,11 @@ pub fn verify_compress_basefold<C, SC, A>(
         // 360-LOC accumulator state machine.
         //
         // Step 6a: borrow the proof's public_values as a typed
-        // RecursionPublicValues view.  The new BasefoldShardProof's
-        // `public_values: Vec<Felt>` is structurally compatible
-        // with the legacy ShardProof's, so the same `.borrow()`
-        // adapter works.
+        // RecursionPublicValues view.  Source is the verify-pass
+        // output (Vec<Felt> cloned from the proof tuple).
         use std::borrow::Borrow;
         let _current_public_values: &zkm_recursion_core::air::RecursionPublicValues<Felt<C::F>> =
-            _basefold_shard_proof_variable.public_values.as_slice().borrow();
+            public_values.as_slice().borrow();
 
         // Step 6b: assert the public values are valid.  Lifts
         // [`crate::machine::assert_recursion_public_values_valid`]
