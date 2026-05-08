@@ -3,6 +3,9 @@ mod memory;
 mod opcode;
 mod program;
 mod record;
+mod seq_block;
+
+pub use seq_block::{BasicBlock, RawProgram, SeqBlock};
 
 // Avoid triggering annoying branch of thiserror derive macro.
 use backtrace::Backtrace as Trace;
