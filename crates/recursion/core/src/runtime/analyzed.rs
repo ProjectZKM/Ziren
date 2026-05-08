@@ -111,10 +111,17 @@ impl<F> RawProgram<Instruction<F>> {
                 Instruction::Mem(_) => incr(&mut counts.mem_const_events, 1),
                 Instruction::Poseidon2(_) => incr(&mut counts.poseidon2_wide_events, 1),
                 Instruction::Select(_) => incr(&mut counts.select_events, 1),
-                Instruction::ExpReverseBitsLen(instr) => {
-                    incr(&mut counts.exp_reverse_bits_len_events, instr.addrs.exp.len())
+                // ExpReverseBitsLen: 1 event per instruction (event carries
+                // `exp: Vec<F>` of all bits inline). Match runtime push.
+                Instruction::ExpReverseBitsLen(_) => {
+                    incr(&mut counts.exp_reverse_bits_len_events, 1)
                 }
-                Instruction::FriFold(_) => incr(&mut counts.fri_fold_events, 1),
+                // FriFold: runtime emits ps_at_z.len() events per instruction
+                // (one per polynomial in the batch). Was off-by-default-1.
+                Instruction::FriFold(instr) => incr(
+                    &mut counts.fri_fold_events,
+                    instr.ext_vec_addrs.ps_at_z.len(),
+                ),
                 Instruction::BatchFRI(instr) => incr(
                     &mut counts.batch_fri_events,
                     instr.base_vec_addrs.p_at_x.len(),

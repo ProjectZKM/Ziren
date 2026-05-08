@@ -222,8 +222,12 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
             Instruction::Select(_) => self.select_events += 1,
-            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { addrs, .. }) => {
-                self.exp_reverse_bits_len_events += addrs.exp.len()
+            // Runtime emits ONE event per instruction (the event carries
+            // `exp: Vec<F>` of all bits). Was over-counting by exp.len();
+            // benign for push-based reserve, but UB-prone for offset
+            // writes via UnsafeRecord (uninit slots → bad transmute).
+            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { .. }) => {
+                self.exp_reverse_bits_len_events += 1
             }
             Instruction::Hint(HintInstr { output_addrs_mults })
             | Instruction::HintBits(HintBitsInstr {
@@ -234,7 +238,13 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 output_addrs_mults,
                 input_addr: _, // No receive lookup for the hint operation
             }) => self.mem_var_events += output_addrs_mults.len(),
-            Instruction::FriFold(_) => self.fri_fold_events += 1,
+            // FriFold runtime emits ps_at_z.len() events per instruction
+            // (one per polynomial in the batch); was off-by-default-1. Benign
+            // for push-based reserve, but UB-prone for offset writes via
+            // UnsafeRecord (uninit slots → bad transmute).
+            Instruction::FriFold(instr) => {
+                self.fri_fold_events += instr.ext_vec_addrs.ps_at_z.len()
+            }
             Instruction::BatchFRI(instr) => {
                 self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
             }

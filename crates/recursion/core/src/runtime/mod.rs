@@ -25,11 +25,13 @@ pub use record::*;
 use std::{
     array,
     borrow::Borrow,
+    cell::UnsafeCell,
     collections::VecDeque,
     fmt::Debug,
     io::{stdout, Write},
     iter::zip,
     marker::PhantomData,
+    mem::MaybeUninit,
     sync::Arc,
 };
 
