@@ -847,6 +847,17 @@ where
             let mut outcomes: Vec<Outcome<Instruction<C::F>>> = Vec::new();
             match ir_instr {
                 DslIr::Parallel(par_blocks) => {
+                    // #259 unlock-chain diagnostic: count Parallel ops
+                    // reaching the compiler so we can compare against
+                    // the runtime-side parallelism_summary readback.
+                    if std::env::var("ZIREN_DEBUG_PARALLEL_COMPILE").is_ok() {
+                        let total_ops: usize = par_blocks.iter().map(|b| b.ops.vec.len()).sum();
+                        eprintln!(
+                            "[compiler_parallel] sub_blocks={} total_ops={}",
+                            par_blocks.len(),
+                            total_ops
+                        );
+                    }
                     // Flush the in-progress Basic block before opening the
                     // Parallel boundary.
                     if !current_basic.is_empty() {

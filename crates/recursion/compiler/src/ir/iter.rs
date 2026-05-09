@@ -60,6 +60,17 @@ where
         // Restore the parent's op buffer and push the Parallel op
         // containing the per-iteration sub-blocks.
         *builder.get_mut_operations() = prev_ops;
+        // #259 unlock-chain diagnostic: ZIREN_DEBUG_PARALLEL_EMIT=1
+        // counts each ir_par_map_collect emission so we can correlate
+        // with the runtime-side parallelism_summary readback.
+        if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
+            let total_ops: usize = blocks.iter().map(|b| b.ops.vec.len()).sum();
+            eprintln!(
+                "[ir_par_emit] blocks={} total_ops={}",
+                blocks.len(),
+                total_ops
+            );
+        }
         builder.push_op(DslIr::Parallel(blocks));
         coll
     }

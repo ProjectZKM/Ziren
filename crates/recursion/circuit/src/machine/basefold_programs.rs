@@ -50,6 +50,9 @@ where
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
+    if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
+        eprintln!("[build_normalize_basefold] entered");
+    }
     // The host input now carries `chip_log_heights` per shard, but
     // wiring it through verify_core_basefold breaks the existing
     // padded-row mask constraint (passing real degree bits where the
@@ -99,6 +102,9 @@ where
     let builder_span = tracing::debug_span!("build compose-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
+    if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
+        eprintln!("[build_compose_basefold] entered");
+    }
     verify_compress_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
@@ -133,6 +139,9 @@ where
     let builder_span = tracing::debug_span!("build deferred-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
+    if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
+        eprintln!("[build_deferred_basefold] entered");
+    }
     verify_deferred_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
@@ -170,6 +179,9 @@ where
     let builder_span = tracing::debug_span!("build wrap-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
+    if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
+        eprintln!("[build_wrap_basefold] entered");
+    }
     verify_wrap_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,

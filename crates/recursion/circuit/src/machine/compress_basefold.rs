@@ -266,6 +266,9 @@ pub fn verify_compress_basefold<C, SC, A>(
         .unwrap_or(false);
     let _zlcl_n = vks_and_proofs.len();
     let _zlcl_pre = builder.variable_count();
+    if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
+        eprintln!("[verify_compress_basefold] vks_and_proofs.len()={}", _zlcl_n);
+    }
     // #259 Phase D: split the per-input loop into a parallel-friendly
     // VERIFY pass (ir_par_map_collect emits DslIr::Parallel) and a
     // sequential AGGREGATE pass. Mirrors SP1's compress.rs:159+182
