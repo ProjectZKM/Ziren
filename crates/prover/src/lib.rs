@@ -1681,6 +1681,48 @@ pub mod tests {
             "[compose_emits_parallel] N={} parallel_blocks={} subs={} parallel_instrs={}/{} ({:.1}%)",
             n_inputs, n_par, n_subs, n_par_instrs, total_instrs, pct,
         );
+
+        // Count witness-consuming instructions (Hint, SumcheckVerify)
+        // inside the parallel sub-programs. Non-zero ⇒ par_iter dispatch
+        // needs witness-slicing to be sound (otherwise sub-walkers race
+        // on the shared witness stream).
+        use zkm_recursion_core::runtime::{Instruction, SeqBlock};
+        let mut hint_in_par: usize = 0;
+        let mut sumcheck_in_par: usize = 0;
+        fn walk<F>(
+            block: &SeqBlock<Instruction<F>>,
+            hint: &mut usize,
+            sumcheck: &mut usize,
+            inside: bool,
+        ) {
+            match block {
+                SeqBlock::Basic(b) => {
+                    if inside {
+                        for instr in &b.instrs {
+                            match instr {
+                                Instruction::Hint(h) => *hint += h.output_addrs_mults.len(),
+                                Instruction::SumcheckVerify(_) => *sumcheck += 1,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                SeqBlock::Parallel(subs) => {
+                    for sub in subs {
+                        for sb in &sub.seq_blocks {
+                            walk(sb, hint, sumcheck, true);
+                        }
+                    }
+                }
+            }
+        }
+        for b in &program.seq_blocks.seq_blocks {
+            walk(b, &mut hint_in_par, &mut sumcheck_in_par, false);
+        }
+        eprintln!(
+            "[compose_emits_parallel] hint_in_par={} sumcheck_in_par={}",
+            hint_in_par, sumcheck_in_par,
+        );
     }
 
     pub fn bench_e2e_prover<C: ZKMProverComponents>(

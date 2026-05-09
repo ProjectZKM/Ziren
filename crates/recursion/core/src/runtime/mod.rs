@@ -285,9 +285,45 @@ where
             let (n_par, n_subs, n_par_instrs) = self.program.seq_blocks.parallelism_summary();
             let total = self.program.instruction_count();
             let pct = if total > 0 { 100.0 * n_par_instrs as f64 / total as f64 } else { 0.0 };
+            // Count witness consumers (Hint, SumcheckVerify) inside parallel
+            // sub-programs to determine whether par_iter dispatch is sound
+            // without witness-slicing. A non-zero count means par_iter would
+            // race on the shared witness stream.
+            let mut hint_in_par: usize = 0;
+            let mut sumcheck_in_par: usize = 0;
+            fn walk_par<F>(
+                block: &SeqBlock<Instruction<F>>,
+                hint: &mut usize,
+                sumcheck: &mut usize,
+                inside: bool,
+            ) {
+                match block {
+                    SeqBlock::Basic(b) => {
+                        if inside {
+                            for instr in &b.instrs {
+                                match instr {
+                                    Instruction::Hint(h) => *hint += h.output_addrs_mults.len(),
+                                    Instruction::SumcheckVerify(_) => *sumcheck += 1,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    SeqBlock::Parallel(subs) => {
+                        for sub in subs {
+                            for sb in &sub.seq_blocks {
+                                walk_par(sb, hint, sumcheck, true);
+                            }
+                        }
+                    }
+                }
+            }
+            for b in &self.program.seq_blocks.seq_blocks {
+                walk_par(b, &mut hint_in_par, &mut sumcheck_in_par, false);
+            }
             eprintln!(
-                "[par-summary] parallel_blocks={} total_sub_programs={} parallel_instrs={}/{} ({:.1}%)",
-                n_par, n_subs, n_par_instrs, total, pct
+                "[par-summary] parallel_blocks={} total_sub_programs={} parallel_instrs={}/{} ({:.1}%) hint_in_par={} sumcheck_in_par={}",
+                n_par, n_subs, n_par_instrs, total, pct, hint_in_par, sumcheck_in_par
             );
         }
         if let Ok(path) = std::env::var("ZIREN_DUMP_PROGRAM") {
