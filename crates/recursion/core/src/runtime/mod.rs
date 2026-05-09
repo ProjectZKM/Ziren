@@ -281,26 +281,33 @@ where
                 }
             }
         }
-        self.preallocate_record();
-        // Phase A4 (#259): walk seq_blocks via iter_instructions() instead
-        // of indexing the flat instructions Vec by PC. PC is incremented
-        // sequentially per instruction so that backtrace lookups
-        // (`nearest_pc_backtrace`) and pc-as-value debug logging continue
-        // to work unchanged. seq_blocks contains the same instruction
-        // sequence in the same order today (single Basic block) so this
-        // is zero behavior change. Foundation for Phase B+C parallel
-        // runtime.
+        // #259 Phase C 2c-ii: replace push-based ExecutionRecord writes
+        // with offset-based UnsafeRecord writes. Analyze the program
+        // once at run() entry to assign per-instruction offsets, then
+        // walk the analyzed seq_blocks. After the walk, finalize via
+        // `into_record()` which transmutes the layout-equivalent
+        // `MaybeUninit<UnsafeCell<T>>` Vec into `Vec<T>`. The
+        // SeqBlock::Parallel arm walks sequentially in this commit
+        // (Phase 2d adds par_iter dispatch); UnsafeRecord's Sync impl
+        // and the disjoint-offset invariant from analyze make the
+        // future swap a one-liner.
         // SP1 ref: `/tmp/sp1/crates/recursion/executor/src/runtime/mod.rs`
-        // (the Runtime::run loop iterates the RawProgram).
-        // Snapshot an Arc-clone of the program so the iterator borrow
-        // doesn't conflict with the &mut self field accesses inside the
-        // loop body. Arc::clone is just a refcount bump, not a deep
-        // copy.
-        let program = self.program.clone();
-        for instr in program.iter_instructions() {
+        // (the Runtime::run loop iterates RawProgram<AnalyzedInstruction>).
+        let program_arc = self.program.clone();
+        let (analyzed_program, event_counts) =
+            program_arc.seq_blocks.clone().analyze();
+        let mut unsafe_record = UnsafeRecord::<F>::new(event_counts);
+        // Pre-init public_values cell with default; CommitPublicValues
+        // overwrites the slot. into_record's `assume_init` would be UB
+        // if no CommitPublicValues runs, so the default keeps it sound.
+        unsafe_record.public_values =
+            MaybeUninit::new(UnsafeCell::new(crate::air::RecursionPublicValues::default()));
+
+        for ai in analyzed_program.iter() {
             let next_clk = self.clk + F::from_u32(4);
             let next_pc = self.pc + F::ONE;
-            let instruction = instr.clone();
+            let _offset = ai.offset();
+            let instruction = ai.inner().clone();
             match instruction {
                 Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
                     self.nb_base_ops += 1;
@@ -354,7 +361,8 @@ where
                         },
                     };
                     self.memory.mw(addrs.out, Block::from(out), mult);
-                    self.record.base_alu_events.push(BaseAluEvent { out, in1, in2 });
+                    unsafe_record.base_alu_events[_offset] =
+                        MaybeUninit::new(UnsafeCell::new(BaseAluEvent { out, in1, in2 }));
                 }
                 Instruction::ExtAlu(instr @ ExtAluInstr { opcode, mult, addrs }) => {
                     self.nb_ext_ops += 1;
@@ -387,7 +395,8 @@ where
                     };
                     let out = Block::from(out_ef.as_basis_coefficients_slice());
                     self.memory.mw(addrs.out, out, mult);
-                    self.record.ext_alu_events.push(ExtAluEvent { out, in1, in2 });
+                    unsafe_record.ext_alu_events[_offset] =
+                        MaybeUninit::new(UnsafeCell::new(ExtAluEvent { out, in1, in2 }));
                 }
                 Instruction::Mem(MemInstr {
                     addrs: MemIo { inner: addr },
@@ -406,7 +415,10 @@ where
                         }
                         MemAccessKind::Write => drop(self.memory.mw(addr, val, mult)),
                     }
-                    self.record.mem_const_count += 1;
+                    // mem_const_count is pre-sized by `UnsafeRecord::new`
+                    // from the analyzed Mem-instruction count (SP1 ref:
+                    // /tmp/sp1/crates/recursion/executor/src/record.rs:111).
+                    // No per-instruction increment needed.
                 }
                 Instruction::Poseidon2(instr) => {
                     let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
@@ -431,9 +443,9 @@ where
                     perm_output.iter().zip(output).zip(mults).for_each(|((&val, addr), mult)| {
                         self.memory.mw(addr, Block::from(val), mult);
                     });
-                    self.record
-                        .poseidon2_events
-                        .push(Poseidon2Event { input: in_vals, output: perm_output });
+                    unsafe_record.poseidon2_events[_offset] = MaybeUninit::new(UnsafeCell::new(
+                        Poseidon2Event { input: in_vals, output: perm_output },
+                    ));
                 }
                 Instruction::Select(SelectInstr {
                     addrs: SelectIo { bit, out1, out2, in1, in2 },
@@ -448,13 +460,15 @@ where
                     let out2_val = bit * in1 + (F::ONE - bit) * in2;
                     self.memory.mw(out1, Block::from(out1_val), mult1);
                     self.memory.mw(out2, Block::from(out2_val), mult2);
-                    self.record.select_events.push(SelectEvent {
-                        bit,
-                        out1: out1_val,
-                        out2: out2_val,
-                        in1,
-                        in2,
-                    })
+                    unsafe_record.select_events[_offset] = MaybeUninit::new(UnsafeCell::new(
+                        SelectEvent {
+                            bit,
+                            out1: out1_val,
+                            out2: out2_val,
+                            in1,
+                            in2,
+                        },
+                    ));
                 }
                 Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
                     addrs: ExpReverseBitsIo { base, exp, result },
@@ -471,11 +485,12 @@ where
                     let out =
                         base_val.exp_u64(reverse_bits_len(exp_val as usize, exp_bits.len()) as u64);
                     self.memory.mw(result, Block::from(out), mult);
-                    self.record.exp_reverse_bits_len_events.push(ExpReverseBitsEvent {
-                        result: out,
-                        base: base_val,
-                        exp: exp_bits,
-                    });
+                    unsafe_record.exp_reverse_bits_len_events[_offset] =
+                        MaybeUninit::new(UnsafeCell::new(ExpReverseBitsEvent {
+                            result: out,
+                            base: base_val,
+                            exp: exp_bits,
+                        }));
                 }
                 Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
                     self.nb_bit_decompositions += 1;
@@ -485,9 +500,12 @@ where
                         .map(|i| Block::from(F::from_u32((num >> i) & 1)))
                         .collect::<Vec<_>>();
                     // Write the bits to the array at dst.
-                    for (bit, (addr, mult)) in bits.into_iter().zip(output_addrs_mults) {
+                    for (i, (bit, (addr, mult))) in
+                        bits.into_iter().zip(output_addrs_mults).enumerate()
+                    {
                         self.memory.mw(addr, bit, mult);
-                        self.record.mem_var_events.push(MemEvent { inner: bit });
+                        unsafe_record.mem_var_events[_offset + i] =
+                            MaybeUninit::new(UnsafeCell::new(MemEvent { inner: bit }));
                     }
                 }
                 Instruction::HintAddCurve(HintAddCurveInstr {
@@ -514,17 +532,30 @@ where
                     let point2 = SepticCurve { x: input2_x, y: input2_y };
                     let output = point1.add_incomplete(point2);
 
-                    for (val, (addr, mult)) in
-                        output.x.0.into_iter().zip(output_x_addrs_mults.into_iter())
+                    let _x_count = output_x_addrs_mults.len();
+                    for (i, (val, (addr, mult))) in output
+                        .x
+                        .0
+                        .into_iter()
+                        .zip(output_x_addrs_mults.into_iter())
+                        .enumerate()
                     {
                         self.memory.mw(addr, Block::from(val), mult);
-                        self.record.mem_var_events.push(MemEvent { inner: Block::from(val) });
+                        unsafe_record.mem_var_events[_offset + i] = MaybeUninit::new(
+                            UnsafeCell::new(MemEvent { inner: Block::from(val) }),
+                        );
                     }
-                    for (val, (addr, mult)) in
-                        output.y.0.into_iter().zip(output_y_addrs_mults.into_iter())
+                    for (i, (val, (addr, mult))) in output
+                        .y
+                        .0
+                        .into_iter()
+                        .zip(output_y_addrs_mults.into_iter())
+                        .enumerate()
                     {
                         self.memory.mw(addr, Block::from(val), mult);
-                        self.record.mem_var_events.push(MemEvent { inner: Block::from(val) });
+                        unsafe_record.mem_var_events[_offset + _x_count + i] = MaybeUninit::new(
+                            UnsafeCell::new(MemEvent { inner: Block::from(val) }),
+                        );
                     }
                 }
 
@@ -585,21 +616,23 @@ where
                             alpha_pow_mults[m],
                         );
 
-                        self.record.fri_fold_events.push(FriFoldEvent {
-                            base_single: FriFoldBaseIo { x },
-                            ext_single: FriFoldExtSingleIo {
-                                z: Block::from(z.as_basis_coefficients_slice()),
-                                alpha: Block::from(alpha.as_basis_coefficients_slice()),
-                            },
-                            ext_vec: FriFoldExtVecIo {
-                                mat_opening: Block::from(p_at_x.as_basis_coefficients_slice()),
-                                ps_at_z: Block::from(p_at_z.as_basis_coefficients_slice()),
-                                alpha_pow_input: Block::from(alpha_pow.as_basis_coefficients_slice()),
-                                ro_input: Block::from(ro.as_basis_coefficients_slice()),
-                                alpha_pow_output: Block::from(new_alpha_pow.as_basis_coefficients_slice()),
-                                ro_output: Block::from(new_ro.as_basis_coefficients_slice()),
-                            },
-                        });
+                        unsafe_record.fri_fold_events[_offset + m] = MaybeUninit::new(
+                            UnsafeCell::new(FriFoldEvent {
+                                base_single: FriFoldBaseIo { x },
+                                ext_single: FriFoldExtSingleIo {
+                                    z: Block::from(z.as_basis_coefficients_slice()),
+                                    alpha: Block::from(alpha.as_basis_coefficients_slice()),
+                                },
+                                ext_vec: FriFoldExtVecIo {
+                                    mat_opening: Block::from(p_at_x.as_basis_coefficients_slice()),
+                                    ps_at_z: Block::from(p_at_z.as_basis_coefficients_slice()),
+                                    alpha_pow_input: Block::from(alpha_pow.as_basis_coefficients_slice()),
+                                    ro_input: Block::from(ro.as_basis_coefficients_slice()),
+                                    alpha_pow_output: Block::from(new_alpha_pow.as_basis_coefficients_slice()),
+                                    ro_output: Block::from(new_ro.as_basis_coefficients_slice()),
+                                },
+                            }),
+                        );
                     }
                 }
                 Instruction::BatchFRI(instr) => {
@@ -626,16 +659,18 @@ where
                     self.nb_batch_fri += p_at_zs.len();
                     for m in 0..p_at_zs.len() {
                         acc += alpha_pows[m] * (p_at_zs[m] - EF::from(p_at_xs[m]));
-                        self.record.batch_fri_events.push(BatchFRIEvent {
-                            base_vec: BatchFRIBaseVecIo { p_at_x: p_at_xs[m] },
-                            ext_single: BatchFRIExtSingleIo {
-                                acc: Block::from(acc.as_basis_coefficients_slice()),
-                            },
-                            ext_vec: BatchFRIExtVecIo {
-                                p_at_z: Block::from(p_at_zs[m].as_basis_coefficients_slice()),
-                                alpha_pow: Block::from(alpha_pows[m].as_basis_coefficients_slice()),
-                            },
-                        });
+                        unsafe_record.batch_fri_events[_offset + m] = MaybeUninit::new(
+                            UnsafeCell::new(BatchFRIEvent {
+                                base_vec: BatchFRIBaseVecIo { p_at_x: p_at_xs[m] },
+                                ext_single: BatchFRIExtSingleIo {
+                                    acc: Block::from(acc.as_basis_coefficients_slice()),
+                                },
+                                ext_vec: BatchFRIExtVecIo {
+                                    p_at_z: Block::from(p_at_zs[m].as_basis_coefficients_slice()),
+                                    alpha_pow: Block::from(alpha_pows[m].as_basis_coefficients_slice()),
+                                },
+                            }),
+                        );
                     }
 
                     let _ = self.memory.mw(
@@ -648,10 +683,14 @@ where
                     let pv_addrs = instr.pv_addrs.as_array();
                     let pv_values: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =
                         array::from_fn(|i| self.memory.mr(pv_addrs[i]).val[0]);
-                    self.record.public_values = *pv_values.as_slice().borrow();
-                    self.record
-                        .commit_pv_hash_events
-                        .push(CommitPublicValuesEvent { public_values: self.record.public_values });
+                    let public_values: crate::air::RecursionPublicValues<F> =
+                        *pv_values.as_slice().borrow();
+                    // Overwrite the default-init public_values cell.
+                    unsafe_record.public_values =
+                        MaybeUninit::new(UnsafeCell::new(public_values));
+                    unsafe_record.commit_pv_hash_events[_offset] = MaybeUninit::new(
+                        UnsafeCell::new(CommitPublicValuesEvent { public_values }),
+                    );
                 }
 
                 Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
@@ -674,10 +713,13 @@ where
                     self.nb_bit_decompositions += 1;
                     let fs = self.memory.mr(input_addr).val;
                     // Write the bits to the array at dst.
-                    for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults) {
+                    for (i, (f, (addr, mult))) in
+                        fs.into_iter().zip(output_addrs_mults).enumerate()
+                    {
                         let felt = Block::from(f);
                         self.memory.mw(addr, felt, mult);
-                        self.record.mem_var_events.push(MemEvent { inner: felt });
+                        unsafe_record.mem_var_events[_offset + i] =
+                            MaybeUninit::new(UnsafeCell::new(MemEvent { inner: felt }));
                     }
                 }
                 Instruction::Hint(HintInstr { output_addrs_mults }) => {
@@ -687,7 +729,7 @@ where
                     }
                     let witness = self.witness_stream.drain(0..output_addrs_mults.len());
                     let debug_hint = std::env::var("ZIREN_DEBUG_HINT_BLOCKS").is_ok();
-                    for ((addr, mult), val) in zip(output_addrs_mults, witness) {
+                    for (i, ((addr, mult), val)) in zip(output_addrs_mults, witness).enumerate() {
                         if debug_hint {
                             // Print addresses whose written Block has non-zero
                             // v1/v2/v3 — these are Ext values whose later
@@ -704,7 +746,8 @@ where
                         }
                         // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
                         self.memory.mw(addr, val, mult);
-                        self.record.mem_var_events.push(MemEvent { inner: val });
+                        unsafe_record.mem_var_events[_offset + i] =
+                            MaybeUninit::new(UnsafeCell::new(MemEvent { inner: val }));
                     }
                 }
                 Instruction::SumcheckVerify(instr) => {
@@ -727,18 +770,23 @@ where
                     }
                     let new_claim = self.witness_stream.drain(0..1).next().unwrap();
                     self.memory.mw(instr.new_claim_addr, new_claim, instr.new_claim_mult);
-                    self.record.mem_var_events.push(MemEvent { inner: new_claim });
+                    // SumcheckVerify is multi-chip — secondary offset is the
+                    // mem_var_events index for the new_claim write.
+                    let mem_var_off = ai
+                        .secondary_offset()
+                        .expect("SumcheckVerify must have secondary_offset");
+                    unsafe_record.mem_var_events[mem_var_off] =
+                        MaybeUninit::new(UnsafeCell::new(MemEvent { inner: new_claim }));
 
-                    // Emit the SumcheckVerifyEvent so the
-                    // SumcheckVerifyChip can materialise this row in
-                    // its trace.  The chip's AIR re-checks the
-                    // sumcheck identities against this data.
-                    self.record.sumcheck_verify_events.push(SumcheckVerifyEvent {
-                        claimed_sum,
-                        coeffs: [c0, c1, c2],
-                        challenge,
-                        new_claim,
-                    });
+                    // Primary offset is the sumcheck_verify_events index.
+                    unsafe_record.sumcheck_verify_events[_offset] = MaybeUninit::new(
+                        UnsafeCell::new(SumcheckVerifyEvent {
+                            claimed_sum,
+                            coeffs: [c0, c1, c2],
+                            challenge,
+                            new_claim,
+                        }),
+                    );
                 }
             }
 
@@ -750,6 +798,13 @@ where
                 break;
             }
         }
+        // #259 Phase C 2c-ii: finalize the offset-written UnsafeRecord
+        // back into the standard ExecutionRecord. The transmute is sound
+        // because every event slot is initialized exactly once during
+        // the walk (analyze pass + count alignment guarantee one offset
+        // per emit) and public_values has at least the default written.
+        self.record =
+            unsafe { unsafe_record.into_record(self.program.clone(), self.record.index) };
         Ok(())
     }
 
