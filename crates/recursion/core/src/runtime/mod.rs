@@ -70,6 +70,37 @@ pub const NUM_BITS: usize = 31;
 
 pub const D: usize = 4;
 
+/// #259 C-2d step 2 foundation: per-walker mutable state. Each parallel
+/// sub-walker allocates its own `WalkerState` on the stack so the walker
+/// can take `&self` and dispatch `SeqBlock::Parallel` sub-walks via
+/// rayon `par_iter` without aliasing on shared mutable fields.
+///
+/// pc/clk in sub-walkers are best-effort (used only by trap-error
+/// reporting); only the root walker's pc/clk feed back to `Runtime`
+/// after `execute_blocks` returns. The `nb_*` counters are summed back
+/// at sub-walker join (single-threaded after `try_for_each` returns).
+///
+/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:856` (ExecState).
+#[derive(Debug, Clone, Default)]
+pub struct WalkerState<F: Default + Copy> {
+    pub pc: F,
+    pub clk: F,
+    pub timestamp: usize,
+    pub nb_poseidons: usize,
+    pub nb_wide_poseidons: usize,
+    pub nb_bit_decompositions: usize,
+    pub nb_select: usize,
+    pub nb_exp_reverse_bits: usize,
+    pub nb_ext_ops: usize,
+    pub nb_base_ops: usize,
+    pub nb_memory_ops: usize,
+    pub nb_branch_ops: usize,
+    pub nb_fri_fold: usize,
+    pub nb_batch_fri: usize,
+    pub nb_print_f: usize,
+    pub nb_print_e: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CycleTrackerEntry {
     pub span_entered: bool,
@@ -250,8 +281,15 @@ where
         }
     }
 
-    fn nearest_pc_backtrace(&mut self) -> Option<(usize, Trace)> {
+    fn nearest_pc_backtrace(&self) -> Option<(usize, Trace)> {
         let trap_pc = self.pc.as_canonical_u32() as usize;
+        self.nearest_pc_backtrace_at(trap_pc)
+    }
+
+    /// #259 C-2d step 2 variant: takes `trap_pc` explicitly so it can
+    /// be called from `execute_one` (which holds pc in `WalkerState`,
+    /// not `Runtime`).
+    fn nearest_pc_backtrace_at(&self, trap_pc: usize) -> Option<(usize, Trace)> {
         let trace = self.program.traces.get(trap_pc).cloned()?;
         if let Some(mut trace) = trace {
             trace.resolve();
