@@ -118,8 +118,13 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// The program.
     pub program: Arc<RecursionProgram<F>>,
 
-    /// Memory. From canonical usize of an Address to a MemoryEntry.
-    pub memory: MemVecMap<F>,
+    /// Memory. Parallel-safe cell-per-address layer (#259 Phase C 2d
+    /// foundation). The `&mut self` walker still drives mr/mw via the
+    /// safe variants; once the SeqBlock::Parallel walker arm is ported
+    /// to par_iter, the `&self` `mr_unchecked`/`mw_unchecked` can be
+    /// used directly for race-free disjoint-address writes.
+    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:380`.
+    pub memory: ParMemVec<F>,
 
     /// The execution record.
     pub record: ExecutionRecord<F>,
@@ -198,7 +203,7 @@ where
         >,
     ) -> Self {
         let record = ExecutionRecord::<F> { program: program.clone(), ..Default::default() };
-        let memory = Memory::with_capacity(program.total_memory);
+        let memory = ParMemVec::with_capacity(program.total_memory);
         Self {
             timestamp: 0,
             nb_poseidons: 0,
