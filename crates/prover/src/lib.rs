@@ -1580,6 +1580,109 @@ pub mod tests {
         run_e2e_prover_with_options(prover, elf, stdin, opts, test_kind, true)
     }
 
+    /// #259 unlock-chain validation: build a synthetic compose program
+    /// with N=4 dummy inputs and verify that the resulting
+    /// `RecursionProgram` has at least 1 `SeqBlock::Parallel` block,
+    /// containing N sub-programs (one per `ir_par_map_collect` element).
+    ///
+    /// This is the cheapest end-to-end check that the par_iter unlock
+    /// chain (ir_par_map_collect → DslIr::Parallel → SeqBlock::Parallel
+    /// → runtime walker) survives all stages of program build/compile.
+    /// Local prove tests don't exercise compose programs (single-shard
+    /// fibonacci doesn't trigger compose; multi-shard tests panic on
+    /// pre-existing legacy-FRI removal regression), so this synthetic
+    /// path is the only way to validate the chain without the GPU box.
+    #[test]
+    #[serial]
+    fn compose_basefold_program_emits_seqblock_parallel() {
+        use zkm_recursion_circuit::machine::basefold_programs::build_compose_basefold_program;
+        use zkm_recursion_circuit::machine::{
+            ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape,
+            PublicValuesOutputDigest, ZKMCompressShape,
+        };
+        use zkm_stark::air::MachineAir;
+        use zkm_stark::shape::OrderedShape;
+
+        // Build the production compress machine (RecursionAir, COMPRESS_DEGREE).
+        let compress_machine = CompressAir::compress_machine(InnerSC::default());
+
+        // Construct a 4-input compress shape using minimal recursion-chip
+        // names. Real chip names from RecursionAir; the exact heights
+        // don't matter for the program emission check (the dummy
+        // generator silently skips unknown chips, so use only ones that
+        // exist in the recursion machine).
+        // Use the chip names from the recursion machine itself.
+        let chip_names: Vec<String> = compress_machine
+            .chips()
+            .iter()
+            .take(2)
+            .map(|c| <_ as MachineAir<KoalaBear>>::name(c))
+            .collect();
+        let proof_shape = || {
+            OrderedShape::from_log2_heights(
+                &chip_names
+                    .iter()
+                    .map(|n: &String| (n.clone(), 3usize))
+                    .collect::<Vec<(String, usize)>>(),
+            )
+        };
+        let n_inputs = 4;
+        let compress_shape = ZKMCompressShape::from(
+            (0..n_inputs).map(|_| proof_shape()).collect::<Vec<_>>(),
+        );
+        let merkle_tree_height = 4;
+        let shape = ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height };
+
+        // Generate the dummy witness with N inputs.
+        let witness =
+            ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy::<CompressAir<KoalaBear>>(
+                &compress_machine,
+                &shape,
+            );
+        assert_eq!(
+            witness.vks_and_proofs.len(),
+            n_inputs,
+            "dummy witness should have {n_inputs} input proofs",
+        );
+
+        // Build the compose program (this triggers verify_compress_basefold
+        // → ir_par_map_collect → DslIr::Parallel → compile_block →
+        // SeqBlock::Parallel).
+        let max_log_row_count =
+            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        let program = build_compose_basefold_program::<CompressAir<KoalaBear>>(
+            &compress_machine,
+            &witness,
+            max_log_row_count,
+            /* value_assertions = */ false,
+            PublicValuesOutputDigest::Reduce,
+        );
+
+        // Validate the unlock chain via parallelism_summary.
+        let (n_par, n_subs, n_par_instrs) =
+            program.seq_blocks.parallelism_summary();
+        assert!(
+            n_par >= 1,
+            "compose program with {n_inputs} inputs should have ≥1 SeqBlock::Parallel block, got {n_par}",
+        );
+        assert_eq!(
+            n_subs, n_inputs,
+            "Parallel block should hold {n_inputs} sub-programs, got {n_subs}",
+        );
+        assert!(
+            n_par_instrs > 0,
+            "Parallel sub-programs should hold non-zero instructions",
+        );
+
+        let total_instrs = program.instruction_count();
+        let pct = 100.0 * n_par_instrs as f64 / total_instrs as f64;
+        eprintln!(
+            "[compose_emits_parallel] N={} parallel_blocks={} subs={} parallel_instrs={}/{} ({:.1}%)",
+            n_inputs, n_par, n_subs, n_par_instrs, total_instrs, pct,
+        );
+    }
+
     pub fn bench_e2e_prover<C: ZKMProverComponents>(
         prover: &ZKMProver<C>,
         elf: &[u8],
