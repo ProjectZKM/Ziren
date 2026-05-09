@@ -183,6 +183,23 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     _marker_diffusion: PhantomData<Diffusion>,
 }
 
+// SAFETY: #259 C-2d step 2 walker dispatches `SeqBlock::Parallel`
+// sub-walks via `&Runtime` shared across rayon worker threads. The
+// walker only touches Sync fields (memory: ParMemVec has unsafe
+// Sync impl, perm: Option<Poseidon2> shared read-only, program: Arc).
+// Non-Sync fields (debug_stdout: Box<dyn Write>, witness_stream,
+// cycle_tracker) are explicitly taken out of `self` via mem::replace
+// at the start of `run()` and threaded through as `&mut` through
+// the recursive walker — sub-walks always pass `None` for these
+// (verified by `hint_in_par`/`sumcheck_in_par`/Print absence in
+// parallel sub-programs).
+unsafe impl<'a, F, EF, Diffusion> Sync for Runtime<'a, F, EF, Diffusion>
+where
+    F: PrimeField32 + Sync,
+    EF: ExtensionField<F> + Sync,
+{
+}
+
 #[derive(Error, Debug)]
 pub enum RuntimeError<F: Debug, EF: Debug> {
     #[error(
@@ -213,7 +230,7 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
     EmptyWitnessStream,
 }
 
-impl<F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'_, F, EF, Diffusion>
+impl<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'a, F, EF, Diffusion>
 where
     Poseidon2<
         F::Packing,
@@ -284,6 +301,33 @@ where
     fn nearest_pc_backtrace(&self) -> Option<(usize, Trace)> {
         let trap_pc = self.pc.as_canonical_u32() as usize;
         self.nearest_pc_backtrace_at(trap_pc)
+    }
+
+    /// #259 C-2d step 2: `&self` memory-read helper that wraps the
+    /// `unsafe { mr_unchecked }` discipline. Soundness comes from
+    /// the IR-level `SeqBlock::Parallel` disjoint-address invariant
+    /// (each parallel sub-program writes to a non-overlapping address
+    /// range — the analyze pass relies on it; the runtime walker
+    /// inherits it via `&self.memory.mr_unchecked`).
+    #[inline(always)]
+    fn mr_us(&self, addr: Address<F>) -> &MemoryEntry<F> {
+        unsafe { self.memory.mr_unchecked(addr) }
+    }
+
+    /// `&self` memory-write helper. Same soundness contract as `mr_us`.
+    #[inline(always)]
+    fn mw_us(&self, addr: Address<F>, val: Block<F>, mult: F) {
+        unsafe { self.memory.mw_unchecked(addr, val, mult) }
+    }
+
+    /// #259 C-2d step 2 record-write helper. Wraps the SP1 raw_get
+    /// idiom so the type parameter `T` is inferred from the slot.
+    /// Soundness: caller must ensure the slot is written exactly once
+    /// across all threads — guaranteed by analyze pass + IR-level
+    /// `SeqBlock::Parallel` disjoint-offset invariant.
+    #[inline(always)]
+    unsafe fn raw_write_ev<T>(slot: &MaybeUninit<UnsafeCell<T>>, ev: T) {
+        unsafe { UnsafeCell::raw_get(slot.as_ptr() as *const UnsafeCell<T>).write(ev) }
     }
 
     /// #259 C-2d step 2 variant: takes `trap_pc` explicitly so it can
@@ -387,35 +431,187 @@ where
         let program_arc = self.program.clone();
         let (analyzed_program, event_counts) =
             program_arc.seq_blocks.clone().analyze();
-        let mut unsafe_record = UnsafeRecord::<F>::new(event_counts);
-        // Pre-init public_values cell with default; CommitPublicValues
-        // overwrites the slot. into_record's `assume_init` would be UB
-        // if no CommitPublicValues runs, so the default keeps it sound.
-        unsafe_record.public_values =
-            MaybeUninit::new(UnsafeCell::new(crate::air::RecursionPublicValues::default()));
+        let unsafe_record = UnsafeRecord::<F>::new(event_counts);
+        // Pre-init public_values cell with default via SP1's raw_get
+        // pattern — works through `&UnsafeRecord` so it's compatible
+        // with the new `&self` walker. CommitPublicValues overwrites.
+        unsafe {
+            UnsafeCell::raw_get(
+                unsafe_record.public_values.as_ptr()
+                    as *const UnsafeCell<crate::air::RecursionPublicValues<F>>,
+            )
+            .write(crate::air::RecursionPublicValues::default());
+        }
 
-        for ai in analyzed_program.iter() {
-            let next_clk = self.clk + F::from_u32(4);
-            let next_pc = self.pc + F::ONE;
-            let _offset = ai.offset();
-            let instruction = ai.inner().clone();
-            match instruction {
+        // #259 C-2d step 2: hoist mutable per-walker state into a
+        // stack-allocated `WalkerState` so the recursive walker can take
+        // `&self` and dispatch `SeqBlock::Parallel` sub-walks via rayon
+        // par_iter without aliasing on shared mutable Runtime fields.
+        let mut state = WalkerState::<F> {
+            pc: self.pc,
+            clk: self.clk,
+            timestamp: self.timestamp,
+            nb_poseidons: self.nb_poseidons,
+            nb_wide_poseidons: self.nb_wide_poseidons,
+            nb_bit_decompositions: self.nb_bit_decompositions,
+            nb_select: self.nb_select,
+            nb_exp_reverse_bits: self.nb_exp_reverse_bits,
+            nb_ext_ops: self.nb_ext_ops,
+            nb_base_ops: self.nb_base_ops,
+            nb_memory_ops: self.nb_memory_ops,
+            nb_branch_ops: self.nb_branch_ops,
+            nb_fri_fold: self.nb_fri_fold,
+            nb_batch_fri: self.nb_batch_fri,
+            nb_print_f: self.nb_print_f,
+            nb_print_e: self.nb_print_e,
+        };
+        // Take witness/debug_stdout out so we can pass them as `&mut`
+        // through the recursive `&self` walker without aliasing self.
+        let mut witness = std::mem::take(&mut self.witness_stream);
+        let mut debug_stdout: Box<dyn Write + 'a> =
+            std::mem::replace(&mut self.debug_stdout, Box::new(stdout()));
+
+        let walker_result = self.execute_blocks(
+            &analyzed_program.seq_blocks,
+            &mut state,
+            Some(&mut witness),
+            Some(&mut *debug_stdout),
+            &unsafe_record,
+            early_exit_ts,
+        );
+
+        // Restore taken-out fields and sync state regardless of result
+        // (so error reporting downstream sees the updated pc/clk).
+        self.witness_stream = witness;
+        self.debug_stdout = debug_stdout;
+        self.pc = state.pc;
+        self.clk = state.clk;
+        self.timestamp = state.timestamp;
+        self.nb_poseidons = state.nb_poseidons;
+        self.nb_wide_poseidons = state.nb_wide_poseidons;
+        self.nb_bit_decompositions = state.nb_bit_decompositions;
+        self.nb_select = state.nb_select;
+        self.nb_exp_reverse_bits = state.nb_exp_reverse_bits;
+        self.nb_ext_ops = state.nb_ext_ops;
+        self.nb_base_ops = state.nb_base_ops;
+        self.nb_memory_ops = state.nb_memory_ops;
+        self.nb_branch_ops = state.nb_branch_ops;
+        self.nb_fri_fold = state.nb_fri_fold;
+        self.nb_batch_fri = state.nb_batch_fri;
+        self.nb_print_f = state.nb_print_f;
+        self.nb_print_e = state.nb_print_e;
+        walker_result?;
+
+        // Finalize: transmute layout-equivalent `MaybeUninit<UnsafeCell<T>>`
+        // Vec into `Vec<T>`. Sound because every event slot is initialized
+        // exactly once by execute_one (analyze pass guarantees one offset
+        // per emit) and public_values has at least the default written.
+        self.record =
+            unsafe { unsafe_record.into_record(self.program.clone(), self.record.index) };
+        Ok(())
+    }
+
+    /// #259 C-2d step 2 walker. Walks the SeqBlock tree, dispatching
+    /// `SeqBlock::Parallel` sub-programs via `par_iter` (each sub-walker
+    /// allocates its own `WalkerState`, shares `&self` + `&unsafe_record`,
+    /// passes `witness=None`/`debug_stdout=None` since parallel sub-programs
+    /// in compose are pure compute — verified by `hint_in_par`/`sumcheck_in_par`
+    /// counter at commit eace827).
+    ///
+    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:799-834`
+    /// (execute_raw_inner).
+    #[allow(clippy::too_many_arguments)]
+    fn execute_blocks(
+        &self,
+        blocks: &[SeqBlock<AnalyzedInstruction<F>>],
+        state: &mut WalkerState<F>,
+        mut witness: Option<&mut VecDeque<Block<F>>>,
+        mut debug_stdout: Option<&mut (dyn Write + 'a)>,
+        rec: &UnsafeRecord<F>,
+        early_exit_ts: usize,
+    ) -> Result<(), RuntimeError<F, EF>> {
+        for block in blocks {
+            match block {
+                SeqBlock::Basic(basic) => {
+                    for ai in &basic.instrs {
+                        self.execute_one(
+                            ai,
+                            state,
+                            witness.as_deref_mut(),
+                            debug_stdout.as_deref_mut(),
+                            rec,
+                        )?;
+                        if state.timestamp >= early_exit_ts {
+                            return Ok(());
+                        }
+                    }
+                }
+                SeqBlock::Parallel(par_blocks) => {
+                    use p3_maybe_rayon::prelude::*;
+                    par_blocks.par_iter().try_for_each(
+                        |sub: &RawProgram<AnalyzedInstruction<F>>| -> Result<(), RuntimeError<F, EF>> {
+                            let mut substate = WalkerState::<F>::default();
+                            substate.pc = state.pc;
+                            substate.clk = state.clk;
+                            // Sub-walks: no witness / debug_stdout — verified
+                            // pure-compute (hint_in_par=0, sumcheck_in_par=0).
+                            self.execute_blocks(
+                                &sub.seq_blocks,
+                                &mut substate,
+                                None,
+                                None,
+                                rec,
+                                early_exit_ts,
+                            )
+                        },
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// #259 C-2d step 2 per-instruction body. Identical semantics to the
+    /// original `Runtime::run` for-loop body, with mechanical substitutions:
+    /// - `self.nb_*` → `state.nb_*`
+    /// - `self.pc/clk/timestamp` → `state.pc/clk/timestamp`
+    /// - `self.memory.mr/mw` → `unsafe { self.memory.mr_unchecked / mw_unchecked }`
+    /// - `self.witness_stream` → `witness.as_mut().expect(...)`
+    /// - `self.debug_stdout` → `debug_stdout.as_mut().expect(...)`
+    /// - `unsafe_record.X[off] = MaybeUninit::new(UnsafeCell::new(ev))`
+    ///   → `unsafe { UnsafeCell::raw_get(rec.X[off].as_ptr() as *const UnsafeCell<_>).write(ev) }`
+    ///
+    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs::execute_one`.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_one(
+        &self,
+        ai: &AnalyzedInstruction<F>,
+        state: &mut WalkerState<F>,
+        mut witness: Option<&mut VecDeque<Block<F>>>,
+        mut debug_stdout: Option<&mut (dyn Write + 'a)>,
+        rec: &UnsafeRecord<F>,
+    ) -> Result<(), RuntimeError<F, EF>> {
+        let next_clk = state.clk + F::from_u32(4);
+        let next_pc = state.pc + F::ONE;
+        let _offset = ai.offset();
+        let instruction = ai.inner().clone();
+        match instruction {
                 Instruction::BaseAlu(instr @ BaseAluInstr { opcode, mult, addrs }) => {
-                    self.nb_base_ops += 1;
+                    state.nb_base_ops += 1;
                     // `ZIREN_DEBUG_READ_SHAPES=1`: log when BaseAlu reads an
                     // address that holds an Ext-shaped Block (non-zero v1/v2/v3).
                     // Those reads cause the wrap cumsum mismatch.
                     let debug_shapes = std::env::var("ZIREN_DEBUG_READ_SHAPES").is_ok();
                     if debug_shapes {
-                        let pc = self.pc.as_canonical_u32();
-                        let e1 = self.memory.mr(addrs.in1).val;
+                        let pc = state.pc.as_canonical_u32();
+                        let e1 = self.mr_us(addrs.in1).val;
                         if !e1.0[1].is_zero() || !e1.0[2].is_zero() || !e1.0[3].is_zero() {
                             eprintln!(
                                 "[read shape] pc={} chip=BaseAlu op={:?} addr={} out_addr={} ext=true",
                                 pc, opcode, addrs.in1.as_usize(), addrs.out.as_usize()
                             );
                         }
-                        let e2 = self.memory.mr(addrs.in2).val;
+                        let e2 = self.mr_us(addrs.in2).val;
                         if !e2.0[1].is_zero() || !e2.0[2].is_zero() || !e2.0[3].is_zero() {
                             eprintln!(
                                 "[read shape] pc={} chip=BaseAlu op={:?} addr={} out_addr={} ext=true",
@@ -423,8 +619,8 @@ where
                             );
                         }
                     }
-                    let in1 = self.memory.mr(addrs.in1).val[0];
-                    let in2 = self.memory.mr(addrs.in2).val[0];
+                    let in1 = self.mr_us(addrs.in1).val[0];
+                    let in2 = self.mr_us(addrs.in2).val[0];
                     let out = match opcode {
                         BaseAluOpcode::AddF => in1 + in2,
                         BaseAluOpcode::SubF => in1 - in2,
@@ -444,21 +640,20 @@ where
                                         in1,
                                         in2,
                                         instr,
-                                        pc: self.pc.as_canonical_u32() as usize,
-                                        trace: self.nearest_pc_backtrace(),
+                                        pc: state.pc.as_canonical_u32() as usize,
+                                        trace: self.nearest_pc_backtrace_at(state.pc.as_canonical_u32() as usize),
                                     });
                                 }
                             }
                         },
                     };
-                    self.memory.mw(addrs.out, Block::from(out), mult);
-                    unsafe_record.base_alu_events[_offset] =
-                        MaybeUninit::new(UnsafeCell::new(BaseAluEvent { out, in1, in2 }));
+                    self.mw_us(addrs.out, Block::from(out), mult);
+                    unsafe { Self::raw_write_ev(&rec.base_alu_events[_offset], BaseAluEvent { out, in1, in2 }); }
                 }
                 Instruction::ExtAlu(instr @ ExtAluInstr { opcode, mult, addrs }) => {
-                    self.nb_ext_ops += 1;
-                    let in1 = self.memory.mr(addrs.in1).val;
-                    let in2 = self.memory.mr(addrs.in2).val;
+                    state.nb_ext_ops += 1;
+                    let in1 = self.mr_us(addrs.in1).val;
+                    let in2 = self.mr_us(addrs.in2).val;
                     let in1_ef = EF::from_basis_coefficients_slice(&in1.0).unwrap();
                     let in2_ef = EF::from_basis_coefficients_slice(&in2.0).unwrap();
                     let out_ef = match opcode {
@@ -477,17 +672,16 @@ where
                                         in1: in1_ef,
                                         in2: in2_ef,
                                         instr,
-                                        pc: self.pc.as_canonical_u32() as usize,
-                                        trace: self.nearest_pc_backtrace(),
+                                        pc: state.pc.as_canonical_u32() as usize,
+                                        trace: self.nearest_pc_backtrace_at(state.pc.as_canonical_u32() as usize),
                                     });
                                 }
                             }
                         },
                     };
                     let out = Block::from(out_ef.as_basis_coefficients_slice());
-                    self.memory.mw(addrs.out, out, mult);
-                    unsafe_record.ext_alu_events[_offset] =
-                        MaybeUninit::new(UnsafeCell::new(ExtAluEvent { out, in1, in2 }));
+                    self.mw_us(addrs.out, out, mult);
+                    unsafe { Self::raw_write_ev(&rec.ext_alu_events[_offset], ExtAluEvent { out, in1, in2 }); }
                 }
                 Instruction::Mem(MemInstr {
                     addrs: MemIo { inner: addr },
@@ -495,16 +689,16 @@ where
                     mult,
                     kind,
                 }) => {
-                    self.nb_memory_ops += 1;
+                    state.nb_memory_ops += 1;
                     match kind {
                         MemAccessKind::Read => {
-                            let mem_entry = self.memory.mr(addr);
+                            let mem_entry = self.mr_us(addr);
                             assert_eq!(
                                 mem_entry.val, val,
                                 "stored memory value should be the specified value"
                             );
                         }
-                        MemAccessKind::Write => drop(self.memory.mw(addr, val, mult)),
+                        MemAccessKind::Write => drop(self.mw_us(addr, val, mult)),
                     }
                     // mem_const_count is pre-sized by `UnsafeRecord::new`
                     // from the analyzed Mem-instruction count (SP1 ref:
@@ -513,13 +707,13 @@ where
                 }
                 Instruction::Poseidon2(instr) => {
                     let Poseidon2Instr { addrs: Poseidon2Io { input, output }, mults } = *instr;
-                    self.nb_poseidons += 1;
+                    state.nb_poseidons += 1;
                     // `ZIREN_DEBUG_READ_SHAPES=1`: log Poseidon2 inputs at
                     // Ext-shaped addresses.
                     if std::env::var("ZIREN_DEBUG_READ_SHAPES").is_ok() {
-                        let pc = self.pc.as_canonical_u32();
+                        let pc = state.pc.as_canonical_u32();
                         for (i, &addr) in input.iter().enumerate() {
-                            let e = self.memory.mr(addr).val;
+                            let e = self.mr_us(addr).val;
                             if !e.0[1].is_zero() || !e.0[2].is_zero() || !e.0[3].is_zero() {
                                 eprintln!(
                                     "[read shape] pc={} chip=Poseidon2 slot={} addr={} ext=true",
@@ -528,30 +722,30 @@ where
                             }
                         }
                     }
-                    let in_vals = std::array::from_fn(|i| self.memory.mr(input[i]).val[0]);
+                    let in_vals = std::array::from_fn(|i| self.mr_us(input[i]).val[0]);
                     let perm_output = self.perm.as_ref().unwrap().permute(in_vals);
 
                     perm_output.iter().zip(output).zip(mults).for_each(|((&val, addr), mult)| {
-                        self.memory.mw(addr, Block::from(val), mult);
+                        self.mw_us(addr, Block::from(val), mult);
                     });
-                    unsafe_record.poseidon2_events[_offset] = MaybeUninit::new(UnsafeCell::new(
+                    unsafe { Self::raw_write_ev(&rec.poseidon2_events[_offset], 
                         Poseidon2Event { input: in_vals, output: perm_output },
-                    ));
+                    ); }
                 }
                 Instruction::Select(SelectInstr {
                     addrs: SelectIo { bit, out1, out2, in1, in2 },
                     mult1,
                     mult2,
                 }) => {
-                    self.nb_select += 1;
-                    let bit = self.memory.mr(bit).val[0];
-                    let in1 = self.memory.mr(in1).val[0];
-                    let in2 = self.memory.mr(in2).val[0];
+                    state.nb_select += 1;
+                    let bit = self.mr_us(bit).val[0];
+                    let in1 = self.mr_us(in1).val[0];
+                    let in2 = self.mr_us(in2).val[0];
                     let out1_val = bit * in2 + (F::ONE - bit) * in1;
                     let out2_val = bit * in1 + (F::ONE - bit) * in2;
-                    self.memory.mw(out1, Block::from(out1_val), mult1);
-                    self.memory.mw(out2, Block::from(out2_val), mult2);
-                    unsafe_record.select_events[_offset] = MaybeUninit::new(UnsafeCell::new(
+                    self.mw_us(out1, Block::from(out1_val), mult1);
+                    self.mw_us(out2, Block::from(out2_val), mult2);
+                    unsafe { Self::raw_write_ev(&rec.select_events[_offset], 
                         SelectEvent {
                             bit,
                             out1: out1_val,
@@ -559,33 +753,32 @@ where
                             in1,
                             in2,
                         },
-                    ));
+                    ); }
                 }
                 Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
                     addrs: ExpReverseBitsIo { base, exp, result },
                     mult,
                 }) => {
-                    self.nb_exp_reverse_bits += 1;
-                    let base_val = self.memory.mr(base).val[0];
+                    state.nb_exp_reverse_bits += 1;
+                    let base_val = self.mr_us(base).val[0];
                     let exp_bits: Vec<_> =
-                        exp.iter().map(|bit| self.memory.mr(*bit).val[0]).collect();
+                        exp.iter().map(|bit| self.mr_us(*bit).val[0]).collect();
                     let exp_val = exp_bits
                         .iter()
                         .enumerate()
                         .fold(0, |acc, (i, &val)| acc + val.as_canonical_u32() * (1 << i));
                     let out =
                         base_val.exp_u64(reverse_bits_len(exp_val as usize, exp_bits.len()) as u64);
-                    self.memory.mw(result, Block::from(out), mult);
-                    unsafe_record.exp_reverse_bits_len_events[_offset] =
-                        MaybeUninit::new(UnsafeCell::new(ExpReverseBitsEvent {
+                    self.mw_us(result, Block::from(out), mult);
+                    unsafe { Self::raw_write_ev(&rec.exp_reverse_bits_len_events[_offset], ExpReverseBitsEvent {
                             result: out,
                             base: base_val,
                             exp: exp_bits,
-                        }));
+                        }); }
                 }
                 Instruction::HintBits(HintBitsInstr { output_addrs_mults, input_addr }) => {
-                    self.nb_bit_decompositions += 1;
-                    let num = self.memory.mr(input_addr).val[0].as_canonical_u32();
+                    state.nb_bit_decompositions += 1;
+                    let num = self.mr_us(input_addr).val[0].as_canonical_u32();
                     // Decompose the num into LE bits.
                     let bits = (0..output_addrs_mults.len())
                         .map(|i| Block::from(F::from_u32((num >> i) & 1)))
@@ -594,9 +787,8 @@ where
                     for (i, (bit, (addr, mult))) in
                         bits.into_iter().zip(output_addrs_mults).enumerate()
                     {
-                        self.memory.mw(addr, bit, mult);
-                        unsafe_record.mem_var_events[_offset + i] =
-                            MaybeUninit::new(UnsafeCell::new(MemEvent { inner: bit }));
+                        self.mw_us(addr, bit, mult);
+                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: bit }); }
                     }
                 }
                 Instruction::HintAddCurve(HintAddCurveInstr {
@@ -608,16 +800,16 @@ where
                     input2_y_addrs,
                 }) => {
                     let input1_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr(input1_x_addrs[i]).val[0]
+                        self.mr_us(input1_x_addrs[i]).val[0]
                     });
                     let input1_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr(input1_y_addrs[i]).val[0]
+                        self.mr_us(input1_y_addrs[i]).val[0]
                     });
                     let input2_x = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr(input2_x_addrs[i]).val[0]
+                        self.mr_us(input2_x_addrs[i]).val[0]
                     });
                     let input2_y = SepticExtension::<F>::from_base_fn(|i| {
-                        self.memory.mr(input2_y_addrs[i]).val[0]
+                        self.mr_us(input2_y_addrs[i]).val[0]
                     });
                     let point1 = SepticCurve { x: input1_x, y: input1_y };
                     let point2 = SepticCurve { x: input2_x, y: input2_y };
@@ -631,10 +823,8 @@ where
                         .zip(output_x_addrs_mults.into_iter())
                         .enumerate()
                     {
-                        self.memory.mw(addr, Block::from(val), mult);
-                        unsafe_record.mem_var_events[_offset + i] = MaybeUninit::new(
-                            UnsafeCell::new(MemEvent { inner: Block::from(val) }),
-                        );
+                        self.mw_us(addr, Block::from(val), mult);
+                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: Block::from(val) }); }
                     }
                     for (i, (val, (addr, mult))) in output
                         .y
@@ -643,10 +833,8 @@ where
                         .zip(output_y_addrs_mults.into_iter())
                         .enumerate()
                     {
-                        self.memory.mw(addr, Block::from(val), mult);
-                        unsafe_record.mem_var_events[_offset + _x_count + i] = MaybeUninit::new(
-                            UnsafeCell::new(MemEvent { inner: Block::from(val) }),
-                        );
+                        self.mw_us(addr, Block::from(val), mult);
+                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + _x_count + i], MemEvent { inner: Block::from(val) }); }
                     }
                 }
 
@@ -658,21 +846,21 @@ where
                         alpha_pow_mults,
                         ro_mults,
                     } = *instr;
-                    self.nb_fri_fold += 1;
-                    let x = self.memory.mr(base_single_addrs.x).val[0];
-                    let z = self.memory.mr(ext_single_addrs.z).val;
+                    state.nb_fri_fold += 1;
+                    let x = self.mr_us(base_single_addrs.x).val[0];
+                    let z = self.mr_us(ext_single_addrs.z).val;
                     let z: EF = z.ext();
-                    let alpha = self.memory.mr(ext_single_addrs.alpha).val;
+                    let alpha = self.mr_us(ext_single_addrs.alpha).val;
                     let alpha: EF = alpha.ext();
                     let mat_opening = ext_vec_addrs
                         .mat_opening
                         .iter()
-                        .map(|addr| self.memory.mr(*addr).val)
+                        .map(|addr| self.mr_us(*addr).val)
                         .collect_vec();
                     let ps_at_z = ext_vec_addrs
                         .ps_at_z
                         .iter()
-                        .map(|addr| self.memory.mr(*addr).val)
+                        .map(|addr| self.mr_us(*addr).val)
                         .collect_vec();
 
                     for m in 0..ps_at_z.len() {
@@ -688,27 +876,26 @@ where
 
                         // First we peek to get the current value.
                         let alpha_pow: EF =
-                            self.memory.mr(ext_vec_addrs.alpha_pow_input[m]).val.ext();
+                            self.mr_us(ext_vec_addrs.alpha_pow_input[m]).val.ext();
 
-                        let ro: EF = self.memory.mr(ext_vec_addrs.ro_input[m]).val.ext();
+                        let ro: EF = self.mr_us(ext_vec_addrs.ro_input[m]).val.ext();
 
                         let new_ro = ro + alpha_pow * quotient;
                         let new_alpha_pow = alpha_pow * alpha;
 
-                        let _ = self.memory.mw(
+                        let _ = self.mw_us(
                             ext_vec_addrs.ro_output[m],
                             Block::from(new_ro.as_basis_coefficients_slice()),
                             ro_mults[m],
                         );
 
-                        let _ = self.memory.mw(
+                        let _ = self.mw_us(
                             ext_vec_addrs.alpha_pow_output[m],
                             Block::from(new_alpha_pow.as_basis_coefficients_slice()),
                             alpha_pow_mults[m],
                         );
 
-                        unsafe_record.fri_fold_events[_offset + m] = MaybeUninit::new(
-                            UnsafeCell::new(FriFoldEvent {
+                        unsafe { Self::raw_write_ev(&rec.fri_fold_events[_offset + m], FriFoldEvent {
                                 base_single: FriFoldBaseIo { x },
                                 ext_single: FriFoldExtSingleIo {
                                     z: Block::from(z.as_basis_coefficients_slice()),
@@ -722,8 +909,7 @@ where
                                     alpha_pow_output: Block::from(new_alpha_pow.as_basis_coefficients_slice()),
                                     ro_output: Block::from(new_ro.as_basis_coefficients_slice()),
                                 },
-                            }),
-                        );
+                            }); }
                     }
                 }
                 Instruction::BatchFRI(instr) => {
@@ -734,24 +920,23 @@ where
                     let p_at_xs = base_vec_addrs
                         .p_at_x
                         .iter()
-                        .map(|addr| self.memory.mr(*addr).val[0])
+                        .map(|addr| self.mr_us(*addr).val[0])
                         .collect_vec();
                     let p_at_zs = ext_vec_addrs
                         .p_at_z
                         .iter()
-                        .map(|addr| self.memory.mr(*addr).val.ext::<EF>())
+                        .map(|addr| self.mr_us(*addr).val.ext::<EF>())
                         .collect_vec();
                     let alpha_pows: Vec<_> = ext_vec_addrs
                         .alpha_pow
                         .iter()
-                        .map(|addr| self.memory.mr(*addr).val.ext::<EF>())
+                        .map(|addr| self.mr_us(*addr).val.ext::<EF>())
                         .collect_vec();
 
-                    self.nb_batch_fri += p_at_zs.len();
+                    state.nb_batch_fri += p_at_zs.len();
                     for m in 0..p_at_zs.len() {
                         acc += alpha_pows[m] * (p_at_zs[m] - EF::from(p_at_xs[m]));
-                        unsafe_record.batch_fri_events[_offset + m] = MaybeUninit::new(
-                            UnsafeCell::new(BatchFRIEvent {
+                        unsafe { Self::raw_write_ev(&rec.batch_fri_events[_offset + m], BatchFRIEvent {
                                 base_vec: BatchFRIBaseVecIo { p_at_x: p_at_xs[m] },
                                 ext_single: BatchFRIExtSingleIo {
                                     acc: Block::from(acc.as_basis_coefficients_slice()),
@@ -760,11 +945,10 @@ where
                                     p_at_z: Block::from(p_at_zs[m].as_basis_coefficients_slice()),
                                     alpha_pow: Block::from(alpha_pows[m].as_basis_coefficients_slice()),
                                 },
-                            }),
-                        );
+                            }); }
                     }
 
-                    let _ = self.memory.mw(
+                    let _ = self.mw_us(
                         ext_single_addrs.acc,
                         Block::from(acc.as_basis_coefficients_slice()),
                         acc_mult,
@@ -773,27 +957,24 @@ where
                 Instruction::CommitPublicValues(instr) => {
                     let pv_addrs = instr.pv_addrs.as_array();
                     let pv_values: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =
-                        array::from_fn(|i| self.memory.mr(pv_addrs[i]).val[0]);
+                        array::from_fn(|i| self.mr_us(pv_addrs[i]).val[0]);
                     let public_values: crate::air::RecursionPublicValues<F> =
                         *pv_values.as_slice().borrow();
                     // Overwrite the default-init public_values cell.
-                    unsafe_record.public_values =
-                        MaybeUninit::new(UnsafeCell::new(public_values));
-                    unsafe_record.commit_pv_hash_events[_offset] = MaybeUninit::new(
-                        UnsafeCell::new(CommitPublicValuesEvent { public_values }),
-                    );
+                    unsafe { Self::raw_write_ev(&rec.public_values, public_values); }
+                    unsafe { Self::raw_write_ev(&rec.commit_pv_hash_events[_offset], CommitPublicValuesEvent { public_values }); }
                 }
 
                 Instruction::Print(PrintInstr { field_elt_type, addr }) => match field_elt_type {
                     FieldEltType::Base => {
-                        self.nb_print_f += 1;
-                        let f = self.memory.mr(addr).val[0];
-                        writeln!(self.debug_stdout, "PRINTF={f}")
+                        state.nb_print_f += 1;
+                        let f = self.mr_us(addr).val[0];
+                        writeln!(debug_stdout.as_mut().expect("debug_stdout must be Some at root walker"), "PRINTF={f}")
                     }
                     FieldEltType::Extension => {
-                        self.nb_print_e += 1;
-                        let ef = self.memory.mr(addr).val;
-                        writeln!(self.debug_stdout, "PRINTEF={ef:?}")
+                        state.nb_print_e += 1;
+                        let ef = self.mr_us(addr).val;
+                        writeln!(debug_stdout.as_mut().expect("debug_stdout must be Some at root walker"), "PRINTEF={ef:?}")
                     }
                 }
                 .map_err(RuntimeError::DebugPrint)?,
@@ -801,24 +982,23 @@ where
                     output_addrs_mults,
                     input_addr,
                 }) => {
-                    self.nb_bit_decompositions += 1;
-                    let fs = self.memory.mr(input_addr).val;
+                    state.nb_bit_decompositions += 1;
+                    let fs = self.mr_us(input_addr).val;
                     // Write the bits to the array at dst.
                     for (i, (f, (addr, mult))) in
                         fs.into_iter().zip(output_addrs_mults).enumerate()
                     {
                         let felt = Block::from(f);
-                        self.memory.mw(addr, felt, mult);
-                        unsafe_record.mem_var_events[_offset + i] =
-                            MaybeUninit::new(UnsafeCell::new(MemEvent { inner: felt }));
+                        self.mw_us(addr, felt, mult);
+                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: felt }); }
                     }
                 }
                 Instruction::Hint(HintInstr { output_addrs_mults }) => {
                     // Check that enough Blocks can be read, so `drain` does not panic.
-                    if self.witness_stream.len() < output_addrs_mults.len() {
+                    if witness.as_mut().expect("witness must be Some at root walker").len() < output_addrs_mults.len() {
                         return Err(RuntimeError::EmptyWitnessStream);
                     }
-                    let witness = self.witness_stream.drain(0..output_addrs_mults.len());
+                    let witness = witness.as_mut().expect("witness must be Some at root walker").drain(0..output_addrs_mults.len());
                     let debug_hint = std::env::var("ZIREN_DEBUG_HINT_BLOCKS").is_ok();
                     for (i, ((addr, mult), val)) in zip(output_addrs_mults, witness).enumerate() {
                         if debug_hint {
@@ -836,18 +1016,17 @@ where
                             }
                         }
                         // Inline [`Self::mw`] to mutably borrow multiple fields of `self`.
-                        self.memory.mw(addr, val, mult);
-                        unsafe_record.mem_var_events[_offset + i] =
-                            MaybeUninit::new(UnsafeCell::new(MemEvent { inner: val }));
+                        self.mw_us(addr, val, mult);
+                        unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: val }); }
                     }
                 }
                 Instruction::SumcheckVerify(instr) => {
                     // Read inputs from memory.
-                    let challenge = self.memory.mr(instr.challenge_addr).val;
-                    let claimed_sum = self.memory.mr(instr.claimed_sum_addr).val;
-                    let c0 = self.memory.mr(instr.c0_addr).val;
-                    let c1 = self.memory.mr(instr.c1_addr).val;
-                    let c2 = self.memory.mr(instr.c2_addr).val;
+                    let challenge = self.mr_us(instr.challenge_addr).val;
+                    let claimed_sum = self.mr_us(instr.claimed_sum_addr).val;
+                    let c0 = self.mr_us(instr.c0_addr).val;
+                    let c1 = self.mr_us(instr.c1_addr).val;
+                    let c2 = self.mr_us(instr.c2_addr).val;
 
                     // The actual verification (p(0)+p(1)=s, new_claim=p(r))
                     // is done by the SumcheckVerifyChip's AIR constraints.
@@ -856,46 +1035,31 @@ where
 
                     // Compute new_claim = c_0 + c_1*r + c_2*r^2 and write.
                     // For the runtime, we read the hint from the witness stream.
-                    if self.witness_stream.is_empty() {
+                    if witness.as_mut().expect("witness must be Some at root walker").is_empty() {
                         return Err(RuntimeError::EmptyWitnessStream);
                     }
-                    let new_claim = self.witness_stream.drain(0..1).next().unwrap();
-                    self.memory.mw(instr.new_claim_addr, new_claim, instr.new_claim_mult);
+                    let new_claim = witness.as_mut().expect("witness must be Some at root walker").drain(0..1).next().unwrap();
+                    self.mw_us(instr.new_claim_addr, new_claim, instr.new_claim_mult);
                     // SumcheckVerify is multi-chip — secondary offset is the
                     // mem_var_events index for the new_claim write.
                     let mem_var_off = ai
                         .secondary_offset()
                         .expect("SumcheckVerify must have secondary_offset");
-                    unsafe_record.mem_var_events[mem_var_off] =
-                        MaybeUninit::new(UnsafeCell::new(MemEvent { inner: new_claim }));
+                    unsafe { Self::raw_write_ev(&rec.mem_var_events[mem_var_off], MemEvent { inner: new_claim }); }
 
                     // Primary offset is the sumcheck_verify_events index.
-                    unsafe_record.sumcheck_verify_events[_offset] = MaybeUninit::new(
-                        UnsafeCell::new(SumcheckVerifyEvent {
+                    unsafe { Self::raw_write_ev(&rec.sumcheck_verify_events[_offset], SumcheckVerifyEvent {
                             claimed_sum,
                             coeffs: [c0, c1, c2],
                             challenge,
                             new_claim,
-                        }),
-                    );
+                        }); }
                 }
             }
 
-            self.pc = next_pc;
-            self.clk = next_clk;
-            self.timestamp += 1;
-
-            if self.timestamp >= early_exit_ts {
-                break;
-            }
-        }
-        // #259 Phase C 2c-ii: finalize the offset-written UnsafeRecord
-        // back into the standard ExecutionRecord. The transmute is sound
-        // because every event slot is initialized exactly once during
-        // the walk (analyze pass + count alignment guarantee one offset
-        // per emit) and public_values has at least the default written.
-        self.record =
-            unsafe { unsafe_record.into_record(self.program.clone(), self.record.index) };
+        state.pc = next_pc;
+        state.clk = next_clk;
+        state.timestamp += 1;
         Ok(())
     }
 
