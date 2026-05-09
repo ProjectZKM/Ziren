@@ -278,6 +278,18 @@ where
         // for debugging.  Each shard's run() rewrites the same path,
         // so set the env var in a shard-isolated test (e.g. Test::Compress
         // for compress shard, Test::All to capture wrap shard last).
+        // #259 step 2 sizing: print parallelism opportunity per Runtime::run
+        // when ZIREN_DUMP_PARALLELISM is set. Validates whether C-2d step 2
+        // (par_iter walker dispatch) would actually pay off on this workload.
+        if std::env::var("ZIREN_DUMP_PARALLELISM").is_ok() {
+            let (n_par, n_subs, n_par_instrs) = self.program.seq_blocks.parallelism_summary();
+            let total = self.program.instruction_count();
+            let pct = if total > 0 { 100.0 * n_par_instrs as f64 / total as f64 } else { 0.0 };
+            eprintln!(
+                "[par-summary] parallel_blocks={} total_sub_programs={} parallel_instrs={}/{} ({:.1}%)",
+                n_par, n_subs, n_par_instrs, total, pct
+            );
+        }
         if let Ok(path) = std::env::var("ZIREN_DUMP_PROGRAM") {
             use std::io::Write as _;
             if let Ok(mut f) = std::fs::File::create(&path) {

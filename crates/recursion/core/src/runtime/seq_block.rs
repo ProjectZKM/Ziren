@@ -82,6 +82,42 @@ impl<T> RawProgram<T> {
         self.iter().count()
     }
 
+    /// #259 step 2 sizing diagnostic: count `(parallel_blocks, total_sub_programs,
+    /// total_instructions_in_parallel_subs)`. A program with a non-zero second
+    /// component is one where `par_iter` walker dispatch (C-2d step 2) would
+    /// help; the third component bounds the wall-time win.
+    pub fn parallelism_summary(&self) -> (usize, usize, usize) {
+        fn walk<T>(block: &SeqBlock<T>, n_par: &mut usize, n_subs: &mut usize, n_par_instrs: &mut usize) {
+            match block {
+                SeqBlock::Basic(_) => {}
+                SeqBlock::Parallel(subs) => {
+                    *n_par += 1;
+                    *n_subs += subs.len();
+                    for sub in subs {
+                        for b in &sub.seq_blocks {
+                            *n_par_instrs += sub_instr_count(b);
+                            walk(b, n_par, n_subs, n_par_instrs);
+                        }
+                    }
+                }
+            }
+        }
+        fn sub_instr_count<T>(block: &SeqBlock<T>) -> usize {
+            match block {
+                SeqBlock::Basic(b) => b.instrs.len(),
+                SeqBlock::Parallel(subs) => subs
+                    .iter()
+                    .map(|sub| sub.seq_blocks.iter().map(sub_instr_count).sum::<usize>())
+                    .sum(),
+            }
+        }
+        let (mut n_par, mut n_subs, mut n_par_instrs) = (0, 0, 0);
+        for b in &self.seq_blocks {
+            walk(b, &mut n_par, &mut n_subs, &mut n_par_instrs);
+        }
+        (n_par, n_subs, n_par_instrs)
+    }
+
     /// Build a `RawProgram` containing one `Basic` block — useful for
     /// programs that don't yet use parallelism.
     pub fn from_linear(instrs: Vec<T>) -> Self {
