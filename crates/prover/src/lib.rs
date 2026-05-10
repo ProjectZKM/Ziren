@@ -939,7 +939,23 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                             });
 
                             // Execute the runtime.
-                            let record = tracing::debug_span!("execute runtime").in_scope(|| {
+                            //
+                            // #259 pre-sprint instrumentation: upgraded
+                            // span to info level + recorded the program's
+                            // total instruction count.  Bounds the SeqBlock
+                            // parallelism win BEFORE committing the 3-5 week
+                            // refactor — if per-call wall is small or the
+                            // instruction count is small, the win ceiling
+                            // is correspondingly bounded.  Per-compose-call
+                            // span lets `cargo run … 2>&1 | grep "execute
+                            // runtime"` extract the per-call wall histogram
+                            // for any production run.
+                            let n_instructions = program.instruction_count();
+                            let _t_run = std::time::Instant::now();
+                            let record = tracing::info_span!(
+                                "execute_runtime",
+                                instructions = n_instructions,
+                            ).in_scope(|| {
                                 let mut runtime =
                                     RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
                                         program.clone(),
@@ -954,6 +970,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .unwrap();
                                 runtime.record
                             });
+                            // #259 instrumentation: emit per-compose-call
+                            // wall after the span exits.  Use to bound
+                            // the SeqBlock parallelism win — if this is
+                            // routinely <100ms, the win ceiling is small
+                            // and #259 isn't worth the multi-week sprint.
+                            tracing::info!(
+                                event = "execute_runtime_done",
+                                elapsed_ms = _t_run.elapsed().as_millis() as u64,
+                                instructions = n_instructions,
+                                "compose-call runtime wall"
+                            );
 
                             // Generate the dependencies.
                             let mut records = vec![record];
