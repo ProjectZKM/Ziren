@@ -46,6 +46,9 @@ pub fn build_gkr_circuit<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
+    // #263: per-shard device-trace provider, threaded into the GPU
+    // first-layer hook through `generate_first_layer`.
+    device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
     F: PrimeField,
@@ -61,6 +64,7 @@ where
         alpha,
         betas,
         num_row_variables,
+        device_traces,
     );
 
     // generate_first_layer reduces num_row_variables by 1 (per its
@@ -222,6 +226,29 @@ where
 ///     can only occur when `first.num_row_variables == 0`, which the
 ///     `>= 2` assertion above already rules out, but this guard keeps
 ///     the device branch robust)
+/// #263/#266 perf fix — process-cached env lookup for the
+/// layer-transition GPU dispatch.  Returns true when EITHER the
+/// master switch `ZIREN_GPU_DEVICE_HOOKS=1` OR the legacy
+/// `ZIREN_GPU_LAYER_TRANSITION=1` is set.
+///
+/// Safe under the master switch now (#266) because the call site
+/// gates on `gpu_worker_context::current_gpu_pool_worker_device()`
+/// being `Some(_)` — off-pool basefold workers without a
+/// `cudaSetDevice` context have TLS=None and skip GPU dispatch.
+fn layer_transition_env_cached() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        let master = std::env::var("ZIREN_GPU_DEVICE_HOOKS")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        master
+            || std::env::var("ZIREN_GPU_LAYER_TRANSITION")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+    })
+}
+
 fn try_run_device_path<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
@@ -230,12 +257,20 @@ where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    // Gate 1: env var.
-    if std::env::var("ZIREN_GPU_LAYER_TRANSITION")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-        == false
-    {
+    // Gate 1: env var.  Either the legacy `ZIREN_GPU_LAYER_TRANSITION=1`
+    // OR the master switch `ZIREN_GPU_DEVICE_HOOKS=1` (#263) engages
+    // the device transition path.  Cached per-process to avoid
+    // libc-environ Mutex acquisition cost (per-shard call site).
+    //
+    // Gate 1b (#266 fix): also require a GPU pool worker TLS context.
+    // Without this, dispatching from an off-pool basefold rayon worker
+    // hits the wrong cudaSetDevice context — kernel either fails or
+    // runs on GPU 0, paying full PCIe + launch overhead.  Reth A/B
+    // showed +16% core regression from this exact failure mode.
+    if !layer_transition_env_cached() {
+        return None;
+    }
+    if crate::gpu_worker_context::current_gpu_pool_worker_device().is_none() {
         return None;
     }
 

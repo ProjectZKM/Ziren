@@ -82,6 +82,43 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
     (mult, denominator)
 }
 
+/// #263 perf fix — process-cached env var lookup for the device-hooks
+/// master switch.  Avoids per-chip Mutex contention on libc's environ
+/// when this is called inside a parallel per-chip loop.
+fn device_hooks_master_cached() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        std::env::var("ZIREN_GPU_DEVICE_HOOKS")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    })
+}
+
+/// Process-cached `interaction_env` resolution.
+fn first_layer_interaction_env_cached() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        device_hooks_master_cached()
+            || std::env::var("ZIREN_GPU_INTERACTION_EVAL_DEVICE")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+    })
+}
+
+/// Process-cached `build_gkr_env` resolution.
+fn first_layer_build_gkr_env_cached() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        device_hooks_master_cached()
+            || std::env::var("ZIREN_GPU_BUILD_GKR_DEVICE")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+    })
+}
+
 /// Build a chip's per-row interaction tables.
 ///
 /// Returns `(numer, denom)` row-major matrices of shape
@@ -253,6 +290,9 @@ pub fn generate_first_layer<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
+    // #263: per-shard device-trace provider threaded into the GPU
+    // first-layer hook (replaces the racy global Mutex snapshot).
+    device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> LogUpGkrCpuLayer<F, EF>
 where
     F: PrimeField,
@@ -315,13 +355,43 @@ where
         // the legacy #112 flag name.  Bridge work — feeding device
         // buffers DIRECTLY into the J3 pool's `LogupGkrDevicePool::upload`
         // (skipping host pull-back) — is documented in the K1 follow-up.
-        let interaction_env = std::env::var("ZIREN_GPU_INTERACTION_EVAL_DEVICE")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        let build_gkr_env = std::env::var("ZIREN_GPU_BUILD_GKR_DEVICE")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if interaction_env || build_gkr_env {
+        // #263: device-resident first-layer dispatch.  Opt-in via
+        // either the legacy per-hook env vars OR the single master
+        // switch `ZIREN_GPU_DEVICE_HOOKS=1` (preferred — flips both
+        // chip-keyed hooks, see also `prove_shard_to_basefold` for
+        // the jagged-PCS counterpart).  Wins -6%+ wall on tendermint
+        // and reth WITH the `provider_present` short-circuit below
+        // (which prevents the off-pool basefold worker from paying
+        // env-gated dispatch overhead on its `None`-provider calls).
+        // Default OFF pending automated CI A/B harness — single noisy
+        // run isn't enough to flip default safely.
+        //
+        // PERF FIX (#263 follow-up): cache the env::var reads in a
+        // OnceLock — `std::env::var` takes a libc-environ Mutex on
+        // Linux which contends badly when called inside the per-chip
+        // loop across N concurrent workers (rough math: 4 workers ×
+        // 191 shards × ~20 chips × 3 env reads = ~46K contended Mutex
+        // acquisitions per phase per stage).  Reading once per process
+        // eliminates the contention and removes the +30-90s noise
+        // floor on default-on flip seen in earlier reth A/B runs.
+        let interaction_env = first_layer_interaction_env_cached();
+        let build_gkr_env = first_layer_build_gkr_env_cached();
+        // #263 follow-up: short-circuit the GPU dispatch when no
+        // per-shard `DeviceTraceProvider` was passed.  Without a
+        // provider, the hook can only fall back to the global Mutex
+        // (empty in production) and then to a host-upload kernel
+        // launch from the CALLING thread — which on the off-pool
+        // basefold rayon worker has no `cudaSetDevice` context (#142
+        // design).  The kernel either runs on GPU 0 (wrong device)
+        // or fails through to a host CPU equivalent, paying full
+        // dispatch overhead for zero benefit.  Reth A/B showed core
+        // stage +16% (+49s on 191 shards) from this overhead.
+        // Skipping when provider is None recovers that cost without
+        // changing behaviour for callers that DO pass a provider.
+        let provider_present = device_traces.is_some();
+        let gpu_tables: Option<(Vec<F>, Vec<EF>)> =
+            if (interaction_env || build_gkr_env) && provider_present
+        {
             if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
                 use core::any::TypeId;
                 type Ef4 = p3_field::extension::BinomialExtensionField<
@@ -412,6 +482,12 @@ where
                             prep_padded_width,
                             alpha_ef4,
                             betas_ef4,
+                            // #263: per-shard device-trace provider
+                            // threaded from prove_shard_to_basefold's
+                            // caller (compress_multi_gpu / shard_prover_gpu).
+                            // Hook implementation downcast-uses the per-chip
+                            // handle to skip the H→D upload path when present.
+                            device_traces,
                         );
                         result.map(|(numer_kb, denom_ef4)| {
                             // Reinterpret Vec<Kb> → Vec<F> and

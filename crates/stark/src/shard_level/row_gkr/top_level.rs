@@ -73,6 +73,11 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     main_traces: &[RowMajorMatrix<F>],
     max_log_row_count: usize,
     challenger: &mut Challenger,
+    // #263: per-shard device-trace provider (SP1-aligned param pattern).
+    // None => host-only path.  Future Phase 3 will plumb this into the
+    // first-layer / Step-6 / layer-transition GPU hooks instead of the
+    // racy global-Mutex snapshot.
+    _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField,
@@ -131,6 +136,7 @@ where
         alpha,
         &betas,
         num_row_variables,
+        _device_traces,
     );
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;

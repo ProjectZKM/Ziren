@@ -786,6 +786,13 @@ pub type GpuInteractionEvalFn = fn(
     preprocessed_width: usize,
     alpha: Ef4,
     betas: &[Ef4],
+    // #263 SP1-aligned: per-shard device-trace provider replaces the
+    // racy global Mutex<DeviceTraceSnapshot> in
+    // `ziren-gpu/core/src/basefold/interaction_eval.rs`.  The hook
+    // implementation downcasts the per-chip handle to its concrete
+    // device-trace type (typically `Arc<ColMajorMatrixDevice<F>>`).
+    // `None` => fall back to the host-upload path inside the hook.
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> Option<(Vec<p3_koala_bear::KoalaBear>, Vec<Ef4>)>;
 
 static GPU_INTERACTION_EVAL_HOOK: std::sync::OnceLock<GpuInteractionEvalFn> =
@@ -934,6 +941,12 @@ mod jagged_pcs_device_hook {
         chip_names: &[String],
         r_row_per_chip: &[Vec<Ef4>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
+        // #263 SP1-aligned: per-shard device-trace provider.
+        // Replaces the racy global `ACTIVE_CHIP_TRACES` consulted by
+        // `phase4_device_hook` (which keys by chip name like this hook
+        // does).  Borrowed reference scoped to a single shard's
+        // prove call — concurrent shards each pass their own.
+        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
     ) -> Vec<u8>;
 
     static GPU_JAGGED_PCS_DEVICE_HOOK: std::sync::OnceLock<GpuJaggedPcsDeviceFn> =

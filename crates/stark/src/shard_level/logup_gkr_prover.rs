@@ -78,6 +78,27 @@ use crate::Chip;
 ///
 /// See `/data/stephen/ziren-gpu/core/src/basefold/per_chip_eval_at.rs`
 /// for the GPU implementation.
+/// #263 perf fix — process-cached env lookup for Step-6 eval_at GPU
+/// dispatch.  Returns true only when `ZIREN_GPU_EVAL_AT=1` is set.
+///
+/// NOT covered by the master switch `ZIREN_GPU_DEVICE_HOOKS=1`: the
+/// hook signature has no chip-name or provider arg, so we can't
+/// short-circuit when called from the off-pool basefold worker (no
+/// `cudaSetDevice` context).  Reth A/B with eval_at engaged via master
+/// switch showed core +16% regression from wasted dispatches on those
+/// workers.  Kept opt-in here pending either (a) hook signature
+/// extension to accept a provider, OR (b) thread-local detection of
+/// "is this a GPU pool worker?".
+fn eval_at_env_cached() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        std::env::var("ZIREN_GPU_EVAL_AT")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    })
+}
+
 pub fn evaluate_trace_columns_at_point_or_device<F, EF>(
     trace: &[F],
     width: usize,
@@ -88,16 +109,17 @@ where
     EF: ExtensionField<F> + Send + Sync,
 {
     // Task #103 Phase 2: GPU dispatch via function-pointer hook.
-    // When ZIREN_GPU_EVAL_AT=1 AND a hook is registered AND F=KoalaBear
-    // / EF=Ef4 (production reth path), invoke the registered GPU
-    // implementation.  Otherwise fall back to the rayon host path.
+    // When `ZIREN_GPU_EVAL_AT=1` (or the master switch
+    // `ZIREN_GPU_DEVICE_HOOKS=1` from #263) is set AND a hook is
+    // registered AND F=KoalaBear / EF=Ef4 (production reth path),
+    // invoke the registered GPU implementation.  Otherwise fall back
+    // to the rayon host path.
     //
-    // Same TypeId-guarded slice_cast pattern as the #102 sumcheck
-    // hook in row_gkr/round.rs::sum_as_poly_in_last_variable.
-    if std::env::var("ZIREN_GPU_EVAL_AT")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-    {
+    // Env reads are process-cached (#263 perf fix) — `std::env::var`
+    // takes a libc-environ Mutex and was a contention source under
+    // multi-worker concurrency.  Same pattern as `first_layer.rs` and
+    // `prover.rs`.
+    if eval_at_env_cached() {
         if let Some(gpu_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_eval_at_hook()
         {

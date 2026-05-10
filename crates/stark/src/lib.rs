@@ -9,6 +9,7 @@ mod chip;
 mod config;
 mod debug;
 pub mod folder;
+pub mod gpu_worker_context;
 mod kb31_poseidon2;
 #[cfg(feature = "basefold")]
 pub mod basefold;

@@ -353,6 +353,7 @@ where
 /// The transcript bytes are byte-identical to the prior ad-hoc
 /// loop — see [`ZerocheckRoundPolynomial`] for the per-round
 /// arithmetic and the reduction equality.
+#[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
@@ -361,6 +362,9 @@ pub fn prove_shard_zerocheck<SC, A>(
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
+    // #263: per-shard device-trace provider (SP1-aligned).  None today;
+    // Phase 3 wires the zerocheck device-resident ctable hooks.
+    _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> PartialSumcheckProof<Challenge<SC>>
 where
     SC: StarkGenericConfig,

@@ -25,6 +25,7 @@
 //!     `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792`.
 
 pub mod basefold_constraint_folder;
+pub mod device_trace_provider;
 pub mod logup_gkr_prover;
 pub mod main_trace_loader;
 pub mod prover;
@@ -35,6 +36,7 @@ pub mod types;
 pub mod verifier;
 pub mod zerocheck_prover;
 
+pub use device_trace_provider::DeviceTraceProvider;
 pub use logup_gkr_prover::*;
 pub use main_trace_loader::{EagerHostLoader, LazyDeviceLoader, MainTraceLoader};
 pub use prover::*;

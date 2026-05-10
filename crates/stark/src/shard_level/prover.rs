@@ -87,6 +87,13 @@ pub fn prove_shard_to_basefold<SC, A>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
+    // #263 SP1-aligned: per-shard device-trace provider, race-free
+    // replacement for the global `Mutex<DeviceTraceSnapshot>`.
+    // GPU callers (compress_multi_gpu / core_multi_gpu /
+    // shard_prover_gpu) build a `DeviceShardTraces` per shard and
+    // pass `Some(&provider)`.  Host-only callers (CPU prover, the
+    // recursion-circuit verifier-simulation) pass `None`.
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -94,9 +101,7 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
-    // Trampoline to the loader-based entry point (C-full D4).  The
-    // existing call sites continue to pass a borrowed slice; we wrap
-    // it in an [`EagerHostLoader`] so behaviour is byte-equivalent.
+    // Trampoline to the loader-based entry point (C-full D4).
     let loader = EagerHostLoader::new(main_traces);
     prove_shard_to_basefold_with_loader::<SC, A, _>(
         chips,
@@ -106,6 +111,7 @@ where
         public_values,
         max_log_row_count,
         challenger,
+        device_traces,
     )
 }
 
@@ -140,6 +146,15 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
+    // Per-shard device-trace provider (#263 SP1-aligned port).
+    //
+    // `Some(provider)` => GPU hooks may consult the provider for this
+    // shard's device-resident main traces (skipping the H→D upload
+    // path).  `None` => behaves byte-identically to the legacy
+    // host-only path.  Borrowed ref scoped to this prove call —
+    // concurrent shards on different GPU pool workers each pass their
+    // OWN provider, no shared mutable state, no race.
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -226,6 +241,7 @@ where
             main_traces,
             max_log_row_count,
             challenger,
+            _device_traces,
         )
     };
     tracing::info!(
@@ -252,6 +268,7 @@ where
             &public_values,
             max_log_row_count,
             challenger,
+            _device_traces,
         )
     };
     tracing::info!(
@@ -322,6 +339,7 @@ where
             main_traces,
             &logup_gkr_proof.logup_evaluations.point,
             challenger,
+            _device_traces,
         )
     };
     tracing::info!(
@@ -469,11 +487,34 @@ where
 /// field on `BasefoldShardProof`, bundle for the new structured
 /// `evaluation_proof_bundle` field (#241 Phase 4c).  Bundle is `None`
 /// when the SC config doesn't match the KoalaBear monomorphization.
+/// #263 perf fix — process-cached env lookup for the jagged-PCS device
+/// dispatch.  Eliminates per-shard libc-environ Mutex acquisition cost
+/// under multi-worker concurrency.  Returns true when EITHER the master
+/// switch `ZIREN_GPU_DEVICE_HOOKS=1` OR the per-hook env
+/// `ZIREN_GPU_JAGGED_PCS_DEVICE=1` is set.
+fn jagged_pcs_device_env_cached() -> bool {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        let master = std::env::var("ZIREN_GPU_DEVICE_HOOKS")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        master
+            || std::env::var("ZIREN_GPU_JAGGED_PCS_DEVICE")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+    })
+}
+
 fn emit_jagged_pcs_bytes<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
+    // #263: per-shard device-trace provider for jagged-PCS GPU hooks
+    // (eval_at, jagged-sumcheck reduction).  None today; Phase 3 wires
+    // the dispatch.
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> (Vec<u8>, Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>)
 where
     SC: StarkGenericConfig,
@@ -598,10 +639,17 @@ where
     // Falls through to the host orchestrator (and then to the #113
     // host-trace hook below) if either the env flag is unset or no
     // hook is registered.  Strictly opt-in.
-    if std::env::var("ZIREN_GPU_JAGGED_PCS_DEVICE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-    {
+    // #263: device-trace jagged-PCS dispatch.  Opt-in via either the
+    // legacy `ZIREN_GPU_JAGGED_PCS_DEVICE=1` OR the single master
+    // switch `ZIREN_GPU_DEVICE_HOOKS=1` (preferred).
+    // The `_device_traces.is_some()` guard is a defensive short-circuit:
+    // off-pool basefold workers pass None (no cudaSetDevice context)
+    // and would otherwise dispatch to the wrong GPU.
+    //
+    // Env reads cached per-process (avoids libc-environ Mutex contention
+    // under multi-worker concurrency — same fix as first_layer.rs).
+    let provider_present_jagged = _device_traces.is_some();
+    if provider_present_jagged && jagged_pcs_device_env_cached() {
         if let Some(hook) =
             crate::shard_level::sumcheck_poly::get_gpu_jagged_pcs_device_hook()
         {
@@ -621,7 +669,10 @@ where
             // device path until the hook signature is extended.  The
             // recursion-circuit consumers fall back to the bytes path
             // when bundle is None.
-            return (hook(&chip_names, &r_row_per_chip, lb_challenger), None);
+            return (
+                hook(&chip_names, &r_row_per_chip, lb_challenger, _device_traces),
+                None,
+            );
         } else {
             use std::sync::OnceLock;
             static WARN_ONCE: OnceLock<()> = OnceLock::new();

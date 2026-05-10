@@ -1222,6 +1222,8 @@ where
             public_values,
             max_log_row_count,
             &mut shard_challenger,
+            // #263: CPU prover path; no device traces.
+            None,
         )
     }));
 

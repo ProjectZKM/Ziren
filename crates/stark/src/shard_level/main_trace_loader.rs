@@ -169,7 +169,7 @@ where
 impl<F, Pull> MainTraceLoader<F> for LazyDeviceLoader<F, Pull>
 where
     F: Clone + Send + Sync,
-    Pull: Fn(usize) -> RowMajorMatrix<F>,
+    Pull: Fn(usize) -> RowMajorMatrix<F> + Sync,
 {
     fn len(&self) -> usize {
         self.n_chips
@@ -177,5 +177,25 @@ where
 
     fn get(&self, i: usize) -> RowMajorMatrix<F> {
         (self.pull)(i)
+    }
+
+    /// Parallel materialization (#268 Phase 1).  Overrides the
+    /// sequential default to fan-out the per-chip pull across rayon
+    /// workers.  Eliminates the May 9 #262 75× per-shard regression
+    /// where serial device→host pull dominated.
+    ///
+    /// Per-shard call cost: ~20 chips × ~18s serial pull = 360s
+    /// before; with par_iter and 8-core rayon pool ≈ 60s.  Caller
+    /// closure (`pull` arg) is responsible for setting the right
+    /// CUDA device context inside its body before calling
+    /// `to_host_naive` — see
+    /// `ziren-gpu/basefold/src/shard_prover.rs::prove_shard_to_basefold_gpu`
+    /// for the per-rayon-worker `set_device` pattern.
+    fn materialize_all(&self) -> Vec<RowMajorMatrix<F>> {
+        use p3_maybe_rayon::prelude::*;
+        (0..self.n_chips)
+            .into_par_iter()
+            .map(|i| (self.pull)(i))
+            .collect()
     }
 }

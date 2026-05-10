@@ -323,6 +323,8 @@ mod tests {
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count,
             &mut challenger,
+            // #263: host-only synthetic-witness builder; no device traces.
+            None,
         )
     }
 

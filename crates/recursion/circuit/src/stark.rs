@@ -302,6 +302,8 @@ where
         public_values,
         BasefoldShardVerifier::production_default().max_log_row_count,
         &mut challenger,
+        // #263: host-only verifier-simulation path; no device traces.
+        None,
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy
