@@ -909,8 +909,24 @@ where
         }
     };
     let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
+    // #258 Tier 1: cache the last bit-decomp; long runs of artificial-zero
+    // and padding columns share the same `current_offset` so cloning the
+    // cached Vec<Felt> reuses the same Felt handles and avoids re-emitting
+    // bits_per_entry uninit+assign ops per redundant column.
+    let mut cached_decomp: Option<(usize, Vec<Felt<C::F>>)> = None;
+    let mut emit_decomp = |b: &mut Builder<C>, value: usize| -> Vec<Felt<C::F>> {
+        let key = cap_to_bits(value);
+        if let Some((cached_key, cached_vec)) = cached_decomp.as_ref() {
+            if *cached_key == key {
+                return cached_vec.clone();
+            }
+        }
+        let vec = bit_decompose_usize_to_felts::<C>(b, key, bits_per_entry);
+        cached_decomp = Some((key, vec.clone()));
+        vec
+    };
     // [0] = 0 (always)
-    col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+    col_prefix_sums.push(emit_decomp(builder, 0));
     let mut offset_idx: usize = 0;
     let mut current_offset: usize = 0;
     for cc in column_counts_by_round.iter() {
@@ -924,11 +940,7 @@ where
             if col_prefix_sums.len() >= col_prefix_sums_len {
                 break;
             }
-            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-                builder,
-                cap_to_bits(current_offset),
-                bits_per_entry,
-            ));
+            col_prefix_sums.push(emit_decomp(builder, current_offset));
         }
         // Artificial-zero columns: cc[len-2]+1 if cc has >=2 chips,
         // else 1 (degenerate single-chip round).  They share the
@@ -938,32 +950,20 @@ where
             if col_prefix_sums.len() >= col_prefix_sums_len {
                 break;
             }
-            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-                builder,
-                cap_to_bits(current_offset),
-                bits_per_entry,
-            ));
+            col_prefix_sums.push(emit_decomp(builder, current_offset));
         }
     }
     // Pad to padded_cols (skip last slot — that one's reserved for
     // total_values).  Padding columns also have zero advance.
     while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-            builder,
-            cap_to_bits(current_offset),
-            bits_per_entry,
-        ));
+        col_prefix_sums.push(emit_decomp(builder, current_offset));
     }
     // Final slot = bit-decomp of total_values.  This is what the
     // verifier's final_area Horner-decode at
     // recursive_jagged_pcs.rs:262-272 asserts equals the
     // accumulated row-count sum.
     if col_prefix_sums.len() < col_prefix_sums_len {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-            builder,
-            cap_to_bits(total_values),
-            bits_per_entry,
-        ));
+        col_prefix_sums.push(emit_decomp(builder, total_values));
     }
     let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
         col_prefix_sums,
