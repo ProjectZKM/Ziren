@@ -2,6 +2,7 @@ use std::{array, cell::UnsafeCell, mem::MaybeUninit, sync::Arc};
 
 use hashbrown::HashMap;
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use serde::{Deserialize, Serialize};
 use zkm_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use crate::machine::RecursionAirEventCount;
@@ -12,8 +13,16 @@ use super::{
     SumcheckVerifyEvent,
 };
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de> + Default"))]
 pub struct ExecutionRecord<F> {
+    /// Skipped on the wire — the coordinator sends `program` separately
+    /// (cached server-side by `program_cache_key`) and the shard-server
+    /// re-attaches it to the deserialized record before driving the
+    /// shard-level prover.  Avoids paying the program serialization cost
+    /// per shard when many shards share the same compose program (#272
+    /// process-per-GPU architecture).
+    #[serde(skip)]
     pub program: Arc<RecursionProgram<F>>,
     /// The index of the shard.
     pub index: u32,
