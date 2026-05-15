@@ -160,6 +160,16 @@ where
             next.input_address - AB::Expr::from_canonical_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
         );
 
+        // Outside the absorbed-edge transition, keep `input_address` stable
+        // across rows. Exclude the final output row because its successor is a
+        // padding row.
+        let keep_input_address =
+            (AB::Expr::one() - local.is_absorbed) * (AB::Expr::one() - local.write_output);
+        builder
+            .when_transition()
+            .when(keep_input_address)
+            .assert_eq(local.input_address, next.input_address);
+
         // Outside the absorbed-edge transition, keep `original_state` stable
         // across rows. Exclude the final output row because its successor is a
         // padding row.
