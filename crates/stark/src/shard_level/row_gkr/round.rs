@@ -486,6 +486,94 @@ struct ChipLayerState<EF> {
 /// future work without changing any current behavior.
 
 
+/// Sprint B3 (SP1 port): build a post-fix `ChipLayerState` from the
+/// strided GPU output buffer + packed header metadata.
+///
+/// Inputs (decoded from the post_fix Vec by the B2.2 parser):
+/// - `post_fix_data`: 4 * n_output_pairs Ef4 cells, laid out as
+///   `[n0, n1, d0, d1]` per output pair (kernel outputLayer + 4*i).
+/// - `chip_offsets`: length n_chips + 1, cumulative global col indices
+///   per chip.  `chip_offsets[c+1] - chip_offsets[c]` = chip c's
+///   `num_interactions`.
+/// - `per_int_h`: length n_chips, output-pair count per col within
+///   chip c.  All cols in a chip share this value.
+/// - `chip_rows_post_fix`: layer-wide row count after the round-0
+///   fold = `1 << (num_row_variables - 1)`.  Per-chip
+///   `num_real_rows` is `min(per_int_h[c], chip_rows_post_fix)`.
+///
+/// Output layout (row-major `cells[r * cols + col]` per chip):
+/// - For pair (chip c, col col_within_chip, local_row r):
+///     global_pair_idx = chip_pair_start_c + col * per_int_h[c] + r
+///   where chip_pair_start_c = sum over c' < c of
+///   (chip_offsets[c'+1] - chip_offsets[c']) * per_int_h[c'].
+/// - cells[r * cols + col_within_chip] = post_fix_data[4 * global_pair_idx + slot]
+///   for slot ∈ {0,1,2,3} = {n0, n1, d0, d1}.
+#[allow(dead_code)]
+fn from_strided_post_fix<EF: Field + Copy>(
+    post_fix_data: &[EF],
+    chip_offsets: &[u32],
+    per_int_h: &[u32],
+    chip_rows_post_fix: usize,
+) -> Option<ChipLayerState<EF>> {
+    use p3_field::PrimeCharacteristicRing as _;
+    if chip_offsets.len() != per_int_h.len() + 1 {
+        return None;
+    }
+    let n_chips = per_int_h.len();
+    let mut n0_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
+    let mut n1_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
+    let mut d0_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
+    let mut d1_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
+    let mut chip_offsets_cells: Vec<usize> = Vec::with_capacity(n_chips);
+    let mut chip_cols_vec: Vec<usize> = Vec::with_capacity(n_chips);
+    let mut num_real_rows_vec: Vec<usize> = Vec::with_capacity(n_chips);
+    let mut cell_so_far = 0usize;
+    let mut pair_so_far = 0usize;
+    for c in 0..n_chips {
+        let cols_c = (chip_offsets[c + 1] - chip_offsets[c]) as usize;
+        let per_h_c = per_int_h[c] as usize;
+        let real_rows = per_h_c.min(chip_rows_post_fix);
+        let chip_size = cols_c * real_rows;
+        let mut chip_n0: Vec<EF> = vec![EF::ZERO; chip_size];
+        let mut chip_n1: Vec<EF> = vec![EF::ZERO; chip_size];
+        let mut chip_d0: Vec<EF> = vec![EF::ONE; chip_size];
+        let mut chip_d1: Vec<EF> = vec![EF::ONE; chip_size];
+        for col in 0..cols_c {
+            let col_pair_start = pair_so_far + col * per_h_c;
+            for r in 0..real_rows {
+                let pair_idx = col_pair_start + r;
+                let base = 4 * pair_idx;
+                if base + 3 < post_fix_data.len() {
+                    let dst = r * cols_c + col;
+                    chip_n0[dst] = post_fix_data[base + 0];
+                    chip_n1[dst] = post_fix_data[base + 1];
+                    chip_d0[dst] = post_fix_data[base + 2];
+                    chip_d1[dst] = post_fix_data[base + 3];
+                }
+            }
+        }
+        n0_vec.push(chip_n0);
+        n1_vec.push(chip_n1);
+        d0_vec.push(chip_d0);
+        d1_vec.push(chip_d1);
+        chip_offsets_cells.push(cell_so_far);
+        chip_cols_vec.push(cols_c);
+        num_real_rows_vec.push(real_rows);
+        cell_so_far += cols_c;
+        pair_so_far += cols_c * per_h_c;
+    }
+    Some(ChipLayerState {
+        n0: n0_vec,
+        d0: d0_vec,
+        n1: n1_vec,
+        d1: d1_vec,
+        chip_offsets: chip_offsets_cells,
+        chip_cols: chip_cols_vec,
+        num_real_rows: num_real_rows_vec,
+        chip_rows: chip_rows_post_fix,
+    })
+}
+
 /// #270 step 7z synthetic diff test — fixed-input, hand-computable
 /// 1-chip 4-row 1-col case for isolating the SP1<->Ziren convention
 /// error.  Called once via OnceLock from try_first_round_on_gpu.
