@@ -835,6 +835,16 @@ fn marshal_thread_pool() -> &'static std::sync::Arc<rayon::ThreadPool> {
     })
 }
 
+/// Returns `(round_0_univariate, Option<post_fix_chip_state>)`.
+///
+/// Sprint B4 extension: when SP1 mode (ZIREN_GPU_SP1_FIRST_LAYER=1)
+/// produces a fully-decoded post-fix ChipLayerState via Sprint B3's
+/// `from_strided_post_fix`, the inner Option is `Some(state)` — the
+/// caller can wire it into `PolynomialLayer::GpuPrefolded { ... }`
+/// to fully skip the host Chip path for rounds 1..N.
+///
+/// Inner Option `None` preserves legacy behavior: caller falls back
+/// to `PolynomialLayer::Chip(chip_state)` + cached round-0 poly.
 fn try_first_round_on_gpu<F, EF>(
     circuit: &GkrCircuitLayer<F, EF>,
     eval_point: &[EF],
@@ -844,7 +854,7 @@ fn try_first_round_on_gpu<F, EF>(
     eq_row: &[EF],
     pad_eq_int_sum: EF,
     claimed_sum: EF,
-) -> Option<UnivariatePolynomial<EF>>
+) -> Option<(UnivariatePolynomial<EF>, Option<Box<ChipLayerState<EF>>>)>
 where
     F: Field + Into<EF> + Copy + Sync,
     EF: ExtensionField<F>,
@@ -1729,16 +1739,14 @@ where
         );
     });
 
-    // Sprint B2.2 (SP1 port): decode the full packed header from
-    // post_fix when SP1 mode emits the packed payload.  Layout:
-    //   [magic,
-    //    chip_offsets_len, chip_offset_0..N,
-    //    per_int_h_len, per_int_h_0..(N-1),
-    //    post_fix_data...]
-    // Magic = ProdEF::from_u32(0xB1B1_B1B1).  Extracts u32 fields via
-    // first BasedVectorSpace coord (BinomialExtensionField stores
-    // canonical u32 in slot 0 when constructed from_u32).  Not yet
-    // wired to PolynomialLayer::GpuPrefolded (Sprint B3).
+    // Sprint B2.2 + B4 (SP1 port): decode the full packed header from
+    // post_fix when SP1 mode emits the packed payload, then build the
+    // post-fix ChipLayerState via the B3 constructor.  When the build
+    // succeeds, the caller (LogupRoundPolynomial::new) wires it into
+    // PolynomialLayer::GpuPrefolded.  When it doesn't, the caller
+    // falls back to PolynomialLayer::Chip(host_chip_state) +
+    // gpu_cached_first_poly.
+    let mut post_fix_chip_state: Option<Box<ChipLayerState<EF>>> = None;
     {
         use p3_field::PrimeCharacteristicRing as _;
         use p3_field::BasedVectorSpace as _;
@@ -1770,15 +1778,48 @@ where
                             .zip(per_int_h.iter())
                             .map(|(co, &ph)| (co[1] - co[0]) * ph * 4)
                             .sum();
-                        static B2_PROBE: OnceLock<()> = OnceLock::new();
-                        B2_PROBE.get_or_init(|| {
+                        let valid = data_len as u32 == expected_data;
+                        static B4_PROBE: OnceLock<()> = OnceLock::new();
+                        B4_PROBE.get_or_init(|| {
                             tracing::warn!(
-                                "Sprint B2.2 PROBE: chip_offsets={:?} per_int_h={:?} \
-                                 data_len={} expected_data={} match={}",
-                                chip_offsets, per_int_h, data_len, expected_data,
-                                data_len as u32 == expected_data,
+                                "Sprint B4 PROBE: header validated chip_offsets={:?} \
+                                 per_int_h={:?} data_len={} expected_data={} valid={}",
+                                chip_offsets, per_int_h, data_len, expected_data, valid,
                             );
                         });
+                        if valid {
+                            // chip_rows_post_fix = layer chip_rows / 2.
+                            // Caller's eq_row.len() = layer chip_rows.
+                            let chip_rows_post_fix = (eq_row.len() / 2).max(1);
+                            // Cast post_fix_data slice from &[ProdEF] to &[EF].
+                            // SAFETY: ProdEF == EF in production (Ef4).
+                            // try_first_round_on_gpu is gated on this elsewhere.
+                            let pf_data_prodef: &[ProdEF] = &post_fix[per_int_h_end..];
+                            let pf_data_ef: &[EF] = unsafe {
+                                core::slice::from_raw_parts(
+                                    pf_data_prodef.as_ptr() as *const EF,
+                                    pf_data_prodef.len(),
+                                )
+                            };
+                            if let Some(state) = from_strided_post_fix::<EF>(
+                                pf_data_ef,
+                                &chip_offsets,
+                                &per_int_h,
+                                chip_rows_post_fix,
+                            ) {
+                                static B4_BUILT: OnceLock<()> = OnceLock::new();
+                                B4_BUILT.get_or_init(|| {
+                                    tracing::warn!(
+                                        "Sprint B4 BUILT: ChipLayerState n_chips={} \
+                                         chip_rows_post_fix={} chip_cols={:?} \
+                                         num_real_rows={:?}",
+                                        state.n0.len(), state.chip_rows,
+                                        state.chip_cols, state.num_real_rows,
+                                    );
+                                });
+                                post_fix_chip_state = Some(Box::new(state));
+                            }
+                        }
                     }
                 }
             }
@@ -1786,8 +1827,8 @@ where
     }
     let _ = (host_evals, gpu_partials, post_fix);
 
-    // Step 8g: return Some(sp1_coeffs) — verified COEFFS_MATCH=true (step 8e).
-    Some(UnivariatePolynomial::new(sp1_coeffs.to_vec()))
+    let poly = UnivariatePolynomial::new(sp1_coeffs.to_vec());
+    Some((poly, post_fix_chip_state))
 }
 
 
@@ -2510,7 +2551,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         // first-round + compute host evals + log side-by-side.
         // All inputs built; safe to compare paths.  Returns None
         // unconditionally (safety net).
-        let gpu_cached_first_poly = try_first_round_on_gpu::<F, EF>(
+        let gpu_result = try_first_round_on_gpu::<F, EF>(
             circuit,
             eval_point,
             lambda,
@@ -2521,8 +2562,28 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             claimed_sum,
         );
 
+        // Sprint B4: when GPU returns a fully-built post-fix
+        // ChipLayerState (Some inner Option), wire into
+        // PolynomialLayer::GpuPrefolded.  Otherwise fall back to
+        // PolynomialLayer::Chip(chip_state) + cached round-0 poly
+        // (legacy path).
+        let (initial_state, gpu_cached_first_poly): (
+            PolynomialLayer<EF>,
+            Option<UnivariatePolynomial<EF>>,
+        ) = match gpu_result {
+            Some((poly, Some(post_fix_state))) => (
+                PolynomialLayer::GpuPrefolded {
+                    cached_round_poly: poly,
+                    post_fix_state,
+                },
+                None,
+            ),
+            Some((poly, None)) => (PolynomialLayer::Chip(chip_state), Some(poly)),
+            None => (PolynomialLayer::Chip(chip_state), None),
+        };
+
         let mut me = Self {
-            state: PolynomialLayer::Chip(chip_state),
+            state: initial_state,
             eq_int,
             eq_row,
             pad_eq_int_sum,
