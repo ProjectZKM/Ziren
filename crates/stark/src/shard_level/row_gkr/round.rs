@@ -1641,26 +1641,58 @@ where
         );
     });
 
-    // Sprint B2 (SP1 port): decode chip_interaction_offsets header
-    // from post_fix when SP1 mode emits the packed payload.  Layout:
-    //   [magic, header_len, chip_offset_0..N, post_fix_data...]
-    // Magic = ProdEF::from_u32(0xB1B1_B1B1).  When detected, log
-    // header + first/last chip offset for validation.  Not yet wired
-    // to PolynomialLayer::GpuPrefolded (Sprint B3).
+    // Sprint B2.2 (SP1 port): decode the full packed header from
+    // post_fix when SP1 mode emits the packed payload.  Layout:
+    //   [magic,
+    //    chip_offsets_len, chip_offset_0..N,
+    //    per_int_h_len, per_int_h_0..(N-1),
+    //    post_fix_data...]
+    // Magic = ProdEF::from_u32(0xB1B1_B1B1).  Extracts u32 fields via
+    // first BasedVectorSpace coord (BinomialExtensionField stores
+    // canonical u32 in slot 0 when constructed from_u32).  Not yet
+    // wired to PolynomialLayer::GpuPrefolded (Sprint B3).
     {
         use p3_field::PrimeCharacteristicRing as _;
-        if post_fix.len() >= 2 {
+        use p3_field::BasedVectorSpace as _;
+        use p3_field::PrimeField32 as _;
+        let extract_u32 = |v: &ProdEF| -> u32 {
+            let basis: &[ProdF] = v.as_basis_coefficients_slice();
+            basis.first().map(|c| c.as_canonical_u32()).unwrap_or(0)
+        };
+        if post_fix.len() >= 4 {
             let magic = ProdEF::from_u32(0xB1B1_B1B1);
             if post_fix[0] == magic {
-                let header_len_raw = post_fix[1];
-                static B2_PROBE: OnceLock<()> = OnceLock::new();
-                B2_PROBE.get_or_init(|| {
-                    tracing::warn!(
-                        "Sprint B2 PROBE: post_fix magic detected, header_len_raw={:?}, \
-                         post_fix.len={}",
-                        header_len_raw, post_fix.len(),
-                    );
-                });
+                let chip_offsets_len = extract_u32(&post_fix[1]) as usize;
+                let chip_offsets_end = 2 + chip_offsets_len;
+                if post_fix.len() >= chip_offsets_end + 1 {
+                    let mut chip_offsets: Vec<u32> = Vec::with_capacity(chip_offsets_len);
+                    for i in 0..chip_offsets_len {
+                        chip_offsets.push(extract_u32(&post_fix[2 + i]));
+                    }
+                    let per_int_h_len = extract_u32(&post_fix[chip_offsets_end]) as usize;
+                    let per_int_h_end = chip_offsets_end + 1 + per_int_h_len;
+                    if post_fix.len() >= per_int_h_end {
+                        let mut per_int_h: Vec<u32> = Vec::with_capacity(per_int_h_len);
+                        for i in 0..per_int_h_len {
+                            per_int_h.push(extract_u32(&post_fix[chip_offsets_end + 1 + i]));
+                        }
+                        let data_len = post_fix.len().saturating_sub(per_int_h_end);
+                        let expected_data: u32 = chip_offsets
+                            .windows(2)
+                            .zip(per_int_h.iter())
+                            .map(|(co, &ph)| (co[1] - co[0]) * ph * 4)
+                            .sum();
+                        static B2_PROBE: OnceLock<()> = OnceLock::new();
+                        B2_PROBE.get_or_init(|| {
+                            tracing::warn!(
+                                "Sprint B2.2 PROBE: chip_offsets={:?} per_int_h={:?} \
+                                 data_len={} expected_data={} match={}",
+                                chip_offsets, per_int_h, data_len, expected_data,
+                                data_len as u32 == expected_data,
+                            );
+                        });
+                    }
+                }
             }
         }
     }
