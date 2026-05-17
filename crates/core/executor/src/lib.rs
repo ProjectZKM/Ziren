@@ -24,6 +24,10 @@ pub mod memory;
 /// (#316 Phase B). Defines the per-shard checkpoint format the JIT
 /// emits and the TracingVM (Phase C) consumes. See module docs.
 pub mod minimal_trace;
+/// TracingVM scaffold + parallel driver (#316 Phase C). Consumes
+/// `MinimalTrace` chunks and produces full `ExecutionRecord`s — one
+/// per shard, rayon-parallelised across cores. See module docs.
+pub mod tracing_vm;
 mod opcode;
 mod program;
 #[cfg(test)]
