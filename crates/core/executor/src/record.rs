@@ -82,6 +82,12 @@ pub struct ExecutionRecord {
 
 impl ExecutionRecord {
     /// Create a new [`ExecutionRecord`].
+    ///
+    /// When the `pre-alloc` feature is enabled, the legacy fixed-size reservation
+    /// (`1 << 22` for cpu/add_sub, `1 << 21` for memory_instr) is kept for backward
+    /// compatibility. New code should prefer [`Self::new_preallocated`] which sizes
+    /// every hot event Vec from a single `reservation_size` hint (e.g. `shard_size / 8`),
+    /// mirroring SP1's pattern in `core/executor/src/record.rs::new_preallocated`.
     #[must_use]
     #[cfg(feature = "pre-alloc")]
     pub fn new(program: Arc<Program>) -> Self {
@@ -95,6 +101,45 @@ impl ExecutionRecord {
     #[cfg(not(feature = "pre-alloc"))]
     pub fn new(program: Arc<Program>) -> Self {
         Self { program, ..Default::default() }
+    }
+
+    /// Create a new [`ExecutionRecord`] with every hot event `Vec` pre-reserved to
+    /// `reservation_size`.
+    ///
+    /// `reservation_size` should be a rough upper bound on the count of any *single*
+    /// event kind a shard will produce. A good default is `shard_size / 8`: no single
+    /// event kind tends to hit more than ~1/8 of a shard's cycles (mirrors SP1's
+    /// `core/executor/src/record.rs::new_preallocated` and prover/worker/prover/core.rs).
+    ///
+    /// This avoids the Vec-growth realloc storm seen on the per-shard interpreter hot
+    /// loop (#316). When `reservation_size == 0` this degrades cleanly to `new`.
+    #[must_use]
+    pub fn new_preallocated(program: Arc<Program>, reservation_size: usize) -> Self {
+        let mut result = Self { program, ..Default::default() };
+        if reservation_size == 0 {
+            return result;
+        }
+
+        // CPU + ALU family — touch every (or nearly every) cycle.
+        result.cpu_events.reserve(reservation_size);
+        result.add_sub_events.reserve(reservation_size);
+        result.bitwise_events.reserve(reservation_size);
+        result.shift_left_events.reserve(reservation_size);
+        result.shift_right_events.reserve(reservation_size);
+        result.lt_events.reserve(reservation_size);
+        result.mul_events.reserve(reservation_size);
+        result.divrem_events.reserve(reservation_size);
+        result.cloclz_events.reserve(reservation_size);
+        // Memory + branch + jump + misc are also common per-shard event sinks.
+        result.memory_instr_events.reserve(reservation_size);
+        result.branch_events.reserve(reservation_size);
+        result.jump_events.reserve(reservation_size);
+        result.movcond_events.reserve(reservation_size);
+        result.misc_events.reserve(reservation_size);
+        // Byte lookups dominate the hash-map insert path; pre-size to dodge rehash.
+        result.byte_lookups.reserve(reservation_size);
+
+        result
     }
 
     /// Add a mul event to the execution record.

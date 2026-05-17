@@ -296,8 +296,12 @@ impl<'a> Executor<'a> {
         // Create a shared reference to the program.
         let program = Arc::new(program);
 
-        // Create a default record with the program.
-        let record = ExecutionRecord::new(program.clone());
+        // Create a default record with the program. Pre-allocate hot event Vecs
+        // sized at `shard_size / 8` (matches SP1's pattern in
+        // crates/prover/src/worker/prover/core.rs ::new_preallocated), avoiding the
+        // single-thread realloc storm on the trace-emit hot path (#316).
+        let event_reservation = (opts.shard_size / 8).max(1);
+        let record = ExecutionRecord::new_preallocated(program.clone(), event_reservation);
 
         // Determine the maximum number of cycles for any syscall.
         let syscall_map = default_syscall_map();
@@ -2192,8 +2196,19 @@ impl<'a> Executor<'a> {
             }
         }
 
-        let removed_record =
-            std::mem::replace(&mut self.record, ExecutionRecord::new(self.program.clone()));
+        // Only pre-allocate for the Trace mode hot path; Simple/Checkpoint modes
+        // never emit per-cycle events so the larger reservation would just waste
+        // pages. `shard_size` is stored as `cycles * 4` in the constructor; divide
+        // back out for the event-count hint (then ÷ 8 per the SP1 heuristic).
+        let event_reservation = if self.executor_mode == ExecutorMode::Trace {
+            ((self.shard_size as usize) / 4 / 8).max(1)
+        } else {
+            0
+        };
+        let removed_record = std::mem::replace(
+            &mut self.record,
+            ExecutionRecord::new_preallocated(self.program.clone(), event_reservation),
+        );
         let public_values = removed_record.public_values;
         self.record.public_values = public_values;
         self.records.push(removed_record);
