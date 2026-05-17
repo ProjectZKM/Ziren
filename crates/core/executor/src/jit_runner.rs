@@ -1341,6 +1341,47 @@ mod platform {
         unsafe { jit_fn.call(ctx as *mut JitContext) };
     }
 
+    /// Run the JIT'd program AND capture a [`crate::minimal_trace::TraceChunk`]
+    /// describing what was executed.
+    ///
+    /// Phase B (#316) helper: this is the Stage-1 emit point that produces
+    /// the data Stage 2 (`TracingVM`, Phase C) will consume to re-emit a
+    /// full `ExecutionRecord`. For now the chunk records only the start /
+    /// end register snapshot, the pc / clk bounds, and a zero-length
+    /// `mem_reads` oracle — Phase C will populate the oracle and split
+    /// into per-shard chunks. The single-chunk skeleton is enough to
+    /// verify wire-format + serde + plumbing end-to-end.
+    ///
+    /// `shard_index` lets the caller tag the chunk for downstream sort /
+    /// rendezvous; pass `0` if you only ever emit a single chunk per run.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`run_jit`]: `ctx` must be a valid context with
+    /// live pointers (memory, jump_table, trace_buf) for the duration of
+    /// the call.
+    pub unsafe fn run_jit_capture_trace_chunk(
+        jit_fn: &JitFunction,
+        ctx: &mut JitContext,
+        shard_index: u32,
+    ) -> crate::minimal_trace::TraceChunk {
+        let pc_start = ctx.pc;
+        let clk_start = ctx.global_clk;
+        let start_registers = ctx.registers;
+
+        // SAFETY: caller's contract.
+        unsafe { jit_fn.call(ctx as *mut JitContext) };
+
+        crate::minimal_trace::TraceChunk {
+            shard_index,
+            start_registers,
+            pc_start,
+            clk_start,
+            clk_end: ctx.global_clk,
+            mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+        }
+    }
+
     /// SIGSEGV probe: stash a `*mut JitContext` into a global atomic
     /// before `run_jit`, install a handler that — on SEGV — prints
     /// `last_executed_pc`, faulting address, and key pinned regs to
@@ -1575,8 +1616,8 @@ mod platform {
 pub use platform::{
     build_context, build_jit_function, cached_jit_function, first_unsupported_opcode,
     host_buffer_size_for, host_offset_of, install_segv_probe, jit_syscall_handler,
-    program_fingerprint_of, run_jit, BuildParams, JitBridgeState, JitMemoryBridge,
-    JitRunOutcome, RunnerError, SegvProbeGuard,
+    program_fingerprint_of, run_jit, run_jit_capture_trace_chunk, BuildParams, JitBridgeState,
+    JitMemoryBridge, JitRunOutcome, RunnerError, SegvProbeGuard,
 };
 
 /// Re-export of the JIT crate's syscall handler signature so the
