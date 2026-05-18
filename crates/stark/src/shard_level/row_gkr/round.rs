@@ -3268,13 +3268,17 @@ where
     // or on CUDA error; in either case we fall through to the host
     // trait-driven driver below.  Generic-EF callers (test code,
     // non-production) take the host path unconditionally.
-    // #361 default-on: V2/H2 hooks engage on basefold compress and
-    // deliver ~10% compress wall improvement (validated via H2_DIAG
-    // probe). Per SP1-port directive: just port as SP1 does, don't
-    // gate. Opt-out via env=0.
+    // #361 REVERTED to opt-in: clean perf (3 runs each, low system
+    // contention) shows core +94% / compress +14% / wall +64%
+    // regression vs OFF. Pathologically larger than 20% threshold.
+    // Earlier "compress -11%" reading was noise from contaminated
+    // runs. H2/V2 path adds per-shard dispatch overhead that
+    // amortizes badly on core stage's many small shards.
+    // Future fix: batched dispatch across shards, or only enable
+    // for chip_rows >= threshold. Opt-in preserved for diagnostic.
     if std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
-        .map(|v| v != "0")
-        .unwrap_or(true)
+        .map(|v| v == "1")
+        .unwrap_or(false)
     {
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<
