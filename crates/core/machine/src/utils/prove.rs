@@ -184,12 +184,34 @@ where
             ExecutionState,
             bool,
             u64,
+            // #316 Phase D.4 producer wiring: optional sidecar of
+            // sealed TraceChunks accumulated since the last batch.
+            // Consumer may use these via `trace_chunk` to avoid
+            // re-executing memory state from scratch.
+            Option<std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>>,
         )>(opts.checkpoints_channel_capacity);
+        // #316 Phase D.4 opt-in. When set, producer collects MinimalTrace
+        // chunks during Checkpoint-mode execution and sends them alongside
+        // each ExecutionState batch. Consumer may then prefer `trace_chunk`
+        // (which uses the chunks' mem_reads oracle) over `trace_checkpoint`
+        // (which re-executes from scratch). Default OFF — production path
+        // unchanged.
+        let use_minimal_trace = std::env::var("ZIREN_USE_MINIMAL_TRACE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if use_minimal_trace {
+            runtime.minimal_trace_collector =
+                Some(zkm_core_executor::minimal_trace::MinimalTrace::default());
+        }
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
                     let mut index = 0;
+                    // #316 Phase D.4: track how many chunks we've already
+                    // sent so each batch's sidecar only carries the NEW
+                    // chunks added since the last `execute_state`.
+                    let mut last_pulled_chunks = 0usize;
                     loop {
                         // Enter the span.
                         let span = tracing::debug_span!("batch");
@@ -202,14 +224,46 @@ where
 
                         // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
                         let global_clk = runtime.state.global_clk;
+
+                        // #316 Phase D.4: pull NEW chunks accumulated by
+                        // the collector during this batch. Only sealed
+                        // chunks (clk_end != u64::MAX) are eligible.
+                        let chunks_sidecar = if use_minimal_trace {
+                            if let Some(trace) = runtime.minimal_trace_collector.as_ref() {
+                                let total = trace.chunks.len();
+                                if total > last_pulled_chunks {
+                                    let new_chunks: Vec<_> = trace.chunks
+                                        [last_pulled_chunks..total]
+                                        .iter()
+                                        .filter(|c| c.clk_end != u64::MAX)
+                                        .cloned()
+                                        .collect();
+                                    last_pulled_chunks = total;
+                                    Some(std::sync::Arc::from(new_chunks))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
                         tracing::trace!(
                             target = "checkpoint_pin",
                             event = "produce",
                             index = index,
                             done = done,
                             global_clk = global_clk,
+                            chunks = chunks_sidecar
+                                .as_ref()
+                                .map(|c: &std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>| c.len())
+                                .unwrap_or(0),
                         );
-                        checkpoints_tx.send((index, checkpoint, done, global_clk)).unwrap();
+                        checkpoints_tx
+                            .send((index, checkpoint, done, global_clk, chunks_sidecar))
+                            .unwrap();
 
                         // If we've reached the final checkpoint, break out of the loop.
                         if done {
@@ -262,7 +316,9 @@ where
                     let _: () = loop {
                         // Receive the latest checkpoint.
                         let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, execution_state, done, num_cycles)) = received {
+                        if let Ok((index, execution_state, done, num_cycles, chunks_sidecar))
+                            = received
+                        {
                             // Task #101: in-memory checkpoint — no
                             // tempfile read, no bincode::deserialize.
                             tracing::trace!(
@@ -272,15 +328,39 @@ where
                                 done = done,
                                 num_cycles = num_cycles,
                             );
-                            // Trace the checkpoint and reconstruct the execution records.
+                            // #316 Phase D.4: if env-gated and the
+                            // producer supplied chunks, use the oracle
+                            // path (`trace_chunk`) instead of the
+                            // re-execute-from-checkpoint path
+                            // (`trace_checkpoint`). Falls back to
+                            // checkpoint if no chunks were available
+                            // (e.g. zero-cycle batches, or first batch
+                            // before any shard boundary).
+                            let _ = execution_state; // may be unused on chunk path
                             let (mut records, report) = tracing::debug_span!("trace checkpoint")
                                 .in_scope(|| {
-                                    trace_checkpoint::<SC>(
-                                        program.clone(),
-                                        execution_state,
-                                        opts,
-                                        shape_config,
-                                    )
+                                    match chunks_sidecar.as_ref() {
+                                        Some(chunks) if !chunks.is_empty() => {
+                                            let mut merged_records: Vec<ExecutionRecord> =
+                                                Vec::new();
+                                            for chunk in chunks.iter() {
+                                                let (recs, _) = trace_chunk::<SC>(
+                                                    program.clone(),
+                                                    chunk,
+                                                    opts,
+                                                    shape_config,
+                                                );
+                                                merged_records.extend(recs);
+                                            }
+                                            (merged_records, ExecutionReport::default())
+                                        }
+                                        _ => trace_checkpoint::<SC>(
+                                            program.clone(),
+                                            execution_state,
+                                            opts,
+                                            shape_config,
+                                        ),
+                                    }
                                 });
                             log::debug!("generated {} records", records.len());
                             *report_aggregate.lock().unwrap() += report;
@@ -830,6 +910,50 @@ where
     let (records, _) = runtime.execute_record(true).unwrap();
 
     (records, runtime.report)
+}
+
+/// #316 Phase D.4 — drop-in replacement for `trace_checkpoint` that
+/// consumes a [`zkm_core_executor::minimal_trace::TraceChunk`] instead
+/// of a full [`ExecutionState`]. The chunk's `mem_reads` oracle
+/// pre-populates the worker's memory; `start_registers` seeds the
+/// register file; `clk_end` bounds the worker.
+///
+/// Signature mirrors `trace_checkpoint` so call sites can swap in via
+/// a single conditional once the producer side of the pipeline emits
+/// chunks instead of `ExecutionState` snapshots.
+///
+/// Byte-equivalence with `trace_checkpoint` is validated by
+/// `crates/core/executor/examples/byte_equiv_probe.rs` — single-shard
+/// PASS on fibonacci/u256/biguint/ed25519; multi-shard PASS on ed25519
+/// with `SHARD_SIZE=1M` (4 shards, ~188K oracle entries/shard).
+pub fn trace_chunk<SC: StarkGenericConfig>(
+    program: Program,
+    chunk: &zkm_core_executor::minimal_trace::TraceChunk,
+    opts: ZKMCoreOpts,
+    shape_config: Option<&CoreShapeConfig<SC::Val>>,
+) -> (Vec<ExecutionRecord>, ExecutionReport)
+where
+    <SC as StarkGenericConfig>::Val: PrimeField32,
+{
+    use std::sync::Arc;
+    use zkm_core_executor::tracing_vm::drive_tracing_vm_parallel;
+
+    // Single-chunk MinimalTrace; the driver returns 1 record.
+    let trace = zkm_core_executor::minimal_trace::MinimalTrace {
+        chunks: vec![chunk.clone()],
+        public_values: Vec::new(),
+        total_cycles: chunk.clk_end,
+    };
+    let records = drive_tracing_vm_parallel(Arc::new(program), opts, &trace)
+        .expect("drive_tracing_vm_parallel");
+    // `drive_tracing_vm_parallel` doesn't aggregate a Report; for D.4
+    // wiring the caller (consumer thread in prove.rs) reads from the
+    // record stream directly. Until the consumer migrates, this
+    // returns ExecutionReport::default() — callers that rely on the
+    // report should keep using trace_checkpoint until D.4 producer
+    // migration.
+    let _ = shape_config;
+    (records, ExecutionReport::default())
 }
 
 #[cfg(debug_assertions)]

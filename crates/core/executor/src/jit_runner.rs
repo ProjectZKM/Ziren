@@ -1367,7 +1367,7 @@ mod platform {
     ) -> crate::minimal_trace::TraceChunk {
         let pc_start = ctx.pc;
         let clk_start = ctx.global_clk;
-        let start_registers = ctx.registers;
+        let start_registers = ctx.registers.to_vec();
 
         // SAFETY: caller's contract.
         unsafe { jit_fn.call(ctx as *mut JitContext) };

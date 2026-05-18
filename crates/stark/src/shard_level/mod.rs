@@ -25,6 +25,7 @@
 //!     `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792`.
 
 pub mod basefold_constraint_folder;
+pub mod device_first_layer_context;
 pub mod device_trace_provider;
 pub mod logup_gkr_prover;
 pub mod main_trace_loader;

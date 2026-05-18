@@ -123,7 +123,24 @@ pub struct Executor<'a> {
     pub records: Vec<ExecutionRecord>,
 
     /// Local memory access events.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    ///
+    /// #316 Phase D.4 lifter step 3: switched from `HashMap<…>` (ahash)
+    /// to `IntMap<…>` (NoHashHasher) — u32 keys don't need hash mixing
+    /// since the HashMap probe sequence handles collision distribution.
+    /// Cuts per-cycle HashMap overhead in half for user-memory accesses
+    /// (addresses >= 36) that bypass the register-slot fast path.
+    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+
+    /// #316 Phase D.4 lifter step 2: fast-path register-slot mirror
+    /// of `local_memory_access`. MIPS register addresses are 0..36
+    /// (32 GPRs + HI/LO/BRK/HEAP) and dominate per-cycle access
+    /// patterns. Every ALU is 3 register touches; every memory op is
+    /// 2-3 register touches + 1 user-memory touch. Mirroring registers
+    /// into a fixed `[Option<MemoryLocalEvent>; 36]` skips the
+    /// HashMap hash + probe for the ~95% case. User-memory addresses
+    /// (>= 36) still flow through the HashMap. Drained alongside the
+    /// HashMap at `bump_record`.
+    pub local_reg_access: [Option<MemoryLocalEvent>; 36],
 
     /// A counter for the number of cycles that have been executed in certain functions.
     pub cycle_tracker: HashMap<String, (u64, u32)>,
@@ -163,6 +180,84 @@ pub struct Executor<'a> {
 
     /// The maximum LDE size to allow.
     pub lde_size_threshold: u64,
+
+    /// #316 Phase D.2: optional MinimalTrace collector. When `Some`,
+    /// each `bump_record()` push also stamps a `TraceChunk` capturing
+    /// (clk, pc, registers) so a subsequent parallel `TracingVM` can
+    /// replay each shard independently. `None` (default) preserves
+    /// the legacy path with zero overhead. The JIT-side emit path
+    /// will populate the same field directly once landed.
+    pub minimal_trace_collector: Option<crate::minimal_trace::MinimalTrace>,
+
+    /// #316 Phase D.4 (lifter port step 1): skip replay-irrelevant
+    /// bookkeeping in `execute_operation`. When set, the executor:
+    ///   - skips `report.opcode_counts` increments (per cycle)
+    ///   - skips `local_counts.event_counts` increments (per cycle)
+    ///   - skips `local_counts.syscalls_sent` accounting (per syscall)
+    ///   - skips the per-class branch/jump opcode-count adjustments
+    ///     (~30 LOC of bookkeeping per cycle)
+    /// These are all duplicate work in TracingVM replay — they were
+    /// already computed during the original checkpoint-gen pass, and
+    /// the worker's `report`/`local_counts` outputs are discarded.
+    /// Default false; TracingVM workers set true.
+    pub skip_replay_bookkeeping: bool,
+
+    /// #316 Phase D — Option B: in-flight buffer for the current
+    /// chunk's mem_reads oracle. Populated by `mr()` whenever the
+    /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
+    /// when the chunk closes — the accumulated entries become the
+    /// previous chunk's `mem_reads` field (Arc<[MemValue]>).
+    pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
+}
+
+/// #316 Phase D.4 lifter step 2: dispatch helper that picks the
+/// fastest sink for a local-memory-access update.
+///
+/// - `override_map`: passed-in syscall-context HashMap; if Some,
+///   wins (syscall context never touches registers but must use its
+///   own map for precompile lifetime).
+/// - `reg_slots`: fixed `[Option<MemoryLocalEvent>; 36]` mirror for
+///   register addresses (0..36). Skips HashMap hash + probe entirely.
+/// - `fallback_map`: executor's main HashMap; used for user-memory
+///   addresses (>= 36).
+#[inline]
+fn upsert_local_mem(
+    override_map: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
+    reg_slots: &mut [Option<MemoryLocalEvent>; 36],
+    fallback_map: &mut nohash_hasher::IntMap<u32, MemoryLocalEvent>,
+    addr: u32,
+    prev_record: MemoryRecord,
+    record: MemoryRecord,
+) {
+    if let Some(m) = override_map {
+        m.entry(addr)
+            .and_modify(|e| e.final_mem_access = record)
+            .or_insert(MemoryLocalEvent {
+                addr,
+                initial_mem_access: prev_record,
+                final_mem_access: record,
+            });
+    } else if (addr as usize) < 36 {
+        let slot = &mut reg_slots[addr as usize];
+        if let Some(e) = slot {
+            e.final_mem_access = record;
+        } else {
+            *slot = Some(MemoryLocalEvent {
+                addr,
+                initial_mem_access: prev_record,
+                final_mem_access: record,
+            });
+        }
+    } else {
+        fallback_map
+            .entry(addr)
+            .and_modify(|e| e.final_mem_access = record)
+            .or_insert(MemoryLocalEvent {
+                addr,
+                initial_mem_access: prev_record,
+                final_mem_access: record,
+            });
+    }
 }
 
 /// The different modes the executor can run in.
@@ -351,12 +446,16 @@ impl<'a> Executor<'a> {
             },
             memory_checkpoint: Memory::default(),
             uninitialized_memory_checkpoint: Memory::default(),
-            local_memory_access: HashMap::new(),
+            local_memory_access: nohash_hasher::IntMap::default(),
+            local_reg_access: std::array::from_fn(|_| None),
             maximal_shapes: None,
             costs: costs.into_iter().map(|(k, v)| (k, v as u64)).collect(),
             shape_check_frequency: opts.shape_check_frequency,
             lde_size_check: false,
             lde_size_threshold: 0,
+            minimal_trace_collector: None,
+            skip_replay_bookkeeping: false,
+            recording_chunk_mem_reads: Vec::new(),
         }
     }
 
@@ -496,7 +595,7 @@ impl<'a> Executor<'a> {
         addr: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
         // Get the memory record entry.
         let entry = self.state.memory.page_table.entry(addr);
@@ -542,7 +641,8 @@ impl<'a> Executor<'a> {
         //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
         //     local_memory_access to detect this. *WARNING*: This means that we are counting
         //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
+        if !self.unconstrained && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some()) {
             self.local_counts.local_mem += 1;
         }
 
@@ -551,22 +651,30 @@ impl<'a> Executor<'a> {
         record.timestamp = timestamp;
 
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+            );
+        }
 
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+        // #316 Phase D — Option B: record the read into the in-flight
+        // chunk's mem_reads oracle, but ONLY for user-memory addresses
+        // (>= NUM_REGISTERS). Register reads are reproducible from the
+        // chunk's start_registers; recording them would double the
+        // oracle size for no benefit.
+        if self.minimal_trace_collector.is_some()
+            && !self.unconstrained
+            && addr >= NUM_REGISTERS as u32
+        {
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                clk: self.state.global_clk,
+                addr,
+                value: record.value,
+            });
         }
 
         // Construct the memory read record.
@@ -635,7 +743,7 @@ impl<'a> Executor<'a> {
         register: Register,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
         // Get the memory record entry.
         let addr = register as u32;
@@ -677,21 +785,14 @@ impl<'a> Executor<'a> {
         record.shard = shard;
         record.timestamp = timestamp;
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+            );
         }
         // Construct the memory read record.
         MemoryReadRecord::new(
@@ -710,7 +811,7 @@ impl<'a> Executor<'a> {
         value: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
         // Get the memory record entry.
         let entry = self.state.memory.page_table.entry(addr);
@@ -757,7 +858,8 @@ impl<'a> Executor<'a> {
         //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
         //     local_memory_access to detect this. *WARNING*: This means that we are counting
         //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
+        if !self.unconstrained && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some()) {
             self.local_counts.local_mem += 1;
         }
 
@@ -767,22 +869,28 @@ impl<'a> Executor<'a> {
         record.timestamp = timestamp;
 
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+            );
+        }
 
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+        // #316 Phase D — Option B: record the previous value for the
+        // oracle (writes need this so the worker sees the same
+        // prev_value when constructing its MemoryWriteRecord).
+        if self.minimal_trace_collector.is_some()
+            && !self.unconstrained
+            && addr >= NUM_REGISTERS as u32
+        {
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                clk: self.state.global_clk,
+                addr,
+                value: prev_record.value,
+            });
         }
 
         // Construct the memory write record.
@@ -803,7 +911,7 @@ impl<'a> Executor<'a> {
         value: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
         let addr = register as u32;
         // Get the memory record entry.
@@ -851,7 +959,8 @@ impl<'a> Executor<'a> {
         //  2. The address is being accessed in a syscall. In this case, we need to send it. We use
         //     local_memory_access to detect this. *WARNING*: This means that we are counting
         //     on the .is_some() condition to be true only in the SyscallContext.
-        if !self.unconstrained && (record.shard != shard || local_memory_access.is_some()) {
+        if !self.unconstrained && !self.skip_replay_bookkeeping
+            && (record.shard != shard || local_memory_access.is_some()) {
             self.local_counts.local_mem += 1;
         }
 
@@ -861,22 +970,28 @@ impl<'a> Executor<'a> {
         record.timestamp = timestamp;
 
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+            );
+        }
 
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+        // #316 Phase D — Option B: record the previous value for the
+        // oracle (writes need this so the worker sees the same
+        // prev_value when constructing its MemoryWriteRecord).
+        if self.minimal_trace_collector.is_some()
+            && !self.unconstrained
+            && addr >= NUM_REGISTERS as u32
+        {
+            self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
+                clk: self.state.global_clk,
+                addr,
+                value: prev_record.value,
+            });
         }
 
         // Construct the memory write record.
@@ -899,7 +1014,7 @@ impl<'a> Executor<'a> {
         value: u32,
         shard: u32,
         timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
         let addr = register as u32;
 
@@ -1487,7 +1602,12 @@ impl<'a> Executor<'a> {
             self.memory_accesses = MemoryAccessRecord::default();
         }
 
-        if !self.unconstrained {
+        // #316 Phase D.4 lifter step 1: gate replay-irrelevant
+        // bookkeeping. In TracingVM workers, `skip_replay_bookkeeping`
+        // is set so opcode_counts and local_counts are not
+        // re-incremented — they were already computed during the
+        // checkpoint-gen pass.
+        if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
             self.local_counts.event_counts[instruction.opcode] += 1;
             if instruction.is_memory_load_instruction() {
@@ -1573,7 +1693,10 @@ impl<'a> Executor<'a> {
             let mut prev_a = syscall_id;
             log::trace!("pc: {:X} syscall {}, a0: {:X}, a1: {:X}", self.state.pc, syscall_id, b, c);
 
-            if self.print_report && !self.unconstrained {
+            // #316 Phase D.4 lifter step 1: gate syscall bookkeeping
+            // for the same reason as opcode counts — replay workers
+            // discard these outputs.
+            if self.print_report && !self.unconstrained && !self.skip_replay_bookkeeping {
                 self.report.syscall_counts[syscall] += 1;
             }
 
@@ -1589,10 +1712,13 @@ impl<'a> Executor<'a> {
                 return Err(ExecutionError::InvalidSyscallUsage(syscall_id as u64));
             }
 
-            // Update the syscall counts.
-            let syscall_for_count = syscall.count_map();
-            let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
-            *syscall_count += 1;
+            // Update the syscall counts. (Skipped in replay — state.syscall_counts
+            // is write-only output, not read back by the executor.)
+            if !self.skip_replay_bookkeeping {
+                let syscall_for_count = syscall.count_map();
+                let syscall_count = self.state.syscall_counts.entry(syscall_for_count).or_insert(0);
+                *syscall_count += 1;
+            }
 
             let syscall_impl = self.get_syscall(syscall).cloned();
             syscall_code = syscall.syscall_id();
@@ -2188,9 +2314,59 @@ impl<'a> Executor<'a> {
 
     /// Bump the record.
     pub fn bump_record(&mut self) {
+        // #316 Phase D.2: at each shard boundary, stamp a TraceChunk
+        // covering the just-finished shard. The chunk's start_registers/
+        // pc_start/clk_start come from the PREVIOUS bump (or program
+        // init for the first shard); clk_end is the current clock.
+        // Cheap O(1) snapshot — only enabled when collector is Some.
+        if let Some(trace) = self.minimal_trace_collector.as_mut() {
+            use crate::minimal_trace::TraceChunk;
+            let next_chunk_pc = self.state.pc;
+            let next_chunk_clk = self.state.global_clk;
+            let mut next_registers = vec![0u32; 36];
+            for i in 0..36u32 {
+                next_registers[i as usize] =
+                    self.state.memory.registers.get(i).map(|r| r.value).unwrap_or(0);
+            }
+            // Patch the previous chunk's clk_end (if any) to seal it.
+            if let Some(prev) = trace.chunks.last_mut() {
+                prev.clk_end = next_chunk_clk;
+                // #316 Phase D — Option B: stamp the recorded mem_reads
+                // oracle entries onto the chunk that just closed. Drain
+                // the recording buffer so the next chunk starts fresh.
+                let drained: Vec<crate::minimal_trace::MemValue> =
+                    std::mem::take(&mut self.recording_chunk_mem_reads);
+                prev.mem_reads = std::sync::Arc::from(drained);
+            } else {
+                // First bump: no prior chunk to seal. The current
+                // recording buffer accumulated reads from before chunk 0
+                // existed (only possible in pathological init paths);
+                // drop them.
+                self.recording_chunk_mem_reads.clear();
+            }
+            // Open the next chunk. clk_end is finalized at the next bump
+            // (or at the end of execution via finalize_minimal_trace).
+            trace.chunks.push(TraceChunk {
+                shard_index: trace.chunks.len() as u32,
+                start_registers: next_registers,
+                pc_start: next_chunk_pc,
+                clk_start: next_chunk_clk,
+                clk_end: u64::MAX,  // sealed at next bump or finalize
+                mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+            });
+            trace.total_cycles = next_chunk_clk;
+        }
         self.local_counts = LocalCounts::default();
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
         if self.executor_mode == ExecutorMode::Trace {
+            // #316 Phase D.4 step 2: also drain the register-slot fast-
+            // path mirror. Reset each Option<…> slot to None so the next
+            // shard starts fresh.
+            for slot in self.local_reg_access.iter_mut() {
+                if let Some(event) = slot.take() {
+                    self.record.cpu_local_memory_access.push(event);
+                }
+            }
             for (_, event) in self.local_memory_access.drain() {
                 self.record.cpu_local_memory_access.push(event);
             }
@@ -2306,6 +2482,27 @@ impl<'a> Executor<'a> {
         tracing::debug!("loading memory image");
         for (&addr, value) in &self.program.image {
             self.state.memory.insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
+        }
+
+        // #316 Phase D.2/D.3: open chunk 0 for the collector. Subsequent
+        // bump_record calls seal the open chunk and open the next.
+        if let Some(trace) = self.minimal_trace_collector.as_mut() {
+            if trace.chunks.is_empty() {
+                use crate::minimal_trace::TraceChunk;
+                let mut start_regs = vec![0u32; 36];
+                for i in 0..36u32 {
+                    start_regs[i as usize] =
+                        self.state.memory.registers.get(i).map(|r| r.value).unwrap_or(0);
+                }
+                trace.chunks.push(TraceChunk {
+                    shard_index: 0,
+                    start_registers: start_regs,
+                    pc_start: self.state.pc,
+                    clk_start: 0,
+                    clk_end: u64::MAX,
+                    mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+                });
+            }
         }
     }
 

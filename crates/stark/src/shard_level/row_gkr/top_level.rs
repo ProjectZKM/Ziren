@@ -83,7 +83,7 @@ where
     F: PrimeField,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     A: MachineAir<F>,
-    Challenger: FieldChallenger<F>,
+    Challenger: FieldChallenger<F> + 'static,
 {
     // Step 1: sample [alpha, beta].  `beta_seed_dim` = log2(max_arity
     // rounded up).  `betas.len()` = 1 + max_arity (slot 0 is for

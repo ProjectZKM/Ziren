@@ -900,7 +900,7 @@ where
                 .map(|v| v == "1")
                 .unwrap_or(false)
         });
-        use crate::device_first_layer_context as dfl;
+        use crate::shard_level::device_first_layer_context as dfl;
         // C6 May-14 fix: ALWAYS drain on each shard's first dispatch.
         // The TLS slot persists across shards (Drop is no-op), so the
         // is_none() check would skip drain after shard 1 → all later
@@ -1345,12 +1345,12 @@ where
         });
         static REACHED: OnceLock<()> = OnceLock::new();
         REACHED.get_or_init(|| {
-            use crate::device_first_layer_context as dfl;
+            use crate::shard_level::device_first_layer_context as dfl;
             let tls_present = dfl::current_device_first_layer().is_some();
             let hook_present = dfl::get_first_round_device_hook().is_some();
             tracing::warn!("#308-PROBE phase4 reached env_on={env_on} tls={tls_present} hook={hook_present} n_chips={}", first_layer.numerator_0.len());
         });
-        use crate::device_first_layer_context as dfl;
+        use crate::shard_level::device_first_layer_context as dfl;
         if env_on && dfl::current_device_first_layer().is_some() {
             if let Some(device_hook) = dfl::get_first_round_device_hook() {
                 let target_rows = 1usize << first_layer.num_row_variables;
@@ -1997,6 +1997,79 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     debug_assert!(eq_row.len() == state.chip_rows);
     let row_half = state.chip_rows / 2;
 
+    // #336 / #343: GPU dispatch hook for chip-structured round-poly
+    // compute. Default OFF (`ZIREN_GPU_CHIP_SUMCHECK=1` enables).
+    // Hook impl lives in ziren-gpu/basefold/chip_sumcheck_dispatch.rs;
+    // when registered + env on + EF == Ef4 production type, route to
+    // GPU. Returns [p(0), p(1), p(2), p(3)] same shape as the host
+    // fallback.
+    if std::env::var("ZIREN_GPU_CHIP_SUMCHECK")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        if let Some(gpu_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_hook()
+        {
+            use core::any::TypeId;
+            type Ef4 = p3_field::extension::BinomialExtensionField<
+                p3_koala_bear::KoalaBear, 4>;
+            if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
+                // SAFETY: TypeId equality at runtime guarantees EF == Ef4.
+                unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
+                    core::slice::from_raw_parts(s.as_ptr().cast::<B>(), s.len())
+                }
+                let n0_views: Vec<&[Ef4]> = state.n0.iter()
+                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                    .collect();
+                let d0_views: Vec<&[Ef4]> = state.d0.iter()
+                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                    .collect();
+                let n1_views: Vec<&[Ef4]> = state.n1.iter()
+                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                    .collect();
+                let d1_views: Vec<&[Ef4]> = state.d1.iter()
+                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                    .collect();
+                let eq_int_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(eq_int) };
+                let eq_row_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(eq_row) };
+                let pad_eq_int_v: Ef4 = unsafe {
+                    core::mem::transmute_copy::<EF, Ef4>(&pad_eq_int_sum)
+                };
+                let lambda_v: Ef4 =
+                    unsafe { core::mem::transmute_copy::<EF, Ef4>(&lambda) };
+                let claim_v: Ef4 = unsafe {
+                    core::mem::transmute_copy::<EF, Ef4>(&current_claim)
+                };
+                use std::sync::OnceLock;
+                static FIRED_336: OnceLock<()> = OnceLock::new();
+                FIRED_336.get_or_init(|| {
+                    tracing::warn!(
+                        "#336 chip-structured sumcheck GPU hook FIRED \
+                         (chip_rows={}, n_chips={}, total_cells_est={})",
+                        state.chip_rows, state.n0.len(),
+                        state.chip_cols.iter().sum::<usize>() * state.chip_rows,
+                    );
+                });
+                let evals_ef4 = gpu_hook(
+                    &n0_views, &d0_views, &n1_views, &d1_views,
+                    &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
+                    state.chip_rows,
+                    eq_int_v, eq_row_v,
+                    pad_eq_int_v, lambda_v, claim_v,
+                );
+                let evals: [EF; 4] = unsafe {
+                    [
+                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[0]),
+                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[1]),
+                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[2]),
+                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[3]),
+                    ]
+                };
+                return evals;
+            }
+        }
+    }
+
     // Pre-compute the row sums Σ eq_row_X(row) for X ∈ {1, 2, 3} —
     // used by the "fully-padding chip" fast path AND by the per-chip
     // pad-pad row collapse for partial chips.
@@ -2441,6 +2514,24 @@ pub struct LogupRoundPolynomial<EF> {
     /// call.  Cleared by fix_last_variable so subsequent rounds use the
     /// normal host path.
     gpu_cached_first_poly: Option<UnivariatePolynomial<EF>>,
+    /// #343 Phase C: per-instance id for the device-resident
+    /// chip-sumcheck cache. Assigned eagerly via a process-global
+    /// counter so every `LogupRoundPolynomial` has a unique key
+    /// for the device hook's thread-local layer cache.
+    chip_sumcheck_id: u64,
+    /// #343 Phase C: 0-based round counter for the chip-state
+    /// sumcheck. Incremented at the end of each `fix_last_variable`
+    /// while in `Chip` state. Round 0 of the chip-sumcheck is
+    /// the value when `sum_as_poly_in_last_variable` first runs
+    /// on `PolynomialLayer::Chip` (transitions from GpuPrefolded
+    /// reset this to 0).
+    chip_sumcheck_round: usize,
+    /// #343 Phase C: verifier-sampled `alpha` from the most recent
+    /// `fix_last_variable` call while in `Chip` state. `None` until
+    /// the first such call. Used by the device hook to fold the
+    /// cached device layer before running the next round's
+    /// sumcheck kernel.
+    last_chip_alpha: Option<EF>,
 }
 
 /// Two-mode storage backing for `LogupRoundPolynomial.state`.
@@ -2594,6 +2685,17 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             remaining_row_vars: num_row_variables,
             layer_int_vars: num_interaction_variables,
             gpu_cached_first_poly,
+            // #343 Phase C: device-resident chip-sumcheck per-instance
+            // id (process-global counter) + round counters. The id is
+            // assigned eagerly so every LogupRoundPolynomial instance
+            // has a unique key for the thread-local device cache.
+            chip_sumcheck_id: {
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+                NEXT_ID.fetch_add(1, Ordering::Relaxed)
+            },
+            chip_sumcheck_round: 0,
+            last_chip_alpha: None,
         };
 
         // Edge case: zero row variables — chip tables are already 1-row.
@@ -2737,6 +2839,13 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
             PolynomialLayer::Chip(state) => {
                 fold_chip_state_row(state, alpha);
                 self.remaining_row_vars -= 1;
+                // #343 Phase C: capture the alpha just applied to the
+                // chip state. Round counter advances by one — the next
+                // sum_as_poly_in_last_variable will be the next round
+                // in this chip-sumcheck instance.
+                self.last_chip_alpha = Some(alpha);
+                self.chip_sumcheck_round =
+                    self.chip_sumcheck_round.saturating_add(1);
                 if state.chip_rows == 1 && self.remaining_row_vars == 0 {
                     // Don't transition yet if there are still row
                     // variables left.  But chip_rows == 1 with
@@ -2835,14 +2944,104 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         }
         let claim_v = claim.expect("sum_as_poly_in_last_variable: claim required");
         let evals = match &self.state {
-            PolynomialLayer::Chip(state) => round_poly_evaluations_chip_structured(
-                state,
-                &self.eq_int,
-                &self.eq_row,
-                self.pad_eq_int_sum,
-                self.lambda,
-                claim_v,
-            ),
+            PolynomialLayer::Chip(state) => {
+                // #343 Phase C: optional device-resident dispatch.
+                // Gated on ZIREN_GPU_CHIP_SUMCHECK=1 (engages the
+                // existing host SP1 hook path) AND
+                // ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE=1 (engages the
+                // device-resident hook). Threads sumcheck_id +
+                // round_idx + alpha_prev so the device hook keeps a
+                // cross-round layer cache and applies the fold kernel
+                // in place. Falls through to host on None.
+                let try_device = std::env::var("ZIREN_GPU_CHIP_SUMCHECK")
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
+                    && std::env::var("ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE")
+                        .map(|v| v == "1")
+                        .unwrap_or(false);
+                if try_device {
+                    if let Some(dev_hook) =
+                        crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_device_hook()
+                    {
+                        use core::any::TypeId;
+                        type Ef4 = p3_field::extension::BinomialExtensionField<
+                            p3_koala_bear::KoalaBear, 4>;
+                        if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
+                            // SAFETY: TypeId equality guarantees EF == Ef4.
+                            unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
+                                core::slice::from_raw_parts(
+                                    s.as_ptr().cast::<B>(), s.len(),
+                                )
+                            }
+                            let n0v: Vec<&[Ef4]> = state.n0.iter()
+                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                                .collect();
+                            let d0v: Vec<&[Ef4]> = state.d0.iter()
+                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                                .collect();
+                            let n1v: Vec<&[Ef4]> = state.n1.iter()
+                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                                .collect();
+                            let d1v: Vec<&[Ef4]> = state.d1.iter()
+                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
+                                .collect();
+                            let eq_int_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(&self.eq_int) };
+                            let eq_row_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(&self.eq_row) };
+                            let pad_eq_int_v: Ef4 = unsafe {
+                                core::mem::transmute_copy::<EF, Ef4>(&self.pad_eq_int_sum)
+                            };
+                            let lambda_v: Ef4 =
+                                unsafe { core::mem::transmute_copy::<EF, Ef4>(&self.lambda) };
+                            let claim_vv: Ef4 =
+                                unsafe { core::mem::transmute_copy::<EF, Ef4>(&claim_v) };
+                            let alpha_prev_v: Option<Ef4> = self.last_chip_alpha
+                                .as_ref()
+                                .map(|a| unsafe { core::mem::transmute_copy::<EF, Ef4>(a) });
+                            use std::sync::OnceLock;
+                            static FIRED_343C: OnceLock<()> = OnceLock::new();
+                            FIRED_343C.get_or_init(|| {
+                                tracing::warn!(
+                                    "#343C device-resident chip-sumcheck hook FIRED \
+                                     (chip_rows={}, n_chips={}, round_idx={}, id={})",
+                                    state.chip_rows, state.n0.len(),
+                                    self.chip_sumcheck_round, self.chip_sumcheck_id,
+                                );
+                            });
+                            if let Some(evals_ef4) = dev_hook(
+                                &n0v, &d0v, &n1v, &d1v,
+                                &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
+                                state.chip_rows,
+                                eq_int_v, eq_row_v,
+                                pad_eq_int_v, lambda_v, claim_vv,
+                                self.chip_sumcheck_id,
+                                self.chip_sumcheck_round,
+                                alpha_prev_v,
+                            ) {
+                                let evals: [EF; 4] = unsafe {
+                                    [
+                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[0]),
+                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[1]),
+                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[2]),
+                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[3]),
+                                    ]
+                                };
+                                return UnivariatePolynomial::new(
+                                    poly_coefficients_from_evals(evals).to_vec(),
+                                );
+                            }
+                            // Device hook None → fall through to host.
+                        }
+                    }
+                }
+                round_poly_evaluations_chip_structured(
+                    state,
+                    &self.eq_int,
+                    &self.eq_row,
+                    self.pad_eq_int_sum,
+                    self.lambda,
+                    claim_v,
+                )
+            }
             PolynomialLayer::Packed { n0, d0, n1, d1 } => {
                 // Task #102 dispatch hook (Phase 2): when
                 // ZIREN_GPU_SUMCHECK=1 AND a GPU evaluator is

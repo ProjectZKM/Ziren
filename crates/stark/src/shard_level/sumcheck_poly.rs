@@ -1053,6 +1053,182 @@ pub fn get_gpu_logup_round_hook() -> Option<GpuLogupRoundProverFn> {
     GPU_LOGUP_ROUND_HOOK.get().copied()
 }
 
+// ──────────────────────────────────────────────────────────────────
+// #336 / #343: GPU chip-structured sumcheck round-poly hook.
+//
+// Separate from `GpuSumcheckEvalsFn` (covers PACKED mode, post-
+// chip-collapse, flat n0/d0/n1/d1 arrays). This hook covers rounds
+// 1..N when `chip_rows > 1`, where data is still in per-chip
+// `Vec<Vec<EF>>` form.
+//
+// CPU reference: `crates/stark/src/shard_level/row_gkr/round.rs`
+// `round_poly_evaluations_chip_structured`.
+//
+// Signature mirrored verbatim from
+// `ziren-gpu/basefold/src/chip_sumcheck_dispatch.rs::chip_structured_sumcheck_dispatch`
+// (commit 40abeb6, `feat/gpu-basefold-primitives-2`).
+// ──────────────────────────────────────────────────────────────────
+pub type GpuChipStructuredSumcheckFn = fn(
+    n0: &[&[Ef4]],
+    d0: &[&[Ef4]],
+    n1: &[&[Ef4]],
+    d1: &[&[Ef4]],
+    chip_offsets: &[usize],
+    chip_cols: &[usize],
+    num_real_rows: &[usize],
+    chip_rows: usize,
+    eq_int: &[Ef4],
+    eq_row: &[Ef4],
+    pad_eq_int_sum: Ef4,
+    lambda: Ef4,
+    current_claim: Ef4,
+) -> [Ef4; 4];
+
+static GPU_CHIP_STRUCTURED_SUMCHECK_HOOK: std::sync::OnceLock<
+    GpuChipStructuredSumcheckFn,
+> = std::sync::OnceLock::new();
+
+pub fn register_gpu_chip_structured_sumcheck_hook(
+    f: GpuChipStructuredSumcheckFn,
+) -> Result<(), GpuChipStructuredSumcheckFn> {
+    GPU_CHIP_STRUCTURED_SUMCHECK_HOOK.set(f)
+}
+
+#[must_use]
+pub fn get_gpu_chip_structured_sumcheck_hook(
+) -> Option<GpuChipStructuredSumcheckFn> {
+    GPU_CHIP_STRUCTURED_SUMCHECK_HOOK.get().copied()
+}
+
+// ──────────────────────────────────────────────────────────────────
+// #343 Phase C: GPU device-resident chip-structured sumcheck hook.
+//
+// Adds the per-round state needed for device-resident replay:
+//   - `sumcheck_id` keys a thread-local device cache so the hook
+//     can detect round-0 marshal vs. round-N fold transitions.
+//     Caller must pick a fresh id per `LogupRoundPolynomial` Chip
+//     instance.
+//   - `round_idx` is 0-based; round 0 marshals from host arrays,
+//     rounds 1..N may consume the cached device layer.
+//   - `alpha_prev` is `None` for round 0; `Some(alpha)` for rounds
+//     1..N (the verifier-sampled binding scalar from the previous
+//     round). Device hook folds the cached layer with this scalar
+//     before running the next sumcheck round.
+//
+// On any internal error the hook returns `None` so the caller can
+// fall back to the host hook for that round.
+//
+// Mirrored from
+// `ziren-gpu/basefold/src/chip_sumcheck_dispatch.rs::chip_structured_sumcheck_dispatch_device`.
+// ──────────────────────────────────────────────────────────────────
+pub type GpuChipStructuredSumcheckDeviceFn = fn(
+    n0: &[&[Ef4]],
+    d0: &[&[Ef4]],
+    n1: &[&[Ef4]],
+    d1: &[&[Ef4]],
+    chip_offsets: &[usize],
+    chip_cols: &[usize],
+    num_real_rows: &[usize],
+    chip_rows: usize,
+    eq_int: &[Ef4],
+    eq_row: &[Ef4],
+    pad_eq_int_sum: Ef4,
+    lambda: Ef4,
+    current_claim: Ef4,
+    sumcheck_id: u64,
+    round_idx: usize,
+    alpha_prev: Option<Ef4>,
+) -> Option<[Ef4; 4]>;
+
+static GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK: std::sync::OnceLock<
+    GpuChipStructuredSumcheckDeviceFn,
+> = std::sync::OnceLock::new();
+
+pub fn register_gpu_chip_structured_sumcheck_device_hook(
+    f: GpuChipStructuredSumcheckDeviceFn,
+) -> Result<(), GpuChipStructuredSumcheckDeviceFn> {
+    GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK.set(f)
+}
+
+#[must_use]
+pub fn get_gpu_chip_structured_sumcheck_device_hook(
+) -> Option<GpuChipStructuredSumcheckDeviceFn> {
+    GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK.get().copied()
+}
+
+// ──────────────────────────────────────────────────────────────────
+// #316 fixup: V2 logup-round hook + first-round hook stubs.
+//
+// These are referenced by `row_gkr/round.rs` (#270/#271 in-flight
+// work) but were never committed on this branch.  The ziren-gpu side
+// is what `register_*`s them at startup; when zkm-core-executor (or
+// any consumer that doesn't link ziren-gpu) builds, the registry is
+// empty and `get_*_hook()` returns `None` → the host fallback path
+// runs.  Stub here so the crate type-checks; production behavior is
+// unchanged because the env flags that enable these dispatch sites
+// default OFF or no-op when the hook is missing.
+// ──────────────────────────────────────────────────────────────────
+
+/// V2 signature: takes a real `&mut InnerChallenger` instead of the
+/// V1 observe/sample closures.  Used by the device-resident challenger
+/// path (#271 step 5).
+pub type GpuLogupRoundProverFnV2 = fn(
+    n0_flat: Vec<Ef4>,
+    d0_flat: Vec<Ef4>,
+    n1_flat: Vec<Ef4>,
+    d1_flat: Vec<Ef4>,
+    eq_int: Vec<Ef4>,
+    eq_row: Vec<Ef4>,
+    lambda: Ef4,
+    initial_claim: Ef4,
+    num_variables: usize,
+    challenger: &mut crate::InnerChallenger,
+) -> Option<GpuLogupRoundResult>;
+
+static GPU_LOGUP_ROUND_HOOK_V2: std::sync::OnceLock<GpuLogupRoundProverFnV2> =
+    std::sync::OnceLock::new();
+
+pub fn register_gpu_logup_round_hook_v2(
+    f: GpuLogupRoundProverFnV2,
+) -> Result<(), GpuLogupRoundProverFnV2> {
+    GPU_LOGUP_ROUND_HOOK_V2.set(f)
+}
+
+#[must_use]
+pub fn get_gpu_logup_round_hook_v2() -> Option<GpuLogupRoundProverFnV2> {
+    GPU_LOGUP_ROUND_HOOK_V2.get().copied()
+}
+
+/// First-round chip-structured hook used by `#270 step 7w`.  Returns
+/// `(gpu_partials, post_fix)` where `gpu_partials` is a 3-element
+/// `[sum_zero, sum_half, eq_sum]` vector and `post_fix` carries the
+/// packed strided payload that `from_strided_post_fix` decodes.
+pub type GpuFirstRoundHookFn = fn(
+    numerator_concat: &[p3_koala_bear::KoalaBear],
+    denominator_concat: &[Ef4],
+    col_index: &[u32],
+    start_indices: &[u32],
+    eq_row_chip_offsets: &[u32],
+    eq_row_real: &[Ef4],
+    eq_int_real: &[Ef4],
+    lambda: Ef4,
+    alpha: Ef4,
+) -> Option<(Vec<Ef4>, Vec<Ef4>)>;
+
+static GPU_FIRST_ROUND_HOOK: std::sync::OnceLock<GpuFirstRoundHookFn> =
+    std::sync::OnceLock::new();
+
+pub fn register_gpu_first_round_hook(
+    f: GpuFirstRoundHookFn,
+) -> Result<(), GpuFirstRoundHookFn> {
+    GPU_FIRST_ROUND_HOOK.set(f)
+}
+
+#[must_use]
+pub fn get_gpu_first_round_hook() -> Option<GpuFirstRoundHookFn> {
+    GPU_FIRST_ROUND_HOOK.get().copied()
+}
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;

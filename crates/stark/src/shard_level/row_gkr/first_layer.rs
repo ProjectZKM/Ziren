@@ -90,8 +90,8 @@ fn device_hooks_master_cached() -> bool {
     static CACHED: OnceLock<bool> = OnceLock::new();
     *CACHED.get_or_init(|| {
         std::env::var("ZIREN_GPU_DEVICE_HOOKS")
-            .map(|v| v == "1")
-            .unwrap_or(false)
+            .map(|v| v != "0")
+            .unwrap_or(true)
     })
 }
 

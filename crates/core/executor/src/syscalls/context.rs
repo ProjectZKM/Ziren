@@ -25,7 +25,7 @@ pub struct SyscallContext<'a, 'b: 'a> {
     /// The runtime.
     pub rt: &'a mut Executor<'b>,
     /// The local memory access events for the syscall.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
 }
 
 impl<'a, 'b> SyscallContext<'a, 'b> {
@@ -39,7 +39,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
             next_pc: runtime.state.pc.wrapping_add(4),
             exit_code: 0,
             rt: runtime,
-            local_memory_access: HashMap::new(),
+            local_memory_access: nohash_hasher::IntMap::default(),
         }
     }
 

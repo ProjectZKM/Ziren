@@ -81,8 +81,10 @@ pub struct TraceChunk {
     pub shard_index: u32,
     /// Register file (36 slots, matching `JitContext::registers`) at the
     /// start of this shard's slice of execution: 0..32 are MIPS GPRs,
-    /// 32/33 are HI/LO, 34 is BRK, 35 is HEAP.
-    pub start_registers: [u32; 36],
+    /// 32/33 are HI/LO, 34 is BRK, 35 is HEAP. `Vec` (not `[u32; 36]`)
+    /// because serde Deserialize is not derived for fixed arrays > 32
+    /// without `serde-big-array`; len is invariantly 36.
+    pub start_registers: Vec<u32>,
     /// PC at which Stage 2 should begin re-executing this shard.
     pub pc_start: u32,
     /// Global clock at the start of this shard.
@@ -92,6 +94,14 @@ pub struct TraceChunk {
     /// Oracle of memory reads observed by Stage 1. May be empty when the
     /// JIT emit path was not configured to record memory; in that case
     /// Stage 2 falls back to direct guest-memory reads.
+    ///
+    /// #316 Phase D — Option B (mem_reads oracle): when populated by the
+    /// sequential producer, Stage 2 pre-loads its sub-Executor's
+    /// page_table from these entries before replaying, eliminating the
+    /// need for chunks to carry full memory state. The Arc is built at
+    /// chunk-close time; during in-flight chunk construction the
+    /// executor writes into a sibling `Vec<MemValue>` and converts on
+    /// finalize.
     pub mem_reads: Arc<[MemValue]>,
 }
 
@@ -101,7 +111,7 @@ impl TraceChunk {
     pub fn empty(shard_index: u32, pc_start: u32, clk_start: u64) -> Self {
         Self {
             shard_index,
-            start_registers: [0; 36],
+            start_registers: vec![0; 36],
             pc_start,
             clk_start,
             clk_end: clk_start,
@@ -146,6 +156,20 @@ impl MinimalTrace {
         self.total_cycles = self.total_cycles.max(chunk.clk_end);
         self.chunks.push(chunk);
     }
+
+    /// #316 Phase D.2: seal the last open chunk with the final clock
+    /// after the executor finishes. Drop any leading chunks whose
+    /// clk_end ≤ clk_start (degenerate zero-cycle shards opened by an
+    /// extra trailing `bump_record()`).
+    pub fn finalize(&mut self, final_clk: u64) {
+        if let Some(last) = self.chunks.last_mut() {
+            if last.clk_end == u64::MAX {
+                last.clk_end = final_clk;
+            }
+        }
+        self.chunks.retain(|c| c.clk_end > c.clk_start);
+        self.total_cycles = final_clk;
+    }
 }
 
 /// Environment variable that opts the JIT runner into emitting a
@@ -171,7 +195,7 @@ mod tests {
     fn empty_chunk_has_zero_cycles() {
         let chunk = TraceChunk::empty(0, 0x1000_0000, 0);
         assert_eq!(chunk.num_cycles(), 0);
-        assert_eq!(chunk.start_registers, [0; 36]);
+        assert_eq!(chunk.start_registers, vec![0u32; 36]);
         assert_eq!(chunk.pc_start, 0x1000_0000);
         assert!(chunk.mem_reads.is_empty());
     }
