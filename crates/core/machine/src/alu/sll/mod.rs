@@ -49,7 +49,9 @@ use zkm_derive::AlignedBorrow;
 #[cfg(feature = "picus")]
 use zkm_derive::PicusAnnotations;
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::MachineAir, PicusInfo, Word};
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
+use zkm_stark::{air::MachineAir, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,

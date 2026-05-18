@@ -28,9 +28,11 @@ use zkm_curves::{
 use zkm_derive::AlignedBorrow;
 #[cfg(feature = "picus")]
 use zkm_derive::PicusAnnotations;
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
 use zkm_stark::{
     air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
-    MachineRecord, PicusInfo,
+    MachineRecord,
 };
 
 /// The number of columns in the U256x2048MulCols.

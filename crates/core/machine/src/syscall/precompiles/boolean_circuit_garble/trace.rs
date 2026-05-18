@@ -18,7 +18,9 @@ use zkm_core_executor::events::{
 };
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_stark::{MachineAir, PicusInfo};
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
+use zkm_stark::MachineAir;
 
 impl<F: PrimeField32> MachineAir<F> for BooleanCircuitGarbleChip {
     type Record = ExecutionRecord;

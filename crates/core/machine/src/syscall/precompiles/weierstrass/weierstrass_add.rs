@@ -28,10 +28,9 @@ use zkm_curves::{
 use zkm_derive::AlignedBorrow;
 #[cfg(feature = "picus")]
 use zkm_derive::PicusAnnotations;
-use zkm_stark::{
-    air::{LookupScope, MachineAir, ZKMAirBuilder},
-    PicusInfo,
-};
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
+use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryReadCols, MemoryWriteCols},

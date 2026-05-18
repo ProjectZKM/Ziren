@@ -70,8 +70,9 @@ impl ProverClient {
         match env::var("ZKM_PROVER").unwrap_or("local".to_string()).to_lowercase().as_str() {
             "mock" => Self { prover: Box::new(MockProver::new()) },
             "cpu" | "local" => {
-                #[cfg(debug_assertions)]
-                eprintln!("Warning: Local prover in dev mode is not recommended. Proof generation may be slow.");
+                if cfg!(debug_assertions) && env::var_os("ZKM_SDK_WARN_LOCAL_DEV").is_some() {
+                    eprintln!("Warning: Local prover in dev mode is not recommended. Proof generation may be slow.");
+                }
                 Self {
                     prover: Box::new(CpuProver::new()),
                 }

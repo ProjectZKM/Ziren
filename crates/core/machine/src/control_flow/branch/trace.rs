@@ -9,7 +9,9 @@ use zkm_core_executor::{
     events::{BranchEvent, ByteLookupEvent, ByteRecord},
     ExecutionRecord, Opcode, Program,
 };
-use zkm_stark::{air::MachineAir, PicusInfo, Word};
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
+use zkm_stark::{air::MachineAir, Word};
 
 use crate::{
     utils::{next_power_of_two, zeroed_f_vec},
