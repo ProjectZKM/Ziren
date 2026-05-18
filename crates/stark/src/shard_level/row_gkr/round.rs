@@ -3299,6 +3299,39 @@ where
         if TypeId::of::<EF>() == TypeId::of::<Ef4>()
             && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
         {
+            // #371 step 1: V3 dispatch (preferred over V2 when registered).
+            // V3 hook accepts an opaque device-layer handle (Option<...>); first
+            // call passes None and the hook marshals from `*_flat` host vecs,
+            // subsequent calls within the same shard pass the stashed handle
+            // from the prior layer's output so flatten_layer is skipped.
+            // Handle threading is via TLS (per project_368_369 design) — this
+            // dispatch site stays signature-compatible with V2.
+            if let Some(gpu_hook_v3) =
+                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
+            {
+                use std::sync::OnceLock;
+                static V3_FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                V3_FIRED_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "#371 V3 logup-round hook FIRED \
+                         (ZIREN_GPU_LOGUP_GKR_DEVICE=1, EF=Ef4, \
+                         Challenger=InnerChallenger, V3 registered)"
+                    );
+                });
+                if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
+                    circuit,
+                    eval_point,
+                    numerator_eval,
+                    denominator_eval,
+                    lambda,
+                    challenger,
+                    gpu_hook_v3,
+                ) {
+                    return proof;
+                }
+                // V3 declined → fall through to V2 (and then V1/host).
+            }
+
             if let Some(gpu_hook_v2) =
                 crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v2()
             {
@@ -3693,6 +3726,165 @@ where
         denominator_0: cast_ef4_to_ef::<EF>(result.openings[1]),
         numerator_1: cast_ef4_to_ef::<EF>(result.openings[2]),
         denominator_1: cast_ef4_to_ef::<EF>(result.openings[3]),
+        sumcheck_proof,
+    })
+}
+
+/// #371 V3 dispatch: thread an optional `DeviceLayerHandle` from a prior layer's
+/// hook output through TLS, plus host fallback inputs. The hook implementation
+/// (registered ziren-gpu side) downcasts the handle to its concrete CudaSlice
+/// state; when present it skips marshalling the `*_flat` host vecs entirely.
+///
+/// Handle plumbing: stashed in `LOGUP_V3_NEXT_HANDLE` TLS — call site at the
+/// start of each shard's GKR-circuit loop clears it; each successful call
+/// publishes the returned `next_layer` for the next round.
+#[allow(clippy::too_many_arguments)]
+fn try_logup_round_gpu_v3<F, EF, Challenger>(
+    circuit: &GkrCircuitLayer<F, EF>,
+    eval_point: &[EF],
+    numerator_eval: EF,
+    denominator_eval: EF,
+    lambda: EF,
+    challenger: &mut Challenger,
+    gpu_hook_v3: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFnV3,
+) -> Option<LogupGkrRoundProof<EF>>
+where
+    F: PrimeField,
+    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    Challenger: FieldChallenger<F> + 'static,
+{
+    type Ef4 = p3_field::extension::BinomialExtensionField<
+        p3_koala_bear::KoalaBear, 4>;
+
+    debug_assert_eq!(
+        core::any::TypeId::of::<EF>(),
+        core::any::TypeId::of::<Ef4>(),
+        "try_logup_round_gpu_v3 invoked with EF != Ef4",
+    );
+    debug_assert_eq!(
+        core::any::TypeId::of::<Challenger>(),
+        core::any::TypeId::of::<crate::InnerChallenger>(),
+        "try_logup_round_gpu_v3 invoked with Challenger != InnerChallenger",
+    );
+
+    #[inline]
+    fn cast_ef_to_ef4<EF: 'static + Copy>(v: EF) -> Ef4 {
+        unsafe { core::mem::transmute_copy::<EF, Ef4>(&v) }
+    }
+    #[inline]
+    fn cast_ef4_to_ef<EF: 'static + Copy>(v: Ef4) -> EF {
+        unsafe { core::mem::transmute_copy::<Ef4, EF>(&v) }
+    }
+    #[inline]
+    fn cast_vec_ef_to_ef4<EF: 'static>(mut v: Vec<EF>) -> Vec<Ef4> {
+        let len = v.len();
+        let cap = v.capacity();
+        let ptr = v.as_mut_ptr();
+        core::mem::forget(v);
+        unsafe { Vec::from_raw_parts(ptr.cast::<Ef4>(), len, cap) }
+    }
+
+    let (num_row_variables, num_interaction_variables) = match circuit {
+        GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
+        GkrCircuitLayer::FirstLayer(l) => {
+            (l.num_row_variables, l.num_interaction_variables)
+        }
+    };
+    let total_vars = num_row_variables + num_interaction_variables;
+    if total_vars == 0 {
+        return None;
+    }
+
+    let profile = std::env::var("ZIREN_LOGUP_V3_PROFILE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let t_start = profile.then(std::time::Instant::now);
+
+    // #371: pull stashed device handle from prior layer's output, if any.
+    // First call in a shard's circuit walk returns None and the hook marshals
+    // from `*_flat` host vecs. Subsequent calls reuse device buffers.
+    let input_handle =
+        crate::shard_level::sumcheck_poly::take_logup_v3_next_handle();
+    let handle_present = input_handle.is_some();
+
+    // Build host fallback inputs only when no device handle is available.
+    // When the handle is present, the hook reads from device buffers and these
+    // empty vecs are unused (saves the flatten_layer 77%-of-per-call cost).
+    let (n0_flat, d0_flat, n1_flat, d1_flat, eq_int, eq_row) = if handle_present {
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+    } else {
+        let (n0, d0, n1, d1) = match circuit {
+            GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
+            GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
+        };
+        let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
+        let ei = build_eq_table(interaction_point);
+        let er = build_eq_table(row_point);
+        (n0, d0, n1, d1, ei, er)
+    };
+    let setup_us = t_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
+
+    let initial_claim = lambda * numerator_eval + denominator_eval;
+
+    // SAFETY: TypeId equality checked above guarantees Challenger ==
+    // InnerChallenger at runtime, so this transmute is well-defined.
+    let inner_challenger: &mut crate::InnerChallenger = unsafe {
+        &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
+    };
+
+    let t_hook = profile.then(std::time::Instant::now);
+    let result = gpu_hook_v3(
+        input_handle,
+        cast_vec_ef_to_ef4::<EF>(n0_flat),
+        cast_vec_ef_to_ef4::<EF>(d0_flat),
+        cast_vec_ef_to_ef4::<EF>(n1_flat),
+        cast_vec_ef_to_ef4::<EF>(d1_flat),
+        cast_vec_ef_to_ef4::<EF>(eq_int),
+        cast_vec_ef_to_ef4::<EF>(eq_row),
+        cast_ef_to_ef4::<EF>(lambda),
+        cast_ef_to_ef4::<EF>(initial_claim),
+        total_vars,
+        inner_challenger,
+    )?;
+    let hook_us = t_hook.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
+
+    // Stash next-layer handle for the subsequent round's call.
+    if let Some(next) = result.next_layer.clone() {
+        crate::shard_level::sumcheck_poly::publish_logup_v3_next_handle(next);
+    }
+
+    let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
+        .round
+        .univariate_polys
+        .into_iter()
+        .map(|coeffs| UnivariatePolynomial {
+            coefficients: coeffs.into_iter().map(cast_ef4_to_ef::<EF>).collect(),
+        })
+        .collect();
+    let point: Vec<EF> = result.round.point.into_iter().map(cast_ef4_to_ef::<EF>).collect();
+    let final_eval: EF = cast_ef4_to_ef::<EF>(result.round.final_eval);
+    let claimed_sum_ef: EF = initial_claim;
+
+    let sumcheck_proof = PartialSumcheckProof::<EF> {
+        univariate_polys,
+        claimed_sum: claimed_sum_ef,
+        point_and_eval: (point, final_eval),
+    };
+
+    if profile {
+        eprintln!(
+            "[#371] handle_in={} setup_us={setup_us} hook_us={hook_us} \
+             handle_out={} vars={total_vars}",
+            if handle_present { 1 } else { 0 },
+            if result.next_layer.is_some() { 1 } else { 0 },
+        );
+    }
+
+    Some(LogupGkrRoundProof {
+        numerator_0: cast_ef4_to_ef::<EF>(result.round.openings[0]),
+        denominator_0: cast_ef4_to_ef::<EF>(result.round.openings[1]),
+        numerator_1: cast_ef4_to_ef::<EF>(result.round.openings[2]),
+        denominator_1: cast_ef4_to_ef::<EF>(result.round.openings[3]),
         sumcheck_proof,
     })
 }

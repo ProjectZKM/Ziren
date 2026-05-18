@@ -1258,8 +1258,7 @@ pub type GpuLogupRoundProverFnV3 = fn(
     lambda: Ef4,
     initial_claim: Ef4,
     num_variables: usize,
-    observe_ef: &dyn Fn(Ef4),
-    sample_ef: &dyn Fn() -> Ef4,
+    challenger: &mut crate::InnerChallenger,
 ) -> Option<GpuLogupRoundResultV3>;
 
 static GPU_LOGUP_ROUND_HOOK_V3: std::sync::OnceLock<GpuLogupRoundProverFnV3> =
@@ -1278,6 +1277,37 @@ pub fn register_gpu_logup_round_hook_v3(
 #[must_use]
 pub fn get_gpu_logup_round_hook_v3() -> Option<GpuLogupRoundProverFnV3> {
     GPU_LOGUP_ROUND_HOOK_V3.get().copied()
+}
+
+// #371 TLS handle stash: thread DeviceLayerHandle from one V3 hook call to the
+// next within a single shard's GKR-circuit walk. The dispatch site
+// `try_logup_round_gpu_v3` `take`s before each call and `publish`es after the
+// returned `next_layer` (if any). Caller is expected to `clear` at shard
+// boundaries to prevent stale-handle reuse across shards (handled by the
+// shard-level orchestrator, not this module).
+std::thread_local! {
+    static LOGUP_V3_NEXT_HANDLE: std::cell::RefCell<Option<DeviceLayerHandle>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Take the stashed device-layer handle from the prior V3 hook call, if any.
+/// Used by the V3 dispatch site to thread layer state between calls.
+#[must_use]
+pub fn take_logup_v3_next_handle() -> Option<DeviceLayerHandle> {
+    LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow_mut().take())
+}
+
+/// Publish the device-layer handle from a V3 hook's `next_layer` field so the
+/// subsequent call within the same shard's circuit walk can reuse it.
+pub fn publish_logup_v3_next_handle(handle: DeviceLayerHandle) {
+    LOGUP_V3_NEXT_HANDLE.with(|c| *c.borrow_mut() = Some(handle));
+}
+
+/// Clear any stashed V3 handle. Called at shard boundaries by the orchestrator
+/// to prevent the last shard's terminal-layer handle leaking into the next
+/// shard's first call.
+pub fn clear_logup_v3_next_handle() {
+    LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow_mut().take());
 }
 
 /// First-round chip-structured hook used by `#270 step 7w`.  Returns
@@ -1449,8 +1479,7 @@ mod tests {
         _lambda: Ef4,
         _initial_claim: Ef4,
         _num_variables: usize,
-        _observe_ef: &dyn Fn(Ef4),
-        _sample_ef: &dyn Fn() -> Ef4,
+        _challenger: &mut crate::InnerChallenger,
     ) -> Option<GpuLogupRoundResultV3> {
         None
     }
