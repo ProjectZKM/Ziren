@@ -432,6 +432,79 @@ mod tests {
             "ADD event count diverges: seq={} par={}", total_addsub_a, total_addsub_b);
     }
 
+    /// #316 Phase D — deeper byte-equiv: compare CpuEvent + AluEvent
+    /// fields between sequential and parallel paths, not just counts.
+    /// This is the regression net for D.5 codegen step 2 (when the
+    /// JIT-emit path lands, this test will catch any per-event drift
+    /// even if total counts coincidentally match).
+    #[test]
+    fn parallel_replay_field_level_equiv() {
+        use crate::instruction::Instruction;
+        use crate::opcode::Opcode;
+        use crate::Executor;
+
+        // Mix of opcodes to exercise multiple event types: ADDs to
+        // populate add_sub_events; chained reg updates so dependencies
+        // are non-trivial.
+        let pc_base = 0x1000_0000u32;
+        let mut insns: Vec<Instruction> = Vec::with_capacity(80);
+        for i in 0..40u32 {
+            // Cycle reg index 1..15 so we hit a range of register addrs.
+            let dst = ((i % 14) + 1) as u8;
+            insns.push(Instruction::new(Opcode::ADD, dst, 0, (i + 1) as u32, false, true));
+        }
+        // Then a chain of ADDs that read previously-written regs.
+        for _ in 0..40 {
+            insns.push(Instruction::new(Opcode::ADD, 1, 1, 2, false, false));
+        }
+        let program = Program::new(insns, pc_base, pc_base);
+
+        // Sequential
+        let mut exec_a = Executor::new(program.clone(), ZKMCoreOpts::default());
+        exec_a.minimal_trace_collector = Some(MinimalTrace::default());
+        exec_a.run().expect("seq run");
+        let mut trace = exec_a.minimal_trace_collector.take().unwrap();
+        trace.finalize(exec_a.state.global_clk);
+        let records_a = std::mem::take(&mut exec_a.records);
+
+        // Parallel
+        let records_b = drive_tracing_vm_parallel(
+            Arc::new(program),
+            ZKMCoreOpts::default(),
+            &trace,
+        ).expect("par replay");
+
+        // Flatten per-shard CpuEvent streams for comparison.
+        let cpu_a: Vec<_> = records_a.iter().flat_map(|r| r.cpu_events.iter()).collect();
+        let cpu_b: Vec<_> = records_b.iter().flat_map(|r| r.cpu_events.iter()).collect();
+        assert_eq!(cpu_a.len(), cpu_b.len(), "cpu_event count");
+
+        for (i, (a, b)) in cpu_a.iter().zip(cpu_b.iter()).enumerate() {
+            // The clk/pc fields are the load-bearing identity for the
+            // event — drift here means the worker diverged from the
+            // sequential timeline. The remaining fields are the actual
+            // computational outputs; drift there means semantic bug.
+            assert_eq!(a.clk, b.clk, "cpu_events[{i}] clk: seq={} par={}", a.clk, b.clk);
+            assert_eq!(a.pc, b.pc, "cpu_events[{i}] pc: seq={:#x} par={:#x}", a.pc, b.pc);
+            assert_eq!(a.next_pc, b.next_pc, "cpu_events[{i}] next_pc");
+            assert_eq!(a.a, b.a, "cpu_events[{i}] a");
+            assert_eq!(a.b, b.b, "cpu_events[{i}] b");
+            assert_eq!(a.c, b.c, "cpu_events[{i}] c");
+            assert_eq!(a.exit_code, b.exit_code, "cpu_events[{i}] exit_code");
+        }
+
+        // Same for add_sub_events.
+        let add_a: Vec<_> = records_a.iter().flat_map(|r| r.add_sub_events.iter()).collect();
+        let add_b: Vec<_> = records_b.iter().flat_map(|r| r.add_sub_events.iter()).collect();
+        assert_eq!(add_a.len(), add_b.len(), "add_sub_event count");
+        for (i, (a, b)) in add_a.iter().zip(add_b.iter()).enumerate() {
+            assert_eq!(a.pc, b.pc, "add_sub[{i}] pc");
+            assert_eq!(a.a, b.a, "add_sub[{i}] a (result)");
+            assert_eq!(a.b, b.b, "add_sub[{i}] b (operand)");
+            assert_eq!(a.c, b.c, "add_sub[{i}] c (operand)");
+        }
+    }
+
     /// #316 Phase D.2: opening the `minimal_trace_collector` on an
     /// Executor makes `bump_record()` emit chunks. Sanity-check that
     /// chunks come out in clk order and tile contiguously.
