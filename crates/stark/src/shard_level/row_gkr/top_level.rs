@@ -85,6 +85,18 @@ where
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
+    // #359 followup: env-gated profile to scope what fraction of
+    // basefold compress wall this row-GKR LogUp loop consumes.
+    // This IS the active LogUp path on basefold (per project_359
+    // _basefold_compress_path). Default OFF.
+    static PROFILE_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let profile = *PROFILE_ENABLED.get_or_init(|| {
+        std::env::var("ZIREN_ROW_GKR_PROFILE")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    });
+    let t_total_start = if profile { Some(std::time::Instant::now()) } else { None };
+
     // Step 1: sample [alpha, beta].  `beta_seed_dim` = log2(max_arity
     // rounded up).  `betas.len()` = 1 + max_arity (slot 0 is for
     // argument_index, slots 1..=arity for per-column values).
@@ -458,7 +470,7 @@ where
         trace_dim_point.insert(0, EF::ZERO);
     }
 
-    LogupGkrProof {
+    let proof = LogupGkrProof {
         circuit_output: LogUpGkrOutput {
             numerator: output.numerator,
             denominator: output.denominator,
@@ -469,7 +481,17 @@ where
             chip_openings,
         },
         witness: F::ZERO,
+    };
+
+    if profile {
+        let dt = t_total_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
+        eprintln!(
+            "#359_ROW_GKR n_chips={} max_log_rows={} total_us={}",
+            chips.len(), max_log_row_count, dt,
+        );
     }
+
+    proof
 }
 
 #[inline]
