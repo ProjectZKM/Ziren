@@ -104,6 +104,7 @@ fn run_jit_alu_chain(program: &Program) -> u64 {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
+            mem_read_recorder: None, // #316 Phase D.5 step 5
     };
     let jit_fn = build_jit_function(program, params, None).expect("build_jit_function");
 

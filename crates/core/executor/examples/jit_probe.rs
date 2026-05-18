@@ -111,6 +111,7 @@ fn main() {
         pc_start: program.pc_start,
         pc_base: program.pc_base,
         clk_bump: 5,
+            mem_read_recorder: None, // #316 Phase D.5 step 5
     };
     let jit_fn = build_jit_function(
         &program,

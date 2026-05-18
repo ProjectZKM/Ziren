@@ -1217,6 +1217,17 @@ mod platform {
         /// tracking in the JIT — the host re-derives clk from the
         /// trace ring instead.
         pub clk_bump: u64,
+        /// #316 Phase D.5 step 5: optional mem-read recorder fn
+        /// registered with the JIT codegen. When `Some(f)`, every
+        /// LW/LB/LBU/LH/LHU emits a post-load SysV-ABI call to `f`
+        /// passing `(global_clk, guest_addr, value)`. `None` = no
+        /// codegen overhead, recorder-free fast path.
+        ///
+        /// IMPORTANT: this field is NOT part of the program
+        /// fingerprint used by `cached_jit_function`. Callers that
+        /// flip between Some / None must use a separate cache key
+        /// or call `build_jit_function` directly (uncached).
+        pub mem_read_recorder: Option<unsafe extern "C" fn(u64, u32, u32)>,
     }
 
     /// Build a [`JitFunction`] from a program + build parameters.
@@ -1247,6 +1258,12 @@ mod platform {
         )?;
         if let Some(handler) = syscall_handler {
             transpiler.register_syscall_handler(handler);
+        }
+        // #316 Phase D.5 step 5: register the optional mem-read recorder
+        // so load instructions emit the post-load extern call. When
+        // `None`, codegen is byte-identical to pre-D.5.
+        if let Some(recorder) = params.mem_read_recorder {
+            transpiler.set_mem_read_recorder(recorder);
         }
         // Wrap the driver-emitted per-instruction code with the
         // SysV-ABI prologue/epilogue and the register seed/spill so
@@ -1369,8 +1386,31 @@ mod platform {
         let clk_start = ctx.global_clk;
         let start_registers = ctx.registers.to_vec();
 
+        // #316 Phase D.5 step 4: clear the per-thread recorder buffer
+        // BEFORE the JIT call so the oracle reflects only THIS chunk's
+        // reads (and not leftovers from a previous chunk on the same
+        // thread). Safe to call unconditionally — when no recorder was
+        // wired at build time, the JIT never pushes and drain returns
+        // empty.
+        let _ = take_recorded_mem_reads();
+
         // SAFETY: caller's contract.
         unsafe { jit_fn.call(ctx as *mut JitContext) };
+
+        // #316 Phase D.5 step 4: drain recorder into the chunk's
+        // mem_reads oracle. Pre-D.5 callers (no recorder configured at
+        // build time) get the same empty Vec as before — byte-equivalent.
+        // Post-D.5 callers that set `BuildParams.mem_read_recorder` get a
+        // populated oracle that TracingVM can consume for replay.
+        let mem_reads: Vec<crate::minimal_trace::MemValue> =
+            take_recorded_mem_reads()
+                .into_iter()
+                .map(|r| crate::minimal_trace::MemValue {
+                    clk: r.clk,
+                    addr: r.addr,
+                    value: r.value,
+                })
+                .collect();
 
         crate::minimal_trace::TraceChunk {
             shard_index,
@@ -1378,7 +1418,7 @@ mod platform {
             pc_start,
             clk_start,
             clk_end: ctx.global_clk,
-            mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+            mem_reads: std::sync::Arc::from(mem_reads),
         }
     }
 

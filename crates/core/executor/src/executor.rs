@@ -2583,6 +2583,11 @@ impl<'a> Executor<'a> {
                 // instruction (executor.rs:2164) so JIT vs interp
                 // cycle counts agree byte-for-byte at run_fast exit.
                 clk_bump: 1,
+                // #316 Phase D.5 step 5: run_fast is the fast-execution
+                // path; trace capture goes through a separate code path
+                // that opts into the recorder. None = byte-identical to
+                // pre-D.5.
+                mem_read_recorder: None,
             };
             // Look up (or build) the JIT function via the global
             // cache so subsequent calls to `run_fast` on the same

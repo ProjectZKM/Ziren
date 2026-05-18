@@ -89,6 +89,7 @@ fn run_jit_n(program: &Program, halt_n: u64) -> ([u32; 32], u32, u64, u32) {
         pc_start: program.pc_start,
         pc_base: program.pc_base,
         clk_bump: 1,
+            mem_read_recorder: None, // #316 Phase D.5 step 5
     };
     let jit_fn = build_jit_function(
         program,
