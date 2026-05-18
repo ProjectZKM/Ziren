@@ -568,6 +568,28 @@ impl MemoryInstructions for TranspilerBackend {
     }
 
     fn lwl(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
+        // #316 Phase D.5 step 2c (DEFERRED): the mem-read recorder is
+        // NOT wired into LWL/LWR. The merge logic below clobbers rbp
+        // (TEMP_B) via `emit_register_load(rd, TEMP_B)` and consumes
+        // eax/edx/ecx for the variable-shift sequence, so the post-load
+        // recorder call would step on the merge.
+        //
+        // Pinned register survey:
+        //   rbx=TEMP_A, rbp=TEMP_B, r10=MEMORY_PTR, r12=CONTEXT,
+        //   r13=JUMP_TABLE, r14=$ra (RA_PIN), r15=CLOCK_OR_SAVED_STACK_PTR
+        // — there's no free callee-saved GPR to stash `aligned_vaddr`
+        // and `mem` across the merge. A stack push/pop pair around the
+        // recorder call would work but adds 6 native ops per unaligned
+        // load (push aligned_vaddr, push mem, push rax for align, call,
+        // pop rax, pop mem, pop aligned_vaddr) — disproportionate cost
+        // for a rare instruction.
+        //
+        // Until we have a use case that requires LWL/LWR oracle capture,
+        // callers that opt into ZIREN_USE_MINIMAL_TRACE=1 must restrict
+        // themselves to programs that don't use unaligned loads. The
+        // bench programs (fibonacci/hello-world/tendermint) all avoid
+        // LWL/LWR. Reth uses some; flag that in step 6 plumbing.
+        //
         // MIPS LWL semantics, mirroring `executor.rs::execute_load`'s
         // Opcode::LWL arm:
         //
