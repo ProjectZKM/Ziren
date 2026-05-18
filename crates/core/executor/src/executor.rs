@@ -228,6 +228,7 @@ fn upsert_local_mem(
     addr: u32,
     prev_record: MemoryRecord,
     record: MemoryRecord,
+    is_register: bool,
 ) {
     if let Some(m) = override_map {
         m.entry(addr)
@@ -237,7 +238,7 @@ fn upsert_local_mem(
                 initial_mem_access: prev_record,
                 final_mem_access: record,
             });
-    } else if (addr as usize) < 36 {
+    } else if is_register && (addr as usize) < 36 {
         let slot = &mut reg_slots[addr as usize];
         if let Some(e) = slot {
             e.final_mem_access = record;
@@ -658,6 +659,7 @@ impl<'a> Executor<'a> {
                 addr,
                 prev_record,
                 *record,
+                false, // is_register
             );
         }
 
@@ -792,6 +794,7 @@ impl<'a> Executor<'a> {
                 addr,
                 prev_record,
                 *record,
+                true, // is_register
             );
         }
         // Construct the memory read record.
@@ -876,6 +879,7 @@ impl<'a> Executor<'a> {
                 addr,
                 prev_record,
                 *record,
+                false, // is_register
             );
         }
 
@@ -977,6 +981,7 @@ impl<'a> Executor<'a> {
                 addr,
                 prev_record,
                 *record,
+                true, // is_register
             );
         }
 
@@ -1063,22 +1068,20 @@ impl<'a> Executor<'a> {
         record.timestamp = timestamp;
 
         if !self.unconstrained {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
+            // #316 Phase D.4 step 2 FIX: rw_traced is register write — must go
+            // through upsert_local_mem with is_register=true so the event lands in
+            // reg_slots[], matching rr_traced. Without this, register reads land
+            // in reg_slots but writes land in local_memory_access — same register
+            // gets two events, doubling interactions.
+            upsert_local_mem(
+                local_memory_access,
+                &mut self.local_reg_access,
+                &mut self.local_memory_access,
+                addr,
+                prev_record,
+                *record,
+                true, // is_register
+            );
         }
 
         // Construct the memory write record.

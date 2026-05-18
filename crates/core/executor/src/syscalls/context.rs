@@ -139,6 +139,18 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
                     self.rt.record.cpu_local_memory_access.push(local_mem_access);
                 }
 
+                // #316 Phase D.4 lifter step 2 fix: also flush the register-slot
+                // fast-path mirror for register addresses. Without this, the
+                // reg_slots[addr] event keeps its pre-syscall `initial_mem_access`
+                // and gets extended by post-syscall accesses, double-covering the
+                // pre-syscall→syscall interval that should belong to the syscall
+                // event. This produces non-zero global cumulative sum on verify.
+                if (addr as usize) < 36 {
+                    if let Some(reg_event) = self.rt.local_reg_access[addr as usize].take() {
+                        self.rt.record.cpu_local_memory_access.push(reg_event);
+                    }
+                }
+
                 syscall_local_mem_events.push(event);
             }
         }
