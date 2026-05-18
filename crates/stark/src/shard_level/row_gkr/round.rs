@@ -112,20 +112,25 @@ where
     let total_chip_cols: usize =
         layer.numerator_0.iter().map(|c| c.num_interactions).sum();
     let pad_per_row = cols.saturating_sub(total_chip_cols);
-    // Two-region init: first `total_chip_cols` columns of every row will
-    // be overwritten by the scatter; the trailing `pad_per_row` columns
-    // need identity-fraction (0/1) values.  We allocate uninit, then the
-    // scatter loop writes the active region AND fills the padding tail
-    // for each row in the same iteration — no separate init pass.
-    // FLAKE FIX: revert from unsafe set_len to vec! init while
-    // hunting the OodEvaluationMismatch source. KoalaBear's serde
-    // rejects values >= PRIME, and uninit u32 leaks ~50% of the time
-    // produce out-of-range values, breaking compress proof bincode
-    // round-trip and (sometimes) constraint evaluation.
-    let mut n0_flat: Vec<EF> = vec![EF::ZERO; total];
-    let mut d0_flat: Vec<EF> = vec![EF::ONE; total];
-    let mut n1_flat: Vec<EF> = vec![EF::ZERO; total];
-    let mut d1_flat: Vec<EF> = vec![EF::ONE; total];
+    // #368 follow-up: parallel-init the four flat buffers (was sequential
+    // `vec![EF::ZERO/ONE; total]`).  Profile probe showed flatten_layer
+    // dominates V2 path at 77% of per-layer cost; sequential init of
+    // 4 × `total` EF4 elements (16 B each) is the bulk of that time.
+    // Each chunk's fill writes every slot, preserving the
+    // "every byte initialized via safe Rust write" invariant that the
+    // FLAKE FIX relied on — uninit-set_len is never observable here.
+    use p3_maybe_rayon::prelude::*;
+    let par_init = |fill: EF| -> Vec<EF> {
+        let mut v: Vec<EF> = Vec::with_capacity(total);
+        // SAFETY: We immediately write every slot below via par_chunks_mut.
+        unsafe { v.set_len(total); }
+        v.par_chunks_mut(1usize << 16).for_each(|c| c.fill(fill));
+        v
+    };
+    let mut n0_flat: Vec<EF> = par_init(EF::ZERO);
+    let mut d0_flat: Vec<EF> = par_init(EF::ONE);
+    let mut n1_flat: Vec<EF> = par_init(EF::ZERO);
+    let mut d1_flat: Vec<EF> = par_init(EF::ONE);
 
     // Phase 4 perf fix (Apr 25 2026): pre-compute per-chip column
     // offsets along the interaction axis so the row scatter can run
