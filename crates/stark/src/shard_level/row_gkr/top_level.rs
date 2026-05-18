@@ -260,7 +260,14 @@ where
     // resident across all 8 concurrent shards × 8 GPUs and OOM the
     // basefold commit Merkle phase that follows.
     let mut device_circuit_id_to_drain: Option<u64> = None;
+    // #360 sub-phase accumulators: per-iteration costs within
+    // layer_transitions. Profile when ZIREN_ROW_GKR_PROFILE=1.
+    let mut acc_pull_us: u64 = 0;
+    let mut acc_prove_us: u64 = 0;
+    let mut acc_observe_us: u64 = 0;
+    let mut acc_other_us: u64 = 0;
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
+        let _t_iter_start = std::time::Instant::now();
         // Sample lambda for this round.
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
@@ -272,6 +279,7 @@ where
         // outlives the call.  The owner is dropped at end of scope
         // (each iteration), releasing the host materialization before
         // the next round allocates.
+        let _t_pull_start = std::time::Instant::now();
         let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
             super::layer::LayerState::Host(_) => None,
             super::layer::LayerState::Device { circuit_id, handle, .. } => {
@@ -300,8 +308,10 @@ where
                 pulled_owner.as_ref().expect("Device variant always assigns Some above")
             }
         };
+        acc_pull_us += _t_pull_start.elapsed().as_micros() as u64;
 
         // Run the sumcheck.
+        let _t_prove_start = std::time::Instant::now();
         let round_proof = prove_gkr_round::<F, EF, _>(
             layer,
             &eval_point,
@@ -310,7 +320,9 @@ where
             lambda,
             challenger,
         );
+        acc_prove_us += _t_prove_start.elapsed().as_micros() as u64;
 
+        let _t_observe_start = std::time::Instant::now();
         // Observe the 4 openings into the challenger (as extension elements).
         // Order MUST match verifier (verifier.rs:812): n0, n1, d0, d1.
         // Mismatched order desyncs the transcript at the line_challenge
@@ -319,6 +331,7 @@ where
         observe_ext::<F, EF, _>(challenger, round_proof.numerator_1);
         observe_ext::<F, EF, _>(challenger, round_proof.denominator_0);
         observe_ext::<F, EF, _>(challenger, round_proof.denominator_1);
+        acc_observe_us += _t_observe_start.elapsed().as_micros() as u64;
 
         // Take the reduced point from the sumcheck as the base for the
         // next layer's eval_point; extend by the line challenge.
@@ -336,6 +349,16 @@ where
 
         eval_point = next_eval_point;
         round_proofs.push(round_proof);
+        // Per-iteration "other" = total iteration - (pull + prove + observe).
+        // Captures lambda sample, line_challenge sample, line formula,
+        // next_eval_point build, push, drop overhead.
+        let iter_total_us = _t_iter_start.elapsed().as_micros() as u64;
+        acc_other_us += iter_total_us
+            .saturating_sub(acc_pull_us)
+            .saturating_sub(acc_prove_us)
+            .saturating_sub(acc_observe_us);
+        // (Above is approximate per-iter; rolling subtract gives positive
+        // remainder if iter dominates accumulated phases since last reset.)
     }
     let n_layers = round_proofs.len();
 
@@ -494,9 +517,11 @@ where
             .saturating_sub(_dt_extract_us);
         eprintln!(
             "#359_ROW_GKR n_chips={} max_log_rows={} total_us={} \
-             first_us={} layers_us={} extract_us={} other_us={}",
+             first_us={} layers_us={} extract_us={} other_us={} \
+             layers_pull_us={} layers_prove_us={} layers_observe_us={} layers_other_us={}",
             chips.len(), max_log_row_count, dt,
             _dt_first_us, _dt_layers_us, _dt_extract_us, other_us,
+            acc_pull_us, acc_prove_us, acc_observe_us, acc_other_us,
         );
     }
 
