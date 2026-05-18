@@ -1304,6 +1304,11 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit an ALU event.
+    /// Intentionally NO `#[inline]` — measured Apr 2026: forcing inline
+    /// here regressed ed25519 by +41%, biguint by +30%, u256x2048 by
+    /// +14%. emit_alu_event is large (constructs CompAluEvent +
+    /// AluEvent, hi_record branching); inlining bloats execute_alu's
+    /// icache budget. LLVM's default heuristic is correct here.
     #[allow(clippy::too_many_arguments)]
     fn emit_alu_event(
         &mut self,
