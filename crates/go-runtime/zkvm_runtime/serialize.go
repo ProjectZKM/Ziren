@@ -56,16 +56,21 @@ func serializeData(v reflect.Value) ([]byte, error) {
 		binary.LittleEndian.PutUint64(b, uint64(v.Uint()))
 		return b, nil
 	case reflect.Slice:
-		output := make([]byte, 8)
-		binary.LittleEndian.PutUint64(output, uint64(v.Len()))
-		for i := 0; i < v.Len(); i++ {
-			d, err := serializeData(v.Index(i))
-			if err != nil {
-				return nil, err
+		switch v.Type().Elem().Kind() {
+		case reflect.Uint8:
+			output := make([]byte, 8)
+			binary.LittleEndian.PutUint64(output, uint64(v.Len()))
+
+			for i := 0; i < v.Len(); i++ {
+				d, err := serializeData(v.Index(i))
+				if err != nil {
+					return nil, err
+				}
+				output = append(output, d...)
 			}
-			output = append(output, d...)
+			return output, nil
 		}
-		return output, nil
+		return nil, fmt.Errorf("unsupported type: %v, elem: %v", v.Kind(), v.Elem().Kind())
 	case reflect.Array:
 		switch v.Type().Elem().Kind() {
 		case reflect.Uint8:
