@@ -139,18 +139,19 @@ impl<'a> TracingVM<'a> {
         // any earlier shard's writes that this shard reads from".
         if !chunk.mem_reads.is_empty() {
             use crate::events::MemoryRecord;
-            use std::collections::HashSet;
             // Use the FIRST entry per address (state at chunk start).
-            // Later entries reflect mid-shard mutations the worker will
-            // reproduce on its own.
-            let mut seen: HashSet<u32> = HashSet::new();
+            // `entry().or_insert(...)` is no-op if the address is
+            // already present, which gives first-seen semantics with
+            // a single hash per addr (vs the HashSet+insert version
+            // which paid 2 hashes per addr).
             for mv in chunk.mem_reads.iter() {
-                if seen.insert(mv.addr) {
-                    sub.state.memory.page_table.insert(
-                        mv.addr,
-                        MemoryRecord { value: mv.value, shard: 0, timestamp: 0 },
-                    );
-                }
+                sub.state.memory.page_table
+                    .entry(mv.addr)
+                    .or_insert(MemoryRecord {
+                        value: mv.value,
+                        shard: 0,
+                        timestamp: 0,
+                    });
             }
         }
 
