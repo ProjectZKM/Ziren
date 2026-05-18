@@ -1668,3 +1668,135 @@ mod platform_diag {
 }
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub use platform_diag::snapshot as jit_cache_stats;
+
+// ──────────────────────────────────────────────────────────────────
+// #316 Phase D.5 — JIT-side mem_reads oracle (scaffold)
+// ──────────────────────────────────────────────────────────────────
+//
+// SP1-style two-stage tracing relies on the producer side (which
+// today is the interp `Executor::execute_state` pass) emitting a
+// `MinimalTrace` with per-shard `mem_reads` oracle entries. The
+// existing path uses interp + the in-mr/mw `recording_chunk_mem_reads`
+// hook (D.4 producer wiring).
+//
+// D.5 swaps in the JIT for the same producer role. The JIT runs
+// native code at ~7× the interp speed (per
+// `project_jit_by_default_apr29.md`), so even with a per-memory-op
+// recorder callback, the producer wins ~3-4× over the interp baseline.
+//
+// **Step 1 (this commit)**: scaffold a C-ABI extern recorder function +
+// thread-local buffer + `take_recorded_mem_reads` drain. NO codegen
+// changes — future steps wire the trait `TraceCollector::trace_mem_value`
+// implementation in `crates/core/jit/src/backends/x86/transpiler.rs`
+// to emit a call to `jit_record_mem_read` after every LW/LH/LB/SW/SH/SB
+// lowering site.
+//
+// Codegen-level wiring is deferred because:
+//   (a) Per-opcode lowering is bespoke and the JIT is default-on
+//       production. Risk of regression on a path the GPU box validates
+//       end-to-end but we can't validate locally.
+//   (b) The host-side recorder is the harder-to-test piece (atomics,
+//       thread-local lifecycle, drain semantics). Landing it standalone
+//       lets the codegen wiring be a 1-line `.call` emit in step 2.
+
+/// Single memory-read oracle entry, matching
+/// `crate::minimal_trace::MemValue` layout. Re-exported here so
+/// codegen doesn't need to depend on minimal_trace directly.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct JitMemReadRecord {
+    pub clk: u64,
+    pub addr: u32,
+    pub value: u32,
+}
+
+thread_local! {
+    /// Thread-local buffer of JIT-recorded memory reads, populated by
+    /// the per-op extern callback. Drained at shard boundaries by
+    /// the producer thread.
+    static JIT_MEM_READS: std::cell::RefCell<Vec<JitMemReadRecord>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// C-ABI recorder fn — called from JIT-emitted load/store sequences.
+/// Codegen will emit:
+///     mov rdi, rax        ; clk
+///     mov esi, ecx        ; addr
+///     mov edx, edx        ; value (already in edx)
+///     call jit_record_mem_read
+///
+/// Safe to call from any thread; each thread has its own buffer.
+/// O(1) amortized — `Vec::push` with thread-local ownership.
+#[no_mangle]
+pub extern "C" fn jit_record_mem_read(clk: u64, addr: u32, value: u32) {
+    JIT_MEM_READS.with(|b| {
+        b.borrow_mut().push(JitMemReadRecord { clk, addr, value });
+    });
+}
+
+/// Drain the thread-local recorder buffer. Called by the producer
+/// at each shard boundary; returns the entries collected since the
+/// last drain.
+pub fn take_recorded_mem_reads() -> Vec<JitMemReadRecord> {
+    JIT_MEM_READS.with(|b| std::mem::take(&mut *b.borrow_mut()))
+}
+
+/// Number of entries currently recorded (for diagnostics / tests).
+#[must_use]
+pub fn recorded_mem_reads_len() -> usize {
+    JIT_MEM_READS.with(|b| b.borrow().len())
+}
+
+#[cfg(test)]
+mod mem_reads_recorder_tests {
+    use super::*;
+
+    /// Smoke test: jit_record_mem_read pushes entries; take_ drains them.
+    #[test]
+    fn record_and_drain() {
+        // Start clean — other tests may have left entries.
+        let _ = take_recorded_mem_reads();
+        assert_eq!(recorded_mem_reads_len(), 0);
+
+        jit_record_mem_read(100, 0x1000_0000, 0xdead_beef);
+        jit_record_mem_read(105, 0x1000_0004, 0xcafe_d00d);
+        jit_record_mem_read(110, 0x1000_0008, 0x1234_5678);
+
+        assert_eq!(recorded_mem_reads_len(), 3);
+
+        let drained = take_recorded_mem_reads();
+        assert_eq!(drained.len(), 3);
+        assert_eq!(drained[0].clk, 100);
+        assert_eq!(drained[0].addr, 0x1000_0000);
+        assert_eq!(drained[0].value, 0xdead_beef);
+        assert_eq!(drained[2].value, 0x1234_5678);
+
+        // Buffer is empty after drain.
+        assert_eq!(recorded_mem_reads_len(), 0);
+        assert!(take_recorded_mem_reads().is_empty());
+    }
+
+    /// Verify thread-local isolation: a recording in thread A is not
+    /// visible from thread B.
+    #[test]
+    fn thread_local_isolation() {
+        let _ = take_recorded_mem_reads();
+        jit_record_mem_read(1, 0x100, 0xAA);
+        let main_len = recorded_mem_reads_len();
+        assert_eq!(main_len, 1);
+
+        let other_len = std::thread::spawn(|| {
+            // This thread's buffer should start empty.
+            let pre = recorded_mem_reads_len();
+            jit_record_mem_read(2, 0x200, 0xBB);
+            let post = recorded_mem_reads_len();
+            (pre, post)
+        }).join().unwrap();
+
+        assert_eq!(other_len.0, 0, "other thread should start with empty buffer");
+        assert_eq!(other_len.1, 1, "other thread should see its own push");
+        // Main thread's buffer is unaffected.
+        assert_eq!(recorded_mem_reads_len(), 1);
+        let _ = take_recorded_mem_reads();
+    }
+}
