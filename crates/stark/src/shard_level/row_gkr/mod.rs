@@ -38,6 +38,7 @@
 //! exposed for unit-test builds.
 
 pub mod build;
+pub mod device_circuit;
 pub mod extract;
 pub mod first_layer;
 pub mod layer;
@@ -46,6 +47,7 @@ pub mod top_level;
 pub mod transition;
 
 pub use build::*;
+pub use device_circuit::*;
 pub use extract::*;
 pub use first_layer::*;
 pub use layer::*;
