@@ -197,6 +197,14 @@ pub struct TranspilerBackend {
     /// Registered SYSCALL handler.  Stashed at register-time and
     /// emitted as an absolute call in the syscall lowering.
     pub(crate) syscall_handler: Option<crate::SyscallHandler>,
+
+    /// #316 Phase D.5 step 2: optional mem-read recorder. When set,
+    /// load instructions (LW today; LB/LBU/LH/LHU/LWL/LWR queued
+    /// behind validation) emit a SysV-ABI call to this fn after the
+    /// load, passing `(global_clk, guest_addr, value)`. Default
+    /// `None` keeps codegen byte-identical to pre-D.5 — every load
+    /// is a single mov, no register save/restore, no extra ops.
+    pub(crate) mem_read_recorder: Option<unsafe extern "C" fn(u64, u32, u32)>,
 }
 
 impl TranspilerBackend {
@@ -223,6 +231,7 @@ impl TranspilerBackend {
             emit_pc_trace: std::env::var_os("ZIREN_JIT_PC_TRACE").is_some(),
             may_early_exit: false,
             syscall_handler: None,
+            mem_read_recorder: None,
         })
     }
 
@@ -239,6 +248,18 @@ impl TranspilerBackend {
     /// tests that don't care about timing).
     pub fn set_clk_bump(&mut self, clk_bump: u64) {
         self.clk_bump = clk_bump;
+    }
+
+    /// #316 Phase D.5 step 2: register a mem-read recorder. After
+    /// this is set, every JIT'd load instruction (LW today) emits a
+    /// post-load SysV-ABI call to `f(global_clk, guest_addr, value)`.
+    /// Default unset: codegen byte-identical to pre-D.5.
+    ///
+    /// Caller is responsible for thread-safety of `f` — the standard
+    /// pattern is a thread-local `Vec<JitMemReadRecord>` (see
+    /// `executor::jit_runner::jit_record_mem_read`).
+    pub fn set_mem_read_recorder(&mut self, f: unsafe extern "C" fn(u64, u32, u32)) {
+        self.mem_read_recorder = Some(f);
     }
 
     /// Look up the dynamic label for a MIPS PC.  Returns `None` if
@@ -395,6 +416,51 @@ impl TranspilerBackend {
             ; mov Rd(TEMP_A), DWORD [Rq(CONTEXT) + offset]
         );
         self.emit_register_store(reg, TEMP_A);
+    }
+
+    /// #316 Phase D.5 step 2: emit a post-load call to the registered
+    /// mem-read recorder. No-op if no recorder is set.
+    ///
+    /// Contract:
+    ///   - `addr_reg`: register holding the GUEST virtual address
+    ///     (lower 32 bits used). Caller is responsible for not having
+    ///     overwritten this between address compute and this call.
+    ///   - `value_reg`: register holding the LOADED value (lower 32
+    ///     bits used).
+    ///
+    /// SysV ABI: rdi=clk (u64), esi=addr (u32), edx=value (u32).
+    /// Reads `ctx.global_clk` for the clk arg. Caller-saved regs
+    /// (rax, rcx, rdx, rsi, rdi, r8-r11) may be clobbered by the
+    /// callee — we re-load `MEMORY_PTR` from `ctx.memory` after the
+    /// call since R10 is caller-saved. TEMP_A/B (rbx/rbp) and
+    /// CONTEXT/JUMP_TABLE (r12/r13) are callee-saved → safe.
+    ///
+    /// Stack alignment: SysV requires 16-byte at the `call` site.
+    /// Function entry pushed an odd number of qwords; we push one
+    /// more to realign and pop after.
+    pub(crate) fn emit_record_mem_read_call(&mut self, addr_reg: u8, value_reg: u8) {
+        use dynasmrt::{dynasm, DynasmApi};
+        let Some(recorder) = self.mem_read_recorder else { return };
+        let target = recorder as usize;
+        dynasm!(self.assembler ; .arch x64
+            // Move value FIRST (before addr) — if addr_reg and value_reg
+            // alias (the LW codegen reuses TEMP_A for both, see
+            // instruction_impl.rs::lw), reading addr post-load yields
+            // wrong data; require caller to save addr to a separate reg.
+            ; mov edx, Rd(value_reg)
+            ; mov esi, Rd(addr_reg)
+            ; mov rdi, [Rq(CONTEXT) + GLOBAL_CLK_OFFSET]
+            // Stack align: prologue pushed 6 callee-saved qwords (rbx,
+            // rbp, r12, r13, r14, r15) + the return address from JIT
+            // dispatch entry = 7 qwords = misaligned to 8. Push one
+            // more to realign to 16 before the call.
+            ; push rax
+            ; mov rax, QWORD target as i64
+            ; call rax
+            ; pop rax
+            // R10 (MEMORY_PTR) is caller-saved; restore it from ctx.
+            ; mov Rq(MEMORY_PTR), [Rq(CONTEXT) + MEMORY_OFFSET]
+        );
     }
 
     /// Emit the address-translation + 4-byte load shared by LWL/LWR/

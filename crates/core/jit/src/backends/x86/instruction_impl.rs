@@ -512,9 +512,22 @@ impl MemoryInstructions for TranspilerBackend {
     fn lw(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
         self.emit_address_translate(rs1, imm, TEMP_A);
+        // #316 Phase D.5 step 2: when a mem-read recorder is registered,
+        // stash the guest address in TEMP_B BEFORE the load (because LW
+        // overwrites TEMP_A with the loaded value, see below). The
+        // post-load recorder call needs both. TEMP_B is callee-saved
+        // (rbp) and unused between MIPS instructions; safe to clobber
+        // for the duration of this single LW. When no recorder is set
+        // the codegen is byte-identical to pre-D.5 (no `mov`, no call).
+        if self.mem_read_recorder.is_some() {
+            dynasm!(self.assembler ; .arch x64
+                ; mov Rq(TEMP_B), Rq(TEMP_A)
+            );
+        }
         dynasm!(self.assembler ; .arch x64
             ; mov Rd(TEMP_A), DWORD [Rq(TEMP_A)]
         );
+        self.emit_record_mem_read_call(TEMP_B, TEMP_A);
         self.emit_register_store(rd, TEMP_A);
     }
 
