@@ -475,55 +475,91 @@ impl ComputeInstructions for TranspilerBackend {
 impl MemoryInstructions for TranspilerBackend {
     fn lb(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
+        // #316 Phase D.5 step 2: see lw() for the guest-address stash
+        // contract. When recorder unset, codegen is byte-identical to
+        // pre-D.5 (no extra mov, no call).
+        if self.mem_read_recorder.is_some() {
+            self.emit_register_load(rs1, TEMP_B);
+            dynasm!(self.assembler ; .arch x64
+                ; add Rd(TEMP_B), DWORD imm
+            );
+        }
         self.emit_address_translate(rs1, imm, TEMP_A);
         dynasm!(self.assembler ; .arch x64
             ; movsx Rd(TEMP_A), BYTE [Rq(TEMP_A)]
         );
+        self.emit_record_mem_read_call(TEMP_B, TEMP_A);
         self.emit_register_store(rd, TEMP_A);
     }
 
     fn lbu(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
+        // #316 Phase D.5 step 2: see lw().
+        if self.mem_read_recorder.is_some() {
+            self.emit_register_load(rs1, TEMP_B);
+            dynasm!(self.assembler ; .arch x64
+                ; add Rd(TEMP_B), DWORD imm
+            );
+        }
         self.emit_address_translate(rs1, imm, TEMP_A);
         dynasm!(self.assembler ; .arch x64
             ; movzx Rd(TEMP_A), BYTE [Rq(TEMP_A)]
         );
+        self.emit_record_mem_read_call(TEMP_B, TEMP_A);
         self.emit_register_store(rd, TEMP_A);
     }
 
     fn lh(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
+        // #316 Phase D.5 step 2: see lw().
+        if self.mem_read_recorder.is_some() {
+            self.emit_register_load(rs1, TEMP_B);
+            dynasm!(self.assembler ; .arch x64
+                ; add Rd(TEMP_B), DWORD imm
+            );
+        }
         self.emit_address_translate(rs1, imm, TEMP_A);
         dynasm!(self.assembler ; .arch x64
             ; movsx Rd(TEMP_A), WORD [Rq(TEMP_A)]
         );
+        self.emit_record_mem_read_call(TEMP_B, TEMP_A);
         self.emit_register_store(rd, TEMP_A);
     }
 
     fn lhu(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
+        // #316 Phase D.5 step 2: see lw().
+        if self.mem_read_recorder.is_some() {
+            self.emit_register_load(rs1, TEMP_B);
+            dynasm!(self.assembler ; .arch x64
+                ; add Rd(TEMP_B), DWORD imm
+            );
+        }
         self.emit_address_translate(rs1, imm, TEMP_A);
         dynasm!(self.assembler ; .arch x64
             ; movzx Rd(TEMP_A), WORD [Rq(TEMP_A)]
         );
+        self.emit_record_mem_read_call(TEMP_B, TEMP_A);
         self.emit_register_store(rd, TEMP_A);
     }
 
     fn lw(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
-        self.emit_address_translate(rs1, imm, TEMP_A);
         // #316 Phase D.5 step 2: when a mem-read recorder is registered,
-        // stash the guest address in TEMP_B BEFORE the load (because LW
-        // overwrites TEMP_A with the loaded value, see below). The
-        // post-load recorder call needs both. TEMP_B is callee-saved
-        // (rbp) and unused between MIPS instructions; safe to clobber
-        // for the duration of this single LW. When no recorder is set
-        // the codegen is byte-identical to pre-D.5 (no `mov`, no call).
+        // compute the GUEST virtual address (rs1 + imm) into TEMP_B
+        // BEFORE emit_address_translate clobbers TEMP_A with a HOST
+        // address. The recorder needs guest addresses (what the MIPS
+        // program sees), not host pointers. TEMP_B is callee-saved
+        // (rbp) so it survives the post-load extern call without
+        // explicit save/restore. When no recorder is set, codegen is
+        // byte-identical to pre-D.5.
         if self.mem_read_recorder.is_some() {
+            self.emit_register_load(rs1, TEMP_B);
             dynasm!(self.assembler ; .arch x64
-                ; mov Rq(TEMP_B), Rq(TEMP_A)
+                ; add Rd(TEMP_B), DWORD imm
             );
         }
+        self.emit_address_translate(rs1, imm, TEMP_A);
         dynasm!(self.assembler ; .arch x64
             ; mov Rd(TEMP_A), DWORD [Rq(TEMP_A)]
         );
