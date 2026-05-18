@@ -1199,6 +1199,87 @@ pub fn get_gpu_logup_round_hook_v2() -> Option<GpuLogupRoundProverFnV2> {
     GPU_LOGUP_ROUND_HOOK_V2.get().copied()
 }
 
+// ──────────────────────────────────────────────────────────────────
+// #371 scaffolding: V3 device-handle logup-round hook.
+//
+// SP1-aligned signature that accepts an opaque device-buffer handle
+// instead of host `Vec<Ef4>` payloads.  Eliminates the `flatten_layer`
+// host marshal (77% / 58% of per-layer cost on fibonacci / tendermint
+// per #371 profile) once ziren-gpu wires the device path.
+//
+// V3 is a PARALLEL API to V2.  Ziren stark cannot depend on CUDA, so
+// the handle is type-erased via `Arc<dyn Any + Send + Sync>`; ziren-gpu
+// downcasts to its concrete `DeviceLayerState` (or equivalent) inside
+// the registered hook.  V3 falls through to V2 at the call site when
+// no V3 hook is registered (separate sprint — call-site wiring NOT in
+// this change).
+//
+// Mirrors SP1 `sp1-gpu/crates/logup_gkr/src/lib.rs::prove_round` taking
+// a `TaskScope::alloc`'d device pointer; see also SP1
+// `sp1-gpu/crates/cuda/src/task.rs` for the TaskScope::alloc pattern
+// that ziren-gpu's downcast target should mimic.
+// ──────────────────────────────────────────────────────────────────
+
+/// Opaque, type-erased handle to a device-resident per-layer state.
+/// Ziren stark only stores+threads the handle; ziren-gpu owns concrete
+/// type and performs the downcast inside the hook.
+#[derive(Clone)]
+pub struct DeviceLayerHandle(pub alloc::sync::Arc<dyn core::any::Any + Send + Sync>);
+
+impl core::fmt::Debug for DeviceLayerHandle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DeviceLayerHandle").finish_non_exhaustive()
+    }
+}
+
+/// V3 result: V2's `GpuLogupRoundResult` plus an optional next-layer
+/// device handle so the caller can chain rounds without re-marshalling.
+/// `next_layer = None` signals the hook didn't (or couldn't) stash the
+/// post-fold state device-resident; caller must rebuild via host
+/// `gkr_transition`, same as V2.
+#[derive(Debug, Clone)]
+pub struct GpuLogupRoundResultV3 {
+    pub round: GpuLogupRoundResult,
+    pub next_layer: Option<DeviceLayerHandle>,
+}
+
+/// V3 signature.  `input` is `None` on the first call (round 0 of the
+/// outermost layer); `Some(handle)` once a previous V3 call returned
+/// `next_layer = Some(...)`.  The `*_flat` host vectors are the V2
+/// fallback shape — the hook MAY ignore them if `input.is_some()`.
+pub type GpuLogupRoundProverFnV3 = fn(
+    input: Option<DeviceLayerHandle>,
+    n0_flat: Vec<Ef4>,
+    d0_flat: Vec<Ef4>,
+    n1_flat: Vec<Ef4>,
+    d1_flat: Vec<Ef4>,
+    eq_int: Vec<Ef4>,
+    eq_row: Vec<Ef4>,
+    lambda: Ef4,
+    initial_claim: Ef4,
+    num_variables: usize,
+    observe_ef: &dyn Fn(Ef4),
+    sample_ef: &dyn Fn() -> Ef4,
+) -> Option<GpuLogupRoundResultV3>;
+
+static GPU_LOGUP_ROUND_HOOK_V3: std::sync::OnceLock<GpuLogupRoundProverFnV3> =
+    std::sync::OnceLock::new();
+
+/// Register the V3 device-handle LogUp-GKR per-layer sumcheck prover.
+/// Idempotent; returns `Err` if a hook was already registered.
+/// Called once by ziren-gpu at startup (follow-up sprint).
+pub fn register_gpu_logup_round_hook_v3(
+    f: GpuLogupRoundProverFnV3,
+) -> Result<(), GpuLogupRoundProverFnV3> {
+    GPU_LOGUP_ROUND_HOOK_V3.set(f)
+}
+
+/// Read the registered V3 LogUp-GKR per-layer sumcheck prover, if any.
+#[must_use]
+pub fn get_gpu_logup_round_hook_v3() -> Option<GpuLogupRoundProverFnV3> {
+    GPU_LOGUP_ROUND_HOOK_V3.get().copied()
+}
+
 /// First-round chip-structured hook used by `#270 step 7w`.  Returns
 /// `(gpu_partials, post_fix)` where `gpu_partials` is a 3-element
 /// `[sum_zero, sum_half, eq_sum]` vector and `post_fix` carries the
@@ -1347,5 +1428,40 @@ mod tests {
         // result = p0 * lambda + p1 = [1*10+3, 2*10+4] = [13, 24].
         assert_eq!(r.coefficients[0], EF::from_u32(13));
         assert_eq!(r.coefficients[1], EF::from_u32(24));
+    }
+
+    // #371 scaffolding: V3 device-handle hook registration smoke test.
+    //
+    // OnceLock is process-global so this stub becomes "the" V3 hook for
+    // the rest of the test process.  That's fine — no other test in this
+    // module touches V3, and the V2 / V1 / device-resident hooks are
+    // separate OnceLocks.  Live registration from ziren-gpu is gated
+    // behind `cfg(not(test))` at the call site (TBD in the wire-up
+    // sprint), so this can't collide with production startup.
+    fn stub_v3_hook(
+        _input: Option<DeviceLayerHandle>,
+        _n0: Vec<Ef4>,
+        _d0: Vec<Ef4>,
+        _n1: Vec<Ef4>,
+        _d1: Vec<Ef4>,
+        _eq_int: Vec<Ef4>,
+        _eq_row: Vec<Ef4>,
+        _lambda: Ef4,
+        _initial_claim: Ef4,
+        _num_variables: usize,
+        _observe_ef: &dyn Fn(Ef4),
+        _sample_ef: &dyn Fn() -> Ef4,
+    ) -> Option<GpuLogupRoundResultV3> {
+        None
+    }
+
+    #[test]
+    fn register_gpu_logup_round_hook_v3_smoke() {
+        // First registration succeeds; second is rejected (idempotent).
+        let _ = register_gpu_logup_round_hook_v3(stub_v3_hook);
+        assert!(get_gpu_logup_round_hook_v3().is_some());
+        // Re-register must fail (OnceLock).
+        let err = register_gpu_logup_round_hook_v3(stub_v3_hook);
+        assert!(err.is_err());
     }
 }
