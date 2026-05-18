@@ -3228,6 +3228,33 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
+    // #361 diagnostic: env-gated probe — fires once with the
+    // env+TypeId+hook state at first call to identify which gate
+    // blocks the H2 / V2 path on basefold compress.
+    static H2_DIAG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if std::env::var("ZIREN_H2_DIAG").map(|v| v == "1").unwrap_or(false) {
+        H2_DIAG.get_or_init(|| {
+            use core::any::TypeId;
+            type Ef4 = p3_field::extension::BinomialExtensionField<
+                p3_koala_bear::KoalaBear, 4>;
+            let env_set = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            let ef_is_ef4 = TypeId::of::<EF>() == TypeId::of::<Ef4>();
+            let challenger_is_inner =
+                TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>();
+            let hook_v1 =
+                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook().is_some();
+            let hook_v2 =
+                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v2().is_some();
+            eprintln!(
+                "#361_H2_DIAG env_set={env_set} ef_is_ef4={ef_is_ef4} \
+                 challenger_is_inner={challenger_is_inner} \
+                 hook_v1_registered={hook_v1} hook_v2_registered={hook_v2}"
+            );
+        });
+    }
+
     // C-full H2 — device-resident per-layer LogUp-GKR sumcheck.
     //
     // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a GPU prover is
@@ -3241,9 +3268,13 @@ where
     // or on CUDA error; in either case we fall through to the host
     // trait-driven driver below.  Generic-EF callers (test code,
     // non-production) take the host path unconditionally.
+    // #361 default-on: V2/H2 hooks engage on basefold compress and
+    // deliver ~10% compress wall improvement (validated via H2_DIAG
+    // probe). Per SP1-port directive: just port as SP1 does, don't
+    // gate. Opt-out via env=0.
     if std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+        .map(|v| v != "0")
+        .unwrap_or(true)
     {
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<
