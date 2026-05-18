@@ -153,8 +153,9 @@ where
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
     drop(_first_span);
+    let _dt_first_us = _t_first.elapsed().as_micros() as u64;
     tracing::info!(
-        elapsed_ms = _t_first.elapsed().as_millis() as u64,
+        elapsed_ms = _dt_first_us / 1000,
         chips = n_chips,
         sub_phase = "first_layer",
         "logup_gkr sub-phase done"
@@ -355,8 +356,9 @@ where
     }
 
     drop(_layers_span);
+    let _dt_layers_us = _t_layers.elapsed().as_micros() as u64;
     tracing::info!(
-        elapsed_ms = _t_layers.elapsed().as_millis() as u64,
+        elapsed_ms = _dt_layers_us / 1000,
         chips = n_chips,
         layers = n_layers,
         sub_phase = "layer_transitions",
@@ -441,8 +443,9 @@ where
         })
         .collect();
     drop(_extract_span);
+    let _dt_extract_us = _t_extract.elapsed().as_micros() as u64;
     tracing::info!(
-        elapsed_ms = _t_extract.elapsed().as_millis() as u64,
+        elapsed_ms = _dt_extract_us / 1000,
         chips = n_chips,
         sub_phase = "output_extract",
         "logup_gkr sub-phase done"
@@ -485,9 +488,15 @@ where
 
     if profile {
         let dt = t_total_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
+        let other_us = dt
+            .saturating_sub(_dt_first_us)
+            .saturating_sub(_dt_layers_us)
+            .saturating_sub(_dt_extract_us);
         eprintln!(
-            "#359_ROW_GKR n_chips={} max_log_rows={} total_us={}",
+            "#359_ROW_GKR n_chips={} max_log_rows={} total_us={} \
+             first_us={} layers_us={} extract_us={} other_us={}",
             chips.len(), max_log_row_count, dt,
+            _dt_first_us, _dt_layers_us, _dt_extract_us, other_us,
         );
     }
 
