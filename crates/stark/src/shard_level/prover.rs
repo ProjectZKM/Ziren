@@ -487,25 +487,6 @@ where
 /// field on `BasefoldShardProof`, bundle for the new structured
 /// `evaluation_proof_bundle` field (#241 Phase 4c).  Bundle is `None`
 /// when the SC config doesn't match the KoalaBear monomorphization.
-/// #263 perf fix — process-cached env lookup for the jagged-PCS device
-/// dispatch.  Eliminates per-shard libc-environ Mutex acquisition cost
-/// under multi-worker concurrency.  Returns true when EITHER the master
-/// switch `ZIREN_GPU_DEVICE_HOOKS=1` OR the per-hook env
-/// `ZIREN_GPU_JAGGED_PCS_DEVICE=1` is set.
-fn jagged_pcs_device_env_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        let master = std::env::var("ZIREN_GPU_DEVICE_HOOKS")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        master
-            || std::env::var("ZIREN_GPU_JAGGED_PCS_DEVICE")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-    })
-}
-
 fn emit_jagged_pcs_bytes<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
@@ -624,10 +605,9 @@ where
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
 
-    // #174 (C-full B1) — DEVICE-trace jagged-PCS dispatch.  When the
-    // env flag `ZIREN_GPU_JAGGED_PCS_DEVICE=1` is set AND ziren-gpu's
-    // `phase4_device` has registered its device-trace hook (via
-    // `register_gpu_jagged_pcs_device_hook`), dispatch through the
+    // #174 (C-full B1) — DEVICE-trace jagged-PCS dispatch.  When
+    // ziren-gpu's `phase4_device` has registered its device-trace hook
+    // (via `register_gpu_jagged_pcs_device_hook`), dispatch through the
     // device-trace `emit_jagged_pcs_bytes_device` path.  The hook reads
     // the per-shard device-trace snapshot installed by
     // `prove_shard_to_basefold_gpu` keyed by chip name; we hand it the
@@ -636,20 +616,13 @@ where
     // MUST be byte-identical to the host emit (validated on the GPU
     // box against the legacy default).
     //
-    // Falls through to the host orchestrator (and then to the #113
-    // host-trace hook below) if either the env flag is unset or no
-    // hook is registered.  Strictly opt-in.
-    // #263: device-trace jagged-PCS dispatch.  Opt-in via either the
-    // legacy `ZIREN_GPU_JAGGED_PCS_DEVICE=1` OR the single master
-    // switch `ZIREN_GPU_DEVICE_HOOKS=1` (preferred).
     // The `_device_traces.is_some()` guard is a defensive short-circuit:
     // off-pool basefold workers pass None (no cudaSetDevice context)
-    // and would otherwise dispatch to the wrong GPU.
-    //
-    // Env reads cached per-process (avoids libc-environ Mutex contention
-    // under multi-worker concurrency — same fix as first_layer.rs).
+    // and would otherwise dispatch to the wrong GPU.  Falls through to
+    // the host orchestrator (and then to the #113 hook below) if no
+    // hook is registered (e.g. CPU-only build).
     let provider_present_jagged = _device_traces.is_some();
-    if provider_present_jagged && jagged_pcs_device_env_cached() {
+    if provider_present_jagged {
         if let Some(hook) =
             crate::shard_level::sumcheck_poly::get_gpu_jagged_pcs_device_hook()
         {
@@ -658,8 +631,7 @@ where
             FIRED_ONCE.get_or_init(|| {
                 tracing::warn!(
                     "#174 jagged_pcs_device hook FIRED \
-                     (ZIREN_GPU_JAGGED_PCS_DEVICE=1, gpu_hook dispatched, \
-                     n_chips={})",
+                     (gpu_hook dispatched, n_chips={})",
                     chip_traces.len()
                 );
             });
@@ -673,74 +645,44 @@ where
                 hook(&chip_names, &r_row_per_chip, lb_challenger, _device_traces),
                 None,
             );
-        } else {
-            use std::sync::OnceLock;
-            static WARN_ONCE: OnceLock<()> = OnceLock::new();
-            WARN_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "#174 jagged_pcs_device hook FELL THROUGH \
-                     (env=set, hook=None); ziren-gpu's compress_multi_gpu \
-                     must call register_gpu_jagged_pcs_device_hook \
-                     at startup. #113/host orchestrator used."
-                );
-            });
         }
     }
 
-    // #113 — GPU jagged-PCS orchestration dispatch.  When the env flag
-    // `ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1` is set AND the
-    // ziren-gpu crate has registered the device-resident orchestrator
-    // hook (via `register_gpu_jagged_orchestration_hook`), bypass the
-    // host orchestrator (`prove_jagged_basefold` below) and let the
-    // device driver own the entire jagged-PCS pipeline (commit,
-    // per-chip y-evals via #103, sumcheck reduction via #107, BaseFold
-    // open).  Output bytes MUST be byte-identical — the GPU side
-    // serializes the same `JaggedBasefoldBundle` shape via rmp-serde.
+    // #113 — GPU jagged-PCS orchestration dispatch.  When the ziren-gpu
+    // crate has registered the device-resident orchestrator hook (via
+    // `register_gpu_jagged_orchestration_hook`), bypass the host
+    // orchestrator (`prove_jagged_basefold` below) and let the device
+    // driver own the entire jagged-PCS pipeline (commit, per-chip
+    // y-evals via #103, sumcheck reduction via #107, BaseFold open).
+    // Output bytes MUST be byte-identical — the GPU side serializes
+    // the same `JaggedBasefoldBundle` shape via rmp-serde.
     //
-    // Falls through to the host orchestrator if either the env flag is
-    // unset or no hook is registered (e.g. CPU-only build, or GPU crate
-    // hasn't initialised yet on the call path).  This keeps the host
-    // path the source of truth and the GPU dispatch strictly opt-in.
-    if std::env::var("ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+    // Falls through to the host orchestrator if no hook is registered
+    // (e.g. CPU-only build, or GPU crate hasn't initialised yet on the
+    // call path).
+    if let Some(hook) =
+        crate::shard_level::sumcheck_poly::get_gpu_jagged_orchestration_hook()
     {
-        if let Some(hook) =
-            crate::shard_level::sumcheck_poly::get_gpu_jagged_orchestration_hook()
-        {
-            // Debug instrumentation: one-shot warn on first
-            // successful GPU dispatch.
-            use std::sync::OnceLock;
-            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-            FIRED_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "#113 jagged_orchestration hook FIRED \
-                     (ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1, \
-                     gpu_hook dispatched, n_chips={})",
-                    chip_traces.len()
-                );
-            });
-            // chip_traces / r_row_per_chip are already in the concrete
-            // (`InnerVal = KoalaBear`, `InnerChallenge = Ef4`) form
-            // (TypeId gate above + `kb31_poseidon2` type aliases).
-            // Both are identically-typed to the hook signature; pass
-            // straight through.  The hook owns the entire pipeline
-            // and returns the rmp-serde bundle bytes directly.
-            // GPU orchestrator hook only returns bytes — bundle
-            // stays None on the device path (Phase 4c).
-            return (hook(&chip_traces, &r_row_per_chip, lb_challenger), None);
-        } else {
-            use std::sync::OnceLock;
-            static WARN_ONCE: OnceLock<()> = OnceLock::new();
-            WARN_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "#113 jagged_orchestration hook FELL THROUGH \
-                     (env=set, hook=None); ziren-gpu's compress_multi_gpu \
-                     must call register_gpu_jagged_orchestration_hook \
-                     at startup. Host orchestrator used."
-                );
-            });
-        }
+        // Debug instrumentation: one-shot warn on first successful
+        // GPU dispatch.
+        use std::sync::OnceLock;
+        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+        FIRED_ONCE.get_or_init(|| {
+            tracing::warn!(
+                "#113 jagged_orchestration hook FIRED \
+                 (gpu_hook dispatched, n_chips={})",
+                chip_traces.len()
+            );
+        });
+        // chip_traces / r_row_per_chip are already in the concrete
+        // (`InnerVal = KoalaBear`, `InnerChallenge = Ef4`) form
+        // (TypeId gate above + `kb31_poseidon2` type aliases).
+        // Both are identically-typed to the hook signature; pass
+        // straight through.  The hook owns the entire pipeline
+        // and returns the rmp-serde bundle bytes directly.
+        // GPU orchestrator hook only returns bytes — bundle
+        // stays None on the device path (Phase 4c).
+        return (hook(&chip_traces, &r_row_per_chip, lb_challenger), None);
     }
 
     // SP1 single-dense path (Ziren #97): emit_jagged_pcs_bytes calls
