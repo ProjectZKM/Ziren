@@ -110,8 +110,11 @@ pub fn register_first_round_device_hook(
 }
 
 /// Hook ziren-gpu registers to drain its TLS-stashed device handle.
-/// Stub stores the pointer but `drain_via_hook` ignores it.
-pub type DrainHook = fn() -> Option<DeviceFirstLayerHandle>;
+/// Signature matches ziren-gpu's `drain_to_handle` which returns
+/// the erased `Arc<dyn Any + Send + Sync>` so consumers can downcast
+/// to their concrete trace type.  Stub stores the pointer but
+/// `drain_via_hook` ignores it.
+pub type DrainHook = fn() -> Option<std::sync::Arc<dyn Any + Send + Sync>>;
 
 static REGISTERED_DRAIN_HOOK: std::sync::OnceLock<DrainHook> = std::sync::OnceLock::new();
 
