@@ -32,7 +32,9 @@ use crate::{
         assert_complete, assert_recursion_public_values_valid, recursion_public_values_digest,
         root_public_values_digest,
     },
-    stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
+    stark::{
+        dummy_recursion_shard_proof_dispatcher, ShardProofVariable, StarkVerifier,
+    },
     CircuitConfig, KoalaBearFriParameters, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
@@ -510,11 +512,17 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMCompressShape,
     ) -> Self {
+        // Step 5 Phase 3a (May 19 2026): route through the dispatcher
+        // so that `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` automatically
+        // reaches the basefold-shaped dummy once Phase 3b lands the
+        // RecursionAir-parameterised analog of
+        // `dummy_basefold_vk_and_shard_proof`.  Default OFF preserves
+        // the existing FRI-shaped behaviour.
         let vks_and_proofs = shape
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                let (vk, proof) = dummy_vk_and_shard_proof(machine, proof_shape);
+                let (vk, proof) = dummy_recursion_shard_proof_dispatcher(machine, proof_shape);
                 (vk, proof)
             })
             .collect();
