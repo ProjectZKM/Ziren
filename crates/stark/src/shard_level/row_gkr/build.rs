@@ -101,11 +101,11 @@ where
     // so behavior is byte-identical to the pre-4b path.
     //
     // ─────────────────────────────────────────────────────────────────
-    // Step 4c (`/tmp/step4_backend_parametrize_plan.md`) — opt-in GPU
-    // dispatch path:
+    // Step 4c (`/tmp/step4_backend_parametrize_plan.md`) — GPU dispatch
+    // path:
     //
-    //   * Env var:  ZIREN_GPU_LAYER_TRANSITION=1
-    //   * Hooks:    register_gpu_layer_init_hook
+    //   * Gates:    GPU pool worker TLS context (#266) +
+    //               register_gpu_layer_init_hook
     //               register_gpu_layer_transition_hook
     //               register_gpu_layer_pull_hook
     //               (all three must be installed by ziren-gpu at startup;
@@ -126,7 +126,7 @@ where
     // input; this avoids an init contract that branches on the
     // base-vs-extension state of the input layer.
     //
-    // Default behavior (env var unset OR any hook missing OR TypeId
+    // Default behavior (TLS=None OR any hook missing OR TypeId
     // mismatch) is byte-identical to the pre-4c path.
     // ─────────────────────────────────────────────────────────────────
     let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
@@ -219,36 +219,14 @@ where
 ///     path would have pushed).
 ///
 /// Returns `None` when ANY of the following:
-///   * `ZIREN_GPU_LAYER_TRANSITION` env var is unset / not "1"
 ///   * any of the three GPU hooks (init, transition, pull) is unregistered
 ///   * `F != LbVal` or `EF != LbChallenge` (TypeId check)
 ///   * `last_ef_layer` is `None` on entry (no host transition happened —
 ///     can only occur when `first.num_row_variables == 0`, which the
 ///     `>= 2` assertion above already rules out, but this guard keeps
 ///     the device branch robust)
-/// #263/#266 perf fix — process-cached env lookup for the
-/// layer-transition GPU dispatch.  Returns true when EITHER the
-/// master switch `ZIREN_GPU_DEVICE_HOOKS=1` OR the legacy
-/// `ZIREN_GPU_LAYER_TRANSITION=1` is set.
-///
-/// Safe under the master switch now (#266) because the call site
-/// gates on `gpu_worker_context::current_gpu_pool_worker_device()`
-/// being `Some(_)` — off-pool basefold workers without a
-/// `cudaSetDevice` context have TLS=None and skip GPU dispatch.
-fn layer_transition_env_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        let master = std::env::var("ZIREN_GPU_DEVICE_HOOKS")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        master
-            || std::env::var("ZIREN_GPU_LAYER_TRANSITION")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-    })
-}
-
+///   * `current_gpu_pool_worker_device()` returns None — off-pool
+///     basefold workers without a `cudaSetDevice` context (#266)
 fn try_run_device_path<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
@@ -257,19 +235,16 @@ where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    // Gate 1: env var.  Either the legacy `ZIREN_GPU_LAYER_TRANSITION=1`
-    // OR the master switch `ZIREN_GPU_DEVICE_HOOKS=1` (#263) engages
-    // the device transition path.  Cached per-process to avoid
-    // libc-environ Mutex acquisition cost (per-shard call site).
+    // Gate 1 (#266): require a GPU pool worker TLS context.  Without
+    // this, dispatching from an off-pool basefold rayon worker hits
+    // the wrong cudaSetDevice context — kernel either fails or runs
+    // on GPU 0, paying full PCIe + launch overhead.  Reth A/B showed
+    // +16% core regression from this exact failure mode.
     //
-    // Gate 1b (#266 fix): also require a GPU pool worker TLS context.
-    // Without this, dispatching from an off-pool basefold rayon worker
-    // hits the wrong cudaSetDevice context — kernel either fails or
-    // runs on GPU 0, paying full PCIe + launch overhead.  Reth A/B
-    // showed +16% core regression from this exact failure mode.
-    if !layer_transition_env_cached() {
-        return None;
-    }
+    // The legacy env gates (`ZIREN_GPU_LAYER_TRANSITION` /
+    // `ZIREN_GPU_DEVICE_HOOKS`) were removed; the TLS gate + hook
+    // registration check + TypeId gate inside
+    // `try_run_device_path_basefold` are now the source of truth.
     if crate::gpu_worker_context::current_gpu_pool_worker_device().is_none() {
         return None;
     }
