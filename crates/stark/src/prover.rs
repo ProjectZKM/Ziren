@@ -363,11 +363,18 @@ where
         // prep + main commit/open, with soundness now carried by the
         // BaseFold per-shard proof generated below.)
         //
-        // The CPU-chip presence check guards against shards (e.g. some
-        // recursion-only shards) that don't declare the Cpu chip and
-        // therefore lack the Fiat--Shamir constants this path assumes;
-        // those still take the FRI path.
-        let use_basefold_path = data.chip_ordering.contains_key("Cpu");
+        // Gate on "Program" (MIPS-specific preprocessed trace) — this
+        // distinguishes MIPS shards (Cpu and memory-only) from recursion
+        // shards (BaseAlu/ExtAlu/Poseidon2 only).  Recursion programs do
+        // NOT carry "Program" and stay on the FRI path; ALL MIPS shards
+        // (including Cpu-less memory-finalize shards) take basefold.
+        //
+        // This generalizes the META #59 Phase 2 (v2) side-channel that
+        // used to be added in the FRI path for Cpu-less MIPS shards
+        // (was at line 918) — now those shards take the basefold path
+        // directly instead of running the dead FRI computation + side-
+        // channel basefold proof.
+        let use_basefold_path = data.chip_ordering.contains_key("Program");
 
         if use_basefold_path {
             let t_basefold_path = std::time::Instant::now();
@@ -905,30 +912,13 @@ where
             )
             .collect::<Vec<_>>();
 
-        // META #59 Phase 2 (v2): populate basefold_shard_proof ALSO
-        // in the FRI path for MIPS shards without Cpu (e.g. memory-only
-        // finalize shards).  Gate on "Program" chip (MIPS-specific
-        // preprocessed trace) to distinguish MIPS shards from recursion
-        // shards — recursion programs (BaseAlu / ExtAlu / Poseidon2
-        // chips) do NOT carry "Program" and must keep basefold=None.
-        //
-        // v1 attempt used no gate and regressed Test::Compress because
-        // recursion programs were also producing basefold proofs that
-        // the verifier rejected.
-        let basefold_shard_proof = if data.chip_ordering.contains_key("Program") {
-            try_prove_shard_to_basefold_boxed::<SC, A>(
-                &chips,
-                &pk.traces,
-                &pk.chip_ordering,
-                &traces,
-                &data.main_commit,
-                data.public_values.clone(),
-                &basefold_challenger_snapshot,
-            )
-        } else {
-            None
-        };
-
+        // The FRI path now serves ONLY recursion shards (no "Program"
+        // chip).  Recursion shards must keep basefold_shard_proof=None
+        // — the verifier rejects basefold proofs on recursion-shaped
+        // shards.  The META #59 Phase 2 (v2) side-channel that used to
+        // live here (basefold proof for Cpu-less MIPS memory-only
+        // shards) is no longer needed: those shards now take the
+        // basefold path directly via the line 370 gate.
         Ok(ShardProof::<SC> {
             commitment: ShardCommitment {
                 main_commit: data.main_commit.clone(),
@@ -938,7 +928,7 @@ where
             opening_proof,
             chip_ordering: data.chip_ordering,
             public_values: data.public_values,
-            basefold_shard_proof,
+            basefold_shard_proof: None,
         })
     }
 
