@@ -10,7 +10,6 @@ use crate::air::{Block, RecursionPublicValues};
 pub mod air;
 pub mod builder;
 pub mod chips;
-pub mod gpu_hooks;
 pub mod machine;
 pub mod runtime;
 pub mod shape;

@@ -5,13 +5,13 @@ use p3_air::BaseAir;
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use tracing::instrument;
 use zkm_core_machine::utils::next_power_of_two;
 
-use crate::{gpu_hooks, Poseidon2Event};
 #[cfg(not(feature = "sys"))]
 use zkm_primitives::RC_16_30_U32;
 use zkm_stark::air::MachineAir;
@@ -43,73 +43,6 @@ use crate::{
 use super::columns::preprocessed::Poseidon2PreprocessedColsWide;
 
 const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedColsWide<u8>>();
-
-/// Try the GPU device-tracegen hook for `Poseidon2WideChip`.
-///
-/// Returns `Some(matrix)` when ALL of the following hold:
-///   * `ZIREN_GPU_TRACEGEN_DEVICE=1` is set in the environment.
-///   * `F == KoalaBear` (the production reth path; generic-EF callers
-///     fall back to host even when the env flag is set).
-///   * A hook is registered via
-///     [`gpu_hooks::register_poseidon2_wide_device_trace_hook`]
-///     (called from `compress_multi_gpu` startup in `ziren-gpu`).
-///   * The hook itself returns `Some` (it can decline to run, e.g.
-///     when the GPU is unhealthy; the caller then falls back to host).
-///
-/// The returned matrix is byte-identical to the host `generate_trace`
-/// output — same width (degree-3 vs degree-9 columns), same
-/// `padded_nb_rows`, and the trailing dummy rows are populated by the
-/// kernel's `event_to_row(zero_input, ...)` to match the host's
-/// `populate_perm([F::ZERO; WIDTH], None, ...)` (NOT zero-padded).
-#[inline]
-fn try_device_trace<F: PrimeField32>(
-    events: &[Poseidon2Event<F>],
-    padded_nb_rows: usize,
-    width: usize,
-) -> Option<RowMajorMatrix<F>> {
-    if std::env::var("ZIREN_GPU_TRACEGEN_DEVICE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-        == false
-    {
-        return None;
-    }
-    // Debug instrumentation: one-shot per-arm warns (#8 Poseidon2Wide).
-    use std::sync::OnceLock;
-    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
-    static NOHOOK_ONCE: OnceLock<()> = OnceLock::new();
-    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-    static REJECT_ONCE: OnceLock<()> = OnceLock::new();
-    if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
-        MISMATCH_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FELL THROUGH (TypeId: F != KoalaBear)"));
-        return None;
-    }
-    let hook = match gpu_hooks::get_poseidon2_wide_device_trace_hook() {
-        Some(h) => h,
-        None => {
-            NOHOOK_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FELL THROUGH (env=set, hook=None)"));
-            return None;
-        }
-    };
-    let events_kb: &[Poseidon2Event<KoalaBear>] = unsafe {
-        std::mem::transmute::<&[Poseidon2Event<F>], &[Poseidon2Event<KoalaBear>]>(events)
-    };
-    let mat_kb = match hook(events_kb, padded_nb_rows, width) {
-        Some(m) => {
-            FIRED_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FIRED (ZIREN_GPU_TRACEGEN_DEVICE=1, dispatched)"));
-            m
-        }
-        None => {
-            REJECT_ONCE.get_or_init(|| tracing::warn!("#8 Poseidon2Wide hook FELL THROUGH (hook returned None)"));
-            return None;
-        }
-    };
-    let w = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
-    debug_assert_eq!(w, width, "device hook returned matrix with unexpected width");
-    let values_f: Vec<F> =
-        unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };
-    Some(RowMajorMatrix::new(values_f, w))
-}
 
 impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<DEGREE> {
     type Record = ExecutionRecord<F>;
@@ -154,13 +87,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
         let padded_nb_rows = self.num_rows(input).unwrap();
         let num_columns = <Self as BaseAir<F>>::width(self);
 
-        // Integration #4: try the GPU device-tracegen hook first.
-        // Returns `None` when the env flag is unset, F != KoalaBear,
-        // no hook is registered, or the hook itself declines.
-        if let Some(mat) = try_device_trace(events, padded_nb_rows, num_columns) {
-            return Ok(mat);
-        }
-
         let mut values = vec![F::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
@@ -201,13 +127,6 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2WideChip<D
 
         let padded_nb_rows = self.num_rows(input).unwrap();
         let num_columns = <Self as BaseAir<KoalaBear>>::width(self);
-
-        // Integration #4: try the GPU device-tracegen hook first.
-        // (`F` is enforced KoalaBear by the assert above, so the
-        // TypeId guard inside `try_device_trace` always matches.)
-        if let Some(mat) = try_device_trace(&input.poseidon2_events, padded_nb_rows, num_columns) {
-            return Ok(mat);
-        }
 
         let events = unsafe {
             std::mem::transmute::<&Vec<Poseidon2Io<F>>, &Vec<Poseidon2Io<KoalaBear>>>(

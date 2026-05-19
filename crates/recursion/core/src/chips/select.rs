@@ -1,6 +1,7 @@
 use core::borrow::Borrow;
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+#[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
@@ -9,78 +10,7 @@ use zkm_core_machine::utils::next_power_of_two;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::MachineAir;
 
-use crate::{builder::ZKMRecursionAirBuilder, gpu_hooks, *};
-
-/// Try the GPU device-tracegen hook for `SelectChip`.
-///
-/// Returns `Some(matrix)` when ALL of the following hold:
-///   * `ZIREN_GPU_TRACEGEN_DEVICE=1` is set in the environment.
-///   * `F == KoalaBear` (the production reth path; generic-EF callers
-///     fall back to host even when the env flag is set).
-///   * A hook is registered via
-///     [`gpu_hooks::register_select_device_trace_hook`] (called from
-///     `compress_multi_gpu` startup in `ziren-gpu`).
-///   * The hook itself returns `Some` (it can decline to run, e.g.
-///     when the GPU is unhealthy or the event count is below the
-///     device-launch threshold; the caller then falls back to host).
-///
-/// The returned matrix is byte-identical to the host `generate_trace`
-/// output: same column order (bit, out1, out2, in1, in2), same
-/// `padded_nb_rows`, zero-padded tail.  See
-/// `cuda/tracegen/recursion.cuh::recursion_select_generate_trace_kernel`
-/// + `core/src/tracegen/recursion.rs::SelectChip::generate_trace_device`
-/// in the `ziren-gpu` repo.
-#[inline]
-fn try_device_trace<F: PrimeField32>(
-    events: &[SelectIo<F>],
-    padded_nb_rows: usize,
-) -> Option<RowMajorMatrix<F>> {
-    // Cheap env check (called once per chip per shard — perf is fine).
-    if std::env::var("ZIREN_GPU_TRACEGEN_DEVICE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-        == false
-    {
-        return None;
-    }
-    // Debug instrumentation: one-shot per-arm warns (#3 Select).
-    use std::sync::OnceLock;
-    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
-    static NOHOOK_ONCE: OnceLock<()> = OnceLock::new();
-    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-    static REJECT_ONCE: OnceLock<()> = OnceLock::new();
-    if std::any::TypeId::of::<F>() != std::any::TypeId::of::<KoalaBear>() {
-        MISMATCH_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FELL THROUGH (TypeId: F != KoalaBear)"));
-        return None;
-    }
-    let hook = match gpu_hooks::get_select_device_trace_hook() {
-        Some(h) => h,
-        None => {
-            NOHOOK_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FELL THROUGH (env=set, hook=None)"));
-            return None;
-        }
-    };
-    let events_kb: &[SelectEvent<KoalaBear>] = unsafe {
-        std::mem::transmute::<&[SelectIo<F>], &[SelectEvent<KoalaBear>]>(events)
-    };
-    let mat_kb = match hook(events_kb, padded_nb_rows) {
-        Some(m) => {
-            FIRED_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FIRED (ZIREN_GPU_TRACEGEN_DEVICE=1, dispatched)"));
-            m
-        }
-        None => {
-            REJECT_ONCE.get_or_init(|| tracing::warn!("#3 Select hook FELL THROUGH (hook returned None)"));
-            return None;
-        }
-    };
-    // `RowMajorMatrix`'s fields aren't all `pub` in this Plonky3 fork,
-    // so go through `width()` + the public `values` Vec rather than
-    // pattern-match.
-    let width = <RowMajorMatrix<KoalaBear> as p3_matrix::Matrix<KoalaBear>>::width(&mat_kb);
-    let values_f: Vec<F> =
-        unsafe { std::mem::transmute::<Vec<KoalaBear>, Vec<F>>(mat_kb.values) };
-    Some(RowMajorMatrix::new(values_f, width))
-}
+use crate::{builder::ZKMRecursionAirBuilder, *};
 
 #[derive(Default)]
 pub struct SelectChip;
@@ -237,13 +167,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         let events = &input.select_events;
         let padded_nb_rows = self.num_rows(input).unwrap();
 
-        // Integration #3: try the GPU device-tracegen hook first.
-        // Returns `None` when the env flag is unset, F != KoalaBear,
-        // no hook is registered, or the hook itself declines.
-        if let Some(mat) = try_device_trace(events, padded_nb_rows) {
-            return Ok(mat);
-        }
-
         let mut values = vec![F::ZERO; padded_nb_rows * SELECT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
@@ -272,13 +195,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         );
 
         let padded_nb_rows = self.num_rows(input).unwrap();
-
-        // Integration #3: try the GPU device-tracegen hook first.
-        // (`F` is enforced KoalaBear by the assert above, so the
-        // TypeId guard inside `try_device_trace` always matches.)
-        if let Some(mat) = try_device_trace(&input.select_events, padded_nb_rows) {
-            return Ok(mat);
-        }
 
         let events = unsafe {
             std::mem::transmute::<&Vec<SelectIo<F>>, &Vec<SelectIo<KoalaBear>>>(
