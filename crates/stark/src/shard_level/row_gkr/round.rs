@@ -3808,20 +3808,23 @@ where
     let handle_present = input_handle.is_some();
 
     // Build host fallback inputs only when no device handle is available.
-    // When the handle is present, the hook reads from device buffers and these
-    // empty vecs are unused (saves the flatten_layer 77%-of-per-call cost).
-    let (n0_flat, d0_flat, n1_flat, d1_flat, eq_int, eq_row) = if handle_present {
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+    // When the handle is present, the hook reads quadrant buffers from the
+    // device handle and these flat vecs stay empty (saves flatten_layer's
+    // 77%-of-per-call cost). eq_int and eq_row depend on the per-call
+    // eval_point sampled from the challenger — they can't live in a per-shard
+    // device cache and must be rebuilt every round regardless of handle
+    // presence so the hook can upload fresh per-call eq tables.
+    let (n0_flat, d0_flat, n1_flat, d1_flat) = if handle_present {
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new())
     } else {
-        let (n0, d0, n1, d1) = match circuit {
+        match circuit {
             GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
-        };
-        let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
-        let ei = build_eq_table(interaction_point);
-        let er = build_eq_table(row_point);
-        (n0, d0, n1, d1, ei, er)
+        }
     };
+    let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
+    let eq_int = build_eq_table(interaction_point);
+    let eq_row = build_eq_table(row_point);
     let setup_us = t_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
