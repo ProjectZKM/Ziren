@@ -3289,6 +3289,51 @@ where
         type Ef4 = p3_field::extension::BinomialExtensionField<
             p3_koala_bear::KoalaBear, 4>;
 
+        // #361 follow-up (Step 3 V3-regression analysis, May 19): scaffold
+        // for the "per-layer size threshold" fix path proposed by the
+        // comment block above.  Skip the GPU dispatch entirely (including
+        // all of try_logup_round_gpu_v3's host marshalling — flatten_layer,
+        // build_eq_table, vec conversions) when this layer's total_vars is
+        // below the env-configured threshold.  Default = 0 (preserves
+        // pre-scaffold behavior: every dispatch runs, whether the inner
+        // hook will accept or decline based on its own
+        // MIN_DEVICE_TOTAL_VARS=8 gate).
+        //
+        // Set ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS=N (recommend
+        // N in [14,20] per project_v3_regression_analysis.md) to avoid
+        // routing tiny layers through V3.  When the guard fires, control
+        // falls straight to the host trait-driven driver below.
+        //
+        // Validation deferred to next session (bench requires clean GPU
+        // box).  See the memory file for the matrix.
+        let v3_threshold_vars: usize = {
+            static THRESH: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+            *THRESH.get_or_init(|| {
+                std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(0)
+            })
+        };
+        let total_vars_for_threshold: usize = match circuit {
+            GkrCircuitLayer::Layer(l) => {
+                l.num_row_variables + l.num_interaction_variables
+            }
+            GkrCircuitLayer::FirstLayer(l) => {
+                l.num_row_variables + l.num_interaction_variables
+            }
+        };
+        if v3_threshold_vars > 0
+            && total_vars_for_threshold < v3_threshold_vars
+        {
+            // Skip GPU dispatch — too small to amortize per-call
+            // overhead.  Fall through to the host trait driver below.
+            // No fired_once log here: per-call diagnostics would be too
+            // noisy; the ZIREN_LOGUP_V3_PROFILE probe inside
+            // try_logup_round_gpu_v3 captures "did we even reach the
+            // hook" via its log presence.
+        } else {
+
         // #271 step 5: V2 dispatch (preferred when challenger is
         // InnerChallenger).  V2 takes &mut InnerChallenger directly —
         // the eventual fused round-finalize kernel will use device-
@@ -3390,6 +3435,7 @@ where
                 // spam on the (intentional) MIN_DEVICE_HALF cutoff.
             }
         }
+        } // end of `else` arm for v3_threshold_vars guard (#361 follow-up)
     }
 
     // Construct the trait-shaped sumcheck poly that wraps the layer
