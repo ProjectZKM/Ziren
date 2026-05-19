@@ -5,9 +5,10 @@
 //! Phase C of #259. The trait collects an iterator into N sub-blocks,
 //! each containing the DSL IR ops emitted by a single invocation of the
 //! map closure. The resulting blocks are wrapped in a `DslIr::Parallel`
-//! op pushed to the parent builder. Today the runtime collapses
-//! `Parallel` to sequential via Phase A4's `iter_instructions`; Phase D
-//! will dispatch via `par_iter` once the memory layer is thread-safe.
+//! op pushed to the parent builder. The runtime dispatches sub-blocks
+//! via rayon `par_iter` (`runtime/mod.rs::execute_blocks`, commit
+//! f1f4fee4); the memory layer is thread-safe through `ParMemVec` +
+//! the IR-level disjoint-`addrs_written` invariant.
 //!
 //! The IR-level discipline that makes parallel sound: each sub-block's
 //! `addrs_written` range is disjoint from the others' (variable_count
