@@ -17,7 +17,9 @@ use zkm_derive::AlignedBorrow;
 #[cfg(feature = "picus")]
 use zkm_derive::PicusAnnotations;
 use zkm_stark::air::AirLookup;
-use zkm_stark::air::{LookupScope, MachineAir, PicusInfo, ZKMAirBuilder};
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
+use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
 use zkm_stark::LookupKind;
 
 use crate::{utils::next_power_of_two, CoreChipError};

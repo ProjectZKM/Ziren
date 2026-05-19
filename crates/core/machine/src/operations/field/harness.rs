@@ -9,10 +9,9 @@ use zkm_curves::{edwards::ed25519::Ed25519BaseField, params::Limbs};
 use zkm_derive::AlignedBorrow;
 #[cfg(feature = "picus")]
 use zkm_derive::PicusAnnotations;
-use zkm_stark::{
-    air::{MachineAir, ZKMAirBuilder},
-    PicusInfo,
-};
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
+use zkm_stark::air::{MachineAir, ZKMAirBuilder};
 
 use crate::{
     operations::field::{

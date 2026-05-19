@@ -13,12 +13,14 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, GlobalLookupEvent},
     ExecutionRecord, Program,
 };
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
 use zkm_stark::{
     air::{AirLookup, LookupScope, MachineAir},
     septic_curve::{SepticCurve, SepticCurveComplete},
     septic_digest::SepticDigest,
     septic_extension::{SepticBlock, SepticExtension},
-    LookupKind, PicusInfo, ZKMAirBuilder,
+    LookupKind, ZKMAirBuilder,
 };
 
 use crate::{

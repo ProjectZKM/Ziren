@@ -9,7 +9,9 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::{air::MachineAir, PicusInfo};
+use zkm_stark::air::MachineAir;
+#[cfg(feature = "picus")]
+use zkm_stark::air::PicusInfo;
 
 use crate::CoreChipError;
 
