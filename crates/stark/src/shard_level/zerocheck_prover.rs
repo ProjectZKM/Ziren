@@ -500,6 +500,17 @@ where
                 // shard zerocheck is the zero polynomial.
                 return None;
             }
+            // Chips that did not produce any rows in this shard get
+            // skipped under both filter modes: the host evaluator
+            // (`eval_constraints_on_hypercube_with_cumsums`) asserts
+            // `main.height() == 2^num_vars`, which fails for the
+            // zero-height degenerate case.  The previous all-or-
+            // nothing filter masked this incidentally by also
+            // dropping permutation-bearing chips; under #372 we
+            // must explicitly preserve the no-rows skip.
+            if split_enabled && (main_trace.values.is_empty() || main_trace.width == 0) {
+                return None;
+            }
             let height = main_trace.values.len() / main_trace.width.max(1);
             let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
 
