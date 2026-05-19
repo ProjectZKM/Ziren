@@ -455,7 +455,47 @@ where
                     return Some((log_height, table.clone()));
                 }
             }
-            if chip.permutation_width() > 0 {
+            // #372: pure-AIR / permutation-bearing chip split.
+            //
+            // Historically Ziren skipped permutation-bearing chips
+            // (those with `permutation_width() > 0`) entirely so the
+            // hypercube evaluator did not have to synthesize a
+            // permutation column it did not own.  But the host-side
+            // [`VerifierConstraintFolder`] is an `EmptyMessageBuilder`
+            // (see `folder.rs:430`), which means every `builder.send`
+            // / `builder.receive` call performed by the chip's
+            // `Air::eval` is a no-op.  In other words, the per-row
+            // constraint walk evaluates ONLY the chip's pure-AIR
+            // assertions even for permutation-bearing chips — the
+            // lookups are already discharged by LogUp-GKR.
+            //
+            // The all-or-nothing filter therefore masks the #111 GPU
+            // constraint-eval hook (production chips all carry
+            // lookups → `permutation_width > 0` → filter returns
+            // `None`, so the GPU dispatch site below is unreachable).
+            //
+            // Under `ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=1` we drop the
+            // skip and emit the pure-AIR c-table for every chip,
+            // mirroring SP1's `prover/shard.rs:474` zerocheck which
+            // also iterates over every chip without filtering.
+            // The cryptographic identity exercised by the recursion
+            // verifier (`BasefoldZerocheckVerifier::verify_zerocheck`)
+            // and the host opt-in
+            // [`verify_zerocheck_cryptographic_identity_host`] already
+            // computes `eval_constraints_basefold` for every chip via
+            // `BasefoldConstraintFolder`, which is likewise an
+            // `EmptyMessageBuilder` (see
+            // `basefold_constraint_folder.rs:152`) — so dropping the
+            // prover-side filter is verifier-consistent.
+            //
+            // Default-OFF until multi-workload byte-equivalence is
+            // re-validated.  When OFF, behaviour is byte-identical to
+            // pre-#372.
+            let split_enabled =
+                std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
+                    .map(|v| v == "1")
+                    .unwrap_or(false);
+            if !split_enabled && chip.permutation_width() > 0 {
                 // Empty placeholder — chip's contribution to the
                 // shard zerocheck is the zero polynomial.
                 return None;
@@ -878,8 +918,17 @@ where
     let public_values_kb: &[Kb] = unsafe {
         core::slice::from_raw_parts(public_values.as_ptr().cast::<Kb>(), public_values.len())
     };
+    // #372: same env-gated split as the per-chip path.  When
+    // `ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=1`, the batched pre-pass also
+    // includes permutation-bearing chips.  The pure-AIR c-table is
+    // computed via the `EmptyMessageBuilder` path on host fallback and
+    // through the GPU bytecode interpreter (which compiles the chip's
+    // pure-AIR constraints) in the batched hook.
+    let split_enabled_batched = std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     for (i, chip) in chips.iter().enumerate() {
-        if chip.permutation_width() > 0 { continue; }
+        if !split_enabled_batched && chip.permutation_width() > 0 { continue; }
         let main_trace = &main_traces[i];
         let preproc_trace = &preprocessed_traces[i];
         let height = main_trace.values.len() / main_trace.width.max(1);
