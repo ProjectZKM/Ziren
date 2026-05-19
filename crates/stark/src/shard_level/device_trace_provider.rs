@@ -86,4 +86,56 @@ pub trait DeviceTraceProvider: Send + Sync {
     fn chip_names(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /// B6.7-redo: per-chip trace height lookup for canonical ordering.
+    /// Producer (interaction_eval.rs) sorts by (Reverse(height), name)
+    /// to match host's `shard_chips_ordered` order. Default None
+    /// triggers alphabetical fallback (legacy behaviour).
+    fn chip_height(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
+    /// #339: per-chip canonical index from the machine's
+    /// `chip_ordering: HashMap<String, usize>`. This is the host's
+    /// AUTHORITATIVE ordering, set once at machine setup
+    /// (`machine.rs:471`) and used by `shard_chips_ordered` for
+    /// every per-shard prove.
+    ///
+    /// The B6.7-redo `chip_height`-based fallback is broken for the
+    /// SP1_PREFOLD path because the host's `chip_ordering` is
+    /// derived from PREPROCESSED-trace heights (set at setup,
+    /// constant per chip), while `chip_height` here reports per-shard
+    /// MAIN-trace heights (variable per shard). Different sort keys
+    /// → wrong chip indices in the producer's
+    /// `chip_interaction_offsets` header.
+    ///
+    /// Providers that have access to the prover's `chip_ordering`
+    /// HashMap should override this to return
+    /// `chip_ordering.get(name).copied()`. Default None preserves
+    /// the legacy `chip_height` fallback path for compat.
+    fn chip_order_index(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
+    /// Borrow the SP1-aligned dense trace pack (#270 step 4 trait
+    /// extension), if the implementor has built one.
+    ///
+    /// Returns `None` by default — implementations that don't carry
+    /// a dense pack (legacy per-chip-only providers, mocks, etc) get
+    /// the no-op fallback.  `ziren-gpu`'s `DeviceShardTraces`
+    /// overrides this to expose the lazy `TraceDenseData<KoalaBear>`
+    /// inside its `OnceLock`, returning `Some` only after it's been
+    /// materialized via the builder.
+    ///
+    /// **Materialization contract**: pure borrow accessor.  Does NOT
+    /// trigger lazy build — implementations that hold a
+    /// `OnceLock<TraceDenseData>` must have the pack already
+    /// materialized.  Callers that need the pack must trigger the
+    /// build via the concrete impl type (e.g. downcast to
+    /// `&DeviceShardTraces` then call `dense_or_build(...)`).  This
+    /// avoids leaking the `CudaStream` argument into the
+    /// CUDA-agnostic trait surface.
+    fn dense_pack(&self) -> Option<&(dyn Any + Send + Sync)> {
+        None
+    }
 }
