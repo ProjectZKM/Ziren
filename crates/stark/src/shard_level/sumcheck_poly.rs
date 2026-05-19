@@ -408,6 +408,36 @@ pub fn get_gpu_eval_at_hook() -> Option<GpuEvalAtFn> {
     GPU_EVAL_AT_HOOK.get().copied()
 }
 
+// Sprint B6 (SP1 port alpha-binding fix) — fix-round-zero hook.
+//
+// Provides a registration slot so `ziren-gpu`'s
+// `register_gpu_fix_round_zero_hook` call at startup compiles.  The
+// in-tree caller for round-0 alpha binding lives behind the
+// SP1-prefold path which is not currently invoked from
+// `feat/upgrade-plonky3`; consumer wire-up arrives with the rest of
+// the B6 port.  Without a caller the registered fn is silent — host
+// fold remains the active path.
+pub type GpuFixRoundZeroFn = fn(
+    alpha: Ef4,
+    lambda: Ef4,
+    eq_row: &[Ef4],
+    eq_interaction: &[Ef4],
+) -> Option<Vec<Ef4>>;
+
+static GPU_FIX_ROUND_ZERO_HOOK: std::sync::OnceLock<GpuFixRoundZeroFn> =
+    std::sync::OnceLock::new();
+
+pub fn register_gpu_fix_round_zero_hook(
+    f: GpuFixRoundZeroFn,
+) -> Result<(), GpuFixRoundZeroFn> {
+    GPU_FIX_ROUND_ZERO_HOOK.set(f)
+}
+
+#[must_use]
+pub fn get_gpu_fix_round_zero_hook() -> Option<GpuFixRoundZeroFn> {
+    GPU_FIX_ROUND_ZERO_HOOK.get().copied()
+}
+
 // ────────────────────────────────────────────────────────────────────
 // GPU shard-zerocheck dispatch hook (#106 — sister of #102 / #103)
 // ────────────────────────────────────────────────────────────────────
