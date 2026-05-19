@@ -70,4 +70,20 @@ pub trait DeviceTraceProvider: Send + Sync {
         &self,
         chip_name: &str,
     ) -> Option<Arc<dyn Any + Send + Sync>>;
+
+    /// Enumerate chip names this provider holds device traces for.
+    ///
+    /// Lets a hook iterate the entire per-shard chip set — required
+    /// for batch-style orchestration where the first per-chip call
+    /// dispatches once on behalf of all chips (rather than emulating
+    /// the batch with N per-chip kernel launches).  Order is
+    /// implementation-defined; consumers that need a stable order
+    /// should sort the returned `Vec`.
+    ///
+    /// Default returns `Vec::new()` so existing implementations stay
+    /// source-compatible — providers that don't expose enumeration
+    /// just disable the batch fast path on the consumer side.
+    fn chip_names(&self) -> Vec<String> {
+        Vec::new()
+    }
 }

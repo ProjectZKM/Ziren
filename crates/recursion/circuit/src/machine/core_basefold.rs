@@ -199,21 +199,205 @@ pub fn verify_core_basefold<C, SC, A>(
 
     assert!(!shard_proof_tuples.is_empty());
 
-    // ---- Per-shard verification + consistency assertions ----
-    for (i, proof_tuple) in shard_proof_tuples.into_iter().enumerate() {
-        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, evaluation_proof_bundle_opt) =
-            proof_tuple;
+    // #2 E remaining (May 14): per-shard loop split into a parallel
+    // VERIFY pass (via ir_par_map_collect, mirrors compress_basefold and
+    // deferred_basefold) and a sequential AGGREGATE pass for first-shard
+    // init + cross-shard consistency + state mutations.
+    //
+    // Pre-compute per-shard host data (chip_names, contains_*) so both
+    // passes can read them without needing to consume proof_tuple twice.
+    use zkm_recursion_compiler::ir::IrIter;
+    let per_shard_chip_names: Vec<Vec<String>> = shard_proof_tuples
+        .iter()
+        .map(|t| t.2.logup_evaluations.chip_openings.keys().cloned().collect())
+        .collect();
+    let per_shard_contains: Vec<(bool, bool, bool)> = per_shard_chip_names
+        .iter()
+        .map(|names| {
+            let cc = |n: &str| names.iter().any(|s| s.as_str() == n);
+            (cc("Cpu"), cc("MemoryInit"), cc("MemoryFinalize"))
+        })
+        .collect();
 
-        // Chip presence is encoded in the LogUp-GKR chip_openings set.
-        let chip_names: Vec<String> =
-            logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
-        let contains_cpu = contains_chip(&chip_names, "Cpu");
-        let contains_memory_init = contains_chip(&chip_names, "MemoryInit");
-        let contains_memory_finalize = contains_chip(&chip_names, "MemoryFinalize");
+    let basefold_vk_ref = &basefold_vk;
+    let basefold_shard_verifier_ref = &basefold_shard_verifier;
+    let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
+    // chip_log_heights_per_shard, machine, max_log_row_count are already
+    // refs / Copy.
 
-        // Interpret the public-values Vec as a PublicValues struct.
+    // ---- VERIFY pass (parallel) ----
+    // Returns per-shard (public_values_raw_clone, global_cumulative_sums)
+    // for the sequential aggregate to consume.
+    let verify_outputs: Vec<(
+        Vec<Felt<C::F>>,
+        Vec<zkm_stark::septic_digest::SepticDigest<Felt<C::F>>>,
+    )> = shard_proof_tuples
+        .into_iter()
+        .enumerate()
+        .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (i, proof_tuple)| {
+            let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof_bytes, evaluation_proof_bundle_opt) =
+                proof_tuple;
+            let chip_names: Vec<String> =
+                logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
+
+            // Build column_counts_by_round before the lift so the
+            // jagged-PCS metadata matches the actual opened_values shape.
+            let mut shard_chips_pre: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+                .chips()
+                .iter()
+                .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
+                .collect();
+            shard_chips_pre.sort_by(|a, b| {
+                MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
+                    .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+            });
+            let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
+                .iter()
+                .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+                .collect();
+            let main_widths_pre: Vec<usize> = shard_chips_pre
+                .iter()
+                .map(|c| p3_air::BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+                .collect();
+            let column_counts_by_round_pre: Vec<Vec<usize>> =
+                vec![preprocessed_widths_pre, main_widths_pre];
+
+            let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
+                match evaluation_proof_bundle_opt.as_ref() {
+                    Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+                        builder,
+                        bundle,
+                        max_log_row_count,
+                        &column_counts_by_round_pre,
+                        None,
+                    ),
+                    None => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                        builder,
+                        &evaluation_proof_bytes,
+                        max_log_row_count,
+                        &column_counts_by_round_pre,
+                    ),
+                }
+            } else {
+                crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                    builder,
+                    &evaluation_proof_bytes,
+                    max_log_row_count,
+                    &column_counts_by_round_pre,
+                )
+            };
+            let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
+                builder,
+                &chip_names,
+                max_log_row_count,
+            );
+            let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+                .chips()
+                .iter()
+                .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
+                .collect();
+            shard_chips.sort_by(|a, b| {
+                MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
+                    .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+            });
+            use p3_air::BaseAir;
+            let preprocessed_widths: Vec<usize> = shard_chips
+                .iter()
+                .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+                .collect();
+            let main_widths: Vec<usize> = shard_chips
+                .iter()
+                .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+                .collect();
+            let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
+            let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
+                crate::basefold_verifier::RecursiveBasefoldVerifier,
+            >::chip_metadata_from_chips::<SC, A>(&shard_chips);
+            let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
+                crate::basefold_verifier::RecursiveBasefoldVerifier,
+            >::insertion_points_from_column_counts(&column_counts_by_round);
+            let basefold_shard_proof_variable =
+                crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C>(
+                    main_commit,
+                    public_values_raw.clone(),
+                    &logup_gkr_proof,
+                    &zerocheck_proof,
+                    evaluation_proof_var,
+                    chip_height_bits,
+                );
+            let _ = chip_log_heights_per_shard.get(i);
+            let empty_cumsums = std::collections::BTreeMap::new();
+            let cumsums_for_shard = cumsums_per_shard_ref
+                .get(i)
+                .unwrap_or(&empty_cumsums);
+            let opened_values =
+                crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
+                    builder,
+                    &logup_gkr_proof.logup_evaluations.chip_openings,
+                    cumsums_for_shard,
+                    max_log_row_count,
+                );
+            let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
+            let jagged_evaluator_fn =
+                super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
+                    builder,
+                );
+            let mut challenger = machine.config().challenger_variable(builder);
+
+            let per_proof_verifier;
+            let active_verifier = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
+                if let Some(bundle) = evaluation_proof_bundle_opt.as_ref() {
+                    let bundle_num_vars =
+                        bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                    per_proof_verifier =
+                        crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars(
+                            max_log_row_count,
+                            bundle.commit.log_stacking_height,
+                            bundle_num_vars,
+                        );
+                    &per_proof_verifier
+                } else {
+                    basefold_shard_verifier_ref
+                }
+            } else {
+                basefold_shard_verifier_ref
+            };
+
+            active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(
+                builder,
+                basefold_vk_ref,
+                &basefold_shard_proof_variable,
+                &shard_chips,
+                &chip_metadata,
+                &opened_values,
+                &insertion_points,
+                &mut challenger,
+                machine.num_pv_elts(),
+                eval_public_values_fn,
+                jagged_evaluator_fn,
+            );
+
+            // Extract Global-scoped per-chip cumulative sums for the
+            // sequential aggregate. shard_chips is sorted to match
+            // opened_values.chips order (BTreeMap key order).
+            let mut shard_globals = Vec::new();
+            for (chip, chip_values) in shard_chips.iter().zip(opened_values.chips.iter()) {
+                if chip.commit_scope() == LookupScope::Global {
+                    shard_globals.push(chip_values.global_cumulative_sum);
+                }
+            }
+            (public_values_raw, shard_globals)
+        });
+
+    // ---- AGGREGATE pass (sequential) ----
+    // Walks verify outputs in shard order, runs first-shard init at i==0,
+    // then the cross-shard consistency assertions and state mutations.
+    for (i, (public_values_raw, shard_globals)) in verify_outputs.into_iter().enumerate() {
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
+        let chip_names = &per_shard_chip_names[i];
+        let (contains_cpu, contains_memory_init, contains_memory_finalize) = per_shard_contains[i];
+        let _ = chip_names; // host data already consumed via contains_*
 
         // ---- First-shard initialization (legacy core.rs:180-263) ----
         if i == 0 {
@@ -284,169 +468,6 @@ pub fn verify_core_basefold<C, SC, A>(
                 builder.assert_felt_eq(is_first_shard * *bit, C::F::ZERO);
             }
         }
-
-        // ---- Verify the shard via BasefoldShardVerifier ----
-        // Build column_counts_by_round before the lift so the
-        // jagged-PCS metadata matches the actual opened_values shape.
-        //
-        // IMPORTANT: Sort shard_chips by name to match the BTreeMap
-        // ordering of `chip_openings`/`opened_values.chips` —
-        // `build_opened_values_from_chip_openings` iterates the BTreeMap
-        // in key-sorted order, while `machine.chips()` uses insertion
-        // order (Cpu first). Without this sort the subsequent
-        // `shard_chips.iter().zip(opened_values.chips.iter())` in
-        // `verify_zerocheck` pairs the wrong chip with each opening,
-        // panicking with "Main width mismatch: expected 67, got 19".
-        let mut shard_chips_pre: Vec<&zkm_stark::MachineChip<SC, A>> = machine
-            .chips()
-            .iter()
-            .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
-            .collect();
-        shard_chips_pre.sort_by(|a, b| {
-            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
-                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
-        });
-        let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
-            .iter()
-            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
-            .collect();
-        let main_widths_pre: Vec<usize> = shard_chips_pre
-            .iter()
-            .map(|c| p3_air::BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
-            .collect();
-        let column_counts_by_round_pre: Vec<Vec<usize>> =
-            vec![preprocessed_widths_pre, main_widths_pre];
-
-        // #245 Phase 4f: bundle path is the default.  Set
-        // ZIREN_DISABLE_BUNDLE_LIFT=1 to fall back to the placeholder
-        // lift (bypass while #249 recursion-shape follow-on lands).
-        let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
-            match evaluation_proof_bundle_opt.as_ref() {
-                Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
-                    builder,
-                    bundle,
-                    max_log_row_count,
-                    &column_counts_by_round_pre,
-                    None,
-                ),
-                None => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-                    builder,
-                    &evaluation_proof_bytes,
-                    max_log_row_count,
-                    &column_counts_by_round_pre,
-                ),
-            }
-        } else {
-            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-                builder,
-                &evaluation_proof_bytes,
-                max_log_row_count,
-                &column_counts_by_round_pre,
-            )
-        };
-        let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
-            builder,
-            &chip_names,
-            max_log_row_count,
-        );
-        let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
-            .chips()
-            .iter()
-            .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
-            .collect();
-        shard_chips.sort_by(|a, b| {
-            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
-                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
-        });
-        use p3_air::BaseAir;
-        let preprocessed_widths: Vec<usize> = shard_chips
-            .iter()
-            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
-            .collect();
-        let main_widths: Vec<usize> = shard_chips
-            .iter()
-            .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
-            .collect();
-        let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
-        let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
-            crate::basefold_verifier::RecursiveBasefoldVerifier,
-        >::chip_metadata_from_chips::<SC, A>(&shard_chips);
-        let insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
-            crate::basefold_verifier::RecursiveBasefoldVerifier,
-        >::insertion_points_from_column_counts(&column_counts_by_round);
-        let basefold_shard_proof_variable =
-            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C>(
-                main_commit,
-                public_values_raw.clone(),
-                &logup_gkr_proof,
-                &zerocheck_proof,
-                evaluation_proof_var,
-                chip_height_bits,
-            );
-        // META #59 Phase C: consume real per-chip cumulative sums from
-        // the BasefoldShardProof (populated in `prove_shard_to_basefold`).
-        // The matching prover-side change is in
-        // `crates/stark/src/shard_level/zerocheck_prover.rs` which
-        // computes per-chip global_cumulative_sum from main trace's
-        // last 14 elements (commit_scope == Global) and uses zero local.
-        let _ = chip_log_heights_per_shard.get(i);
-        let empty_cumsums = std::collections::BTreeMap::new();
-        let cumsums_for_shard = chip_cumulative_sums_per_shard
-            .get(i)
-            .unwrap_or(&empty_cumsums);
-        let opened_values =
-            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
-                builder,
-                &logup_gkr_proof.logup_evaluations.chip_openings,
-                cumsums_for_shard,
-                max_log_row_count,
-            );
-        // See docs/task_22_plan.md #22.2 for the EVPV audit.
-        let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
-        let jagged_evaluator_fn =
-            super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
-                builder,
-            );
-        let mut challenger = machine.config().challenger_variable(builder);
-
-        // #244 fix: when bundle path is active and bundle is Some,
-        // rebuild verifier with the bundle's log_stacking_height +
-        // actual num_variables (= fri_commitments.len()).  Both come
-        // from prover-side dynamic values that the verifier must
-        // match for the in-circuit assertions to hold.  See #244 for
-        // the full chain analysis.
-        let per_proof_verifier;
-        let active_verifier = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
-            if let Some(bundle) = evaluation_proof_bundle_opt.as_ref() {
-                let bundle_num_vars =
-                    bundle.basefold_proof.basefold_proof.fri_commitments.len();
-                per_proof_verifier =
-                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars(
-                        max_log_row_count,
-                        bundle.commit.log_stacking_height,
-                        bundle_num_vars,
-                    );
-                &per_proof_verifier
-            } else {
-                &basefold_shard_verifier
-            }
-        } else {
-            &basefold_shard_verifier
-        };
-
-        active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(
-            builder,
-            &basefold_vk,
-            &basefold_shard_proof_variable,
-            &shard_chips,
-            &chip_metadata,
-            &opened_values,
-            &insertion_points,
-            &mut challenger,
-            machine.num_pv_elts(),
-            eval_public_values_fn,
-            jagged_evaluator_fn,
-        );
 
         // ---- Shard-chain consistency assertions (legacy core.rs:290-514) ----
 
@@ -597,12 +618,10 @@ pub fn verify_core_basefold<C, SC, A>(
         // Shard index range check (< 2^MAX_LOG_NUMBER_OF_SHARDS).
         C::range_check_felt(builder, public_values.shard, MAX_LOG_NUMBER_OF_SHARDS);
 
-        // Accumulate global cumulative sums from chips that produce them.
-        for (chip, chip_values) in shard_chips.iter().zip(opened_values.chips.iter()) {
-            if chip.commit_scope() == LookupScope::Global {
-                global_cumulative_sums.push(chip_values.global_cumulative_sum);
-            }
-        }
+        // Global-scoped per-chip sums are collected by the parallel
+        // verify pass (see verify_outputs.shard_globals); merge them
+        // into the running aggregator here.
+        global_cumulative_sums.extend(shard_globals);
     }
 
     let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
