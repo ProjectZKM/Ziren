@@ -337,6 +337,11 @@ where
         // ops on the challenger.  Capture that state here so the
         // shard-level prover's Phase 1 sees an aligned transcript
         // (otherwise round 0's claimed_sum check desyncs).
+        //
+        // The snapshot is consumed only by the basefold branch but must
+        // be captured here, before the main_commit observe + perm
+        // challenge sampling that follow — those operations diverge the
+        // challenger state from what the basefold verifier expects.
         let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
 
         challenger.observe(data.main_commit.clone());
@@ -575,7 +580,24 @@ where
             });
         }
 
-        // === FRI PIPELINE (original) ===
+        // ─────────────────────────────────────────────────────────────
+        // === FRI PATH — RECURSION SHARDS ONLY (Step 5 Phase 3 target) ===
+        //
+        // After Step 5 Phase 1 (commit 2a21f10f), the basefold branch
+        // above serves ALL MIPS shards (Cpu and memory-only).  Reaching
+        // this point means `data.chip_ordering` lacks the "Program"
+        // chip, which only happens for recursion shards (BaseAlu /
+        // ExtAlu / Poseidon2 / FriFold / BatchFRI).
+        //
+        // The entire block below — permutation traces, quotient
+        // evaluation, FRI commit, OOD opening (~376 LOC, lines ~580-940)
+        // — DELETES WHOLESALE when Step 5 Phase 3 lands and recursion
+        // shards move to basefold (META #59 Phase D continuation).
+        // Until then, this is recursion's prove pipeline.
+        //
+        // Do not add MIPS-specific logic here.  Per-MIPS observes /
+        // commits / cumsums all live in the basefold branch above.
+        // ─────────────────────────────────────────────────────────────
 
         // Generate the permutation traces.
         let t_perm_gen = std::time::Instant::now();
