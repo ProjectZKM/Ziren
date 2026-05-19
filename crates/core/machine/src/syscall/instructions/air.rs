@@ -162,14 +162,20 @@ impl SyscallInstrsChip {
         builder.when(AB::Expr::one() - local.is_real).assert_zero(send_to_table.clone());
 
         // KoalaBear range checks on op_b and op_c, activated by stored flags.
-        // op_b_check = 1 when send_to_table || is_halt (covers both syscall bridge and exit code).
-        // op_c_check = 1 when send_to_table || is_commit_deferred_proofs (covers bridge and digest).
+        // Only required on the precompile bridge (where args travel as a single reduced field
+        // element), for `is_halt` (exit code is reduced), and for `is_commit_deferred_proofs`
+        // (digest element is reduced). Linux syscalls travel via half-word packed columns in
+        // `SyscallChip`, which are U16-range-checked there — reduce() collision is impossible,
+        // so the KoalaBear range check is not needed (and would reject legal u32 args like
+        // AT_FDCWD = 0xFFFFFF9C).
+        let send_to_precompile: AB::Expr = get_send_table::<AB>(local).into();
+        let op_b_check_active: AB::Expr = send_to_precompile.clone() + local.is_halt.into();
+        let op_c_check_active: AB::Expr =
+            send_to_precompile + local.is_commit_deferred_proofs.result.into();
         builder.assert_bool(local.op_b_check);
         builder.assert_bool(local.op_c_check);
-        builder.when(send_to_table.clone()).assert_one(local.op_b_check);
-        builder.when(local.is_halt).assert_one(local.op_b_check);
-        builder.when(send_to_table.clone()).assert_one(local.op_c_check);
-        builder.when(local.is_commit_deferred_proofs.result).assert_one(local.op_c_check);
+        builder.when(op_b_check_active).assert_one(local.op_b_check);
+        builder.when(op_c_check_active).assert_one(local.op_c_check);
         builder.when_not(local.is_real).assert_zero(local.op_b_check);
         builder.when_not(local.is_real).assert_zero(local.op_c_check);
 
