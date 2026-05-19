@@ -82,43 +82,6 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
     (mult, denominator)
 }
 
-/// #263 perf fix — process-cached env var lookup for the device-hooks
-/// master switch.  Avoids per-chip Mutex contention on libc's environ
-/// when this is called inside a parallel per-chip loop.
-fn device_hooks_master_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        std::env::var("ZIREN_GPU_DEVICE_HOOKS")
-            .map(|v| v != "0")
-            .unwrap_or(true)
-    })
-}
-
-/// Process-cached `interaction_env` resolution.
-fn first_layer_interaction_env_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        device_hooks_master_cached()
-            || std::env::var("ZIREN_GPU_INTERACTION_EVAL_DEVICE")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-    })
-}
-
-/// Process-cached `build_gkr_env` resolution.
-fn first_layer_build_gkr_env_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        device_hooks_master_cached()
-            || std::env::var("ZIREN_GPU_BUILD_GKR_DEVICE")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-    })
-}
-
 /// Build a chip's per-row interaction tables.
 ///
 /// Returns `(numer, denom)` row-major matrices of shape
@@ -332,66 +295,26 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        // #112 + C-full K1 dispatch hook: when EITHER
-        // `ZIREN_GPU_INTERACTION_EVAL_DEVICE=1` OR
-        // `ZIREN_GPU_BUILD_GKR_DEVICE=1` is set, AND a GPU hook is
-        // registered AND `(F, EF) == (KoalaBear, Ef4)` (production
-        // basefold path), route the per-row interaction walk through
-        // the registered GPU descriptor kernel
-        // (`build_gkr_circuit_first_layer_koala_bear`).  Output is
-        // byte-identical to `build_chip_interaction_tables`; on `None`
-        // (chip rejected, unknown name, etc.) the host fallback runs
-        // unconditionally.
+        // #112 / C-full K1: device-resident first-layer dispatch.
+        // The legacy env-gated opt-in (`ZIREN_GPU_INTERACTION_EVAL_DEVICE`
+        // / `ZIREN_GPU_BUILD_GKR_DEVICE` + master `ZIREN_GPU_DEVICE_HOOKS`)
+        // was removed: the hook-registration check + `provider_present`
+        // short-circuit + `(F, EF) == (KoalaBear, Ef4)` TypeId gate are
+        // the source-of-truth gates; the env layer was a redundant
+        // defensive bypass.  Output is byte-identical to
+        // `build_chip_interaction_tables`; on `None` (chip rejected,
+        // unknown name, etc.) the host fallback runs unconditionally.
         //
-        // The GPU output is materialized as `(Vec<KoalaBear>, Vec<Ef4>)`
-        // and reinterpreted back to `(Vec<F>, Vec<EF>)` under TypeId
-        // equality (same `transmute` pattern used for #106 and #111).
-        //
-        // C-full K1: the `ZIREN_GPU_BUILD_GKR_DEVICE=1` alias (matching
-        // the docstring contract in
-        // `ziren-gpu/basefold/src/logup_gkr.rs::register_build_gkr_device_hook`)
-        // engages the same hook slot, letting operators flip the
-        // device-resident first-layer construction without touching
-        // the legacy #112 flag name.  Bridge work — feeding device
-        // buffers DIRECTLY into the J3 pool's `LogupGkrDevicePool::upload`
-        // (skipping host pull-back) — is documented in the K1 follow-up.
-        // #263: device-resident first-layer dispatch.  Opt-in via
-        // either the legacy per-hook env vars OR the single master
-        // switch `ZIREN_GPU_DEVICE_HOOKS=1` (preferred — flips both
-        // chip-keyed hooks, see also `prove_shard_to_basefold` for
-        // the jagged-PCS counterpart).  Wins -6%+ wall on tendermint
-        // and reth WITH the `provider_present` short-circuit below
-        // (which prevents the off-pool basefold worker from paying
-        // env-gated dispatch overhead on its `None`-provider calls).
-        // Default OFF pending automated CI A/B harness — single noisy
-        // run isn't enough to flip default safely.
-        //
-        // PERF FIX (#263 follow-up): cache the env::var reads in a
-        // OnceLock — `std::env::var` takes a libc-environ Mutex on
-        // Linux which contends badly when called inside the per-chip
-        // loop across N concurrent workers (rough math: 4 workers ×
-        // 191 shards × ~20 chips × 3 env reads = ~46K contended Mutex
-        // acquisitions per phase per stage).  Reading once per process
-        // eliminates the contention and removes the +30-90s noise
-        // floor on default-on flip seen in earlier reth A/B runs.
-        let interaction_env = first_layer_interaction_env_cached();
-        let build_gkr_env = first_layer_build_gkr_env_cached();
-        // #263 follow-up: short-circuit the GPU dispatch when no
-        // per-shard `DeviceTraceProvider` was passed.  Without a
-        // provider, the hook can only fall back to the global Mutex
-        // (empty in production) and then to a host-upload kernel
-        // launch from the CALLING thread — which on the off-pool
-        // basefold rayon worker has no `cudaSetDevice` context (#142
-        // design).  The kernel either runs on GPU 0 (wrong device)
-        // or fails through to a host CPU equivalent, paying full
-        // dispatch overhead for zero benefit.  Reth A/B showed core
-        // stage +16% (+49s on 191 shards) from this overhead.
-        // Skipping when provider is None recovers that cost without
-        // changing behaviour for callers that DO pass a provider.
+        // The `provider_present` short-circuit (#263 follow-up) skips
+        // the GPU dispatch when no per-shard `DeviceTraceProvider` was
+        // passed.  Without a provider, the hook can only fall back to
+        // the global Mutex (empty in production) and then to a
+        // host-upload kernel launch from the CALLING thread — which
+        // on the off-pool basefold rayon worker has no `cudaSetDevice`
+        // context (#142 design).  Reth A/B showed core stage +16% from
+        // this overhead.
         let provider_present = device_traces.is_some();
-        let gpu_tables: Option<(Vec<F>, Vec<EF>)> =
-            if (interaction_env || build_gkr_env) && provider_present
-        {
+        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if provider_present {
             if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
                 use core::any::TypeId;
                 type Ef4 = p3_field::extension::BinomialExtensionField<
@@ -448,8 +371,7 @@ where
                     FIRED_ONCE.get_or_init(|| {
                         tracing::warn!(
                             "#112 interaction_eval hook FIRED \
-                             (ZIREN_GPU_INTERACTION_EVAL_DEVICE=1, \
-                             (F,EF)=(Kb,Ef4), gpu_hook dispatched, \
+                             ((F,EF)=(Kb,Ef4), gpu_hook dispatched, \
                              chip={})", chip.name()
                         );
                     });
@@ -533,17 +455,9 @@ where
                     None
                 }
             } else {
-                use std::sync::OnceLock;
-                static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                WARN_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "#112 interaction_eval hook FELL THROUGH \
-                         (env=set, hook=None); ziren-gpu's \
-                         compress_multi_gpu must call \
-                         register_gpu_interaction_eval_hook at \
-                         startup. Host CPU used."
-                    );
-                });
+                // Hook not registered (e.g. CPU-only build, or
+                // ziren-gpu hasn't called register_gpu_interaction_eval_hook
+                // yet on the call path).  Host CPU used.
                 None
             }
         } else {
