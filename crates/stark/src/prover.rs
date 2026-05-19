@@ -379,7 +379,37 @@ where
         // (was at line 918) — now those shards take the basefold path
         // directly instead of running the dead FRI computation + side-
         // channel basefold proof.
-        let use_basefold_path = data.chip_ordering.contains_key("Program");
+        //
+        // === Step 5 Phase 3 experimental override (default OFF) ===
+        // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` widens the gate to
+        // include recursion shards (no "Program" chip).  Off by default
+        // because the in-circuit verifier at
+        // `crates/recursion/circuit/src/stark.rs::StarkVerifier::verify_shard`
+        // (called by compress/wrap/deferred recursion programs) still
+        // requires the FRI proof shape — flipping ON will emit a
+        // basefold proof on the recursion shard but the parent compose
+        // program won't be able to verify it.  Used during Phase 3 port
+        // to observe the first failure mode against fibonacci compress.
+        //
+        // Expected failure when ON:
+        //   1. host-side prover (this fn) emits basefold proof on
+        //      recursion shards — succeeds (basefold prover is
+        //      chip-set-agnostic per `shard_level/prover.rs`).
+        //   2. host-side verifier dispatches to BasefoldShardVerifier
+        //      via `verifier.rs:54` — likely succeeds.
+        //   3. compress's compose program (recursion-circuit) calls
+        //      `StarkVerifier::verify_shard` on the recursion shard
+        //      proof — FAILS, because the dummy shape (FRI-shaped
+        //      auxiliary_commits + populated permutation/quotient
+        //      opened_values) won't match the basefold-shaped real
+        //      proof (empty aux, empty perm/quotient).  This is the
+        //      mirror of the Apr 25 wrap-cumsum bug (Witnessable shape
+        //      misalignment) — see `project_phase4_wrap_blocker.md`.
+        let force_basefold_for_recursion = std::env::var("ZIREN_FORCE_BASEFOLD_FOR_RECURSION")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let use_basefold_path =
+            data.chip_ordering.contains_key("Program") || force_basefold_for_recursion;
 
         if use_basefold_path {
             let t_basefold_path = std::time::Instant::now();
