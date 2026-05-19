@@ -598,10 +598,11 @@ pub struct HostLayerView<'a> {
 /// FirstLayer) to device memory, returns an opaque handle the
 /// transition / pull hooks can consume.
 ///
-/// Step 4c: declared but only invoked when the
-/// `ZIREN_GPU_LAYER_TRANSITION` env var is set, the hook + the
-/// transition hook + the pull hook are all registered, AND the
-/// `build_gkr_circuit` generic types resolve to (`LbVal`, `LbChallenge`).
+/// Step 4c: declared but only invoked when this hook + the transition
+/// hook + the pull hook are all registered, the calling thread has a
+/// `gpu_worker_context` TLS (i.e. a `MultiGpuDevicePool` worker), AND
+/// the `build_gkr_circuit` generic types resolve to (`LbVal`,
+/// `LbChallenge`).
 ///
 /// **#230 multi-GPU fix** — `circuit_id` scopes this hook to a single
 /// GKR-circuit build call.  See `GpuLayerTransitionFn` docs for the

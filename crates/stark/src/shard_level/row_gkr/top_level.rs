@@ -229,9 +229,9 @@ where
     // loop), then dispatch on the LayerState variant.
     //
     // Step 4d — when `LayerState::Device { handle, .. }` appears (only
-    // possible when `ZIREN_GPU_LAYER_TRANSITION=1` + all three GPU hooks
-    // registered + `(F, EF) == (LbVal, LbChallenge)` — see
-    // `build_gkr_circuit`'s gates 1-4), invoke the registered
+    // possible when the calling thread has a `gpu_worker_context` TLS +
+    // all three GPU hooks registered + `(F, EF) == (LbVal, LbChallenge)`
+    // — see `build_gkr_circuit`'s gates), invoke the registered
     // `GpuLayerPullFn` to materialize the device-resident layer back to
     // host as a `LogUpGkrCpuLayer<LbChallenge, LbChallenge>`, wrap it as
     // a `GkrCircuitLayer::Layer`, and run the existing per-round

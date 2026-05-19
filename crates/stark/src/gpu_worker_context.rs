@@ -16,9 +16,8 @@
 //! or silently runs on the wrong device, paying full PCIe +
 //! kernel-launch overhead for zero benefit.
 //!
-//! Reth A/B with `ZIREN_GPU_LAYER_TRANSITION=1` engaged via the
-//! `ZIREN_GPU_DEVICE_HOOKS` master switch showed core-stage
-//! +16% (~+50s on 191 shards) from this exact failure mode.
+//! Reth A/B with the layer-transition GPU dispatch engaged showed
+//! core-stage +16% (~+50s on 191 shards) from this exact failure mode.
 //!
 //! ## Mechanism
 //!

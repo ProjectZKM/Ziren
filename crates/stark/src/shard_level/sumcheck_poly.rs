@@ -752,9 +752,9 @@ pub fn get_gpu_constraint_eval_cross_shard_hook()
 // that #109 ships in `ziren-gpu/cuda/basefold/build_gkr_circuit.cu`
 // — a single kernel launch per chip instead of per-row rayon.
 //
-// The hook is only consulted when
-// `ZIREN_GPU_INTERACTION_EVAL_DEVICE=1` is set AND `EF` is the
-// production `Ef4` type.  When unset, the host walk in
+// The hook is only consulted when a `DeviceTraceProvider` is passed
+// from the caller AND `EF` is the production `Ef4` type AND the hook
+// has been registered.  Otherwise the host walk in
 // `build_chip_interaction_tables` runs unchanged.
 // ─────────────────────────────────────────────────────────────────────
 
@@ -829,8 +829,7 @@ pub fn get_gpu_interaction_eval_hook() -> Option<GpuInteractionEvalFn> {
 //
 // The hook is concrete-typed at `(KoalaBear, Ef4, LbChallenger)` —
 // the production reth path.  Generic-EF callers fall back to the
-// host orchestrator even when `ZIREN_GPU_JAGGED_ORCHESTRATION_DEVICE=1`
-// is set.  Output bytes MUST be byte-identical to
+// host orchestrator.  Output bytes MUST be byte-identical to
 // `bundle.to_bytes()` from
 // `crate::basefold_late_binding::jagged::prove_jagged_basefold` —
 // validated via a CPU-equivalence test in the GPU crate.
@@ -915,13 +914,10 @@ pub use jagged_orchestration_hook::{
 // skipping the per-chip `to_host_naive()` pull-back that the #113
 // host-trace hook would have to do.
 //
-// Activated by `ZIREN_GPU_JAGGED_PCS_DEVICE=1` (matches the env name
-// the `phase4_device` doc-comment advertises).  Until this hook
-// landed, that env flag was DEAD — `phase4_device::emit_jagged_pcs_bytes_device`
-// existed and was tested but no caller ever invoked it from the
-// shard-prover prove path.  Output bytes MUST be byte-identical to
-// the host `bundle.to_bytes()` (validated end-to-end on the GPU box
-// against the v1 default).
+// Activated when registered AND a `DeviceTraceProvider` is passed
+// from the caller.  Output bytes MUST be byte-identical to the host
+// `bundle.to_bytes()` (validated end-to-end on the GPU box against
+// the v1 default).
 // ─────────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "basefold")]

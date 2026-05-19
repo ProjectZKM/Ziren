@@ -81,14 +81,13 @@ use crate::Chip;
 /// #263 perf fix — process-cached env lookup for Step-6 eval_at GPU
 /// dispatch.  Returns true only when `ZIREN_GPU_EVAL_AT=1` is set.
 ///
-/// NOT covered by the master switch `ZIREN_GPU_DEVICE_HOOKS=1`: the
-/// hook signature has no chip-name or provider arg, so we can't
-/// short-circuit when called from the off-pool basefold worker (no
-/// `cudaSetDevice` context).  Reth A/B with eval_at engaged via master
-/// switch showed core +16% regression from wasted dispatches on those
-/// workers.  Kept opt-in here pending either (a) hook signature
-/// extension to accept a provider, OR (b) thread-local detection of
-/// "is this a GPU pool worker?".
+/// Kept opt-in: the hook signature has no chip-name or provider arg,
+/// so we can't short-circuit when called from the off-pool basefold
+/// worker (no `cudaSetDevice` context).  Reth A/B with eval_at always
+/// engaged showed core +16% regression from wasted dispatches on those
+/// workers.  Kept opt-in pending either (a) hook signature extension
+/// to accept a provider, OR (b) thread-local detection of "is this a
+/// GPU pool worker?".
 fn eval_at_env_cached() -> bool {
     use std::sync::OnceLock;
     static CACHED: OnceLock<bool> = OnceLock::new();
@@ -109,11 +108,10 @@ where
     EF: ExtensionField<F> + Send + Sync,
 {
     // Task #103 Phase 2: GPU dispatch via function-pointer hook.
-    // When `ZIREN_GPU_EVAL_AT=1` (or the master switch
-    // `ZIREN_GPU_DEVICE_HOOKS=1` from #263) is set AND a hook is
-    // registered AND F=KoalaBear / EF=Ef4 (production reth path),
-    // invoke the registered GPU implementation.  Otherwise fall back
-    // to the rayon host path.
+    // When `ZIREN_GPU_EVAL_AT=1` is set AND a hook is registered AND
+    // F=KoalaBear / EF=Ef4 (production reth path), invoke the
+    // registered GPU implementation.  Otherwise fall back to the
+    // rayon host path.
     //
     // Env reads are process-cached (#263 perf fix) — `std::env::var`
     // takes a libc-environ Mutex and was a contention source under
