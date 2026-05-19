@@ -597,7 +597,7 @@ fn diff_layer_or_panic<EF>(
     host: &super::layer::LogUpGkrCpuLayer<EF, EF>,
 )
 where
-    EF: ExtensionField<p3_koala_bear::KoalaBear>,
+    EF: p3_field::Field + core::fmt::Debug,
 {
     use super::layer::RowMajorTable;
 
