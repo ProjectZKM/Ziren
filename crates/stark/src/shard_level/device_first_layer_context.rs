@@ -76,23 +76,32 @@ pub type FirstRoundDeviceHook = fn(
 ) -> Option<(Vec<Ef4>, Vec<Ef4>)>;
 
 /// Drain the device-first-layer thread-local stash via the registered
-/// hook. Stub returns `None`.
+/// hook.  Invokes the `DrainHook` registered by ziren-gpu (if any) and
+/// wraps the returned `Arc<dyn Any>` payload in a
+/// `DeviceFirstLayerHandle` so callers can `.downcast_ref::<Arc<T>>()`.
+/// Returns `None` when no drain hook is registered or the hook itself
+/// returns `None`.
 #[must_use]
 pub fn drain_via_hook() -> Option<DeviceFirstLayerHandle> {
-    None
+    let drain = REGISTERED_DRAIN_HOOK.get().copied()?;
+    let payload = drain()?;
+    Some(DeviceFirstLayerHandle { payload: Box::new(payload) })
 }
 
 /// Returns the currently-stashed device-first-layer handle, if any.
-/// Stub always `None`.
+/// Stub always `None` — the TLS-stashing pattern needs a separate
+/// orphan-commit port to land; consumers fall back to the
+/// drain-on-demand path via `drain_via_hook`.
 #[must_use]
 pub fn current_device_first_layer() -> Option<&'static DeviceFirstLayerHandle> {
     None
 }
 
-/// Returns the registered first-round device hook. Stub always `None`.
+/// Returns the registered first-round device hook, or `None` if
+/// ziren-gpu hasn't called `register_first_round_device_hook` yet.
 #[must_use]
 pub fn get_first_round_device_hook() -> Option<FirstRoundDeviceHook> {
-    None
+    REGISTERED_FIRST_ROUND_HOOK.get().copied()
 }
 
 /// Hook ziren-gpu registers to install its own first-round device
