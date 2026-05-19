@@ -745,12 +745,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Generate the inputs for the first layer of recursive proofs.
     ///
-    /// When `ZIREN_USE_BASEFOLD=1` and every shard carries a
-    /// `basefold_shard_proof` side channel, emits `ZKMCircuitWitness::CoreBasefold`
-    /// witnesses that dispatch to the cluster-parametrized basefold
-    /// Normalize program. Otherwise falls back to the legacy per-chip
-    /// `ZKMCircuitWitness::Core` path. Deferred proofs always take the
-    /// legacy path until the basefold Deferred prover is wired.
+    /// Every shard carries a `basefold_shard_proof` side channel, so this
+    /// emits `ZKMCircuitWitness::CoreBasefold` witnesses that dispatch to
+    /// the cluster-parametrized basefold Normalize program. When the
+    /// side-channel is unexpectedly missing (e.g. a non-KoalaBear config),
+    /// falls back to the legacy per-chip `ZKMCircuitWitness::Core` path.
+    /// Deferred proofs follow the same dispatch.
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
@@ -760,57 +760,38 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         batch_size: usize,
     ) -> Vec<ZKMCircuitWitness> {
         let is_complete = shard_proofs.len() == 1 && deferred_proofs.is_empty();
-        // Cutover (#35, Apr 30): default flipped from opt-in to opt-out.
-        let use_basefold = env::var("ZIREN_USE_BASEFOLD")
-            .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
-            .unwrap_or(true);
 
         let mut inputs = Vec::new();
 
-        if use_basefold {
-            if let Some(bf_inputs) = self.get_recursion_core_inputs_basefold(
-                &vk.vk,
-                shard_proofs,
-                batch_size,
-                is_complete,
-            ) {
-                tracing::debug!(
-                    "ZIREN_USE_BASEFOLD=1: emitting {} CoreBasefold witness(es)",
-                    bf_inputs.len()
-                );
-                inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
-            } else {
-                tracing::warn!(
-                    "ZIREN_USE_BASEFOLD=1 but side-channel missing; falling back to legacy Core"
-                );
-                let core_inputs =
-                    self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, is_complete);
-                inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
-            }
+        if let Some(bf_inputs) = self.get_recursion_core_inputs_basefold(
+            &vk.vk,
+            shard_proofs,
+            batch_size,
+            is_complete,
+        ) {
+            tracing::debug!("emitting {} CoreBasefold witness(es)", bf_inputs.len());
+            inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
         } else {
+            tracing::warn!("basefold side-channel missing; falling back to legacy Core");
             let core_inputs =
                 self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, is_complete);
             inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
         }
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        // META #59 Phase 4 (#49): when ZIREN_USE_BASEFOLD=1 AND all deferred
-        // proofs carry a basefold side channel, emit DeferredBasefold
-        // witnesses; otherwise fall back to legacy Deferred.
-        if use_basefold {
-            if let Some(bf_deferred) = self.get_recursion_deferred_inputs_basefold(
-                &vk.vk,
-                last_proof_pv,
-                deferred_proofs,
-                batch_size,
-            ) {
-                inputs.extend(
-                    bf_deferred.into_iter().map(ZKMCircuitWitness::DeferredBasefold),
-                );
-                return inputs;
-            }
-            // Fall through to legacy deferred path when side channel missing.
+        // META #59 Phase 4 (#49): when all deferred proofs carry a basefold
+        // side channel, emit DeferredBasefold witnesses; otherwise fall
+        // back to legacy Deferred.
+        if let Some(bf_deferred) = self.get_recursion_deferred_inputs_basefold(
+            &vk.vk,
+            last_proof_pv,
+            deferred_proofs,
+            batch_size,
+        ) {
+            inputs.extend(bf_deferred.into_iter().map(ZKMCircuitWitness::DeferredBasefold));
+            return inputs;
         }
+        // Fall through to legacy deferred path when side channel missing.
         let deferred_inputs =
             self.get_recursion_deferred_inputs(&vk.vk, last_proof_pv, deferred_proofs, batch_size);
         inputs.extend(deferred_inputs.into_iter().map(ZKMCircuitWitness::Deferred));

@@ -23,11 +23,11 @@ struct Args {
 }
 
 /// Hard-coded list of basefold compress_vk hashes captured by running
-/// `test_e2e_compress_fibonacci` and `collect_basefold_vks` under
-/// `ZIREN_USE_BASEFOLD=1`. Each entry is the canonical-form `[u32; 8]`
-/// printed by `eprintln!("{:?}", vk.hash_koalabear())`.
+/// `test_e2e_compress_fibonacci` and `collect_basefold_vks`. Each entry
+/// is the canonical-form `[u32; 8]` printed by
+/// `eprintln!("{:?}", vk.hash_koalabear())`.
 const HASHES: &[[u32; DIGEST_SIZE]] = &[
-    // FIBONACCI_ELF (test_artifacts) under ZIREN_USE_BASEFOLD=1.
+    // FIBONACCI_ELF (test_artifacts).
     // Apr 24 2026 META #59 Phase C: verifier + prover now use real
     // per-chip global_cumulative_sum (from main trace's last 14 elements
     // when commit_scope == Global).  AST shifted from Phase A hash.

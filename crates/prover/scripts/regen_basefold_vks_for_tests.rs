@@ -7,7 +7,7 @@
 //! the regenerated map.
 //!
 //! Usage:
-//!   ZIREN_USE_BASEFOLD=1 VERIFY_VK=false RUST_LOG=info \
+//!   VERIFY_VK=false RUST_LOG=info \
 //!     cargo run --release -p zkm-prover --bin regen_basefold_vks_for_tests
 //!
 //! The output map contains one entry per *unique* compress VK hash
@@ -36,14 +36,6 @@ const HELLO_WORLD_ELF_PATH: &str =
 
 fn main() {
     setup_logger();
-    assert!(
-        std::env::var("ZIREN_USE_BASEFOLD").as_deref() == Ok("1")
-            || std::env::var("ZIREN_USE_BASEFOLD")
-                .as_deref()
-                .map(|v| v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
-        "set ZIREN_USE_BASEFOLD=1"
-    );
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let opts = ZKMProverOpts::default();

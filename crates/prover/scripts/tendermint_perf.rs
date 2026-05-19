@@ -1,8 +1,6 @@
 //! Standalone tendermint perf profiler.  Loads program.bin + stdin.bin
-//! from the standard shape-bin layout, runs prove + verify with the
-//! current default proof system (WHIR + jagged + zerocheck + LogUp-GKR,
-//! or legacy FRI when `ZIREN_USE_FRI=1`), and prints per-phase timings
-//! and proof size.
+//! from the standard shape-bin layout, runs prove + verify, and prints
+//! per-phase timings and proof size.
 //!
 //! Usage:
 //!   cargo run --release -p zkm-prover --bin tendermint_perf -- \
@@ -37,14 +35,7 @@ fn main() {
     let stdin: ZKMStdin =
         bincode::deserialize(&stdin_bytes).expect("failed to deserialize stdin");
 
-    let fri_mode = std::env::var("ZIREN_USE_FRI").unwrap_or_default() == "1";
-    let basefold_mode = std::env::var("ZIREN_USE_BASEFOLD").unwrap_or_default() == "1";
-    let mode_label = match (fri_mode, basefold_mode) {
-        (true, _) => "FRI (legacy)",
-        (false, true) => "WHIR + BaseFold late-binding (D1 hybrid)",
-        (false, false) => "WHIR + jagged (default)",
-    };
-    println!("=== tendermint perf profile (mode: {}) ===", mode_label);
+    println!("=== tendermint perf profile (BaseFold + jagged + zerocheck + LogUp-GKR) ===");
     println!("workload: {}", args.workload.display());
     println!("ELF size: {} bytes", elf.len());
     println!("stdin len: {} buffers", stdin.buffer.len());

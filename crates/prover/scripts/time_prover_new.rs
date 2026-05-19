@@ -14,8 +14,7 @@ use zkm_prover::ZKMProver;
 fn main() {
     setup_logger();
     eprintln!(
-        "[time-prover-new] ZIREN_USE_BASEFOLD={:?} VERIFY_VK={:?}",
-        std::env::var("ZIREN_USE_BASEFOLD").ok(),
+        "[time-prover-new] VERIFY_VK={:?}",
         std::env::var("VERIFY_VK").ok(),
     );
     let t = Instant::now();

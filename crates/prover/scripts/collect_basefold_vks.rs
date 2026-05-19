@@ -1,9 +1,8 @@
 //! Collect basefold compress VK hashes by running each collect.sh workload
-//! through prove_core + compress under `ZIREN_USE_BASEFOLD=1` and hashing
-//! the produced normalize-program VK.
+//! through prove_core + compress and hashing the produced normalize-program VK.
 //!
 //! Usage:
-//!   ZIREN_USE_BASEFOLD=1 VERIFY_VK=false RUST_LOG=info \
+//!   VERIFY_VK=false RUST_LOG=info \
 //!     cargo run --release -p zkm-prover --bin collect_basefold_vks -- \
 //!       --workload-dir /data/stephen/ziren-shape-bin \
 //!       --workload chess --workload fibonacci-1k --workload json \
@@ -81,15 +80,6 @@ fn main() {
     }));
 
     let args = Args::parse();
-
-    assert!(
-        std::env::var("ZIREN_USE_BASEFOLD").as_deref() == Ok("1")
-            || std::env::var("ZIREN_USE_BASEFOLD")
-                .as_deref()
-                .map(|v| v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
-        "set ZIREN_USE_BASEFOLD=1 — this binary collects BASEFOLD compress VKs"
-    );
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
     let opts = ZKMProverOpts::default();

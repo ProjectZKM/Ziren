@@ -525,7 +525,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `compose_program_basefold`, etc.) instead of the legacy FRI ones.
     ///
     /// META #59 step 4 (#52). Used by `build_compress_vks` to regenerate
-    /// `vk_map.bin` against basefold programs when `ZIREN_USE_BASEFOLD=1`.
+    /// `vk_map.bin` against the basefold compress programs.
     pub fn program_from_shape_basefold(
         &self,
         shape: ZKMCompressProgramShape,

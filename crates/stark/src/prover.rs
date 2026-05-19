@@ -353,11 +353,8 @@ where
             .collect::<Vec<_>>();
 
         // === BASEFOLD FAST PATH (default) ===
-        // BaseFold + jagged late-binding + zerocheck + LogUp-GKR is now
-        // the default proof system.  Set `ZIREN_USE_FRI=1` to opt out
-        // and use the legacy FRI + permutation + quotient path.  The
-        // FRI path is kept as a fallback / debugging tool only;
-        // production deployments should leave it disabled.
+        // BaseFold + jagged late-binding + zerocheck + LogUp-GKR is the
+        // default proof system for MIPS shards.
         //
         // (Historical note: this path was originally named "WHIR fast
         // path" while the WHIR PCS was the planned soundness pillar.
@@ -370,8 +367,7 @@ where
         // recursion-only shards) that don't declare the Cpu chip and
         // therefore lack the Fiat--Shamir constants this path assumes;
         // those still take the FRI path.
-        let force_fri = std::env::var("ZIREN_USE_FRI").unwrap_or_default() == "1";
-        let use_basefold_path = !force_fri && data.chip_ordering.contains_key("Cpu");
+        let use_basefold_path = data.chip_ordering.contains_key("Cpu");
 
         if use_basefold_path {
             let t_basefold_path = std::time::Instant::now();
