@@ -1,88 +1,14 @@
-use std::marker::PhantomData;
-
-use p3_air::Air;
-use p3_field::PrimeCharacteristicRing;
-use p3_koala_bear::KoalaBear;
-
-use super::{
-    PublicValuesOutputDigest, ZKMCompressVerifier, ZKMCompressWithVKeyVerifier,
-    ZKMCompressWithVKeyWitnessVariable, ZKMCompressWitnessVariable,
-};
-use crate::{
-    challenger::DuplexChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
-    CircuitConfig, KoalaBearFriParametersVariable,
-};
-use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
-use zkm_recursion_core::DIGEST_SIZE;
-use zkm_stark::{air::MachineAir, StarkMachine};
-
-/// A program to verify a single recursive proof representing a complete proof of program execution.
-///
-/// The root verifier is simply a `ZKMCompressVerifier` with an assertion that the `is_complete`
-/// flag is set to true.
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCompressRootVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
-}
-
-/// A program to verify a single recursive proof representing a complete proof of program execution.
-///
-/// The root verifier is simply a `ZKMCompressVerifier` with an assertion that the `is_complete`
-/// flag is set to true.
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCompressRootVerifierWithVKey<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
-}
-
-impl<C, SC, A> ZKMCompressRootVerifier<C, SC, A>
-where
-    SC: KoalaBearFriParametersVariable<C>,
-    C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
-
-    A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
-    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
-{
-    pub fn verify(
-        builder: &mut Builder<C>,
-        machine: &StarkMachine<SC, A>,
-        input: ZKMCompressWitnessVariable<C, SC>,
-        vk_root: [Felt<C::F>; DIGEST_SIZE],
-    ) {
-        // Assert that the program is complete.
-        builder.assert_felt_eq(input.is_complete, C::F::ONE);
-        // Verify the proof, as a compress proof.
-        ZKMCompressVerifier::verify(
-            builder,
-            machine,
-            input,
-            vk_root,
-            PublicValuesOutputDigest::Root,
-        );
-    }
-}
-
-impl<C, SC, A> ZKMCompressRootVerifierWithVKey<C, SC, A>
-where
-    SC: KoalaBearFriParametersVariable<
-        C,
-        FriChallengerVariable = DuplexChallengerVariable<C>,
-        DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
-    >,
-    C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
-
-    A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
-    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
-{
-    pub fn verify(
-        builder: &mut Builder<C>,
-        machine: &StarkMachine<SC, A>,
-        input: ZKMCompressWithVKeyWitnessVariable<C, SC>,
-        value_assertions: bool,
-        kind: PublicValuesOutputDigest,
-    ) {
-        // Assert that the program is complete.
-        builder.assert_felt_eq(input.compress_var.is_complete, C::F::ONE);
-        // Verify the proof, as a compress proof.
-        ZKMCompressWithVKeyVerifier::verify(builder, machine, input, value_assertions, kind);
-    }
-}
+//! ## Task #397 (May 19 2026) — FRI root-verifier deletion
+//!
+//! `ZKMCompressRootVerifier` and `ZKMCompressRootVerifierWithVKey` were
+//! thin wrappers around `ZKMCompressVerifier::verify` /
+//! `ZKMCompressWithVKeyVerifier::verify` that asserted
+//! `is_complete == ONE` and then re-entered the FRI compose body.
+//! Both have been retired together with the rest of the FRI compose
+//! chain — the basefold root behaviour is folded into the existing
+//! [`super::compress_basefold::verify_compress_basefold`] entry point
+//! by passing [`super::PublicValuesOutputDigest::Root`].
+//!
+//! The module is kept (rather than removed from `mod.rs`) so existing
+//! `pub use root::*;` re-exports stay intact while the rest of the
+//! cleanup lands; the module is empty by design.

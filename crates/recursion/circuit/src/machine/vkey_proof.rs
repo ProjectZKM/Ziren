@@ -1,10 +1,35 @@
+//! VK-merkle-proof verifier + compress-with-vkey **data-type carriers**.
+//!
+//! ## Task #397 (May 19 2026) — FRI compose-with-vkey body deletion
+//!
+//! The legacy `ZKMCompressWithVKeyVerifier::verify` body (which performed
+//! the VK merkle check and then re-entered the FRI compose verifier) has
+//! been removed. The vkey check is now inlined at the head of the basefold
+//! compose verifier (see `compress_basefold.rs:212`,
+//! `deferred_basefold.rs:168`, `wrap_basefold.rs:128`), which calls
+//! [`ZKMMerkleProofVerifier::verify`] directly.
+//!
+//! Retained surface (still on live import paths):
+//!
+//! - [`ZKMMerkleProofVerifier`] — the actual basefold-path vkey verifier,
+//!   live in three call sites.
+//! - [`ZKMMerkleProofWitnessValues`] / [`ZKMMerkleProofWitnessVariable`] —
+//!   the witness carriers for the merkle proof, consumed by
+//!   `compress_basefold::ZKMCompressBasefoldWitnessValues::vk_merkle_data`
+//!   and the deferred/wrap basefold variants.
+//! - [`ZKMCompressWithVKeyWitnessValues`] / [`ZKMCompressWithVkeyShape`] /
+//!   [`ZKMCompressWithVKeyWitnessVariable`] — data-type carriers used by
+//!   the prover (`crates/prover/src/lib.rs:1582-1620`) when assembling the
+//!   pre-compose witness payload.
+//! - `ZKMCompressWithVKeyWitnessValues::dummy` — used by the shape
+//!   enumerator pipeline.
+
 use std::marker::PhantomData;
 
-use p3_air::Air;
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
+use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
 use zkm_stark::{
     air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, OpeningProof,
@@ -12,8 +37,6 @@ use zkm_stark::{
 };
 
 use crate::{
-    challenger::DuplexChallengerVariable,
-    constraints::RecursiveVerifierConstraintFolder,
     hash::{FieldHasher, FieldHasherVariable},
     merkle_tree::{verify, MerkleProof},
     stark::MerkleProofVariable,
@@ -21,10 +44,7 @@ use crate::{
     CircuitConfig, FriProofVariable, KoalaBearFriParameters, KoalaBearFriParametersVariable,
 };
 
-use super::{
-    PublicValuesOutputDigest, ZKMCompressShape, ZKMCompressVerifier, ZKMCompressWitnessValues,
-    ZKMCompressWitnessVariable,
-};
+use super::{ZKMCompressShape, ZKMCompressWitnessValues, ZKMCompressWitnessVariable};
 
 /// A program to verify a batch of recursive proofs and aggregate their public values.
 #[derive(Debug, Clone, Copy)]
@@ -89,11 +109,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ZKMCompressWithVKeyVerifier<C, SC, A> {
-    _phantom: PhantomData<(C, SC, A)>,
-}
-
 /// Witness layout for the verifier of the proof shape phase of the compress stage.
 pub struct ZKMCompressWithVKeyWitnessVariable<
     C: CircuitConfig<F = KoalaBear>,
@@ -107,37 +122,6 @@ pub struct ZKMCompressWithVKeyWitnessVariable<
 pub struct ZKMCompressWithVKeyWitnessValues<SC: StarkGenericConfig + FieldHasher<KoalaBear>> {
     pub compress_val: ZKMCompressWitnessValues<SC>,
     pub merkle_val: ZKMMerkleProofWitnessValues<SC>,
-}
-
-impl<C, SC, A> ZKMCompressWithVKeyVerifier<C, SC, A>
-where
-    SC: KoalaBearFriParametersVariable<
-        C,
-        FriChallengerVariable = DuplexChallengerVariable<C>,
-        DigestVariable = [Felt<KoalaBear>; DIGEST_SIZE],
-    >,
-    C: CircuitConfig<F = SC::Val, EF = SC::Challenge, Bit = Felt<KoalaBear>>,
-    A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
-    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
-{
-    /// Verify the proof shape phase of the compress stage.
-    pub fn verify(
-        builder: &mut Builder<C>,
-        machine: &StarkMachine<SC, A>,
-        input: ZKMCompressWithVKeyWitnessVariable<C, SC>,
-        value_assertions: bool,
-        kind: PublicValuesOutputDigest,
-    ) {
-        let values = input
-            .compress_var
-            .vks_and_proofs
-            .iter()
-            .map(|(vk, _)| vk.hash(builder))
-            .collect::<Vec<_>>();
-        let vk_root = input.merkle_var.root.map(|x| builder.eval(x));
-        ZKMMerkleProofVerifier::verify(builder, values, input.merkle_var, value_assertions);
-        ZKMCompressVerifier::verify(builder, machine, input.compress_var, vk_root, kind);
-    }
 }
 
 impl<SC: KoalaBearFriParameters + FieldHasher<KoalaBear>> ZKMCompressWithVKeyWitnessValues<SC> {
