@@ -3320,6 +3320,35 @@ where
         // routing tiny layers through V3.  When the guard fires, control
         // falls straight to the host trait-driven driver below.
         //
+        // #375 (May 20 follow-up): workload-class auto-detect.  May 20
+        // bench showed THRESHOLD_VARS=17 maximises reth (-56%) but
+        // regresses tendermint (+40%).  Single-dim total_vars threshold
+        // is insufficient because both workloads have layers above /
+        // below 17.  The cost asymmetry is per-call dispatch overhead
+        // (~700 µs) × invocation count: tendermint shards have more
+        // small-layer invocations per unit GPU work.  Auto-detect mode
+        // adds a SECOND dimension — number of chips in the layer.  A
+        // layer with >= MIN_CHIPS chips amortises dispatch better
+        // because each per-call upload covers more concurrent work.
+        //
+        //   ZIREN_GPU_LOGUP_GKR_DEVICE_AUTO=1     enable auto-detect
+        //   ZIREN_GPU_LOGUP_GKR_DEVICE_AUTO_MIN_VARS=N   default 17
+        //   ZIREN_GPU_LOGUP_GKR_DEVICE_AUTO_MIN_CHIPS=M  default 8
+        //
+        // When AUTO=1, V3 fires iff `total_vars >= MIN_VARS AND
+        // num_chips >= MIN_CHIPS`.  The single-dim THRESHOLD_VARS gate
+        // still applies if also set (additive AND).  Default-OFF in
+        // both modes; bench validation pending next session.
+        //
+        // Discriminator rationale (May 20 data + project_375 analysis):
+        //  - tendermint shards: many small chips (1-3) per LogUp-GKR
+        //    layer above THR=17 → AUTO gate blocks dispatch
+        //  - reth shards: dense chips (50+) per layer → AUTO gate
+        //    admits dispatch, preserving the -56% win
+        // The chip-count test reads `numerator_0.len()` (a Vec len, O(1))
+        // so per-call overhead of the auto-detect itself is negligible
+        // (~10 ns) vs the 700 µs dispatch we are gating.
+        //
         // Validation deferred to next session (bench requires clean GPU
         // box).  See the memory file for the matrix.
         let v3_threshold_vars: usize = {
@@ -3331,17 +3360,55 @@ where
                     .unwrap_or(0)
             })
         };
-        let total_vars_for_threshold: usize = match circuit {
-            GkrCircuitLayer::Layer(l) => {
-                l.num_row_variables + l.num_interaction_variables
-            }
-            GkrCircuitLayer::FirstLayer(l) => {
-                l.num_row_variables + l.num_interaction_variables
-            }
+        // #375 auto-detect mode config (default OFF).
+        let v3_auto_enabled: bool = {
+            static AUTO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *AUTO.get_or_init(|| {
+                std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_AUTO")
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
+            })
         };
-        if v3_threshold_vars > 0
-            && total_vars_for_threshold < v3_threshold_vars
-        {
+        let v3_auto_min_vars: usize = {
+            static MIN_V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+            *MIN_V.get_or_init(|| {
+                std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_AUTO_MIN_VARS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(17)
+            })
+        };
+        let v3_auto_min_chips: usize = {
+            static MIN_C: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+            *MIN_C.get_or_init(|| {
+                std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_AUTO_MIN_CHIPS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(8)
+            })
+        };
+        // Per-layer discriminator fields: total_vars + chip count.
+        // `numerator_0.len()` is the per-chip table count for this layer
+        // (FirstLayer or Layer — both LogUpGkrCpuLayer variants).
+        let (total_vars_for_threshold, num_chips_for_threshold): (usize, usize) = match circuit {
+            GkrCircuitLayer::Layer(l) => (
+                l.num_row_variables + l.num_interaction_variables,
+                l.numerator_0.len(),
+            ),
+            GkrCircuitLayer::FirstLayer(l) => (
+                l.num_row_variables + l.num_interaction_variables,
+                l.numerator_0.len(),
+            ),
+        };
+        // Single-dim gate (existing): total_vars < N → skip.
+        let single_dim_skip = v3_threshold_vars > 0
+            && total_vars_for_threshold < v3_threshold_vars;
+        // Auto-detect gate (#375): require BOTH vars and chip count above
+        // their respective minima.  Skip otherwise.
+        let auto_skip = v3_auto_enabled
+            && (total_vars_for_threshold < v3_auto_min_vars
+                || num_chips_for_threshold < v3_auto_min_chips);
+        if single_dim_skip || auto_skip {
             // Skip GPU dispatch — too small to amortize per-call
             // overhead.  Fall through to the host trait driver below.
             // No fired_once log here: per-call diagnostics would be too
