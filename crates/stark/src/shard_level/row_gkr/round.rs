@@ -1344,8 +1344,13 @@ where
     let device_result: Option<(Vec<ProdEF>, Vec<ProdEF>)> = {
         static GATE: OnceLock<bool> = OnceLock::new();
         let env_on = *GATE.get_or_init(|| {
-            let v = std::env::var("ZIREN_GPU_PHASE3_DISPATCH").map(|v| v == "1").unwrap_or(false);
-            tracing::warn!("#308-PROBE phase4 gate read env_on={v}");
+            // #380 default ON to match SP1 (no per-shard env gate; phase 3
+            // device dispatch is always engaged when TLS+hook present).
+            // Opt-OUT with ZIREN_GPU_PHASE3_DISPATCH=0.
+            let v = std::env::var("ZIREN_GPU_PHASE3_DISPATCH")
+                .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+                .unwrap_or(true);
+            tracing::warn!("#308-PROBE phase4 gate read env_on={v} (default ON #380)");
             v
         });
         static REACHED: OnceLock<()> = OnceLock::new();
