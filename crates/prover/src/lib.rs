@@ -50,10 +50,7 @@ use zkm_primitives::{hash_deferred_proof, io::ZKMPublicValues};
 use zkm_recursion_circuit::{
     hash::FieldHasher,
     machine::{
-        basefold_programs::{
-            build_compose_basefold_program, build_deferred_basefold_program,
-            build_normalize_basefold_program, build_wrap_basefold_program,
-        },
+        basefold_programs::{build_normalize_basefold_program, build_wrap_basefold_program},
         build_compose_basefold_recursion_program, build_deferred_basefold_recursion_program,
         compress_basefold::ZKMCompressBasefoldWitnessValues,
         core_basefold::ZKMCoreBasefoldWitnessValues,
@@ -544,34 +541,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        // Step 5 Phase 3 step 1: env-gated dispatch to the
-        // recursion-AIR-named program builder.  Functionally identical
-        // body — the new `_recursion` variant exists to express
-        // call-site intent and to host the eventual chip-side selector
-        // soundness audit (Phase 3c). When the env override is OFF the
-        // legacy `build_compose_basefold_program` path is used so this
-        // wiring is a no-op for production today.
-        let force_basefold_for_recursion =
-            std::env::var("ZIREN_FORCE_BASEFOLD_FOR_RECURSION")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-        let mut program = if force_basefold_for_recursion {
-            build_compose_basefold_recursion_program(
-                self.compress_prover.machine(),
-                input,
-                max_log_row_count,
-                self.vk_verification,
-                PublicValuesOutputDigest::Reduce,
-            )
-        } else {
-            build_compose_basefold_program(
-                self.compress_prover.machine(),
-                input,
-                max_log_row_count,
-                self.vk_verification,
-                PublicValuesOutputDigest::Reduce,
-            )
-        };
+        // Step 5 Phase 3e (May 19 2026): basefold-for-recursion is now
+        // the default. The `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env
+        // toggle and the legacy `build_compose_basefold_program`
+        // branch have been retired — the `_recursion` variant is the
+        // sole production path. See
+        // `project_389_fri_deletion.md` for the deletion punch list.
+        let mut program = build_compose_basefold_recursion_program(
+            self.compress_prover.machine(),
+            input,
+            max_log_row_count,
+            self.vk_verification,
+            PublicValuesOutputDigest::Reduce,
+        );
         if let Some(recursion_shape_config) = &self.compress_shape_config {
             recursion_shape_config.fix_shape(&mut program);
         }
@@ -587,28 +569,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        // Step 5 Phase 3 step 1: env-gated dispatch to the
-        // recursion-AIR-named program builder (mirrors
-        // `build_compose_program_basefold_uncached`).
-        let force_basefold_for_recursion =
-            std::env::var("ZIREN_FORCE_BASEFOLD_FOR_RECURSION")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-        let mut program = if force_basefold_for_recursion {
-            build_deferred_basefold_recursion_program(
-                self.compress_prover.machine(),
-                input,
-                max_log_row_count,
-                self.vk_verification,
-            )
-        } else {
-            build_deferred_basefold_program(
-                self.compress_prover.machine(),
-                input,
-                max_log_row_count,
-                self.vk_verification,
-            )
-        };
+        // Step 5 Phase 3e (May 19 2026): basefold-for-recursion is now
+        // the default. Mirrors the cutover on
+        // `build_compose_program_basefold_uncached`.
+        let mut program = build_deferred_basefold_recursion_program(
+            self.compress_prover.machine(),
+            input,
+            max_log_row_count,
+            self.vk_verification,
+        );
         if let Some(recursion_shape_config) = &self.compress_shape_config {
             recursion_shape_config.fix_shape(&mut program);
         }
