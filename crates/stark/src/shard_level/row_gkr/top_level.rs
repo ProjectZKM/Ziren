@@ -114,67 +114,20 @@ where
         crate::basefold_late_binding::allocate_gpu_layer_circuit_id(),
     );
 
-    // #383 sub-step 2 — invoke the registered populator BEFORE binding
-    // the typed-pointer guard so the dispatch site (`round.rs::
-    // try_logup_round_gpu_v3`) sees a fully-installed circuit on the
-    // first V3 call.
+    // #383 sub-step 2 / #394 — the populator invocation moved AFTER
+    // `build_gkr_circuit` (below) because the ziren-gpu populator
+    // drains the per-circuit layer-transition registry which is only
+    // filled DURING `build_gkr_circuit`.  Invoking it at scope-entry
+    // (the original position) declined every time on production:
     //
-    // **Today's effective behavior**: no ziren-gpu hook registered yet
-    // (sub-step 2b lands separately) → `get_gpu_logup_scope_populate
-    // _hook()` returns `None`, the install is skipped, and the scope's
-    // `circuit` stays `None` — V3 dispatch falls through to the legacy
-    // TLS handle path.  Byte-equivalent to sub-step 1.
+    //   #394 V3 scope populate declined — no active layer-transition
+    //         registry circuit on current GPU
     //
-    // **Production-EF gate** (matches `enter_with_scope`'s typed-pointer
-    // contract): the populator hook only fires when `(F, EF) ==
-    // (KoalaBear, Ef4)`.  Other generic instantiations (tests, port
-    // code, recursion-circuit) skip it — preserving the test-only
-    // codepaths that don't pull the GPU populator into scope.
-    //
-    // **Future sub-step 2b** (ziren-gpu side): the populator drains the
-    // per-circuit registry's accumulated device layers into a
-    // `Vec<DeviceCircuitLayerPayload>`, ordering them bottom-up
-    // (`payloads[0] = terminal`, `payloads.last() = first_layer`).  The
-    // scope's `next_layer()` then pops in pop-order (FirstLayer first),
-    // matching SP1's `LogUpCudaCircuit::next`.
-    {
-        use core::any::TypeId;
-        type Ef4Local = p3_field::extension::BinomialExtensionField<
-            p3_koala_bear::KoalaBear, 4>;
-        if TypeId::of::<F>() == TypeId::of::<p3_koala_bear::KoalaBear>()
-            && TypeId::of::<EF>() == TypeId::of::<Ef4Local>()
-        {
-            if let Some(hook) =
-                crate::basefold_late_binding::get_gpu_logup_scope_populate_hook()
-            {
-                let cid = logup_task_scope.circuit_id();
-                if let Some(payloads) = hook(cid) {
-                    // SAFETY: TypeId gate above confirms (F, EF) ==
-                    // (KoalaBear, Ef4); the scope is therefore
-                    // structurally identical to a
-                    // `LogupTaskScope<KoalaBear, Ef4>`.  The
-                    // `install_circuit_from_payloads` impl is generic
-                    // over (F, EF) — it only requires `Field` /
-                    // `ExtensionField` bounds — so we can call it
-                    // directly on the typed scope without transmute.
-                    //
-                    // `input_data.circuit_id` matches the scope's
-                    // circuit_id (allocated above) so multi-GPU
-                    // isolation is preserved.
-                    let input_data =
-                        super::device_circuit::DeviceInputData {
-                            circuit_id: cid,
-                            num_row_variables: max_log_row_count as u32,
-                            num_interaction_variables: 0,
-                        };
-                    logup_task_scope.install_circuit_from_payloads(
-                        payloads, input_data,
-                    );
-                }
-            }
-        }
-    }
-
+    // The typed-pointer guard (`enter_with_scope`) is bound here so
+    // the V3 dispatch sees an active scope from the very first round,
+    // but the scope's `circuit` field stays `None` until the populator
+    // fires after `build_gkr_circuit` completes (see `install_circuit
+    // _from_payloads` call further down).
     let _logup_task_scope_guard =
         super::device_circuit::LogupTaskScopeGuard::enter_with_scope::<F, EF>(
             &mut logup_task_scope,
@@ -255,6 +208,70 @@ where
         sub_phase = "first_layer",
         "logup_gkr sub-phase done"
     );
+
+    // #383 sub-step 2 / #394 — invoke the registered populator AFTER
+    // `build_gkr_circuit` (which fills ziren-gpu's per-circuit
+    // layer-transition registry) but BEFORE the GKR walk fires V3
+    // dispatch (which consults the scope via `with_production_scope_
+    // mut`).  This is the correct insertion point per
+    // `project_394_substep2b_zirengpu_populator.md`: the populator
+    // drains the just-built registry into `DeviceCircuitLayerPayload`
+    // entries that the scope installs.
+    //
+    // **Production-EF gate** (matches `enter_with_scope`'s
+    // typed-pointer contract): the populator hook only fires when
+    // `(F, EF) == (KoalaBear, Ef4)`.  Other generic instantiations
+    // (tests, port code, recursion-circuit) skip it.
+    //
+    // **Default behavior**: when no ziren-gpu hook is registered
+    // (`get_gpu_logup_scope_populate_hook` returns `None`) OR the
+    // registered hook returns `None` (e.g. its own env gate is OFF),
+    // the install is skipped and the scope's `circuit` stays `None`
+    // — V3 dispatch falls through to the legacy `take_logup_v3_next_
+    // handle` TLS path.  Byte-equivalent to sub-step 1.
+    //
+    // **Borrow semantics**: `_logup_task_scope_guard` (above) holds
+    // only a raw TLS pointer, NOT a borrow.  We can still take
+    // `&mut logup_task_scope` here — the dispatch site's
+    // `with_production_scope_mut` runs strictly later in the same
+    // single-threaded function body, so no aliasing.
+    {
+        use core::any::TypeId;
+        type Ef4Local = p3_field::extension::BinomialExtensionField<
+            p3_koala_bear::KoalaBear, 4>;
+        if TypeId::of::<F>() == TypeId::of::<p3_koala_bear::KoalaBear>()
+            && TypeId::of::<EF>() == TypeId::of::<Ef4Local>()
+        {
+            if let Some(hook) =
+                crate::basefold_late_binding::get_gpu_logup_scope_populate_hook()
+            {
+                let cid = logup_task_scope.circuit_id();
+                if let Some(payloads) = hook(cid) {
+                    // SAFETY: TypeId gate above confirms (F, EF) ==
+                    // (KoalaBear, Ef4); the scope is therefore
+                    // structurally identical to a
+                    // `LogupTaskScope<KoalaBear, Ef4>`.  The
+                    // `install_circuit_from_payloads` impl is generic
+                    // over (F, EF) — it only requires `Field` /
+                    // `ExtensionField` bounds — so we can call it
+                    // directly on the typed scope without transmute.
+                    //
+                    // `input_data.circuit_id` matches the scope's
+                    // circuit_id (allocated above) so multi-GPU
+                    // isolation is preserved.
+                    let input_data =
+                        super::device_circuit::DeviceInputData {
+                            circuit_id: cid,
+                            num_row_variables: max_log_row_count as u32,
+                            num_interaction_variables: 0,
+                        };
+                    logup_task_scope.install_circuit_from_payloads(
+                        payloads, input_data,
+                    );
+                }
+            }
+        }
+    }
 
     // Step 2.5: observe circuit_output into the challenger before
     // sampling eval_point.  Mirrors `verify_logup_gkr_host` lines
@@ -361,6 +378,53 @@ where
     let mut acc_prove_us: u64 = 0;
     let mut acc_observe_us: u64 = 0;
     let mut acc_other_us: u64 = 0;
+
+    // #398 sub-step 3 — opt-in device-resident consumer.
+    //
+    // When `ZIREN_LOGUP_DEVICE_CONSUMER=1` AND the scope has an
+    // installed circuit (sub-step 2 + 2b populator wired) AND the
+    // V3 GPU hook is registered AND the production EF gate matches,
+    // skip `pull_device_layer_to_host` for `LayerState::Device`
+    // entries: pass a SHAPE-ONLY proxy to `prove_gkr_round` and let
+    // the V3 dispatch consume the device handle directly from the
+    // scope (`with_production_scope_mut` + `scope.next_layer()` in
+    // `round.rs::try_logup_round_gpu_v3`).
+    //
+    // This is the smallest first concrete sub-step of #398 — it
+    // demonstrates the device-resident consumer architecture without
+    // requiring the full SP1 `LogUpCudaCircuit::next()` port.  Default
+    // OFF so the legacy pull path remains the production path until
+    // sub-step 2b ships the ziren-gpu populator that actually fills
+    // the scope.
+    //
+    // SP1 reference: `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs`
+    // (LogUpCudaCircuit::next at line 167 — pops from
+    // `materialized_layers` Vec, never pulls to host).
+    //
+    // **Safety contract** — the shape-only proxy is sound to pass to
+    // `prove_gkr_round` ONLY when the V3 hook is GUARANTEED to
+    // consume the scope handle (and never read `cells`).  We enforce
+    // this here by also gating on `ZIREN_GPU_LOGUP_GKR_DEVICE != 0`
+    // (V3 hook env gate — default ON per #380).  When V3 declines
+    // (e.g. threshold-skip or hook unregistered), the host fallback
+    // path in `prove_gkr_round` will read the empty cells and panic.
+    // Sub-step 3 follow-ups (separate session): make this default-on
+    // once the populator-hook coverage matches V3 dispatch coverage.
+    let device_consumer_enabled: bool = {
+        use core::any::TypeId;
+        type Ef4Local = p3_field::extension::BinomialExtensionField<
+            p3_koala_bear::KoalaBear, 4>;
+        let env_set = std::env::var("ZIREN_LOGUP_DEVICE_CONSUMER")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let v3_enabled = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
+            .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+            .unwrap_or(true);
+        let ef_gate = TypeId::of::<F>() == TypeId::of::<p3_koala_bear::KoalaBear>()
+            && TypeId::of::<EF>() == TypeId::of::<Ef4Local>();
+        env_set && v3_enabled && ef_gate
+    };
+
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         let _t_iter_start = std::time::Instant::now();
         // Sample lambda for this round.
@@ -374,10 +438,20 @@ where
         // outlives the call.  The owner is dropped at end of scope
         // (each iteration), releasing the host materialization before
         // the next round allocates.
+        //
+        // #398 sub-step 3 — when `device_consumer_enabled` AND this is
+        // a `LayerState::Device` entry AND the scope's peek matches
+        // this entry's shape, we construct a shape-only proxy instead
+        // of pulling; the V3 dispatch reads from the scope handle.
         let _t_pull_start = std::time::Instant::now();
         let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
             super::layer::LayerState::Host(_) => None,
-            super::layer::LayerState::Device { circuit_id, handle, .. } => {
+            super::layer::LayerState::Device {
+                circuit_id,
+                handle,
+                num_row_variables: state_num_rv,
+                num_interaction_variables: state_num_iv,
+            } => {
                 // Record the per-circuit ID for the post-loop drain.
                 // Every Device entry from the same `build_gkr_circuit`
                 // invocation shares the same circuit_id (allocated
@@ -393,7 +467,34 @@ where
                          share circuit_id"
                     );
                 }
-                Some(pull_device_layer_to_host::<F, EF>(*circuit_id, *handle))
+
+                // #398 sub-step 3 — device-resident consumer fast path.
+                // The scope peek tells us if a layer is available; we
+                // require shape parity with the `LayerState::Device`
+                // entry to guard against ordering mismatches between
+                // the populator's bottom-up Vec and the consumer's
+                // iteration order.
+                let scope_shape_matches = if device_consumer_enabled {
+                    super::device_circuit::with_production_scope_mut(|scope| {
+                        scope.peek_next_layer_shape()
+                    })
+                    .flatten()
+                    .map(|(rv, iv)| rv == *state_num_rv && iv == *state_num_iv)
+                    .unwrap_or(false)
+                } else {
+                    false
+                };
+
+                if scope_shape_matches {
+                    // Skip the host pull — pass a shape-only proxy.
+                    // V3 dispatch will consume the scope handle.
+                    Some(super::layer::GkrCircuitLayer::<F, EF>::shape_only_layer_proxy(
+                        *state_num_rv,
+                        *state_num_iv,
+                    ))
+                } else {
+                    Some(pull_device_layer_to_host::<F, EF>(*circuit_id, *handle))
+                }
             }
         };
 

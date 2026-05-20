@@ -187,10 +187,12 @@ impl core::fmt::Debug for DeviceLayerHandle {
 /// the shape metadata to dispatch on, so we don't pull the heavy
 /// `JaggedTraceMle` / chip-set types in here.
 ///
-/// **#371 hook-point:** The V3 hook will accept a `DeviceInputData`
-/// reference and invoke a registered `generate_first_layer_hook`
-/// keyed on `circuit_id`.
-#[derive(Clone, Debug)]
+/// **#371 / #376 hook-point:** The
+/// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`] hook
+/// accepts a `circuit_id` and consults the ziren-gpu side's
+/// per-circuit registry — the [`DeviceInputData::input_handle`]
+/// payload below carries the matching opaque chip/trace bundle.
+#[derive(Clone)]
 pub struct DeviceInputData {
     /// Multi-GPU scoping ID (matches [`DeviceLayerHandle::circuit_id`]).
     pub circuit_id: u64,
@@ -201,6 +203,97 @@ pub struct DeviceInputData {
     /// log₂ of (total interaction count rounded up to the next power
     /// of two).
     pub num_interaction_variables: u32,
+    /// #376 sub-step 1 — opaque input-data bundle the GPU side
+    /// downcasts when the regen hook fires.
+    ///
+    /// Analogue of SP1's
+    /// [`GkrInputData`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs#L36-L51)
+    /// `chip_set` / `all_interactions` / `jagged_trace_data` / `alpha`
+    /// / `beta_seed` fields — Ziren keeps them type-erased on the
+    /// stark side and lets ziren-gpu own the concrete payload type
+    /// (typically wrapping the per-shard
+    /// [`crate::shard_level::DeviceTraceProvider`] + the alpha/beta
+    /// challenges + the chip ordering vec).
+    ///
+    /// **Lifetime contract**: when present, the payload MUST stay
+    /// alive for as long as the GKR-circuit walk could fire the
+    /// regen hook on this `circuit_id`.  In practice the ziren-gpu
+    /// side stashes the payload in its `PerCircuitRegistry` (keyed
+    /// by `circuit_id`) at `gpu_layer_init_hook` time and drops it
+    /// alongside the rest of the bucket at
+    /// `gpu_layer_drain_circuit_hook`.
+    ///
+    /// **`None` semantics**: the regen hook is unavailable for this
+    /// circuit (no recompute mode armed, or older ziren-gpu build).
+    /// `DeviceLogupGkrCircuit::next` translates the missing payload
+    /// into a return-`None`, surfacing the existing pull-stub panic
+    /// in ziren-gpu when the drop path was taken without a regen hook.
+    pub input_handle: Option<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
+}
+
+impl DeviceInputData {
+    /// Construct a `DeviceInputData` with `input_handle = None` —
+    /// the minimal shape needed by today's call sites (#368 / #383
+    /// scaffold, which carries no regen payload).
+    ///
+    /// Use [`Self::with_input_handle`] (or the builder-style
+    /// [`Self::set_input_handle`]) to install the regen payload
+    /// before handing the struct off to a [`DeviceLogupGkrCircuit`]
+    /// that may need to invoke
+    /// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`].
+    #[must_use]
+    pub fn new(
+        circuit_id: u64,
+        num_row_variables: u32,
+        num_interaction_variables: u32,
+    ) -> Self {
+        Self {
+            circuit_id,
+            num_row_variables,
+            num_interaction_variables,
+            input_handle: None,
+        }
+    }
+
+    /// Builder variant of [`Self::new`] that takes the opaque
+    /// regen payload.
+    #[must_use]
+    pub fn with_input_handle(
+        circuit_id: u64,
+        num_row_variables: u32,
+        num_interaction_variables: u32,
+        input_handle: alloc::sync::Arc<dyn core::any::Any + Send + Sync>,
+    ) -> Self {
+        Self {
+            circuit_id,
+            num_row_variables,
+            num_interaction_variables,
+            input_handle: Some(input_handle),
+        }
+    }
+
+    /// Install or replace the opaque regen payload after
+    /// construction.  Returns the previous value (if any).
+    pub fn set_input_handle(
+        &mut self,
+        handle: alloc::sync::Arc<dyn core::any::Any + Send + Sync>,
+    ) -> Option<alloc::sync::Arc<dyn core::any::Any + Send + Sync>> {
+        self.input_handle.replace(handle)
+    }
+}
+
+impl core::fmt::Debug for DeviceInputData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DeviceInputData")
+            .field("circuit_id", &self.circuit_id)
+            .field("num_row_variables", &self.num_row_variables)
+            .field("num_interaction_variables", &self.num_interaction_variables)
+            .field(
+                "input_handle",
+                &self.input_handle.as_ref().map(|_| "<opaque>"),
+            )
+            .finish()
+    }
 }
 
 /// A single circuit layer, mirroring SP1's
@@ -367,6 +460,50 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.materialized_layers.is_empty() && self.num_virtual_layers == 0
+    }
+
+    /// Peek at the shape of the next layer that [`Self::next`] would
+    /// yield, WITHOUT consuming it.
+    ///
+    /// Returns `(num_row_variables, num_interaction_variables)` of the
+    /// top-of-stack [`DeviceCircuitLayer`] or `None` when the circuit
+    /// is exhausted.
+    ///
+    /// ## `#398 sub-step 3` — device-resident consumer
+    ///
+    /// The intermediate-layer consumer in `top_level.rs` uses this
+    /// peek to discover the shape of a scope-installed layer BEFORE
+    /// deciding whether to skip `pull_device_layer_to_host`.  When the
+    /// peek's shape matches the `LayerState::Device` entry's
+    /// `(num_row_variables, num_interaction_variables)`, the consumer
+    /// can construct a shape-only `GkrCircuitLayer` proxy (empty cell
+    /// vectors) and skip the host pull entirely — the V3 dispatch
+    /// site reads the actual data from the scope-attached device
+    /// handle via `scope.next_layer().to_sumcheck_handle()`.
+    ///
+    /// Mirrors SP1's pattern in
+    /// [`LogUpCudaCircuit::next`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/tracegen.rs#L168-L186)
+    /// — except SP1 doesn't need a peek because its consumer never
+    /// has a host fallback path.
+    #[inline]
+    #[must_use]
+    pub fn peek_next_layer_shape(&self) -> Option<(usize, usize)> {
+        if let Some(last) = self.materialized_layers.last() {
+            return Some((last.num_row_variables(), last.num_interaction_variables()));
+        }
+        if self.num_virtual_layers == 0 {
+            return None;
+        }
+        debug_assert_eq!(
+            self.num_virtual_layers, 1,
+            "DeviceLogupGkrCircuit: lazy regeneration only supports a single virtual layer"
+        );
+        // Lazy first-layer placeholder shape — reduces `num_row_variables`
+        // by one to match SP1's `generate_first_layer` convention.
+        Some((
+            (self.input_data.num_row_variables.saturating_sub(1)) as usize,
+            self.input_data.num_interaction_variables as usize,
+        ))
     }
 
     /// Pop the next layer in bottom-up order.
@@ -553,6 +690,27 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     /// a free-standing TLS.
     pub fn next_layer(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
         self.circuit.as_mut().and_then(|c| c.next())
+    }
+
+    /// #398 sub-step 3 — read-only shape peek on the next layer.
+    ///
+    /// Returns `(num_row_variables, num_interaction_variables)` of the
+    /// top-of-stack layer without consuming it.  `None` when no
+    /// circuit was installed or the stack is exhausted.
+    ///
+    /// Used by the device-resident consumer path in `top_level.rs` to
+    /// validate that the scope-installed layer matches the
+    /// `LayerState::Device` entry's shape BEFORE skipping
+    /// `pull_device_layer_to_host`.  When the shapes match AND the
+    /// `ZIREN_LOGUP_DEVICE_CONSUMER` flag is set, the consumer skips
+    /// the host pull and passes a shape-only proxy to
+    /// `prove_gkr_round`.  Byte-equivalent to the legacy path when
+    /// the V3 hook (which reads from the scope handle) is registered
+    /// and active.
+    #[inline]
+    #[must_use]
+    pub fn peek_next_layer_shape(&self) -> Option<(usize, usize)> {
+        self.circuit.as_ref().and_then(|c| c.peek_next_layer_shape())
     }
 
     /// #383 sub-step 2 — install a circuit from a populator-provided
@@ -963,6 +1121,53 @@ mod tests {
         let l1 = scope.next_layer().expect("terminal layer");
         assert!(matches!(l1, DeviceCircuitLayer::Materialized(_, _)));
         assert!(scope.next_layer().is_none());
+    }
+
+    /// #398 sub-step 3 — `peek_next_layer_shape` reads the shape of
+    /// the top-of-stack layer without consuming it; verify that
+    /// `next_layer` still yields the same layer afterward.
+    #[test]
+    fn peek_next_layer_shape_is_non_consuming() {
+        let input_data = DeviceInputData {
+            circuit_id: 91,
+            num_row_variables: 3,
+            num_interaction_variables: 2,
+        };
+        let layers = vec![
+            // bottom-up: terminal first (popped LAST), first_layer last (popped FIRST)
+            DeviceCircuitLayer::<KoalaBear, EF>::Materialized(make_handle(7, 1, 2), PhantomData),
+            DeviceCircuitLayer::<KoalaBear, EF>::FirstLayer(make_handle(8, 2, 2), PhantomData),
+        ];
+        let circuit = DeviceLogupGkrCircuit::<KoalaBear, EF>::new(layers, input_data, 0);
+
+        let mut scope = LogupTaskScope::<KoalaBear, EF>::new(91);
+        scope.install_circuit(circuit);
+
+        // Peek the top of stack — should be the FirstLayer (last entry).
+        let peek1 = scope.peek_next_layer_shape().expect("peek non-empty");
+        assert_eq!(peek1, (2, 2));
+
+        // Re-peek without pop yields the same shape.
+        let peek2 = scope.peek_next_layer_shape().expect("peek non-empty");
+        assert_eq!(peek2, (2, 2));
+
+        // Now pop and verify the next peek shifts to the underlying layer.
+        let popped = scope.next_layer().expect("pop FirstLayer");
+        assert!(matches!(popped, DeviceCircuitLayer::FirstLayer(_, _)));
+        let peek3 = scope.peek_next_layer_shape().expect("peek terminal");
+        assert_eq!(peek3, (1, 2));
+
+        // Pop terminal — peek returns None.
+        let _popped = scope.next_layer().expect("pop terminal");
+        assert!(scope.peek_next_layer_shape().is_none());
+    }
+
+    /// #398 sub-step 3 — `peek_next_layer_shape` returns `None` when
+    /// no circuit is installed.
+    #[test]
+    fn peek_next_layer_shape_none_without_circuit() {
+        let scope = LogupTaskScope::<KoalaBear, EF>::new(42);
+        assert!(scope.peek_next_layer_shape().is_none());
     }
 
     /// #383 — RAII guard binds + unbinds the active circuit_id slot.
