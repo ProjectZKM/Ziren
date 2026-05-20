@@ -113,6 +113,68 @@ where
     let mut logup_task_scope = super::device_circuit::LogupTaskScope::<F, EF>::new(
         crate::basefold_late_binding::allocate_gpu_layer_circuit_id(),
     );
+
+    // #383 sub-step 2 — invoke the registered populator BEFORE binding
+    // the typed-pointer guard so the dispatch site (`round.rs::
+    // try_logup_round_gpu_v3`) sees a fully-installed circuit on the
+    // first V3 call.
+    //
+    // **Today's effective behavior**: no ziren-gpu hook registered yet
+    // (sub-step 2b lands separately) → `get_gpu_logup_scope_populate
+    // _hook()` returns `None`, the install is skipped, and the scope's
+    // `circuit` stays `None` — V3 dispatch falls through to the legacy
+    // TLS handle path.  Byte-equivalent to sub-step 1.
+    //
+    // **Production-EF gate** (matches `enter_with_scope`'s typed-pointer
+    // contract): the populator hook only fires when `(F, EF) ==
+    // (KoalaBear, Ef4)`.  Other generic instantiations (tests, port
+    // code, recursion-circuit) skip it — preserving the test-only
+    // codepaths that don't pull the GPU populator into scope.
+    //
+    // **Future sub-step 2b** (ziren-gpu side): the populator drains the
+    // per-circuit registry's accumulated device layers into a
+    // `Vec<DeviceCircuitLayerPayload>`, ordering them bottom-up
+    // (`payloads[0] = terminal`, `payloads.last() = first_layer`).  The
+    // scope's `next_layer()` then pops in pop-order (FirstLayer first),
+    // matching SP1's `LogUpCudaCircuit::next`.
+    {
+        use core::any::TypeId;
+        type Ef4Local = p3_field::extension::BinomialExtensionField<
+            p3_koala_bear::KoalaBear, 4>;
+        if TypeId::of::<F>() == TypeId::of::<p3_koala_bear::KoalaBear>()
+            && TypeId::of::<EF>() == TypeId::of::<Ef4Local>()
+        {
+            if let Some(hook) =
+                crate::basefold_late_binding::get_gpu_logup_scope_populate_hook()
+            {
+                let cid = logup_task_scope.circuit_id();
+                if let Some(payloads) = hook(cid) {
+                    // SAFETY: TypeId gate above confirms (F, EF) ==
+                    // (KoalaBear, Ef4); the scope is therefore
+                    // structurally identical to a
+                    // `LogupTaskScope<KoalaBear, Ef4>`.  The
+                    // `install_circuit_from_payloads` impl is generic
+                    // over (F, EF) — it only requires `Field` /
+                    // `ExtensionField` bounds — so we can call it
+                    // directly on the typed scope without transmute.
+                    //
+                    // `input_data.circuit_id` matches the scope's
+                    // circuit_id (allocated above) so multi-GPU
+                    // isolation is preserved.
+                    let input_data =
+                        super::device_circuit::DeviceInputData {
+                            circuit_id: cid,
+                            num_row_variables: max_log_row_count as u32,
+                            num_interaction_variables: 0,
+                        };
+                    logup_task_scope.install_circuit_from_payloads(
+                        payloads, input_data,
+                    );
+                }
+            }
+        }
+    }
+
     let _logup_task_scope_guard =
         super::device_circuit::LogupTaskScopeGuard::enter_with_scope::<F, EF>(
             &mut logup_task_scope,

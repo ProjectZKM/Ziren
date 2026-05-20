@@ -707,6 +707,70 @@ pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
     GPU_LAYER_DRAIN_HOOK.get().copied()
 }
 
+/// #383 sub-step 2 — populate the per-shard `LogupTaskScope` with
+/// device-resident layer payloads at scope-entry.
+///
+/// **Purpose**: SP1's `generate_gkr_circuit` materializes every GKR
+/// layer up front on device, then hands the per-shard
+/// `LogUpCudaCircuit<'a, TaskScope>` to the per-round prover which
+/// `pop()`s a layer per call (see
+/// `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/tracegen.rs:188-246`).  Ziren's
+/// `top_level.rs::prove_shard_logup_gkr_rows` now allocates a
+/// `LogupTaskScope` at the same lifetime boundary (#383 sub-step 1)
+/// and invokes this hook (sub-step 2) so the ziren-gpu side can fill
+/// the scope's `DeviceLogupGkrCircuit` from its own device-resident
+/// per-circuit registry.
+///
+/// **Contract**: returns `Some(payloads)` when the GPU populator has
+/// at least one device-resident layer available for `circuit_id`;
+/// returns `None` when the populator declines (host-only path, env
+/// gate off, populator not yet warmed, etc.) — the V3 dispatch then
+/// falls back to the legacy `take_logup_v3_next_handle` TLS path
+/// installed in sub-step 1.
+///
+/// **Ordering**: `payloads[0]` MUST be the TERMINAL layer (smallest
+/// `num_row_variables`, popped LAST by `scope.next_layer()`), and the
+/// last entry MUST be the FIRST LAYER (largest, popped FIRST).  This
+/// matches SP1's `materialized_layers.pop()` semantics — Ziren's
+/// `DeviceLogupGkrCircuit::next` is a literal `Vec::pop`.
+///
+/// **Lifetime**: the returned `Arc` payloads are held by the scope for
+/// the duration of `prove_shard_logup_gkr_rows`; they drop when the
+/// scope guard's `Drop` runs at function exit.  The populator MUST
+/// ensure its concrete payload type matches what the registered V3
+/// hook downcasts to (today: ziren-gpu's `DeviceLogupLayerState`).
+///
+/// **No-op fallback**: when this hook is not registered (older
+/// ziren-gpu builds, or when the feature is disabled), `top_level.rs`
+/// skips the install call and the scope's `circuit` stays `None` —
+/// byte-equivalent to pre-#383 dispatch via the legacy TLS handle.
+pub type GpuLogupScopePopulateFn = fn(
+    circuit_id: u64,
+) -> Option<
+    Vec<crate::shard_level::row_gkr::device_circuit::DeviceCircuitLayerPayload>,
+>;
+
+static GPU_LOGUP_SCOPE_POPULATE_HOOK: std::sync::OnceLock<GpuLogupScopePopulateFn> =
+    std::sync::OnceLock::new();
+
+/// Register the populate-at-scope-entry hook.  Idempotent; returns
+/// `Err(existing_hook)` when a hook was already registered.  Called
+/// once at ziren-gpu startup (see sub-step 2b — `basefold/src/
+/// logup_scope_populate.rs` in the ziren-gpu repo).
+pub fn register_gpu_logup_scope_populate_hook(
+    f: GpuLogupScopePopulateFn,
+) -> Result<(), GpuLogupScopePopulateFn> {
+    GPU_LOGUP_SCOPE_POPULATE_HOOK.set(f)
+}
+
+/// Read the registered populate-at-scope-entry hook, if any.  Callers
+/// MUST handle `None` gracefully — see contract on
+/// [`GpuLogupScopePopulateFn`].
+#[must_use]
+pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
+    GPU_LOGUP_SCOPE_POPULATE_HOOK.get().copied()
+}
+
 /// Process-wide monotonic counter for GKR-circuit IDs.  Each
 /// `build_gkr_circuit` call that takes the device path allocates a
 /// fresh ID via [`allocate_gpu_layer_circuit_id`] and threads it

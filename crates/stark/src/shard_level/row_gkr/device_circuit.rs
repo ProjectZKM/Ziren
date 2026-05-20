@@ -554,6 +554,76 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     pub fn next_layer(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
         self.circuit.as_mut().and_then(|c| c.next())
     }
+
+    /// #383 sub-step 2 — install a circuit from a populator-provided
+    /// payload vector.  Each entry becomes a [`DeviceCircuitLayer::
+    /// Materialized`]; ordering is bottom-up (matches
+    /// `materialized_layers.pop()` semantics — see SP1's
+    /// `generate_gkr_circuit` at `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/
+    /// tracegen.rs:188-246` for the canonical order).
+    ///
+    /// The populator (a ziren-gpu side hook, sub-step 2b) is responsible
+    /// for ordering: index 0 = TERMINAL (smallest `num_row_variables`,
+    /// popped LAST), last index = FIRST LAYER (largest, popped FIRST).
+    ///
+    /// `num_virtual_layers` is set to `0` — populators that materialize
+    /// every layer up front (the SP1-style "eager" mode) need no lazy
+    /// regen; deferred-FirstLayer mode is a future extension.
+    pub fn install_circuit_from_payloads(
+        &mut self,
+        payloads: Vec<DeviceCircuitLayerPayload>,
+        input_data: DeviceInputData,
+    ) {
+        let layers: Vec<DeviceCircuitLayer<F, EF>> = payloads
+            .into_iter()
+            .map(|p| {
+                let handle = DeviceLayerHandle::new(
+                    p.inner,
+                    p.num_row_variables,
+                    p.num_interaction_variables,
+                    input_data.circuit_id,
+                );
+                DeviceCircuitLayer::Materialized(handle, PhantomData)
+            })
+            .collect();
+        self.install_circuit(DeviceLogupGkrCircuit::new(
+            layers,
+            input_data,
+            0,
+        ));
+    }
+}
+
+/// #383 sub-step 2 — populator payload describing a single device-side
+/// GKR layer's opaque handle + shape metadata.
+///
+/// Returned by the [`crate::basefold_late_binding::GpuLogupScopePopulateFn`]
+/// hook and consumed by [`LogupTaskScope::install_circuit_from_payloads`]
+/// to build the per-shard `DeviceLogupGkrCircuit` at scope-entry without
+/// pulling any device-side types into the stark crate.
+///
+/// The `inner` Arc payload is whatever concrete type the registered V3
+/// hook downcasts to — today that's ziren-gpu's `DeviceLogupLayerState`.
+/// The stark crate treats it as fully opaque via the
+/// [`AnyDeviceHandle`] marker trait (`Any + Send + Sync`).
+#[derive(Clone)]
+pub struct DeviceCircuitLayerPayload {
+    /// Opaque type-erased payload — concrete impl supplied by the
+    /// registered ziren-gpu populator hook.
+    pub inner: Arc<dyn AnyDeviceHandle>,
+    /// log₂ of row count for this layer.
+    pub num_row_variables: usize,
+    /// log₂ of (max chip-interaction count rounded up).
+    pub num_interaction_variables: usize,
+}
+
+impl core::fmt::Debug for DeviceCircuitLayerPayload {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DeviceCircuitLayerPayload")
+            .field("num_row_variables", &self.num_row_variables)
+            .field("num_interaction_variables", &self.num_interaction_variables)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Thread-local slot carrying the per-shard scope `circuit_id`.
@@ -1016,6 +1086,100 @@ mod tests {
         let any_ref: &dyn core::any::Any = &*v3_handle.0;
         let test = any_ref.downcast_ref::<TestHandle>().expect("downcast");
         assert_eq!(test.tag, 99);
+    }
+
+    /// #383 sub-step 2 — `install_circuit_from_payloads` builds a
+    /// `DeviceLogupGkrCircuit` from populator-provided payloads and
+    /// makes `next_layer()` return them in pop-order (bottom-up
+    /// reverse).  Mirrors what the ziren-gpu populator hook will do
+    /// at scope-entry.
+    #[test]
+    fn install_circuit_from_payloads_populates_pop_order() {
+        let input_data = DeviceInputData {
+            circuit_id: 300,
+            num_row_variables: 4,
+            num_interaction_variables: 2,
+        };
+        // Payloads ordered bottom-up: index 0 = terminal (popped LAST),
+        // last index = FirstLayer (popped FIRST).
+        let payloads = vec![
+            DeviceCircuitLayerPayload {
+                inner: Arc::new(TestHandle { tag: 901 }),
+                num_row_variables: 1,
+                num_interaction_variables: 2,
+            },
+            DeviceCircuitLayerPayload {
+                inner: Arc::new(TestHandle { tag: 902 }),
+                num_row_variables: 2,
+                num_interaction_variables: 2,
+            },
+            DeviceCircuitLayerPayload {
+                inner: Arc::new(TestHandle { tag: 903 }),
+                num_row_variables: 3,
+                num_interaction_variables: 2,
+            },
+        ];
+
+        let mut scope = LogupTaskScope::<KoalaBear, EF>::new(300);
+        assert!(scope.circuit().is_none());
+        scope.install_circuit_from_payloads(payloads, input_data.clone());
+
+        // Scope now reports installed circuit + input_data.
+        assert!(scope.circuit().is_some());
+        assert!(scope.input_data().is_some());
+        assert_eq!(scope.input_data().unwrap().circuit_id, 300);
+
+        // Pop order: FirstLayer (tag 903) → intermediate (902) → terminal (901).
+        let l0 = scope.next_layer().expect("first layer");
+        let h0 = l0.as_handle().expect("materialized handle");
+        let any0: &dyn core::any::Any = &**h0.inner();
+        assert_eq!(any0.downcast_ref::<TestHandle>().unwrap().tag, 903);
+        assert_eq!(h0.num_row_variables(), 3);
+        // circuit_id propagated from input_data into the synthesized handle.
+        assert_eq!(h0.circuit_id(), 300);
+
+        let l1 = scope.next_layer().expect("middle layer");
+        let h1 = l1.as_handle().unwrap();
+        assert_eq!(
+            (&**h1.inner() as &dyn core::any::Any)
+                .downcast_ref::<TestHandle>()
+                .unwrap()
+                .tag,
+            902
+        );
+        assert_eq!(h1.num_row_variables(), 2);
+
+        let l2 = scope.next_layer().expect("terminal layer");
+        let h2 = l2.as_handle().unwrap();
+        assert_eq!(
+            (&**h2.inner() as &dyn core::any::Any)
+                .downcast_ref::<TestHandle>()
+                .unwrap()
+                .tag,
+            901
+        );
+        assert_eq!(h2.num_row_variables(), 1);
+
+        // Fourth call: exhausted.
+        assert!(scope.next_layer().is_none());
+    }
+
+    /// #383 sub-step 2 — empty payload vec installs an empty circuit;
+    /// `next_layer()` returns None immediately.  Populators with no
+    /// device-side state to share (e.g. host-only path) hit this case.
+    #[test]
+    fn install_circuit_from_payloads_empty_yields_none() {
+        let input_data = DeviceInputData {
+            circuit_id: 301,
+            num_row_variables: 2,
+            num_interaction_variables: 1,
+        };
+        let mut scope = LogupTaskScope::<KoalaBear, EF>::new(301);
+        scope.install_circuit_from_payloads(Vec::new(), input_data);
+        // Installed but empty — circuit() Some, next_layer() None.
+        assert!(scope.circuit().is_some());
+        assert!(scope.input_data().is_some());
+        assert!(scope.next_layer().is_none());
     }
 
     /// #383 sub-step 1 — pop a layer from an installed scope via
