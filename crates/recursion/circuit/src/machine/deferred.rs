@@ -245,10 +245,16 @@ where
 }
 
 impl ZKMDeferredWitnessValues<KoalaBearPoseidon2> {
-    pub fn dummy<A: MachineAir<KoalaBear>>(
+    /// Step 5 Phase 3b (May 19 2026) bound widening — see the matching
+    /// note on `ZKMCompressWitnessValues::dummy`.
+    pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMDeferredShape,
-    ) -> Self {
+    ) -> Self
+    where
+        A: MachineAir<KoalaBear>
+            + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+    {
         let inner_witness =
             ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.inner);
         let vks_and_proofs = inner_witness.vks_and_proofs;

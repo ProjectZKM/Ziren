@@ -99,37 +99,178 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 /// to the LEGACY FRI shape because recursion shards take FRI; this
 /// dispatcher prepares for the inverse — realigning to BASEFOLD
 /// shape once recursion shards take basefold via the env override.
-pub fn dummy_recursion_shard_proof_dispatcher<A: MachineAir<KoalaBear>>(
+pub fn dummy_recursion_shard_proof_dispatcher<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
-) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
+) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>)
+where
+    A: MachineAir<KoalaBear>
+        + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+{
     let force_basefold_for_recursion = std::env::var("ZIREN_FORCE_BASEFOLD_FOR_RECURSION")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
 
     if force_basefold_for_recursion {
-        // Phase 3b work item (not yet landed).  Mirroring SP1's
-        // basefold-shaped dummy + the existing
-        // [`dummy_basefold_vk_and_shard_proof`] (which is MipsAir-
-        // parameterised) needs a RecursionAir-parameterised analog
-        // that emits a `ShardProof` with `basefold_shard_proof: Some(_)`
-        // and empty FRI fields (no aux_commits, empty perm/quotient
-        // opened values), matching the on-the-wire shape the host
-        // prover produces under `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1`.
+        // Phase 3b (May 19 2026) — basefold-shaped recursion shard
+        // dummy wired in.  `dummy_recursion_basefold_vk_and_shard_proof`
+        // re-wraps the basefold proof produced by the existing
+        // `dummy_basefold_vk_and_shard_proof` (RecursionAir works
+        // through its generic A parameter — RecursionAir's MachineAir +
+        // Air<VerifierConstraintFolder> bounds are satisfied via the
+        // standard derive macro) into a ShardProof carrier whose FRI
+        // fields are empty and `basefold_shard_proof: Some(_)`.
         //
-        // Until that lands, fail loudly with a pointer so a future
-        // session running with the override ON gets a clear next-step
-        // instead of opaque witness-stream misalignment downstream.
-        unimplemented!(
-            "ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1 set, but the basefold-shaped \
-             recursion shard dummy enumerator is not yet ported.  Phase 3b work \
-             item: build `dummy_recursion_basefold_vk_and_shard_proof` (RecursionAir-\
-             parameterised analog of `dummy_basefold_vk_and_shard_proof`) and route \
-             it from here.  See `project_step5_phase3_roadmap.md` Phase 3b + 3c."
-        );
+        // This matches the on-the-wire shape the host prover emits
+        // when `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` widens the
+        // basefold gate to recursion shards
+        // (`crates/stark/src/prover.rs:600-610`).
+        return dummy_recursion_basefold_vk_and_shard_proof(machine, shape);
     }
 
     dummy_vk_and_shard_proof(machine, shape)
+}
+
+/// Step 5 Phase 3b basefold-shaped recursion shard dummy (May 19 2026).
+///
+/// Produces a `(StarkVerifyingKey, ShardProof)` pair whose
+/// `ShardProof` carries:
+///   - `commitment.auxiliary_commits = vec![]` (no perm + quotient commits)
+///   - `opened_values` with empty `permutation`/`quotient` fields
+///   - `opening_proof` from the basefold-mode FRI sub-proof (prep + main only)
+///   - `basefold_shard_proof: Some(_)` populated with the dummy
+///     basefold shard proof from `dummy_basefold_vk_and_shard_proof`.
+///
+/// This mirrors the real prover output shape at
+/// `crates/stark/src/prover.rs:600-610` (the `use_basefold_path`
+/// return branch).  RecursionAir-parameterised because the inner
+/// `dummy_basefold_vk_and_shard_proof` already drives the
+/// `prove_shard_to_basefold` host path with the chip set from
+/// `machine`, so passing in a `StarkMachine<KBP2, RecursionAir<_,_>>`
+/// produces a basefold proof shaped for recursion chips
+/// (BaseAlu/ExtAlu/Poseidon2/FriFold/etc.) instead of MIPS chips.
+///
+/// # Status (scaffold)
+///
+/// The opening_proof + opened_values FRI placeholders are minimal
+/// (empty perm/quotient, opening_proof from a small pcs.open call
+/// mirroring the prover branch).  Cryptographic soundness of the
+/// dummy isn't required — consumers (`program_from_shape`) only
+/// care about the witness-stream shape, which is driven by
+/// chip_ordering + chip_cumulative_sums in the basefold sub-proof.
+///
+/// Wraps the inner `BasefoldShardProof` in a `Box` per the
+/// `ShardProof::basefold_shard_proof: Option<Box<_>>` definition.
+///
+/// # Trait bounds
+///
+/// Same `A: MachineAir + Air<VerifierConstraintFolder>` bounds as
+/// `dummy_basefold_vk_and_shard_proof` — both `MipsAir` and
+/// `RecursionAir<F, DEGREE>` satisfy these via the standard derive
+/// macro at `crates/derive/src/lib.rs:218,321`.
+pub fn dummy_recursion_basefold_vk_and_shard_proof<A>(
+    machine: &StarkMachine<KoalaBearPoseidon2, A>,
+    shape: &OrderedShape,
+) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>)
+where
+    A: MachineAir<KoalaBear>
+        + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+{
+    // Produce the basefold shard proof + matching VK using the
+    // existing infrastructure.  The chip set and per-chip shapes
+    // come from the machine + shape pair.
+    let (vk, basefold_proof) = dummy_basefold_vk_and_shard_proof::<A>(machine, shape);
+
+    // Build the empty FRI placeholder fields matching the real
+    // basefold-path prover output at `prover.rs:600-610`.  Empty
+    // auxiliary_commits + empty perm/quotient opened values.  The
+    // chip_ordering carries the name → index map needed by
+    // recursion-side Witnessable::read to fix the witness-stream
+    // order.
+    let chip_ordering = shape
+        .inner
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| (name.clone(), i))
+        .collect::<HashMap<_, _>>();
+
+    // Per-chip ChipOpenedValues with empty permutation / quotient
+    // arrays — matching the prover's basefold-path emission at
+    // `prover.rs:559-568`.  Preprocessed + main keep their real
+    // widths so the witness reader still walks the right number
+    // of felts; perm + quotient are empty because the basefold
+    // pipeline doesn't commit them.
+    let shard_chips = machine.shard_chips_ordered(&chip_ordering).collect::<Vec<_>>();
+    let opened_values = ShardOpenedValues {
+        chips: shard_chips
+            .iter()
+            .zip_eq(shape.inner.iter())
+            .map(|(chip, (_, log_degree))| {
+                let preprocessed_width = chip.preprocessed_width();
+                let main_width = chip.width();
+                ChipOpenedValues {
+                    preprocessed: AirOpenedValues {
+                        local: vec![InnerChallenge::ZERO; preprocessed_width],
+                        next: vec![InnerChallenge::ZERO; preprocessed_width],
+                    },
+                    main: AirOpenedValues {
+                        local: vec![InnerChallenge::ZERO; main_width],
+                        next: vec![InnerChallenge::ZERO; main_width],
+                    },
+                    permutation: AirOpenedValues { local: vec![], next: vec![] },
+                    quotient: vec![],
+                    global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
+                    local_cumulative_sum: InnerChallenge::ZERO,
+                    log_degree: *log_degree,
+                }
+            })
+            .collect(),
+    };
+
+    // FRI opening_proof — minimal placeholder.  The basefold path
+    // still calls `pcs.open` for prep + main (no perm/quotient),
+    // producing a 2-batch FRI proof.  For the dummy we emit a
+    // 2-batch shape via `dummy_pcs_proof` (preprocessed + main only).
+    let mut preprocessed_batch_shape = vec![];
+    let mut main_batch_shape = vec![];
+    for chip_opening in opened_values.chips.iter() {
+        if !chip_opening.preprocessed.local.is_empty() {
+            preprocessed_batch_shape.push(PolynomialShape {
+                width: chip_opening.preprocessed.local.len(),
+                log_degree: chip_opening.log_degree,
+            });
+        }
+        main_batch_shape.push(PolynomialShape {
+            width: chip_opening.main.local.len(),
+            log_degree: chip_opening.log_degree,
+        });
+    }
+    let mut batch_shapes = Vec::with_capacity(2);
+    if !preprocessed_batch_shape.is_empty() {
+        batch_shapes.push(PolynomialBatchShape { shapes: preprocessed_batch_shape });
+    }
+    if !main_batch_shape.is_empty() {
+        batch_shapes.push(PolynomialBatchShape { shapes: main_batch_shape });
+    }
+    let fri_queries = machine.config().fri_config().num_queries;
+    let log_blowup = machine.config().fri_config().log_blowup;
+    let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
+
+    let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| KoalaBear::ZERO).collect::<Vec<_>>();
+
+    let shard_proof = ShardProof {
+        commitment: ShardCommitment {
+            main_commit: dummy_commit(),
+            auxiliary_commits: Vec::new(),
+        },
+        opened_values,
+        opening_proof,
+        chip_ordering,
+        public_values,
+        basefold_shard_proof: Some(Box::new(basefold_proof)),
+    };
+
+    (vk, shard_proof)
 }
 
 /// Make a dummy shard proof for a given proof shape.

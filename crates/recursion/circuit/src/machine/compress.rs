@@ -508,10 +508,22 @@ impl<SC: KoalaBearFriParameters> ZKMCompressWitnessValues<SC> {
 }
 
 impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
-    pub fn dummy<A: MachineAir<KoalaBear>>(
+    /// Step 5 Phase 3b (May 19 2026) bound widening: the dispatcher
+    /// now routes to `dummy_recursion_basefold_vk_and_shard_proof`
+    /// when `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1`, which drives
+    /// `prove_shard_to_basefold` and therefore requires the chip
+    /// type to satisfy `Air<VerifierConstraintFolder>` (the host-side
+    /// shard-prover's chip-eval bound).  Both `MipsAir` and
+    /// `RecursionAir<F, DEGREE>` satisfy this via the standard
+    /// `MachineAir` derive.
+    pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMCompressShape,
-    ) -> Self {
+    ) -> Self
+    where
+        A: MachineAir<KoalaBear>
+            + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+    {
         // Step 5 Phase 3a (May 19 2026): route through the dispatcher
         // so that `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` automatically
         // reaches the basefold-shaped dummy once Phase 3b lands the

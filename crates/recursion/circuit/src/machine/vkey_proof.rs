@@ -159,10 +159,19 @@ impl ZKMMerkleProofWitnessValues<KoalaBearPoseidon2> {
 }
 
 impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
-    pub fn dummy<A: MachineAir<KoalaBear>>(
+    /// Step 5 Phase 3b (May 19 2026) bound widening matches the
+    /// `ZKMCompressWitnessValues::dummy` delegate below — propagates
+    /// the `Air<VerifierConstraintFolder>` bound required by the
+    /// basefold-shaped dummy under
+    /// `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1`.
+    pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMCompressWithVkeyShape,
-    ) -> Self {
+    ) -> Self
+    where
+        A: MachineAir<KoalaBear>
+            + for<'b> p3_air::Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+    {
         let compress_val =
             ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.compress_shape);
         let num_proofs = compress_val.vks_and_proofs.len();
