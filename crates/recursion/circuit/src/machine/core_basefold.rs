@@ -676,9 +676,10 @@ impl ZKMCoreBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
     /// `chip_cumulative_sums` cardinality matches a real proof
     /// shard-by-shard.
     ///
-    /// Counterpart to [`crate::machine::core::ZKMRecursionWitnessValues::dummy`]
-    /// for the legacy FRI pipeline. Used by `program_from_shape`
-    /// (#52) to build basefold recursion programs from cached shapes.
+    /// Sole dummy constructor for the basefold recursion pipeline
+    /// (the legacy FRI-shaped counterpart `ZKMRecursionWitnessValues::dummy`
+    /// was retired in #393). Used by `program_from_shape` (#52) to
+    /// build basefold recursion programs from cached shapes.
     pub fn dummy(
         machine: &zkm_stark::StarkMachine<
             zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,

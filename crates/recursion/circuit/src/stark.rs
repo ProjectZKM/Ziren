@@ -6,7 +6,7 @@ use num_traits::cast::ToPrimitive;
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_commit::{Mmcs, Pcs, PolynomialSpace};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -18,7 +18,7 @@ use zkm_recursion_compiler::{
 use zkm_stark::septic_digest::SepticDigest;
 use zkm_stark::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
-    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge, SerializableDomain,
+    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge,
     ShardCommitment, ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
 use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
@@ -210,160 +210,6 @@ where
     (vk, shard_proof)
 }
 
-/// Make a dummy shard proof for a given proof shape.
-pub fn dummy_vk_and_shard_proof<A: MachineAir<KoalaBear>>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    shape: &OrderedShape,
-) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>) {
-    // Phase 4 fix (Apr 25 2026): dummy must match the LEGACY FRI
-    // pipeline that the prover uses for recursion shards.  The
-    // `use_basefold_path = ... && data.chip_ordering.contains_key("Cpu")`
-    // gate at `crates/stark/src/prover.rs` ensures recursion shards
-    // (no Cpu chip — shrink/wrap inputs) take the LEGACY FRI path
-    // which emits 2 auxiliary commits (`[permutation_commit,
-    // quotient_commit]`) plus populated `permutation` + `quotient`
-    // opened values.
-    //
-    // The earlier dummy assumed BaseFold-shape (empty aux, empty
-    // perm/quotient) which created a structural mismatch with the
-    // real proof, causing the wrap-program to read fewer hint
-    // blocks than the writer produced — Block-shape misalignment
-    // in MemoryVar/BaseAlu/Poseidon2 lookups, propagating to
-    // local_cumulative_sum != 0 in wrap_bn254 verification.
-    let commitment = ShardCommitment {
-        main_commit: dummy_commit(),
-        auxiliary_commits: vec![dummy_commit(), dummy_commit()],
-    };
-
-    // Get dummy opened values by reading the chip ordering from the shape.
-    let chip_ordering = shape
-        .inner
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _))| (name.clone(), i))
-        .collect::<HashMap<_, _>>();
-    let shard_chips = machine.shard_chips_ordered(&chip_ordering).collect::<Vec<_>>();
-    let opened_values = ShardOpenedValues {
-        chips: shard_chips
-            .iter()
-            .zip_eq(shape.inner.iter())
-            .map(|(chip, (_, log_degree))| {
-                dummy_opened_values::<_, InnerChallenge, _>(chip, *log_degree)
-            })
-            .collect(),
-    };
-
-    let mut preprocessed_names_and_dimensions = vec![];
-    let mut preprocessed_batch_shape = vec![];
-    let mut main_batch_shape = vec![];
-    let mut permutation_batch_shape = vec![];
-    let mut quotient_batch_shape = vec![];
-
-    for (chip, chip_opening) in shard_chips.iter().zip_eq(opened_values.chips.iter()) {
-        if !chip_opening.preprocessed.local.is_empty() {
-            let prep_shape = PolynomialShape {
-                width: chip_opening.preprocessed.local.len(),
-                log_degree: chip_opening.log_degree,
-            };
-            preprocessed_names_and_dimensions.push((
-                chip.name(),
-                prep_shape.width,
-                prep_shape.log_degree,
-            ));
-            preprocessed_batch_shape.push(prep_shape);
-        }
-        let main_shape = PolynomialShape {
-            width: chip_opening.main.local.len(),
-            log_degree: chip_opening.log_degree,
-        };
-        main_batch_shape.push(main_shape);
-        let permutation_shape = PolynomialShape {
-            width: chip_opening.permutation.local.len(),
-            log_degree: chip_opening.log_degree,
-        };
-        permutation_batch_shape.push(permutation_shape);
-        for quot_chunk in chip_opening.quotient.iter() {
-            assert_eq!(quot_chunk.len(), 4);
-            quotient_batch_shape.push(PolynomialShape {
-                width: quot_chunk.len(),
-                log_degree: chip_opening.log_degree,
-            });
-        }
-    }
-
-    // Phase 4 fix (Apr 25 2026): match the LEGACY FRI prover's
-    // batch list — 4 batches in the canonical [preprocessed, main,
-    // permutation, quotient] order.  Always include perm + quotient
-    // batches now that dummy populates them (dummy_opened_values
-    // sets `permutation.local.len() = chip.permutation_width() * D`
-    // and `quotient = vec![vec![EF::ZERO; D]; quotient_width]` for
-    // every chip).
-    //
-    // Drop the width-0 filter from the BaseFold-shaped dummy: real
-    // prover commits permutation traces for ALL chips (including
-    // ones with `permutation_width = 0`), so dummy must too —
-    // mismatched shape breaks the wrap_program's compile-time hint
-    // sequence (Witnessable::write/read iterate the same fields).
-    let mut batch_shapes = Vec::with_capacity(4);
-    if !preprocessed_batch_shape.is_empty() {
-        batch_shapes.push(PolynomialBatchShape { shapes: preprocessed_batch_shape });
-    }
-    if !main_batch_shape.is_empty() {
-        batch_shapes.push(PolynomialBatchShape { shapes: main_batch_shape });
-    }
-    if !permutation_batch_shape.is_empty() {
-        batch_shapes.push(PolynomialBatchShape { shapes: permutation_batch_shape });
-    }
-    if !quotient_batch_shape.is_empty() {
-        batch_shapes.push(PolynomialBatchShape { shapes: quotient_batch_shape });
-    }
-
-    let fri_queries = machine.config().fri_config().num_queries;
-    let log_blowup = machine.config().fri_config().log_blowup;
-    let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
-
-    let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| KoalaBear::ZERO).collect::<Vec<_>>();
-
-    // Get the preprocessed chip information.
-    let pcs = machine.config().pcs();
-    let preprocessed_chip_information: Vec<_> = preprocessed_names_and_dimensions
-        .iter()
-        .map(|(name, width, log_height)| {
-            let domain = <<KoalaBearPoseidon2 as StarkGenericConfig>::Pcs as Pcs<
-                <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge,
-                <KoalaBearPoseidon2 as StarkGenericConfig>::Challenger,
-            >>::natural_domain_for_degree(pcs, 1 << log_height);
-            (name.to_owned(), SerializableDomain::from_coset(&domain), (*width, 1 << log_height))
-        })
-        .collect();
-
-    // Get the chip ordering.
-    let preprocessed_chip_ordering = preprocessed_names_and_dimensions
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _, _))| (name.to_owned(), i))
-        .collect::<HashMap<_, _>>();
-
-    let vk = StarkVerifyingKey {
-        commit: dummy_commit(),
-        pc_start: KoalaBear::ZERO,
-        initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
-        chip_information: preprocessed_chip_information,
-        chip_ordering: preprocessed_chip_ordering,
-    };
-
-    let shard_proof = ShardProof {
-        commitment,
-        opened_values,
-        opening_proof,
-        chip_ordering,
-        public_values,
-        basefold_shard_proof: None,
-    };
-
-    (vk, shard_proof)
-}
-
 /// Make a dummy basefold-pipeline shard proof for a given proof shape.
 ///
 /// Drives the host-side `prove_shard_to_basefold` with zero-filled
@@ -469,57 +315,6 @@ where
     };
 
     (vk, proof)
-}
-
-fn dummy_opened_values<F: Field, EF: ExtensionField<F>, A: MachineAir<F>>(
-    chip: &Chip<F, A>,
-    log_degree: usize,
-) -> ChipOpenedValues<F, EF> {
-    let preprocessed_width = chip.preprocessed_width();
-    let preprocessed = AirOpenedValues {
-        local: vec![EF::ZERO; preprocessed_width],
-        next: vec![EF::ZERO; preprocessed_width],
-    };
-    let main_width = chip.width();
-    let main =
-        AirOpenedValues { local: vec![EF::ZERO; main_width], next: vec![EF::ZERO; main_width] };
-
-    // Phase 4 fix (Apr 25 2026): match the LEGACY FRI prover's
-    // ChipOpenedValues — `permutation` and `quotient` populated.
-    // Recursion shards (no Cpu chip) take the legacy FRI path in
-    // `crates/stark/src/prover.rs::open` which writes both
-    // `permutation_opened_values` and `quotient_opened_values` for
-    // every chip.
-    //
-    // Permutation opened values are the FLATTENED ext columns —
-    // `chip.permutation_width()` ext columns × `D = 4` felts per
-    // ext (see `verify_opening_shape` in
-    // `crates/stark/src/verifier.rs:354`: expected length is
-    // `chip.permutation_width() * <SC::Challenge as
-    // BasedVectorSpace<Val<SC>>>::DIMENSION`).  D for KoalaBear's
-    // BinomialExtensionField<KoalaBear, 4> is 4.
-    //
-    // Each quotient chunk holds `D = 4` extension-field basis
-    // values per `slice.map(|mut op| op.pop().unwrap())` followed
-    // by `quotient: Vec<Vec<EF>>` assignment in prover.rs.
-    const D: usize = 4;
-    let permutation_width_flattened = chip.permutation_width() * D;
-    let permutation = AirOpenedValues {
-        local: vec![EF::ZERO; permutation_width_flattened],
-        next: vec![EF::ZERO; permutation_width_flattened],
-    };
-    let quotient_chunks = chip.quotient_width();
-    let quotient: Vec<Vec<EF>> = vec![vec![EF::ZERO; D]; quotient_chunks];
-
-    ChipOpenedValues {
-        preprocessed,
-        main,
-        permutation,
-        quotient,
-        global_cumulative_sum: SepticDigest::<F>::zero(),
-        local_cumulative_sum: EF::ZERO,
-        log_degree,
-    }
 }
 
 #[derive(Clone)]

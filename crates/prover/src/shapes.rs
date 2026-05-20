@@ -371,9 +371,9 @@ impl ZKMProofShape {
         //      `stacked_shapes/enumerate.rs` that don't match a real
         //      `MachineAir::name()` (the enumerate list has
         //      `Bls12381Add` etc., the machine has `Bls12381AddAssign`).
-        //      Without this, `dummy_vk_and_shard_proof` panics in
-        //      `zip_eq` when `shard_chips_ordered` returns fewer chips
-        //      than the shape names.
+        //      Without this, `dummy_basefold_vk_and_shard_proof` panics
+        //      in `zip_eq` when `shard_chips_ordered` returns fewer
+        //      chips than the shape names.
         //
         //   2. **Byte-lookup overflow cap**: `to_ordered_shape` gives
         //      every chip a uniform `log_height` (e.g. 22).  But the

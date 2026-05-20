@@ -582,8 +582,9 @@ pub struct BasefoldProofShape {
 /// of each MLE) matches a real proof so the recursion compiler's
 /// witness-stream layout work can use this as a placeholder.
 ///
-/// Counterpart to [`crate::stark::dummy_vk_and_shard_proof`] for
-/// the BaseFold-pipeline shape.  Used by:
+/// BaseFold-pipeline analog of SP1's legacy FRI-shaped
+/// `dummy_vk_and_shard_proof` (Ziren's equivalent was retired in
+/// #393). Used by:
 ///
 ///   - Recursion-circuit harness tests that compile the verifier
 ///     against a stable proof-shape fixture.
