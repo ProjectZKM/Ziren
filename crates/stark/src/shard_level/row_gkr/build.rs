@@ -239,13 +239,22 @@ fn layer_transition_env_cached() -> bool {
     use std::sync::OnceLock;
     static CACHED: OnceLock<bool> = OnceLock::new();
     *CACHED.get_or_init(|| {
-        let master = std::env::var("ZIREN_GPU_DEVICE_HOOKS")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        master
-            || std::env::var("ZIREN_GPU_LAYER_TRANSITION")
-                .map(|v| v == "1")
-                .unwrap_or(false)
+        // #380 default ON to match SP1 (sp1-gpu/.../device.rs has no env
+        // gate on the layer-transition device path — it's always engaged
+        // when the (F,EF) types match and hooks are registered).
+        //
+        // Opt-OUT with ZIREN_GPU_LAYER_TRANSITION=0 or
+        // ZIREN_GPU_DEVICE_HOOKS=0 as kill-switch.  Either explicit `=0`
+        // disables the device path; otherwise default to ON.
+        //
+        // Combined-config safety (per project_379_combined_incompatible.md):
+        // V3 + LT both ON OOMs at 32 GB on reth.  ziren-gpu's
+        // `cuda_setup_mem_pool` auto-sets the mempool release threshold
+        // to GPU_MEM/2 on small cards (<= 30 GB) so freed allocations
+        // return to OS — the defensive layer for the combined config.
+        let disabled = std::env::var("ZIREN_GPU_DEVICE_HOOKS").as_deref() == Ok("0")
+            || std::env::var("ZIREN_GPU_LAYER_TRANSITION").as_deref() == Ok("0");
+        !disabled
     })
 }
 
