@@ -3874,11 +3874,61 @@ where
         .unwrap_or(false);
     let t_start = profile.then(std::time::Instant::now);
 
+    // #383 sub-step 1: consult the per-shard LogupTaskScope first.
+    //
+    // When the scope has a pre-materialized device circuit installed
+    // (sub-step 2 will wire the populator), `next_layer()` pops the
+    // bottom-most `DeviceCircuitLayer` and we bridge its handle to the
+    // V3 hook's untyped `Option<DeviceLayerHandle>` parameter — skipping
+    // `flatten_layer` + `cast_vec_ef_to_ef4` for n0/d0/n1/d1 (the
+    // dominant ~500 µs of the per-call host overhead per
+    // `project_383_taskscope_logup.md` accounting table).
+    //
+    // **Today**: the scope's `circuit` field is always `None` (no
+    // `install_circuit` caller until sub-step 2), so this lookup
+    // returns `None` and we fall through to the legacy TLS path
+    // (`take_logup_v3_next_handle`).  Byte-equivalent to pre-#383
+    // behavior.
+    //
+    // **Sub-step 2 (next session)**: populator installs the circuit
+    // during `build_gkr_circuit`, this lookup becomes the hot path,
+    // and the TLS fallback only fires for the very first V3 call of
+    // a shard whose populator declined (e.g. CUDA error).
+    let scope_layer: Option<crate::shard_level::sumcheck_poly::DeviceLayerHandle> = {
+        use core::any::TypeId;
+        type Ef4Local = p3_field::extension::BinomialExtensionField<
+            p3_koala_bear::KoalaBear, 4>;
+        if TypeId::of::<F>() == TypeId::of::<p3_koala_bear::KoalaBear>()
+            && TypeId::of::<EF>() == TypeId::of::<Ef4Local>()
+        {
+            crate::shard_level::row_gkr::device_circuit::with_production_scope_mut(
+                |scope| {
+                    scope.next_layer().and_then(|layer| {
+                        layer
+                            .as_handle()
+                            .map(|h| h.to_sumcheck_handle())
+                    })
+                },
+            )
+            .flatten()
+        } else {
+            None
+        }
+    };
+
     // #371: pull stashed device handle from prior layer's output, if any.
     // First call in a shard's circuit walk returns None and the hook marshals
     // from `*_flat` host vecs. Subsequent calls reuse device buffers.
-    let input_handle =
-        crate::shard_level::sumcheck_poly::take_logup_v3_next_handle();
+    //
+    // Resolution order:
+    //   1. scope_layer (from #383 LogupTaskScope) — preferred when
+    //      sub-step 2 populator is wired and the scope has the
+    //      pre-materialized layer for this round.
+    //   2. legacy TLS handle (`take_logup_v3_next_handle`) — the
+    //      pre-#383 path; still fires when the scope is empty.
+    let input_handle = scope_layer.or_else(
+        crate::shard_level::sumcheck_poly::take_logup_v3_next_handle,
+    );
     let handle_present = input_handle.is_some();
 
     // Build host fallback inputs only when no device handle is available.

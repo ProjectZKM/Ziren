@@ -139,6 +139,30 @@ impl DeviceLayerHandle {
     pub fn inner(&self) -> &Arc<dyn AnyDeviceHandle> {
         &self.inner
     }
+
+    /// #383 sub-step 1 — bridge to the V3 hook's untyped
+    /// [`crate::shard_level::sumcheck_poly::DeviceLayerHandle`]
+    /// (`Arc<dyn Any + Send + Sync>`).
+    ///
+    /// Both handle types ultimately wrap the same concrete payload
+    /// owned by the GPU crate; this method clones the `Arc` and
+    /// upcasts the trait object so the dispatch site can feed the
+    /// scope-attached handle into the V3 hook's `input:
+    /// Option<DeviceLayerHandle>` parameter without forcing the
+    /// caller to thread two distinct handle types through.
+    ///
+    /// Trait upcasting (`Arc<dyn AnyDeviceHandle>` →
+    /// `Arc<dyn Any + Send + Sync>`) is stable since rustc 1.86; the
+    /// `AnyDeviceHandle: Any + Send + Sync` supertrait bound makes
+    /// the upcast well-defined.
+    #[inline]
+    #[must_use]
+    pub fn to_sumcheck_handle(
+        &self,
+    ) -> crate::shard_level::sumcheck_poly::DeviceLayerHandle {
+        let any_arc: Arc<dyn core::any::Any + Send + Sync> = self.inner.clone();
+        crate::shard_level::sumcheck_poly::DeviceLayerHandle(any_arc)
+    }
 }
 
 impl core::fmt::Debug for DeviceLayerHandle {
@@ -532,32 +556,93 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     }
 }
 
-/// Thread-local slot carrying the per-shard scope.  Mirrors the
-/// existing `LOGUP_V3_NEXT_HANDLE` plumbing pattern but at the scope
-/// granularity rather than per-handle.  Indirection via `*mut`-cast on
-/// drop is avoided — we store a serialized "active" flag the dispatch
-/// site can consult to decide whether scope-popping is in effect.
+/// Thread-local slot carrying the per-shard scope `circuit_id`.
 ///
-/// **Type erasure**: the slot stores `()` today because the scope's
-/// generic parameters `(F, EF)` are concrete at every legal Ziren
-/// call-site (always `KoalaBear` / `Ef4` for the production path), but
-/// type-erased TLS storage avoids forcing the generic params through
-/// the dispatch site signature in `round.rs`.  Sub-step 1 of the
-/// roadmap above will replace this with a `*mut LogupTaskScope<F, EF>`
-/// cell once the dispatch site takes an explicit scope borrow.
+/// Used for diagnostic / multi-GPU-isolation introspection by callers
+/// that don't need to consult the typed scope state — see
+/// [`LOGUP_TASK_SCOPE_PTR`] below for the typed pointer used by the V3
+/// dispatch.
 std::thread_local! {
     static LOGUP_TASK_SCOPE_ACTIVE: std::cell::Cell<Option<u64>> =
         const { std::cell::Cell::new(None) };
 }
 
-/// RAII guard returned by [`LogupTaskScope::enter`].  Binds the scope's
-/// `circuit_id` into the thread-local slot for the lifetime of the
-/// guard; on drop, clears the slot AND the V3 next-layer TLS so the
-/// next shard's first V3 call starts from a clean state.
+/// #383 sub-step 1 — typed pointer slot for the V3 dispatch site.
+///
+/// Stores a raw `*mut LogupTaskScope<KoalaBear, Ef4>` for the
+/// production scope (`(F, EF) = (KoalaBear, Ef4)`).  The V3 dispatch
+/// at `round.rs:try_logup_round_gpu_v3` reads this slot to:
+///
+/// 1. Pop a pre-materialized [`DeviceCircuitLayer`] from the scope's
+///    installed [`DeviceLogupGkrCircuit`].
+/// 2. Bridge the layer's [`DeviceLayerHandle`] into the V3 hook's
+///    untyped handle parameter via
+///    [`DeviceLayerHandle::to_sumcheck_handle`].
+/// 3. Skip the per-call `flatten_layer` + `cast_vec_ef_to_ef4` host
+///    marshalling — projected -500 µs per round per
+///    `project_383_taskscope_logup.md`.
+///
+/// **Type erasure rationale**: TLS slots cannot hold generic types,
+/// so we pin the slot to the single concrete `(KoalaBear, Ef4)`
+/// production scope.  Non-production callers (e.g. test code with a
+/// different EF) see `None` here and fall through to the existing
+/// `take_logup_v3_next_handle` path — byte-equivalent to pre-#383.
+///
+/// **Safety contract**: the pointer is set exclusively by
+/// [`LogupTaskScopeGuard::enter_with_scope`] from a `&mut
+/// LogupTaskScope<KoalaBear, Ef4>` whose lifetime strictly outlives
+/// the guard.  The guard's `Drop` impl restores the prior slot value
+/// before the borrow ends, so the dispatch site never observes a
+/// dangling pointer.
+type ProductionScope = LogupTaskScope<
+    p3_koala_bear::KoalaBear,
+    p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>,
+>;
+
+std::thread_local! {
+    static LOGUP_TASK_SCOPE_PTR: std::cell::Cell<Option<core::ptr::NonNull<ProductionScope>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// #383 sub-step 1 — typed accessor for the V3 dispatch site.
+///
+/// Invokes `f` with a mutable borrow of the currently-active
+/// production scope, if any.  Returns `None` when:
+///
+/// * No `LogupTaskScopeGuard::enter_with_scope` is active on this
+///   thread (e.g. tests using `enter(circuit_id)` only), or
+/// * The active guard's scope is not the production `(KoalaBear,
+///   Ef4)` type.
+///
+/// **Safety**: the slot is set exclusively by
+/// `LogupTaskScopeGuard::enter_with_scope` under the borrow contract
+/// documented on [`LOGUP_TASK_SCOPE_PTR`].  This function dereferences
+/// the raw pointer for the duration of `f`.  Nesting through `f` is
+/// safe because Rust's borrow checker prevents simultaneous mutable
+/// borrows on a single-threaded TLS slot.
+#[must_use]
+pub fn with_production_scope_mut<R>(
+    f: impl FnOnce(&mut ProductionScope) -> R,
+) -> Option<R> {
+    let ptr = LOGUP_TASK_SCOPE_PTR.with(|c| c.get())?;
+    // SAFETY: see safety contract on LOGUP_TASK_SCOPE_PTR. The pointer
+    // was set by enter_with_scope from a &mut borrow whose lifetime
+    // strictly outlives this dispatch call (guard held on the same
+    // thread for the duration of prove_shard_logup_gkr_rows).
+    let scope: &mut ProductionScope = unsafe { ptr.as_ptr().as_mut().expect("non-null") };
+    Some(f(scope))
+}
+
+/// RAII guard returned by [`LogupTaskScopeGuard::enter`] /
+/// [`LogupTaskScopeGuard::enter_with_scope`].  Binds the scope's
+/// `circuit_id` (and optionally a typed pointer to the scope itself)
+/// into the per-thread slots for the lifetime of the guard; on drop,
+/// restores the prior slot values AND clears the V3 next-layer TLS so
+/// the next shard's first V3 call starts from a clean state.
 ///
 /// **Drop semantics matter**: today's `LOGUP_V3_NEXT_HANDLE` is never
 /// cleared at shard boundaries (`clear_logup_v3_next_handle` has zero
-/// call-sites — see grep in `project_v3_regression_analysis.md`).
+/// other call-sites — see grep in `project_v3_regression_analysis.md`).
 /// Wrapping `prove_shard_logup_gkr_rows` in a `LogupTaskScopeGuard` is
 /// the smallest fix that introduces a real scope boundary.
 #[must_use = "the guard must be held for the duration of the GKR walk; \
@@ -566,14 +651,72 @@ pub struct LogupTaskScopeGuard {
     /// Prior scope's `circuit_id`, restored on drop.  Supports nested
     /// scopes for tests; production has only one level.
     prior: Option<u64>,
+    /// Prior typed-scope pointer, restored on drop.  `None` when the
+    /// guard was constructed via [`Self::enter`] (untyped); `Some(_)`
+    /// only when constructed via [`Self::enter_with_scope`] for the
+    /// production `(KoalaBear, Ef4)` type.
+    prior_ptr: Option<core::ptr::NonNull<ProductionScope>>,
 }
 
 impl LogupTaskScopeGuard {
-    /// Bind a new scope.  Returns an RAII guard that unbinds on drop.
+    /// Bind a new untyped scope.  Returns an RAII guard that unbinds
+    /// on drop.  Does NOT populate the typed pointer slot — the V3
+    /// dispatch falls back to the existing TLS handle path.
+    ///
+    /// Used for diagnostic / non-production paths where the typed
+    /// pointer can't be plumbed (e.g. mismatched generic params).
     #[must_use]
     pub fn enter(circuit_id: u64) -> Self {
         let prior = LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.replace(Some(circuit_id)));
-        Self { prior }
+        Self { prior, prior_ptr: None }
+    }
+
+    /// #383 sub-step 1 — bind a typed scope pointer for the V3
+    /// dispatch site to consult.  Only effective for the production
+    /// `(KoalaBear, Ef4)` scope; other generic instantiations behave
+    /// like [`Self::enter`] (circuit_id only).
+    ///
+    /// # Safety contract
+    ///
+    /// `scope` must outlive the returned guard.  Production callers
+    /// satisfy this by holding the scope on the stack of
+    /// `prove_shard_logup_gkr_rows` and the guard via `let _g =` in
+    /// the same function — the guard drops at function return,
+    /// strictly before the scope's `Drop`.
+    #[must_use]
+    pub fn enter_with_scope<F, EF>(scope: &mut LogupTaskScope<F, EF>) -> Self
+    where
+        F: Field + 'static,
+        EF: ExtensionField<F> + 'static,
+    {
+        let circuit_id = scope.circuit_id();
+        let prior = LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.replace(Some(circuit_id)));
+
+        // Only install the typed pointer when the generics match the
+        // production `(KoalaBear, Ef4)` slot type.  Other instantiations
+        // (tests, ports) just get the circuit_id-only behavior.
+        let prior_ptr = if core::any::TypeId::of::<F>()
+            == core::any::TypeId::of::<p3_koala_bear::KoalaBear>()
+            && core::any::TypeId::of::<EF>()
+                == core::any::TypeId::of::<
+                    p3_field::extension::BinomialExtensionField<
+                        p3_koala_bear::KoalaBear,
+                        4,
+                    >,
+                >() {
+            // SAFETY: TypeId equality guarantees `LogupTaskScope<F, EF>`
+            // and `ProductionScope` have identical layout; the cast is
+            // a no-op at runtime.  `scope` outlives the guard by
+            // contract (documented above).
+            let typed: *mut ProductionScope =
+                (scope as *mut LogupTaskScope<F, EF>) as *mut ProductionScope;
+            let nn = core::ptr::NonNull::new(typed).expect("scope ptr non-null");
+            LOGUP_TASK_SCOPE_PTR.with(|c| c.replace(Some(nn)))
+        } else {
+            None
+        };
+
+        Self { prior, prior_ptr }
     }
 
     /// Returns the currently-active scope `circuit_id`, if any.  Used
@@ -588,10 +731,14 @@ impl LogupTaskScopeGuard {
 
 impl Drop for LogupTaskScopeGuard {
     fn drop(&mut self) {
+        // Restore prior typed-scope pointer FIRST so any further work
+        // in the prior scope sees its own pointer.  Setting to None
+        // when prior_ptr is None preserves the "no scope" state.
+        LOGUP_TASK_SCOPE_PTR.with(|c| c.set(self.prior_ptr));
         LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.set(self.prior));
         // Clear the per-V3-call handle TLS — prevents the terminal
         // layer's handle from leaking into the next shard's first call.
-        // Today `clear_logup_v3_next_handle` has zero callers; this
+        // Today `clear_logup_v3_next_handle` has zero other callers; this
         // closes that gap structurally.
         crate::shard_level::sumcheck_poly::clear_logup_v3_next_handle();
     }
@@ -796,5 +943,136 @@ mod tests {
             take_logup_v3_next_handle().is_none(),
             "LogupTaskScopeGuard::drop should clear V3 next-handle TLS"
         );
+    }
+
+    /// #383 sub-step 1 — `enter_with_scope` for the production
+    /// `(KoalaBear, Ef4)` type installs the typed pointer so the
+    /// dispatch site can pop layers via `with_production_scope_mut`.
+    #[test]
+    fn enter_with_scope_installs_typed_pointer() {
+        type Ef4 = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+
+        // Outside any guard: production-scope accessor returns None.
+        assert!(
+            with_production_scope_mut(|_| ()).is_none(),
+            "no active guard ⇒ accessor returns None"
+        );
+
+        let mut scope = LogupTaskScope::<KoalaBear, Ef4>::new(101);
+        {
+            let _guard =
+                LogupTaskScopeGuard::enter_with_scope::<KoalaBear, Ef4>(&mut scope);
+            // Inside the guard: accessor returns Some and yields the
+            // scope's circuit_id (proves the pointer points to OUR scope).
+            let cid = with_production_scope_mut(|s| s.circuit_id())
+                .expect("scope installed");
+            assert_eq!(cid, 101);
+        }
+        // After drop: typed pointer slot cleared.
+        assert!(
+            with_production_scope_mut(|_| ()).is_none(),
+            "guard drop ⇒ typed slot cleared"
+        );
+    }
+
+    /// #383 sub-step 1 — `enter_with_scope` for a non-production
+    /// `EF` falls back to the untyped behavior: `active_circuit_id`
+    /// is bound but `with_production_scope_mut` returns `None`.  This
+    /// preserves byte-equivalent behavior for tests / port code that
+    /// use a different EF type.
+    ///
+    /// The test type alias `EF = Challenge<KoalaBearPoseidon2>` happens
+    /// to resolve to the production `Ef4` (BinomialExtensionField<KoalaBear, 4>),
+    /// so we use `KoalaBear` for both F and EF here (degree-1 self
+    /// extension) to get a genuinely non-production type pair.
+    #[test]
+    fn enter_with_scope_non_production_falls_back_to_untyped() {
+        let mut scope = LogupTaskScope::<KoalaBear, KoalaBear>::new(303);
+        {
+            let _guard = LogupTaskScopeGuard::enter_with_scope::<KoalaBear, KoalaBear>(
+                &mut scope,
+            );
+            assert_eq!(LogupTaskScopeGuard::active_circuit_id(), Some(303));
+            // Typed slot remains None for non-production types.
+            assert!(
+                with_production_scope_mut(|_| ()).is_none(),
+                "non-production EF ⇒ typed slot stays None"
+            );
+        }
+        assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
+    }
+
+    /// #383 sub-step 1 — `to_sumcheck_handle` bridges the typed
+    /// `device_circuit::DeviceLayerHandle` to the untyped
+    /// `sumcheck_poly::DeviceLayerHandle` that the V3 hook accepts,
+    /// preserving the underlying Arc payload via trait upcasting.
+    #[test]
+    fn device_layer_handle_to_sumcheck_handle_bridges_arc() {
+        let h = make_handle(99, 4, 3);
+        let v3_handle = h.to_sumcheck_handle();
+        // The bridged handle's Arc<dyn Any + Send + Sync> downcasts
+        // back to the original TestHandle, confirming the upcast
+        // preserved the concrete payload.
+        let any_ref: &dyn core::any::Any = &*v3_handle.0;
+        let test = any_ref.downcast_ref::<TestHandle>().expect("downcast");
+        assert_eq!(test.tag, 99);
+    }
+
+    /// #383 sub-step 1 — pop a layer from an installed scope via
+    /// `with_production_scope_mut`, bridge to a sumcheck handle, and
+    /// confirm the round-trip.  This mirrors what
+    /// `try_logup_round_gpu_v3` does on the hot path once sub-step 2
+    /// installs a circuit.
+    #[test]
+    fn dispatch_site_pop_and_bridge_roundtrip() {
+        type Ef4 = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
+        let input_data = DeviceInputData {
+            circuit_id: 200,
+            num_row_variables: 3,
+            num_interaction_variables: 2,
+        };
+        let layers = vec![
+            DeviceCircuitLayer::<KoalaBear, Ef4>::Materialized(
+                make_handle(701, 1, 2),
+                PhantomData,
+            ),
+            DeviceCircuitLayer::<KoalaBear, Ef4>::FirstLayer(
+                make_handle(702, 2, 2),
+                PhantomData,
+            ),
+        ];
+        let circuit =
+            DeviceLogupGkrCircuit::<KoalaBear, Ef4>::new(layers, input_data, 0);
+
+        let mut scope = LogupTaskScope::<KoalaBear, Ef4>::new(200);
+        scope.install_circuit(circuit);
+
+        let _guard = LogupTaskScopeGuard::enter_with_scope::<KoalaBear, Ef4>(&mut scope);
+
+        // First call: pops FirstLayer, bridges to a sumcheck handle.
+        let h1 = with_production_scope_mut(|s| {
+            s.next_layer().and_then(|l| l.as_handle().map(|h| h.to_sumcheck_handle()))
+        })
+        .expect("scope active")
+        .expect("layer popped");
+        // Downcast back to confirm we got the FirstLayer's TestHandle.
+        let any_ref: &dyn core::any::Any = &*h1.0;
+        assert_eq!(any_ref.downcast_ref::<TestHandle>().unwrap().tag, 702);
+
+        // Second call: pops Materialized terminal layer.
+        let h2 = with_production_scope_mut(|s| {
+            s.next_layer().and_then(|l| l.as_handle().map(|h| h.to_sumcheck_handle()))
+        })
+        .expect("scope active")
+        .expect("terminal layer popped");
+        let any_ref2: &dyn core::any::Any = &*h2.0;
+        assert_eq!(any_ref2.downcast_ref::<TestHandle>().unwrap().tag, 701);
+
+        // Third call: scope exhausted.
+        let empty = with_production_scope_mut(|s| {
+            s.next_layer().and_then(|l| l.as_handle().map(|h| h.to_sumcheck_handle()))
+        })
+        .expect("scope active");
+        assert!(empty.is_none(), "exhausted scope yields None");
     }
 }

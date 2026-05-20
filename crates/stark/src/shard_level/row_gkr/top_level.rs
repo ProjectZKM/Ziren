@@ -85,24 +85,38 @@ where
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
-    // #383 scaffold — RAII LogUp-GKR task scope.  Binds a fresh
-    // circuit_id into the per-thread scope slot and (critically) clears
-    // the V3 `LOGUP_V3_NEXT_HANDLE` TLS on drop, plugging the
-    // cross-shard handle leak documented in
-    // `project_v3_regression_analysis.md` (today
-    // `clear_logup_v3_next_handle` has zero call-sites).
+    // #383 sub-step 1 — RAII LogUp-GKR task scope wired via
+    // `enter_with_scope` so the V3 dispatch site (`round.rs::
+    // try_logup_round_gpu_v3`) can consult the typed scope pointer
+    // and pop pre-materialized device layers via `scope.next_layer()`
+    // instead of re-marshalling host vecs per round.
     //
-    // Behavior change: NONE.  The dispatch site at `round.rs:3880-3902`
-    // does not yet consult the scope — sub-step 1 of the multi-week
-    // roadmap (memory file `project_383_taskscope_logup.md`) will swap
-    // `take_logup_v3_next_handle` to consult `scope.next_layer()` so
-    // re-marshalling becomes structurally impossible.
+    // **Today's behavior change**: structurally none — the scope's
+    // `circuit` field stays `None` (no `install_circuit` caller until
+    // sub-step 2 wires the populator).  When the scope holds no
+    // installed circuit, `with_production_scope_mut` still returns
+    // `Some(...)` but `scope.next_layer()` returns `None`, and the
+    // V3 dispatch falls through to the existing `take_logup_v3_next
+    // _handle` path — byte-identical to pre-#383.
+    //
+    // **Future sub-step 2 wins**: when the populator installs the
+    // device circuit at scope start, the V3 dispatch will pop a
+    // `DeviceCircuitLayer` per round, skip `flatten_layer` +
+    // `cast_vec_ef_to_ef4`, and feed the handle directly into the
+    // V3 hook — projected -500 µs per call per
+    // `project_383_taskscope_logup.md`.
     //
     // The guard MUST be held for the duration of every GKR walk and
-    // dropped strictly AFTER the final V3 dispatch returns.
-    let _logup_task_scope = super::device_circuit::LogupTaskScopeGuard::enter(
+    // dropped strictly AFTER the final V3 dispatch returns; the scope
+    // itself MUST outlive the guard (enforced by stack ordering — the
+    // `mut` binding above the `let _logup_task_scope = ...`).
+    let mut logup_task_scope = super::device_circuit::LogupTaskScope::<F, EF>::new(
         crate::basefold_late_binding::allocate_gpu_layer_circuit_id(),
     );
+    let _logup_task_scope_guard =
+        super::device_circuit::LogupTaskScopeGuard::enter_with_scope::<F, EF>(
+            &mut logup_task_scope,
+        );
 
     // #359 followup: env-gated profile to scope what fraction of
     // basefold compress wall this row-GKR LogUp loop consumes.
