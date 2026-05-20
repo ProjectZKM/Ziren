@@ -380,36 +380,31 @@ where
         // directly instead of running the dead FRI computation + side-
         // channel basefold proof.
         //
-        // === Step 5 Phase 3 experimental override (default OFF) ===
-        // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` widens the gate to
-        // include recursion shards (no "Program" chip).  Off by default
-        // because the in-circuit verifier at
-        // `crates/recursion/circuit/src/stark.rs::StarkVerifier::verify_shard`
-        // (called by compress/wrap/deferred recursion programs) still
-        // requires the FRI proof shape — flipping ON will emit a
-        // basefold proof on the recursion shard but the parent compose
-        // program won't be able to verify it.  Used during Phase 3 port
-        // to observe the first failure mode against fibonacci compress.
+        // === Step 5 Phase 3e (May 19 2026): basefold-for-recursion is default ===
+        // The env-gated `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` switch retired
+        // (commit e3569c6b on lib.rs side, this commit on prover.rs side).
+        // Dispatch is now TypeId-based per the Phase 3d HYBRID memo
+        // (`project_step5_phase3d_wrap_decision.md`):
+        //   - SC == KoalaBearPoseidon2 (Val=KoalaBear + Challenge=InnerChallenge
+        //     + Challenger=LbChallenger)  → basefold path for ALL shards,
+        //     including recursion shards (compose/shrink).
+        //   - SC == OuterSC (bn254 wrap path with `MultiField32Challenger`)
+        //     → fall through to the FRI body below.  Wrap stays on FRI
+        //     permanently per Phase 3d HYBRID; the basefold path's inner
+        //     `try_prove_shard_to_basefold_boxed` has the same TypeId
+        //     guard so this outer check matches its assumption.
         //
-        // Expected failure when ON:
-        //   1. host-side prover (this fn) emits basefold proof on
-        //      recursion shards — succeeds (basefold prover is
-        //      chip-set-agnostic per `shard_level/prover.rs`).
-        //   2. host-side verifier dispatches to BasefoldShardVerifier
-        //      via `verifier.rs:54` — likely succeeds.
-        //   3. compress's compose program (recursion-circuit) calls
-        //      `StarkVerifier::verify_shard` on the recursion shard
-        //      proof — FAILS, because the dummy shape (FRI-shaped
-        //      auxiliary_commits + populated permutation/quotient
-        //      opened_values) won't match the basefold-shaped real
-        //      proof (empty aux, empty perm/quotient).  This is the
-        //      mirror of the Apr 25 wrap-cumsum bug (Witnessable shape
-        //      misalignment) — see `project_phase4_wrap_blocker.md`.
-        let force_basefold_for_recursion = std::env::var("ZIREN_FORCE_BASEFOLD_FOR_RECURSION")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        let use_basefold_path =
-            data.chip_ordering.contains_key("Program") || force_basefold_for_recursion;
+        // Smoke validation (test_e2e_compress_fibonacci, 38.12s VERIFY_VK=false)
+        // confirmed the recursion-AIR basefold variant prior to this flip.
+        // Wrap regression guard: `test_e2e_wrap_fibonacci` (FRI path).
+        let use_basefold_path = {
+            use core::any::TypeId;
+            TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>()
+                && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
+                    == TypeId::of::<crate::InnerChallenge>()
+                && TypeId::of::<SC::Challenger>()
+                    == TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+        };
 
         if use_basefold_path {
             let t_basefold_path = std::time::Instant::now();
