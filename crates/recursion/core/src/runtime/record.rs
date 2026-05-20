@@ -10,7 +10,6 @@ use crate::machine::RecursionAirEventCount;
 use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
     FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues, SelectEvent,
-    SumcheckVerifyEvent,
 };
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -40,10 +39,6 @@ pub struct ExecutionRecord<F> {
     pub fri_fold_events: Vec<FriFoldEvent<F>>,
     pub batch_fri_events: Vec<BatchFRIEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
-    /// Events for `SumcheckVerifyChip` (Phase 2c+ recursion BaseFold
-    /// verifier).  One event per sumcheck round.  Empty in pure-FRI
-    /// recursion (no SumcheckVerify instructions emitted).
-    pub sumcheck_verify_events: Vec<SumcheckVerifyEvent<F>>,
 }
 
 impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
@@ -58,10 +53,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());
         stats.insert("fri_fold_events".to_string(), self.fri_fold_events.len());
-        stats.insert(
-            "sumcheck_verify_events".to_string(),
-            self.sumcheck_verify_events.len(),
-        );
 
         stats
     }
@@ -82,7 +73,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             fri_fold_events,
             batch_fri_events,
             commit_pv_hash_events,
-            sumcheck_verify_events,
         } = self;
         base_alu_events.append(&mut other.base_alu_events);
         ext_alu_events.append(&mut other.ext_alu_events);
@@ -94,7 +84,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         fri_fold_events.append(&mut other.fri_fold_events);
         batch_fri_events.append(&mut other.batch_fri_events);
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
-        sumcheck_verify_events.append(&mut other.sumcheck_verify_events);
     }
 
     fn public_values<T: PrimeCharacteristicRing>(&self) -> Vec<T> {
@@ -147,7 +136,6 @@ pub struct UnsafeRecord<F> {
     pub fri_fold_events: Vec<MaybeUninit<UnsafeCell<FriFoldEvent<F>>>>,
     pub batch_fri_events: Vec<MaybeUninit<UnsafeCell<BatchFRIEvent<F>>>>,
     pub commit_pv_hash_events: Vec<MaybeUninit<UnsafeCell<CommitPublicValuesEvent<F>>>>,
-    pub sumcheck_verify_events: Vec<MaybeUninit<UnsafeCell<SumcheckVerifyEvent<F>>>>,
 }
 
 // SAFETY: caller is responsible for the discipline that no two threads
@@ -188,7 +176,6 @@ impl<F> UnsafeRecord<F> {
             // counters added to RecursionAirEventCount so all 11 event
             // vecs are ready for offset-based writes.
             commit_pv_hash_events: create_uninit_vec(event_counts.commit_pv_hash_events),
-            sumcheck_verify_events: create_uninit_vec(event_counts.sumcheck_verify_events),
         }
     }
 
@@ -248,10 +235,6 @@ impl<F> UnsafeRecord<F> {
                 Vec<MaybeUninit<UnsafeCell<CommitPublicValuesEvent<F>>>>,
                 Vec<CommitPublicValuesEvent<F>>,
             >(self.commit_pv_hash_events),
-            sumcheck_verify_events: std::mem::transmute::<
-                Vec<MaybeUninit<UnsafeCell<SumcheckVerifyEvent<F>>>>,
-                Vec<SumcheckVerifyEvent<F>>,
-            >(self.sumcheck_verify_events),
         }
     }
 }

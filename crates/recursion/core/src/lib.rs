@@ -347,28 +347,6 @@ pub struct FriFoldEvent<F> {
     pub ext_vec: FriFoldExtVecIo<Block<F>>,
 }
 
-/// Event recorded by the recursion runtime when a SumcheckVerify
-/// instruction executes.  One event per sumcheck round.
-///
-/// Mirrors the row layout of `SumcheckVerifyChip`'s
-/// `SumcheckVerifyCols` (in
-/// `crates/recursion/core/src/chips/sumcheck_verify.rs`):
-///   - `claimed_sum`: the previous round's claim
-///   - `coeffs`: round polynomial evaluated at X = 0, 1, 2
-///   - `challenge`: verifier's sampled challenge for this round
-///   - `new_claim`: derived `p(challenge)` for the next round
-///
-/// Used by `SumcheckVerifyChip::generate_trace` to materialise rows
-/// from the recursion program's execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(C)]
-pub struct SumcheckVerifyEvent<F> {
-    pub claimed_sum: Block<F>,
-    pub coeffs: [Block<F>; 3],
-    pub challenge: Block<F>,
-    pub new_claim: Block<F>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchFRIIo<V> {
     pub ext_single: BatchFRIExtSingleIo<Block<V>>,

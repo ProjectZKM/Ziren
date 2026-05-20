@@ -36,15 +36,11 @@ pub struct AnalyzedInstruction<F> {
     pub(crate) offset: usize,
     /// Secondary chip offset for multi-chip emitters.
     ///
-    /// Most instructions emit to one chip-event vec — `offset` is enough.
-    /// SumcheckVerify is the lone multi-chip case: it emits to BOTH
-    /// `sumcheck_verify_events` (primary, via `offset`) AND
-    /// `mem_var_events` (secondary, via `secondary_offset`) for the
-    /// new_claim memory write at `runtime/mod.rs:728`.
-    ///
-    /// Encoded as `usize::MAX` sentinel for "none" so the type stays
-    /// `Copy`-shaped and serde-stable. `secondary_offset()` returns
-    /// `Option<usize>` for ergonomics.
+    /// All current instructions emit to one chip-event vec — `offset`
+    /// is enough.  The slot is retained as `usize::MAX` sentinel for
+    /// "none" so the type stays `Copy`-shaped and serde-stable; the
+    /// SP1 executor port keeps this for future multi-chip instructions.
+    /// `secondary_offset()` returns `Option<usize>` for ergonomics.
     #[serde(default = "default_secondary_offset")]
     pub(crate) secondary_offset: usize,
 }
@@ -56,14 +52,6 @@ fn default_secondary_offset() -> usize {
 impl<F> AnalyzedInstruction<F> {
     pub const fn new(inner: Instruction<F>, offset: usize) -> Self {
         Self { inner, offset, secondary_offset: usize::MAX }
-    }
-
-    /// Construct an analyzed instruction with both a primary and
-    /// secondary chip offset. Used for multi-chip emitters
-    /// (e.g., SumcheckVerify writing to both sumcheck_verify_events
-    /// and mem_var_events per instruction).
-    pub const fn with_secondary(inner: Instruction<F>, offset: usize, secondary: usize) -> Self {
-        Self { inner, offset, secondary_offset: secondary }
     }
 
     pub const fn inner(&self) -> &Instruction<F> {
@@ -183,13 +171,6 @@ impl<F> RawProgram<Instruction<F>> {
                 Instruction::CommitPublicValues(_) => {
                     incr(&mut counts.commit_pv_hash_events, 1)
                 }
-                // SumcheckVerify is multi-chip: emits 1 sumcheck_verify event
-                // (primary) + 1 mem_var event (for the new_claim memory
-                // write at runtime/mod.rs:728). Returns sentinel — the
-                // real per-chip offsets are populated in the
-                // SumcheckVerify branch in `analyze_block` itself, which
-                // builds an `AnalyzedInstruction::with_secondary`.
-                Instruction::SumcheckVerify(_) => usize::MAX,
                 // No event-vector slot consumed; offset is meaningless.
                 Instruction::Print(_) => 0,
             }
@@ -205,27 +186,8 @@ impl<F> RawProgram<Instruction<F>> {
                         .instrs
                         .into_iter()
                         .map(|instr| {
-                            // Multi-chip emitter case: SumcheckVerify writes
-                            // both a sumcheck_verify event AND a mem_var event.
-                            // Capture both offsets via with_secondary so the
-                            // runtime walker can write to both vecs by index
-                            // without needing to recount on the fly.
-                            if matches!(instr, Instruction::SumcheckVerify(_)) {
-                                let primary = {
-                                    let s = counts.sumcheck_verify_events;
-                                    counts.sumcheck_verify_events += 1;
-                                    s
-                                };
-                                let secondary = {
-                                    let s = counts.mem_var_events;
-                                    counts.mem_var_events += 1;
-                                    s
-                                };
-                                AnalyzedInstruction::with_secondary(instr, primary, secondary)
-                            } else {
-                                let offset = instr_offset(&instr, counts);
-                                AnalyzedInstruction::new(instr, offset)
-                            }
+                            let offset = instr_offset(&instr, counts);
+                            AnalyzedInstruction::new(instr, offset)
                         })
                         .collect();
                     SeqBlock::Basic(BasicBlock { instrs: analyzed })
@@ -316,48 +278,8 @@ mod tests {
         assert_eq!(mem_offsets, vec![0]);
     }
 
-    #[test]
-    fn sumcheck_verify_carries_secondary_offset() {
-        use crate::runtime::instruction::SumcheckVerifyInstr;
-        let svi = SumcheckVerifyInstr {
-            challenge_addr: Address(k(0)),
-            claimed_sum_addr: Address(k(1)),
-            c0_addr: Address(k(2)),
-            c1_addr: Address(k(3)),
-            c2_addr: Address(k(4)),
-            new_claim_addr: Address(k(5)),
-            new_claim_mult: KoalaBear::ONE,
-        };
-        let prog: RawProgram<Instruction<KoalaBear>> = RawProgram {
-            seq_blocks: vec![SeqBlock::Basic(BasicBlock {
-                instrs: vec![
-                    dummy_base_alu(),
-                    Instruction::SumcheckVerify(Box::new(svi)),
-                    dummy_base_alu(),
-                ],
-            })],
-        };
-        let (analyzed, counts) = prog.analyze();
-        assert_eq!(counts.base_alu_events, 2);
-        assert_eq!(counts.sumcheck_verify_events, 1);
-        assert_eq!(counts.mem_var_events, 1);
-        // Find the SumcheckVerify in the analyzed program.
-        if let SeqBlock::Basic(basic) = &analyzed.seq_blocks[0] {
-            for ai in &basic.instrs {
-                if matches!(ai.inner(), Instruction::SumcheckVerify(_)) {
-                    assert_eq!(ai.offset(), 0, "primary = sumcheck_verify offset");
-                    assert_eq!(
-                        ai.secondary_offset(),
-                        Some(0),
-                        "secondary = mem_var offset"
-                    );
-                }
-                if matches!(ai.inner(), Instruction::BaseAlu(_)) {
-                    assert_eq!(ai.secondary_offset(), None, "single-chip: no secondary");
-                }
-            }
-        }
-    }
+    // (removed) sumcheck_verify_carries_secondary_offset — #391:
+    // SumcheckVerify pipeline deleted, no multi-chip emitters remain.
 
     #[test]
     fn analyze_handles_parallel_blocks() {

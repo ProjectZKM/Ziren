@@ -13,7 +13,7 @@ pub use seq_block::{BasicBlock, RawProgram, SeqBlock};
 use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
 use instruction::HintAddCurveInstr;
-pub use instruction::{Instruction, SumcheckVerifyInstr};
+pub use instruction::Instruction;
 use instruction::{FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, PrintInstr};
 use itertools::Itertools;
 use machine::RecursionAirEventCount;
@@ -191,8 +191,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
 // cycle_tracker) are explicitly taken out of `self` via mem::replace
 // at the start of `run()` and threaded through as `&mut` through
 // the recursive walker — sub-walks always pass `None` for these
-// (verified by `hint_in_par`/`sumcheck_in_par`/Print absence in
-// parallel sub-programs).
+// (verified by `hint_in_par`/Print absence in parallel sub-programs).
 unsafe impl<'a, F, EF, Diffusion> Sync for Runtime<'a, F, EF, Diffusion>
 where
     F: PrimeField32 + Sync,
@@ -367,26 +366,22 @@ where
             let (n_par, n_subs, n_par_instrs) = self.program.seq_blocks.parallelism_summary();
             let total = self.program.instruction_count();
             let pct = if total > 0 { 100.0 * n_par_instrs as f64 / total as f64 } else { 0.0 };
-            // Count witness consumers (Hint, SumcheckVerify) inside parallel
-            // sub-programs to determine whether par_iter dispatch is sound
-            // without witness-slicing. A non-zero count means par_iter would
-            // race on the shared witness stream.
+            // Count witness consumers (Hint) inside parallel sub-programs
+            // to determine whether par_iter dispatch is sound without
+            // witness-slicing. A non-zero count means par_iter would race
+            // on the shared witness stream.
             let mut hint_in_par: usize = 0;
-            let mut sumcheck_in_par: usize = 0;
             fn walk_par<F>(
                 block: &SeqBlock<Instruction<F>>,
                 hint: &mut usize,
-                sumcheck: &mut usize,
                 inside: bool,
             ) {
                 match block {
                     SeqBlock::Basic(b) => {
                         if inside {
                             for instr in &b.instrs {
-                                match instr {
-                                    Instruction::Hint(h) => *hint += h.output_addrs_mults.len(),
-                                    Instruction::SumcheckVerify(_) => *sumcheck += 1,
-                                    _ => {}
+                                if let Instruction::Hint(h) = instr {
+                                    *hint += h.output_addrs_mults.len();
                                 }
                             }
                         }
@@ -394,18 +389,18 @@ where
                     SeqBlock::Parallel(subs) => {
                         for sub in subs {
                             for sb in &sub.seq_blocks {
-                                walk_par(sb, hint, sumcheck, true);
+                                walk_par(sb, hint, true);
                             }
                         }
                     }
                 }
             }
             for b in &self.program.seq_blocks.seq_blocks {
-                walk_par(b, &mut hint_in_par, &mut sumcheck_in_par, false);
+                walk_par(b, &mut hint_in_par, false);
             }
             eprintln!(
-                "[par-summary] parallel_blocks={} total_sub_programs={} parallel_instrs={}/{} ({:.1}%) hint_in_par={} sumcheck_in_par={}",
-                n_par, n_subs, n_par_instrs, total, pct, hint_in_par, sumcheck_in_par
+                "[par-summary] parallel_blocks={} total_sub_programs={} parallel_instrs={}/{} ({:.1}%) hint_in_par={}",
+                n_par, n_subs, n_par_instrs, total, pct, hint_in_par
             );
         }
         if let Ok(path) = std::env::var("ZIREN_DUMP_PROGRAM") {
@@ -515,7 +510,7 @@ where
     /// `SeqBlock::Parallel` sub-programs via `par_iter` (each sub-walker
     /// allocates its own `WalkerState`, shares `&self` + `&unsafe_record`,
     /// passes `witness=None`/`debug_stdout=None` since parallel sub-programs
-    /// in compose are pure compute — verified by `hint_in_par`/`sumcheck_in_par`
+    /// in compose are pure compute — verified by `hint_in_par`
     /// counter at commit eace827).
     ///
     /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:799-834`
@@ -554,7 +549,7 @@ where
                             substate.pc = state.pc;
                             substate.clk = state.clk;
                             // Sub-walks: no witness / debug_stdout — verified
-                            // pure-compute (hint_in_par=0, sumcheck_in_par=0).
+                            // pure-compute (hint_in_par=0).
                             self.execute_blocks(
                                 &sub.seq_blocks,
                                 &mut substate,
@@ -1020,41 +1015,6 @@ where
                         unsafe { Self::raw_write_ev(&rec.mem_var_events[_offset + i], MemEvent { inner: val }); }
                     }
                 }
-                Instruction::SumcheckVerify(instr) => {
-                    // Read inputs from memory.
-                    let challenge = self.mr_us(instr.challenge_addr).val;
-                    let claimed_sum = self.mr_us(instr.claimed_sum_addr).val;
-                    let c0 = self.mr_us(instr.c0_addr).val;
-                    let c1 = self.mr_us(instr.c1_addr).val;
-                    let c2 = self.mr_us(instr.c2_addr).val;
-
-                    // The actual verification (p(0)+p(1)=s, new_claim=p(r))
-                    // is done by the SumcheckVerifyChip's AIR constraints.
-                    // The runtime only needs to read/write memory and
-                    // emit the event for trace generation.
-
-                    // Compute new_claim = c_0 + c_1*r + c_2*r^2 and write.
-                    // For the runtime, we read the hint from the witness stream.
-                    if witness.as_mut().expect("witness must be Some at root walker").is_empty() {
-                        return Err(RuntimeError::EmptyWitnessStream);
-                    }
-                    let new_claim = witness.as_mut().expect("witness must be Some at root walker").drain(0..1).next().unwrap();
-                    self.mw_us(instr.new_claim_addr, new_claim, instr.new_claim_mult);
-                    // SumcheckVerify is multi-chip — secondary offset is the
-                    // mem_var_events index for the new_claim write.
-                    let mem_var_off = ai
-                        .secondary_offset()
-                        .expect("SumcheckVerify must have secondary_offset");
-                    unsafe { Self::raw_write_ev(&rec.mem_var_events[mem_var_off], MemEvent { inner: new_claim }); }
-
-                    // Primary offset is the sumcheck_verify_events index.
-                    unsafe { Self::raw_write_ev(&rec.sumcheck_verify_events[_offset], SumcheckVerifyEvent {
-                            claimed_sum,
-                            coeffs: [c0, c1, c2],
-                            challenge,
-                            new_claim,
-                        }); }
-                }
             }
 
         state.pc = next_pc;
@@ -1081,7 +1041,6 @@ where
         self.record.fri_fold_events.reserve(event_counts.fri_fold_events);
         self.record.batch_fri_events.reserve(event_counts.batch_fri_events);
         self.record.commit_pv_hash_events.reserve(event_counts.commit_pv_hash_events);
-        self.record.sumcheck_verify_events.reserve(event_counts.sumcheck_verify_events);
     }
 }
 

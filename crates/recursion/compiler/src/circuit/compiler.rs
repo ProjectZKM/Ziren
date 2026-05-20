@@ -388,35 +388,6 @@ where
         }))
     }
 
-    /// Emit a `SumcheckVerify` instruction that verifies one
-    /// sumcheck round (used by the Phase 2c+ recursion-circuit BaseFold
-    /// verifier, mirrors `fri_fold` but for the BaseFold sumcheck path).
-    ///
-    /// `challenge`, `claimed_sum`: prior round's verifier challenge
-    /// and the previous claim.
-    /// `c0`, `c1`, `c2`: the round polynomial's three coefficients.
-    /// `new_claim`: the output cell that the runtime writes to (and
-    /// the chip's AIR re-checks via Horner-on-challenge).
-    fn sumcheck_verify(
-        &mut self,
-        challenge: Ext<C::F, C::EF>,
-        claimed_sum: Ext<C::F, C::EF>,
-        c0: Ext<C::F, C::EF>,
-        c1: Ext<C::F, C::EF>,
-        c2: Ext<C::F, C::EF>,
-        new_claim: Ext<C::F, C::EF>,
-    ) -> Instruction<C::F> {
-        Instruction::SumcheckVerify(Box::new(SumcheckVerifyInstr {
-            challenge_addr: challenge.read(self),
-            claimed_sum_addr: claimed_sum.read(self),
-            c0_addr: c0.read(self),
-            c1_addr: c1.read(self),
-            c2_addr: c2.read(self),
-            new_claim_addr: new_claim.write(self),
-            new_claim_mult: C::F::ZERO,
-        }))
-    }
-
     fn batch_fri(
         &mut self,
         acc: Ext<C::F, C::EF>,
@@ -584,9 +555,6 @@ where
             }
             DslIr::CircuitV2FriFold(data) => f(self.fri_fold(data.0, data.1)),
             DslIr::CircuitV2BatchFRI(data) => f(self.batch_fri(data.0, data.1, data.2, data.3)),
-            DslIr::CircuitV2SumcheckVerify(data) => f(self.sumcheck_verify(
-                data.0, data.1, data.2, data.3, data.4, data.5,
-            )),
             DslIr::CircuitV2CommitPublicValues(public_values) => {
                 f(self.commit_public_values(&public_values))
             }
@@ -739,9 +707,6 @@ where
                         } = instr.as_mut();
                         backfill((acc_mult, acc));
                     }
-                    Instruction::SumcheckVerify(instr) => {
-                        backfill((&mut instr.new_claim_mult, &instr.new_claim_addr));
-                    }
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
                     }) => {
@@ -765,8 +730,6 @@ where
                     Instruction::Mem(MemInstr { kind: MemAccessKind::Read, .. })
                     | Instruction::CommitPublicValues(_)
                     | Instruction::Print(_) => (),
-                    // BaseFold sumcheck verify: output mult is in the instruction.
-                    Instruction::SumcheckVerify(_) => (),
                 }
             }
         });
@@ -951,7 +914,6 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::Hint(_) => "Hint",
         Instruction::HintAddCurve(_) => "HintAddCurve",
         Instruction::CommitPublicValues(_) => "CommitPublicValues",
-        Instruction::SumcheckVerify(_) => "SumcheckVerify",
     }
 }
 
