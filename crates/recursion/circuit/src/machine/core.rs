@@ -41,7 +41,7 @@ use zkm_recursion_core::{
 use crate::{
     challenger::{CanObserveVariable, DuplexChallengerVariable},
     machine::{assert_complete, recursion_public_values_digest},
-    stark::{dummy_vk_and_shard_proof, ShardProofVariable, StarkVerifier},
+    stark::{ShardProofVariable, StarkVerifier},
     CircuitConfig, KoalaBearFriParameters, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
@@ -572,24 +572,6 @@ impl<SC: KoalaBearFriParameters> ZKMRecursionWitnessValues<SC> {
         let proof_shapes = self.shard_proofs.iter().map(|proof| proof.shape()).collect();
 
         ZKMRecursionShape { proof_shapes, is_complete: self.is_complete }
-    }
-}
-
-impl ZKMRecursionWitnessValues<KoalaBearPoseidon2> {
-    pub fn dummy(
-        machine: &StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
-        shape: &ZKMRecursionShape,
-    ) -> Self {
-        let (mut vks, shard_proofs): (Vec<_>, Vec<_>) =
-            shape.proof_shapes.iter().map(|shape| dummy_vk_and_shard_proof(machine, shape)).unzip();
-        let vk = vks.pop().unwrap();
-        Self {
-            vk,
-            shard_proofs,
-            is_complete: shape.is_complete,
-            is_first_shard: false,
-            vk_root: [KoalaBear::ZERO; DIGEST_SIZE],
-        }
     }
 }
 
