@@ -118,7 +118,15 @@ impl ZKMProverOpts {
             // Override with SHARD_SIZE env to force a specific value
             // (default ZKMCoreOpts already honours the env). Disable
             // the auto-shrink with ZIREN_GPU_SMALL_CARD=0.
-            if gpu_ram_gb <= 30 {
+            // Threshold bumped from 30 → 36 to catch 32 GB RTX 5090s
+            // under SP1's `ceil() + 4` formula (32 + 4 = 36).  SP1's
+            // original 30 was tuned for 24 GB 4090s (28) and 80 GB
+            // H100s (84), leaving 32 GB 5090s at 36 falling through
+            // to large-card mode.  Production 5090 box OOMs under
+            // V3 + LT default-on when small-card mode doesn't fire;
+            // catching at ≤36 enables the shard-size halving + the
+            // matching mempool/recompute companions on ziren-gpu.
+            if gpu_ram_gb <= 36 {
                 let small_card_enabled = std::env::var("ZIREN_GPU_SMALL_CARD")
                     .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
                     .unwrap_or(true);
