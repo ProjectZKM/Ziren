@@ -8,8 +8,7 @@
 //!     transcript ordering and per-round consistency checks are
 //!     unit-testable without the full recursion-compiler integration;
 //!   - DSL-IR emit hooks for the in-circuit pieces that the recursion
-//!     compiler will lower to SumcheckVerify / Poseidon2 / FriFold
-//!     instructions.
+//!     compiler will lower to Poseidon2 / FriFold instructions.
 //!
 //! # Architecture
 //!
@@ -476,42 +475,6 @@ impl RecursiveBasefoldVerifier {
     }
 }
 
-/// **DSL-IR bridge: emit BaseFold per-round sumcheck verify ops.**
-///
-/// Walks a sequence of `(c0, c1, c2)` triples and pushes one
-/// `DslIr::CircuitV2SumcheckVerify` op per round into the recursion
-/// builder.  The op is degree-agnostic — for BaseFold's degree-1
-/// rounds, `c2` is just zero, and the chip compiler handles the
-/// trivial coefficient.
-pub fn emit_basefold_sumcheck_rounds<C>(
-    builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
-    initial_claim: zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
-    rounds: &[[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>; 3]],
-    challenges: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
-) -> Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>>
-where
-    C: zkm_recursion_compiler::prelude::Config,
-{
-    use zkm_recursion_compiler::ir::DslIr;
-    assert_eq!(rounds.len(), challenges.len(), "round count mismatch");
-    let mut new_claims = Vec::with_capacity(rounds.len());
-    let mut current_claim = initial_claim;
-    for ([c0, c1, c2], challenge) in rounds.iter().zip(challenges.iter()) {
-        let new_claim: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::CircuitV2SumcheckVerify(Box::new((
-            *challenge,
-            current_claim,
-            *c0,
-            *c1,
-            *c2,
-            new_claim,
-        ))));
-        new_claims.push(new_claim);
-        current_claim = new_claim;
-    }
-    new_claims
-}
-
 /// **DSL-IR bridge: emit Merkle inclusion path verification.**
 /// At each level: select left/right halves based on `bit`, hash via
 /// Poseidon2KoalaBear, take the first DIGEST_SIZE felts as the new
@@ -645,64 +608,6 @@ where
     }
 
     folded
-}
-
-/// **Top-level in-circuit BaseFold verifier orchestrator.**
-///
-/// Emits the full constraint sequence for verifying a BaseFold shard
-/// proof, in protocol order:
-///
-/// 1. Per-round: emit `[g(0), g(1)]` sumcheck check via
-///    [`emit_basefold_sumcheck_rounds`] — the per-round check is
-///    Lagrange interpolation at the verifier's eval point coord.
-/// 2. Per-round: emit Merkle root commitment observation.
-/// 3. Per-round: sample beta (verifier randomness).
-/// 4. After all rounds: observe the final poly EF constant.
-/// 5. Per-query: emit FRI fold-check chain via
-///    [`emit_basefold_query_chain`].
-/// 6. Final consistency: emit the
-///    `final_poly == last_uni[0] + last_beta * last_uni[1]` check.
-///
-/// `proof_*` argument groups carry the witness-stream cells the
-/// recursion compiler will wire from the host-side proof bytes.  This
-/// function is the bridge between the host
-/// [`crate::basefold_verifier::RecursiveBasefoldVerifier::verify_basefold_pcs_host_shape`]
-/// math and the in-circuit chip primitives.
-pub fn verify_basefold_pcs_in_circuit<C>(
-    builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
-    initial_claim: zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
-    sumcheck_messages: &[[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>; 3]],
-    sumcheck_challenges: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
-    final_poly: zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
-) -> zkm_recursion_compiler::prelude::Ext<C::F, C::EF>
-where
-    C: zkm_recursion_compiler::prelude::Config,
-{
-    // (1-3) Sumcheck rounds.  Returns the chain of new_claims; the
-    // last entry is the post-final-fold claim.
-    let new_claims = emit_basefold_sumcheck_rounds(
-        builder,
-        initial_claim,
-        sumcheck_messages,
-        sumcheck_challenges,
-    );
-
-    // (6) Final consistency: final_poly should equal the last
-    // sumcheck message's `c0 + last_beta * c1` — this is the
-    // BaseFold key invariant.  We use the last new_claim from the
-    // sumcheck chain (which by construction equals exactly that
-    // expression — see `emit_basefold_sumcheck_rounds`).
-    let _ = new_claims.last(); // assertion via the chip's emitted constraint
-    let _ = final_poly; // wired via the witness binding in step 4
-
-    // The FRI query-phase emission (step 5) is delegated to
-    // `emit_basefold_query_chain` which wraps `crate::fri::verify_query`
-    // at arity 2.  Caller must wire that per-query in a loop.
-    //
-    // Returns the final claim Ext for the caller to bind against
-    // their own constraint chain (e.g. the jagged sumcheck's
-    // `q_at_z * w_at_z` final identity).
-    new_claims.last().copied().unwrap_or(initial_claim)
 }
 
 /// `RecursiveMultilinearPcsVerifier` impl on [`RecursiveBasefoldVerifier`].
