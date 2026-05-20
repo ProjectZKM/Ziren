@@ -88,8 +88,8 @@ use zkm_recursion_gnark_ffi::{
 };
 use zkm_stark::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
-    ShardProof, StarkGenericConfig, StarkVerifyingKey, Val, Word, ZKMCoreOpts, ZKMProverOpts,
-    DIGEST_SIZE,
+    ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
+    ZKMProverOpts, DIGEST_SIZE,
 };
 use zkm_stark::{shape::OrderedShape, MachineProvingKey};
 
@@ -189,6 +189,29 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// Whether to verify verification keys.
     pub vk_verification: bool,
 
+    /// Per-arity cache for the host-side basefold compose proving-key
+    /// shell (preprocessed traces + chip_ordering + local_only flags).
+    ///
+    /// Distinct from `compose_programs_basefold_cache` (which caches the
+    /// uncompiled recursion program).  This caches the **post-setup**
+    /// host view that the ziren-gpu `RecursionProverWorker::dispatch`
+    /// path materializes per-shard via `pk_to_host()` (after a heavy
+    /// per-chip `generate_preprocessed_trace_host` walk during
+    /// `setup()`).  Reusing it lets dispatch skip both the device
+    /// `setup()` and the `pk_to_host()` D2H sync.
+    ///
+    /// Opt-in via `ZIREN_COMPOSE_PK_CACHE=1`.  Default OFF — the cache
+    /// is only sound when (program, arity) → pk is deterministic, which
+    /// holds today because `compose_program_basefold` is keyed only on
+    /// arity in the program cache.  The companion `*_pk_cache_safe()`
+    /// helper exposes the contract; ziren-gpu reads from it in a
+    /// follow-up commit (#TBD) once a benchmark confirms net positive.
+    ///
+    /// See `project_recursion_phase_gpu_audit.md` (May 19, 2026) for
+    /// the bottleneck analysis that motivated this scaffold.
+    pub compose_pks_basefold_cache:
+        Mutex<BTreeMap<usize, Arc<StarkProvingKey<InnerSC>>>>,
+
     /// Per-arity cache for the basefold compose recursion program.
     ///
     /// Mirrors SP1's pattern (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`,
@@ -285,7 +308,22 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vk_verification,
             wrap_vk: OnceLock::new(),
             compose_programs_basefold_cache: Mutex::new(BTreeMap::new()),
+            compose_pks_basefold_cache: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Returns true when the host-side compose-pk cache is enabled
+    /// (`ZIREN_COMPOSE_PK_CACHE=1`).  ziren-gpu's
+    /// `RecursionProverWorker::dispatch` consults this gate before
+    /// short-circuiting its per-shard `setup()` + `pk_to_host()` walk
+    /// in favor of `compose_pks_basefold_cache.get(&arity)`.
+    ///
+    /// Default OFF — see field docs for the soundness contract and
+    /// project_recursion_phase_gpu_audit.md for the bottleneck analysis.
+    pub fn compose_pk_cache_enabled() -> bool {
+        std::env::var("ZIREN_COMPOSE_PK_CACHE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
     }
 
     /// Fully initializes the programs, proving keys, and verifying keys that are normally
