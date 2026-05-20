@@ -1355,8 +1355,24 @@ where
             let hook_present = dfl::get_first_round_device_hook().is_some();
             tracing::warn!("#308-PROBE phase4 reached env_on={env_on} tls={tls_present} hook={hook_present} n_chips={}", first_layer.numerator_0.len());
         });
+        // Threshold gate: skip device dispatch when first_layer.num_row_variables
+        // is below `ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS` (default 0 = no
+        // threshold).  Mirrors the V3 LogUp-GKR threshold scaffold (#361 /
+        // commit 52d96570) — per-shard dispatch overhead exceeds GPU speedup
+        // on small layers (~700µs/call vs ~10µs host).  May 20 tendermint
+        // bench: PHASE3_DISPATCH=1 alone is +14% vs OFF, motivating a
+        // size threshold for default-on consideration.
+        static PHASE3_THRESHOLD: OnceLock<u32> = OnceLock::new();
+        let phase3_threshold = *PHASE3_THRESHOLD.get_or_init(|| {
+            std::env::var("ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0)
+        });
+        let total_vars_u = first_layer.num_row_variables as u32;
+        let under_threshold = phase3_threshold > 0 && total_vars_u < phase3_threshold;
         use crate::shard_level::device_first_layer_context as dfl;
-        if env_on && dfl::current_device_first_layer().is_some() {
+        if env_on && !under_threshold && dfl::current_device_first_layer().is_some() {
             if let Some(device_hook) = dfl::get_first_round_device_hook() {
                 let target_rows = 1usize << first_layer.num_row_variables;
                 let row_half_u = (target_rows / 2) as u32;
