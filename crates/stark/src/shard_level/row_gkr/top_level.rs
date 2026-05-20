@@ -264,6 +264,13 @@ where
                             circuit_id: cid,
                             num_row_variables: max_log_row_count as u32,
                             num_interaction_variables: 0,
+                            // #376 sub-step 1 — regen payload not yet
+                            // populated; #383 populator path is eager
+                            // (all layers materialized at scope entry),
+                            // so the lazy regen arm never fires here.
+                            // Ziren-gpu fills this slot when it lands
+                            // the CUDA `generate_first_layer` impl.
+                            input_handle: None,
                         };
                     logup_task_scope.install_circuit_from_payloads(
                         payloads, input_data,
