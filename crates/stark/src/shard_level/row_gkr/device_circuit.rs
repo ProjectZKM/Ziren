@@ -517,15 +517,30 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     ///   FirstLayer from `input_data` (one-shot — decrement counter).
     /// * Else, return `None`.
     ///
-    /// ## `#371 hook-point`
+    /// ## `#376 sub-step 3 — regen hook dispatch`
     ///
-    /// The lazy-regeneration arm currently carries a `todo!()`
-    /// because Ziren has no GPU-side `generate_first_layer` hook
-    /// registered yet — the V3 hook (#371) will install one keyed on
-    /// `input_data.circuit_id`.  Until #371 lands, callers MUST
-    /// construct `DeviceLogupGkrCircuit` with `num_virtual_layers ==
-    /// 0` (eager materialization) — the iterator pops materialized
-    /// entries only.
+    /// The lazy-regeneration arm consults the registered
+    /// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`] hook
+    /// (when the `basefold` feature is on) via `circuit_id`.  When the
+    /// hook is registered AND returns `Some(payload)`, we wrap it in a
+    /// fresh [`DeviceCircuitLayer::FirstLayer`] and return it.  When
+    /// the hook is unregistered OR returns `None`, this arm decrements
+    /// `num_virtual_layers` and returns `None` — the upstream
+    /// `gpu_layer_pull_hook` in ziren-gpu already special-cases
+    /// "dropped-but-no-regen" with a detailed diagnostic panic (see
+    /// `project_sp1_small_card_substep2.md`).
+    ///
+    /// **Note**: until the ziren-gpu side wires its CUDA
+    /// `generate_first_layer` kernel + concrete `input_handle`
+    /// downcast (multi-day work — see
+    /// `project_376_first_layer_device_port.md`), callers SHOULD
+    /// continue to construct `DeviceLogupGkrCircuit` with
+    /// `num_virtual_layers == 0` and rely on the existing
+    /// eager-pull-to-host path.  The dispatch here is
+    /// correctness-preserving when the hook is unregistered (returns
+    /// `None` cleanly), but the upstream pull stub in ziren-gpu will
+    /// still fire if the production round loop actually revisits a
+    /// dropped seq=1.
     pub fn next(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
         if let Some(layer) = self.materialized_layers.pop() {
             return Some(layer);
@@ -533,21 +548,39 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
         if self.num_virtual_layers == 0 {
             return None;
         }
-        // num_virtual_layers > 0 → fall through to lazy first-layer
-        // generation.  Currently unimplemented; see #371 hook-point
-        // note above.
         debug_assert_eq!(
             self.num_virtual_layers, 1,
             "DeviceLogupGkrCircuit: lazy regeneration only supports a single virtual layer"
         );
+        // Decrement first so a second `next()` after a failed regen
+        // attempt cleanly returns `None` without re-entering this arm.
         self.num_virtual_layers = 0;
-        // hook-point #371: call generate_first_layer_device(&self.input_data)
-        // and return Some(DeviceCircuitLayer::FirstLayer(handle, _)).
-        let _ = &self.input_data;
-        todo!(
-            "device-side first-layer regeneration hook (#371) not yet wired; \
-             construct DeviceLogupGkrCircuit with num_virtual_layers=0 until then"
-        );
+
+        // #376 sub-step 3 — consult the registered regen hook (gated
+        // on the `basefold` feature; `basefold_late_binding` is itself
+        // `#![cfg(feature = "basefold")]`).  When the hook is
+        // unregistered (no ziren-gpu CUDA impl yet) OR returns `None`
+        // (downcast failed / kernel error), surface `None` to the
+        // caller — the upstream pull-stub panic in ziren-gpu's
+        // `gpu_layer_pull_hook` remains the primary signal that the
+        // regen path was needed but unavailable.
+        #[cfg(feature = "basefold")]
+        {
+            if let Some(hook) =
+                crate::basefold_late_binding::get_gpu_generate_first_layer_hook()
+            {
+                if let Some(payload) = hook(self.input_data.circuit_id) {
+                    let handle = DeviceLayerHandle::new(
+                        payload.inner,
+                        payload.num_row_variables,
+                        payload.num_interaction_variables,
+                        self.input_data.circuit_id,
+                    );
+                    return Some(DeviceCircuitLayer::FirstLayer(handle, PhantomData));
+                }
+            }
+        }
+        None
     }
 
     /// Returns the input-data circuit ID — useful for the GPU
@@ -1050,6 +1083,92 @@ mod tests {
         assert!(circuit.next().is_none());
         // Repeated calls also yield None.
         assert!(circuit.next().is_none());
+    }
+
+    /// #376 sub-step 3 — when `num_virtual_layers == 1`, the
+    /// materialized stack is empty, AND no `GpuGenerateFirstLayerFn`
+    /// hook is registered, `next()` returns `None` (rather than
+    /// panicking via the old `todo!()` arm).  This is the new safe
+    /// default: the regen-on-pull contract is fulfilled by the
+    /// upstream `gpu_layer_pull_hook` in ziren-gpu, which already
+    /// emits a detailed diagnostic when a dropped seq is pulled and
+    /// no regen is available.
+    ///
+    /// Note: this test cannot positively assert that the hook IS
+    /// invoked when registered — the hook is a process-wide
+    /// `OnceLock` and the test suite shares it with any other test
+    /// (or the prod binary).  We only verify that the `None` path is
+    /// graceful; the positive case (hook fires → `Some(FirstLayer)`)
+    /// is covered in the integration suite once ziren-gpu lands its
+    /// impl.
+    #[test]
+    fn next_returns_none_when_virtual_and_no_regen_hook() {
+        // Hook is unregistered on a fresh test process; if a parallel
+        // test happens to register it, we tolerate `Some(...)` here
+        // because the contract is "return whatever the hook says".
+        let hook_present =
+            crate::basefold_late_binding::get_gpu_generate_first_layer_hook()
+                .is_some();
+
+        let input_data = DeviceInputData {
+            circuit_id: 4242,
+            num_row_variables: 6,
+            num_interaction_variables: 4,
+            input_handle: None,
+        };
+        let mut circuit =
+            DeviceLogupGkrCircuit::<KoalaBear, EF>::new(Vec::new(), input_data, 1);
+
+        assert_eq!(circuit.len(), 1);
+        assert!(!circuit.is_empty());
+
+        let next = circuit.next();
+        if hook_present {
+            // Cannot assert further — hook impl decides.
+        } else {
+            assert!(
+                next.is_none(),
+                "no regen hook ⇒ next() returns None instead of panicking"
+            );
+        }
+        assert_eq!(circuit.num_virtual_layers, 0);
+        assert!(circuit.is_empty());
+
+        // Repeated calls also yield None.
+        assert!(circuit.next().is_none());
+    }
+
+    /// #376 sub-step 3 — `DeviceInputData::new` /
+    /// `with_input_handle` / `set_input_handle` builders behave as
+    /// specced.
+    #[test]
+    fn device_input_data_builders() {
+        let plain = DeviceInputData::new(11, 3, 2);
+        assert_eq!(plain.circuit_id, 11);
+        assert_eq!(plain.num_row_variables, 3);
+        assert_eq!(plain.num_interaction_variables, 2);
+        assert!(plain.input_handle.is_none());
+
+        struct Bundle(u32);
+        let handle: Arc<dyn core::any::Any + Send + Sync> = Arc::new(Bundle(99));
+        let with = DeviceInputData::with_input_handle(12, 4, 3, handle.clone());
+        assert_eq!(with.circuit_id, 12);
+        assert!(with.input_handle.is_some());
+
+        // Downcast round-trip preserves payload identity.
+        let any_ref: &dyn core::any::Any =
+            &**with.input_handle.as_ref().unwrap();
+        assert_eq!(any_ref.downcast_ref::<Bundle>().unwrap().0, 99);
+
+        // set_input_handle returns prior (None) and installs new.
+        let mut tweaked = DeviceInputData::new(13, 2, 1);
+        let prev = tweaked.set_input_handle(handle.clone());
+        assert!(prev.is_none());
+        assert!(tweaked.input_handle.is_some());
+
+        // Second set returns the previous handle.
+        let prev2 = tweaked.set_input_handle(Arc::new(Bundle(7)));
+        assert!(prev2.is_some());
     }
 
     /// `FirstLayerVirtual` placeholder reports the right shape
