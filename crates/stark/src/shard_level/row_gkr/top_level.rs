@@ -85,6 +85,25 @@ where
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
+    // #383 scaffold — RAII LogUp-GKR task scope.  Binds a fresh
+    // circuit_id into the per-thread scope slot and (critically) clears
+    // the V3 `LOGUP_V3_NEXT_HANDLE` TLS on drop, plugging the
+    // cross-shard handle leak documented in
+    // `project_v3_regression_analysis.md` (today
+    // `clear_logup_v3_next_handle` has zero call-sites).
+    //
+    // Behavior change: NONE.  The dispatch site at `round.rs:3880-3902`
+    // does not yet consult the scope — sub-step 1 of the multi-week
+    // roadmap (memory file `project_383_taskscope_logup.md`) will swap
+    // `take_logup_v3_next_handle` to consult `scope.next_layer()` so
+    // re-marshalling becomes structurally impossible.
+    //
+    // The guard MUST be held for the duration of every GKR walk and
+    // dropped strictly AFTER the final V3 dispatch returns.
+    let _logup_task_scope = super::device_circuit::LogupTaskScopeGuard::enter(
+        crate::basefold_late_binding::allocate_gpu_layer_circuit_id(),
+    );
+
     // #359 followup: env-gated profile to scope what fraction of
     // basefold compress wall this row-GKR LogUp loop consumes.
     // This IS the active LogUp path on basefold (per project_359

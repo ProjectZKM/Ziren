@@ -399,6 +399,204 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     }
 }
 
+/// #383 — Per-shard LogUp-GKR task scope (Ziren analogue of SP1's
+/// `LogUpCudaCircuit<'a, TaskScope>` lifetime).
+///
+/// **Why this exists**
+///
+/// SP1's `LogUpCudaCircuit<'a, A: Backend>` holds the materialized device
+/// layers + input data behind a `TaskScope` lifetime (see
+/// `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs:151-161`).  Every
+/// per-round sumcheck call within a shard's GKR walk reuses the same
+/// device-resident state — the scope amortizes one upload across `~18`
+/// layers' worth of `prove_gkr_round` invocations.
+///
+/// Ziren today re-marshals on every V3 dispatch (`round.rs:3891-3902`):
+/// `flatten_layer + build_eq_table + cast_vec_ef_to_ef4 + hook`.  Profile
+/// data in `project_v3_regression_analysis.md` attributes the **+94%
+/// tendermint regression** when `ZIREN_GPU_LOGUP_GKR_DEVICE=1` to this
+/// per-layer marshalling × ~3400 calls/shard.
+///
+/// **Scope semantics**
+///
+/// One `LogupTaskScope<F, EF>` is allocated per `prove_shard_logup_gkr_rows`
+/// invocation:
+///
+/// * **Construction** binds a fresh `circuit_id` (multi-GPU isolation —
+///   matches `LayerState::Device::circuit_id` from #230) and stashes the
+///   scope handle in a thread-local slot so the V3 dispatch site
+///   (`try_logup_round_gpu_v3`) can consult it without threading new
+///   arguments through Ziren's per-round signatures.
+///
+/// * **Drop** clears the slot AND the V3 next-layer TLS
+///   (`clear_logup_v3_next_handle`), preventing the last shard's terminal
+///   handle from leaking into the next shard's first V3 call.  Today
+///   `clear_logup_v3_next_handle` has zero call-sites — confirmed via
+///   grep against `crates/stark/src/` — and the regression analysis
+///   identifies this lack of scope boundary as a contributing factor.
+///
+/// **Smallest-sub-step (this commit) — scaffold, zero behavior change**
+///
+/// * Defines the type + TLS plumbing.
+/// * Adds an RAII `enter()` helper that callers wrap around the GKR
+///   pipeline.  No callers consult the scope yet — the dispatch site at
+///   `round.rs:3880-3902` still goes through the existing `*_next_handle`
+///   TLS path.
+/// * On Drop: clears `LOGUP_V3_NEXT_HANDLE` so shard boundaries are
+///   correctly scoped (today's silent bug per `project_v3_regression`).
+///
+/// **Follow-up sub-steps (multi-week roadmap — see project memory)**
+///
+/// 1. Wire `prove_shard_logup_gkr_rows` to construct the scope on entry
+///    (RAII guard) and pass a borrow into `prove_gkr_round`.
+/// 2. Migrate `take_logup_v3_next_handle` / `publish_logup_v3_next_handle`
+///    to consult `scope.materialized_handles` instead of a thread-local
+///    Option — so the cross-shard race becomes structurally impossible.
+/// 3. Move the V3 cache populator from its bespoke TLS
+///    (`v3_cache_populate.rs:try_populate_cache`) into the scope's
+///    `materialized_handles` Vec — the V3 hook then pops from the scope
+///    directly.
+/// 4. Eventually port SP1's `gkr_transition` device-side so the scope
+///    pre-builds ALL intermediate layers at scope start (single
+///    `concat_chips_to_flat` + N `gkr_transition` kernel launches)
+///    and per-round dispatch becomes a pop-only operation.
+pub struct LogupTaskScope<F: Field, EF: ExtensionField<F>> {
+    /// Multi-GPU scoping ID — fresh per scope, matches the
+    /// `LayerState::Device::circuit_id` convention.
+    circuit_id: u64,
+    /// Optional pre-materialized device circuit.  When the V3-cache
+    /// populator (sub-step 3 above) lands, this is filled at scope
+    /// construction; per-round V3 calls then pop from
+    /// `circuit.materialized_layers` rather than re-marshalling host
+    /// vecs.  `None` today — scope-as-anchor only.
+    circuit: Option<DeviceLogupGkrCircuit<F, EF>>,
+    /// Mirrors SP1's `LogUpCudaCircuit::input_data` shape metadata so
+    /// downstream consumers can interrogate the scope without holding a
+    /// fully-built circuit.
+    input_data: Option<DeviceInputData>,
+    _phantom: PhantomData<(F, EF)>,
+}
+
+impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
+    /// Construct a new scope with a fresh `circuit_id`.  The scope is
+    /// **not** yet bound to the thread-local slot — callers must use
+    /// [`Self::enter`] to obtain an RAII guard that performs the bind.
+    #[must_use]
+    pub fn new(circuit_id: u64) -> Self {
+        Self {
+            circuit_id,
+            circuit: None,
+            input_data: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Install a freshly-built `DeviceLogupGkrCircuit` into the scope.
+    /// Called by the populator (sub-step 3) once the device-side layer
+    /// transition pipeline materializes the layer stack up-front.
+    pub fn install_circuit(&mut self, circuit: DeviceLogupGkrCircuit<F, EF>) {
+        self.input_data = Some(circuit.input_data.clone());
+        self.circuit = Some(circuit);
+    }
+
+    /// Returns the scope's `circuit_id`.
+    #[inline]
+    #[must_use]
+    pub fn circuit_id(&self) -> u64 {
+        self.circuit_id
+    }
+
+    /// Borrow the pre-materialized circuit, if installed.
+    #[inline]
+    #[must_use]
+    pub fn circuit(&self) -> Option<&DeviceLogupGkrCircuit<F, EF>> {
+        self.circuit.as_ref()
+    }
+
+    /// Borrow the input-data shape metadata, if installed.
+    #[inline]
+    #[must_use]
+    pub fn input_data(&self) -> Option<&DeviceInputData> {
+        self.input_data.as_ref()
+    }
+
+    /// Pop the bottom-most layer handle from the installed circuit, if
+    /// any.  Returns `None` when no circuit was installed (today's
+    /// default — scope-as-anchor) or when the circuit is exhausted.
+    ///
+    /// Sub-step 2 of the roadmap above will rewire
+    /// `take_logup_v3_next_handle` to call into this method instead of
+    /// a free-standing TLS.
+    pub fn next_layer(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
+        self.circuit.as_mut().and_then(|c| c.next())
+    }
+}
+
+/// Thread-local slot carrying the per-shard scope.  Mirrors the
+/// existing `LOGUP_V3_NEXT_HANDLE` plumbing pattern but at the scope
+/// granularity rather than per-handle.  Indirection via `*mut`-cast on
+/// drop is avoided — we store a serialized "active" flag the dispatch
+/// site can consult to decide whether scope-popping is in effect.
+///
+/// **Type erasure**: the slot stores `()` today because the scope's
+/// generic parameters `(F, EF)` are concrete at every legal Ziren
+/// call-site (always `KoalaBear` / `Ef4` for the production path), but
+/// type-erased TLS storage avoids forcing the generic params through
+/// the dispatch site signature in `round.rs`.  Sub-step 1 of the
+/// roadmap above will replace this with a `*mut LogupTaskScope<F, EF>`
+/// cell once the dispatch site takes an explicit scope borrow.
+std::thread_local! {
+    static LOGUP_TASK_SCOPE_ACTIVE: std::cell::Cell<Option<u64>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// RAII guard returned by [`LogupTaskScope::enter`].  Binds the scope's
+/// `circuit_id` into the thread-local slot for the lifetime of the
+/// guard; on drop, clears the slot AND the V3 next-layer TLS so the
+/// next shard's first V3 call starts from a clean state.
+///
+/// **Drop semantics matter**: today's `LOGUP_V3_NEXT_HANDLE` is never
+/// cleared at shard boundaries (`clear_logup_v3_next_handle` has zero
+/// call-sites — see grep in `project_v3_regression_analysis.md`).
+/// Wrapping `prove_shard_logup_gkr_rows` in a `LogupTaskScopeGuard` is
+/// the smallest fix that introduces a real scope boundary.
+#[must_use = "the guard must be held for the duration of the GKR walk; \
+              drop clears the per-shard handle TLS"]
+pub struct LogupTaskScopeGuard {
+    /// Prior scope's `circuit_id`, restored on drop.  Supports nested
+    /// scopes for tests; production has only one level.
+    prior: Option<u64>,
+}
+
+impl LogupTaskScopeGuard {
+    /// Bind a new scope.  Returns an RAII guard that unbinds on drop.
+    #[must_use]
+    pub fn enter(circuit_id: u64) -> Self {
+        let prior = LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.replace(Some(circuit_id)));
+        Self { prior }
+    }
+
+    /// Returns the currently-active scope `circuit_id`, if any.  Used
+    /// by the V3 dispatch site (sub-step 1 of the roadmap above) to
+    /// decide whether to consult the scope or fall back to today's
+    /// per-call marshalling.
+    #[must_use]
+    pub fn active_circuit_id() -> Option<u64> {
+        LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.get())
+    }
+}
+
+impl Drop for LogupTaskScopeGuard {
+    fn drop(&mut self) {
+        LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.set(self.prior));
+        // Clear the per-V3-call handle TLS — prevents the terminal
+        // layer's handle from leaking into the next shard's first call.
+        // Today `clear_logup_v3_next_handle` has zero callers; this
+        // closes that gap structurally.
+        crate::shard_level::sumcheck_poly::clear_logup_v3_next_handle();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,5 +704,97 @@ mod tests {
         let any_ref: &dyn core::any::Any = &**h.inner();
         let test_handle = any_ref.downcast_ref::<TestHandle>().expect("downcast");
         assert_eq!(test_handle.tag, 42);
+    }
+
+    /// #383 — empty scope (no circuit installed) reports `None` for both
+    /// `circuit()` and `next_layer()`.  This is the production default
+    /// today; behavior remains identical to pre-#383 dispatch.
+    #[test]
+    fn task_scope_empty_yields_none() {
+        let mut scope = LogupTaskScope::<KoalaBear, EF>::new(123);
+        assert_eq!(scope.circuit_id(), 123);
+        assert!(scope.circuit().is_none());
+        assert!(scope.input_data().is_none());
+        assert!(scope.next_layer().is_none());
+    }
+
+    /// #383 — scope with installed circuit yields layers via `next_layer`
+    /// and exposes input-data metadata.  Mirrors SP1's
+    /// `LogUpCudaCircuit::next` semantics.
+    #[test]
+    fn task_scope_with_circuit_pops_layers() {
+        let input_data = DeviceInputData {
+            circuit_id: 55,
+            num_row_variables: 3,
+            num_interaction_variables: 2,
+        };
+        let layers = vec![
+            DeviceCircuitLayer::<KoalaBear, EF>::Materialized(make_handle(1, 1, 2), PhantomData),
+            DeviceCircuitLayer::<KoalaBear, EF>::FirstLayer(make_handle(2, 2, 2), PhantomData),
+        ];
+        let circuit = DeviceLogupGkrCircuit::<KoalaBear, EF>::new(layers, input_data, 0);
+
+        let mut scope = LogupTaskScope::<KoalaBear, EF>::new(55);
+        scope.install_circuit(circuit);
+
+        assert_eq!(scope.circuit_id(), 55);
+        assert!(scope.input_data().is_some());
+        assert_eq!(scope.input_data().unwrap().num_row_variables, 3);
+
+        let l0 = scope.next_layer().expect("first layer");
+        assert!(matches!(l0, DeviceCircuitLayer::FirstLayer(_, _)));
+        let l1 = scope.next_layer().expect("terminal layer");
+        assert!(matches!(l1, DeviceCircuitLayer::Materialized(_, _)));
+        assert!(scope.next_layer().is_none());
+    }
+
+    /// #383 — RAII guard binds + unbinds the active circuit_id slot.
+    #[test]
+    fn task_scope_guard_binds_and_unbinds() {
+        assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
+        {
+            let _guard = LogupTaskScopeGuard::enter(777);
+            assert_eq!(LogupTaskScopeGuard::active_circuit_id(), Some(777));
+        }
+        assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
+    }
+
+    /// #383 — nested guards restore the prior active id on drop.
+    /// Production has only a single level today, but tests may nest.
+    #[test]
+    fn task_scope_guard_nests() {
+        let outer = LogupTaskScopeGuard::enter(1);
+        assert_eq!(LogupTaskScopeGuard::active_circuit_id(), Some(1));
+        {
+            let _inner = LogupTaskScopeGuard::enter(2);
+            assert_eq!(LogupTaskScopeGuard::active_circuit_id(), Some(2));
+        }
+        assert_eq!(LogupTaskScopeGuard::active_circuit_id(), Some(1));
+        drop(outer);
+        assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
+    }
+
+    /// #383 — guard drop clears the V3 next-layer handle TLS, closing
+    /// the cross-shard race documented in
+    /// `project_v3_regression_analysis.md` (`clear_logup_v3_next_handle`
+    /// previously had zero callers).
+    #[test]
+    fn task_scope_guard_clears_v3_handle_on_drop() {
+        use crate::shard_level::sumcheck_poly::{
+            publish_logup_v3_next_handle, take_logup_v3_next_handle,
+            DeviceLayerHandle as V3Handle,
+        };
+        struct Tag;
+        // Install a fake handle as if the prior round had returned one.
+        publish_logup_v3_next_handle(V3Handle(Arc::new(Tag) as Arc<_>));
+        {
+            let _guard = LogupTaskScopeGuard::enter(42);
+            // Guard is alive — handle still observable to peek-like calls.
+        }
+        // Guard dropped — handle MUST be cleared.
+        assert!(
+            take_logup_v3_next_handle().is_none(),
+            "LogupTaskScopeGuard::drop should clear V3 next-handle TLS"
+        );
     }
 }
