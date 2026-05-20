@@ -901,9 +901,12 @@ where
     let _device_first_layer_guard = {
         static CONSUME_GATE: OnceLock<bool> = OnceLock::new();
         let consume = *CONSUME_GATE.get_or_init(|| {
+            // #380 default ON to match SP1 (device-first-layer stash drain
+            // is mandatory in SP1's first-round kernel pipeline — no env
+            // gate). Opt-OUT with ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME=0.
             std::env::var("ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME")
-                .map(|v| v == "1")
-                .unwrap_or(false)
+                .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+                .unwrap_or(true)
         });
         use crate::shard_level::device_first_layer_context as dfl;
         // C6 May-14 fix: ALWAYS drain on each shard's first dispatch.
