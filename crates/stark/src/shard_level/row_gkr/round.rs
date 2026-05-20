@@ -3289,17 +3289,21 @@ where
     // or on CUDA error; in either case we fall through to the host
     // trait-driven driver below.  Generic-EF callers (test code,
     // non-production) take the host path unconditionally.
-    // #361 REVERTED to opt-in: clean perf (3 runs each, low system
-    // contention) shows core +94% / compress +14% / wall +64%
-    // regression vs OFF. Pathologically larger than 20% threshold.
-    // Earlier "compress -11%" reading was noise from contaminated
-    // runs. H2/V2 path adds per-shard dispatch overhead that
-    // amortizes badly on core stage's many small shards.
-    // Future fix: batched dispatch across shards, or only enable
-    // for chip_rows >= threshold. Opt-in preserved for diagnostic.
+    // #380 default ON to match SP1 (sp1-gpu has no env gate — the device
+    // LogUp-GKR path is the only path).  SP1 reference: sp1-gpu/.../
+    // logup_gkr/src/tracegen.rs (no `if env_var` wrapper).
+    //
+    // Expected workload impact (per project_379_combined_incompatible.md
+    // and project_validation_may20_findings.md May 20 bench data):
+    //   * reth (large shards, total_vars >= 17): -56% wall — best lever
+    //   * tendermint (small shards): +40-94% wall — small-layer dispatch
+    //     overhead dominates; SP1 amortizes via TaskScope-persisted state
+    //     that Ziren doesn't have yet (filed for future async pipeline port).
+    //
+    // Opt-OUT with ZIREN_GPU_LOGUP_GKR_DEVICE=0 as kill-switch.
     if std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+        .unwrap_or(true)
     {
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<
