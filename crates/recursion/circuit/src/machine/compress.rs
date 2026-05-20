@@ -33,7 +33,7 @@ use crate::{
         root_public_values_digest,
     },
     stark::{
-        dummy_recursion_shard_proof_dispatcher, ShardProofVariable, StarkVerifier,
+        dummy_recursion_basefold_vk_and_shard_proof, ShardProofVariable, StarkVerifier,
     },
     CircuitConfig, KoalaBearFriParameters, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
@@ -508,12 +508,13 @@ impl<SC: KoalaBearFriParameters> ZKMCompressWitnessValues<SC> {
 }
 
 impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
-    /// Step 5 Phase 3b (May 19 2026) bound widening: the dispatcher
-    /// now routes to `dummy_recursion_basefold_vk_and_shard_proof`
-    /// when `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1`, which drives
-    /// `prove_shard_to_basefold` and therefore requires the chip
-    /// type to satisfy `Air<VerifierConstraintFolder>` (the host-side
-    /// shard-prover's chip-eval bound).  Both `MipsAir` and
+    /// Step 5 Phase 3e (May 19 2026): the env-gated dispatcher seam
+    /// was retired with the rest of Phase 3e.  Basefold is the only
+    /// recursion-shard shape now, so this calls
+    /// `dummy_recursion_basefold_vk_and_shard_proof` directly.
+    /// The trait bound `A: Air<VerifierConstraintFolder>` propagates
+    /// from `dummy_basefold_vk_and_shard_proof` (which drives
+    /// `prove_shard_to_basefold`).  Both `MipsAir` and
     /// `RecursionAir<F, DEGREE>` satisfy this via the standard
     /// `MachineAir` derive.
     pub fn dummy<A>(
@@ -524,17 +525,12 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
         A: MachineAir<KoalaBear>
             + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
     {
-        // Step 5 Phase 3a (May 19 2026): route through the dispatcher
-        // so that `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` automatically
-        // reaches the basefold-shaped dummy once Phase 3b lands the
-        // RecursionAir-parameterised analog of
-        // `dummy_basefold_vk_and_shard_proof`.  Default OFF preserves
-        // the existing FRI-shaped behaviour.
         let vks_and_proofs = shape
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                let (vk, proof) = dummy_recursion_shard_proof_dispatcher(machine, proof_shape);
+                let (vk, proof) =
+                    dummy_recursion_basefold_vk_and_shard_proof(machine, proof_shape);
                 (vk, proof)
             })
             .collect();

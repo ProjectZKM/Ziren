@@ -68,69 +68,6 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
     challenger
 }
 
-/// Step 5 Phase 3a dispatcher scaffold (May 19 2026).
-///
-/// Routes between FRI-shaped and basefold-shaped recursion shard
-/// dummies based on the same env gate that controls the host-side
-/// prover (`ZIREN_FORCE_BASEFOLD_FOR_RECURSION` at
-/// `crates/stark/src/prover.rs:408`).
-///
-/// **Default OFF** — falls through to the existing
-/// [`dummy_vk_and_shard_proof`] (FRI-shaped) with zero behaviour
-/// change, matching the host prover's default of FRI for recursion
-/// shards.
-///
-/// **ON** — currently `unimplemented!()` with an actionable Phase 3b
-/// pointer.  The basefold-shaped recursion shard dummy
-/// (`dummy_recursion_basefold_vk_and_shard_proof`) still needs to be
-/// ported, parameterised over the `RecursionAir` chip set rather
-/// than `MipsAir`.  See the parent roadmap memo at
-/// `project_step5_phase3_roadmap.md`.
-///
-/// This is the architectural seam that Phase 3b will fill: call
-/// sites in `machine/compress.rs::ZKMCompressWitnessValues::dummy`
-/// (and downstream `deferred.rs`) route through this dispatcher
-/// instead of calling [`dummy_vk_and_shard_proof`] directly, so that
-/// flipping the gate ON automatically reaches the new basefold dummy
-/// without touching the call sites.
-///
-/// The mirror image of the Apr 25 wrap-cumsum fix
-/// (`project_phase4_wrap_blocker.md`): that fix realigned the dummy
-/// to the LEGACY FRI shape because recursion shards take FRI; this
-/// dispatcher prepares for the inverse — realigning to BASEFOLD
-/// shape once recursion shards take basefold via the env override.
-pub fn dummy_recursion_shard_proof_dispatcher<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    shape: &OrderedShape,
-) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>)
-where
-    A: MachineAir<KoalaBear>
-        + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
-{
-    let force_basefold_for_recursion = std::env::var("ZIREN_FORCE_BASEFOLD_FOR_RECURSION")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-
-    if force_basefold_for_recursion {
-        // Phase 3b (May 19 2026) — basefold-shaped recursion shard
-        // dummy wired in.  `dummy_recursion_basefold_vk_and_shard_proof`
-        // re-wraps the basefold proof produced by the existing
-        // `dummy_basefold_vk_and_shard_proof` (RecursionAir works
-        // through its generic A parameter — RecursionAir's MachineAir +
-        // Air<VerifierConstraintFolder> bounds are satisfied via the
-        // standard derive macro) into a ShardProof carrier whose FRI
-        // fields are empty and `basefold_shard_proof: Some(_)`.
-        //
-        // This matches the on-the-wire shape the host prover emits
-        // when `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` widens the
-        // basefold gate to recursion shards
-        // (`crates/stark/src/prover.rs:600-610`).
-        return dummy_recursion_basefold_vk_and_shard_proof(machine, shape);
-    }
-
-    dummy_vk_and_shard_proof(machine, shape)
-}
-
 /// Step 5 Phase 3b basefold-shaped recursion shard dummy (May 19 2026).
 ///
 /// Produces a `(StarkVerifyingKey, ShardProof)` pair whose
