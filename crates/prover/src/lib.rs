@@ -190,7 +190,8 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     pub vk_verification: bool,
 
     /// Per-arity cache for the host-side basefold compose proving-key
-    /// shell (preprocessed traces + chip_ordering + local_only flags).
+    /// shell (preprocessed traces + chip_ordering + local_only flags)
+    /// paired with the matching verifying key.
     ///
     /// Distinct from `compose_programs_basefold_cache` (which caches the
     /// uncompiled recursion program).  This caches the **post-setup**
@@ -198,19 +199,25 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// path materializes per-shard via `pk_to_host()` (after a heavy
     /// per-chip `generate_preprocessed_trace_host` walk during
     /// `setup()`).  Reusing it lets dispatch skip both the device
-    /// `setup()` and the `pk_to_host()` D2H sync.
+    /// `setup()` and the `pk_to_host()` D2H sync; the vk is paired so
+    /// downstream `ProvedShard { vk, .. }` can be filled from the
+    /// cache instead of returned from the (skipped) `setup()` call.
     ///
     /// Opt-in via `ZIREN_COMPOSE_PK_CACHE=1`.  Default OFF — the cache
-    /// is only sound when (program, arity) → pk is deterministic, which
-    /// holds today because `compose_program_basefold` is keyed only on
-    /// arity in the program cache.  The companion `*_pk_cache_safe()`
-    /// helper exposes the contract; ziren-gpu reads from it in a
-    /// follow-up commit (#TBD) once a benchmark confirms net positive.
+    /// is only sound when (program, arity) → (pk, vk) is deterministic,
+    /// which holds today because `compose_program_basefold` is keyed
+    /// only on arity in the program cache and `setup()` is a pure
+    /// function of the program.  Mirrors SP1's
+    /// `RecursionKeys::Exists(pk, vk)` (recursion.rs:280-345).
     ///
     /// See `project_recursion_phase_gpu_audit.md` (May 19, 2026) for
     /// the bottleneck analysis that motivated this scaffold.
-    pub compose_pks_basefold_cache:
-        Mutex<BTreeMap<usize, Arc<StarkProvingKey<InnerSC>>>>,
+    pub compose_pks_basefold_cache: Mutex<
+        BTreeMap<
+            usize,
+            Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>,
+        >,
+    >,
 
     /// Per-arity cache for the basefold compose recursion program.
     ///
@@ -324,6 +331,39 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         std::env::var("ZIREN_COMPOSE_PK_CACHE")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
+    }
+
+    /// Lookup helper for the compose-pk cache.  Returns the cached
+    /// `(pk, vk)` pair for the given arity if one is present.  The
+    /// returned `Arc` is cheap to clone; ziren-gpu's dispatch path
+    /// holds it for the duration of one shard.
+    ///
+    /// Does NOT check `compose_pk_cache_enabled()` — callers gate on
+    /// the env helper first and only consult this when caching is on,
+    /// so disabled callers pay zero mutex cost.
+    pub fn compose_pk_cache_get(
+        &self,
+        arity: usize,
+    ) -> Option<Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)>> {
+        let guard = self.compose_pks_basefold_cache.lock().unwrap();
+        guard.get(&arity).cloned()
+    }
+
+    /// Insertion helper for the compose-pk cache.  Uses the BTreeMap
+    /// `entry` API so a concurrent inserter for the same arity does
+    /// not get clobbered — the first writer wins and subsequent
+    /// inserters discard their freshly-built pk.  Returns the Arc
+    /// that's actually in the cache (caller's value if first, the
+    /// pre-existing value otherwise) so callers can use the canonical
+    /// pk/vk for the downstream device upload.
+    pub fn compose_pk_cache_insert(
+        &self,
+        arity: usize,
+        pk: StarkProvingKey<InnerSC>,
+        vk: StarkVerifyingKey<InnerSC>,
+    ) -> Arc<(StarkProvingKey<InnerSC>, StarkVerifyingKey<InnerSC>)> {
+        let mut guard = self.compose_pks_basefold_cache.lock().unwrap();
+        Arc::clone(guard.entry(arity).or_insert_with(|| Arc::new((pk, vk))))
     }
 
     /// Fully initializes the programs, proving keys, and verifying keys that are normally
