@@ -290,6 +290,87 @@ impl From<RecursionShape> for OrderedShape {
     }
 }
 
+/// Task #382 Phase 3a sub-sprint A: compile-time proof that every
+/// `RecursionAir` chip implements
+/// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
+///
+/// The host-side `BasefoldConstraintFolder` (defined at
+/// `zkm-stark::shard_level::basefold_constraint_folder`) is
+/// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
+/// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
+/// (`crates/stark/src/air/builder.rs:581`) and
+/// `AB: BaseAirBuilder => RecursionAirBuilder` (`crates/recursion/core/src/builder.rs:15`)
+/// and `AB: RecursionAirBuilder => ZKMRecursionAirBuilder` (`crates/recursion/core/src/builder.rs:14`)
+/// automatically becomes a `ZKMRecursionAirBuilder` — so the existing
+/// generic `impl<AB: ZKMRecursionAirBuilder> Air<AB> for ChipName` on
+/// every recursion chip already covers it.  No new per-chip code is
+/// required; these assertions just make the bound resolution explicit
+/// and act as a regression guard if any chip's bounds tighten.
+///
+/// The in-circuit folder
+/// (`zkm-recursion-circuit::basefold_constraint_folder`) lives in a
+/// downstream crate, so its assertion lives in `zkm-recursion-circuit`
+/// (see `crates/recursion/circuit/src/basefold_constraint_folder.rs`).
+#[cfg(test)]
+mod basefold_air_assertions {
+    use super::*;
+    use crate::chips::{
+        alu_base::BaseAluChip, alu_ext::ExtAluChip, batch_fri::BatchFRIChip,
+        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip,
+        mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
+        poseidon2_skinny::Poseidon2SkinnyChip, poseidon2_wide::Poseidon2WideChip,
+        public_values::PublicValuesChip, select::SelectChip,
+    };
+    use p3_air::Air;
+    use p3_koala_bear::KoalaBear;
+    use zkm_stark::{
+        shard_level::basefold_constraint_folder::BasefoldConstraintFolder, InnerChallenge,
+    };
+
+    /// Compile-time bound: `T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
+    fn assert_basefold_air<T>()
+    where
+        T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>,
+    {
+    }
+
+    /// Const used purely to force monomorphisation of all 11 chip
+    /// assertions at compile time.  Never called.
+    #[allow(dead_code)]
+    const _ASSERT_ALL_CHIPS: fn() = || {
+        // 1. MemoryConst
+        assert_basefold_air::<MemoryConstChip<KoalaBear>>();
+        // 2. MemoryVar
+        assert_basefold_air::<MemoryVarChip<KoalaBear>>();
+        // 3. BaseAlu
+        assert_basefold_air::<BaseAluChip>();
+        // 4. ExtAlu
+        assert_basefold_air::<ExtAluChip>();
+        // 5. Poseidon2Wide (DEGREE=9, the production const)
+        assert_basefold_air::<Poseidon2WideChip<9>>();
+        // 6. Poseidon2Skinny (DEGREE=9)
+        assert_basefold_air::<Poseidon2SkinnyChip<9>>();
+        // 7. Select
+        assert_basefold_air::<SelectChip>();
+        // 8. FriFold (DEGREE=9)
+        assert_basefold_air::<FriFoldChip<9>>();
+        // 9. BatchFRI (DEGREE=9)
+        assert_basefold_air::<BatchFRIChip<9>>();
+        // 10. ExpReverseBitsLen (DEGREE=9)
+        assert_basefold_air::<ExpReverseBitsLenChip<9>>();
+        // 11. PublicValues
+        assert_basefold_air::<PublicValuesChip>();
+
+        // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
+        // `impl<AB: ZKMRecursionAirBuilder<F = F>, AB::Var: 'static>
+        // Air<AB> for RecursionAir<F, DEGREE>` (`crates/derive/src/lib.rs:320-328`).
+        // For `AB = BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>`,
+        // `AB::F = KoalaBear` matches `F = KoalaBear` and `AB::Var =
+        // InnerChallenge: 'static`, so the bound resolves.
+        assert_basefold_air::<RecursionAir<KoalaBear, 9>>();
+    };
+}
+
 #[cfg(test)]
 pub mod tests {
 
