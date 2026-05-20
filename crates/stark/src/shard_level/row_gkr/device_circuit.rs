@@ -1001,6 +1001,7 @@ mod tests {
             circuit_id: 7,
             num_row_variables: 4,
             num_interaction_variables: 3,
+            input_handle: None,
         };
         // Layers pushed bottom-first: index 0 = terminal (smallest),
         // last index = FirstLayer (largest).  `pop()` yields the
@@ -1040,6 +1041,7 @@ mod tests {
             circuit_id: 99,
             num_row_variables: 4,
             num_interaction_variables: 3,
+            input_handle: None,
         };
         let mut circuit =
             DeviceLogupGkrCircuit::<KoalaBear, EF>::new(Vec::new(), input_data, 0);
@@ -1058,6 +1060,7 @@ mod tests {
             circuit_id: 1,
             num_row_variables: 5,
             num_interaction_variables: 2,
+            input_handle: None,
         };
         let layer = DeviceCircuitLayer::<KoalaBear, EF>::FirstLayerVirtual(input, PhantomData);
         assert!(layer.is_virtual());
@@ -1102,6 +1105,7 @@ mod tests {
             circuit_id: 55,
             num_row_variables: 3,
             num_interaction_variables: 2,
+            input_handle: None,
         };
         let layers = vec![
             DeviceCircuitLayer::<KoalaBear, EF>::Materialized(make_handle(1, 1, 2), PhantomData),
@@ -1132,6 +1136,7 @@ mod tests {
             circuit_id: 91,
             num_row_variables: 3,
             num_interaction_variables: 2,
+            input_handle: None,
         };
         let layers = vec![
             // bottom-up: terminal first (popped LAST), first_layer last (popped FIRST)
@@ -1304,6 +1309,7 @@ mod tests {
             circuit_id: 300,
             num_row_variables: 4,
             num_interaction_variables: 2,
+            input_handle: None,
         };
         // Payloads ordered bottom-up: index 0 = terminal (popped LAST),
         // last index = FirstLayer (popped FIRST).
@@ -1378,6 +1384,7 @@ mod tests {
             circuit_id: 301,
             num_row_variables: 2,
             num_interaction_variables: 1,
+            input_handle: None,
         };
         let mut scope = LogupTaskScope::<KoalaBear, EF>::new(301);
         scope.install_circuit_from_payloads(Vec::new(), input_data);
@@ -1399,6 +1406,7 @@ mod tests {
             circuit_id: 200,
             num_row_variables: 3,
             num_interaction_variables: 2,
+            input_handle: None,
         };
         let layers = vec![
             DeviceCircuitLayer::<KoalaBear, Ef4>::Materialized(

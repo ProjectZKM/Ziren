@@ -771,6 +771,55 @@ pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
     GPU_LOGUP_SCOPE_POPULATE_HOOK.get().copied()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// #376 sub-step 1 — Device-resident `generate_first_layer` regen hook.
+//
+// Signature port only.  Returns the per-`circuit_id` first-layer payload
+// (opaque `Arc<dyn AnyDeviceHandle>` + shape metadata) so
+// [`crate::shard_level::row_gkr::device_circuit::DeviceLogupGkrCircuit::next`]
+// can replace its lazy `todo!()` arm with a hook-or-None dispatch.
+//
+// Until ziren-gpu wires its CUDA `generate_first_layer` impl, the hook
+// stays unregistered → `get` returns `None` → the lazy regen arm in
+// `next` decrements `num_virtual_layers` and surfaces `None` to the
+// caller.  Production scope construction today uses
+// `num_virtual_layers == 0`, so this arm never fires; the hook
+// signature is structural scaffolding.
+
+/// Hook signature for device-side first-layer regeneration.
+///
+/// Given the per-shard `circuit_id` (matching the
+/// `LayerState::Device::circuit_id` keyed on the scope), the ziren-gpu
+/// impl looks up its per-circuit registry, downcasts the stashed
+/// `input_handle: Arc<dyn Any + Send + Sync>` payload, runs the
+/// `generate_first_layer` CUDA kernel, and returns the resulting
+/// device layer payload + shape metadata.  Returns `None` on any
+/// failure (lookup miss, downcast fail, kernel error).
+pub type GpuGenerateFirstLayerFn = fn(
+    circuit_id: u64,
+) -> Option<
+    crate::shard_level::row_gkr::device_circuit::DeviceCircuitLayerPayload,
+>;
+
+static GPU_GENERATE_FIRST_LAYER_HOOK: std::sync::OnceLock<GpuGenerateFirstLayerFn> =
+    std::sync::OnceLock::new();
+
+/// Register the regen hook.  Idempotent; returns `Err(existing)` when
+/// a hook was already registered.  Called once at ziren-gpu startup
+/// alongside the other GKR hooks.
+pub fn register_gpu_generate_first_layer_hook(
+    f: GpuGenerateFirstLayerFn,
+) -> Result<(), GpuGenerateFirstLayerFn> {
+    GPU_GENERATE_FIRST_LAYER_HOOK.set(f)
+}
+
+/// Read the registered regen hook, if any.  Callers MUST handle
+/// `None` gracefully — see the contract on [`GpuGenerateFirstLayerFn`].
+#[must_use]
+pub fn get_gpu_generate_first_layer_hook() -> Option<GpuGenerateFirstLayerFn> {
+    GPU_GENERATE_FIRST_LAYER_HOOK.get().copied()
+}
+
 /// Process-wide monotonic counter for GKR-circuit IDs.  Each
 /// `build_gkr_circuit` call that takes the device path allocates a
 /// fresh ID via [`allocate_gpu_layer_circuit_id`] and threads it
