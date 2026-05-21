@@ -907,10 +907,16 @@ where
 
     // Walk rounds 1..n.
     //
-    // Sumcheck convention (SP1-aligned): the prover runs an MSB fold
-    // and `insert(0, α)`s each freshly-sampled challenge at the front
-    // of `reduced_point`.  We mirror the prover's construction here so
-    // the equality check below sees the same Vec.
+    // Transcript-ordering convention (UNCHANGED by #383 Path B Phase 1):
+    // both legacy V2 and SP1 packed-pool Path 1' GPU provers construct
+    // `proof.point_and_eval.0` via `insert(0, alpha)` per round (same as
+    // SP1's `slop_multilinear::Point::add_dimension`).  We mirror that
+    // reconstruction here so the equality check below sees the same Vec.
+    //
+    // The LSB-fold semantic reinterpretation introduced by Phase 1 lives
+    // ENTIRELY in the final-eval identity below at `verify_logup_gkr_host`
+    // — `sumcheck_point[k]` is reinterpreted to bind `eval_point[n-1-k]`
+    // via an `eval_point.reverse()` at the `eq_eval_host` call site.
     let mut alphas: Vec<EF> = Vec::with_capacity(n);
     let mut prev_poly = p0;
     for i in 1..n {
@@ -1081,9 +1087,22 @@ where
         )?;
 
         // Final-eval identity.
+        //
+        // SP1 LSB-fold convention (#383 Path B Phase 1): `sumcheck_point`
+        // is `[α_0, α_1, ..., α_{n-1}]` (push-at-back order — see
+        // `verify_sumcheck_host`).  `eval_point` was accumulated under the
+        // PREVIOUS legacy convention and is in `[v_{n-1}, ..., v_0]` order
+        // relative to the GKR layer's variable indexing.  The final-eval
+        // identity requires `point[k]` to bind `eval_point[n-1-k]`, so we
+        // reverse `eval_point` here before the symmetric `eq_eval_host`
+        // product.  This matches SP1's `Mle::full_lagrange_eval(&point,
+        // &eval_point)` semantics from `partially_verify_sumcheck_proof` →
+        // `verify_logup_gkr` (hypercube/src/logup_gkr/verifier.rs:219).
         let sumcheck_point = &round_proof.sumcheck_proof.point_and_eval.0;
         let final_eval = round_proof.sumcheck_proof.point_and_eval.1;
-        let eq_val = eq_eval_host(sumcheck_point, &eval_point);
+        let eval_point_reversed: Vec<Challenge<SC>> =
+            eval_point.iter().rev().copied().collect();
+        let eq_val = eq_eval_host(sumcheck_point, &eval_point_reversed);
         let n0 = round_proof.numerator_0;
         let n1 = round_proof.numerator_1;
         let d0 = round_proof.denominator_0;
