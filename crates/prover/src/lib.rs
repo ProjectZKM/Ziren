@@ -300,7 +300,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // programs (256 at arity-4) at >5 min/program with vk_verification.
         let _ = core_cache_size;
 
-        Self {
+        let prover = Self {
             core_prover,
             compress_prover,
             shrink_prover,
@@ -314,7 +314,111 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             wrap_vk: OnceLock::new(),
             compose_programs_basefold_cache: Mutex::new(BTreeMap::new()),
             compose_pks_basefold_cache: Mutex::new(BTreeMap::new()),
+        };
+
+        // Compose-program pre-warm (SP1 audit gap #14, May 21 2026).
+        //
+        // Mirrors SP1's `worker/prover/recursion.rs:461-487` arity walk:
+        // for each arity in `1..=REDUCE_BATCH_SIZE`, synthesize a dummy
+        // compose witness and build the compose recursion program.  The
+        // built program is discarded — the goal is to amortize the
+        // first-compose-call JIT/compile cost (DSL → AsmCompiler → shape
+        // fixing) at process startup instead of paying it inside the
+        // first user `compress()` invocation.
+        //
+        // INDEPENDENT of `ZIREN_PROGRAM_CACHE` (which is opt-in per
+        // project_256_cache_perf_reverted.md): the cache stores the
+        // *built* program; pre-warm instead warms the compiler's
+        // internal caches (e.g. SeqBlock layout, plonky3 codegen
+        // tables, shape-fix tables) that survive across builds even
+        // when each per-arity program object is discarded.
+        //
+        // Kill-switch: `ZIREN_DISABLE_COMPOSE_PREWARM=1`.
+        prover.prewarm_compose_programs();
+
+        prover
+    }
+
+    /// Compose-program pre-warm helper.  See call-site comment in
+    /// [`Self::uninitialized`] for the rationale.  Walks
+    /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
+    /// dummy compose program per arity to amortize first-compile cost.
+    ///
+    /// Bails when:
+    ///   - `ZIREN_DISABLE_COMPOSE_PREWARM=1` (manual kill switch),
+    ///   - `compress_shape_config` is None
+    ///     (`FIX_RECURSION_SHAPES=false` — no allowed shape to drive
+    ///     `fix_shape`, would panic or build a non-canonical program),
+    ///   - the recursion shape config has no allowed shapes
+    ///     (defensive — should not happen with the default config).
+    fn prewarm_compose_programs(&self) {
+        if std::env::var("ZIREN_DISABLE_COMPOSE_PREWARM")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            tracing::debug!("compose pre-warm disabled via ZIREN_DISABLE_COMPOSE_PREWARM");
+            return;
         }
+
+        let Some(recursion_shape_config) = self.compress_shape_config.as_ref() else {
+            tracing::debug!(
+                "compose pre-warm skipped: compress_shape_config is None \
+                 (FIX_RECURSION_SHAPES=false)"
+            );
+            return;
+        };
+
+        // Pull the first allowed recursion shape — replicated across
+        // `arity` slots, this is a valid `ZKMCompressShape` that
+        // survives `fix_shape`.  Mirrors SP1's
+        // `compress_proof_shape_from_arity(arity)` which also uses a
+        // single canonical shape replicated.
+        let Some(first_shape_map) = recursion_shape_config.first() else {
+            tracing::debug!(
+                "compose pre-warm skipped: recursion_shape_config has no allowed shapes"
+            );
+            return;
+        };
+
+        let proof_shape: OrderedShape = first_shape_map
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+
+        // Use the production merkle tree height — this is what real
+        // compose witnesses see at runtime, so the pre-warmed shape
+        // matches the JIT path that user calls will hit.
+        let merkle_tree_height = self.recursion_vk_tree.height;
+
+        let prewarm_start = std::time::Instant::now();
+        for arity in 1..=REDUCE_BATCH_SIZE {
+            let compress_shape =
+                ZKMCompressShape::from(vec![proof_shape.clone(); arity]);
+            let shape = ZKMCompressWithVkeyShape {
+                compress_shape,
+                merkle_tree_height,
+            };
+            let witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
+                self.compress_prover.machine(),
+                &shape,
+            );
+            let per_arity_start = std::time::Instant::now();
+            // Discard the result — we want the JIT/compile-cache
+            // side-effects, not the program object.  When
+            // `ZIREN_PROGRAM_CACHE=1` the program *will* be stored in
+            // `compose_programs_basefold_cache`; that's an additional
+            // benefit but not the pre-warm goal.
+            let _program = self.compose_program_basefold(&witness);
+            tracing::debug!(
+                "compose pre-warm: arity={arity} built in {:?}",
+                per_arity_start.elapsed()
+            );
+        }
+        tracing::debug!(
+            "compose pre-warm: arity 1..={} done in {:?}",
+            REDUCE_BATCH_SIZE,
+            prewarm_start.elapsed()
+        );
     }
 
     /// Returns true when the host-side compose-pk cache is enabled
