@@ -49,7 +49,7 @@ use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeF
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::main_trace_loader::{EagerHostLoader, MainTraceLoader};
-use super::shard_proof::BasefoldShardProof;
+use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::row_gkr::top_level::prove_shard_logup_gkr_rows;
 use super::zerocheck_prover::prove_shard_zerocheck;
 use crate::air::MachineAir;
@@ -94,6 +94,11 @@ pub fn prove_shard_to_basefold<SC, A>(
     // pass `Some(&provider)`.  Host-only callers (CPU prover, the
     // recursion-circuit verifier-simulation) pass `None`.
     device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // Gap #10: fold-orientation tag stamped on the emitted proof.
+    // CPU host callers pass `FoldOrientation::Msb`; GPU shard prover
+    // resolves the right orientation per env-var path.  Drives the
+    // host verifier's per-round eq pairing without env-var dispatch.
+    orientation: FoldOrientation,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -112,6 +117,7 @@ where
         max_log_row_count,
         challenger,
         device_traces,
+        orientation,
     )
 }
 
@@ -155,6 +161,10 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // concurrent shards on different GPU pool workers each pass their
     // OWN provider, no shared mutable state, no race.
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // Gap #10: fold-orientation tag the prover stamps on the emitted
+    // proof.  See [`prove_shard_to_basefold`] doc for caller-side
+    // convention.
+    orientation: FoldOrientation,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -449,6 +459,7 @@ where
         evaluation_proof,
         #[cfg(feature = "basefold")]
         evaluation_proof_bundle: evaluation_proof_bundle_opt,
+        fold_orientation: orientation,
     };
     drop(_phase5_span);
     tracing::info!(

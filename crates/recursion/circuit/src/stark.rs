@@ -292,6 +292,9 @@ where
         &mut challenger,
         // #263: host-only verifier-simulation path; no device traces.
         None,
+        // Gap #10: verifier-simulation path emits MSB-folded proofs
+        // (host-CPU convention).
+        zkm_stark::shard_level::shard_proof::FoldOrientation::Msb,
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy

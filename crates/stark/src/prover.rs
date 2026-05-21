@@ -1257,6 +1257,9 @@ where
             &mut shard_challenger,
             // #263: CPU prover path; no device traces.
             None,
+            // Gap #10: CpuProver path always emits MSB-folded proofs
+            // (the GPU LSB packed-pool path is unreachable here).
+            crate::shard_level::shard_proof::FoldOrientation::Msb,
         )
     }));
 
