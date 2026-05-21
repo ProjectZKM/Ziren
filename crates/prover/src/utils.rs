@@ -50,14 +50,12 @@ pub fn root_public_values_digest(
     public_values: &RootPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
-    let input = (*public_values.zkm_vk_digest())
-        .into_iter()
-        .chain(
-            (*public_values.committed_value_digest())
-                .into_iter()
-                .flat_map(|word| word.0.into_iter()),
-        )
-        .collect::<Vec<_>>();
+    let mut input = [KoalaBear::ZERO; 40];
+    input[..8].copy_from_slice(public_values.zkm_vk_digest());
+    for (i, word) in public_values.committed_value_digest().iter().enumerate() {
+        let start = 8 + i * 4;
+        input[start..start + 4].copy_from_slice(&word.0);
+    }
     hash.hash_slice(&input)
 }
 
