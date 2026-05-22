@@ -79,6 +79,68 @@ pub trait MainTraceLoader<F> {
     {
         (0..self.len()).map(|i| self.get(i)).collect()
     }
+
+    // ── Phase A scaffolding (gap #1) ─────────────────────────
+    //
+    // The orchestrator and several phases need ONLY per-chip
+    // height/width metadata (not the full value slice).  Examples:
+    //
+    //   * Phase 5 builds `chip_log_heights` from `trace.height()`
+    //     (prover.rs:382-393).
+    //   * Phase 2/3/4 size local sumcheck tables from
+    //     `chip_height` via `log_height = ceil_log2(h)`.
+    //   * Cumulative-sum stamping reads the trailing 14 elements
+    //     of each chip's main trace (prover.rs:422-431) — this is
+    //     a tail-slice consumer, NOT a full-trace consumer.
+    //
+    // Today the default impl falls back to `get(i)` and reads the
+    // dimensions off the materialized `RowMajorMatrix`.  Lazy
+    // device-backed loaders OVERRIDE these methods (via stashed
+    // metadata) to avoid the PCIe pull when only dims are needed.
+    //
+    // Gap #1 Phase B will switch the phase signatures to take
+    // `&L: MainTraceLoader` and route metadata queries through
+    // these methods — closing the `materialize_all` fence at
+    // `prover.rs:190-192` for the GPU shard-prover path.
+    //
+    // See `project_434_gap1_wip.md` + `project_device_residency_deep_analysis_post_session.md`
+    // for the full design rationale.
+
+    /// Height (= row count) of chip `i`'s main trace.
+    ///
+    /// Default impl materializes the chip via [`Self::get`] and
+    /// reads `values.len() / width`.  Lazy device-backed loaders
+    /// SHOULD override to read cached metadata so this query is
+    /// O(1) host-only.
+    fn chip_height(&self, i: usize) -> usize {
+        let t = self.get(i);
+        if t.width == 0 {
+            1
+        } else {
+            t.values.len() / t.width
+        }
+    }
+
+    /// Width (= column count) of chip `i`'s main trace.
+    ///
+    /// Default impl materializes the chip via [`Self::get`] and
+    /// reads `width`.  Lazy device-backed loaders SHOULD
+    /// override to read cached metadata so this query is O(1)
+    /// host-only.
+    fn chip_width(&self, i: usize) -> usize {
+        self.get(i).width
+    }
+
+    /// Returns `(height, width)` per chip in chip-iteration
+    /// order.  Convenience aggregator over [`Self::chip_height`]
+    /// + [`Self::chip_width`].
+    ///
+    /// Phase 5 callers should prefer this when they only need
+    /// dimensions — avoids the per-chip materialise that the
+    /// `chips.iter().zip(main_traces.iter())` pattern triggers.
+    fn chip_dims(&self) -> Vec<(usize, usize)> {
+        (0..self.len()).map(|i| (self.chip_height(i), self.chip_width(i))).collect()
+    }
 }
 
 /// Loader backed by a borrowed slice of host `RowMajorMatrix`s.
@@ -146,6 +208,19 @@ where
 {
     n_chips: usize,
     pull: Pull,
+    /// Optional per-chip `(height, width)` metadata supplied at
+    /// construction.  When present, [`MainTraceLoader::chip_height`]
+    /// / [`MainTraceLoader::chip_width`] / [`MainTraceLoader::chip_dims`]
+    /// read from this slice without invoking the pull closure —
+    /// the GPU caller already knows these dims (the device-resident
+    /// `ColMajorMatrixDevice` exposes them as host-side struct
+    /// reads), so stashing them here eliminates the upfront PCIe
+    /// pull when only metadata is needed.
+    ///
+    /// `None` means the default trait impl (which falls back to
+    /// `get(i)`) is used — preserves the legacy behaviour of
+    /// [`Self::new`].
+    dims: Option<Vec<(usize, usize)>>,
     _marker: core::marker::PhantomData<F>,
 }
 
@@ -157,10 +232,46 @@ where
     /// closure.  `pull(i)` MUST return the host trace for chip
     /// `i`; behaviour for `i >= n_chips` is unspecified (trait
     /// callers will not invoke it).
+    ///
+    /// Per-chip metadata queries fall back to the default trait
+    /// impl which invokes [`Self::get`] — i.e. each `chip_height`
+    /// /  `chip_width` call triggers a PCIe pull.  GPU callers
+    /// SHOULD prefer [`Self::with_dims`] to stash dims at
+    /// construction time and avoid those pulls.
     pub fn new(n_chips: usize, pull: Pull) -> Self {
         Self {
             n_chips,
             pull,
+            dims: None,
+            _marker: core::marker::PhantomData,
+        }
+    }
+
+    /// Build a lazy loader with pre-supplied per-chip
+    /// `(height, width)` metadata.  Used by GPU callers that
+    /// already know the dims from device-resident
+    /// `ColMajorMatrixDevice::height/width` host-side struct
+    /// reads.
+    ///
+    /// `dims.len()` MUST equal `n_chips`; the metadata
+    /// override is bypassed otherwise (defensive: falls back to
+    /// the default trait impl).
+    ///
+    /// Phase B of gap #1 routes per-phase metadata queries
+    /// through the new `chip_dims()` consumer in
+    /// `shard_level/prover.rs::prove_shard_to_basefold_with_loader`
+    /// so the GPU compress path stops pulling chip values upfront
+    /// when only dims are needed.
+    pub fn with_dims(n_chips: usize, pull: Pull, dims: Vec<(usize, usize)>) -> Self {
+        debug_assert_eq!(
+            dims.len(),
+            n_chips,
+            "with_dims: dims length must equal n_chips",
+        );
+        Self {
+            n_chips,
+            pull,
+            dims: Some(dims),
             _marker: core::marker::PhantomData,
         }
     }
@@ -197,5 +308,39 @@ where
             .into_par_iter()
             .map(|i| (self.pull)(i))
             .collect()
+    }
+
+    /// O(1) metadata read when `with_dims` supplied dims;
+    /// falls back to the default `get(i)` pull otherwise.
+    fn chip_height(&self, i: usize) -> usize {
+        match &self.dims {
+            Some(d) if i < d.len() => d[i].0,
+            _ => {
+                let t = (self.pull)(i);
+                if t.width == 0 {
+                    1
+                } else {
+                    t.values.len() / t.width
+                }
+            }
+        }
+    }
+
+    /// O(1) metadata read when `with_dims` supplied dims;
+    /// falls back to the default `get(i)` pull otherwise.
+    fn chip_width(&self, i: usize) -> usize {
+        match &self.dims {
+            Some(d) if i < d.len() => d[i].1,
+            _ => (self.pull)(i).width,
+        }
+    }
+
+    /// O(n_chips) when metadata stashed; otherwise falls back to
+    /// the default per-chip pull loop.
+    fn chip_dims(&self) -> Vec<(usize, usize)> {
+        match &self.dims {
+            Some(d) if d.len() == self.n_chips => d.clone(),
+            _ => (0..self.n_chips).map(|i| (self.chip_height(i), self.chip_width(i))).collect(),
+        }
     }
 }
