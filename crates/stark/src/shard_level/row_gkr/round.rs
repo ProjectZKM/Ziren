@@ -995,7 +995,14 @@ where
     // analytically on host, skip them from GPU upload + kernel work.
     // Env-gated: default OFF until per-shard validation extends beyond
     // the first-dispatch COEFFS_MATCH check.
-    let skip_padding_enabled = std::env::var("ZIREN_GPU_SKIP_PADDING_CHIPS").map(|v| v == "1").unwrap_or(false);
+    // Default-on: skip zero-row padding chips from GPU dispatch (bandwidth savings).
+    // Opt-out via ZIREN_GPU_SKIP_PADDING_CHIPS_DISABLE=1 (or legacy =0/false).
+    let skip_padding_enabled = !std::env::var("ZIREN_GPU_SKIP_PADDING_CHIPS_DISABLE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+        && !std::env::var("ZIREN_GPU_SKIP_PADDING_CHIPS")
+            .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false);
     let is_padding_chip: Vec<bool> = if skip_padding_enabled {
         (0..n_chips).map(|c| first_layer.numerator_0[c].num_real_rows == 0).collect()
     } else {
