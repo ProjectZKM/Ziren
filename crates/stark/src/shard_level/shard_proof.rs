@@ -49,15 +49,15 @@ use crate::ShardOpenedValues;
 ///     paths fold the high-order variable first (eq pairing uses
 ///     `eval_point` in original order at the round's final-eval
 ///     identity).
-///   - `Lsb` — the GPU `ZIREN_GPU_LOGUP_PACKED=1` (default Path 1'
-///     SP1 packed-pool) path folds the low-order variable first
+///   - `Lsb` — the GPU `ZIREN_DEBUG_LOGUP_PACKED_BROKEN=1` (SP1
+///     packed-pool) path folds the low-order variable first
 ///     (eq pairing must reverse `eval_point` to match the prover's
 ///     fold direction).
 ///
 /// The verifier (`verify_logup_gkr_host`) dispatches on this tag
 /// at the per-round final-eval identity site, eliminating the need
 /// for env-var-driven dispatch (which is broken on the CpuProver
-/// binary that cannot read `ZIREN_GPU_LOGUP_PACKED`).  See
+/// binary that cannot read `ZIREN_DEBUG_LOGUP_PACKED_BROKEN`).  See
 /// `project_baseline_fix_blocked.md` §"Hypothesis" and
 /// `project_sp1_gap_refresh_may21.md` gap #10.
 ///
@@ -67,12 +67,14 @@ use crate::ShardOpenedValues;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FoldOrientation {
     /// High-order variable folded first.  CPU prover + GPU LEGACY V2
-    /// + GPU Path B' (`ZIREN_GPU_LOGUP_ZIREN_PATH=1`) emit this.
+    /// + GPU Path B' (`ZIREN_DEBUG_LOGUP_ZIREN_PATH_DORMANT=1`) emit this.
     Msb,
     /// Low-order variable folded first.  GPU Path 1' SP1 packed-pool
-    /// (default ON when `ZIREN_GPU_LOGUP_PACKED` != "0" and
-    /// `ZIREN_GPU_GKR_TRANSITION_LEGACY` != "1" and
-    /// `ZIREN_GPU_LOGUP_ZIREN_PATH` != "1") emits this.
+    /// (opted in via `ZIREN_DEBUG_LOGUP_PACKED_BROKEN=1` together with
+    /// `ZIREN_DEBUG_GKR_LEGACY_PERCHIP=0`) emits this.  Path is
+    /// known broken at round 1+ (verifier rejects with "final_eval
+    /// identity failed"); reachable only as a forensics opt-in since
+    /// the LEGACY V2 per-chip default became the sole sound path.
     Lsb,
 }
 
@@ -190,8 +192,8 @@ pub struct BasefoldShardProof<F, EF> {
     /// Fold orientation emitted by the prover.  Eliminates env-var
     /// dispatch ambiguity at the verifier — the verifier reads
     /// this tag (gap #10) instead of consulting
-    /// `ZIREN_GPU_LOGUP_PACKED` which the CpuProver binary cannot
-    /// read.  `serde(default)` defaults to [`FoldOrientation::Msb`]
+    /// `ZIREN_DEBUG_LOGUP_PACKED_BROKEN` which the CpuProver binary
+    /// cannot read.  `serde(default)` defaults to [`FoldOrientation::Msb`]
     /// so older proof bytes (every pre-tag CPU/LEGACY/Path-B' proof)
     /// deserialize to the correct orientation.
     #[serde(default)]

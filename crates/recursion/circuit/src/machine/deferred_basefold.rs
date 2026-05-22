@@ -225,10 +225,12 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
 
-        // #245 Phase 4f: bundle path is the default.  Set
-        // ZIREN_DISABLE_BUNDLE_LIFT=1 to fall back to the placeholder
-        // lift (bypass while #249 recursion-shape follow-on lands).
-        let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
+        // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
+        // (set to any value) falls back to the placeholder per-shard
+        // lift; preserved as a kill switch for forensics when bundle-
+        // lift recursion shape registration regresses.  Default unset
+        // = bundle path.
+        let evaluation_proof_var = if std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_err() {
             match evaluation_proof_bundle_opt.as_ref() {
                 Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
                     builder,
@@ -295,7 +297,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier =
-            if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
+            if std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_err() {
                 if let Some(bundle) = evaluation_proof_bundle_opt.as_ref() {
                     let bundle_num_vars =
                         bundle.basefold_proof.basefold_proof.fri_commitments.len();
