@@ -1076,6 +1076,124 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
         );
         Self { vks_and_proofs, vk_merkle_data, is_complete: false }
     }
+
+    /// Compute a structural signature of the witness layout.
+    ///
+    /// Two `ZKMCompressBasefoldWitnessValues` produce byte-identical
+    /// recursion programs iff their `shape_key()` values are equal —
+    /// the key hashes every variable-length collection that the
+    /// `Witnessable::write` traversal walks, in write order. This
+    /// makes the per-arity compose program cache sound: cache hits
+    /// only occur when the cached program's `Hint` instruction count
+    /// matches the next input's witness stream length, eliminating
+    /// the `RuntimeError::EmptyWitnessStream` panic that fires when
+    /// two same-arity calls have different per-input shapes (#256
+    /// audit `assert_eq!` documented this as the cache's failure
+    /// mode; see `project_256_cache_perf_reverted.md`).
+    ///
+    /// **Not** a cryptographic commitment — collisions are tolerable
+    /// in principle because a divergent program will only fail at
+    /// runtime (the cache audit gate
+    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` still catches them
+    /// byte-exactly). In practice the hashed tuple is precise
+    /// enough that real-world collisions are not expected.
+    ///
+    /// Walk order MUST mirror the
+    /// `Witnessable::<C>::write(&self, witness)` impl at
+    /// `crates/recursion/circuit/src/machine/witness.rs:392-403`
+    /// — any change there requires a matching update here.
+    pub fn shape_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+
+        // Tag the key with a version so future cache-key changes
+        // invalidate previously-cached programs without silent
+        // collisions.
+        0xC0_FE_BA_5E_u32.hash(&mut h);
+
+        // vks_and_proofs.len() is the arity.  All per-input shapes
+        // follow.
+        self.vks_and_proofs.len().hash(&mut h);
+        for (_vk, sp) in self.vks_and_proofs.iter() {
+            // BasefoldShardProof (zkm_stark::shard_level::shard_proof)
+            // — Witnessable::write order:
+            //   main_commitment (fixed [F; 8])
+            //   public_values   (Vec<F>)
+            //   logup_gkr_proof (LogupGkrProof)
+            //   zerocheck_proof (PartialSumcheckProof)
+            sp.public_values.len().hash(&mut h);
+
+            // LogupGkrProof::write order:
+            //   circuit_output  (LogUpGkrOutput { numerator, denominator })
+            //   round_proofs    (Vec<LogupGkrRoundProof>)
+            //   logup_evaluations (LogUpEvaluations { point, chip_openings })
+            //   witness         (single F — fixed)
+            let lgkr = &sp.logup_gkr_proof;
+            lgkr.circuit_output.numerator.len().hash(&mut h);
+            lgkr.circuit_output.denominator.len().hash(&mut h);
+            lgkr.round_proofs.len().hash(&mut h);
+            for round in lgkr.round_proofs.iter() {
+                // Each round writes 4 fixed EFs + a sumcheck proof.
+                round.sumcheck_proof.univariate_polys.len().hash(&mut h);
+                for poly in round.sumcheck_proof.univariate_polys.iter() {
+                    poly.coefficients.len().hash(&mut h);
+                }
+                // point_and_eval.0 (point: Vec<EF>) is also variable.
+                round.sumcheck_proof.point_and_eval.0.len().hash(&mut h);
+            }
+            // logup_evaluations
+            lgkr.logup_evaluations.point.len().hash(&mut h);
+            lgkr.logup_evaluations.chip_openings.len().hash(&mut h);
+            for (name, eval) in lgkr.logup_evaluations.chip_openings.iter() {
+                // chip_openings is a BTreeMap — iteration order is
+                // sorted, matching the Witnessable::write traversal.
+                // Hash names to detect chip-set drift.
+                name.hash(&mut h);
+                eval.main_trace_evaluations.len().hash(&mut h);
+                // Option<Vec<EF>> — discriminant + len.
+                match &eval.preprocessed_trace_evaluations {
+                    Some(v) => {
+                        1u8.hash(&mut h);
+                        v.len().hash(&mut h);
+                    }
+                    None => 0u8.hash(&mut h),
+                }
+            }
+
+            // zerocheck_proof (PartialSumcheckProof)
+            sp.zerocheck_proof.univariate_polys.len().hash(&mut h);
+            for poly in sp.zerocheck_proof.univariate_polys.iter() {
+                poly.coefficients.len().hash(&mut h);
+            }
+            sp.zerocheck_proof.point_and_eval.0.len().hash(&mut h);
+
+            // chip_cumulative_sums (BTreeMap) — iterated by the
+            // compose-basefold Witnessable impl (witness.rs:395-398)
+            // after the proofs but in the same per-input loop.
+            sp.chip_cumulative_sums.len().hash(&mut h);
+            for (name, _) in sp.chip_cumulative_sums.iter() {
+                name.hash(&mut h);
+                // Each ChipCumulativeSums has fixed shape
+                // (Ext + SepticDigest of [F; 7] × 2) — no varlen.
+            }
+        }
+
+        // vk_merkle_data (ZKMMerkleProofWitnessValues) write order:
+        //   vk_merkle_proofs (Vec<MerkleProof>) — variable both in
+        //                    count and per-proof path length
+        //   values           (Vec<Digest>) — variable count
+        //   root             (Digest — fixed)
+        self.vk_merkle_data.vk_merkle_proofs.len().hash(&mut h);
+        for proof in self.vk_merkle_data.vk_merkle_proofs.iter() {
+            proof.path.len().hash(&mut h);
+        }
+        self.vk_merkle_data.values.len().hash(&mut h);
+
+        // is_complete (bool — fixed; included for completeness).
+        self.is_complete.hash(&mut h);
+
+        h.finish()
+    }
 }
 
 #[cfg(test)]

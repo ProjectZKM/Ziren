@@ -217,22 +217,38 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
         >,
     >,
 
-    /// Per-arity cache for the basefold compose recursion program.
+    /// Per-shape cache for the basefold compose recursion program.
     ///
-    /// Mirrors SP1's pattern (`crates/prover/src/worker/prover/recursion.rs:446`,
-    /// `compose_programs: BTreeMap<usize, Arc<RecursionProgram>>`): the compose
-    /// program's structure is determined by arity (count of input proofs)
-    /// once per-input shapes are stable, so one program per arity suffices.
+    /// **Key**: `ZKMCompressBasefoldWitnessValues::shape_key()` —
+    /// a u64 structural signature that hashes every variable-length
+    /// collection in the witness write traversal (arity, per-input
+    /// chip counts, sumcheck round counts, etc.).  Two inputs sharing
+    /// a cached program iff their shape keys match — which is the
+    /// soundness condition for the cache (cached program's `Hint`
+    /// instruction count must equal the next input's witness stream
+    /// length).
+    ///
+    /// **History**: Before May 21 2026 (`feat/upgrade-plonky3-program-cache-fix`)
+    /// the key was just `arity` (mirroring SP1's
+    /// `crates/prover/src/worker/prover/recursion.rs:446`).
+    /// That was unsound for Ziren because per-input shapes vary
+    /// widely across calls of the same arity (lift heights span
+    /// 5K..328K vs SP1's tight clustering — see
+    /// `project_256_cache_perf_reverted.md` and
+    /// `project_tendermint_speedup_proposals.md` §6).  Re-using a
+    /// program built for shape A with shape B's witness stream
+    /// triggered `RuntimeError::EmptyWitnessStream` panics under
+    /// `ZIREN_PROGRAM_CACHE=1` / `ZIREN_GPU_RESIDENCY=full`.
     ///
     /// Opt-in via `ZIREN_GPU_RESIDENCY=full` (legacy
     /// `ZIREN_PROGRAM_CACHE=1` still honored).  With
     /// `ZIREN_VERIFY_PROGRAM_CACHE=1` every cache hit rebuilds and
-    /// asserts byte-equality (bincode) — catches the failure mode
-    /// where real input shapes vary across calls of the same arity,
-    /// which would mean caching the wrong program.  The audit flag is
-    /// orthogonal to the residency profile (CI/dev tool).
+    /// asserts byte-equality (bincode) — catches the (now-rare)
+    /// failure mode where two inputs collide in `shape_key()` but
+    /// produce different programs.  The audit flag is orthogonal to
+    /// the residency profile (CI/dev tool).
     pub compose_programs_basefold_cache:
-        Mutex<BTreeMap<usize, Arc<RecursionProgram<KoalaBear>>>>,
+        Mutex<BTreeMap<u64, Arc<RecursionProgram<KoalaBear>>>>,
 }
 
 impl<C: ZKMProverComponents> ZKMProver<C> {
@@ -633,12 +649,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let cache_enabled = crate::residency::program_cache_enabled();
         let verify_cache = crate::residency::program_cache_audit_enabled();
+        // May 21 2026 fix: cache key is now a structural shape signature
+        // covering every variable-length collection in the witness
+        // write traversal (not just arity).  This makes the cache sound
+        // for Ziren's heterogeneous-shape workloads — see
+        // `compose_programs_basefold_cache` field docs and
+        // `ZKMCompressBasefoldWitnessValues::shape_key`.
         let arity = input.vks_and_proofs.len();
+        let cache_key = input.shape_key();
 
         if cache_enabled || verify_cache {
             let cached = {
                 let guard = self.compose_programs_basefold_cache.lock().unwrap();
-                guard.get(&arity).cloned()
+                guard.get(&cache_key).cloned()
             };
             if let Some(cached) = cached {
                 if verify_cache {
@@ -649,9 +672,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         .expect("compose program cache: serialize fresh");
                     assert_eq!(
                         cached_bytes, fresh_bytes,
-                        "compose program cache divergence at arity={arity}: \
-                         real input shapes vary across calls of the same arity \
-                         — SP1's per-arity cache is unsafe; revert ZIREN_PROGRAM_CACHE",
+                        "compose program cache divergence at \
+                         shape_key={cache_key:#x} (arity={arity}): two \
+                         inputs collided in shape_key but produced \
+                         different programs — extend shape_key to cover \
+                         the diverging field",
                     );
                 }
                 return cached;
@@ -663,7 +688,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         if cache_enabled || verify_cache {
             let mut guard = self.compose_programs_basefold_cache.lock().unwrap();
             // Use entry API so a concurrent inserter doesn't get clobbered.
-            return Arc::clone(guard.entry(arity).or_insert(program));
+            return Arc::clone(guard.entry(cache_key).or_insert(program));
         }
 
         program
