@@ -66,9 +66,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         let heights = RecursionAir::<F, DEGREE>::heights(program);
 
         let mut closest_shape = None;
-        let mut chosen_idx: Option<usize> = None;
 
-        for (idx, shape) in self.allowed_shapes.iter().enumerate() {
+        for shape in self.allowed_shapes.iter() {
             // If any of the heights is greater than the shape, continue.
             let mut valid = true;
             for (name, height) in heights.iter() {
@@ -82,31 +81,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
             }
 
             closest_shape = Some(shape.clone());
-            chosen_idx = Some(idx);
             break;
         }
 
         if let Some(shape) = closest_shape {
-            // #260 diagnostic: env-gated per-call height + chosen-shape log so
-            // future shape-registry decisions have data instead of one-workload
-            // guesses. Compact format: one line per call, parseable by the
-            // analysis script. Cheap when the env is unset (one getenv).
-            if std::env::var("ZIREN_LOG_FIX_SHAPE").map(|v| v == "1").unwrap_or(false) {
-                let mut report: Vec<(String, usize, usize)> = heights
-                    .iter()
-                    .map(|(n, h)| (n.clone(), *h, *shape.get(n).unwrap()))
-                    .collect();
-                report.sort_by(|a, b| a.0.cmp(&b.0));
-                let parts: Vec<String> = report
-                    .iter()
-                    .map(|(n, h, lc)| format!("{n}={h}/{}", 1usize << lc))
-                    .collect();
-                eprintln!(
-                    "[fix_shape] idx={} {}",
-                    chosen_idx.unwrap(),
-                    parts.join(" ")
-                );
-            }
             let shape = RecursionShape { inner: shape.into_iter().collect() };
             *program.shape_mut() = Some(shape);
         } else {
