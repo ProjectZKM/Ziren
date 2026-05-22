@@ -333,7 +333,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // tables, shape-fix tables) that survive across builds even
         // when each per-arity program object is discarded.
         //
-        // Kill-switch: `ZIREN_DISABLE_COMPOSE_PREWARM=1`.
+        // Opt-in: `ZIREN_ENABLE_COMPOSE_PREWARM=1`.  Diagnostic in
+        // project_gap_prewarm_regression_diagnosis.md shows the pre-warm
+        // pays ~63.7s upfront for only ~2.4s amortizable compose-compile
+        // cost (the rest, ~61.3s, is wasted on
+        // `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
+        // Default flipped from opt-out to opt-in on the gap-prewarm
+        // follow-up branch (May 21 2026).
         prover.prewarm_compose_programs();
 
         prover
@@ -344,19 +350,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
     /// dummy compose program per arity to amortize first-compile cost.
     ///
-    /// Bails when:
-    ///   - `ZIREN_DISABLE_COMPOSE_PREWARM=1` (manual kill switch),
+    /// Opt-in: only runs when `ZIREN_ENABLE_COMPOSE_PREWARM=1`.
+    /// Default flipped from opt-out to opt-in (May 21 2026): diagnostic
+    /// in project_gap_prewarm_regression_diagnosis.md showed the
+    /// pre-warm pays ~63.7s upfront for only ~2.4s amortizable
+    /// compose-compile cost (the rest, ~61.3s, is wasted on
+    /// `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
+    ///
+    /// Also bails when:
     ///   - `compress_shape_config` is None
     ///     (`FIX_RECURSION_SHAPES=false` — no allowed shape to drive
     ///     `fix_shape`, would panic or build a non-canonical program),
     ///   - the recursion shape config has no allowed shapes
     ///     (defensive — should not happen with the default config).
     fn prewarm_compose_programs(&self) {
-        if std::env::var("ZIREN_DISABLE_COMPOSE_PREWARM")
+        if !std::env::var("ZIREN_ENABLE_COMPOSE_PREWARM")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
         {
-            tracing::debug!("compose pre-warm disabled via ZIREN_DISABLE_COMPOSE_PREWARM");
+            tracing::debug!(
+                "compose pre-warm disabled by default; \
+                 set ZIREN_ENABLE_COMPOSE_PREWARM=1 to opt in"
+            );
             return;
         }
 
