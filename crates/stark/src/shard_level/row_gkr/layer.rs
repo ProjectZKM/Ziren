@@ -79,29 +79,8 @@ pub struct RowMajorTable<F> {
 }
 
 impl<F: Clone> RowMajorTable<F> {
-    /// Build a table of `2^num_row_variables × num_interactions` cells
-    /// filled with `fill`.  `num_interaction_variables` is derived as
-    /// `log₂(num_interactions.next_power_of_two())`.
-    #[must_use]
-    pub fn filled_raw(
-        num_row_variables: usize,
-        num_interactions: usize,
-        fill: F,
-    ) -> Self {
-        let total = (1usize << num_row_variables) * num_interactions;
-        let num_interaction_variables =
-            num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
-        Self {
-            cells: vec![fill; total],
-            num_row_variables,
-            num_interaction_variables,
-            num_interactions,
-            num_real_rows: 1usize << num_row_variables,
-        }
-    }
-
-    /// Same shape as `filled_raw` but skips the per-cell init.  Caller
-    /// MUST write every cell of `cells[0..total]` before any read.
+    /// Same shape as the raw filled builder but skips the per-cell init.
+    /// Caller MUST write every cell of `cells[0..total]` before any read.
     /// Used by hot-path constructors (e.g. `layer_transition`) that
     /// would otherwise spend most of their time in `vec![fill; total]`
     /// before unconditionally overwriting every slot.
@@ -469,24 +448,6 @@ impl<F: Field, EF: ExtensionField<F>> LayerState<F, EF> {
         }
     }
 
-    /// `true` when this layer is host-resident.
-    #[inline]
-    #[must_use]
-    pub fn is_host(&self) -> bool {
-        matches!(self, Self::Host(_))
-    }
-
-    /// Borrow the host-resident `GkrCircuitLayer`, or `None` for a
-    /// device-resident layer.  Step 4b/4c will add a sibling
-    /// `as_device_handle()` that returns the `u64`.
-    #[inline]
-    #[must_use]
-    pub fn as_host(&self) -> Option<&GkrCircuitLayer<F, EF>> {
-        match self {
-            Self::Host(layer) => Some(layer),
-            Self::Device { .. } => None,
-        }
-    }
 }
 
 /// The full GKR circuit — layers indexed top-down (layer 0 = first /

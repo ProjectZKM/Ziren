@@ -135,14 +135,6 @@ fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::th
     result
 }
 
-/// Checks that all the lookups between the chips has been satisfied.
-///
-/// Note that this does not actually verify the proof.
-pub fn debug_cumulative_sums<F: Field, EF: ExtensionField<F>>(perms: &[RowMajorMatrix<EF>]) {
-    let sum: EF = perms.iter().map(|perm| *perm.row_slice(perm.height() - 1).unwrap().last().unwrap()).sum();
-    assert_eq!(sum, EF::ZERO);
-}
-
 /// A builder for debugging constraints.
 pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     // TODO: read by the legacy windowed builder; the new

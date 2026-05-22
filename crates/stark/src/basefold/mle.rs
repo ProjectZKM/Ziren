@@ -19,7 +19,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{ExtensionField, Field};
 use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -52,18 +52,8 @@ impl<F: Field> Mle<F> {
         self.guts.height()
     }
 
-    /// Iterate over hypercube rows: each yielded slice is one
-    /// hypercube point's values across all polynomials in the batch.
-    pub fn hypercube_iter(&self) -> impl Iterator<Item = &[F]> {
-        self.guts.values.chunks_exact(self.guts.width())
-    }
-
     pub fn guts(&self) -> &RowMajorMatrix<F> {
         &self.guts
-    }
-
-    pub fn into_guts(self) -> RowMajorMatrix<F> {
-        self.guts
     }
 
     /// Standard multilinear evaluation at an extension-field point.
@@ -146,15 +136,6 @@ impl<F: Field> Mle<F> {
     }
 }
 
-impl<F: Field> Mle<F> {
-    /// Helper: number of nonzero entries (used by stacked PCS for
-    /// computing padding amount).  Without per-row padding metadata
-    /// we just return `hypercube_size()`.
-    pub fn num_non_zero_entries(&self) -> usize {
-        self.hypercube_size()
-    }
-}
-
 /// `Message<T>` mirrors SP1's `slop_commit::Message<T>` — an Arc-
 /// shared sequence of items used in basefold's per-round flows.  We
 /// alias to a plain `Vec<Arc<T>>` since Ziren has no equivalent of
@@ -170,23 +151,3 @@ pub fn message_from_iter<T, I: IntoIterator<Item = T>>(iter: I) -> Message<T> {
     iter.into_iter().map(Arc::new).collect()
 }
 
-/// Helper: `EF` -> `EF` evaluation of a single-poly Mle stored as
-/// extension elements directly (used by the verifier for the
-/// final-poly check).
-pub fn eval_ext_dense<F: Field, EF: ExtensionField<F>>(values: &[EF], point: &[EF]) -> EF
-where
-    EF: PrimeCharacteristicRing,
-{
-    debug_assert_eq!(values.len(), 1 << point.len());
-    let mut current = values.to_vec();
-    let mut len = current.len();
-    for &r in point {
-        len /= 2;
-        for i in 0..len {
-            let lo = current[i];
-            let hi = current[len + i];
-            current[i] = lo + r * (hi - lo);
-        }
-    }
-    current[0]
-}
