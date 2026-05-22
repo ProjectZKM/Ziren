@@ -1125,18 +1125,16 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // Phase 4 perf escape hatch (Apr 25 2026): `ZIREN_SKIP_BASEFOLD=1`
-    // forces this helper to return None, skipping the
-    // ~30s LogUp-GKR + jagged-PCS proof generation entirely.  The
-    // verifier then dispatches to the legacy STARK path (because
-    // `basefold_shard_proof.is_none()`).  Use for dev/test workloads
-    // where soundness from the basefold pillar isn't required —
-    // e.g. `mips::tests::test_*_prove_simple` micro-benchmarks that
-    // exercise the recursion plumbing rather than the production
-    // soundness chain.  Production deployments MUST leave this unset
+    // Test-only escape hatch: ZIREN_TEST_SKIP_BASEFOLD=1 forces this
+    // helper to return None, skipping the ~30s LogUp-GKR + jagged-PCS
+    // proof generation entirely.  The verifier then dispatches to the
+    // legacy STARK path (because `basefold_shard_proof.is_none()`).
+    // Intended for dev/test workloads that exercise recursion plumbing
+    // without basefold soundness — e.g. `mips::tests::test_*_prove_simple`
+    // micro-benchmarks.  Production deployments MUST leave this unset
     // (or set to `0`) so the basefold proof is generated and the
     // BasefoldShardVerifier dispatches.
-    if std::env::var("ZIREN_SKIP_BASEFOLD")
+    if std::env::var("ZIREN_TEST_SKIP_BASEFOLD")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
