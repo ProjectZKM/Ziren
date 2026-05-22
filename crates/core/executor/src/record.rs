@@ -147,11 +147,6 @@ impl ExecutionRecord {
         self.mul_events.push(mul_event);
     }
 
-    /// Add a lt event to the execution record.
-    pub fn add_lt_event(&mut self, lt_event: AluEvent) {
-        self.lt_events.push(lt_event);
-    }
-
     /// Take out events from the [`ExecutionRecord`] that should be deferred to a separate shard.
     ///
     /// Note: we usually defer events that would increase the recursion cost significantly if

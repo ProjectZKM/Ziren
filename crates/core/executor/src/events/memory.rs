@@ -112,22 +112,6 @@ impl MemoryRecordEnum {
         }
     }
 
-    /// Retrieve the previous memory record.
-    #[must_use]
-    pub fn previous_record(&self) -> MemoryRecord {
-        match self {
-            MemoryRecordEnum::Read(record) => MemoryRecord {
-                shard: record.prev_shard,
-                timestamp: record.prev_timestamp,
-                value: record.value,
-            },
-            MemoryRecordEnum::Write(record) => MemoryRecord {
-                shard: record.prev_shard,
-                timestamp: record.prev_timestamp,
-                value: record.prev_value,
-            },
-        }
-    }
 }
 
 /// Memory Initialize/Finalize Event.
