@@ -13,6 +13,7 @@
 
 pub mod build;
 pub mod components;
+pub mod residency;
 pub mod shapes;
 pub mod types;
 pub mod utils;
@@ -201,12 +202,14 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// downstream `ProvedShard { vk, .. }` can be filled from the
     /// cache instead of returned from the (skipped) `setup()` call.
     ///
-    /// Opt-in via `ZIREN_COMPOSE_PK_CACHE=1`.  Default OFF — the cache
-    /// is only sound when (program, arity) → (pk, vk) is deterministic,
-    /// which holds today because `compose_program_basefold` is keyed
-    /// only on arity in the program cache and `setup()` is a pure
-    /// function of the program.  Mirrors SP1's
-    /// `RecursionKeys::Exists(pk, vk)` (recursion.rs:280-345).
+    /// Opt-in via `ZIREN_GPU_RESIDENCY=full` (legacy
+    /// `ZIREN_COMPOSE_PK_CACHE=1` still honored with a deprecation
+    /// warn).  Default OFF — the cache is only sound when
+    /// (program, arity) → (pk, vk) is deterministic, which holds today
+    /// because `compose_program_basefold` is keyed only on arity in
+    /// the program cache and `setup()` is a pure function of the
+    /// program.  Mirrors SP1's `RecursionKeys::Exists(pk, vk)`
+    /// (recursion.rs:280-345).
     ///
     /// See `project_recursion_phase_gpu_audit.md` (May 19, 2026) for
     /// the bottleneck analysis that motivated this scaffold.
@@ -224,10 +227,13 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// program's structure is determined by arity (count of input proofs)
     /// once per-input shapes are stable, so one program per arity suffices.
     ///
-    /// Opt-in via `ZIREN_PROGRAM_CACHE=1`. With `ZIREN_VERIFY_PROGRAM_CACHE=1`
-    /// every cache hit rebuilds and asserts byte-equality (bincode) — catches
-    /// the failure mode where real input shapes vary across calls of the
-    /// same arity, which would mean caching the wrong program.
+    /// Opt-in via `ZIREN_GPU_RESIDENCY=full` (legacy
+    /// `ZIREN_PROGRAM_CACHE=1` still honored).  With
+    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` every cache hit rebuilds and
+    /// asserts byte-equality (bincode) — catches the failure mode
+    /// where real input shapes vary across calls of the same arity,
+    /// which would mean caching the wrong program.  The audit flag is
+    /// orthogonal to the residency profile (CI/dev tool).
     pub compose_programs_basefold_cache:
         Mutex<BTreeMap<usize, Arc<RecursionProgram<KoalaBear>>>>,
 }
@@ -326,14 +332,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // fixing) at process startup instead of paying it inside the
         // first user `compress()` invocation.
         //
-        // INDEPENDENT of `ZIREN_PROGRAM_CACHE` (which is opt-in per
+        // INDEPENDENT of program-cache gating (`ZIREN_GPU_RESIDENCY=full`
+        // / legacy `ZIREN_PROGRAM_CACHE=1`, opt-in per
         // project_256_cache_perf_reverted.md): the cache stores the
         // *built* program; pre-warm instead warms the compiler's
         // internal caches (e.g. SeqBlock layout, plonky3 codegen
         // tables, shape-fix tables) that survive across builds even
         // when each per-arity program object is discarded.
         //
-        // Opt-in: `ZIREN_ENABLE_COMPOSE_PREWARM=1`.  Diagnostic in
+        // Opt-in: `ZIREN_GPU_RESIDENCY=full` (legacy
+        // `ZIREN_ENABLE_COMPOSE_PREWARM=1` honored).  Diagnostic in
         // project_gap_prewarm_regression_diagnosis.md shows the pre-warm
         // pays ~63.7s upfront for only ~2.4s amortizable compose-compile
         // cost (the rest, ~61.3s, is wasted on
@@ -350,7 +358,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
     /// dummy compose program per arity to amortize first-compile cost.
     ///
-    /// Opt-in: only runs when `ZIREN_ENABLE_COMPOSE_PREWARM=1`.
+    /// Opt-in: only runs under `ZIREN_GPU_RESIDENCY=full` (legacy
+    /// `ZIREN_ENABLE_COMPOSE_PREWARM=1` still honored).
     /// Default flipped from opt-out to opt-in (May 21 2026): diagnostic
     /// in project_gap_prewarm_regression_diagnosis.md showed the
     /// pre-warm pays ~63.7s upfront for only ~2.4s amortizable
@@ -364,13 +373,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ///   - the recursion shape config has no allowed shapes
     ///     (defensive — should not happen with the default config).
     fn prewarm_compose_programs(&self) {
-        if !std::env::var("ZIREN_ENABLE_COMPOSE_PREWARM")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
+        if !crate::residency::compose_prewarm_enabled() {
             tracing::debug!(
                 "compose pre-warm disabled by default; \
-                 set ZIREN_ENABLE_COMPOSE_PREWARM=1 to opt in"
+                 set ZIREN_GPU_RESIDENCY=full (or legacy \
+                 ZIREN_ENABLE_COMPOSE_PREWARM=1) to opt in"
             );
             return;
         }
@@ -420,7 +427,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let per_arity_start = std::time::Instant::now();
             // Discard the result — we want the JIT/compile-cache
             // side-effects, not the program object.  When
-            // `ZIREN_PROGRAM_CACHE=1` the program *will* be stored in
+            // program caching is on the program *will* be stored in
             // `compose_programs_basefold_cache`; that's an additional
             // benefit but not the pre-warm goal.
             let _program = self.compose_program_basefold(&witness);
@@ -436,18 +443,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
     }
 
-    /// Returns true when the host-side compose-pk cache is enabled
-    /// (`ZIREN_COMPOSE_PK_CACHE=1`).  ziren-gpu's
-    /// `RecursionProverWorker::dispatch` consults this gate before
-    /// short-circuiting its per-shard `setup()` + `pk_to_host()` walk
-    /// in favor of `compose_pks_basefold_cache.get(&arity)`.
+    /// Returns true when the host-side compose-pk cache is enabled.
+    /// ziren-gpu's `RecursionProverWorker::dispatch` consults this
+    /// gate before short-circuiting its per-shard `setup()` +
+    /// `pk_to_host()` walk in favor of
+    /// `compose_pks_basefold_cache.get(&arity)`.
     ///
-    /// Default OFF — see field docs for the soundness contract and
-    /// project_recursion_phase_gpu_audit.md for the bottleneck analysis.
+    /// Resolved via `crate::residency::compose_pk_cache_enabled()` —
+    /// `ZIREN_GPU_RESIDENCY=full` opts in, the legacy
+    /// `ZIREN_COMPOSE_PK_CACHE=1` still works (with a deprecation
+    /// warn).  Default OFF; see field docs for the soundness contract
+    /// and project_recursion_phase_gpu_audit.md for the bottleneck
+    /// analysis.
     pub fn compose_pk_cache_enabled() -> bool {
-        std::env::var("ZIREN_COMPOSE_PK_CACHE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
+        crate::residency::compose_pk_cache_enabled()
     }
 
     /// Lookup helper for the compose-pk cache.  Returns the cached
@@ -600,20 +609,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// analog of [`Self::compress_program`].
     ///
     /// SP1-style per-arity cache (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`):
-    /// when `ZIREN_PROGRAM_CACHE=1`, the program is built once per arity and
-    /// reused. With `ZIREN_VERIFY_PROGRAM_CACHE=1`, every cache hit rebuilds
-    /// and asserts bincode byte-equality — catches the failure mode where
-    /// real input shapes vary across calls of the same arity.
+    /// under `ZIREN_GPU_RESIDENCY=full` (legacy `ZIREN_PROGRAM_CACHE=1`
+    /// still honored), the program is built once per arity and reused.
+    /// With `ZIREN_VERIFY_PROGRAM_CACHE=1` (orthogonal to the residency
+    /// profile), every cache hit rebuilds and asserts bincode
+    /// byte-equality — catches the failure mode where real input
+    /// shapes vary across calls of the same arity.
     pub fn compose_program_basefold(
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let cache_enabled = std::env::var("ZIREN_PROGRAM_CACHE")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-        let verify_cache = std::env::var("ZIREN_VERIFY_PROGRAM_CACHE")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+        let cache_enabled = crate::residency::program_cache_enabled();
+        let verify_cache = crate::residency::program_cache_audit_enabled();
         let arity = input.vks_and_proofs.len();
 
         if cache_enabled || verify_cache {
