@@ -198,10 +198,9 @@ impl<C: Config> Builder<C> {
 
     /// Mutable accessor for the in-progress op list.
     ///
-    /// Used by `IrIter::ir_par_map_collect` (#259 Phase C) to swap a
-    /// fresh op buffer in/out across parallel-block boundaries via
-    /// `std::mem::take`. Mirrors SP1's
-    /// `/tmp/sp1/crates/recursion/compiler/src/ir/builder.rs:151`.
+    /// Used by `IrIter::ir_par_map_collect` to swap a fresh op buffer
+    /// in/out across parallel-block boundaries via `std::mem::take`.
+    /// Mirrors SP1's crates/recursion/compiler/src/ir/builder.rs.
     pub fn get_mut_operations(&mut self) -> &mut TracedVec<DslIr<C>> {
         &mut self.inner.get_mut().operations
     }

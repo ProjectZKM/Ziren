@@ -30,7 +30,7 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:50-180)
+//! Mirrors `RecursiveJaggedPcsVerifier::verify_trusted_evaluations` (crates/recursion/circuit/src/jagged/verifier.rs)
 //! from the upstream BaseFold verifier reference.
 //! Substitutions:
 //!   - `Point<Ext>` → `&[Ext<C::F, C::EF>]`.
@@ -132,7 +132,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
     ///
     /// # Reference
     ///
-    /// Mirrors [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:50-180).
+    /// Mirrors `RecursiveJaggedPcsVerifier::verify_trusted_evaluations` (crates/recursion/circuit/src/jagged/verifier.rs).
     #[allow(clippy::too_many_arguments)]
     pub fn verify_trusted_evaluations<C, FC, JE>(
         &self,
@@ -298,8 +298,8 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
 /// per-round column-count table before delegating to the base
 /// [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`].
 ///
-/// Mirrors [`RecursiveMachineJaggedPcsVerifier`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:183-225)
-/// from the SP1 reference.
+/// Mirrors `RecursiveMachineJaggedPcsVerifier`
+/// (crates/recursion/circuit/src/jagged/verifier.rs) from the SP1 reference.
 pub struct RecursiveMachineJaggedPcsVerifier<'a, P> {
     pub jagged_pcs_verifier: &'a RecursiveJaggedPcsVerifier<P>,
     pub column_counts_by_round: Vec<Vec<usize>>,

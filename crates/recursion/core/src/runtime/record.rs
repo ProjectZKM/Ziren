@@ -110,8 +110,8 @@ impl<F: Field> ExecutionRecord<F> {
 
 /// Pre-sized, interior-mutable record for parallel-safe event writes.
 ///
-/// `#259` Phase C step 2b foundation: each event Vec is sized at `new()`
-/// time from the analyzed event counts; events are then written by
+/// Each event Vec is sized at `new()` time from the analyzed event
+/// counts; events are then written by
 /// offset (computed by the analyze pass) into `MaybeUninit<UnsafeCell<...>>`
 /// slots. With the `RawProgram::Parallel` disjoint-address invariant in
 /// place, parallel sub-walks can write into disjoint offsets through a
@@ -122,7 +122,7 @@ impl<F: Field> ExecutionRecord<F> {
 /// offset per event-emitting instruction; the runtime walker ensures
 /// each instruction is executed exactly once.
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/record.rs:46-127`.
+/// SP1 ref: crates/recursion/executor/src/record.rs::UnsafeRecord.
 #[derive(Debug)]
 pub struct UnsafeRecord<F> {
     pub base_alu_events: Vec<MaybeUninit<UnsafeCell<BaseAluEvent<F>>>>,
@@ -172,9 +172,8 @@ impl<F> UnsafeRecord<F> {
             ),
             fri_fold_events: create_uninit_vec(event_counts.fri_fold_events),
             batch_fri_events: create_uninit_vec(event_counts.batch_fri_events),
-            // #259 Phase C step 2c-ii prep: pre-size from the new
-            // counters added to RecursionAirEventCount so all 11 event
-            // vecs are ready for offset-based writes.
+            // Pre-size from the counters added to RecursionAirEventCount
+            // so all 11 event vecs are ready for offset-based writes.
             commit_pv_hash_events: create_uninit_vec(event_counts.commit_pv_hash_events),
         }
     }
@@ -275,7 +274,7 @@ mod unsafe_record_tests {
         ];
         // Initialize each MaybeUninit slot with an UnsafeCell::new wrapping the event.
         // This is the canonical way to populate UnsafeRecord in tests; the runtime
-        // walker (Phase C step 2c) will use the SP1 idiom
+        // walker will use the SP1 idiom
         // `UnsafeCell::raw_get(slot.as_ptr() as *const UnsafeCell<T>).write(ev)`
         // to write through `&UnsafeRecord` from parallel threads.
         for (i, e) in evs.iter().enumerate() {

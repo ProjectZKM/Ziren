@@ -9,8 +9,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors the upstream
-//! [`logup_gkr::proof`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/proof.rs)
+//! Mirrors the upstream `logup_gkr::proof`
+//! (crates/hypercube/src/logup_gkr/proof.rs)
 //! shape so wire-format JaggedPCS proofs serialize identically.
 //!
 //! Ziren-side substitutions:

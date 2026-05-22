@@ -377,7 +377,7 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            // #261: read vk-merkle witness so verify_compress_basefold can
+            // Read vk-merkle witness so verify_compress_basefold can
             // bind each child VK hash to vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
@@ -391,13 +391,13 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            // META #59 Phase D: write chip_cumulative_sums per input.
+            // Write chip_cumulative_sums per input.
             for (_, sp) in self.vks_and_proofs.iter() {
                 for (_name, sums) in sp.chip_cumulative_sums.iter() {
                     sums.write(witness);
                 }
             }
-            // #261: write vk-merkle witness in matching read order.
+            // Write vk-merkle witness in matching read order.
             self.vk_merkle_data.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
         }
@@ -444,7 +444,7 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            // META #59 Phase D: write chip_cumulative_sums per input.
+            // Write chip_cumulative_sums per input.
             for (_, sp) in self.vks_and_proofs.iter() {
                 for (_name, sums) in sp.chip_cumulative_sums.iter() {
                     sums.write(witness);
@@ -483,7 +483,7 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            // #261 SP1 alignment: read vk-merkle witness so verify_wrap_basefold
+            // SP1 alignment: read vk-merkle witness so verify_wrap_basefold
             // can bind the input VK hash against vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
@@ -495,13 +495,13 @@ mod basefold_witness {
 
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vks_and_proofs.write(witness);
-            // META #59 Phase D: write chip_cumulative_sums per input.
+            // Write chip_cumulative_sums per input.
             for (_, sp) in self.vks_and_proofs.iter() {
                 for (_name, sums) in sp.chip_cumulative_sums.iter() {
                     sums.write(witness);
                 }
             }
-            // #261 SP1 alignment: write vk-merkle witness in matching order.
+            // SP1 alignment: write vk-merkle witness in matching order.
             self.vk_merkle_data.write(witness);
         }
     }

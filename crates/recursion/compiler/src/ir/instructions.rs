@@ -331,16 +331,15 @@ pub enum DslIr<C: Config> {
     /// Reverse bits exponentiation. Output, base, exponent bits.
     CircuitV2ExpReverseBits(Felt<C::F>, Felt<C::F>, Vec<Felt<C::F>>),
 
-    // #259 Phase C scaffold — structuring IR constructors.
     /// Sub-blocks that may be executed in parallel.
     ///
     /// Each sub-block carries a disjoint `addrs_written` range; the
-    /// runtime today walks them sequentially via Phase A4's
-    /// `iter_instructions` (Phase D will dispatch via `par_iter` once
-    /// the memory layer is thread-safe). Emitted by callers via the
-    /// `IrIter::ir_par_map_collect` extension trait.
+    /// runtime today walks them sequentially via the existing
+    /// `iter_instructions` traversal (a follow-up will dispatch via
+    /// `par_iter` once the memory layer is thread-safe). Emitted by
+    /// callers via the `IrIter::ir_par_map_collect` extension trait.
     ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/ir/instructions.rs:298`.
+    /// SP1 ref: crates/recursion/compiler/src/ir/instructions.rs.
     Parallel(Vec<DslIrBlock<C>>),
 }
 
@@ -352,7 +351,7 @@ pub enum DslIr<C: Config> {
 /// `addrs_written` range is closed at the lower end and open at the
 /// upper, matching the convention of `Builder::variable_count`.
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/ir/instructions.rs:306`.
+/// SP1 ref: crates/recursion/compiler/src/ir/instructions.rs::DslIrBlock.
 #[derive(Clone, Debug)]
 pub struct DslIrBlock<C: Config> {
     pub ops: TracedVec<DslIr<C>>,

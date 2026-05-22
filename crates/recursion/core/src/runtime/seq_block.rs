@@ -1,5 +1,5 @@
 //! Sequenced-block program representation, ported from SP1
-//! (`/tmp/sp1/crates/recursion/executor/src/program.rs:225-412`).
+//! (crates/recursion/executor/src/program.rs).
 //!
 //! `RawProgram<T>` is a sequence of `SeqBlock<T>`s. A `SeqBlock` is either
 //! a `BasicBlock` (linearly ordered instructions) or a `Parallel` block
@@ -11,18 +11,17 @@
 //! construction. The runtime relies on this discipline; it does not
 //! verify it.
 //!
-//! Phase A of #259 introduces these types as additive scaffolding only —
-//! the compiler emits a single `Basic` block today; the runtime will be
-//! migrated to walk `seq_blocks` in a follow-up commit, and `Parallel`
-//! emission lands in Phase C once the memory/record layers support
-//! interior mutability.
+//! These types are additive scaffolding — the compiler emits a single
+//! `Basic` block today; the runtime walks `seq_blocks` and `Parallel`
+//! emission lands once the memory/record layers support interior
+//! mutability.
 
 use serde::{Deserialize, Serialize};
 use std::iter::Flatten;
 
 /// A linearly ordered sequence of instructions.
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/program.rs:401-411`.
+/// SP1 ref: crates/recursion/executor/src/program.rs::BasicBlock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasicBlock<T> {
     pub instrs: Vec<T>,
@@ -36,7 +35,7 @@ impl<T> Default for BasicBlock<T> {
 
 /// A segment that may be sequentially composed with other segments.
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/program.rs:288-294`.
+/// SP1 ref: crates/recursion/executor/src/program.rs::SeqBlock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SeqBlock<T> {
     /// One basic block, executed sequentially.
@@ -55,7 +54,7 @@ impl<T> SeqBlock<T> {
 
 /// A program: a sequence of `SeqBlock`s.
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/program.rs:230-280`.
+/// SP1 ref: crates/recursion/executor/src/program.rs::RawProgram.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawProgram<T> {
     pub seq_blocks: Vec<SeqBlock<T>>,
@@ -82,9 +81,9 @@ impl<T> RawProgram<T> {
         self.iter().count()
     }
 
-    /// #259 step 2 sizing diagnostic: count `(parallel_blocks, total_sub_programs,
-    /// total_instructions_in_parallel_subs)`. A program with a non-zero second
-    /// component is one where `par_iter` walker dispatch (C-2d step 2) would
+    /// Sizing diagnostic: count `(parallel_blocks, total_sub_programs,
+    /// total_instructions_in_parallel_subs)`. A program with a non-zero
+    /// second component is one where `par_iter` walker dispatch would
     /// help; the third component bounds the wall-time win.
     pub fn parallelism_summary(&self) -> (usize, usize, usize) {
         fn walk<T>(block: &SeqBlock<T>, n_par: &mut usize, n_subs: &mut usize, n_par_instrs: &mut usize) {

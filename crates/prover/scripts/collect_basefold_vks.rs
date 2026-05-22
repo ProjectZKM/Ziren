@@ -4,7 +4,7 @@
 //! Usage:
 //!   VERIFY_VK=false RUST_LOG=info \
 //!     cargo run --release -p zkm-prover --bin collect_basefold_vks -- \
-//!       --workload-dir /data/stephen/ziren-shape-bin \
+//!       --workload-dir <shape-bin-dir> \
 //!       --workload chess --workload fibonacci-1k --workload json \
 //!       --output /tmp/basefold_vk_map.bin
 //!

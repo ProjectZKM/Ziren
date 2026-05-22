@@ -60,8 +60,8 @@ pub struct RecursionAirEventCount {
     pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
-    /// #259 Phase C step 2c-ii prep: counter for commit_pv_hash events
-    /// (CommitPublicValues match arm in `Runtime::run`). Populated by
+    /// Counter for commit_pv_hash events (CommitPublicValues match arm
+    /// in `Runtime::run`). Populated by
     /// `AddAssign<&Instruction>` so `UnsafeRecord::new` can pre-size
     /// the vec once the runtime walker swaps to offset-based writes.
     pub commit_pv_hash_events: usize,
@@ -253,10 +253,10 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 self.mem_var_events += output_x_addrs_mults.len();
                 self.mem_var_events += output_y_addrs_mults.len();
             }
-            // #259 Phase C step 2c-ii prep: populate the new counters so
-            // `UnsafeRecord::new` can pre-size these vecs once the runtime
-            // walker swaps to offset-based writes. CommitPublicValues emits
-            // exactly one commit_pv_hash event per instruction.
+            // Populate the new counters so `UnsafeRecord::new` can
+            // pre-size these vecs once the runtime walker swaps to
+            // offset-based writes. CommitPublicValues emits exactly
+            // one commit_pv_hash event per instruction.
             Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
         }

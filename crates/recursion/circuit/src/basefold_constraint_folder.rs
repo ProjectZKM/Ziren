@@ -24,8 +24,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`RecursiveVerifierConstraintFolder`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:27-34)
-//! from the upstream BaseFold verifier reference (a type alias to
+//! Mirrors `RecursiveVerifierConstraintFolder`
+//! (crates/recursion/circuit/src/zerocheck.rs in SP1) — a type alias to
 //! `GenericVerifierConstraintFolder`).  Specialised to Ziren's
 //! `Felt` / `Ext` / `SymbolicExt` types in place of the upstream's
 //! generic `(F, EF, FeltVar, ExtVar, SymbolicExtVar)` parameters.

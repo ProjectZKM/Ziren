@@ -21,7 +21,7 @@
 //!
 //! # Reference
 //!
-//! Mirrors SP1's [`ChipOpenedValues`](file:///tmp/sp1/crates/hypercube/src/verifier/proof.rs:78-85)
+//! Mirrors SP1's `ChipOpenedValues` (crates/hypercube/src/verifier/proof.rs)
 //! shape for the BaseFold pipeline.  Uses Ziren's recursion-
 //! compiler `Felt`/`Ext` types (the in-circuit variant); the
 //! corresponding host-side variant lives on the prover side.

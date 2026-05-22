@@ -20,8 +20,7 @@
 //!
 //! # Reference
 //!
-//! Mirrors the upstream
-//! [`logup_gkr.rs`](file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs)
+//! Mirrors the upstream crates/recursion/circuit/src/logup_gkr.rs
 //! verifier helpers.
 
 use std::marker::PhantomData;
@@ -92,9 +91,8 @@ pub fn observe_ext_slice<C, FC>(
 /// [`zkm_stark::basefold::mle::Mle::eval_at`]): `point[0]`
 /// controls the LSB of the index, `point[n-1]` the MSB.
 ///
-/// Mirrors the upstream
-/// [`evaluate_mle_ext`](file:///tmp/sp1/crates/recursion/circuit/src/sumcheck/mod.rs:56-62)
-/// shape; the Ziren port computes `partial_lagrange` symbolically
+/// Mirrors the upstream `evaluate_mle_ext`
+/// (crates/recursion/circuit/src/sumcheck/mod.rs) shape; the Ziren port computes `partial_lagrange` symbolically
 /// inside the builder rather than allocating intermediate Tensors.
 pub fn evaluate_mle_ext<C: CircuitConfig>(
     builder: &mut Builder<C>,
@@ -196,7 +194,8 @@ pub fn partial_lagrange_symbolic<C: CircuitConfig>(
 ///
 /// # Reference
 ///
-/// Mirrors [`RecursiveLogUpGkrVerifier::verify_public_values`](file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs:36-58).
+/// Mirrors `RecursiveLogUpGkrVerifier::verify_public_values`
+/// (crates/recursion/circuit/src/logup_gkr.rs).
 /// Substitution: the upstream's `A::Record::eval_public_values`
 /// trait dispatch becomes a closure parameter so this function
 /// doesn't depend on a Record trait extension on the Ziren side.
@@ -288,7 +287,7 @@ pub struct LogupGkrShardChipMetadata {
 /// new `last_coordinate` is appended to the back of `eval_point`
 /// (LSB-first push: `eval_point[len-1] = last_coordinate`).  This
 /// matches SP1's `Point::add_dimension_back` semantics (see
-/// [`/tmp/sp1/slop/crates/multilinear/src/point.rs:199-201`]).
+/// slop/crates/multilinear/src/point.rs::Point::add_dimension_back).
 ///
 /// Per-round transcript ops (in order — must match the prover):
 ///
@@ -310,7 +309,8 @@ pub struct LogupGkrShardChipMetadata {
 ///
 /// # Reference
 ///
-/// Mirrors [`RecursiveLogUpGkrVerifier::verify_logup_gkr`](file:///tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs:60-200).
+/// Mirrors `RecursiveLogUpGkrVerifier::verify_logup_gkr`
+/// (crates/recursion/circuit/src/logup_gkr.rs).
 /// Substitutions:
 ///   - `Chip<F, A>` introspection → `LogupGkrShardChipMetadata`
 ///     (decouples from a particular Chip type)
@@ -441,7 +441,7 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
 
         // Observe the prover's 4-tuple message into the transcript.
         // Order MUST match SP1's `(n0, n1, d0, d1)` sequence
-        // (`/tmp/sp1/crates/recursion/circuit/src/logup_gkr.rs:163-166`)
+        // (crates/recursion/circuit/src/logup_gkr.rs)
         // — any reorder shifts every subsequent α-sample and
         // produces an OOD mismatch.
         observe_ext_element::<C, FC>(builder, challenger, round_proof.numerator_0);
@@ -454,7 +454,7 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
         //
         // LSB-fold convention (SP1-aligned): `eval_point.push(last)`
         // = `Point::add_dimension_back(last)` per
-        // `/tmp/sp1/slop/crates/multilinear/src/point.rs:199-201`.
+        // slop/crates/multilinear/src/point.rs.
         // `eval_point` grows on the back, mirroring the prover's
         // packed-layer-then-line-challenge structure where the new
         // coordinate is the high-bit (next layer's MSB).

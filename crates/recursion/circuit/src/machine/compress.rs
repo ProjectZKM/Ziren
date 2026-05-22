@@ -12,8 +12,7 @@
 //! [`ZKMCompressWitnessVariable`] anymore.
 //!
 //! What remains in this module (the load-bearing surface for the HYBRID
-//! wrap-stays-on-FRI decision, see
-//! `project_step5_phase3d_wrap_decision.md`):
+//! wrap-stays-on-FRI decision):
 //!
 //! - [`PublicValuesOutputDigest`] — still imported by all basefold compose
 //!   builders (`compress_basefold.rs`, `compress_basefold_recursion.rs`,

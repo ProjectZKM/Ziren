@@ -250,8 +250,8 @@ where
     // zero-fill allocator runs in microseconds because no field
     // arithmetic happens.
     //
-    // Mirrors SP1's `dummy_shard_proof` at
-    // `/tmp/sp1/crates/recursion/circuit/src/dummy/shard_proof.rs:28-83`.
+    // Mirrors SP1's `dummy_shard_proof` in
+    // crates/recursion/circuit/src/dummy/shard_proof.rs.
     //
     // Resolve each chip in the shape to a concrete &Chip from the
     // machine. Skip names that don't exist (defensive — real shapes
