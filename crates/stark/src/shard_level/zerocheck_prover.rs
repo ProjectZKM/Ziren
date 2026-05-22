@@ -497,19 +497,8 @@ where
             // Default-OFF until multi-workload byte-equivalence is
             // re-validated.  When OFF, behaviour is byte-identical to
             // pre-#372.
-            // `ZIREN_GPU_MERGED_BYTECODE=1` implicitly enables SPLIT —
-            // the merged-bytecode constraint-eval port (SP1 gap #1) is
-            // ONLY useful when the per-chip filter admits permutation-
-            // bearing chips, which is the SPLIT codepath.  Without this
-            // coupling the merged hook is dormant in production because
-            // every CompressAir chip carries lookups → `permutation_width
-            // > 0` → filter returns `None` → merged hook never invoked.
-            // See project_merged_bytecode_port.md open items.
             let split_enabled =
                 std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
-                    .map(|v| v == "1")
-                    .unwrap_or(false)
-                || std::env::var("ZIREN_GPU_MERGED_BYTECODE")
                     .map(|v| v == "1")
                     .unwrap_or(false);
             if !split_enabled && chip.permutation_width() > 0 {
@@ -1122,12 +1111,29 @@ where
                     );
                 });
                 debug_assert_eq!(merged_out.len(), keep_idx.len());
+                // Output-shaping rule: when SPLIT is OFF (the default
+                // pre-#372 behaviour), perm-bearing chips' c-tables MUST
+                // be excluded from the result to preserve byte-identical
+                // proof output.  The merged hook computed them so the
+                // dispatch is exercised, but we discard the perm chips'
+                // tables here so the per-chip filter path remains the
+                // source of truth for what's included in the zerocheck.
+                let true_split = std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
+                    .map(|v| v == "1")
+                    .unwrap_or(false);
                 let mut result: Vec<Option<Vec<Challenge<SC>>>> =
                     (0..chips.len()).map(|_| None).collect();
                 let mut any_kept_m = false;
                 for (kept_pos, table_opt) in merged_out.into_iter().enumerate() {
                     let chip_idx = keep_idx[kept_pos];
                     if let Some(t) = table_opt {
+                        // Drop perm-chip tables when SPLIT is off — the
+                        // per-chip filter at line 498 returns None for
+                        // these chips, so we mirror that exclusion here
+                        // to keep zerocheck output byte-identical.
+                        if !true_split && chips[chip_idx].permutation_width() > 0 {
+                            continue;
+                        }
                         let table_ch: Vec<Challenge<SC>> = unsafe {
                             let mut me = std::mem::ManuallyDrop::new(t);
                             Vec::from_raw_parts(
@@ -1143,6 +1149,12 @@ where
                 if any_kept_m {
                     return Some(result);
                 }
+                // No kept results after filtering (the merged hook ran
+                // but every chip was perm-skipped under SPLIT-off).
+                // Return Some with all-None so the per-chip path below
+                // runs for non-perm chips while still recording that
+                // the merged dispatch fired (visible via FIRED_ONCE warn).
+                return Some(result);
             } else {
                 static MERGED_EMPTY_ONCE: OnceLock<()> = OnceLock::new();
                 MERGED_EMPTY_ONCE.get_or_init(|| {
