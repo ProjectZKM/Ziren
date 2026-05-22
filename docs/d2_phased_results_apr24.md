@@ -4,6 +4,19 @@ Captures the consolidated phased-perf + status snapshot from the
 Apr 23-24 Ralph-loop session.  Authoritative source for "where are we
 on D2 + GPU/JIT readiness" as of session end.
 
+> **Historical note (May 2026 env-var consolidation):** every
+> `ZIREN_USE_BASEFOLD=1` invocation below was the Apr-24 opt-in to
+> the basefold late-binding PCS path. That toggle, along with the
+> `ZIREN_DEBUG_GATE3` lift-padding probe, the host-side
+> `*_PROFILE` / `*_DEBUG_*` gates, and the
+> `ZIREN_BASEFOLD_GPU` / `ZIREN_GPU_SHARD_PROVE` GPU selectors, was
+> removed in env-phase-1 + env-phase-2 (May 2026). BaseFold is now
+> the unconditional default; the commands recorded here remain
+> useful for the timing breakdowns they document but the env
+> exports they require are no longer valid. See the "Env-var
+> consolidation (May 2026)" section at the end of
+> `docs/perf_reth_gpu.md` for the full mapping.
+
 ## Phase 1 — Single-shard, single-cluster ✅ GREEN (re-validated 10+×)
 
 `test_e2e_compress_fibonacci` under `ZIREN_USE_BASEFOLD=1 VERIFY_VK=true`:

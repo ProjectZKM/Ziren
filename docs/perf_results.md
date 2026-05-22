@@ -1,8 +1,18 @@
 # Ziren WHIR Performance Results
 
 Benchmark runs on a 16-core, 123 GB RAM x86_64 box.  All measurements
-captured via `/usr/bin/time -v` for peak RSS and wall time.  WHIR
-configuration: jagged late-binding default, `ZIREN_USE_FRI=1` opt-out.
+captured via `/usr/bin/time -v` for peak RSS and wall time.
+
+> **Historical note (May 2026):** these numbers were captured against
+> a WHIR-default build with `ZIREN_USE_FRI=1` as the opt-out toggle.
+> Both `ZIREN_USE_FRI` and the parallel `ZIREN_USE_BASEFOLD=1` opt-in
+> mentioned later in this document have since been deleted — BaseFold
+> + jagged is the only production PCS path. See the "Env-var
+> consolidation (May 2026)" section at the end of
+> `docs/perf_reth_gpu.md` for the consolidation summary.
+> The architectural prose and per-workload measurements still describe
+> the WHIR-vs-BaseFold trade-offs accurately, but the env-var
+> commands referenced are no longer runnable as-is.
 
 ## Benchmark suite
 
@@ -192,7 +202,10 @@ pulling in `whir_late_binding`, `jagged_late_binding`, or
 `whir_config`.  Verifier-side mirror in
 [verifier.rs:1024](crates/stark/src/verifier.rs#L1024) — `cfg(any(...))`
 gates select the right path at compile time when only one feature is
-enabled, with a runtime `ZIREN_USE_BASEFOLD=1` switch when both are.
+enabled. (At the time of this snapshot a runtime `ZIREN_USE_BASEFOLD=1`
+switch selected between the two when both features were compiled in.
+That toggle was retired once WHIR was removed end-to-end; BaseFold is
+now compiled unconditionally.)
 
 The remaining WHIR-tied modules (`whir_late_binding.rs`,
 `jagged_late_binding.rs`, `jagged_whir*.rs`, `whir_config.rs`,
@@ -202,7 +215,9 @@ gated on D2 (the recursion verifier still imports the WHIR
 witness types).
 
 **End-to-end validation (Phase D1):** fibonacci-1k and json both
-complete via `ZIREN_USE_BASEFOLD=1` and the verifier accepts.
+complete on the BaseFold path (at the time of capture the path was
+selected via `ZIREN_USE_BASEFOLD=1`; today it is the unconditional
+default — the toggle no longer exists) and the verifier accepts.
 Hybrid-mode numbers (BaseFold late-binding, WHIR everywhere else):
 
 | Workload | Mode | setup | prove_core | verify | proof |

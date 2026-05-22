@@ -1,5 +1,15 @@
 # META #59 — Basefold Verifier Real-Value Coordinated Swap
 
+> **Historical note (May 2026):** the implementation-strategy
+> section below proposes gating the real-value-capable verifier
+> behind a `ZIREN_BASEFOLD_REAL=1` env var, and the test command
+> referenced `ZIREN_USE_BASEFOLD=1`. Both env vars were retired in
+> the May 2026 env-var consolidation (Phases 1 + 2). BaseFold is
+> now the unconditional production PCS; the real-value swap
+> referenced here landed without an opt-in gate. The design
+> background is still load-bearing for understanding the AST
+> fragility wall and the placeholder→real-value mapping.
+
 ## ✅ Apr 24 progress — Phase 1 plumbing landed
 
 Two host-side fields added without shifting the basefold normalize program AST (Phase 1 STILL GREEN at 154.68s VERIFY_VK=true):
