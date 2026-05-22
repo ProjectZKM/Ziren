@@ -241,13 +241,16 @@ where
 {
     use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
 
-    // SP1 port (May 21 2026) — replaces the previous slow path that
-    // called `prove_shard_to_basefold` against zero traces.  That
-    // approach cost ~61.3s per compose-program pre-warm cycle (one
-    // call × REDUCE_BATCH_SIZE arities); the new zero-fill allocator
-    // path runs in microseconds.
+    // Build the dummy shard proof by directly zero-filling every
+    // field (chip log heights, cumulative sums, logup-GKR round
+    // proofs, openings, evaluation proof bytes) at the shapes
+    // dictated by the input `shape`. This replaces a previous slow
+    // path that drove `prove_shard_to_basefold` against zero traces
+    // (~15s per call × REDUCE_BATCH_SIZE during pre-warm); the
+    // zero-fill allocator runs in microseconds because no field
+    // arithmetic happens.
     //
-    // Reference: SP1 `dummy_shard_proof` at
+    // Mirrors SP1's `dummy_shard_proof` at
     // `/tmp/sp1/crates/recursion/circuit/src/dummy/shard_proof.rs:28-83`.
     //
     // Resolve each chip in the shape to a concrete &Chip from the

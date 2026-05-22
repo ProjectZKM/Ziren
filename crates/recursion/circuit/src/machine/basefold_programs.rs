@@ -232,9 +232,9 @@ mod tests {
     use super::*;
 
     /// Smoke test: ZKMBasefoldRecursionStage enum dispatch + names
-    /// match what SP1 uses for its VK-map keys.
+    /// match the VK-map key convention.
     #[test]
-    fn stage_names_match_sp1_convention() {
+    fn stage_names_match_vk_map_convention() {
         assert_eq!(ZKMBasefoldRecursionStage::Normalize.name(), "Normalize");
         assert_eq!(ZKMBasefoldRecursionStage::Compose { arity: 2 }.name(), "Compose");
         assert_eq!(ZKMBasefoldRecursionStage::Deferred.name(), "Deferred");
@@ -503,8 +503,9 @@ mod tests {
                 zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
             >,
             usize,
-            // #261 SP1-align: build_wrap_basefold_program gained
-            // value_assertions: bool (April 2026).
+            // `build_wrap_basefold_program` takes `value_assertions: bool`
+            // to control whether constraint failures panic (debug) or
+            // become returned errors (production).
             bool,
         ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
             build_wrap_basefold_program::<MipsAir<KoalaBear>>;

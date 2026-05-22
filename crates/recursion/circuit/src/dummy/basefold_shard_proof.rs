@@ -307,7 +307,7 @@ mod tests {
     /// univariate polynomials each with D+1 coefficients, and an
     /// N-dimensional point.
     #[test]
-    fn partial_sumcheck_shape_matches_sp1() {
+    fn partial_sumcheck_shape_matches_contract() {
         let proof: PartialSumcheckProof<EF> =
             dummy_partial_sumcheck_proof(7, 4);
         assert_eq!(proof.univariate_polys.len(), 7);

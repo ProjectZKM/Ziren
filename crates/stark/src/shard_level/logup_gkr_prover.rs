@@ -312,7 +312,7 @@ where
 ///      aggregated leaves to produce the per-layer sumcheck stack.
 ///   4. Project Ziren's per-layer proof shape into SP1's
 ///      [`LogupGkrRoundProof`] shape via
-///      [`ziren_layer_to_sp1_round`].
+///      [`ziren_layer_to_round_proof`].
 ///   5. Per-chip trace MLE evaluations at the final eval_point
 ///      (currently empty — wired in the next iteration once the
 ///      eval_point's trace dimension can be derived from the
@@ -359,7 +359,7 @@ where
         .layers
         .iter()
         .map(|layer| {
-            ziren_layer_to_sp1_round::<EF>(
+            ziren_layer_to_round_proof::<EF>(
                 layer.final_evals,
                 &layer.sumcheck_rounds,
                 EF::ZERO, // claimed_sum carried separately
@@ -455,7 +455,7 @@ where
 /// `univariate_polys` are degree-3 polynomials reconstructed
 /// from the 4 sample points via Lagrange interpolation over
 /// `{0, 1, 2, ∞}`.
-pub fn ziren_layer_to_sp1_round<EF>(
+pub fn ziren_layer_to_round_proof<EF>(
     final_evals: [EF; 4],
     sumcheck_rounds: &[[EF; 4]],
     claimed_sum: EF,
@@ -497,7 +497,7 @@ mod tests {
         use p3_field::PrimeCharacteristicRing;
         let final_evals = [EF::ZERO; 4];
         let sumcheck_rounds = vec![[EF::ZERO; 4]; 3];
-        let proj = ziren_layer_to_sp1_round::<EF>(
+        let proj = ziren_layer_to_round_proof::<EF>(
             final_evals,
             &sumcheck_rounds,
             EF::ZERO,
@@ -562,13 +562,13 @@ mod tests {
         assert_eq!(evals[0], EF::from(F::from_u64(80)));
     }
 
-    /// Numerical test: ziren_layer_to_sp1_round preserves the
+    /// Numerical test: ziren_layer_to_round_proof preserves the
     /// final_evals values in the projected fields.
     #[test]
     fn ziren_layer_projection_preserves_final_evals() {
         let v = |n: u64| EF::from(F::from_u64(n));
         let final_evals = [v(11), v(22), v(33), v(44)];
-        let proj = ziren_layer_to_sp1_round::<EF>(
+        let proj = ziren_layer_to_round_proof::<EF>(
             final_evals,
             &[],
             v(7),
