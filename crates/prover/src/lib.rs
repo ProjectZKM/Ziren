@@ -319,7 +319,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compose_pks_basefold_cache: Mutex::new(BTreeMap::new()),
         };
 
-        // Compose-program pre-warm (SP1 audit gap #14, May 21 2026).
+        // Compose-program pre-warm.
         //
         // Mirrors SP1's `worker/prover/recursion.rs:461-487` arity walk:
         // for each arity in `1..=REDUCE_BATCH_SIZE`, synthesize a dummy
@@ -336,12 +336,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // tables, shape-fix tables) that survive across builds even
         // when each per-arity program object is discarded.
         //
-        // Opt-in: `ZIREN_GPU_RESIDENCY=full` (legacy
-        // `ZIREN_ENABLE_COMPOSE_PREWARM=1` honored).  The pre-warm pays
-        // ~63.7s upfront for only ~2.4s amortizable compose-compile
-        // cost (the rest, ~61.3s, is wasted on
-        // `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE),
-        // so the default is opt-in rather than opt-out.
+        // Default ON.  After the SP1 dummy_shard_proof port (commit
+        // 8728b983), the prewarm cost dropped from ~64.8s to ~2.0s
+        // (the dummy basefold shard proof is now a struct-only stub
+        // rather than a real `prove_shard_to_basefold` invocation per
+        // arity slot), so the universal ~2.4s amortizable
+        // compose-compile saving easily justifies the small upfront
+        // cost.  This gate is intentionally decoupled from
+        // `ZIREN_GPU_RESIDENCY` — that profile still gates broader
+        // residency features (program cache, compose-pk cache, audit)
+        // which carry their own characterization needs.
+        //
+        // Kill-switch: `ZIREN_DISABLE_COMPOSE_PREWARM=1` skips prewarm
+        // entirely (useful for cold-start timing experiments or when
+        // the calling process never reaches `compress()`).
         prover.prewarm_compose_programs();
 
         prover
@@ -352,11 +360,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
     /// dummy compose program per arity to amortize first-compile cost.
     ///
-    /// Opt-in: only runs under `ZIREN_GPU_RESIDENCY=full` (legacy
-    /// `ZIREN_ENABLE_COMPOSE_PREWARM=1` still honored).  The default is
-    /// opt-in because the pre-warm pays ~63.7s upfront for only ~2.4s
-    /// amortizable compose-compile cost (the rest, ~61.3s, is wasted on
-    /// `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
+    /// Default ON.  Post the SP1 dummy_shard_proof port (commit
+    /// 8728b983) the prewarm walk costs ~2.0s total and amortizes
+    /// ~2.4s of compose-compile work that would otherwise be paid
+    /// inside the first user `compress()` invocation, so it is
+    /// universally beneficial and runs by default.
+    ///
+    /// Kill-switch: `ZIREN_DISABLE_COMPOSE_PREWARM=1` (accepts
+    /// `"1"` or `"true"`, case-insensitive) skips prewarm.  This
+    /// gate is intentionally NOT coupled to the
+    /// `ZIREN_GPU_RESIDENCY` profile — that profile gates broader
+    /// residency features (program cache, compose-pk cache, audit)
+    /// orthogonal to the compose-program pre-warm.
     ///
     /// Also bails when:
     ///   - `compress_shape_config` is None
@@ -365,11 +380,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ///   - the recursion shape config has no allowed shapes
     ///     (defensive — should not happen with the default config).
     fn prewarm_compose_programs(&self) {
-        if !crate::residency::compose_prewarm_enabled() {
+        let prewarm_disabled = std::env::var("ZIREN_DISABLE_COMPOSE_PREWARM")
+            .map(|v| {
+                let v = v.trim();
+                v == "1" || v.eq_ignore_ascii_case("true")
+            })
+            .unwrap_or(false);
+        if prewarm_disabled {
             tracing::debug!(
-                "compose pre-warm disabled by default; \
-                 set ZIREN_GPU_RESIDENCY=full (or legacy \
-                 ZIREN_ENABLE_COMPOSE_PREWARM=1) to opt in"
+                "compose pre-warm skipped: \
+                 ZIREN_DISABLE_COMPOSE_PREWARM kill-switch set"
             );
             return;
         }
