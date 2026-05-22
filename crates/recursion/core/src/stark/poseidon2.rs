@@ -28,12 +28,3 @@ pub fn bn254_poseidon2_rc3() -> Vec<[Bn254; 3]> {
         .collect()
 }
 
-pub fn bn254_poseidon2_rc4() -> Vec<[Bn254; 4]> {
-    RC3.iter()
-        .map(|vec| {
-            let result: [Bn254; 3] =
-                vec.iter().cloned().map(bn254_from_ark_ff).collect::<Vec<_>>().try_into().unwrap();
-            [result[0], result[1], result[2], result[2]]
-        })
-        .collect()
-}

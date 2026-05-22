@@ -38,10 +38,6 @@ pub mod test_fixtures {
         }
     }
 
-    pub fn default_execution_record() -> ExecutionRecord<KoalaBear> {
-        ExecutionRecord::<KoalaBear>::default()
-    }
-
     fn initialize() -> (StdRng, usize) {
         let mut rng = StdRng::seed_from_u64(SEED);
         let num_test_cases = rng.gen_range(MIN_TEST_CASES..=MAX_TEST_CASES);

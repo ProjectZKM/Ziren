@@ -915,23 +915,4 @@ where
         Ok(())
     }
 
-    pub fn preallocate_record(&mut self) {
-        // #259 Phase C step 2c: walk seq_blocks recursively (handling
-        // SeqBlock::Parallel) via the analyze module's `event_counts`
-        // helper instead of flattening through `iter_instructions`. The
-        // counts are identical today (compiler emits a single Basic
-        // block; no Parallel blocks yet), but the recursive walk is the
-        // correct foundation for when parallel blocks land.
-        let event_counts = self.program.seq_blocks.event_counts();
-        self.record.poseidon2_events.reserve(event_counts.poseidon2_wide_events);
-        self.record.mem_var_events.reserve(event_counts.mem_var_events);
-        self.record.base_alu_events.reserve(event_counts.base_alu_events);
-        self.record.ext_alu_events.reserve(event_counts.ext_alu_events);
-        self.record.exp_reverse_bits_len_events.reserve(event_counts.exp_reverse_bits_len_events);
-        self.record.select_events.reserve(event_counts.select_events);
-        // #259 Phase C step 2c-ii prep: reserve the newly-tracked event vecs.
-        self.record.fri_fold_events.reserve(event_counts.fri_fold_events);
-        self.record.batch_fri_events.reserve(event_counts.batch_fri_events);
-        self.record.commit_pv_hash_events.reserve(event_counts.commit_pv_hash_events);
-    }
 }

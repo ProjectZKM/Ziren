@@ -176,19 +176,6 @@ pub fn interpolate_3point_evals_at_012<K: Field>(
     UnivariatePolynomial::new(vec![c0, c1, c2])
 }
 
-/// Random-linear combination of univariate polynomials weighted by
-/// powers of `lambda`: result = `Σ_i λ^(n-1-i) · polys[i]`.
-pub fn random_linear_combination<K: Field>(
-    polys: &[UnivariatePolynomial<K>],
-    lambda: K,
-) -> UnivariatePolynomial<K> {
-    let mut result = UnivariatePolynomial::new(vec![K::ZERO]);
-    for poly in polys {
-        result = result * lambda + poly.clone();
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
