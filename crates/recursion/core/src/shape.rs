@@ -87,7 +87,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         }
 
         if let Some(shape) = closest_shape {
-            // #260 diagnostic: env-gated per-call height + chosen-shape log so
+            // Diagnostic: env-gated per-call height + chosen-shape log so
             // future shape-registry decisions have data instead of one-workload
             // guesses. Compact format: one line per call, parseable by the
             // analysis script. Cheap when the env is unset (one getenv).

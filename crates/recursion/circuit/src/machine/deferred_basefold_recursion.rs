@@ -29,9 +29,8 @@
 //! * No new in-circuit verifier function — reuses
 //!   [`super::deferred_basefold::verify_deferred_basefold`] verbatim.
 //! * Selector-soundness of per-chip basefold reduction is deferred
-//!   to Phase 3c (vk_map regen + smoke tests).
-//! * Wrap stays FRI (Phase 3d HYBRID — see
-//!   `project_step5_phase3d_wrap_decision.md`).  No
+//!   to a follow-up that handles vk_map regen + smoke tests.
+//! * Wrap stays FRI in the HYBRID configuration. No
 //!   `wrap_basefold_recursion` companion landed in this sub-sprint.
 
 use p3_koala_bear::KoalaBear;

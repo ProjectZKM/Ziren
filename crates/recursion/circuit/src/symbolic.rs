@@ -14,7 +14,7 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`symbolic.rs`](file:///tmp/sp1/crates/recursion/circuit/src/symbolic.rs)
+//! Mirrors SP1's crates/recursion/circuit/src/symbolic.rs
 //! from the upstream BaseFold verifier reference.  The Ziren port
 //! drops the slop_tensor / slop_multilinear (Mle, MleEval) impls
 //! since Ziren uses flat `Vec` for these positions.

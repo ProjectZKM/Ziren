@@ -22,8 +22,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`jagged/verifier.rs`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs)
-//! and [`jagged/jagged_eval.rs`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs)
+//! Mirrors SP1's crates/recursion/circuit/src/jagged/verifier.rs
+//! and crates/recursion/circuit/src/jagged/jagged_eval.rs
 //! shapes from the upstream BaseFold verifier reference.
 
 use serde::{Deserialize, Serialize};
@@ -39,7 +39,7 @@ use crate::partial_sumcheck::PartialSumcheckProof;
 /// jagged-polynomial evaluation at the verifier-sampled point
 /// matches the value implied by the per-chip prefix-sum metadata.
 ///
-/// Mirrors the upstream [`JaggedSumcheckEvalProof`](file:///tmp/sp1/slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:23-25).
+/// Mirrors SP1's `JaggedSumcheckEvalProof` in slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct JaggedSumcheckEvalProof<F> {
     pub partial_sumcheck_proof: PartialSumcheckProof<F>,
@@ -53,7 +53,7 @@ pub struct JaggedSumcheckEvalProof<F> {
 /// [`crate::basefold_verifier::RecursiveBasefoldProof`]).  `F` is
 /// the base field, `EF` the extension.
 ///
-/// Mirrors the upstream [`RecursiveStackedPcsProof`](file:///tmp/sp1/crates/recursion/circuit/src/basefold/stacked.rs:17-20).
+/// Mirrors SP1's `RecursiveStackedPcsProof` in crates/recursion/circuit/src/basefold/stacked.rs.
 pub struct RecursiveStackedPcsProof<Pcs, F, EF> {
     /// Per-round per-stripe evaluations at the stack-portion of
     /// the eval point.  One outer Vec per commit round (typically
@@ -84,7 +84,7 @@ pub struct JaggedDimensionMetadata<F> {
 /// the field-hasher commitment digest type (typically
 /// `[Felt<F>; DIGEST_SIZE]`).
 ///
-/// Mirrors the upstream [`JaggedPcsProofVariable`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:31-40).
+/// Mirrors SP1's `JaggedPcsProofVariable` in crates/recursion/circuit/src/jagged/verifier.rs.
 pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// Per-chip dimension metadata (col prefix sums) at the
     /// recursion-bit-decomposition layer (Felt-typed).

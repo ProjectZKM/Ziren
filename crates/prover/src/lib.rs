@@ -206,10 +206,10 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// which holds today because `compose_program_basefold` is keyed
     /// only on arity in the program cache and `setup()` is a pure
     /// function of the program.  Mirrors SP1's
-    /// `RecursionKeys::Exists(pk, vk)` (recursion.rs:280-345).
+    /// `RecursionKeys::Exists(pk, vk)` in crates/prover/src/worker/prover/recursion.rs.
     ///
-    /// See `project_recursion_phase_gpu_audit.md` (May 19, 2026) for
-    /// the bottleneck analysis that motivated this scaffold.
+    /// Motivated by the recursion-phase GPU bottleneck where every
+    /// shard repeated an identical `setup()` + `pk_to_host()` walk.
     pub compose_pks_basefold_cache: Mutex<
         BTreeMap<
             usize,
@@ -219,8 +219,8 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 
     /// Per-arity cache for the basefold compose recursion program.
     ///
-    /// Mirrors SP1's pattern (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`,
-    /// `compose_programs: BTreeMap<usize, Arc<RecursionProgram>>`): the compose
+    /// Mirrors SP1's pattern in crates/prover/src/worker/prover/recursion.rs
+    /// (`compose_programs: BTreeMap<usize, Arc<RecursionProgram>>`): the compose
     /// program's structure is determined by arity (count of input proofs)
     /// once per-input shapes are stable, so one program per arity suffices.
     ///
@@ -316,30 +316,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             compose_pks_basefold_cache: Mutex::new(BTreeMap::new()),
         };
 
-        // Compose-program pre-warm (SP1 audit gap #14, May 21 2026).
+        // Compose-program pre-warm. Mirrors SP1's arity walk in
+        // crates/prover/src/worker/prover/recursion.rs: for each arity in
+        // `1..=REDUCE_BATCH_SIZE`, synthesize a dummy compose witness and
+        // build the compose recursion program. The built program is
+        // discarded — the goal is to amortize the first-compose-call
+        // JIT/compile cost (DSL → AsmCompiler → shape fixing) at process
+        // startup instead of paying it inside the first user `compress()`
+        // invocation.
         //
-        // Mirrors SP1's `worker/prover/recursion.rs:461-487` arity walk:
-        // for each arity in `1..=REDUCE_BATCH_SIZE`, synthesize a dummy
-        // compose witness and build the compose recursion program.  The
-        // built program is discarded — the goal is to amortize the
-        // first-compose-call JIT/compile cost (DSL → AsmCompiler → shape
-        // fixing) at process startup instead of paying it inside the
-        // first user `compress()` invocation.
+        // INDEPENDENT of `ZIREN_PROGRAM_CACHE` (which is opt-in): the cache
+        // stores the *built* program; pre-warm instead warms the compiler's
+        // internal caches (e.g. SeqBlock layout, plonky3 codegen tables,
+        // shape-fix tables) that survive across builds even when each
+        // per-arity program object is discarded.
         //
-        // INDEPENDENT of `ZIREN_PROGRAM_CACHE` (which is opt-in per
-        // project_256_cache_perf_reverted.md): the cache stores the
-        // *built* program; pre-warm instead warms the compiler's
-        // internal caches (e.g. SeqBlock layout, plonky3 codegen
-        // tables, shape-fix tables) that survive across builds even
-        // when each per-arity program object is discarded.
-        //
-        // Opt-in: `ZIREN_ENABLE_COMPOSE_PREWARM=1`.  Diagnostic in
-        // project_gap_prewarm_regression_diagnosis.md shows the pre-warm
+        // Opt-in: `ZIREN_ENABLE_COMPOSE_PREWARM=1`. Empirically the pre-warm
         // pays ~63.7s upfront for only ~2.4s amortizable compose-compile
         // cost (the rest, ~61.3s, is wasted on
-        // `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
-        // Default flipped from opt-out to opt-in on the gap-prewarm
-        // follow-up branch (May 21 2026).
+        // `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE),
+        // so the default is opt-in rather than opt-out.
         prover.prewarm_compose_programs();
 
         prover
@@ -350,12 +346,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
     /// dummy compose program per arity to amortize first-compile cost.
     ///
-    /// Opt-in: only runs when `ZIREN_ENABLE_COMPOSE_PREWARM=1`.
-    /// Default flipped from opt-out to opt-in (May 21 2026): diagnostic
-    /// in project_gap_prewarm_regression_diagnosis.md showed the
-    /// pre-warm pays ~63.7s upfront for only ~2.4s amortizable
-    /// compose-compile cost (the rest, ~61.3s, is wasted on
-    /// `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
+    /// Opt-in: only runs when `ZIREN_ENABLE_COMPOSE_PREWARM=1`. The
+    /// default is opt-in because the pre-warm pays ~63.7s upfront for
+    /// only ~2.4s amortizable compose-compile cost (the rest, ~61.3s,
+    /// is wasted on `dummy_basefold_vk_and_shard_proof` calls ×
+    /// REDUCE_BATCH_SIZE).
     ///
     /// Also bails when:
     ///   - `compress_shape_config` is None
@@ -442,8 +437,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// short-circuiting its per-shard `setup()` + `pk_to_host()` walk
     /// in favor of `compose_pks_basefold_cache.get(&arity)`.
     ///
-    /// Default OFF — see field docs for the soundness contract and
-    /// project_recursion_phase_gpu_audit.md for the bottleneck analysis.
+    /// Default OFF — see field docs for the soundness contract; the
+    /// motivating bottleneck is the per-shard repeated `setup()` cost
+    /// on the recursion-phase GPU dispatch path.
     pub fn compose_pk_cache_enabled() -> bool {
         std::env::var("ZIREN_COMPOSE_PK_CACHE")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -599,7 +595,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Compose (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::compress_program`].
     ///
-    /// SP1-style per-arity cache (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`):
+    /// SP1-style per-arity cache (mirrors crates/prover/src/worker/prover/recursion.rs):
     /// when `ZIREN_PROGRAM_CACHE=1`, the program is built once per arity and
     /// reused. With `ZIREN_VERIFY_PROGRAM_CACHE=1`, every cache hit rebuilds
     /// and asserts bincode byte-equality — catches the failure mode where
@@ -660,12 +656,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        // Step 5 Phase 3e (May 19 2026): basefold-for-recursion is now
-        // the default. The `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env
-        // toggle and the legacy `build_compose_basefold_program`
-        // branch have been retired — the `_recursion` variant is the
-        // sole production path. See
-        // `project_389_fri_deletion.md` for the deletion punch list.
+        // basefold-for-recursion is the default. The
+        // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env toggle and the legacy
+        // `build_compose_basefold_program` branch have been retired —
+        // the `_recursion` variant is the sole production path.
         let mut program = build_compose_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
@@ -688,8 +682,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        // Step 5 Phase 3e (May 19 2026): basefold-for-recursion is now
-        // the default. Mirrors the cutover on
+        // basefold-for-recursion is the default. Mirrors the cutover on
         // `build_compose_program_basefold_uncached`.
         let mut program = build_deferred_basefold_recursion_program(
             self.compress_prover.machine(),
@@ -1004,7 +997,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Reduce shard proofs to a single shard proof using the recursion prover.
     #[instrument(name = "compress", level = "info", skip_all)]
-    // META #59 Phase C vk_map regen Apr 24 v14 (jagged lift: cc[len-2]+1 zero-column formula)
+    // jagged lift uses cc[len-2]+1 zero-column formula (matches the vk_map regen).
     pub fn compress(
         &self,
         vk: &ZKMVerifyingKey,
@@ -1125,10 +1118,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
                             // Execute the runtime.
                             //
-                            // #259 pre-sprint instrumentation: upgraded
-                            // span to info level + recorded the program's
-                            // total instruction count.  Bounds the SeqBlock
-                            // parallelism win BEFORE committing the 3-5 week
+                            // Pre-sprint instrumentation: info-level span
+                            // recording the program's total instruction count
+                            // so the SeqBlock parallelism win ceiling can be
+                            // bounded BEFORE committing the multi-week
                             // refactor — if per-call wall is small or the
                             // instruction count is small, the win ceiling
                             // is correspondingly bounded.  Per-compose-call
@@ -1155,11 +1148,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .unwrap();
                                 runtime.record
                             });
-                            // #259 instrumentation: emit per-compose-call
-                            // wall after the span exits.  Use to bound
-                            // the SeqBlock parallelism win — if this is
+                            // Instrumentation: emit per-compose-call wall
+                            // after the span exits.  Use to bound the
+                            // SeqBlock parallelism win — if this is
                             // routinely <100ms, the win ceiling is small
-                            // and #259 isn't worth the multi-week sprint.
+                            // and the SeqBlock refactor isn't worth the
+                            // multi-week sprint.
                             tracing::info!(
                                 event = "execute_runtime_done",
                                 elapsed_ms = _t_run.elapsed().as_millis() as u64,
@@ -1376,7 +1370,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     (vk, bf)
                                 })
                                 .collect();
-                            // #261: bundle vk-merkle witness so the compose
+                            // Bundle vk-merkle witness so the compose
                             // program can read vk_root from input rather than
                             // baking it as a compile-time constant.
                             let vks_only: Vec<StarkVerifyingKey<InnerSC>> =
@@ -1436,7 +1430,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
-        // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
             self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
@@ -1484,7 +1478,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
-        // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
             self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
@@ -1649,7 +1643,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         digest
     }
 
-    /// #261 helper: build a merkle witness for a slice of VKs without
+    /// Build a merkle witness for a slice of VKs without
     /// going through the legacy `ZKMCompressWitnessValues` shape.
     /// Used by basefold compose/wrap to bundle vk_merkle_data into the
     /// witness that the recursion program reads.  Mirror of the inner
@@ -1792,7 +1786,7 @@ pub mod tests {
         run_e2e_prover_with_options(prover, elf, stdin, opts, test_kind, true)
     }
 
-    /// #259 unlock-chain validation: build a synthetic compose program
+    /// Par-iter unlock-chain validation: build a synthetic compose program
     /// with N=4 dummy inputs and verify that the resulting
     /// `RecursionProgram` has at least 1 `SeqBlock::Parallel` block,
     /// containing N sub-programs (one per `ir_par_map_collect` element).

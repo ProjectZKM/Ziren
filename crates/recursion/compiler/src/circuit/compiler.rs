@@ -753,7 +753,7 @@ where
         // Reset the other fields.
         self.next_addr = Default::default();
         self.virtual_to_physical.clear();
-        // #259 Phase C: assemble the final SeqBlock structure. Constants
+        // Assemble the final SeqBlock structure. Constants
         // are prepended as a Basic block; the user's compiled SeqBlocks
         // (which may contain SeqBlock::Parallel) follow. Traces are
         // prepended with `None`s for the const init prefix.
@@ -783,8 +783,7 @@ where
     /// Cycle-tracker enter/exit ops thread through `span_builder`
     /// as in the legacy compile loop.
     ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/circuit/compiler.rs::compile_raw_program`
-    /// (lines 639-697).
+    /// SP1 ref: crates/recursion/compiler/src/circuit/compiler.rs::compile_raw_program.
     fn compile_block<F>(
         &mut self,
         operations: TracedVec<DslIr<C>>,
@@ -810,7 +809,7 @@ where
             let mut outcomes: Vec<Outcome<Instruction<C::F>>> = Vec::new();
             match ir_instr {
                 DslIr::Parallel(par_blocks) => {
-                    // #259 unlock-chain diagnostic: count Parallel ops
+                    // Unlock-chain diagnostic: count Parallel ops
                     // reaching the compiler so we can compare against
                     // the runtime-side parallelism_summary readback.
                     if std::env::var("ZIREN_DEBUG_PARALLEL_COMPILE").is_ok() {

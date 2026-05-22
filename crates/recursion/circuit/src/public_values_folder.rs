@@ -21,7 +21,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`GenericVerifierPublicValuesConstraintFolder`](file:///tmp/sp1/crates/hypercube/src/folder.rs:401-414)
+//! Mirrors `GenericVerifierPublicValuesConstraintFolder`
+//! (crates/hypercube/src/folder.rs)
 //! from the upstream BaseFold verifier reference, specialised to
 //! Ziren's recursion-compiler [`SymbolicExt`] / [`Ext`] / [`Felt`]
 //! types in place of upstream's generic `(F, EF, PubVar, Var, Expr)`.

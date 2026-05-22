@@ -46,9 +46,9 @@ pub struct ZKMWrapBasefoldWitnessValues<
     /// Single `(vk, root-proof)` pair to wrap.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
     /// vk-merkle witness binding the input VK against the canonical
-    /// vk_root.  #261 SP1 alignment — mirrors SP1's
+    /// vk_root.  SP1 alignment — mirrors SP1's
     /// `SP1CompressRootVerifierWithVKey::verify` which forwards to
-    /// `SP1MerkleProofVerifier` (`/tmp/sp1/crates/recursion/circuit/src/machine/root.rs:30-50`).
+    /// `SP1MerkleProofVerifier` (crates/recursion/circuit/src/machine/root.rs).
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
 }
 
@@ -119,7 +119,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         vk_merkle_data,
     } = input;
 
-    // #261 SP1 alignment: bind the single input VK to the witnessed
+    // SP1 alignment: bind the single input VK to the witnessed
     // vk_root via merkle proof, mirroring SP1's
     // `SP1CompressRootVerifierWithVKey::verify` (forwards to
     // `SP1CompressWithVKeyVerifier::verify` which runs
@@ -139,12 +139,12 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let chip_names: Vec<String> =
         logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-    // #83 fix: build column_counts_by_round BEFORE the lift call,
-    // matching compress_basefold.rs:268-275. Empty placeholder
+    // Build column_counts_by_round BEFORE the lift call,
+    // matching compress_basefold.rs. Empty placeholder
     // caused JaggedPcsParams to see num_cols=1 → z_col empty →
-    // evaluate_mle_ext panic at logup_gkr.rs:105 with column_claims
+    // evaluate_mle_ext panic at logup_gkr.rs with column_claims
     // sized to the real ~1024-entry padded width. Same fix as
-    // deferred_basefold.rs in the same commit.
+    // applied to deferred_basefold.rs in the same commit.
     let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
         .chips()
         .iter()
@@ -166,10 +166,10 @@ pub fn verify_wrap_basefold<C, SC, A>(
         .collect();
     let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
 
-    // #245 Phase 4f: bundle path is the default since the witness-stream
-    // symmetry fix.  Set ZIREN_DISABLE_BUNDLE_LIFT=1 to fall back to
-    // the placeholder lift (used as bypass while #249 follow-on work —
-    // recursion shape registry expansion — lands).
+    // Bundle path is the default since the witness-stream symmetry fix.
+    // Set ZIREN_DISABLE_BUNDLE_LIFT=1 to fall back to the placeholder
+    // lift (kept as a bypass while recursion shape registry expansion
+    // stabilises).
     let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
         match evaluation_proof_bundle_opt.as_ref() {
             Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
@@ -238,8 +238,8 @@ pub fn verify_wrap_basefold<C, SC, A>(
         max_log_row_count as u32,
     );
 
-    // #244 + #249 fix: per-proof override when bundle path is active.
-    // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
+    // Per-proof override when bundle path is active.
+    // Mirrors core_basefold.rs / compress_basefold.rs.
     let per_proof_verifier;
     let active_verifier =
         if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {

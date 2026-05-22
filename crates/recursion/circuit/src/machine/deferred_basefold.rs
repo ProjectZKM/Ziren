@@ -194,7 +194,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-        // #83 fix: compute column_counts_by_round BEFORE the
+        // Compute column_counts_by_round BEFORE the
         // lift_evaluation_proof_bytes call. Previously the lift was
         // passed an empty placeholder, which made the JaggedPcsParams
         // see num_cols = 1 (post-padding) → num_col_variables = 0 →
@@ -225,9 +225,9 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
 
-        // #245 Phase 4f: bundle path is the default.  Set
-        // ZIREN_DISABLE_BUNDLE_LIFT=1 to fall back to the placeholder
-        // lift (bypass while #249 recursion-shape follow-on lands).
+        // Bundle path is the default.  Set ZIREN_DISABLE_BUNDLE_LIFT=1
+        // to fall back to the placeholder lift (bypass while recursion-
+        // shape registry expansion stabilises).
         let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
             match evaluation_proof_bundle_opt.as_ref() {
                 Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
@@ -291,8 +291,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
             );
         let mut challenger = machine.config().challenger_variable(builder);
 
-        // #244 + #249 fix: per-proof override when bundle path is active.
-        // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
+        // Per-proof override when bundle path is active.
+        // Mirrors core_basefold.rs / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier =
             if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
@@ -403,7 +403,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             >,
     {
         use p3_field::PrimeCharacteristicRing;
-        // #261: compress dummy now requires the full ZKMCompressWithVkeyShape so
+        // Compress dummy now requires the full ZKMCompressWithVkeyShape so
         // its vk_merkle_data can be sized.  Deferred overrides vk_merkle_data
         // below with its own proof set, so the inner one is throwaway.
         let inner_shape = super::ZKMCompressWithVkeyShape {

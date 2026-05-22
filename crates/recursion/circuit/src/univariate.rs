@@ -6,7 +6,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors the upstream [`UnivariatePolynomial`](file:///tmp/sp1/slop/crates/algebra/src/univariate.rs)
+//! Mirrors the upstream `UnivariatePolynomial`
+//! (slop/crates/algebra/src/univariate.rs)
 //! implementation by SP1, adapted to use [`p3_field::Field`] in
 //! place of the SP1 algebra abstractions.
 

@@ -1,8 +1,8 @@
 //! Iterator extension for emitting parallel DSL IR blocks.
 //!
-//! Ported from SP1 (`/tmp/sp1/crates/recursion/compiler/src/ir/iter.rs`).
+//! Ported from SP1 (crates/recursion/compiler/src/ir/iter.rs).
 //!
-//! Phase C of #259. The trait collects an iterator into N sub-blocks,
+//! The trait collects an iterator into N sub-blocks,
 //! each containing the DSL IR ops emitted by a single invocation of the
 //! map closure. The resulting blocks are wrapped in a `DslIr::Parallel`
 //! op pushed to the parent builder. The runtime dispatches sub-blocks
@@ -61,7 +61,7 @@ where
         // Restore the parent's op buffer and push the Parallel op
         // containing the per-iteration sub-blocks.
         *builder.get_mut_operations() = prev_ops;
-        // #259 unlock-chain diagnostic: ZIREN_DEBUG_PARALLEL_EMIT=1
+        // Unlock-chain diagnostic: ZIREN_DEBUG_PARALLEL_EMIT=1
         // counts each ir_par_map_collect emission so we can correlate
         // with the runtime-side parallelism_summary readback.
         if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {

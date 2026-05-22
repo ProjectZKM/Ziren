@@ -82,8 +82,8 @@ pub struct ZKMCompressBasefoldWitnessValues<
     /// vk-merkle witness binding the vk_root used by the verifier to the
     /// allowed-VK set.  Mirrors SP1's
     /// `SP1CompressWithVKeyWitnessValues::merkle_val`
-    /// (`/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:107`).
-    /// #261 fix: vk_root is sourced from this witness rather than baked
+    /// (crates/recursion/circuit/src/machine/vkey_proof.rs).
+    /// vk_root is sourced from this witness rather than baked
     /// as a compile-time constant, so the compose program is independent
     /// of the vk_map root and vk_map regen is self-consistent.
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
@@ -201,8 +201,8 @@ pub fn verify_compress_basefold<C, SC, A>(
         is_complete,
     } = input;
 
-    // #261: source vk_root from the merkle witness (SP1 pattern at
-    // `/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:118`)
+    // Source vk_root from the merkle witness (SP1 pattern in
+    // crates/recursion/circuit/src/machine/vkey_proof.rs)
     // and bind each input's VK hash to that root via merkle proof.
     // Replaces the previous compile-time `vk_root` parameter, decoupling
     // the compose program structure from the vk_map root.
@@ -256,11 +256,11 @@ pub fn verify_compress_basefold<C, SC, A>(
             max_log_row_count as u32,
         );
 
-    // #259 sizing diagnostic: log instruction count BEFORE the per-input
+    // Sizing diagnostic: log instruction count BEFORE the per-input
     // verify loop so the loop's contribution to total compose program
     // instructions can be measured. Set ZIREN_LOG_COMPOSE_LOOP=1 to enable.
     // Loop body is the candidate for SP1's `ir_par_map_collect` parallelism
-    // (`/tmp/sp1/crates/recursion/circuit/src/machine/compress.rs:159`).
+    // (crates/recursion/circuit/src/machine/compress.rs).
     let _zlcl_enabled = std::env::var("ZIREN_LOG_COMPOSE_LOOP")
         .map(|v| v == "1")
         .unwrap_or(false);
@@ -269,10 +269,9 @@ pub fn verify_compress_basefold<C, SC, A>(
     if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
         eprintln!("[verify_compress_basefold] vks_and_proofs.len()={}", _zlcl_n);
     }
-    // #259 Phase D: split the per-input loop into a parallel-friendly
+    // Split the per-input loop into a parallel-friendly
     // VERIFY pass (ir_par_map_collect emits DslIr::Parallel) and a
-    // sequential AGGREGATE pass. Mirrors SP1's compress.rs:159+182
-    // pattern. Verify ops have no aggregator-state dependencies; only
+    // sequential AGGREGATE pass. Mirrors SP1's compress.rs pattern. Verify ops have no aggregator-state dependencies; only
     // `public_values: Vec<Felt>` flows from verify to aggregate (it's
     // cloned at closure entry before being moved into the proof
     // assembly call).
@@ -324,11 +323,11 @@ pub fn verify_compress_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![preprocessed_widths_pre, main_widths_pre];
 
-        // #245 Phase 4f: bundle path is the default (closes #240
-        // multi-GPU determinism cascade).  ZIREN_DISABLE_BUNDLE_LIFT=1
+        // Bundle path is the default (resolves the multi-GPU
+        // determinism cascade).  ZIREN_DISABLE_BUNDLE_LIFT=1
         // falls back to the placeholder lift — kept as bypass while
-        // the #249 follow-on (recursion shape registry expansion for
-        // tendermint shard heights) lands.
+        // recursion shape registry expansion for tendermint shard
+        // heights stabilises.
         let evaluation_proof_var = if std::env::var("ZIREN_DISABLE_BUNDLE_LIFT").is_err() {
             match evaluation_proof_bundle_opt.as_ref() {
                 Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
@@ -468,13 +467,13 @@ pub fn verify_compress_basefold<C, SC, A>(
         // type inside BasefoldShardVerifier) has a Pcs::Domain
         // associated type that the inferencer can't pin down
         // from the call alone.
-        // #244 + #249 fix: when bundle path is active and bundle is
-        // Some, rebuild verifier with the bundle's clamped
-        // `log_stacking_height` AND the actual num_variables (=
-        // bundle.basefold_proof.fri_commitments.len()).  Mirrors the
-        // already-landed pattern in `core_basefold.rs:418-434`; was
-        // missing here so multi-shard compress with bundle lift on
-        // hit `basefold_verifier.rs:779` (`rounds.len() != num_variables`)
+        // When bundle path is active and bundle is Some, rebuild
+        // verifier with the bundle's clamped `log_stacking_height`
+        // AND the actual num_variables
+        // (= bundle.basefold_proof.fri_commitments.len()). Mirrors the
+        // already-landed pattern in core_basefold.rs; missing this
+        // path causes multi-shard compress with bundle lift on
+        // to hit basefold_verifier.rs `rounds.len() != num_variables`
         // when small shards triggered `pick_log_stacking_height` clamping.
         let per_proof_verifier;
         let active_verifier =
@@ -556,7 +555,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // bounds of `ZKMCompressVerifier::verify` at
         // `super::compress.rs:75-80`).
 
-        // #259 Phase D: end of verify pass — emit `public_values`
+        // End of verify pass — emit `public_values`
         // (cloned at closure entry) for the sequential aggregate pass.
         _pubvals_for_aggregate
     });
@@ -847,10 +846,10 @@ pub fn verify_compress_basefold<C, SC, A>(
         // builder.sum_digest_v2 happens outside the loop.
         _global_cumulative_sums.push(_current_public_values.global_cumulative_sum);
     }
-    // #259 sizing diagnostic: per-input verify loop emitted N variables for
+    // Sizing diagnostic: per-input verify loop emitted N variables for
     // arity=K. If `loop_vars / total_vars` is large, parallelizing this loop
-    // via `ir_par_map_collect` (SP1 compress.rs:159) yields a near-K× compose
-    // build speedup once Phase B+D land.
+    // via `ir_par_map_collect` (SP1 compress.rs pattern) yields a near-K×
+    // compose build speedup.
     if _zlcl_enabled {
         let _zlcl_post = builder.variable_count();
         let _zlcl_loop_vars = _zlcl_post.saturating_sub(_zlcl_pre);
@@ -918,7 +917,7 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 /// mirroring the host-side verifier at
 /// [`zkm_stark::jagged_sumcheck::verify_jagged_reduction`] and SP1's
 /// `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`
-/// (`/tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:97-170`).
+/// (crates/recursion/circuit/src/jagged/jagged_eval.rs).
 ///
 /// # Protocol
 ///

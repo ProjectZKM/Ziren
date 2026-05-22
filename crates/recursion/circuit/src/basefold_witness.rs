@@ -23,8 +23,9 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`sp1_recursion_circuit::witness`](file:///tmp/sp1/crates/recursion/circuit/src/witness.rs)
-//! conventions — each impl reads the type's fields in declaration
+//! Mirrors `sp1_recursion_circuit::witness`
+//! (crates/recursion/circuit/src/witness.rs) conventions — each impl
+//! reads the type's fields in declaration
 //! order through the builder's witness stream, and `write` mirrors
 //! that order on the prover side.
 

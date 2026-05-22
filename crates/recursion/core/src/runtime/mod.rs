@@ -70,17 +70,17 @@ pub const NUM_BITS: usize = 31;
 
 pub const D: usize = 4;
 
-/// #259 C-2d step 2 foundation: per-walker mutable state. Each parallel
-/// sub-walker allocates its own `WalkerState` on the stack so the walker
-/// can take `&self` and dispatch `SeqBlock::Parallel` sub-walks via
-/// rayon `par_iter` without aliasing on shared mutable fields.
+/// Per-walker mutable state. Each parallel sub-walker allocates its own
+/// `WalkerState` on the stack so the walker can take `&self` and
+/// dispatch `SeqBlock::Parallel` sub-walks via rayon `par_iter` without
+/// aliasing on shared mutable fields.
 ///
 /// pc/clk in sub-walkers are best-effort (used only by trap-error
 /// reporting); only the root walker's pc/clk feed back to `Runtime`
 /// after `execute_blocks` returns. The `nb_*` counters are summed back
 /// at sub-walker join (single-threaded after `try_for_each` returns).
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:856` (ExecState).
+/// SP1 ref: crates/recursion/executor/src/lib.rs::ExecState.
 #[derive(Debug, Clone, Default)]
 pub struct WalkerState<F: Default + Copy> {
     pub pc: F,
@@ -149,12 +149,12 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// The program.
     pub program: Arc<RecursionProgram<F>>,
 
-    /// Memory. Parallel-safe cell-per-address layer (#259 Phase C 2d
-    /// foundation). The `&mut self` walker still drives mr/mw via the
-    /// safe variants; once the SeqBlock::Parallel walker arm is ported
-    /// to par_iter, the `&self` `mr_unchecked`/`mw_unchecked` can be
-    /// used directly for race-free disjoint-address writes.
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:380`.
+    /// Memory. Parallel-safe cell-per-address layer. The `&mut self`
+    /// walker still drives mr/mw via the safe variants; once the
+    /// SeqBlock::Parallel walker arm is ported to par_iter, the `&self`
+    /// `mr_unchecked`/`mw_unchecked` can be used directly for race-free
+    /// disjoint-address writes.
+    /// SP1 ref: crates/recursion/executor/src/lib.rs::Runtime.
     pub memory: ParMemVec<F>,
 
     /// The execution record.
@@ -183,7 +183,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     _marker_diffusion: PhantomData<Diffusion>,
 }
 
-// SAFETY: #259 C-2d step 2 walker dispatches `SeqBlock::Parallel`
+// SAFETY: the walker dispatches `SeqBlock::Parallel`
 // sub-walks via `&Runtime` shared across rayon worker threads. The
 // walker only touches Sync fields (memory: ParMemVec has unsafe
 // Sync impl, perm: Option<Poseidon2> shared read-only, program: Arc).
@@ -302,7 +302,7 @@ where
         self.nearest_pc_backtrace_at(trap_pc)
     }
 
-    /// #259 C-2d step 2: `&self` memory-read helper that wraps the
+    /// `&self` memory-read helper that wraps the
     /// `unsafe { mr_unchecked }` discipline. Soundness comes from
     /// the IR-level `SeqBlock::Parallel` disjoint-address invariant
     /// (each parallel sub-program writes to a non-overlapping address
@@ -319,7 +319,7 @@ where
         unsafe { self.memory.mw_unchecked(addr, val, mult) }
     }
 
-    /// #259 C-2d step 2 record-write helper. Wraps the SP1 raw_get
+    /// Record-write helper. Wraps the SP1 raw_get
     /// idiom so the type parameter `T` is inferred from the slot.
     /// Soundness: caller must ensure the slot is written exactly once
     /// across all threads — guaranteed by analyze pass + IR-level
@@ -329,7 +329,7 @@ where
         unsafe { UnsafeCell::raw_get(slot.as_ptr() as *const UnsafeCell<T>).write(ev) }
     }
 
-    /// #259 C-2d step 2 variant: takes `trap_pc` explicitly so it can
+    /// Variant that takes `trap_pc` explicitly so it can
     /// be called from `execute_one` (which holds pc in `WalkerState`,
     /// not `Runtime`).
     fn nearest_pc_backtrace_at(&self, trap_pc: usize) -> Option<(usize, Trace)> {
@@ -359,9 +359,9 @@ where
         // for debugging.  Each shard's run() rewrites the same path,
         // so set the env var in a shard-isolated test (e.g. Test::Compress
         // for compress shard, Test::All to capture wrap shard last).
-        // #259 step 2 sizing: print parallelism opportunity per Runtime::run
-        // when ZIREN_DUMP_PARALLELISM is set. Validates whether C-2d step 2
-        // (par_iter walker dispatch) would actually pay off on this workload.
+        // Sizing diagnostic: print parallelism opportunity per Runtime::run
+        // when ZIREN_DUMP_PARALLELISM is set. Validates whether par_iter
+        // walker dispatch would actually pay off on this workload.
         if std::env::var("ZIREN_DUMP_PARALLELISM").is_ok() {
             let (n_par, n_subs, n_par_instrs) = self.program.seq_blocks.parallelism_summary();
             let total = self.program.instruction_count();
@@ -411,17 +411,16 @@ where
                 }
             }
         }
-        // #259 Phase C 2c-ii: replace push-based ExecutionRecord writes
-        // with offset-based UnsafeRecord writes. Analyze the program
-        // once at run() entry to assign per-instruction offsets, then
-        // walk the analyzed seq_blocks. After the walk, finalize via
-        // `into_record()` which transmutes the layout-equivalent
+        // Replace push-based ExecutionRecord writes with offset-based
+        // UnsafeRecord writes. Analyze the program once at run() entry
+        // to assign per-instruction offsets, then walk the analyzed
+        // seq_blocks. After the walk, finalize via `into_record()`
+        // which transmutes the layout-equivalent
         // `MaybeUninit<UnsafeCell<T>>` Vec into `Vec<T>`. The
-        // SeqBlock::Parallel arm walks sequentially in this commit
-        // (Phase 2d adds par_iter dispatch); UnsafeRecord's Sync impl
-        // and the disjoint-offset invariant from analyze make the
-        // future swap a one-liner.
-        // SP1 ref: `/tmp/sp1/crates/recursion/executor/src/runtime/mod.rs`
+        // SeqBlock::Parallel arm walks sequentially today; UnsafeRecord's
+        // Sync impl and the disjoint-offset invariant from analyze
+        // make the future swap to par_iter a one-liner.
+        // SP1 ref: crates/recursion/executor/src/runtime/mod.rs
         // (the Runtime::run loop iterates RawProgram<AnalyzedInstruction>).
         let program_arc = self.program.clone();
         let (analyzed_program, event_counts) =
@@ -438,10 +437,10 @@ where
             .write(crate::air::RecursionPublicValues::default());
         }
 
-        // #259 C-2d step 2: hoist mutable per-walker state into a
-        // stack-allocated `WalkerState` so the recursive walker can take
-        // `&self` and dispatch `SeqBlock::Parallel` sub-walks via rayon
-        // par_iter without aliasing on shared mutable Runtime fields.
+        // Hoist mutable per-walker state into a stack-allocated
+        // `WalkerState` so the recursive walker can take `&self` and
+        // dispatch `SeqBlock::Parallel` sub-walks via rayon par_iter
+        // without aliasing on shared mutable Runtime fields.
         let mut state = WalkerState::<F> {
             pc: self.pc,
             clk: self.clk,
@@ -506,15 +505,14 @@ where
         Ok(())
     }
 
-    /// #259 C-2d step 2 walker. Walks the SeqBlock tree, dispatching
-    /// `SeqBlock::Parallel` sub-programs via `par_iter` (each sub-walker
-    /// allocates its own `WalkerState`, shares `&self` + `&unsafe_record`,
-    /// passes `witness=None`/`debug_stdout=None` since parallel sub-programs
-    /// in compose are pure compute — verified by `hint_in_par`
-    /// counter at commit eace827).
+    /// Walks the SeqBlock tree, dispatching `SeqBlock::Parallel`
+    /// sub-programs via `par_iter` (each sub-walker allocates its own
+    /// `WalkerState`, shares `&self` + `&unsafe_record`, passes
+    /// `witness=None`/`debug_stdout=None` since parallel sub-programs
+    /// in compose are pure compute — verified empirically by the
+    /// `hint_in_par` counter).
     ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:799-834`
-    /// (execute_raw_inner).
+    /// SP1 ref: crates/recursion/executor/src/lib.rs::execute_raw_inner.
     #[allow(clippy::too_many_arguments)]
     fn execute_blocks(
         &self,
@@ -566,8 +564,8 @@ where
         Ok(())
     }
 
-    /// #259 C-2d step 2 per-instruction body. Identical semantics to the
-    /// original `Runtime::run` for-loop body, with mechanical substitutions:
+    /// Per-instruction body. Identical semantics to the original
+    /// `Runtime::run` for-loop body, with mechanical substitutions:
     /// - `self.nb_*` → `state.nb_*`
     /// - `self.pc/clk/timestamp` → `state.pc/clk/timestamp`
     /// - `self.memory.mr/mw` → `unsafe { self.memory.mr_unchecked / mw_unchecked }`
@@ -576,7 +574,7 @@ where
     /// - `unsafe_record.X[off] = MaybeUninit::new(UnsafeCell::new(ev))`
     ///   → `unsafe { UnsafeCell::raw_get(rec.X[off].as_ptr() as *const UnsafeCell<_>).write(ev) }`
     ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs::execute_one`.
+    /// SP1 ref: crates/recursion/executor/src/lib.rs::execute_one.
     #[allow(clippy::too_many_arguments)]
     fn execute_one(
         &self,
@@ -697,7 +695,7 @@ where
                     }
                     // mem_const_count is pre-sized by `UnsafeRecord::new`
                     // from the analyzed Mem-instruction count (SP1 ref:
-                    // /tmp/sp1/crates/recursion/executor/src/record.rs:111).
+                    // crates/recursion/executor/src/record.rs).
                     // No per-instruction increment needed.
                 }
                 Instruction::Poseidon2(instr) => {
@@ -1024,12 +1022,12 @@ where
     }
 
     pub fn preallocate_record(&mut self) {
-        // #259 Phase C step 2c: walk seq_blocks recursively (handling
-        // SeqBlock::Parallel) via the analyze module's `event_counts`
-        // helper instead of flattening through `iter_instructions`. The
-        // counts are identical today (compiler emits a single Basic
-        // block; no Parallel blocks yet), but the recursive walk is the
-        // correct foundation for when parallel blocks land.
+        // Walk seq_blocks recursively (handling SeqBlock::Parallel)
+        // via the analyze module's `event_counts` helper instead of
+        // flattening through `iter_instructions`. The counts are
+        // identical today (compiler emits a single Basic block; no
+        // Parallel blocks yet), but the recursive walk is the correct
+        // foundation for when parallel blocks land.
         let event_counts = self.program.seq_blocks.event_counts();
         self.record.poseidon2_events.reserve(event_counts.poseidon2_wide_events);
         self.record.mem_var_events.reserve(event_counts.mem_var_events);
@@ -1037,7 +1035,7 @@ where
         self.record.ext_alu_events.reserve(event_counts.ext_alu_events);
         self.record.exp_reverse_bits_len_events.reserve(event_counts.exp_reverse_bits_len_events);
         self.record.select_events.reserve(event_counts.select_events);
-        // #259 Phase C step 2c-ii prep: reserve the newly-tracked event vecs.
+        // Reserve the newly-tracked event vecs.
         self.record.fri_fold_events.reserve(event_counts.fri_fold_events);
         self.record.batch_fri_events.reserve(event_counts.batch_fri_events);
         self.record.commit_pv_hash_events.reserve(event_counts.commit_pv_hash_events);

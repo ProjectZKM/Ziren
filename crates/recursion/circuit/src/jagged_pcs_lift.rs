@@ -97,7 +97,7 @@ where
     // shape.  This must match the column_claims construction in
     // [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`]
     // (recursive_jagged_pcs.rs:190-223, mirror of
-    // SP1 `/tmp/sp1/crates/recursion/circuit/src/jagged/verifier.rs:77-118`):
+    // SP1 crates/recursion/circuit/src/jagged/verifier.rs):
     //
     //   column_claims.len() = Σ_r (sum(cc[r]))  // flattened claims
     //                       + Σ_r (cc[r][len-2] + 1)  // artificial zero insertions

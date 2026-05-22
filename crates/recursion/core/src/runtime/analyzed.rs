@@ -1,4 +1,4 @@
-//! Per-instruction event-offset analysis (#259 Phase C step 2 scaffolding).
+//! Per-instruction event-offset analysis scaffolding.
 //!
 //! `AnalyzedInstruction { inner, offset }` wraps each instruction with a
 //! pre-computed offset into the (eventually) pre-sized `ExecutionRecord`
@@ -7,8 +7,8 @@
 //! interior mutability without locking.
 //!
 //! This module is **scaffolding only** — the runtime still walks
-//! `seq_blocks` via `iter_instructions()` (Phase A4) and uses dynamic
-//! `Vec::push` for events. The wiring step (Phase C step 2b) will:
+//! `seq_blocks` via `iter_instructions()` and uses dynamic `Vec::push`
+//! for events. The future wiring step will:
 //!
 //!   1. Replace `Runtime::run` with a SeqBlock-aware walker that consumes
 //!      `RawProgram<AnalyzedInstruction<F>>`.
@@ -17,7 +17,7 @@
 //!      via `UnsafeCell<MaybeUninit<...>>` cells.
 //!   4. Add `par_iter` dispatch on `SeqBlock::Parallel`.
 //!
-//! SP1 ref: `/tmp/sp1/crates/recursion/executor/src/analyzed.rs`.
+//! SP1 ref: crates/recursion/executor/src/analyzed.rs.
 
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ use crate::runtime::seq_block::{BasicBlock, RawProgram, SeqBlock};
 
 /// An instruction tagged with its event-write offset.
 ///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/analyzed.rs:11-15`.
+/// SP1 ref: crates/recursion/executor/src/analyzed.rs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzedInstruction<F> {
     pub(crate) inner: Instruction<F>,
@@ -117,7 +117,7 @@ impl<F> RawProgram<Instruction<F>> {
     /// monotonic, non-overlapping address ranges and no cross-block
     /// data dependencies. The runtime relies on this without verifying.
     ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/analyzed.rs:33-128`.
+    /// SP1 ref: crates/recursion/executor/src/analyzed.rs::analyze.
     pub fn analyze(self) -> (RawProgram<AnalyzedInstruction<F>>, RecursionAirEventCount) {
         fn instr_offset<T>(
             instr: &Instruction<T>,
@@ -166,8 +166,8 @@ impl<F> RawProgram<Instruction<F>> {
                     &mut counts.mem_var_events,
                     output_x_addrs_mults.len() + output_y_addrs_mults.len(),
                 ),
-                // #259 Phase C step 2c-ii prep: assign event-vec offsets
-                // for the two newly-tracked event types.
+                // Assign event-vec offsets for the two newly-tracked
+                // event types.
                 Instruction::CommitPublicValues(_) => {
                     incr(&mut counts.commit_pv_hash_events, 1)
                 }

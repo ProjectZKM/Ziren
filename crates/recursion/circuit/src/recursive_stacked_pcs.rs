@@ -15,7 +15,7 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`stacked.rs`](file:///tmp/sp1/crates/recursion/circuit/src/basefold/stacked.rs)
+//! Mirrors SP1's crates/recursion/circuit/src/basefold/stacked.rs
 //! from the upstream BaseFold verifier reference.
 
 use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
@@ -29,8 +29,9 @@ use crate::CircuitConfig;
 /// stacked verifier wraps.  Allows the stacked verifier to be
 /// generic over the PCS choice (BaseFold, future PCSs).
 ///
-/// Mirrors [`RecursiveMultilinearPcsVerifier`](file:///tmp/sp1/crates/recursion/circuit/src/basefold/mod.rs:55)
-/// from the upstream reference, specialised to Ziren's
+/// Mirrors `RecursiveMultilinearPcsVerifier`
+/// (crates/recursion/circuit/src/basefold/mod.rs) from the upstream
+/// reference, specialised to Ziren's
 /// CircuitConfig + FieldChallengerVariable conventions.
 pub trait RecursiveMultilinearPcsVerifier<C: CircuitConfig, FC>
 where
@@ -85,7 +86,8 @@ impl<P> RecursiveStackedPcsVerifier<P> {
     /// stripe (`stack_point`); the remaining coords select which
     /// stripe (`batch_point`).
     ///
-    /// Mirrors [`RecursiveStackedPcsVerifier::verify_untrusted_evaluation`](file:///tmp/sp1/crates/recursion/circuit/src/basefold/stacked.rs:27-58)
+    /// Mirrors `RecursiveStackedPcsVerifier::verify_untrusted_evaluation`
+    /// (crates/recursion/circuit/src/basefold/stacked.rs)
     /// from the upstream reference.  Substitutions:
     ///   - `slop_multilinear::Mle` → flat `Vec<Ext>` (the per-stripe
     ///     evaluations form a 1-poly Mle over `2^batch_dim` rows;
@@ -115,7 +117,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // first `batch_dim` coords are batch (which stripe), last
         // `log_stacking_height` are stack (within a stripe).
         //
-        // #42 May 1 analysis: the basefold prover's sumcheck reduces
+        // The basefold prover's sumcheck reduces
         // all max_log_degree variables, where max_log_degree may be
         // < log_stacking_height (e.g., shard didn't fill the
         // stacking dimension). Zero-padding the point at the
@@ -140,7 +142,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
                 padded_point.push(builder.constant(C::EF::ZERO));
             }
         }
-        // #249 SP1-port (verifier side): mirror the prover's eval_point
+        // SP1-port (verifier side): mirror the prover's eval_point
         // extension in `crates/stark/src/basefold_late_binding.rs`
         // step (5) of `prove_jagged_basefold`.  The prover sampled
         // additional Fiat-Shamir coords to extend the sumcheck output
@@ -170,7 +172,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         }
         let total_dim = padded_point.len();
         let batch_dim = total_dim - stack_dim;
-        // #249: align with Ziren prover convention.  The prover at
+        // Align with Ziren prover convention.  The prover at
         // `crates/stark/src/basefold/stacked.rs` uses
         // `eval_point[..stack_dim]` (LSB-first) as stack_point because
         // Ziren's dense_q layout puts row (= stack) bits at the LSBs of

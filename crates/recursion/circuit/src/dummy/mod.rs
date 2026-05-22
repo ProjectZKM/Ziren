@@ -1,6 +1,6 @@
 //! Zero-fill allocators for SP1-style dummy shard proofs.
 //!
-//! Port of SP1's `/tmp/sp1/crates/recursion/circuit/src/dummy/`
+//! Port of SP1's crates/recursion/circuit/src/dummy/
 //! pattern: every field of the dummy is zero-filled via allocator
 //! helpers — no real prove call.  Used by the recursion-circuit
 //! `dummy_basefold_vk_and_shard_proof` to replace the previous slow
@@ -27,7 +27,7 @@
 //!
 //! # Reference
 //!
-//! - SP1 source: `/tmp/sp1/crates/recursion/circuit/src/dummy/shard_proof.rs`
+//! - SP1 source: crates/recursion/circuit/src/dummy/shard_proof.rs
 //! - Ziren callee replaced: [`crate::stark::dummy_basefold_vk_and_shard_proof`]
 //! - Shape-parity guard: `crate::stark::tests::dummy_basefold_vk_and_shard_proof_shape_stable`
 
