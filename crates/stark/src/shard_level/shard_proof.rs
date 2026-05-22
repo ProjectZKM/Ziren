@@ -40,6 +40,49 @@ use crate::septic_digest::SepticDigest;
 use crate::shard_level::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::ShardOpenedValues;
 
+/// Fold orientation tag for the per-shard LogUp-GKR proof.
+///
+/// Different prover backends emit the inner-sumcheck reduction
+/// against different bit-orderings of the eval_point:
+///
+///   - `Msb` — the CPU host prover and the GPU LEGACY V2 / Path B'
+///     paths fold the high-order variable first (eq pairing uses
+///     `eval_point` in original order at the round's final-eval
+///     identity).
+///   - `Lsb` — the GPU `ZIREN_GPU_LOGUP_PACKED=1` (default Path 1'
+///     SP1 packed-pool) path folds the low-order variable first
+///     (eq pairing must reverse `eval_point` to match the prover's
+///     fold direction).
+///
+/// The verifier (`verify_logup_gkr_host`) dispatches on this tag
+/// at the per-round final-eval identity site, eliminating the need
+/// for env-var-driven dispatch (which is broken on the CpuProver
+/// binary that cannot read `ZIREN_GPU_LOGUP_PACKED`).  See
+/// `project_baseline_fix_blocked.md` §"Hypothesis" and
+/// `project_sp1_gap_refresh_may21.md` gap #10.
+///
+/// Wire format: `serde(default)` defaults to `Msb` so older proof
+/// bytes (without this field) deserialize cleanly to the host-CPU
+/// convention — which is what every pre-tag proof was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FoldOrientation {
+    /// High-order variable folded first.  CPU prover + GPU LEGACY V2
+    /// + GPU Path B' (`ZIREN_GPU_LOGUP_ZIREN_PATH=1`) emit this.
+    Msb,
+    /// Low-order variable folded first.  GPU Path 1' SP1 packed-pool
+    /// (default ON when `ZIREN_GPU_LOGUP_PACKED` != "0" and
+    /// `ZIREN_GPU_GKR_TRANSITION_LEGACY` != "1" and
+    /// `ZIREN_GPU_LOGUP_ZIREN_PATH` != "1") emits this.
+    Lsb,
+}
+
+impl Default for FoldOrientation {
+    fn default() -> Self {
+        FoldOrientation::Msb
+    }
+}
+
+
 /// Per-chip cumulative-sum exposures emitted by the LogUp-GKR prover.
 /// Stored sibling to [`BasefoldShardProof::opened_values`] (rather than
 /// inside [`crate::shard_level::types::ChipEvaluation`]) to avoid
@@ -144,6 +187,15 @@ pub struct BasefoldShardProof<F, EF> {
     #[cfg(feature = "basefold")]
     #[serde(default)]
     pub evaluation_proof_bundle: Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>,
+    /// Fold orientation emitted by the prover.  Eliminates env-var
+    /// dispatch ambiguity at the verifier — the verifier reads
+    /// this tag (gap #10) instead of consulting
+    /// `ZIREN_GPU_LOGUP_PACKED` which the CpuProver binary cannot
+    /// read.  `serde(default)` defaults to [`FoldOrientation::Msb`]
+    /// so older proof bytes (every pre-tag CPU/LEGACY/Path-B' proof)
+    /// deserialize to the correct orientation.
+    #[serde(default)]
+    pub fold_orientation: FoldOrientation,
 }
 
 impl<F, EF> BasefoldShardProof<F, EF>
@@ -166,6 +218,7 @@ where
             evaluation_proof: Vec::new(),
             #[cfg(feature = "basefold")]
             evaluation_proof_bundle: None,
+            fold_orientation: FoldOrientation::Msb,
         }
     }
 }
@@ -223,6 +276,26 @@ mod tests {
             231,
         );
         assert_eq!(proof.public_values.len(), 231);
+    }
+
+    /// Roundtrip the FoldOrientation tag through rmp-serde to
+    /// confirm wire-format stability across Msb/Lsb variants.  Older
+    /// proof bytes without the field deserialize to Msb via
+    /// `serde(default)` — covered by `basefold_shard_proof_rmp_roundtrip`
+    /// above which uses `empty()` (also Msb).
+    #[test]
+    fn basefold_shard_proof_fold_orientation_roundtrip() {
+        for orientation in [FoldOrientation::Msb, FoldOrientation::Lsb] {
+            let mut proof: BasefoldShardProof<F, EF> = BasefoldShardProof::empty(
+                std::array::from_fn(|_| F::ZERO),
+                4,
+            );
+            proof.fold_orientation = orientation;
+            let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
+            let back: BasefoldShardProof<F, EF> =
+                rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
+            assert_eq!(back.fold_orientation, orientation);
+        }
     }
 
     #[test]

@@ -21,7 +21,7 @@ use zkm_stark::{
     air::{LookupScope, MachineAir},
     septic_digest::SepticDigest,
     shard_level::{
-        shard_proof::{BasefoldShardProof, ChipCumulativeSums},
+        shard_proof::{BasefoldShardProof, ChipCumulativeSums, FoldOrientation},
         types::{
             ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof, LogupGkrRoundProof,
             PartialSumcheckProof, UnivariatePolynomial,
@@ -263,6 +263,9 @@ where
         chip_cumulative_sums,
         evaluation_proof: Vec::new(),
         evaluation_proof_bundle: None,
+        // Gap #10: verifier-simulation dummy emits MSB-folded proofs
+        // (host-CPU convention — matches the CpuProver call site).
+        fold_orientation: FoldOrientation::Msb,
     }
 }
 
